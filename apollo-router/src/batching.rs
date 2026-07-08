@@ -5,10 +5,10 @@
 //! - At the router service, a batch query is split apart into multiple requests.
 //! - A single [Batch] structure is created, which is responsible for handling the batch lifecycle.
 //! - Each individual request gets a [BatchQuery] extension.
-//! - After query planning of each individual request, we collect the hashes of the plan nodes that
-//!   will be executed unconditionally as part of the query plan. Those query nodes are candidates
-//!   for being batched up into a single request at the subgraph side, as they do not depend on
-//!   other data being fetched first.
+//! - After query planning of each individual request, the [PrepareBatchingExecutionLayer] collects
+//!   the hashes of the plan nodes that will be executed unconditionally as part of the query plan.
+//!   Those query nodes are candidates for being batched up into a single request at the subgraph
+//!   side, as they do not depend on other data being fetched first.
 //! - [BatchQuery::set_query_hashes] is called with those hashes, to set the expected number of
 //!   subgraph requests. The hashes are also used to track successful and unsuccessful responses to
 //!   each individual subgraph request.
@@ -29,6 +29,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
+use futures::future::BoxFuture;
+use http::StatusCode;
 use opentelemetry::Context as otelContext;
 use opentelemetry::trace::TraceContextExt;
 use parking_lot::Mutex as PMutex;
@@ -43,9 +45,11 @@ use tracing::Span;
 use crate::Context;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
+use crate::graphql;
 use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::services::execution;
 use crate::services::process_batches;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
@@ -484,6 +488,102 @@ pub(crate) async fn assemble_batch(
         request,
         txs,
     })
+}
+
+/// Handle pre-execution batching concerns:
+/// - Inform the [BatchQuery] about the query plan fetch node hashes
+/// - Reject the request if it contains any subscription or defer nodes
+#[derive(Clone)]
+pub(crate) struct PrepareBatchingExecutionLayer {
+    _private: (),
+}
+
+impl PrepareBatchingExecutionLayer {
+    pub(crate) fn new() -> Self {
+        Self { _private: () }
+    }
+}
+
+impl<S> tower::Layer<S> for PrepareBatchingExecutionLayer {
+    type Service = PrepareBatchingExecutionService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        PrepareBatchingExecutionService { inner }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct PrepareBatchingExecutionService<S> {
+    inner: S,
+}
+
+impl<S> tower::Service<execution::Request> for PrepareBatchingExecutionService<S>
+where
+    S: tower::Service<execution::Request, Response = execution::Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    S::Error: Into<BoxError>,
+{
+    type Response = S::Response;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx).map_err(Into::into)
+    }
+
+    fn call(&mut self, req: execution::Request) -> Self::Future {
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
+
+        Box::pin(async move {
+            let context = &req.context;
+            let plan = &req.query_plan;
+            let variables = &req.supergraph_request.body().variables;
+            let is_deferred = plan.is_deferred(variables);
+            let is_subscription = plan.is_subscription();
+
+            let Some(batching) = context
+                .extensions()
+                .with_lock(|lock| lock.get::<crate::configuration::Batching>().cloned())
+            else {
+                return inner.call(req).await.map_err(Into::into);
+            };
+
+            if batching.enabled && (is_deferred || is_subscription) {
+                let code = if is_deferred {
+                    "BATCHING_DEFER_UNSUPPORTED"
+                } else {
+                    "BATCHING_SUBSCRIPTION_UNSUPPORTED"
+                };
+                let mut response = execution::Response::new_from_graphql_response(
+                        graphql::Response::builder()
+                        .error(crate::error::Error::builder()
+                            .message("Deferred responses and subscriptions aren't supported in batches")
+                            .extension_code(code)
+                            .build())
+                            .build(),
+                        context.clone(),
+                    );
+                *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
+                return Ok(response);
+            }
+
+            // Now perform query batch analysis
+            let batch_query_opt = context
+                .extensions()
+                .with_lock(|lock| lock.get::<BatchQuery>().cloned());
+            if let Some(batch_query) = batch_query_opt {
+                let query_hashes = plan.query_hashes(batching, variables)?;
+                batch_query.set_query_hashes(query_hashes).await?;
+                tracing::debug!("batch registered: {}", batch_query);
+            }
+
+            inner.call(req).await.map_err(Into::into)
+        })
+    }
 }
 
 #[cfg(test)]
