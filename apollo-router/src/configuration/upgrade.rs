@@ -70,10 +70,6 @@ enum LogCondition {
 
 const REMOVAL_VALUE: &str = "__PLEASE_DELETE_ME";
 const REMOVAL_EXPRESSION: &str = r#"const("__PLEASE_DELETE_ME")"#;
-const HEADERS_OPS_MIGRATION_DESCRIPTION: &str = "`headers.all.request`, per-subgraph \
-     equivalents, and `headers.connector.{all,sources.*}.request` now require an `operations` \
-     key wrapping the list of propagation rules. Your configuration has been automatically \
-     migrated.";
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum UpgradeMode {
@@ -128,21 +124,24 @@ pub(crate) fn upgrade_configuration(
     // Handled in Rust rather than a proteus YAML action because the source path
     // is a prefix of the destination path and subgraph names are dynamic.
     let migrated = migrate_headers_operations(config.clone());
-    let headers_ops_migrated = migrated != config;
-    if headers_ops_migrated {
+    if migrated != config {
+        if log_warnings {
+            tracing::warn!(
+                "`headers.all.request`, per-subgraph equivalents, and \
+                 `headers.connector.{{all,sources.*}}.request` now require an `operations` key \
+                 wrapping the list of propagation rules. The router has applied this change \
+                 automatically. Please update your configuration file."
+            );
+        }
         config = migrated;
     }
 
-    if (!effective_migrations.is_empty() || headers_ops_migrated) && log_warnings {
-        let mut descriptions: Vec<String> = effective_migrations
+    if !effective_migrations.is_empty() && log_warnings {
+        let descriptions: Vec<String> = effective_migrations
             .iter()
             .enumerate()
             .map(|(idx, m)| format!("  {}. {}", idx + 1, m.description))
             .collect();
-        if headers_ops_migrated {
-            let idx = descriptions.len() + 1;
-            descriptions.push(format!("  {idx}. {HEADERS_OPS_MIGRATION_DESCRIPTION}"));
-        }
         tracing::error!(
             "router configuration contains unsupported options and needs to be upgraded to run the router: \n\n{}\n\n",
             descriptions.join("\n\n")

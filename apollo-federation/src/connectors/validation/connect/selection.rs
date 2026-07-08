@@ -576,6 +576,28 @@ impl<'schema> SelectionValidator<'schema> {
         once(self.root).chain(self.path.iter().copied())
     }
 
+    /// Whether a selected field's value shape implies a group selection
+    /// (`field { ... }`), which requires the field's GraphQL type to be an object.
+    ///
+    /// An `Object` shape is a group selection. An `Array` shape is a group
+    /// selection only when its element shape is itself a group — i.e. a list of
+    /// objects. A list of scalars (for example `data: data->map(@->map(@->toString))`
+    /// over a `[[String]]` field) is a scalar projection, not a group selection,
+    /// so it must not require an object type.
+    fn shape_implies_group_selection(shape: &Shape) -> bool {
+        match shape.case() {
+            ShapeCase::Object { .. } => true,
+            ShapeCase::Array { prefix, tail } => {
+                prefix.iter().any(Self::shape_implies_group_selection)
+                    || Self::shape_implies_group_selection(tail)
+            }
+            ShapeCase::One(shapes) => shapes.iter().any(Self::shape_implies_group_selection),
+            ShapeCase::All(shapes) => shapes.iter().any(Self::shape_implies_group_selection),
+            // `ShapeCase::Name` is a placeholder; scalars/leaves are not groups.
+            _ => false,
+        }
+    }
+
     fn walk_selection_with_shape(
         &mut self,
         type_ref: SchemaTypeRef<'schema>,
@@ -648,13 +670,10 @@ impl<'schema> SelectionValidator<'schema> {
                         self.seen_fields
                             .push((type_ref.name().clone(), field_def.name.clone()));
 
-                        // Check if this field has subselections (group selection)
-                        // Object/Array shapes correspond to GraphQL object/list types with subselections
-                        let has_subselection = match field_shape.case() {
-                            ShapeCase::Object { .. } => true,
-                            ShapeCase::Array { .. } => true,
-                            _ => false, // ShapeCase::Name is a placeholder, don't assume subselections
-                        };
+                        // Check if this field has subselections (group selection).
+                        // An object shape (or a list of objects) is a group selection; a
+                        // list of scalars is a scalar projection, not a group selection.
+                        let has_subselection = Self::shape_implies_group_selection(field_shape);
 
                         if let Some(field_type_ref) =
                             SchemaTypeRef::new(self.schema, inner_type_name)
@@ -725,7 +744,57 @@ impl<'schema> SelectionValidator<'schema> {
                     })
                 }
             }
-            _ => Ok(Vec::new()), // Handle other shape cases
+            ShapeCase::Array { prefix, tail } => {
+                // A list-valued shape — e.g. produced by methods with statically known
+                // list outputs like `->entries` — validates each item shape against the
+                // same type: the caller already unwrapped GraphQL list types to their
+                // inner named type via `inner_named_type()`. Without this arm, fields
+                // selected beneath such methods were never marked as seen, producing
+                // spurious CONNECTORS_UNRESOLVED_FIELD errors (e.g. `->entries { key value }`
+                // against `[FooEntry]` left `FooEntry.key`/`FooEntry.value` unresolved).
+                let mut all_seen_fields = Vec::new();
+                for item_shape in prefix {
+                    all_seen_fields.extend(self.walk_selection_with_shape(type_ref, item_shape)?);
+                }
+                if !tail.is_none() {
+                    all_seen_fields.extend(self.walk_selection_with_shape(type_ref, tail)?);
+                }
+                Ok(all_seen_fields)
+            }
+            ShapeCase::All(shapes) => {
+                // An intersection shape (e.g. `IntfA & IntfB`, or merged records):
+                // the value simultaneously satisfies every member, so the selected
+                // fields are the union across members and each must validate against
+                // `type_ref`. Walk every member and accumulate, propagating errors —
+                // unlike `One` (a union of alternatives), an intersection member that
+                // fails to validate is a genuine error, not a discarded branch.
+                let mut all_seen_fields = Vec::new();
+                for member_shape in shapes.iter() {
+                    all_seen_fields.extend(self.walk_selection_with_shape(type_ref, member_shape)?);
+                }
+                Ok(all_seen_fields)
+            }
+            // Structureless shapes expose no selectable GraphQL fields, so they
+            // contribute nothing to `seen_fields`. These are listed explicitly,
+            // rather than behind a `_` catch-all, so that introducing a new
+            // `ShapeCase` variant becomes a compile error here — forcing a
+            // deliberate decision instead of silently dropping fields (the root
+            // cause of the `->entries` bug the `Array` arm above fixes).
+            ShapeCase::Bool(_)
+            | ShapeCase::String(_)
+            | ShapeCase::Int(_)
+            | ShapeCase::Float
+            | ShapeCase::Null
+            | ShapeCase::None => Ok(Vec::new()),
+            // Opaque / deferred shapes whose structure is not statically known
+            // here. We preserve the existing behavior of contributing nothing;
+            // crucially we do NOT treat them as resolving every field, which could
+            // mask genuine `CONNECTORS_UNRESOLVED_FIELD` errors. A structure-aware
+            // policy for these is left to a follow-up.
+            ShapeCase::Name(_, _) | ShapeCase::Unknown => Ok(Vec::new()),
+            // A shape-processing failure is surfaced through other diagnostics;
+            // there is nothing to credit as seen here.
+            ShapeCase::Error(_) => Ok(Vec::new()),
         }
     }
 }

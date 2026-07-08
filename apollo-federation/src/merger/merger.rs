@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Debug;
@@ -34,6 +35,7 @@ use crate::bail;
 use crate::composition::CompositionOptions;
 use crate::connectors::spec::CONNECT_VERSIONS;
 use crate::error::CompositionError;
+use crate::error::ErrorCode;
 use crate::error::FederationError;
 use crate::error::HasLocations;
 use crate::error::SubgraphLocation;
@@ -49,10 +51,15 @@ use crate::link::join_spec_definition::JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_GRAPH_ARGUMENT_NAME;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_AS_ARGUMENT_NAME;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::link_spec_definition::LINK_VERSIONS;
+use crate::link::metadata::ImportConflictsByIdentity;
+use crate::link::metadata::LinksMetadata;
+use crate::link::metadata::SpecConflictInfo;
+use crate::link::metadata::UniqueSpecNameInSchema;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -68,6 +75,8 @@ use crate::merger::merge_enum::EnumExampleAst;
 use crate::merger::merge_enum::EnumTypeUsage;
 use crate::merger::merge_field::FieldMergeContext;
 use crate::merger::merge_field::JoinFieldBuilder;
+use crate::merger::merge_links::SupergraphDirectiveInfo;
+use crate::merger::merge_links::SupergraphInfo;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
@@ -159,7 +168,6 @@ pub(crate) struct Merger {
     pub(in crate::merger) fields_with_from_context: DirectiveReferencers,
     pub(in crate::merger) fields_with_override: DirectiveReferencers,
     pub(in crate::merger) inaccessible_directive_name_in_supergraph: Option<Name>,
-    pub(in crate::merger) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
     pub(in crate::merger) link_spec_definition: &'static LinkSpecDefinition,
     pub(in crate::merger) join_directive_identities: HashSet<Identity>,
     /// Directives that are composed via `@join__directive` in the supergraph. Populated by
@@ -172,6 +180,8 @@ pub(crate) struct Merger {
     pub(in crate::merger) access_control_directives_in_supergraph: Vec<(Name, Name)>,
     pub(in crate::merger) access_control_additional_sources:
         FallibleOnceCell<HashMap<String, AdditionalDirectiveSources>>,
+    pub(in crate::merger) import_conflicts_by_identity: ImportConflictsByIdentity,
+    pub(in crate::merger) compute_unique_spec_name_in_schema: Option<UniqueSpecNameInSchema>,
 }
 
 impl Merger {
@@ -201,19 +211,6 @@ impl Merger {
         };
         let fields_with_from_context = Self::get_fields_with_from_context_directive(&subgraphs);
         let fields_with_override = Self::get_fields_with_override_directive(&subgraphs);
-
-        let schema_to_import_to_feature_url = subgraphs
-            .iter()
-            .map(|s| {
-                (
-                    s.name.clone(),
-                    s.schema()
-                        .metadata()
-                        .map(|l| l.import_to_feature_url_map())
-                        .unwrap_or_default(),
-                )
-            })
-            .collect();
         let merged = FederationSchema::new(Schema::new())?;
         let join_directive_identities = HashSet::from([Identity::connect_identity()]);
 
@@ -236,7 +233,6 @@ impl Merger {
             enum_usages: HashMap::new(),
             fields_with_from_context,
             fields_with_override,
-            schema_to_import_to_feature_url,
             link_spec_definition,
             join_directive_identities,
             directives_using_join_directive: HashSet::new(),
@@ -246,6 +242,8 @@ impl Merger {
             applied_directives_to_merge: Vec::new(),
             access_control_directives_in_supergraph: Vec::new(),
             access_control_additional_sources: FallibleOnceCell::new(),
+            import_conflicts_by_identity: Default::default(),
+            compute_unique_spec_name_in_schema: None,
         };
 
         // Now call prepare_supergraph as a member function
@@ -292,7 +290,6 @@ impl Merger {
                 .and_then(|links| {
                     links
                         .all_links()
-                        .iter()
                         .find(|link| link.url.identity == *spec.identity())
                 })
                 .map(|link| link.locations(subgraph))
@@ -380,11 +377,119 @@ impl Merger {
             None,
             self.join_spec_definition.purpose(),
             None, // imports
+            |error| Self::push_non_internal_errors(&mut self.error_reporter, error),
         )?;
 
+        // Validate @links for Apollo specs that compose.
         let directives_merge_info = self.collect_core_directives_to_compose()?;
+        let supergraph_info_by_identity =
+            self.validate_core_directive_info(directives_merge_info)?;
 
-        self.validate_and_maybe_add_specs(&directives_merge_info)?;
+        // Validate @links for user specs that compose via @composeDirective, and record usages.
+        trace!("Validating @composeDirective applications");
+        self.compose_directive_manager
+            .validate(&self.subgraphs, &mut self.error_reporter)?;
+
+        // Gather information relevant for conflicts for specs being added to the schema.
+        let all_composed_core_features =
+            self.compose_directive_manager.all_composed_core_features();
+        let spec_conflict_infos =
+            self.merged
+                .metadata()
+                .map(LinksMetadata::all_links)
+                .into_iter()
+                .flatten()
+                .map(|link| SpecConflictInfo {
+                    spec_name_in_schema: &link.url.identity.name,
+                    url: &link.url,
+                    imports: Box::new(
+                        link.imports
+                            .iter()
+                            .map(|import| Cow::Borrowed(import.as_ref())),
+                    ),
+                })
+                .chain(supergraph_info_by_identity.values().map(
+                    |SupergraphInfo {
+                         spec_in_supergraph,
+                         directives,
+                     }| SpecConflictInfo {
+                        spec_name_in_schema: &spec_in_supergraph.url().identity.name,
+                        url: spec_in_supergraph.url(),
+                        imports: Box::new(directives.iter().map(
+                            |SupergraphDirectiveInfo {
+                                 name_in_feature,
+                                 name_in_supergraph,
+                                 ..
+                             }| {
+                                Cow::Owned(Import {
+                                    is_directive: true,
+                                    element: name_in_feature.clone(),
+                                    alias: Some(name_in_supergraph.clone()),
+                                })
+                            },
+                        )),
+                    },
+                ))
+                .chain(all_composed_core_features.iter().map(|(link, directives)| {
+                    SpecConflictInfo {
+                        spec_name_in_schema: &link.url.identity.name,
+                        url: &link.url,
+                        imports: Box::new(directives.iter().map(
+                            |(name_in_schema, name_in_spec)| {
+                                Cow::Owned(Import {
+                                    is_directive: true,
+                                    element: name_in_spec.clone(),
+                                    alias: Some(name_in_schema.clone()),
+                                })
+                            },
+                        )),
+                    }
+                }));
+
+        // Gather names of elements that may be added to the schema, but remove federation operation
+        // types (which won't be in the schema) and built-ins (which start with double underscores
+        // and are guaranteed not to conflict with any unique prefix we find).
+        let all_element_names = self
+            .merged
+            .get_types()
+            .map(|pos| pos.type_name().clone())
+            .chain(
+                self.merged
+                    .get_directive_definitions()
+                    .map(|pos| pos.directive_name.clone()),
+            )
+            .chain(self.subgraphs.iter().flat_map(|subgraph| {
+                subgraph
+                    .schema()
+                    .get_types()
+                    .map(|pos| pos.type_name().clone())
+                    .chain(
+                        subgraph
+                            .schema()
+                            .get_directive_definitions()
+                            .map(|pos| pos.directive_name.clone()),
+                    )
+            }))
+            .filter(|name| {
+                if FEDERATION_OPERATION_TYPES.contains(name) {
+                    return false;
+                }
+                if name.starts_with("__") {
+                    return false;
+                }
+                true
+            });
+
+        let (import_conflicts_by_identity, compute_unique_spec_name_in_schema) =
+            LinksMetadata::compute_spec_name_in_schema_conflicts(
+                spec_conflict_infos,
+                all_element_names,
+            );
+        self.import_conflicts_by_identity = import_conflicts_by_identity;
+        self.compute_unique_spec_name_in_schema = Some(compute_unique_spec_name_in_schema);
+
+        // Now that we've tracked @link conflicts, we can start adding specs to the schema.
+        self.maybe_add_specs(&supergraph_info_by_identity)?;
 
         // Populate the graph enum with subgraph information and store the mapping
         self.subgraph_names_to_join_spec_name = self
@@ -462,13 +567,10 @@ impl Merger {
     /// `MergeResult::errors`. If the merge is successful, `MergeResult::errors` will be empty, and
     /// a supergraph will be returned along with any hints collected during the merge process.
     pub(crate) fn merge(mut self) -> Result<MergeResult, FederationError> {
-        // Validate and record usages of @composeDirective
-        trace!("Validating @composeDirective applications");
-        self.compose_directive_manager
-            .validate(&self.subgraphs, &mut self.error_reporter)?;
-        // TODO: JS doesn't include this, but we're bailing here to test error generation while the
-        // rest of merge is unimplemented. Once merge can complete without panicking, we can remove
-        // this block.
+        // If compose directive manager detected errors during [Merger] construction, the same
+        // errors will likely be re-caught by `self.add_core_features()` (but with less helpful
+        // error messages, since they're caught at the schema level). To avoid this double-listing
+        // of errors, we return early in that case.
         if self.error_reporter.has_errors() {
             let (errors, hints) = self.error_reporter.into_errors_and_hints();
             return Ok(MergeResult {
@@ -481,6 +583,18 @@ impl Merger {
         // Add core features to the merged schema
         trace!("Adding core features to merged schema");
         self.add_core_features()?;
+
+        // If core feature addition detected errors, the schema's `@link`s may be in an incomplete
+        // state, which could cause later code to emit internal errors. To avoid this, we return
+        // early in that case.
+        if self.error_reporter.has_errors() {
+            let (errors, hints) = self.error_reporter.into_errors_and_hints();
+            return Ok(MergeResult {
+                supergraph: None,
+                errors,
+                hints,
+            });
+        }
 
         // Create empty objects for all types and directive definitions
         trace!("Adding shallow types and directives to merged schema");
@@ -670,12 +784,53 @@ impl Merger {
             .collect()
     }
 
+    /// Push non-internal errors as merge errors, but bubble up the first internal error.
+    // PORT_NOTE: This is meant to mimic how assertion errors would bubble through in the JS
+    //            codebase, but errors derived from GraphQLError would be captured.
+    pub(crate) fn push_non_internal_errors(
+        reporter: &mut ErrorReporter,
+        error: FederationError,
+    ) -> Result<(), FederationError> {
+        for error in error.into_errors() {
+            if error.code() == ErrorCode::Internal {
+                return Err(error.into());
+            }
+            reporter.add_error(CompositionError::MergeError {
+                error,
+                locations: Vec::new(),
+            });
+        }
+        Ok(())
+    }
+
     fn add_core_features(&mut self) -> Result<(), FederationError> {
         for (feature, directives) in self
             .compose_directive_manager
             .all_composed_core_features()
             .iter()
         {
+            let spec_name_in_schema = if self
+                .merged
+                .metadata()
+                .map(|metadata| {
+                    metadata.is_spec_name_in_schema_valid(
+                        &feature.url.identity.name,
+                        &feature.url.identity,
+                        &self.import_conflicts_by_identity,
+                    )
+                })
+                .unwrap_or(false)
+            {
+                Name::new_unchecked(&feature.url.identity.name)
+            } else {
+                self.compute_unique_spec_name_in_schema
+                    .as_mut()
+                    .ok_or_else(|| {
+                        internal_error!(
+                            "compute_unique_spec_name_in_schema() unexpectedly uninitialized"
+                        )
+                    })?(&feature.url.identity.name)
+            };
             let imports = directives
                 .iter()
                 .map(|(alias, original)| {
@@ -699,21 +854,29 @@ impl Merger {
                 self.link_spec_definition.apply_feature_to_schema(
                     &mut self.merged,
                     *feature_definition,
-                    None,
+                    Some(spec_name_in_schema).take_if(|spec_name_in_schema| {
+                        spec_name_in_schema.as_str() != feature.url.identity.name.as_ref()
+                    }),
                     feature_definition.purpose(),
                     if imports.is_empty() {
                         None
                     } else {
                         Some(imports)
                     },
+                    |error| Self::push_non_internal_errors(&mut self.error_reporter, error),
                 )?;
             } else {
-                let mut directive =
-                    Directive::new(self.link_spec_definition.url().identity.name.clone());
+                let mut directive = Directive::new(self.link_spec_definition.name().clone());
                 directive.arguments.push(Node::new(Argument {
                     name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
                     value: Node::new(feature.url.to_string().into()),
                 }));
+                if spec_name_in_schema.as_str() != feature.url.identity.name.as_ref() {
+                    directive.arguments.push(Node::new(Argument {
+                        name: LINK_DIRECTIVE_AS_ARGUMENT_NAME,
+                        value: Node::new(spec_name_in_schema.as_str().into()),
+                    }));
+                }
                 if !imports.is_empty() {
                     directive.arguments.push(Node::new(Argument {
                         name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
@@ -725,8 +888,11 @@ impl Merger {
                         )),
                     }));
                 }
-                SchemaDefinitionPosition
-                    .insert_directive(&mut self.merged, Component::new(directive))?;
+                if let Err(error) = SchemaDefinitionPosition
+                    .insert_directive(&mut self.merged, Component::new(directive))
+                {
+                    Self::push_non_internal_errors(&mut self.error_reporter, error)?
+                };
             }
         }
         Ok(())
@@ -2167,6 +2333,9 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         }
     }
 
+    /// Returns whether the second type is a strict subtype of the first type. This code resembles
+    /// [Type::is_assignable_to], except it (1) does not allow strict equality and (2) allows for
+    /// the named types to be subtypes.
     pub(in crate::merger) fn is_strict_subtype(
         &self,
         potential_supertype: &Type,
@@ -2179,54 +2348,58 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         // - NonNullablePropagation: NonNull T is subtype of NonNull U if T is subtype of U
         // - ListUpgrade is NOT supported (was excluded by default)
 
-        match (potential_subtype, potential_supertype) {
-            // -------- List & NonNullList --------
-            // ListPropagation: [T] is subtype of [U] if T is subtype of U
-            (Type::List(inner_sub), Type::List(inner_super)) => {
-                self.is_strict_subtype(inner_super, inner_sub)
-            }
-            // NonNullableDowngrade: [T]! is subtype of [T]
-            (Type::NonNullList(inner_sub), Type::List(inner_super)) if inner_sub == inner_super => {
-                Ok(true)
-            }
-            // NonNullablePropagation: [T]! is subtype of [U]! if T is subtype of U
-            (Type::NonNullList(inner_sub), Type::NonNullList(inner_super)) => {
-                self.is_strict_subtype(inner_super, inner_sub)
-            }
-            // NonNullablePropagation + NonNullableDowngrade: [T]! is subtype of [U] if T is subtype of U
-            (Type::NonNullList(inner_sub), Type::List(inner_super)) => {
-                self.is_strict_subtype(inner_super, inner_sub)
-            }
-
-            // Anything else with list on the left is not a strict subtype
-            (Type::List(_), _) | (Type::NonNullList(_), _) => Ok(false),
-
-            // -------- Named & NonNullNamed --------
-            // Same named type => not strict subtype
-            (Type::Named(a), Type::Named(b)) | (Type::Named(a), Type::NonNullNamed(b))
-                if a == b =>
-            {
+        match (potential_supertype, potential_subtype) {
+            // A nullable type cannot be a subtype of a non-nullable type.
+            (Type::NonNullNamed(_) | Type::NonNullList(_), Type::Named(_) | Type::List(_)) => {
                 Ok(false)
             }
-            (Type::NonNullNamed(a), Type::NonNullNamed(b)) if a == b => Ok(false),
-
-            // NonNull downgrade: T! ⊑ T
-            (Type::NonNullNamed(sub), Type::Named(super_)) if sub == super_ => Ok(true),
-
-            // Interface/Union relationships (includes downgrade handled above)
-            (Type::Named(sub), Type::Named(super_))
-            | (Type::Named(sub), Type::NonNullNamed(super_))
-            | (Type::NonNullNamed(sub), Type::Named(super_))
-            | (Type::NonNullNamed(sub), Type::NonNullNamed(super_)) => {
-                self.is_named_type_subtype(super_, sub)
+            // A list type cannot be a subtype of a non-list type.
+            (Type::Named(_) | Type::NonNullNamed(_), Type::List(_) | Type::NonNullList(_)) => {
+                Ok(false)
             }
-
-            // ListUpgrade not supported; any other combination is not strict
-            _ => Ok(false),
+            // A non-list type cannot be a subtype of a list type (no list upgrades).
+            (Type::List(_) | Type::NonNullList(_), Type::Named(_) | Type::NonNullNamed(_)) => {
+                Ok(false)
+            }
+            // A nullable named type can be a subtype of another nullable named type if the inner
+            // types are strict subtypes.
+            (Type::Named(potential_supertype), Type::Named(potential_subtype)) => {
+                self.is_named_type_strict_subtype(potential_supertype, potential_subtype)
+            }
+            // A non-null named type can be a subtype of another non-null named type if the inner
+            // types are strict subtypes.
+            (Type::NonNullNamed(potential_supertype), Type::NonNullNamed(potential_subtype)) => {
+                self.is_named_type_strict_subtype(potential_supertype, potential_subtype)
+            }
+            // A nullable list type can be a subtype of another nullable list type if the inner
+            // types are strict subtypes.
+            (Type::List(potential_supertype), Type::List(potential_subtype)) => {
+                self.is_strict_subtype(potential_supertype, potential_subtype)
+            }
+            // A non-null list type can be a subtype of another non-null list type if the inner
+            // types are strict subtypes.
+            (Type::NonNullList(potential_supertype), Type::NonNullList(potential_subtype)) => {
+                self.is_strict_subtype(potential_supertype, potential_subtype)
+            }
+            // A non-null named type can be a subtype of a nullable named type if the inner types
+            // are subtypes.
+            (Type::Named(potential_supertype), Type::NonNullNamed(potential_subtype)) => {
+                Ok(potential_supertype == potential_subtype
+                    || self.is_named_type_strict_subtype(potential_supertype, potential_subtype)?)
+            }
+            // A non-null list type can be a subtype of a nullable list type if the inner types are
+            // subtypes.
+            (Type::List(potential_supertype), Type::NonNullList(potential_subtype)) => {
+                Ok(potential_supertype == potential_subtype
+                    || self.is_strict_subtype(potential_supertype, potential_subtype)?)
+            } // You'll notice we didn't need a "_ => Ok(false)" at the end here. That's because the
+              // compiler can prove that the above match arms cover all cases. If you ever change
+              // this code, try to keep it that way.
         }
     }
 
-    fn is_named_type_subtype(
+    /// Returns whether the second named type is a strict subtype of the first named type.
+    fn is_named_type_strict_subtype(
         &self,
         potential_supertype: &NamedType,
         potential_subtype: &NamedType,
@@ -2392,11 +2565,12 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 // schema. For Connectors (see `should_use_join_directive_for_url`), this is an import name (the
                 // same name imported in the supergraph and the extracted subgraphs). For others, this is
                 // the fully qualified directive name in the subgraph schema (re-assigned below).
-                let directive_name_for_join_directive = if source_link
-                    .as_ref()
-                    .is_some_and(|e| e.link.url.identity == Identity::link_identity())
-                {
-                    if let Ok(link) = Link::from_directive_application(directive, schema.schema())
+                let directive_name_for_join_directive = if source_link.as_ref().is_some_and(|e| {
+                    e.link.url.identity == Identity::link_identity() && e.name_in_spec.is_some()
+                }) {
+                    if let Ok(link) = link_import_identity_url_map
+                        .link_spec_definition()
+                        .link_from_directive(directive, schema.schema())
                         && self.should_use_join_directive_for_url(&link.url)
                     {
                         // Persist link when the spec uses @join__directive and the feature
@@ -2419,15 +2593,18 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                     .directives_using_join_directive
                     .contains(&directive.name)
                 {
-                    if let Some(source_link) = source_link {
+                    if let Some(source_link) = source_link
+                        && let Some(name_in_spec) = &source_link.name_in_spec
+                    {
                         // Compute the fully qualified directive name in the subgraph schema without using
                         // `import`, so it can be referenced in the extracted subgraph schema via
                         // `@join__directive`.
                         Some(Link::directive_name_in_schema_for_core_arguments(
                             &source_link.link.url,
-                            &source_link.link.url.identity.name,
+                            // For Apollo specs, their names are valid GraphQL, so this is fine.
+                            &Name::new_unchecked(&source_link.link.url.identity.name),
                             &[],
-                            &source_link.name_in_spec,
+                            name_in_spec,
                         ))
                     } else {
                         Some(directive.name.clone())
