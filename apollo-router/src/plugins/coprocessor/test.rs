@@ -6926,6 +6926,115 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[rstest::rstest]
+    // Default HTTP/2 (`enable`) over a Unix socket resolves to HTTP/1.1, so keep-alive is inert.
+    #[case::default_http2(serde_json::json!({
+        "coprocessor": {
+            "url": "unix:///var/run/coprocessor.sock",
+            "client": { "experimental_http2_keep_alive_interval": "30s" }
+        }
+    }))]
+    // `enable` explicitly — same outcome as the default.
+    #[case::enable_http2(serde_json::json!({
+        "coprocessor": {
+            "url": "unix:///var/run/coprocessor.sock",
+            "client": {
+                "experimental_http2": "enable",
+                "experimental_http2_keep_alive_interval": "30s"
+            }
+        }
+    }))]
+    // `disable` can never carry HTTP/2 keep-alive at all.
+    #[case::disable_http2(serde_json::json!({
+        "coprocessor": {
+            "url": "unix:///var/run/coprocessor.sock",
+            "client": {
+                "experimental_http2": "disable",
+                "experimental_http2_keep_alive_interval": "30s"
+            }
+        }
+    }))]
+    // The unix:// URL is a per-stage override rather than the top-level url.
+    #[case::stage_override(serde_json::json!({
+        "coprocessor": {
+            "url": "http://localhost:8081",
+            "client": { "experimental_http2_keep_alive_interval": "30s" },
+            "router": { "request": { "url": "unix:///var/run/coprocessor.sock" } }
+        }
+    }))]
+    #[tokio::test]
+    async fn test_unix_socket_keep_alive_without_http2only_rejected(
+        #[case] config: serde_json::Value,
+    ) {
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(
+            result.is_err(),
+            "UDS keep-alive without http2only should be rejected"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("http2only"),
+            "Error should point the operator at experimental_http2: http2only: {err}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_unix_socket_keep_alive_with_http2only_accepted() {
+        // http2only forces HTTP/2 prior knowledge over the socket, so keep-alive is effective.
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix:///var/run/coprocessor.sock",
+                "client": {
+                    "experimental_http2": "http2only",
+                    "experimental_http2_keep_alive_interval": "30s"
+                }
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "UDS keep-alive with http2only should load: {:?}",
+            result.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tcp_keep_alive_without_http2only_accepted() {
+        // Guard against a false positive: over TCP, `enable` can still negotiate HTTP/2 via ALPN,
+        // so keep-alive with the default HTTP/2 config must remain valid for non-UDS URLs.
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://localhost:8081",
+                "client": { "experimental_http2_keep_alive_interval": "30s" }
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "TCP keep-alive without http2only should load: {:?}",
+            result.err()
+        );
+    }
+
     #[tokio::test]
     async fn test_invalid_http_url_rejected() {
         let config = serde_json::json!({

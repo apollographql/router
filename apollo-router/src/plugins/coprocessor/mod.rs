@@ -41,6 +41,7 @@ use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
+use crate::plugins::traffic_shaping::Http2Config;
 use crate::services;
 use crate::services::PATH_QUERY_PARAM;
 use crate::services::PipelineStep;
@@ -268,6 +269,25 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
         if let Some(ref url) = init.config.subgraph.all.response.url {
             validate_coprocessor_url(url, "coprocessor.subgraph.all.response.url")?;
         }
+
+        // HTTP/2 keep-alive only takes effect over a Unix socket when HTTP/2 is forced on, so reject
+        // the combination that would silently give no keep-alive (see validate_uds_keep_alive).
+        let mut all_urls: Vec<&str> = vec![init.config.url.as_str()];
+        all_urls.extend(
+            [
+                init.config.router.request.url.as_deref(),
+                init.config.router.response.url.as_deref(),
+                init.config.supergraph.request.url.as_deref(),
+                init.config.supergraph.response.url.as_deref(),
+                init.config.execution.request.url.as_deref(),
+                init.config.execution.response.url.as_deref(),
+                init.config.subgraph.all.request.url.as_deref(),
+                init.config.subgraph.all.response.url.as_deref(),
+            ]
+            .into_iter()
+            .flatten(),
+        );
+        validate_uds_keep_alive(&client_config, &all_urls)?;
 
         // Use shared HttpClientService infrastructure instead of duplicated client creation
         let tls_root_store =
@@ -710,6 +730,31 @@ pub(crate) fn validate_coprocessor_url(url: &str, config_path: &str) -> Result<(
         // Validate HTTP/HTTPS URLs can be parsed
         url.parse::<http::Uri>()
             .map_err(|e| format!("{config_path}: invalid URL '{url}': {e}"))?;
+    }
+    Ok(())
+}
+
+/// Reject an HTTP/2 keep-alive configuration that would be silently inert over a Unix socket.
+///
+/// HTTP/2 keep-alive pings are an h2-only feature. Over a Unix socket the client only speaks
+/// HTTP/2 when it is forced on (`http2only`): unlike TCP there is no TLS/ALPN over UDS for the
+/// client to negotiate h2, so `enable`/`disable` fall back to HTTP/1.1 and the keep-alive pings
+/// never fire. Accepting such a config would leave an operator believing a hung coprocessor over
+/// the socket would be detected when it would not, so fail loudly at startup instead.
+pub(crate) fn validate_uds_keep_alive(client: &Client, urls: &[&str]) -> Result<(), BoxError> {
+    let keep_alive_configured = client.experimental_http2_keep_alive_interval.is_some();
+    let http2_only = matches!(client.experimental_http2, Some(Http2Config::Http2Only));
+    let uses_unix_socket = urls.iter().any(|url| url.starts_with("unix://"));
+
+    if keep_alive_configured && !http2_only && uses_unix_socket {
+        return Err(
+            "coprocessor.client.experimental_http2_keep_alive_interval is set for a Unix-socket \
+             coprocessor URL, but coprocessor.client.experimental_http2 is not `http2only`. Unix \
+             sockets have no TLS/ALPN to negotiate HTTP/2, so the connection falls back to \
+             HTTP/1.1 and the HTTP/2 keep-alive pings never fire (a hung coprocessor would not be \
+             detected). Set `experimental_http2: http2only` to use keep-alive over the socket."
+                .into(),
+        );
     }
     Ok(())
 }
