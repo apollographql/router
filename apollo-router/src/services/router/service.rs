@@ -704,13 +704,15 @@ impl RouterCreator {
         let config_hash = configuration.hash();
         let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
 
-        let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
-            supergraph_creator.make(),
-            apq_layer,
-            persisted_query_layer,
-            query_analysis_layer,
-            configuration.batching.clone(),
-        ));
+        let router_service = content_negotiation::RouterContentNegotiationLayer::default().layer(
+            RouterService::new(
+                supergraph_creator.make(),
+                apq_layer,
+                persisted_query_layer,
+                query_analysis_layer,
+                configuration.batching.clone(),
+            ),
+        );
 
         // NOTE: This is the start of the router pipeline (router_service).
         // The buffer provides backpressure for the full router pipeline and is required
