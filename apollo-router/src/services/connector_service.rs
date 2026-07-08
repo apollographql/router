@@ -211,7 +211,10 @@ async fn execute(
     .into_iter()
     .map(move |request| {
         let mut connector_request_service = connector_request_service.clone();
-        async move { connector_request_service.call(request).await }
+        async move {
+            connector_request_service.ready().await?;
+            connector_request_service.call(request).await
+        }
     });
 
     aggregate_responses(
@@ -266,7 +269,6 @@ impl ConnectorServiceFactory {
             Default::default(),
             Default::default(),
             Arc::new(ConnectorRequestServiceFactory::new(
-                Default::default(),
                 Default::default(),
                 Default::default(),
             )),

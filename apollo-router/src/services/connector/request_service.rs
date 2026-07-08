@@ -1,7 +1,6 @@
 //! Service which makes individual requests to Apollo Connectors over some transport
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -167,32 +166,22 @@ impl ConnectorRequestServiceFactory {
     pub(crate) fn new(
         http_client_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
         plugins: Arc<Plugins>,
-        connector_sources: Arc<HashSet<String>>,
     ) -> Self {
-        // Pre-build the HTTP client services for each source so that
-        // ConnectorRequestService can clone them per-request instead of
-        // re-folding plugins every time.
-        let mut http_clients = IndexMap::with_capacity(http_client_service_factory.len());
-        for (source_key, factory) in http_client_service_factory.iter() {
+        // `http_client_service_factory` contains exactly one entry per connector
+        // source (see `create_http_services` in router_factory.rs), so it doubles
+        // as the set of connector sources to build buffers for.
+        let mut map = HashMap::with_capacity(http_client_service_factory.len());
+        for (source, factory) in http_client_service_factory.iter() {
             // source_config_key() format is "{subgraph_name}.{source_or_synthetic}";
             // the subgraph name is the first dot-separated component.
-            let subgraph_name = source_key.split('.').next().unwrap_or(source_key);
-            http_clients.insert(source_key.clone(), factory.create(subgraph_name));
-        }
-        let mut map = HashMap::with_capacity(connector_sources.len());
-        for source in connector_sources.iter() {
+            let subgraph_name = source.split('.').next().unwrap_or(source);
+            let http_client = factory.create(subgraph_name);
             // One buffer per connector source provides per-source backpressure and is
             // required for correct LoadShed / RateLimit behaviour from traffic-shaping
             // plugins (mirrors the per-subgraph buffer in SubgraphServiceFactory).
             let service = UnconstrainedBuffer::new(
                 plugins.iter().rev().fold(
-                    ConnectorRequestService {
-                        http_client: http_clients
-                            .get(source)
-                            .cloned()
-                            .expect("http client service should exist for every connector source"),
-                    }
-                    .boxed_clone(),
+                    ConnectorRequestService { http_client }.boxed_clone(),
                     |acc, (_, e)| e.connector_request_service(acc, source.clone()),
                 ),
                 DEFAULT_BUFFER_SIZE,
