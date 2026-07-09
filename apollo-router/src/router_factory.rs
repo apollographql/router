@@ -325,7 +325,6 @@ impl YamlRouterFactory {
 
             let query_planner_service = QueryPlannerService::new(
                 schema.clone(),
-                subgraph_schemas.clone(),
                 configuration.clone(),
                 planner.clone(),
                 introspection.clone(),
@@ -335,22 +334,12 @@ impl YamlRouterFactory {
             (query_planner_service, subgraph_schemas)
         };
 
-        // We have a few different subgraph schema structures in different parts of the router
-        // Should probably consolidate at some point, but it's not the biggest deal in the world!
-        let plugin_subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> =
-            Arc::new(
-                subgraph_schemas
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.schema.clone()))
-                    .collect(),
-            );
-
         // Process the plugins.
         let plugins: Arc<Plugins> = Arc::new(
             create_plugins(
                 &configuration,
                 &schema,
-                plugin_subgraph_schemas,
+                subgraph_schemas.clone(),
                 initial_telemetry_plugin,
                 extra_plugins,
                 license,
@@ -562,7 +551,7 @@ pub(crate) async fn add_plugin(
     schema: Arc<String>,
     schema_id: Arc<String>,
     supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    subgraph_schemas: Arc<crate::query_planner::SubgraphSchemas>,
     launch_id: Option<Arc<String>>,
     notify: &Notify<String, crate::graphql::Response>,
     plugin_instances: &mut Plugins,
@@ -599,7 +588,7 @@ pub(crate) async fn add_plugin(
 pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    subgraph_schemas: Arc<crate::query_planner::SubgraphSchemas>,
     initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     license: Arc<LicenseState>,

@@ -19,6 +19,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::query_planner::HashedSubgraphSchemas;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::query_planner::PlanOptions;
 use crate::spec::Query;
@@ -380,9 +381,9 @@ impl PlanNode {
         Ok(())
     }
 
-    pub(crate) fn init_parsed_operations_and_hash_subqueries(
+    pub(super) fn init_parsed_operations_and_hash_subqueries(
         &mut self,
-        subgraph_schemas: &SubgraphSchemas,
+        subgraph_schemas: &HashedSubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
         match self {
             PlanNode::Fetch(fetch_node) => {

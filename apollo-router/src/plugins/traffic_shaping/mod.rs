@@ -796,15 +796,8 @@ mod test {
 
         let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
         let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
-        let plugin_subgraph_schemas = Arc::new(
-            subgraph_schemas
-                .iter()
-                .map(|(k, v)| (k.clone(), v.schema.clone()))
-                .collect::<std::collections::HashMap<_, _>>(),
-        );
         let planner = QueryPlannerService::new(
             schema.clone(),
-            subgraph_schemas.clone(),
             config.clone(),
             qp_arc,
             Arc::new(crate::introspection::IntrospectionCache::new(&config)),
@@ -815,7 +808,7 @@ mod test {
         let mut builder = PluggableSupergraphServiceBuilder::new(
             planner,
             schema.clone(),
-            subgraph_schemas,
+            subgraph_schemas.clone(),
             query_analysis.clone(),
         )
         .with_configuration(config.clone());
@@ -824,7 +817,7 @@ mod test {
             create_plugins(
                 &config,
                 &schema,
-                plugin_subgraph_schemas,
+                subgraph_schemas,
                 None,
                 Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
                 Default::default(),

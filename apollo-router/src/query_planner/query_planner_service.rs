@@ -9,8 +9,6 @@ use std::time::Instant;
 
 use apollo_compiler::Name;
 use apollo_compiler::ast;
-use apollo_compiler::collections::HashMap;
-use apollo_compiler::validation::Valid;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
@@ -44,7 +42,9 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
+use crate::query_planner::HashedSubgraphSchemas;
 use crate::query_planner::convert::convert_root_query_plan_node;
+use crate::query_planner::hashed_subgraph_schemas;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
@@ -54,7 +54,6 @@ use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::query_planner::PlanOptions;
 use crate::spec::Query;
 use crate::spec::Schema;
-use crate::spec::SchemaHash;
 use crate::spec::SpecError;
 use crate::spec::operation_limits::OperationLimits;
 
@@ -81,39 +80,6 @@ pub(crate) fn non_local_selections_check_enabled() -> bool {
     })
 }
 
-pub(crate) type SubgraphSchemas = HashMap<String, SubgraphSchema>;
-
-pub(crate) fn build_subgraph_schemas(planner: &QueryPlanner) -> Arc<SubgraphSchemas> {
-    Arc::new(
-        planner
-            .subgraph_schemas()
-            .iter()
-            .map(|(name, schema)| {
-                (
-                    name.to_string(),
-                    SubgraphSchema::new(schema.schema().clone()),
-                )
-            })
-            .collect::<SubgraphSchemas>(),
-    )
-}
-
-pub(crate) struct SubgraphSchema {
-    pub(crate) schema: Arc<Valid<apollo_compiler::Schema>>,
-    // TODO: Ideally should have separate nominal type for subgraph's schema hash
-    pub(crate) hash: SchemaHash,
-}
-
-impl SubgraphSchema {
-    pub(crate) fn new(schema: Valid<apollo_compiler::Schema>) -> Self {
-        let sdl = schema.serialize().no_indent().to_string();
-        Self {
-            schema: Arc::new(schema),
-            hash: SchemaHash::new(&sdl),
-        }
-    }
-}
-
 /// A query planner that calls out to the apollo-federation crate.
 ///
 /// No caching is performed. To cache, wrap in a [`CachingQueryPlanner`].
@@ -121,7 +87,7 @@ impl SubgraphSchema {
 pub(crate) struct QueryPlannerService {
     planner: Arc<QueryPlanner>,
     schema: Arc<Schema>,
-    subgraph_schemas: Arc<SubgraphSchemas>,
+    subgraph_schemas: Arc<HashedSubgraphSchemas>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
     authorization_config: Arc<authorization::Conf>,
@@ -256,20 +222,12 @@ impl QueryPlannerService {
     ) -> Result<Self, ServiceBuildError> {
         let planner = Self::create_planner(&schema, &configuration)?;
         let introspection = Arc::new(IntrospectionCache::new(&configuration));
-        let subgraph_schemas = build_subgraph_schemas(&planner);
 
-        Self::new(
-            schema,
-            subgraph_schemas,
-            configuration,
-            planner,
-            introspection,
-        )
+        Self::new(schema, configuration, planner, introspection)
     }
 
     pub(crate) fn new(
         schema: Arc<Schema>,
-        subgraph_schemas: Arc<SubgraphSchemas>,
         configuration: Arc<Configuration>,
         planner: Arc<QueryPlanner>,
         introspection: Arc<IntrospectionCache>,
@@ -279,6 +237,7 @@ impl QueryPlannerService {
         let federation_instrument = federation_version_instrument(schema.federation_version());
         let signature_normalization_algorithm =
             TelemetryConfig::signature_normalization_algorithm(&configuration);
+        let subgraph_schemas = hashed_subgraph_schemas(&planner);
 
         Ok(Self {
             planner,

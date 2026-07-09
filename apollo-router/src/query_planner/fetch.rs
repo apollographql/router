@@ -16,7 +16,6 @@ use tower::ServiceExt;
 use tracing::Instrument;
 use tracing::instrument;
 
-use super::query_planner_service::SubgraphSchemas;
 use super::rewrites;
 use super::selection::execute_selection_set;
 use super::subgraph_context::ContextualArguments;
@@ -33,6 +32,8 @@ use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::query_planner::HashedSubgraphSchemas;
+use crate::query_planner::SubgraphSchemas;
 use crate::services::SubgraphRequest;
 use crate::services::fetch::ErrorMapping;
 use crate::services::subgraph::BoxCloneService;
@@ -494,17 +495,17 @@ impl FetchNode {
         subgraph_schemas: &SubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
         let schema = &subgraph_schemas[self.service_name.as_ref()];
-        self.operation.init_parsed(&schema.schema)?;
+        self.operation.init_parsed(schema)?;
         Ok(())
     }
 
-    pub(crate) fn init_parsed_operation_and_hash_subquery(
+    pub(super) fn init_parsed_operation_and_hash_subquery(
         &mut self,
-        subgraph_schemas: &SubgraphSchemas,
+        subgraph_schemas: &HashedSubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
-        let schema = &subgraph_schemas[self.service_name.as_ref()];
-        self.operation.init_parsed(&schema.schema)?;
-        self.schema_aware_hash = Arc::new(schema.hash.operation_hash(
+        let subgraph_schema = &subgraph_schemas[self.service_name.as_ref()];
+        self.operation.init_parsed(&subgraph_schema.schema)?;
+        self.schema_aware_hash = Arc::new(subgraph_schema.hash.operation_hash(
             self.operation.as_serialized(),
             self.operation_name.as_deref(),
         ));
