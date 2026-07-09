@@ -163,13 +163,12 @@ pub(crate) struct ConnectorRequestServiceFactory {
 }
 
 impl ConnectorRequestServiceFactory {
+    /// `http_client_service_factory` contains the connector HTTP client factories
+    /// that we'll set up connector request services for.
     pub(crate) fn new(
         http_client_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
         plugins: Arc<Plugins>,
     ) -> Self {
-        // `http_client_service_factory` contains exactly one entry per connector
-        // source (see `create_http_services` in router_factory.rs), so it doubles
-        // as the set of connector sources to build buffers for.
         let mut map = HashMap::with_capacity(http_client_service_factory.len());
         for (source, factory) in http_client_service_factory.iter() {
             // source_config_key() format is "{subgraph_name}.{source_or_synthetic}";
