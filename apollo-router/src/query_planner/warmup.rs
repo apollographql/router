@@ -354,7 +354,7 @@ mod tests {
 
     #[tokio::test]
     async fn warm_up_from_previous_cache() {
-        let queries = vec![
+        let queries = [
             "{ me { username } }".to_string(),
             "{ topProducts { upc } }".to_string(),
             "{ me { reviews { body } } }".to_string(),
@@ -373,7 +373,7 @@ mod tests {
 
     #[tokio::test]
     async fn warm_up_from_previous_cache_with_custom_max() {
-        let queries = vec![
+        let queries = [
             "{ me { username } }".to_string(),
             "{ topProducts { upc } }".to_string(),
             "{ me { reviews { body } } }".to_string(),
