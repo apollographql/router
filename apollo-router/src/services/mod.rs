@@ -9,7 +9,6 @@ use serde::Serialize;
 use strum::Display;
 
 pub(crate) use self::query_planner::*;
-pub(crate) use self::subgraph::http::*;
 pub(crate) use self::subgraph::service::*;
 pub(crate) use self::supergraph::service::*;
 use crate::graphql::Request;
