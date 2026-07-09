@@ -205,6 +205,8 @@ where
 #[cfg(test)]
 mod tests {
 
+    use std::time::Duration;
+
     use tower::Service;
     use tower::ServiceExt;
 
@@ -213,18 +215,75 @@ mod tests {
     use crate::services::SubgraphResponse;
 
     // Testing strategy:
-    //  - Two calls with the same cache key are joined in the same task via tokio::join!.
-    //    join! polls fut1 first: it locks the wait_map, inserts an entry, calls the inner
-    //    service, and yields (pending on the mock response). join! then polls fut2: it finds
-    //    the entry and subscribes to the broadcast. Both are suspended before the driver ever
-    //    responds. This ordering is structural — cooperative scheduling in a single task —
-    //    not a timing assumption.
-    //  - The driver handles exactly one request. If dedup fails and fut2 reaches the inner
-    //    service a second time, the closed handle returns an error and res2 fails.
+    //  - A previous version of this test relied on tokio::join! polling fut1 before fut2 and
+    //    claimed that ordering was "structural" — cooperative scheduling in a single task, not
+    //    a timing assumption. That claim was false: the wait_map entry inserted by fut1 is
+    //    removed by a *separately spawned* cleanup task (see the `tokio::task::spawn` inside
+    //    `dedup`'s `None` branch), and the mock driver here is also a separate spawned task.
+    //    On the multi-thread runtime, both of those independent tasks can be scheduled on other
+    //    worker threads and race ahead of the main task's join! loop. If the cleanup task wins
+    //    that race and removes the wait_map entry before fut2 is ever polled, fut2 takes the
+    //    `None` branch and calls the inner service a second time. Since the mock driver only
+    //    answers one request before it drops its handle, that second call hits a closed
+    //    channel and fails with `Closed(())`, which is exactly the intermittent CI failure this
+    //    test was rewritten to fix (previously masked/"guaranteed" by an incorrect comment).
+    //  - Rather than hope for a particular poll/scheduling order, we make deduplication a
+    //    proven fact: we spawn both calls as independent tasks (so they really do run
+    //    concurrently, as in production) and condition-wait on the actual invariant dedup
+    //    depends on — that the second call has subscribed to the first call's broadcast
+    //    channel — before letting the mock driver answer the single request it will ever see.
+    //    Only then can there be no more races: the response cannot arrive, and the wait_map
+    //    entry cannot be cleaned up, until the second call has already registered its interest.
     #[tokio::test(flavor = "multi_thread")]
     async fn test_dedup_service() {
         let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
+        let mut svc = QueryDeduplicationService::new(mock);
+        let wait_map = svc.wait_map.clone();
+        let request = SubgraphRequest::fake_builder().build();
+
+        svc.ready().await.expect("it is ready");
+        let fut1 = tokio::spawn(svc.call(request.clone()));
+
+        // Condition-based wait: block until the first call has actually registered its
+        // wait_map entry, rather than assuming it happened by the time we get here.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if !wait_map.lock().await.is_empty() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("fut1 never registered a wait_map entry");
+
+        svc.ready().await.expect("it is ready");
+        let fut2 = tokio::spawn(svc.call(request));
+
+        // Condition-based wait: block until the second call has subscribed to the first
+        // call's broadcast channel. This is the precise invariant that makes deduplication
+        // happen; proving it (instead of assuming a poll order) is what removes the race.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let subscribed = wait_map
+                    .lock()
+                    .await
+                    .values()
+                    .next()
+                    .map(|tx| tx.receiver_count() >= 1)
+                    .unwrap_or(false);
+                if subscribed {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("fut2 never subscribed to the dedup broadcast channel");
+
+        // Only now, with deduplication provably in effect, let the driver answer the single
+        // request it will ever see.
         let driver = tokio::spawn(async move {
             let (req, responder) = handle.next_request().await.unwrap();
             responder.send_response(
@@ -234,23 +293,9 @@ mod tests {
             );
         });
 
-        let mut svc = QueryDeduplicationService::new(mock);
-        let request = SubgraphRequest::fake_builder().build();
-
-        // call() returns a lazy BoxFuture — no work happens yet. Both calls share the same
-        // wait_map Arc, so they will see each other's entries when polled.
-        svc.ready().await.expect("it is ready");
-        let fut1 = svc.call(request.clone());
-        svc.ready().await.expect("it is ready");
-        let fut2 = svc.call(request);
-
-        // tokio::join! polls fut1 first. fut1 inserts a wait_map entry and yields waiting
-        // for the inner service response. join! then polls fut2, which finds the entry and
-        // subscribes to the broadcast. Both are suspended before the driver responds,
-        // guaranteeing deduplication.
         let (res1, res2) = tokio::join!(fut1, fut2);
-        res1.expect("fut1 joined");
-        res2.expect("fut2 joined");
+        res1.expect("fut1 spawned").expect("fut1 joined");
+        res2.expect("fut2 spawned").expect("fut2 joined");
 
         crate::plugin::test::await_mock_driver(driver).await;
     }
