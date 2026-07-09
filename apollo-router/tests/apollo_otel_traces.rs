@@ -436,6 +436,36 @@ async fn get_batch_router_service(
     )
 }
 
+/// Attribute keys whose *value* is legitimately non-deterministic across
+/// runs (wall-clock durations, randomly-chosen mock ports, per-process ids,
+/// live trace/client identifiers, etc). `assert_report!` below replaces the
+/// value of every one of these keys with a fixed `"[redacted]"` placeholder
+/// before the snapshot compare, so two spans that differ *only* in one of
+/// these attributes render byte-for-byte identical YAML.
+///
+/// This is a single source of truth shared by `assert_report!` (which
+/// redacts these for display) and `sort_spans_for_snapshot` (which must
+/// ignore these same keys when building its ordering key below) — the two
+/// lists drifting apart is exactly how a "fixed" sort quietly regresses: if
+/// a new volatile attribute is redacted here but not excluded from the sort
+/// key (or vice versa), the sort can start keying off run-to-run noise
+/// again.
+const VOLATILE_ATTRIBUTE_KEYS: &[&str] = &[
+    "apollo.client.host",
+    "apollo.client.uname",
+    "apollo.router.id",
+    "apollo.schema.id",
+    "apollo.user.agent",
+    "apollo_private.duration_ns",
+    "apollo_private.ftv1",
+    "apollo_private.graphql.variables",
+    "apollo_private.http.response_headers",
+    "apollo_private.sent_time_offset",
+    "trace_id",
+    "graphql.error.path",
+    "apollo.connector.source.detail",
+];
+
 /// Canonicalise span ordering inside an `ExportTraceServiceRequest` so insta
 /// snapshots are stable across runs.
 ///
@@ -450,41 +480,157 @@ async fn get_batch_router_service(
 /// ordering changes — so the cure is to canonicalise the order before
 /// asserting. See blog-details.md / T10 (non-deterministic ordering).
 ///
-/// **Shape chosen — partition-by-root then DFS.** The naive "sort all spans
-/// by start_time" approach is flaky in batch tests: when the OTLP batch
-/// contains two independent traces (e.g. `test_batch_trace_id` ships two
-/// `supergraph` roots plus a separate compute-job pool tree carrying
-/// `parse_query` / `compute_job` / `compute_job.execution`), siblings of one
-/// trace family can drift between the two `supergraph` subtrees depending on
-/// which worker happened to win the start-time race. This was the root cause
-/// of the observed flake on `test_batch_trace_id-2` (the
-/// `test_batch_send_header` snapshot has the same shape and was a latent
-/// sibling).
+/// **Why the previous `(start_time, end_time, name)` key was insufficient.**
+/// The prior version of this function sorted top-level roots by walking
+/// `spans_by_root.keys().cloned().collect()` straight out of a `HashMap` —
+/// Rust's default hasher is randomly seeded per process, so whenever two
+/// roots *tied* on `(start_time, end_time, name)` (exactly the case for
+/// `test_batch_trace_id`, whose two batched operations produce two
+/// structurally-identical `supergraph` root spans that can start/end within
+/// the same nanosecond in a fast CI sandbox), the pre-sort order — and
+/// therefore the stable-sort tiebreak outcome — depended on hash-iteration
+/// order, not on any content. Separately, the sibling-level tiebreak used
+/// `original_position_within_parent`, i.e. this span's index in the
+/// as-received batch — exactly the tokio-drop-order arrival sequence this
+/// function exists to cancel out in the first place. Both tiebreaks were
+/// "deterministic" only in the trivial sense of being a pure function of
+/// already-nondeterministic inputs, so ties could still flip the rendered
+/// snapshot from run to run.
 ///
-/// We therefore (1) resolve each span's terminal ancestor inside the batch
-/// (walking `parent_span_id` until we hit either an empty parent or a parent
-/// that isn't present here), (2) group spans by that root, (3) sort the
-/// roots by `(start_time_unix_nano, end_time_unix_nano, name)` — dropping
-/// `span_id` from the key since it is a fresh random `Vec<u8>` every run and
-/// would itself be a source of non-determinism, and (4) DFS each group in
-/// turn, sorting siblings within a parent by `(start, end, name,
-/// original_position_within_parent)`. The original-position tiebreak is the
-/// final fallback and only kicks in when two siblings of the SAME parent
-/// inside the SAME trace family share `(start, end, name)` — at that point
-/// they're truly indistinguishable post-redaction and any deterministic
-/// order works. Span timestamps are not yet redacted at this point, so the
-/// sort key carries real temporal information; the insta redactions later
-/// in `assert_report!` collapse the keys to `[start_time]` etc. in the
-/// rendered yaml.
+/// **Fix — keep `(start_time, end_time)` as the primary key, but replace the
+/// tiebreak with a content signature.** An earlier draft of this fix made
+/// the *entire* key content-based (name + attributes + children, no
+/// timestamps at all). That is a valid total order, but it throws away the
+/// real chronological signal for the (overwhelmingly common) case where
+/// sibling timestamps are NOT tied, reordering siblings that were never
+/// ambiguous in the first place and churning almost every snapshot in this
+/// file. Instead, `(start_time_unix_nano, end_time_unix_nano)` stays the
+/// primary key — unchanged from before, so non-tied cases keep today's
+/// order — and a bottom-up content `signature` (name + own attributes,
+/// sorted by key with `VOLATILE_ATTRIBUTE_KEYS` stripped out, + the sorted
+/// signatures of its children) is used purely as the tiebreak, replacing
+/// both the old HashMap-iteration-order root tiebreak and the old
+/// arrival-position sibling tiebreak. `span_id`, `trace_id`,
+/// `parent_span_id` never enter the key (fresh random bytes every run); the
+/// volatile attributes are excluded from the signature for the same reason
+/// `assert_report!` redacts them to a fixed placeholder for display — their
+/// real value carries run-to-run noise, not information the snapshot can
+/// see.
+///
+/// **Why leftover ties are safe.** If two distinct spans/subtrees still tie
+/// on the full `(start, end, signature)` key, every field that ends up in
+/// the snapshot is provably equal between them (that is what the signature
+/// covers), so swapping their relative order cannot change the rendered
+/// YAML. The only thing that can break such a tie is `Vec::sort_by`'s
+/// stable fallback to pre-sort order, which is fine here precisely because
+/// a tie at this point is a genuine "no observable difference," not an
+/// artifact of measuring the wrong thing.
 fn sort_spans_for_snapshot(report: &mut ExportTraceServiceRequest) {
     use std::collections::HashMap;
 
     use opentelemetry_proto::tonic::trace::v1::Span;
 
-    // Cap on parent-chain walks. A real trace tree won't exceed a few dozen
-    // levels of nesting; this defends against pathological cycles that
-    // shouldn't exist but would otherwise loop forever.
-    const MAX_PARENT_HOPS: usize = 64;
+    // Cap on recursion depth while computing signatures. A real trace tree
+    // won't exceed a few dozen levels of nesting; this defends against
+    // pathological parent_span_id cycles that shouldn't exist but would
+    // otherwise recurse forever.
+    const MAX_DEPTH: usize = 128;
+
+    fn attr_key_is_volatile(key: &str) -> bool {
+        VOLATILE_ATTRIBUTE_KEYS.contains(&key)
+    }
+
+    /// Bottom-up content signature for the span at `idx`, used only as a
+    /// tiebreak after `(start_time, end_time)`. Memoized so a span that
+    /// were ever reachable via more than one path (shouldn't happen in a
+    /// well-formed tree) is only computed once.
+    fn signature_of(
+        idx: usize,
+        original: &[Span],
+        children_of: &HashMap<Vec<u8>, Vec<usize>>,
+        memo: &mut HashMap<usize, String>,
+        depth: usize,
+    ) -> String {
+        if let Some(sig) = memo.get(&idx) {
+            return sig.clone();
+        }
+        let span = &original[idx];
+
+        let mut attrs: Vec<String> = span
+            .attributes
+            .iter()
+            .filter(|kv| !attr_key_is_volatile(&kv.key))
+            .map(|kv| format!("{}={:?}", kv.key, kv.value))
+            .collect();
+        attrs.sort();
+
+        let mut child_sigs: Vec<String> = if depth >= MAX_DEPTH {
+            // Defensive: bail out of what would otherwise be a cycle-driven
+            // infinite recursion. Degrades to a leaf signature.
+            Vec::new()
+        } else if let Some(children) = children_of.get(&span.span_id) {
+            children
+                .iter()
+                .map(|&c| signature_of(c, original, children_of, memo, depth + 1))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        child_sigs.sort();
+
+        let sig = format!(
+            "name={}|kind={:?}|status={:?}|attrs=[{}]|children=[{}]",
+            span.name,
+            span.kind,
+            span.status,
+            attrs.join(","),
+            child_sigs.join(";")
+        );
+        memo.insert(idx, sig.clone());
+        sig
+    }
+
+    /// Total order key for span `idx`: real chronology first, content
+    /// signature only as the tiebreak.
+    fn sort_key<'a>(
+        idx: usize,
+        original: &[Span],
+        signatures: &'a [String],
+    ) -> (u64, u64, &'a str) {
+        let span = &original[idx];
+        (
+            span.start_time_unix_nano,
+            span.end_time_unix_nano,
+            signatures[idx].as_str(),
+        )
+    }
+
+    /// Iterative DFS (avoids blowing the stack on pathological trees),
+    /// visiting `idx` then its `sort_key`-sorted children. `visited` guards
+    /// against cycles re-emitting a span.
+    fn dfs(
+        root: usize,
+        original: &[Span],
+        children_of: &HashMap<Vec<u8>, Vec<usize>>,
+        signatures: &[String],
+        visited: &mut [bool],
+        ordered: &mut Vec<usize>,
+    ) {
+        let mut stack = vec![root];
+        while let Some(idx) = stack.pop() {
+            if visited[idx] {
+                continue;
+            }
+            visited[idx] = true;
+            ordered.push(idx);
+            if let Some(children) = children_of.get(&original[idx].span_id) {
+                let mut kids = children.clone();
+                kids.sort_by_key(|&i| sort_key(i, original, signatures));
+                // Push in reverse so they pop off the stack in sorted order.
+                stack.extend(kids.into_iter().rev());
+            }
+        }
+    }
 
     for resource_spans in &mut report.resource_spans {
         for scope_spans in &mut resource_spans.scope_spans {
@@ -494,144 +640,70 @@ fn sort_spans_for_snapshot(report: &mut ExportTraceServiceRequest) {
                 continue;
             }
 
-            // Stable index from span_id -> position in `original`, so the
-            // DFS can collect indices instead of cloning Spans.
+            // Stable index from span_id -> position in `original`.
             let id_to_idx: HashMap<Vec<u8>, usize> = original
                 .iter()
                 .enumerate()
                 .map(|(i, s)| (s.span_id.clone(), i))
                 .collect();
 
-            // Resolve each span's terminal ancestor inside this batch. A
-            // span is its own root if `parent_span_id` is empty or if the
-            // parent isn't present in this batch (defensive — keeps stray
-            // spans from being dropped). Walk capped at MAX_PARENT_HOPS to
-            // defend against cycles.
-            let resolve_root = |start_idx: usize| -> Vec<u8> {
-                let mut idx = start_idx;
-                for _ in 0..MAX_PARENT_HOPS {
-                    let span = &original[idx];
-                    if span.parent_span_id.is_empty() {
-                        return span.span_id.clone();
-                    }
-                    match id_to_idx.get(&span.parent_span_id) {
-                        Some(&parent_idx) => {
-                            if parent_idx == idx {
-                                // Self-loop. Treat as root.
-                                return span.span_id.clone();
-                            }
-                            idx = parent_idx;
-                        }
-                        None => return span.span_id.clone(),
-                    }
-                }
-                // Hit the hop cap — degenerate input. Use the span we
-                // landed on as the root so the partition is still total.
-                original[idx].span_id.clone()
-            };
-
-            let root_of: HashMap<Vec<u8>, Vec<u8>> = original
-                .iter()
-                .enumerate()
-                .map(|(i, s)| (s.span_id.clone(), resolve_root(i)))
-                .collect();
-
-            // Group span indices by resolved root.
-            let mut spans_by_root: HashMap<Vec<u8>, Vec<usize>> = HashMap::new();
+            // children_of[parent_span_id] = child indices. Only ever read
+            // via `.get(span_id)` below, never iterated wholesale, so this
+            // HashMap's randomized iteration order can't leak into the
+            // output ordering the way the old `spans_by_root.keys()`
+            // collect did.
+            let mut children_of: HashMap<Vec<u8>, Vec<usize>> = HashMap::new();
             for (idx, span) in original.iter().enumerate() {
-                let root = root_of
-                    .get(&span.span_id)
-                    .cloned()
-                    .unwrap_or_else(|| span.span_id.clone());
-                spans_by_root.entry(root).or_default().push(idx);
-            }
-
-            // Sort the roots by (start_time, end_time, name). No span_id in
-            // the key — it's randomly regenerated per run.
-            let mut roots: Vec<Vec<u8>> = spans_by_root.keys().cloned().collect();
-            roots.sort_by(|a, b| {
-                let ia = id_to_idx.get(a).copied().unwrap_or(0);
-                let ib = id_to_idx.get(b).copied().unwrap_or(0);
-                let sa = &original[ia];
-                let sb = &original[ib];
-                (sa.start_time_unix_nano, sa.end_time_unix_nano, &sa.name).cmp(&(
-                    sb.start_time_unix_nano,
-                    sb.end_time_unix_nano,
-                    &sb.name,
-                ))
-            });
-
-            // Build per-group children_of, indexed by parent_span_id, so
-            // each group's DFS only sees its own family. Within a group, a
-            // root-relative position tracks original ordering for the
-            // final tiebreak when siblings collide on (start, end, name).
-            let mut ordered: Vec<usize> = Vec::with_capacity(original.len());
-            for root in &roots {
-                let member_indices = match spans_by_root.get(root) {
-                    Some(v) => v,
-                    None => continue,
-                };
-
-                // children_of for this group only. The map keys are
-                // parent span_ids; values are (child_idx, original_position)
-                // tuples. `original_position` is the index of the child in
-                // `member_indices`, giving a deterministic in-group tiebreak.
-                let mut children_of: HashMap<Vec<u8>, Vec<(usize, usize)>> = HashMap::new();
-                let mut group_roots: Vec<(usize, usize)> = Vec::new();
-                for (pos, &idx) in member_indices.iter().enumerate() {
-                    let span = &original[idx];
-                    if span.span_id == *root {
-                        group_roots.push((idx, pos));
-                        continue;
-                    }
+                if !span.parent_span_id.is_empty() && id_to_idx.contains_key(&span.parent_span_id) {
                     children_of
                         .entry(span.parent_span_id.clone())
                         .or_default()
-                        .push((idx, pos));
-                }
-
-                // Sort siblings by (start, end, name, original_position).
-                // The position tiebreak ensures determinism when truly
-                // identical siblings exist within the same parent in the
-                // same trace family.
-                let sort_siblings = |v: &mut Vec<(usize, usize)>| {
-                    v.sort_by(|&(a_idx, a_pos), &(b_idx, b_pos)| {
-                        let a = &original[a_idx];
-                        let b = &original[b_idx];
-                        (a.start_time_unix_nano, a.end_time_unix_nano, &a.name, a_pos).cmp(&(
-                            b.start_time_unix_nano,
-                            b.end_time_unix_nano,
-                            &b.name,
-                            b_pos,
-                        ))
-                    });
-                };
-                sort_siblings(&mut group_roots);
-                for v in children_of.values_mut() {
-                    sort_siblings(v);
-                }
-
-                // DFS: visit each (group) root, then its children in sorted
-                // order. Iterative to avoid blowing the stack on
-                // pathological trees.
-                let mut stack: Vec<usize> = group_roots.iter().rev().map(|(idx, _)| *idx).collect();
-                while let Some(idx) = stack.pop() {
-                    ordered.push(idx);
-                    let span_id = &original[idx].span_id;
-                    if let Some(kids) = children_of.get(span_id) {
-                        // Push in reverse so they come off the stack in
-                        // sorted order.
-                        for (child_idx, _) in kids.iter().rev() {
-                            stack.push(*child_idx);
-                        }
-                    }
+                        .push(idx);
                 }
             }
 
-            // Reconstruct the spans vec in DFS order. Wrap each span in
-            // Option so we can `.take()` it exactly once even if the input
-            // contains duplicate span_ids (which would be a bug, but the
-            // sort shouldn't silently drop spans on its behalf).
+            // A span is a root if it has no parent, or its parent isn't
+            // present in this batch (defensive — keeps stray spans visible
+            // instead of silently dropped).
+            let mut roots: Vec<usize> = (0..original.len())
+                .filter(|&i| {
+                    let parent = &original[i].parent_span_id;
+                    parent.is_empty() || !id_to_idx.contains_key(parent)
+                })
+                .collect();
+
+            let mut memo: HashMap<usize, String> = HashMap::new();
+            let signatures: Vec<String> = (0..original.len())
+                .map(|i| signature_of(i, &original, &children_of, &mut memo, 0))
+                .collect();
+
+            roots.sort_by_key(|&i| sort_key(i, &original, &signatures));
+
+            let mut visited = vec![false; original.len()];
+            let mut ordered: Vec<usize> = Vec::with_capacity(original.len());
+            for &root in &roots {
+                dfs(
+                    root,
+                    &original,
+                    &children_of,
+                    &signatures,
+                    &mut visited,
+                    &mut ordered,
+                );
+            }
+
+            // Safety net: any span not reached from a root (only possible
+            // via a parent_span_id cycle, which shouldn't occur in real
+            // traces) is appended in sort-key order so spans are never
+            // silently dropped from the snapshot.
+            let mut leftover: Vec<usize> = (0..original.len()).filter(|&i| !visited[i]).collect();
+            leftover.sort_by_key(|&i| sort_key(i, &original, &signatures));
+            ordered.extend(leftover);
+
+            // Reconstruct the spans vec in the canonical order. Wrap each
+            // span in Option so we can `.take()` it exactly once even if
+            // the input contains duplicate span_ids (which would be a bug,
+            // but the sort shouldn't silently drop spans on its behalf).
             let mut slots: Vec<Option<Span>> = original.into_iter().map(Some).collect();
             scope_spans.spans = ordered
                 .into_iter()
@@ -656,29 +728,14 @@ macro_rules! assert_report {
                     insta::assert_yaml_snapshot!(report, {
                         ".**.attributes" => insta::sorted_redaction(),
                         ".**.attributes[]" => insta::dynamic_redaction(|mut value, _| {
-                            let mut redacted_attributes = vec![
-                                "apollo.client.host",
-                                "apollo.client.uname",
-                                "apollo.router.id",
-                                "apollo.schema.id",
-                                "apollo.user.agent",
-                                "apollo_private.duration_ns" ,
-                                "apollo_private.ftv1",
-                                "apollo_private.graphql.variables",
-                                "apollo_private.http.response_headers",
-                                "apollo_private.sent_time_offset",
-                                "trace_id",
-                                "graphql.error.path",
-                                // The `connector` and `connector_error` tests stand
-                                // up an ephemeral wiremock server (see
-                                // `start_connector_mock_server`) and inject its URL
-                                // via `connectors.sources.*.override_url`, so the
-                                // `connect` span's `apollo.connector.source.detail`
-                                // attribute renders as the random localhost port
-                                // the OS gave us. Redact so the snapshot stays
-                                // hermetic across runs.
-                                "apollo.connector.source.detail",
-                            ];
+                            // Shared with `sort_spans_for_snapshot`'s content
+                            // signature (see `VOLATILE_ATTRIBUTE_KEYS`) so the
+                            // two lists can't drift apart: an attribute
+                            // redacted here for display must also be excluded
+                            // from the pre-snapshot sort key, or its
+                            // run-to-run-random value would leak back into
+                            // span ordering.
+                            let mut redacted_attributes = VOLATILE_ATTRIBUTE_KEYS.to_vec();
                             if $batch {
                                 redacted_attributes.append(&mut vec![
                                 "apollo_private.operation_signature",
