@@ -271,7 +271,7 @@ mod tests {
                     .await
                     .values()
                     .next()
-                    .map(|tx| tx.receiver_count() >= 1)
+                    .map(|tx| tx.receiver_count() >= 2)
                     .unwrap_or(false);
                 if subscribed {
                     break;
