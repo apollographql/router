@@ -229,6 +229,11 @@ mod tests {
     use std::num::NonZeroUsize;
     use std::sync::Arc;
 
+    use tower::Service as _;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt as _;
+
+    use crate::Configuration;
     use crate::cache::storage::CacheStorage;
     use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
     use crate::error::QueryPlannerError;
@@ -236,7 +241,13 @@ mod tests {
     use crate::query_planner::ConfigModeHash;
     use crate::query_planner::InMemoryQueryPlanCache;
     use crate::query_planner::QueryPlan;
+    use crate::query_planner::warmup::WarmupParseQueryLayer;
+    use crate::query_planner::warmup::WarmupRequest;
+    use crate::services::CachingRequest;
     use crate::services::QueryPlannerContent;
+    use crate::services::layers::query_analysis::ParsedDocument;
+    use crate::services::layers::query_analysis::QueryAnalysisLayer;
+    use crate::spec::Schema;
     use crate::spec::SchemaHash;
 
     /// Returns an in-memory cache with the given queries inside.
@@ -377,5 +388,55 @@ mod tests {
         )
         .await;
         assert_eq!(requests.len(), 2, "warm up the max # of queries from cache");
+    }
+
+    #[tokio::test]
+    async fn warmup_query_parser_layer() {
+        // The functionality of this layer is heavily intertwined with the CachingQueryPlanner,
+        // so we are just asserting some simple things here (such as tower compatibility). The
+        // really effective tests are integration tests.
+
+        let (mock, mut handle) = tower_test::mock::pair::<CachingRequest, ()>();
+        let driver = tokio::task::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+            request.context.extensions().with_lock(|lock| {
+                assert!(
+                    lock.get::<ParsedDocument>().is_some(),
+                    "should have inserted ParsedDocument"
+                );
+            });
+            responder.send_response(());
+        });
+
+        let configuration = Arc::new(Configuration::default());
+        let schema = Arc::new(
+            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
+        );
+
+        let query_analysis = Arc::new(QueryAnalysisLayer::new(schema, configuration).await);
+
+        let mut service = ServiceBuilder::new()
+            .layer(WarmupParseQueryLayer::new(query_analysis))
+            .map_err(|err| {
+                panic!(
+                    "we have to cast the error because these services do not use BoxError: {err}"
+                )
+            })
+            .service(mock);
+
+        let _response: () = service
+            .ready()
+            .await
+            .unwrap()
+            .call(WarmupRequest {
+                query: "{ me { username } }".to_string(),
+                operation_name: None,
+                metadata: None,
+                plan_options: None,
+            })
+            .await
+            .unwrap();
+
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 }
