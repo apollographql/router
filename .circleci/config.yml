@@ -249,7 +249,16 @@ commands:
             - run:
                 name: Install mise
                 command: |
-                  curl https://mise.jdx.dev/install.sh | sh
+                  # Download to a file first (rather than `curl | sh`) so a retried/interrupted
+                  # download can't half-execute a partially-streamed install script. The install
+                  # script itself has no built-in retry, and a stalled TCP connection here would
+                  # otherwise hang until CircleCI's no-output timeout kills the whole step instead
+                  # of failing fast and retrying.
+                  curl --proto '=https' --tlsv1.2 -fsSL \
+                    --connect-timeout 10 --max-time 60 \
+                    --retry 5 --retry-connrefused \
+                    -o /tmp/mise-install.sh https://mise.jdx.dev/install.sh
+                  sh /tmp/mise-install.sh
                   mise activate bash >> "$BASH_ENV"
                   for i in 1 2 3; do
                     if mise install --yes --quiet; then
@@ -324,7 +333,11 @@ commands:
           name: Validate helm manifests
           command: |
             # Create list of kube versions
-            CURRENT_KUBE_VERSIONS=$(curl -s -L https://raw.githubusercontent.com/kubernetes/website/main/data/releases/schedule.yaml \
+            # raw.githubusercontent.com occasionally returns transient 5xx/429 responses or has
+            # DNS/connect blips under load, so retry with backoff instead of failing on the first hiccup.
+            CURRENT_KUBE_VERSIONS=$(curl -s -L --fail --retry 5 --retry-connrefused \
+              --connect-timeout 10 --max-time 60 \
+              https://raw.githubusercontent.com/kubernetes/website/main/data/releases/schedule.yaml \
               | yq -o json '.' \
               | jq --raw-output '.schedules[] | select((now | strftime("%Y-%m-%dT00:00:00Z")) as $date | .releaseDate < $date and .endOfLifeDate > $date) | select(.previousPatches != null) | .previousPatches[].release')
 
@@ -346,7 +359,13 @@ commands:
               fi
 
               # Sometimes the database has not been updated with schema details. If that happens, just skip the kubeconform checks until the database is updated"
-              if ! curl --head --silent --output /dev/null  --fail "https://github.com/yannh/kubernetes-json-schema/tree/master/v${kube_version}"; then
+              # Retry transient network errors here too so a blip against github.com doesn't get
+              # misread as "schema not yet available" and silently skip validation. A real 404
+              # (schema genuinely not published yet) is not retried here since --retry only
+              # retries on transient errors (5xx/429/timeouts/connection resets), not 404s.
+              if ! curl --head --silent --output /dev/null --fail --retry 5 --retry-connrefused \
+                --connect-timeout 10 --max-time 30 \
+                "https://github.com/yannh/kubernetes-json-schema/tree/master/v${kube_version}"; then
                 echo "Skipping validation for kubernetes version: ${kube_version} until the schema database is updated."
                 continue
               fi
