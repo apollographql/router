@@ -9,7 +9,8 @@ use serde::Serialize;
 use strum::Display;
 
 pub(crate) use self::query_planner::*;
-pub(crate) use self::subgraph_service::*;
+pub(crate) use self::subgraph::http::*;
+pub(crate) use self::subgraph::service::*;
 pub(crate) use self::supergraph::service::*;
 use crate::graphql::Request;
 use crate::http_ext;
@@ -46,7 +47,6 @@ pub(crate) mod layers;
 pub(crate) mod query_planner;
 pub mod router;
 pub mod subgraph;
-pub(crate) mod subgraph_service;
 pub mod supergraph;
 
 /// Represents the steps of the pipeline that can support user-extensibility.
