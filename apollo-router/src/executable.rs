@@ -305,13 +305,11 @@ impl Opt {
 ///
 /// Refer to the examples if you would like to see how to run your own router with plugins.
 pub fn main() -> Result<()> {
-    // Upgrading opentelemetry-http to 0.32 pulls in a second, newer major version of
-    // `reqwest` (via opentelemetry-otlp/-zipkin's `reqwest-client` feature) whose
-    // default TLS backend is aws-lc-rs, alongside our own reqwest/tonic/fred's
-    // existing ring-based rustls builds. That makes rustls' own auto-detection of a
-    // process-level default provider ambiguous. Install one explicitly, before any
-    // TLS client is built, to avoid that ambiguity.
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // Install the crypto provider explicitly, before any TLS client is built.
+    // The workspace standardizes on aws-lc-rs across all rustls-backed dependencies
+    // (reqwest, tonic, fred, aws-smithy-http-client, opentelemetry-otlp/zipkin); an
+    // explicit install avoids relying on rustls' own auto-detection.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     #[cfg(feature = "dhat-heap")]
     crate::allocator::create_heap_profiler();
