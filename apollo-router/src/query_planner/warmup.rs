@@ -19,6 +19,7 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 pub(crate) type BoxCloneService =
     tower::util::BoxCloneService<WarmupRequest, (), CacheResolverError>;
 
+#[derive(Debug)]
 pub(crate) struct WarmupRequest {
     pub(crate) query: String,
     pub(crate) operation_name: Option<String>,
@@ -221,4 +222,160 @@ pub(crate) async fn warm_up(
     }
 
     tracing::debug!("warmed up the query planner cache with {count} queries planned");
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroUsize;
+    use std::sync::Arc;
+
+    use crate::cache::storage::CacheStorage;
+    use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
+    use crate::error::QueryPlannerError;
+    use crate::query_planner::CachingQueryKey;
+    use crate::query_planner::ConfigModeHash;
+    use crate::query_planner::InMemoryQueryPlanCache;
+    use crate::query_planner::QueryPlan;
+    use crate::services::QueryPlannerContent;
+    use crate::spec::SchemaHash;
+
+    /// Returns an in-memory cache with the given queries inside.
+    async fn prepopulated_cache<Q: AsRef<str>>(
+        queries: impl Iterator<Item = Q>,
+    ) -> InMemoryQueryPlanCache {
+        let cache =
+            CacheStorage::new_in_memory(NonZeroUsize::new(100).unwrap(), "test").in_memory_cache();
+
+        // Moot for these tests
+        let schema_hash = SchemaHash::new("");
+
+        fn empty_query_plan() -> Result<QueryPlannerContent, Arc<QueryPlannerError>> {
+            Ok(QueryPlannerContent::Plan {
+                plan: Arc::new(QueryPlan::fake_new(None, None)),
+            })
+        }
+
+        {
+            let mut guard = cache.lock().await;
+            for query in queries {
+                // XXX(@goto-bus-stop): preferable if we didn't have to construct this manually,
+                // instead used the CachingQueryPlanner public API. But then we need a bunch more
+                // plumbing :/
+                guard.get_or_insert(
+                    CachingQueryKey {
+                        query: query.as_ref().to_string(),
+                        operation: None,
+                        hash: Arc::new(schema_hash.operation_hash(query.as_ref(), None)),
+                        schema_id: schema_hash.clone(),
+                        metadata: Default::default(),
+                        plan_options: Default::default(),
+                        config_mode_hash: ConfigModeHash::from_configuration(&Default::default())
+                            .into(),
+                    },
+                    empty_query_plan,
+                );
+            }
+        }
+
+        cache
+    }
+
+    #[tokio::test]
+    async fn warm_up_pqs_on_startup() {
+        let mut requests = super::queries_to_warm_up(
+            None,
+            None,
+            Some(vec![
+                "{ me { username } }".to_string(),
+                "{ topProducts { upc } }".to_string(),
+            ]),
+            &PersistedQueriesPrewarmQueryPlanCache {
+                on_startup: true,
+                on_reload: false,
+            },
+        )
+        .await;
+
+        requests.sort_by(|a, b| a.query.cmp(&b.query));
+
+        assert_eq!(requests[0].query, "{ me { username } }");
+        assert_eq!(requests[0].metadata, None);
+        assert_eq!(requests[0].plan_options, None);
+        assert_eq!(requests[1].query, "{ topProducts { upc } }");
+        assert_eq!(requests[1].metadata, None);
+        assert_eq!(requests[1].plan_options, None);
+    }
+
+    #[tokio::test]
+    async fn warm_up_pqs_on_reload() {
+        let pqs = vec![
+            "{ me { username } }".to_string(),
+            "{ topProducts { upc } }".to_string(),
+        ];
+
+        let requests = super::queries_to_warm_up(
+            None,
+            None,
+            Some(pqs.clone()),
+            &PersistedQueriesPrewarmQueryPlanCache {
+                on_startup: false,
+                on_reload: true,
+            },
+        )
+        .await;
+        assert!(requests.is_empty());
+
+        let requests = super::queries_to_warm_up(
+            Some(
+                CacheStorage::new_in_memory(NonZeroUsize::new(1).unwrap(), "test")
+                    .in_memory_cache(),
+            ),
+            None,
+            Some(pqs.clone()),
+            &PersistedQueriesPrewarmQueryPlanCache {
+                on_startup: false,
+                on_reload: true,
+            },
+        )
+        .await;
+        assert_eq!(requests.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn warm_up_from_previous_cache() {
+        let queries = vec![
+            "{ me { username } }".to_string(),
+            "{ topProducts { upc } }".to_string(),
+            "{ me { reviews { body } } }".to_string(),
+        ];
+        let cache = prepopulated_cache(queries.iter()).await;
+
+        let requests = super::queries_to_warm_up(
+            Some(cache),
+            None,
+            None,
+            &PersistedQueriesPrewarmQueryPlanCache::default(),
+        )
+        .await;
+        assert_eq!(requests.len(), 1, "warm up 1/3rd of the queries by default");
+    }
+
+    #[tokio::test]
+    async fn warm_up_from_previous_cache_with_custom_max() {
+        let queries = vec![
+            "{ me { username } }".to_string(),
+            "{ topProducts { upc } }".to_string(),
+            "{ me { reviews { body } } }".to_string(),
+        ];
+        let cache = prepopulated_cache(queries.iter()).await;
+
+        let requests = super::queries_to_warm_up(
+            Some(cache),
+            Some(2),
+            None,
+            &PersistedQueriesPrewarmQueryPlanCache::default(),
+        )
+        .await;
+        assert_eq!(requests.len(), 2, "warm up the max # of queries from cache");
+    }
 }

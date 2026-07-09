@@ -91,6 +91,14 @@ pub(crate) const APOLLO_OPERATION_ID: &str = "apollo::supergraph::operation_id";
 // the cache keys are pub(crate), which I'm not going to change at this time :)
 pub(crate) struct ConfigModeHash(Vec<u8>);
 
+impl ConfigModeHash {
+    pub(crate) fn from_configuration(configuration: &Configuration) -> Self {
+        let mut hasher = StructHasher::new();
+        configuration.rust_query_planner_config().hash(&mut hasher);
+        Self(hasher.finalize())
+    }
+}
+
 impl std::fmt::Display for ConfigModeHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", hex::encode(&self.0))
@@ -187,9 +195,7 @@ impl<T> CachingQueryPlanner<T> {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
 
-        let mut hasher = StructHasher::new();
-        configuration.rust_query_planner_config().hash(&mut hasher);
-        let config_mode_hash = Arc::new(ConfigModeHash(hasher.finalize()));
+        let config_mode_hash = Arc::new(ConfigModeHash::from_configuration(configuration));
         let cooperative_cancellation = configuration
             .supergraph
             .query_planning
