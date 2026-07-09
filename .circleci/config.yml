@@ -525,7 +525,10 @@ jobs:
       #       - fuzz_build
       - when:
           condition:
-            equal: ["dev", "<< pipeline.git.branch >>"]
+            and:
+              - equal: ["dev", "<< pipeline.git.branch >>"]
+              - not:
+                  equal: [true, << parameters.nightly >>]
           steps:
             - slack/notify:
                 event: fail
