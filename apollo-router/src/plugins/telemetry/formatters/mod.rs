@@ -25,6 +25,7 @@ use tracing_subscriber::registry::SpanRef;
 use super::config_new::logging::RateLimit;
 use super::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::otel::OtelData;
+use crate::plugins::telemetry::otel::OtelDataState;
 use crate::plugins::telemetry::reload::otel::SampledSpan;
 
 pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
@@ -277,22 +278,20 @@ where
 {
     let ext = span.extensions();
     if let Some(otel_data) = ext.get::<OtelData>() {
-        // The root span is being built and has no parent
-        if let (Some(trace_id), Some(span_id)) =
-            (otel_data.builder.trace_id, otel_data.builder.span_id)
-        {
-            return Some((trace_id, span_id));
-        }
-
-        // Child spans with a valid trace context
-        let span = otel_data.parent_cx.span();
-        let span_context = span.span_context();
-        if span_context.is_valid() {
+        if let OtelDataState::Context { current_cx } = &otel_data.state {
+            let live_span = current_cx.span();
+            let span_context = live_span.span_context();
             return Some((span_context.trace_id(), span_context.span_id()));
         }
+        // Still buffering into a builder: the real trace/span id are only known once
+        // the span is actually built (e.g. by a child span or an explicit
+        // `OpenTelemetrySpanExt::context()` call), to avoid ever showing an id here
+        // that could diverge from the one that eventually gets exported.
+        return None;
     }
-    if let Some(sampled_span) = ext.get::<SampledSpan>() {
-        let (trace_id, span_id) = sampled_span.trace_and_span_id();
+    if let Some(sampled_span) = ext.get::<SampledSpan>()
+        && let Some((trace_id, span_id)) = sampled_span.trace_and_span_id()
+    {
         return Some((
             opentelemetry::trace::TraceId::from(trace_id.to_u128()),
             span_id,

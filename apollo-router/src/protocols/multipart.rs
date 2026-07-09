@@ -461,9 +461,8 @@ mod tests {
         fn on_exit(&self, id: &tracing_core::span::Id, ctx: Context<'_, S>) {
             if let Some(span) = ctx.span(id)
                 && let Some(data) = span.extensions().get::<OtelData>()
-                && let Some(attributes) = data.builder.attributes.as_ref()
             {
-                *self.captured_reason.lock().unwrap() = attributes.iter().find_map(|attr| {
+                *self.captured_reason.lock().unwrap() = data.attributes.iter().find_map(|attr| {
                     let key = &attr.key;
                     (*key == SUBSCRIPTION_END_REASON_KEY || *key == DEFER_END_REASON_KEY)
                         .then(|| attr.clone())

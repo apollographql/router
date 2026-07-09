@@ -51,11 +51,11 @@ impl<E: SpanExporter> SpanExporter for NamedSpanExporter<E> {
         }
     }
 
-    fn shutdown(&mut self) -> OTelSdkResult {
+    fn shutdown(&self) -> OTelSdkResult {
         self.inner.shutdown()
     }
 
-    fn force_flush(&mut self) -> OTelSdkResult {
+    fn force_flush(&self) -> OTelSdkResult {
         self.inner.force_flush()
     }
 
@@ -181,11 +181,11 @@ mod tests {
             ))
         }
 
-        fn shutdown(&mut self) -> OTelSdkResult {
+        fn shutdown(&self) -> OTelSdkResult {
             Ok(())
         }
 
-        fn force_flush(&mut self) -> OTelSdkResult {
+        fn force_flush(&self) -> OTelSdkResult {
             Ok(())
         }
 

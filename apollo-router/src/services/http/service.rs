@@ -721,9 +721,8 @@ mod tests {
             let mut map = self.values.lock().unwrap();
             if let Some(span) = ctx.span(id)
                 && let Some(otel_data) = span.extensions().get::<OtelData>()
-                && let Some(attributes) = otel_data.builder.attributes.as_ref()
             {
-                for attribute in attributes {
+                for attribute in &otel_data.attributes {
                     map.insert(attribute.key.to_string(), attribute.value.clone());
                 }
             }

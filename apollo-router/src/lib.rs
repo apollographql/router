@@ -20,6 +20,16 @@
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
 
+// Install the crypto provider explicitly, before any TLS client is built (see the
+// matching comment in `executable::main` for why this is necessary). The equivalent
+// call for the router binary itself lives there; this one covers `cargo
+// test`/`cargo nextest` unit test binaries, which never go through that entry point.
+#[cfg(test)]
+#[ctor::ctor(unsafe)]
+fn install_default_crypto_provider_for_tests() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 macro_rules! failfast_debug {
     ($($tokens:tt)+) => {{
         tracing::debug!($($tokens)+);

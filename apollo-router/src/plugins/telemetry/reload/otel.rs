@@ -39,6 +39,7 @@ use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry_sdk::trace::IdGenerator;
 use opentelemetry_sdk::trace::Tracer;
 use tower::BoxError;
 use tracing_subscriber::EnvFilter;
@@ -56,7 +57,6 @@ use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::otel;
 use crate::plugins::telemetry::otel::OpenTelemetryLayer;
-use crate::plugins::telemetry::otel::PreSampledTracer;
 use crate::plugins::telemetry::reload::rate_limit::RateLimitLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::tracer::TraceId;
@@ -146,12 +146,13 @@ pub(crate) fn apollo_opentelemetry_initialized() -> bool {
 // To that end, we update the context just for that request to create valid span et trace ids, with the
 // sampling bit set to false
 pub(crate) fn prepare_context(context: Context) -> Context {
-    if !context.span().span_context().is_valid()
-        && let Some(tracer) = OPENTELEMETRY_TRACER_HANDLE.get()
-    {
+    if !context.span().span_context().is_valid() {
+        // There's no real span behind these ids (the trace isn't sampled), so any
+        // random generator works here - nothing needs to match a span build later.
+        let id_generator = opentelemetry_sdk::trace::RandomIdGenerator::default();
         let span_context = SpanContext::new(
-            tracer.new_trace_id(),
-            tracer.new_span_id(),
+            id_generator.new_trace_id(),
+            id_generator.new_span_id(),
             TraceFlags::default(),
             false,
             TraceState::default(),
@@ -163,15 +164,20 @@ pub(crate) fn prepare_context(context: Context) -> Context {
 
 #[derive(Clone, Debug)]
 pub(crate) enum SampledSpan {
+    /// The span isn't sampled, so nothing is ever exported for it. `trace_id`/`span_id`
+    /// are fabricated purely for local log correlation and never need to match anything.
     NotSampled(TraceId, SpanId),
-    Sampled(TraceId, SpanId),
+    /// The span is sampled. Its real trace/span id are only known once it's actually
+    /// built (see `OtelDataState`), so they aren't tracked here to avoid ever
+    /// displaying an id that could diverge from the one that gets exported.
+    Sampled,
 }
 
 impl SampledSpan {
-    pub(crate) fn trace_and_span_id(&self) -> (TraceId, SpanId) {
+    pub(crate) fn trace_and_span_id(&self) -> Option<(TraceId, SpanId)> {
         match self {
-            SampledSpan::NotSampled(trace_id, span_id)
-            | SampledSpan::Sampled(trace_id, span_id) => (trace_id.clone(), *span_id),
+            SampledSpan::NotSampled(trace_id, span_id) => Some((trace_id.clone(), *span_id)),
+            SampledSpan::Sampled => None,
         }
     }
 }
@@ -190,15 +196,14 @@ where
         // entire trace is accepted
         self.extensions()
             .get::<SampledSpan>()
-            .is_some_and(|s| matches!(s, SampledSpan::Sampled(_, _)))
+            .is_some_and(|s| matches!(s, SampledSpan::Sampled))
     }
 
     fn get_trace_id(&self) -> Option<TraceId> {
         let extensions = self.extensions();
-        extensions.get::<SampledSpan>().map(|s| match s {
-            SampledSpan::Sampled(trace_id, _) | SampledSpan::NotSampled(trace_id, _) => {
-                trace_id.clone()
-            }
-        })
+        extensions
+            .get::<SampledSpan>()
+            .and_then(|s| s.trace_and_span_id())
+            .map(|(trace_id, _)| trace_id)
     }
 }

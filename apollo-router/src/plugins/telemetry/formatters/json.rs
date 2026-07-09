@@ -180,9 +180,7 @@ where
 
         // Get otel attributes
         {
-            let otel_attributes = ext
-                .get::<OtelData>()
-                .and_then(|otel_data| otel_data.builder.attributes.as_ref());
+            let otel_attributes = ext.get::<OtelData>().map(|otel_data| &otel_data.attributes);
             if let Some(otel_attributes) = otel_attributes {
                 for kv in otel_attributes.iter().filter(|kv| {
                     let key_name = kv.key.as_str();
@@ -523,8 +521,8 @@ fn extract_dd_trace_id<'a, 'b, T: LookupSpan<'a>>(span: &SpanRef<'a, T>) -> Opti
         let ext = root_span.extensions();
         // Extract dd_trace_id, this could be in otel data or log attributes
         if let Some(otel_data) = ext.get::<OtelData>()
-            && let Some(attributes) = otel_data.builder.attributes.as_ref()
-            && let Some(kv) = attributes
+            && let Some(kv) = otel_data
+                .attributes
                 .iter()
                 .find(|kv| kv.key.as_str() == "dd.trace_id")
         {
@@ -558,9 +556,7 @@ where
 
             // Get otel attributes
             {
-                let otel_attributes = ext
-                    .get::<OtelData>()
-                    .and_then(|otel_data| otel_data.builder.attributes.as_ref());
+                let otel_attributes = ext.get::<OtelData>().map(|otel_data| &otel_data.attributes);
                 if let Some(otel_attributes) = otel_attributes {
                     attributes.extend(
                         otel_attributes

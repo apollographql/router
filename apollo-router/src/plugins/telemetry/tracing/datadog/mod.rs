@@ -10,12 +10,14 @@ use std::time::Duration;
 pub(crate) use agent_sampling::DatadogAgentSampling;
 use ahash::HashMap;
 use ahash::HashMapExt;
+use bytes::Bytes;
 use http::Uri;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::Value;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanKind;
+use opentelemetry_http::HttpClient;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::SpanData;
@@ -255,13 +257,13 @@ impl TracingConfigurator for Config {
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )
-            .with_http_client(
+            .with_http_client(DatadogHttpClient(
                 reqwest::Client::builder()
                     // https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/7
                     // Set the idle timeout to something low to prevent termination of connections.
                     .pool_idle_timeout(Duration::from_millis(1))
                     .build()?,
-            )
+            ))
             .build_exporter()?;
 
         // Use the default span metrics and override with the ones from the config
@@ -365,13 +367,36 @@ impl SpanExporter for ExporterWrapper {
         }
         self.delegate.export(batch)
     }
-    fn shutdown(&mut self) -> OTelSdkResult {
+    fn shutdown(&self) -> OTelSdkResult {
         self.delegate.shutdown()
     }
-    fn force_flush(&mut self) -> OTelSdkResult {
+    fn force_flush(&self) -> OTelSdkResult {
         self.delegate.force_flush()
     }
     fn set_resource(&mut self, resource: &Resource) {
         self.delegate.set_resource(resource);
+    }
+}
+
+/// Adapts the router's `reqwest` client (pinned to a major version independent from
+/// the one `opentelemetry-http`'s `reqwest` feature pulls in) to the `HttpClient` trait
+/// expected by the vendored Datadog exporter's pipeline builder.
+#[derive(Debug)]
+struct DatadogHttpClient(reqwest::Client);
+
+#[async_trait::async_trait]
+impl HttpClient for DatadogHttpClient {
+    async fn send_bytes(
+        &self,
+        request: http::Request<Bytes>,
+    ) -> Result<http::Response<Bytes>, opentelemetry_http::HttpError> {
+        let request = request.try_into()?;
+        let mut response = self.0.execute(request).await?.error_for_status()?;
+        let headers = std::mem::take(response.headers_mut());
+        let mut http_response = http::Response::builder()
+            .status(response.status())
+            .body(response.bytes().await?)?;
+        *http_response.headers_mut() = headers;
+        Ok(http_response)
     }
 }
