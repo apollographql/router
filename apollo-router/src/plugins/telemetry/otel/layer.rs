@@ -889,6 +889,7 @@ where
                     status: otel::Status::Unset,
                 },
                 attributes: seed_attributes,
+                original_name: attrs.metadata().name(),
                 event_attributes: None,
                 forced_status: None,
                 forced_span_name: None,
@@ -1131,6 +1132,7 @@ where
                 state,
                 forced_status,
                 forced_span_name,
+                original_name,
                 ..
             }) = extensions.remove::<OtelData>()
             {
@@ -1187,8 +1189,10 @@ where
                         }
                         if let Some(forced_span_name) = forced_span_name {
                             // Unlike the not-yet-built case, there's no way to read the
-                            // span's current name back once it's live, so we can't
-                            // snapshot it under `OTEL_ORIGINAL_NAME` here.
+                            // span's current name back once it's live, so we rely on the
+                            // name captured up front in `OtelData::original_name` instead.
+                            live_span
+                                .set_attribute(KeyValue::new(OTEL_ORIGINAL_NAME, original_name));
                             live_span.update_name(forced_span_name);
                         }
                         live_span.end_with_timestamp(SystemTime::now());
@@ -1343,6 +1347,7 @@ mod tests {
                     status: otel::Status::Unset,
                 },
                 attributes: Vec::new(),
+                original_name: "",
                 event_attributes: None,
                 forced_status: None,
                 forced_span_name: None,
@@ -1462,14 +1467,37 @@ mod tests {
             );
         });
 
-        // `on_close` renames the builder before calling `start_with_context`, so the
-        // `OtelData` captured by the test tracer's `build_with_context` already has
-        // the forced name.
-        let recorded_name = tracer.0.lock().as_ref().map(|data| match &data.state {
-            OtelDataState::Builder { builder, .. } => builder.name.clone(),
-            OtelDataState::Context { .. } => panic!("expected a Builder state"),
-        });
-        assert_eq!(recorded_name, Some(Cow::Owned(forced_dynamic_name)))
+        // The span is already built (`Context`) by the time `on_close` renames it, so
+        // it goes through `TestBuiltSpan::update_name`/`set_attribute` instead of the
+        // builder directly - those route back into the same shared `OtelData` the test
+        // tracer's `build_with_context` captured, still reported as `Builder` for the
+        // test's convenience (see `TestBuiltSpan`'s doc comment).
+        let (recorded_name, original_name_attr) = tracer
+            .0
+            .lock()
+            .as_ref()
+            .map(|data| match &data.state {
+                OtelDataState::Builder { builder, .. } => (
+                    builder.name.clone(),
+                    builder.attributes.as_ref().and_then(|attrs| {
+                        attrs
+                            .iter()
+                            .find(|kv| kv.key.as_str() == OTEL_ORIGINAL_NAME)
+                            .map(|kv| kv.value.clone())
+                    }),
+                ),
+                OtelDataState::Context { .. } => panic!("expected a Builder state"),
+            })
+            .expect("span data must have been recorded");
+        assert_eq!(recorded_name, Cow::<str>::Owned(forced_dynamic_name));
+        // The pre-rename name preserved under `OTEL_ORIGINAL_NAME` is the span's literal
+        // metadata name ("static_name"), not `dynamic_name` - the `otel.name` field set
+        // at span creation renames the builder directly (see `dynamic_span_names`
+        // above), before `forced_span_name`/`OTEL_ORIGINAL_NAME` ever come into play.
+        assert_eq!(
+            original_name_attr,
+            Some(opentelemetry::Value::String("static_name".into()))
+        );
     }
 
     #[test]
@@ -1515,6 +1543,30 @@ mod tests {
         let recorded_status_message = tracer.with_data(|_, status| status.clone());
 
         assert_eq!(recorded_status_message, otel::Status::error(message))
+    }
+
+    #[test]
+    fn forced_dynamic_span_status() {
+        // Unlike `otel.status_code` set as a span-creation field (covered by
+        // `span_status_code` above, applied while still buffering into a builder),
+        // `set_span_dyn_attribute` after creation only records `forced_status` on
+        // `OtelData` - the span is already built (`Context`) by then, so `on_close`
+        // applies it to the live span instead (mirrors the `OTEL_ORIGINAL_NAME` fix).
+        let tracer = TestTracer(Arc::new(Mutex::new(None)));
+        let subscriber = tracing_subscriber::registry()
+            .with(layer().force_sampling().with_tracer(tracer.clone()));
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::debug_span!("request");
+            let _entered = span.enter();
+            span.set_span_dyn_attribute(
+                Key::from_static_str(OTEL_STATUS_CODE),
+                opentelemetry::Value::String("error".into()),
+            );
+        });
+
+        let recorded_status = tracer.with_data(|_, status| status.clone());
+        assert_eq!(recorded_status, otel::Status::error(""))
     }
 
     #[test]

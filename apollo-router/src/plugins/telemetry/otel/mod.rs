@@ -39,6 +39,12 @@ pub(crate) struct OtelData {
     /// span's attributes (log formatting, log correlation, response headers, etc).
     pub(crate) attributes: Vec<KeyValue>,
 
+    /// The tracing span's original name, from before any `forced_span_name`
+    /// override. A live `Span` offers no way to read its current name back once
+    /// set, so this is captured up front and used to record `OTEL_ORIGINAL_NAME`
+    /// on close regardless of whether the span was already built at that point.
+    pub(crate) original_name: &'static str,
+
     /// Attributes gathered for the next event
     #[cfg(not(test))]
     pub(crate) event_attributes: Option<ahash::HashMap<Key, Value>>,
