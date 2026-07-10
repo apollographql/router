@@ -71,7 +71,7 @@ use crate::services::layers::content_negotiation;
 use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::layers::persisted_queries::EnforceSafelistLayer;
 use crate::services::layers::persisted_queries::ExpandIdsLayer;
-use crate::services::layers::persisted_queries::PersistedQueryLayer;
+use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::layers::query_analysis::QueryAnalysis;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::router;
@@ -100,7 +100,7 @@ impl RouterService {
     fn new(
         supergraph_service: supergraph::BoxCloneService,
         apq_expander: APQExpander,
-        persisted_query_layer: Arc<PersistedQueryLayer>,
+        persisted_queries: Arc<PersistedQueryExpander>,
         query_analysis: Arc<QueryAnalysis>,
         batching: Batching,
     ) -> Self {
@@ -112,10 +112,10 @@ impl RouterService {
             .layer(DisplayRouterRequestLayer)
             .layer(BatchingLayer::new(batching))
             .layer(RouterToSupergraphRequestLayer)
-            .layer(ExpandIdsLayer::new(persisted_query_layer.clone()))
+            .layer(ExpandIdsLayer::new(persisted_queries.clone()))
             .layer(APQCachingLayer::new(apq_expander))
             .layer(ParseQueryLayer::new(query_analysis))
-            .layer(EnforceSafelistLayer::new(persisted_query_layer))
+            .layer(EnforceSafelistLayer::new(persisted_queries))
             .service(supergraph_service)
             .boxed_clone();
 
@@ -157,7 +157,7 @@ pub(crate) async fn from_supergraph_mock_with_configuration(
 
     RouterCreator::new(
         query_analysis,
-        Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
+        Arc::new(PersistedQueryExpander::new(&configuration).await.unwrap()),
         Arc::new(supergraph_creator),
         configuration,
     )
@@ -199,7 +199,11 @@ pub(crate) async fn empty() -> impl Service<
 
     RouterCreator::new(
         query_analysis,
-        Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
+        Arc::new(
+            PersistedQueryExpander::new(&Default::default())
+                .await
+                .unwrap(),
+        ),
         Arc::new(supergraph_creator),
         Arc::new(Configuration::default()),
     )
@@ -670,7 +674,7 @@ impl RouterFactory for RouterCreator {
 impl RouterCreator {
     pub(crate) async fn new(
         query_analysis: Arc<QueryAnalysis>,
-        persisted_query_layer: Arc<PersistedQueryLayer>,
+        persisted_queries: Arc<PersistedQueryExpander>,
         supergraph_creator: Arc<SupergraphCreator>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, BoxError> {
@@ -707,7 +711,7 @@ impl RouterCreator {
             RouterService::new(
                 supergraph_creator.make(),
                 apq_expander,
-                persisted_query_layer,
+                persisted_queries,
                 query_analysis,
                 configuration.batching.clone(),
             ),

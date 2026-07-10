@@ -50,12 +50,12 @@ pub(crate) struct RequestPersistedQueryId {
 ///
 /// This type actually consists of two conceptual layers that must both be applied at the supergraph
 /// service stage, at different points:
-/// - [PersistedQueryLayer::supergraph_request] must be done *before* the GraphQL request is parsed
+/// - [PersistedQueryExpander::supergraph_request] must be done *before* the GraphQL request is parsed
 ///   and validated.
-/// - [PersistedQueryLayer::supergraph_request_with_analyzed_query] must be done *after* the
+/// - [PersistedQueryExpander::supergraph_request_with_analyzed_query] must be done *after* the
 ///   GraphQL request is parsed and validated.
 #[derive(Debug)]
-pub(crate) struct PersistedQueryLayer {
+pub(crate) struct PersistedQueryExpander {
     /// Manages polling uplink for persisted queries and caches the current
     /// value of the manifest and projected safelist. None if the layer is disabled.
     pub(crate) manifest_poller: Option<PersistedQueryManifestPoller>,
@@ -70,8 +70,8 @@ fn skip_enforcement(request: &SupergraphRequest) -> bool {
         .unwrap_or(false)
 }
 
-impl PersistedQueryLayer {
-    /// Create a new [`PersistedQueryLayer`] from CLI options, YAML configuration,
+impl PersistedQueryExpander {
+    /// Create a new [`PersistedQueryExpander`] from CLI options, YAML configuration,
     /// and optionally, an existing persisted query manifest poller.
     pub(crate) async fn new(configuration: &Configuration) -> Result<Self, BoxError> {
         if configuration.persisted_queries.enabled {
@@ -95,7 +95,7 @@ impl PersistedQueryLayer {
     /// 1) resolving a persisted query ID to a query body
     /// 2) rejecting free-form GraphQL requests if they are never allowed by configuration.
     ///    Matching against safelists is done later in
-    ///    [`PersistedQueryLayer::supergraph_request_with_analyzed_query`].
+    ///    [`PersistedQueryExpander::supergraph_request_with_analyzed_query`].
     ///
     /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
     /// (using an `Err()` return value).
@@ -229,7 +229,7 @@ impl PersistedQueryLayer {
     /// Handles post-GraphQL-parsing work for requests using the persisted queries feature,
     /// in particular safelisting.
     ///
-    /// Any request that was expanded by the [`PersistedQueryLayer::supergraph_request`] call is
+    /// Any request that was expanded by the [`PersistedQueryExpander::supergraph_request`] call is
     /// passed through immediately. Free-form GraphQL is matched against safelists and rejected or
     /// passed through based on router configuration.
     ///
@@ -517,7 +517,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn disabled_pq_layer_has_no_poller() {
         let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(PersistedQueries::builder().enabled(false).build())
                 .uplink(uplink_config)
@@ -532,7 +532,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn enabled_pq_layer_has_poller() {
         let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(PersistedQueries::builder().enabled(true).build())
                 .uplink(uplink_config)
@@ -571,7 +571,7 @@ mod tests {
 
         let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
 
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(PersistedQueries::builder().enabled(true).build())
                 .uplink(uplink_config)
@@ -598,7 +598,7 @@ mod tests {
         let (id, _body, manifest) = fake_manifest();
         let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
 
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(PersistedQueries::builder().enabled(true).build())
                 .uplink(uplink_config)
@@ -642,7 +642,7 @@ mod tests {
         ]);
         let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
 
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(PersistedQueries::builder().enabled(true).build())
                 .uplink(uplink_config)
@@ -707,7 +707,7 @@ mod tests {
 
         let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
 
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(PersistedQueries::builder().enabled(true).build())
                 .apq(Apq::fake_builder().enabled(true).build())
@@ -739,7 +739,7 @@ mod tests {
 
         let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
 
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(PersistedQueries::builder().enabled(true).build())
                 .apq(Apq::fake_builder().enabled(false).build())
@@ -777,7 +777,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn enabled_apq_configuration_tracked_in_pq_layer() {
         let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .apq(Apq::fake_builder().enabled(true).build())
                 .persisted_query(PersistedQueries::builder().enabled(true).build())
@@ -798,7 +798,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn disabled_apq_configuration_tracked_in_pq_layer() {
         let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .apq(Apq::fake_builder().enabled(false).build())
                 .uplink(uplink_config)
@@ -820,7 +820,7 @@ mod tests {
     async fn enabled_safelist_configuration_tracked_in_pq_layer() {
         let safelist_config = PersistedQueriesSafelist::builder().enabled(true).build();
         let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(
                     PersistedQueries::builder()
@@ -847,7 +847,7 @@ mod tests {
     }
 
     async fn run_first_two_layers(
-        pq_layer: &PersistedQueryLayer,
+        pq_layer: &PersistedQueryExpander,
         query_analysis: &QueryAnalysis,
         body: &str,
         skip_enforcement: bool,
@@ -882,7 +882,7 @@ mod tests {
     }
 
     async fn denied_by_safelist(
-        pq_layer: &PersistedQueryLayer,
+        pq_layer: &PersistedQueryExpander,
         query_analysis: &QueryAnalysis,
         body: &str,
         log_unknown: bool,
@@ -921,7 +921,7 @@ mod tests {
     }
 
     async fn allowed_by_safelist(
-        pq_layer: &PersistedQueryLayer,
+        pq_layer: &PersistedQueryExpander,
         query_analysis: &QueryAnalysis,
         body: &str,
         log_unknown: bool,
@@ -988,7 +988,7 @@ mod tests {
                 .build()
                 .unwrap();
 
-            let pq_layer = PersistedQueryLayer::new(&config).await.unwrap();
+            let pq_layer = PersistedQueryExpander::new(&config).await.unwrap();
 
             let schema = Arc::new(Schema::parse(include_str!("../../../testdata/supergraph.graphql"), &Default::default()).unwrap());
 
@@ -1108,7 +1108,7 @@ mod tests {
         let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
 
         let safelist_config = PersistedQueriesSafelist::builder().enabled(true).build();
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(
                     PersistedQueries::builder()
@@ -1173,7 +1173,7 @@ mod tests {
     async fn require_id_disabled_by_default_with_safelisting_enabled_in_pq_layer() {
         let safelist_config = PersistedQueriesSafelist::builder().enabled(true).build();
         let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(
                     PersistedQueries::builder()
@@ -1206,7 +1206,7 @@ mod tests {
             .require_id(true)
             .build();
         let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(
                     PersistedQueries::builder()
@@ -1237,7 +1237,7 @@ mod tests {
             .require_id(true)
             .build();
         let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(
                     PersistedQueries::builder()
@@ -1290,7 +1290,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn safelisting_disabled_by_default_in_pq_layer() {
         let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(PersistedQueries::builder().enabled(true).build())
                 .apq(Apq::fake_builder().enabled(false).build())
@@ -1315,7 +1315,7 @@ mod tests {
     async fn disabled_safelist_configuration_tracked_in_pq_layer() {
         let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
         let safelist_config = PersistedQueriesSafelist::builder().enabled(false).build();
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(
                     PersistedQueries::builder()
@@ -1344,7 +1344,7 @@ mod tests {
     async fn can_pass_different_body_from_published_pq_id_with_apq_enabled() {
         let (id, _body, manifest) = fake_manifest();
         let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(PersistedQueries::builder().enabled(true).build())
                 .apq(Apq::fake_builder().enabled(true).build())
@@ -1370,7 +1370,7 @@ mod tests {
     async fn cannot_pass_different_body_as_published_pq_id_with_apq_disabled() {
         let (id, _body, manifest) = fake_manifest();
         let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(PersistedQueries::builder().enabled(true).build())
                 .apq(Apq::fake_builder().enabled(false).build())
@@ -1403,7 +1403,7 @@ mod tests {
     async fn cannot_pass_same_body_as_published_pq_id_with_apq_disabled() {
         let (id, body, manifest) = fake_manifest();
         let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
-        let pq_layer = PersistedQueryLayer::new(
+        let pq_layer = PersistedQueryExpander::new(
             &Configuration::fake_builder()
                 .persisted_query(PersistedQueries::builder().enabled(true).build())
                 .apq(Apq::fake_builder().enabled(false).build())

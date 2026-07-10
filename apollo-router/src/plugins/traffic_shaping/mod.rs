@@ -699,7 +699,7 @@ mod test {
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
     use crate::services::connector::request_service::Request as ConnectorRequest;
-    use crate::services::layers::persisted_queries::PersistedQueryLayer;
+    use crate::services::layers::persisted_queries::PersistedQueryExpander;
     use crate::services::layers::query_analysis::QueryAnalysis;
     use crate::services::router;
     use crate::services::router::service::RouterCreator;
@@ -836,7 +836,11 @@ mod test {
 
         RouterCreator::new(
             query_analysis,
-            Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
+            Arc::new(
+                PersistedQueryExpander::new(&Default::default())
+                    .await
+                    .unwrap(),
+            ),
             Arc::new(supergraph_creator),
             Arc::new(Configuration::default()),
         )

@@ -41,7 +41,7 @@ use crate::services::SupergraphCreator;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
-use crate::services::layers::persisted_queries::PersistedQueryLayer;
+use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::layers::query_analysis::QueryAnalysis;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineRef;
@@ -270,7 +270,7 @@ impl YamlRouterFactory {
         // Instantiate the parser here so we can use it to warm up the planner below
         let query_analysis =
             Arc::new(QueryAnalysis::new(schema.clone(), configuration.clone()).await);
-        let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
+        let persisted_queries = Arc::new(PersistedQueryExpander::new(&configuration).await?);
 
         let (supergraph_creator, warmup) = self
             .inner_create_supergraph(
@@ -286,7 +286,7 @@ impl YamlRouterFactory {
 
         SupergraphCreator::warm_up_query_planner(
             warmup,
-            &persisted_query_layer,
+            &persisted_queries,
             previous_router.map(|previous| previous.previous_cache()),
             configuration.supergraph.query_planning.warmed_up_queries,
             &configuration
@@ -297,7 +297,7 @@ impl YamlRouterFactory {
 
         RouterCreator::new(
             query_analysis,
-            persisted_query_layer,
+            persisted_queries,
             Arc::new(supergraph_creator),
             configuration,
         )

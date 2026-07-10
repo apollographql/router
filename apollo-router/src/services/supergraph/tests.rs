@@ -3756,7 +3756,7 @@ async fn test_cache_warmup() {
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerResponse;
-    use crate::services::layers::persisted_queries::PersistedQueryLayer;
+    use crate::services::layers::persisted_queries::PersistedQueryExpander;
     use crate::services::layers::query_analysis::QueryAnalysis;
     use crate::services::query_planner;
     use crate::services::supergraph::service::SupergraphCreator;
@@ -3773,7 +3773,7 @@ async fn test_cache_warmup() {
     // We have to do a bunch of setup here...
     let query_analysis =
         Arc::new(QueryAnalysis::new(schema.clone(), Arc::new(configuration.clone())).await);
-    let pq_layer = PersistedQueryLayer::new(&configuration).await.unwrap();
+    let pq_layer = PersistedQueryExpander::new(&configuration).await.unwrap();
 
     /// Return an empty plan that doesn't require any subgraph requests to fulfill.
     fn empty_query_plan() -> QueryPlannerResponse {
