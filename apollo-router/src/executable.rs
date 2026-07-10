@@ -307,7 +307,7 @@ impl Opt {
 pub fn main() -> Result<()> {
     // Install the crypto provider explicitly, before any TLS client is built.
     // The workspace standardizes on aws-lc-rs across all rustls-backed dependencies
-    // (reqwest, tonic, fred, aws-smithy-http-client, opentelemetry-otlp/zipkin); an
+    // (reqwest, tonic, fred, aws-smithy-http-client, opentelemetry-otlp); an
     // explicit install avoids relying on rustls' own auto-detection.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 

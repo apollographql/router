@@ -19,5 +19,4 @@ telemetry:
         datadog: false
         baggage: false
         trace_context: false
-        zipkin: false
 

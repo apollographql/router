@@ -10,9 +10,6 @@ telemetry:
       otlp:
         enabled: true
         endpoint: default
-      zipkin:
-        enabled: true
-        endpoint: default
       datadog:
         enabled: true
         endpoint: default

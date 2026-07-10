@@ -7930,11 +7930,6 @@ expression: "&schema"
           "default": false,
           "description": "Propagate trace context https://www.w3.org/TR/trace-context/",
           "type": "boolean"
-        },
-        "zipkin": {
-          "default": false,
-          "description": "Propagate Zipkin",
-          "type": "boolean"
         }
       },
       "type": "object"
@@ -12461,14 +12456,6 @@ expression: "&schema"
             }
           ],
           "description": "Propagation configuration"
-        },
-        "zipkin": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ZipkinConfig"
-            }
-          ],
-          "description": "Zipkin exporter configuration"
         }
       },
       "type": "object"
@@ -12701,46 +12688,6 @@ expression: "&schema"
           "type": "string"
         }
       ]
-    },
-    "ZipkinConfig": {
-      "additionalProperties": false,
-      "properties": {
-        "batch_processor": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/BatchProcessorConfig"
-            }
-          ],
-          "description": "Batch processor configuration"
-        },
-        "enabled": {
-          "description": "Enable zipkin",
-          "type": "boolean"
-        },
-        "endpoint": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/UriEndpoint"
-            }
-          ],
-          "description": "The endpoint to send to"
-        },
-        "sampler": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SamplerOption"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Per-exporter sampler.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`."
-        }
-      },
-      "required": [
-        "enabled"
-      ],
-      "type": "object"
     },
     "logging_format": {
       "oneOf": [

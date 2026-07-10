@@ -157,10 +157,6 @@ items:
                         href: "./observability/router-telemetry-otel/apm-guides/prometheus/prometheus-metrics"
                       - label: "Trace Metrics"
                         href: "./observability/router-telemetry-otel/apm-guides/prometheus/otel-traces-to-prometheus"
-                  - label: "Zipkin"
-                    children:
-                      - label: "Traces"
-                        href: "./observability/router-telemetry-otel/apm-guides/zipkin/zipkin-traces"
                   - label: "Jaeger"
                     children:
                       - label: "Traces"
