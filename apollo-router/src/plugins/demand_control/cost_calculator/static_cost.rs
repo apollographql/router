@@ -248,26 +248,11 @@ impl StaticCostCalculator {
         // defaults — can drive the estimated cost below zero.
         let instance_count = instance_count.max(0);
 
-        // Determine the cost for this particular field. Scalars are free, non-scalars are not.
-        // For fields with selections, add in the cost of the selections as well.
-        let mut type_cost = if let Some(cost_directive) = definition.cost_directive() {
-            cost_directive.weight()
-        } else if definition.ty().is_interface()
-            || definition.ty().is_object()
-            || definition.ty().is_union()
-        {
-            1.0
-        } else {
-            0.0
-        };
-        type_cost += self.score_selection_set(
-            ctx,
-            &field.selection_set,
-            field.ty().inner_named_type(),
-            &own_list_size_directives,
-            inherited_list_sizes,
-            subgraph,
-        )?;
+        // Per-call cost: the cost to resolve this field once (from @cost on the field
+        // definition, plus arguments and directives). Counted once regardless of list size.
+        let field_call_weight = definition
+            .field_cost_directive()
+            .map_or(0.0, |cost| cost.weight());
 
         let mut arguments_cost = 0.0;
         for argument in &field.arguments {
@@ -285,6 +270,33 @@ impl StaticCostCalculator {
                 ctx.variables,
             )?;
         }
+
+        // TODO we should be computing cost of directives applied on the field as well
+        // Negative weights can be used to indicate that certain arguments are less expensive to run target resolver.
+        // Overall cost of a field cannot be negative, if it is we must round it up to zero.
+        // see: https://ibm.github.io/graphql-specs/cost-spec.html#sec-Field-Cost.Example-Negative-Weights
+        let field_call_cost = (field_call_weight + arguments_cost).max(0.0);
+
+        let type_instance_cost = if let Some(cost_directive) = definition.type_cost_directive() {
+            // negative weights can only be specified on arguments
+            cost_directive.weight().max(0.0)
+        } else if definition.ty().is_interface()
+            || definition.ty().is_object()
+            || definition.ty().is_union()
+        {
+            1.0
+        } else {
+            0.0
+        };
+
+        let child_cost = self.score_selection_set(
+            ctx,
+            &field.selection_set,
+            field.ty().inner_named_type(),
+            &own_list_size_directives,
+            inherited_list_sizes,
+            subgraph,
+        )?;
 
         let mut requirements_cost = 0.0;
         if ctx.should_estimate_requires {
@@ -304,15 +316,18 @@ impl StaticCostCalculator {
             }
         }
 
-        let cost = (instance_count as f64) * type_cost + arguments_cost + requirements_cost;
+        let cost = field_call_cost
+            + (instance_count as f64) * (type_instance_cost + child_cost)
+            + requirements_cost;
         tracing::debug!(
-            "Field {} cost breakdown: (count) {} * (type cost) {} + (arguments) {} + (requirements) {} = {}",
+            "Overall field {} cost breakdown: field_call_cost {} + ((count) {} * (type_instance_cost {} + child_selection {})) + (requirements) {} = {}",
             field.name,
+            field_call_cost,
             instance_count,
-            type_cost,
-            arguments_cost,
+            type_instance_cost,
+            child_cost,
             requirements_cost,
-            cost
+            cost,
         );
 
         Ok(cost)
@@ -670,10 +685,43 @@ impl<'schema> ResponseCostCalculator<'schema> {
             return;
         }
 
+        let mut response_field_cost: f64 = 0.0;
+
+        // Per-call cost: field @cost + arguments, counted once per field resolution
+        if include_argument_score {
+            response_field_cost += definition
+                .and_then(|d| d.field_cost_directive())
+                .map_or(0.0, |cost| cost.weight());
+
+            if let Some(definition) = definition {
+                for argument in &field.arguments {
+                    if let Some(argument_definition) = definition.argument_by_name(&argument.name) {
+                        if let Ok(score) = score_argument(
+                            &argument.value,
+                            argument_definition,
+                            self.schema,
+                            variables,
+                        ) {
+                            response_field_cost += score;
+                        }
+                    } else {
+                        tracing::debug!(
+                            "Failed to get schema definition for argument {}.{}({}:). The resulting response cost will be a partial result.",
+                            parent_ty,
+                            field.name,
+                            argument.name,
+                        )
+                    }
+                }
+            }
+        }
+
+        // per-instance type cost + child selections
+        // NOTE: this is an upper bound as we might not know the actual returned object type
         match value {
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
-                self.cost += definition
-                    .and_then(|d| d.cost_directive())
+                response_field_cost += definition
+                    .and_then(|d| d.type_cost_directive())
                     .map_or(0.0, |cost| cost.weight());
             }
             Value::Array(items) => {
@@ -682,31 +730,15 @@ impl<'schema> ResponseCostCalculator<'schema> {
                 }
             }
             Value::Object(children) => {
-                self.cost += definition
-                    .and_then(|d| d.cost_directive())
+                response_field_cost += definition
+                    .and_then(|d| d.type_cost_directive())
                     .map_or(1.0, |cost| cost.weight());
                 self.visit_selections(request, variables, &field.selection_set, children);
             }
         }
 
-        if include_argument_score && let Some(definition) = definition {
-            for argument in &field.arguments {
-                if let Some(argument_definition) = definition.argument_by_name(&argument.name) {
-                    if let Ok(score) =
-                        score_argument(&argument.value, argument_definition, self.schema, variables)
-                    {
-                        self.cost += score;
-                    }
-                } else {
-                    tracing::debug!(
-                        "Failed to get schema definition for argument {}.{}({}:). The resulting response cost will be a partial result.",
-                        parent_ty,
-                        field.name,
-                        argument.name,
-                    )
-                }
-            }
-        }
+        // Overall cost of a resolved field cannot be negative, if it is we must round it up to zero.
+        self.cost += response_field_cost.max(0.0);
     }
 }
 
@@ -1417,7 +1449,7 @@ mod tests {
         #[case::sized_fields_propagate_to_nested_lists(
             r#"query { fieldWithDynamicListSize { items { id } } }"#,
             "{}",
-            11.0  // SizedField: 1, items: 10 * 1 = 10 (from default first: 10)
+            11.0
         )]
         fn vec_based_implementation_maintains_backward_compatibility(
             #[case] query: &str,
@@ -1464,7 +1496,6 @@ mod tests {
         #[case::missing_variable("{}")]
         fn null_or_missing_array_falls_back_to_assumed_size(#[case] variables: &str) {
             let query = r#"query Q($ids: [ID!]) { itemsByIdsWithAssumedSize(ids: $ids) { id } }"#;
-            // assumedSize is 50 in the schema
             assert_eq!(estimated_cost(SCHEMA, query, variables), 50.0);
         }
     }
@@ -1488,22 +1519,22 @@ mod tests {
         #[case::inline_nested_first_10(
             r#"query { search(input: {pagination: {first: 10}}) { id } }"#,
             "{}",
-            12.0  // 10 (list size) + 2 (input objects: SearchInput + PaginationInput)
+            12.0
         )]
         #[case::inline_nested_first_5(
             r#"query { search(input: {pagination: {first: 5}, query: "test"}) { id } }"#,
             "{}",
-            7.0  // 5 (list size) + 2 (input objects)
+            7.0
         )]
         #[case::variable_nested_object(
             r#"query Q($input: SearchInput!) { search(input: $input) { id } }"#,
             r#"{"input": {"pagination": {"first": 7}, "query": "test"}}"#,
-            9.0  // 7 (list size) + 2 (input objects)
+            9.0
         )]
         #[case::variable_nested_first_only(
             r#"query Q($input: SearchInput!) { search(input: $input) { id } }"#,
             r#"{"input": {"pagination": {"first": 3}}}"#,
-            5.0  // 3 (list size) + 2 (input objects)
+            5.0
         )]
         fn nested_path_determines_list_size(
             #[case] query: &str,
@@ -1519,18 +1550,9 @@ mod tests {
         // When path not found, falls back to assumedSize (25)
 
         #[rstest::rstest]
-        #[case::missing_nested_value(
-            r#"{"input": {"pagination": {}}}"#,
-            27.0  // 25 (assumed size) + 2 (SearchInput + PaginationInput)
-        )]
-        #[case::missing_pagination(
-            r#"{"input": {}}"#,
-            26.0  // 25 (assumed size) + 1 (SearchInput only)
-        )]
-        #[case::null_input(
-            r#"{"input": null}"#,
-            25.0  // 25 (assumed size) + 0 (null is not scored)
-        )]
+        #[case::missing_nested_value(r#"{"input": {"pagination": {}}}"#, 27.0)]
+        #[case::missing_pagination(r#"{"input": {}}"#, 26.0)]
+        #[case::null_input(r#"{"input": null}"#, 25.0)]
         fn missing_nested_path_falls_back_to_assumed_size(
             #[case] variables: &str,
             #[case] expected_cost: f64,
@@ -1545,7 +1567,6 @@ mod tests {
         #[test]
         fn deeply_nested_path_inline() {
             let query = r#"query { deeplyNested(input: {level1: {level2: {count: 15}}}) { id } }"#;
-            // 15 (list size) + 3 (input objects: DeeplyNestedInput + NestedLevel1Input + NestedLevel2Input)
             assert_eq!(estimated_cost(SCHEMA, query, "{}"), 18.0);
         }
 
@@ -1554,7 +1575,6 @@ mod tests {
             let query =
                 r#"query Q($input: DeeplyNestedInput!) { deeplyNested(input: $input) { id } }"#;
             let variables = r#"{"input": {"level1": {"level2": {"count": 12}}}}"#;
-            // 12 (list size) + 3 (input objects)
             assert_eq!(estimated_cost(SCHEMA, query, variables), 15.0);
         }
 
@@ -1562,7 +1582,6 @@ mod tests {
         fn inline_nested_object_with_other_fields() {
             // Ensure other fields in the nested object don't affect the size resolution
             let query = r#"query { search(input: {pagination: {first: 8, after: "cursor"}, query: "search term"}) { id } }"#;
-            // 8 (list size) + 2 (input objects: SearchInput + PaginationInput)
             assert_eq!(estimated_cost(SCHEMA, query, "{}"), 10.0);
         }
     }
@@ -1577,12 +1596,12 @@ mod tests {
         #[case::simple_sized_fields_on_nested_type(
             r#"query { containerWithNestedList(first: 5) { page { id } metadata } }"#,
             "{}",
-            6.0  // ResultContainer: 1, page: 5 * 1 = 5, metadata: 0
+            6.0
         )]
         #[case::nested_sized_fields_two_levels(
             r#"query { deepContainerWithNestedList(first: 7) { results { page { id } } } }"#,
             "{}",
-            9.0  // DeepContainer: 1, results: 1, page: 7 * 1 = 7
+            9.0
         )]
         #[case::nested_sized_fields_with_variable(
             r#"query Q($n: Int!) { deepContainerWithNestedList(first: $n) { results { page { id } } } }"#,
@@ -1592,7 +1611,7 @@ mod tests {
         #[case::nested_sized_fields_with_default_value(
             r#"query { deepContainerWithNestedList { results { page { id } } } }"#,
             "{}",
-            12.0  // default first: 10
+            12.0
         )]
         #[case::nested_sized_fields_not_selected(
             r#"query { deepContainerWithNestedList(first: 100) { total } }"#,
@@ -1612,7 +1631,7 @@ mod tests {
                 }
             }"#,
             "{}",
-            12.0  // DeepContainer: 1, page: 5 * 1 = 5, results: 1, page: 5 * 1 = 5
+            12.0
         )]
         fn nested_sized_fields_cases(
             #[case] query: &str,
@@ -1650,6 +1669,157 @@ mod tests {
                     panic!("expected schema load to fail for multiple list fields in one path")
                 }
             }
+        }
+    }
+
+    /// Tests for `@cost` on types: objects, interface implementations, and union members.
+    /// For interfaces, the max `@cost` across all implementing object types is used.
+    /// For unions, the max `@cost` across all member types is used.
+    mod type_cost_tests {
+        use super::estimated_cost;
+
+        const SCHEMA: &str = include_str!("./fixtures/type_cost_schema.graphql");
+
+        #[test]
+        fn object_with_cost_directive() {
+            // CostlyObject has @cost(weight: 7)
+            let cost = estimated_cost(SCHEMA, "query { objectWithCost { id } }", "{}");
+            assert_eq!(cost, 7.0);
+        }
+
+        #[test]
+        fn object_without_cost_directive_defaults_to_one() {
+            // PlainObject has no @cost, defaults to 1.0
+            let cost = estimated_cost(SCHEMA, "query { objectNoCost { id } }", "{}");
+            assert_eq!(cost, 1.0);
+        }
+
+        #[test]
+        fn interface_uses_max_cost_from_implementations() {
+            // Animal: Cat @cost(3), Dog @cost(5) → max is 5
+            let cost = estimated_cost(SCHEMA, "query { cheapAnimal { name } }", "{}");
+            assert_eq!(cost, 5.0);
+        }
+
+        #[test]
+        fn interface_without_cost_on_implementations_defaults_to_one() {
+            // NoCostAnimal: Fish (no @cost), Bird (no @cost) → default 1.0
+            let cost = estimated_cost(SCHEMA, "query { noCostInterface { name } }", "{}");
+            assert_eq!(cost, 1.0);
+        }
+
+        #[test]
+        fn union_uses_max_cost_from_members() {
+            // SearchResult: Article @cost(2), Video @cost(8) → max is 8
+            let cost = estimated_cost(
+                SCHEMA,
+                "query { searchResult { ... on Article { title } ... on Video { url } } }",
+                "{}",
+            );
+            assert_eq!(cost, 8.0);
+        }
+
+        #[test]
+        fn union_with_mixed_cost_uses_max() {
+            // MixedUnion: CostlyMember @cost(10), PlainMember (no @cost) → max is 10
+            let cost = estimated_cost(
+                SCHEMA,
+                "query { mixedUnion { ... on CostlyMember { value } ... on PlainMember { value } } }",
+                "{}",
+            );
+            assert_eq!(cost, 10.0);
+        }
+
+        #[test]
+        fn union_without_cost_on_members_defaults_to_one() {
+            // NoCostUnion: PlainA (no @cost), PlainB (no @cost) → default 1.0
+            let cost = estimated_cost(
+                SCHEMA,
+                "query { noCostUnion { ... on PlainA { id } ... on PlainB { id } } }",
+                "{}",
+            );
+            assert_eq!(cost, 1.0);
+        }
+    }
+
+    /// Tests for negative cost clamping per the cost spec.
+    /// Field cost must never be negative — if `@cost` weights (especially negative argument
+    /// weights) produce a negative total, it is clamped to zero.
+    /// See: https://ibm.github.io/graphql-specs/cost-spec.html#sec-Field-Cost.Example-Negative-Weights
+    mod negative_cost_tests {
+        use super::actual_cost;
+        use super::estimated_cost;
+
+        const SCHEMA: &str = include_str!("./fixtures/negative_cost_schema.graphql");
+
+        #[rstest::rstest]
+        #[case::negative_arg_clamps_to_zero(
+            "query { fieldWithNegativeArgCost(discount: 1) }",
+            "{}",
+            0.0  // field(5) + arg(-20) = -15 → clamped to 0
+        )]
+        #[case::exact_zero_stays_zero(
+            "query { fieldWithExactZeroCost(offset: 1) }",
+            "{}",
+            0.0  // field(10) + arg(-10) = 0
+        )]
+        #[case::positive_result_not_clamped(
+            "query { fieldWithPartialNegativeArg(offset: 1) }",
+            "{}",
+            7.0  // field(10) + arg(-3) = 7
+        )]
+        #[case::mixed_args_net_negative_clamps_to_zero(
+            "query { fieldWithMixedArgs(a: 1, b: 1) }",
+            "{}",
+            0.0  // field(10) + arg_a(-30) + arg_b(5) = -15 → clamped to 0
+        )]
+        #[case::object_field_with_negative_arg_clamps_to_zero(
+            "query { objectWithNegativeArgCost(discount: 1) { id } }",
+            "{}",
+            1.0  // field_call = max(0, 5 + (-50)) = 0, type_instance = 1 (NegCostObject) → 0 + 1*(1+0) = 1
+        )]
+        #[case::child_cost_preserved_when_field_cost_clamps(
+            "query { nestedObjectWithNegativeArgCost(discount: 1) { inner { value } } }",
+            "{}",
+            2.0  // field_call = max(0, 5 + (-50)) = 0, type_instance = 1, child(inner) = 1 → 0 + 1*(1+1) = 2
+        )]
+        fn estimated_cost_clamps_negative_to_zero(
+            #[case] query: &str,
+            #[case] variables: &str,
+            #[case] expected_cost: f64,
+        ) {
+            assert_eq!(estimated_cost(SCHEMA, query, variables), expected_cost);
+        }
+
+        #[rstest::rstest]
+        #[case::scalar_response_clamps_to_zero(
+            "query { fieldWithNegativeArgCost(discount: 1) }",
+            "{}",
+            br#"{"data": {"fieldWithNegativeArgCost": "hello"}}"#,
+            0.0  // scalar weight(0) + arg(-20) = -20 → clamped to 0
+        )]
+        #[case::object_response_clamps_to_zero(
+            "query { objectWithNegativeArgCost(discount: 1) { id } }",
+            "{}",
+            br#"{"data": {"objectWithNegativeArgCost": {"id": "1"}}}"#,
+            0.0  // object weight(5) + arg(-50) = -45 → clamped to 0
+        )]
+        #[case::positive_response_cost_not_clamped(
+            "query { fieldWithPartialNegativeArg(offset: 1) }",
+            "{}",
+            br#"{"data": {"fieldWithPartialNegativeArg": "hello"}}"#,
+            7.0  // scalar with @cost(weight: 10) + arg(-3) = 7, not clamped
+        )]
+        fn actual_cost_clamps_negative_to_zero(
+            #[case] query: &str,
+            #[case] variables: &str,
+            #[case] response_bytes: &'static [u8],
+            #[case] expected_cost: f64,
+        ) {
+            assert_eq!(
+                actual_cost(SCHEMA, query, variables, response_bytes),
+                expected_cost
+            );
         }
     }
 }
