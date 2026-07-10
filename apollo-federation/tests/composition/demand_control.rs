@@ -514,7 +514,8 @@ fn errors_when_subgraphs_use_different_names() {
         subgraph_with_default_name,
         subgraph_with_different_name,
     ])
-    .unwrap_err();
+    .unwrap_err()
+    .errors;
 
     assert_eq!(errors.len(), 1, "Expected 1 error but got {}", errors.len());
     let error = errors.first().unwrap();
@@ -562,7 +563,7 @@ fn hints_when_merging_cost_arguments() {
     assert_eq!(hint.code(), "MERGED_NON_REPEATABLE_DIRECTIVE_ARGUMENTS");
     assert_eq!(
         hint.message(),
-        r#"Directive @cost is applied to "Query.sharedWithCost" in multiple subgraphs with different arguments. Merging strategies used by arguments: { weight: MAX }"#
+        r#"Directive @cost is applied to "Query.sharedWithCost" in multiple subgraphs with different arguments. Merging strategies used by arguments: { "weight": MAX }"#
     );
 
     let shared_with_cost = coord!(Query.sharedWithCost)
@@ -616,6 +617,6 @@ fn hints_when_merging_listsize_arguments() {
     // Note: Rust implementation doesn't quote keys in the merge strategies map
     assert_eq!(
         hint.message(),
-        r#"Directive @listSize is applied to "Query.sharedWithListSize" in multiple subgraphs with different arguments. Merging strategies used by arguments: { assumedSize: NULLABLE_MAX, slicingArguments: NULLABLE_UNION, sizedFields: NULLABLE_UNION, requireOneSlicingArgument: NULLABLE_AND }"#
+        r#"Directive @listSize is applied to "Query.sharedWithListSize" in multiple subgraphs with different arguments. Merging strategies used by arguments: { "assumedSize": NULLABLE_MAX, "slicingArguments": NULLABLE_UNION, "sizedFields": NULLABLE_UNION, "requireOneSlicingArgument": NULLABLE_AND }"#
     )
 }

@@ -210,7 +210,7 @@ mod federation_directives {
         );
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -258,7 +258,7 @@ mod federation_directives {
 
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -303,7 +303,7 @@ mod federation_directives {
         );
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -382,7 +382,7 @@ mod inconsistent_feature_versions {
             r#"@foo(name: "b")"#,
         );
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -640,7 +640,7 @@ mod inconsistent_imports {
             r#"@bar(name: "b")"#,
         );
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -880,7 +880,7 @@ mod inconsistent_imports {
         );
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -910,7 +910,7 @@ mod inconsistent_imports {
             r#"@bar(name: "b")"#,
         );
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -940,7 +940,7 @@ mod inconsistent_imports {
             r#"@foo(name: "a")"#,
         );
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -957,20 +957,20 @@ mod inconsistent_imports {
     fn errors_when_different_exported_directives_have_the_same_name() {
         let subgraph_a = generate_subgraph(
             "subgraphA",
-            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
-            r#"@composeDirective(name: "@foo")"#,
-            "directive @foo(name: String!) on FIELD_DEFINITION",
-            r#"@foo(name: "a")"#,
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@baz"])"#,
+            r#"@composeDirective(name: "@baz")"#,
+            "directive @baz(name: String!) on FIELD_DEFINITION",
+            r#"@baz(name: "a")"#,
         );
         let subgraph_b = generate_subgraph(
             "subgraphA",
-            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: [{ name: "@bar", as: "@foo" }])"#,
-            r#"@composeDirective(name: "@foo")"#,
-            "directive @foo(name: String!) on FIELD_DEFINITION",
-            r#"@foo(name: "a")"#,
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: [{ name: "@bar", as: "@baz" }])"#,
+            r#"@composeDirective(name: "@baz")"#,
+            "directive @baz(name: String!) on FIELD_DEFINITION",
+            r#"@baz(name: "a")"#,
         );
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -979,7 +979,7 @@ mod inconsistent_imports {
         );
         assert_eq!(
             error.to_string(),
-            r#"Composed directive "@foo" does not refer to the same directive in every subgraph"#
+            r#"Composed directive "@baz" does not refer to the same directive in every subgraph"#
         );
     }
 
@@ -1015,7 +1015,7 @@ mod inconsistent_imports {
             }
         "#).unwrap();
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -1028,38 +1028,37 @@ mod inconsistent_imports {
         );
     }
 
-    // TODO: Re-work this test after further @link validations have been added.
-    // #[rstest]
-    // #[case("@join__field")]
-    // #[case("@join__graph")]
-    // #[case("@join__implements")]
-    // #[case("@join__type")]
-    // #[case("@join__unionMember")]
-    // #[case("@join__enumValue")]
-    // fn errors_when_exported_directives_conflict_with_join_spec_directives(#[case] directive: &str) {
-    //     let subgraph_a = generate_subgraph(
-    //         "subgraphA",
-    //         &r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: [{ name: "@foo", as: "<DIRECTIVE>" }])"#.replace("<DIRECTIVE>", directive),
-    //         &r#"@composeDirective(name: "<DIRECTIVE>")"#.replace("<DIRECTIVE>", directive),
-    //         &r#"directive <DIRECTIVE>(name: String!) on FIELD_DEFINITION"#.replace("<DIRECTIVE>", directive),
-    //         &r#"<DIRECTIVE>(name: "a")"#.replace("<DIRECTIVE>", directive),
-    //     );
-    //     let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
-    //
-    //     let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
-    //     assert_eq!(result.len(), 1);
-    //     let error = result.first().unwrap();
-    //     assert_eq!(
-    //         error.code().definition().code().to_string(),
-    //         "DIRECTIVE_COMPOSITION_ERROR"
-    //     );
-    //     assert_eq!(
-    //         error.to_string(),
-    //         format!(
-    //             "Directive \"{directive}\" in subgraph \"subgraphA\" cannot be composed because it is not a member of a core feature"
-    //         )
-    //     );
-    // }
+    #[rstest]
+    #[case("@join__field")]
+    #[case("@join__graph")]
+    #[case("@join__implements")]
+    #[case("@join__type")]
+    #[case("@join__unionMember")]
+    #[case("@join__enumValue")]
+    fn errors_when_exported_directives_conflict_with_join_spec_directives(#[case] directive: &str) {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            &r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: [{ name: "@foo", as: "<DIRECTIVE>" }])"#.replace("<DIRECTIVE>", directive),
+            &r#"@composeDirective(name: "<DIRECTIVE>")"#.replace("<DIRECTIVE>", directive),
+            &r#"directive <DIRECTIVE>(name: String!) on FIELD_DEFINITION"#.replace("<DIRECTIVE>", directive),
+            &r#"<DIRECTIVE>(name: "a")"#.replace("<DIRECTIVE>", directive),
+        );
+        let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
+
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
+        assert_eq!(result.len(), 1);
+        let error = result.first().unwrap();
+        assert_eq!(
+            error.code().definition().code().to_string(),
+            "INVALID_LINK_DIRECTIVE_USAGE"
+        );
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "Cannot import \"@foo\" as \"{directive}\" from feature \"https://specs.custom.dev/foo\" since it can be confused with a namespaced name from another linked feature \"https://specs.apollo.dev/join\". Please rename the import or feature to avoid conflicts via \"as\"."
+            )
+        );
+    }
 }
 
 mod validation {
@@ -1073,7 +1072,7 @@ mod validation {
         let subgraph_a = generate_subgraph("subgraphA", "", compose_text, "", "");
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -1097,7 +1096,7 @@ mod validation {
         );
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -1139,7 +1138,7 @@ mod validation {
         );
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -1161,7 +1160,7 @@ mod composition {
             extend schema
                 @link(url: "https://specs.apollo.dev/link/v1.0")
                 @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@tag"])
-                @link(url: "https://custom.dev/myspec/v1.0", import: [{ name: "@tag", as: "@mytag"}])
+                @link(url: "https://custom.dev/tag/v1.0", as: "mytag", import: [{ name: "@tag", as: "@mytag"}])
                 @composeDirective(name: "@mytag")
 
             directive @mytag(name: String!, prop: String!) on FIELD_DEFINITION | OBJECT
@@ -1208,9 +1207,12 @@ mod composition {
         assert_eq!(tag_directive.to_string(), r#"@tag(name: "c")"#);
 
         assert!(schema.to_string().contains(
-                r#"@link(url: "https://custom.dev/myspec/v1.0", import: [{name: "@tag", as: "@mytag"}])"#,
-            ),
-            "Expected link to custom spec to be in composed schema, but got schema:\n{schema}",
+            r#"@link(url: "https://custom.dev/tag/v1.0", as: "_0tag", import: [{name: "@tag", as: "@mytag"}])"#,
+        ));
+        assert!(
+            schema
+                .to_string()
+                .contains(r#"@link(url: "https://specs.apollo.dev/tag/v0.3")"#,)
         );
     }
 
@@ -1285,11 +1287,9 @@ mod composition {
                 .to_string()
                 .contains(r#"@link(url: "https://custom.dev/myspec/v1.0", import: ["@tag"])"#)
         );
-        assert!(
-            schema
-                .to_string()
-                .contains(r#"@link(url: "https://specs.apollo.dev/tag/v0.3", import: [{name: "@tag", as: "@mytag"}])"#)
-        );
+        assert!(schema .to_string() .contains(
+            r#"@link(url: "https://specs.apollo.dev/tag/v0.3", as: "_0tag", import: [{name: "@tag", as: "@mytag"}])"#
+        ));
     }
 
     #[test]
@@ -1379,6 +1379,190 @@ mod composition {
             r#"@auth(scope: ["VIEWER"])"#
         );
         assert_eq!(auth_directives[1].to_string(), "@auth");
+    }
+
+    #[test]
+    fn deduplicates_directive_using_subgraph_definition_defaults() {
+        // Subgraph A defines @foo with a default value for `debug` and applies
+        // it without specifying the argument (relying on the default).
+        // Subgraph B defines @foo without a default value for `debug` and
+        // applies it explicitly with the value matching subgraph A's default.
+        let subgraph_a = Subgraph::parse("subgraphA", "", r#"
+            extend schema @composeDirective(name: "@foo")
+              @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@shareable"])
+              @link(url: "https://custom.dev/foo/v1.0", import: ["@foo"])
+            directive @foo(name: String!, debug: Boolean = false) on FIELD_DEFINITION
+
+            type Query {
+              shared: String @shareable @foo(name: "test")
+            }
+        "#).expect("valid subgraph");
+        let subgraph_b = Subgraph::parse("subgraphB", "", r#"
+            extend schema @composeDirective(name: "@foo")
+              @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@shareable"])
+              @link(url: "https://custom.dev/foo/v1.1", import: ["@foo"])
+            directive @foo(name: String!, debug: Boolean) on FIELD_DEFINITION
+
+            type Query {
+              shared: String @shareable @foo(name: "test", debug: false)
+            }
+        "#).expect("valid subgraph");
+
+        let result = compose(vec![subgraph_a, subgraph_b]).expect("composed successfully");
+        let schema = result.schema().schema();
+
+        let shared_field = coord!(Query.shared)
+            .lookup_field(schema)
+            .expect("field exists");
+        assert_eq!(
+            shared_field.to_string(),
+            r#"shared: String @foo(name: "test")"#
+        );
+
+        let has_inconsistent_hint = result
+            .hints()
+            .iter()
+            .any(|h| h.definition.code() == "INCONSISTENT_NON_REPEATABLE_DIRECTIVE_ARGUMENTS");
+        assert!(
+            !has_inconsistent_hint,
+            "Should not produce INCONSISTENT_NON_REPEATABLE_DIRECTIVE_ARGUMENTS hint — applications are identical when resolved with correct subgraph defaults"
+        );
+    }
+}
+
+mod inconsistent_definitions {
+    use super::*;
+
+    // Both subgraphs compose the same custom directive (`@foo`) from the same custom spec version,
+    // but declare it with different argument sets. The merged directive definition must be derived
+    // solely from the selected source definition (matching JS), not from a union of arguments
+    // across subgraphs.
+    //
+    // Regression guard: `Merger::add_directives_shallow` previously seeded the merged schema with
+    // the first subgraph's full definition (arguments included); since the per-directive merge step
+    // only inserts missing arguments and never removes them, the merged definition accumulated
+    // arguments from multiple subgraphs. The shallow seed is now name-only (mirroring JS's
+    // `new DirectiveDefinition(name)`), so the merge step is the sole authority on arguments.
+
+    const FOO_LINK: &str = r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#;
+    const FOO_COMPOSE: &str = r#"@composeDirective(name: "@foo")"#;
+
+    /// Each subgraph contributes a disjoint extra argument. The merged definition must contain only
+    /// the selected subgraph's arguments (the alphabetically-last definer, `subgraphB`), proving the
+    /// behavior is selection of a single source definition rather than an argument union.
+    #[test]
+    fn does_not_union_arguments_across_subgraphs() {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            FOO_LINK,
+            FOO_COMPOSE,
+            "directive @foo(name: String!, fromA: Int) on FIELD_DEFINITION",
+            r#"@foo(name: "a")"#,
+        );
+        let subgraph_b = generate_subgraph(
+            "subgraphB",
+            FOO_LINK,
+            FOO_COMPOSE,
+            "directive @foo(name: String!, fromB: Int) on FIELD_DEFINITION",
+            r#"@foo(name: "b")"#,
+        );
+
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
+
+        // `subgraphB` is the selected definition; `fromA` must NOT leak in from `subgraphA`.
+        assert_has_directive_definition(
+            &result,
+            "directive @foo(name: String!, fromB: Int) on FIELD_DEFINITION",
+        );
+    }
+
+    /// The alphabetically-first subgraph declares the fuller definition while the selected
+    /// (alphabetically-last) subgraph declares the minimal one. The merged definition must be the
+    /// minimal (selected) one — the first subgraph's extra argument must not leak in.
+    #[test]
+    fn uses_selected_definition_when_first_subgraph_is_fuller() {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            FOO_LINK,
+            FOO_COMPOSE,
+            "directive @foo(name: String!, extra: Int) on FIELD_DEFINITION",
+            r#"@foo(name: "a")"#,
+        );
+        let subgraph_b = generate_subgraph(
+            "subgraphB",
+            FOO_LINK,
+            FOO_COMPOSE,
+            "directive @foo(name: String!) on FIELD_DEFINITION",
+            r#"@foo(name: "b")"#,
+        );
+
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
+
+        assert_has_directive_definition(
+            &result,
+            "directive @foo(name: String!) on FIELD_DEFINITION",
+        );
+    }
+}
+
+mod string_to_enum_coercion {
+    use insta::assert_snapshot;
+
+    use super::*;
+
+    /// When one subgraph defines a composed directive with an enum argument type
+    /// and another defines it with a String argument type, both subgraphs are
+    /// internally valid.
+    /// After merging, whichever definition is picked, the applied directives from
+    /// the other subgraph should be coerced rather than rejected. A string value
+    /// like `"PUBLIC"` is a valid representation of enum value `PUBLIC`, and an
+    /// unquoted enum value `INTERNAL` is a valid representation of string `"INTERNAL"`.
+    #[test]
+    fn composes_directive_with_enum_arg_when_other_subgraph_uses_string() {
+        let subgraph_a = Subgraph::parse("subgraphA", "", r#"
+            extend schema @composeDirective(name: "@custom")
+              @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@shareable"])
+              @link(url: "https://custom.dev/custom/v1.0", import: ["@custom"])
+
+            enum CustomTag {
+              INTERNAL
+              PUBLIC
+            }
+
+            directive @custom(tag: CustomTag!) on FIELD_DEFINITION
+
+            type Query {
+              product(id: ID!): Product @custom(tag: PUBLIC)
+            }
+
+            type Product @key(fields: "id") {
+              id: ID!
+              name: String
+            }
+        "#).expect("valid first subgraph");
+
+        let subgraph_b = Subgraph::parse("subgraphB", "", r#"
+            extend schema @composeDirective(name: "@custom")
+              @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@shareable"])
+              @link(url: "https://custom.dev/custom/v1.0", import: ["@custom"])
+
+            directive @custom(tag: String!) on FIELD_DEFINITION
+
+            type Query {
+              user(id: ID!): User @custom(tag: "INTERNAL")
+            }
+
+            type User @key(fields: "id")  {
+              id: ID!
+              name: String
+            }
+        "#).expect("valid second subgraph");
+
+        // Regardless of subgraph ordering (which determines which definition is
+        // picked), composition must succeed. The applied directives that were
+        // valid in their source subgraph should not be rejected after merge.
+        let result = compose(vec![subgraph_a, subgraph_b]).expect("successfully composed");
+        assert_snapshot!(result.schema().schema());
     }
 }
 

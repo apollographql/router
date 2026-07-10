@@ -22,6 +22,7 @@ use serde::de::DeserializeOwned;
 use strum::Display;
 use tower::BoxError;
 use tower::Service;
+use tower::ServiceExt as _;
 use tracing::Instrument;
 
 use super::PipelineStep;
@@ -324,7 +325,7 @@ where
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
                 &prepare_context(http_req_span.context()),
-                &mut crate::otel_compat::HeaderInjector(http_request.headers_mut()),
+                &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
             );
         });
 
@@ -333,7 +334,12 @@ where
             context,
         };
 
-        let response = client.call(request).instrument(http_req_span).await?;
+        let response = client
+            .ready()
+            .await?
+            .call(request)
+            .instrument(http_req_span)
+            .await?;
         router::body::into_bytes(response.http_response.into_body())
             .await
             .map_err(BoxError::from)
@@ -381,6 +387,9 @@ where
 }
 
 /// Convert a HeaderMap into a HashMap
+/// This is used to send headers to external services (coprocessors, subgraphs)
+/// Headers are NOT masked here - they are sent with full values for functionality.
+/// Masking should be applied only in logging/tracing statements.
 pub(crate) fn externalize_header_map(
     input: &HeaderMap<HeaderValue>,
 ) -> HashMap<String, Vec<String>> {

@@ -83,7 +83,7 @@ connectors:
   expose_sources_in_context: false
   max_requests_per_operation_per_source: null
   sources: {}
-  subgraphs: {}
+  subgraphs: {} # Deprecated. Use `sources` instead.
 coprocessor:
   client:
     dns_resolution_strategy: ipv4_only
@@ -233,17 +233,19 @@ include_subgraph_errors:
   subgraphs: {}
 license_enforcement: {}
 limits:
-  http1_max_request_buf_size: null
-  http1_max_request_headers: null
-  http_max_request_bytes: 2000000
-  introspection_max_depth: true
-  max_aliases: null
-  max_depth: null
-  max_height: null
-  max_root_fields: null
-  parser_max_recursion: 500
-  parser_max_tokens: 15000
-  warn_only: false
+  router:
+    http1_max_request_buf_size: null
+    http1_max_request_headers: null
+    http_max_request_bytes: 2000000
+    introspection_max_depth: true
+    max_aliases: null
+    max_depth: null
+    max_height: null
+    max_root_fields: null
+    max_recursive_selections: 10000000
+    parser_max_recursion: 500
+    parser_max_tokens: 15000
+    warn_only: false
 override_subgraph_url: {}
 persisted_queries:
   enabled: false
@@ -304,6 +306,9 @@ preview_file_uploads:
         max_files: 0
       mode: stream
 progressive_override: {}
+reload:
+  max_retries: 5
+  retry_delay: 10s
 rhai:
   main: example_main
   scripts: example_scripts

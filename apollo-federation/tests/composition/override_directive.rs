@@ -418,7 +418,7 @@ fn invalid_override_key_field_breaks_composition() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-    let errors = result.as_ref().expect_err("composition failed");
+    let errors = &result.as_ref().expect_err("composition failed").errors;
     assert_eq!(errors.len(), 2);
     insta::assert_snapshot!(errors[0].to_string(), @r#"
     The following supergraph API query:
@@ -584,7 +584,7 @@ fn override_with_provides_on_overridden_field() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
     // Check that we get the override collision error (there may be additional errors)
-    let errors = result.as_ref().expect_err("composition failed");
+    let errors = &result.as_ref().expect_err("composition failed").errors;
     assert!(
         errors.iter().any(|e| e.to_string() == r#"@override cannot be used on field "T.u" on subgraph "Subgraph1" since "T.u" on "Subgraph2" is marked with directive "@provides""#),
         "Expected OverrideCollisionWithAnotherDirective error not found"
@@ -629,7 +629,7 @@ fn override_with_requires_on_overridden_field() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
     // Check that we get the override collision error (there may be additional errors)
-    let errors = result.as_ref().expect_err("composition failed");
+    let errors = &result.as_ref().expect_err("composition failed").errors;
     assert!(
         errors.iter().any(|e| e.to_string() == r#"@override cannot be used on field "T.u" on subgraph "Subgraph1" since "T.u" on "Subgraph2" is marked with directive "@requires""#),
         "Expected OverrideCollisionWithAnotherDirective error not found"
@@ -782,7 +782,7 @@ mod interface_object {
                 ),
                 (
                     "INVALID_FIELD_SHARING",
-                    r#"Non-shareable field "A.a" is resolved from multiple subgraphs: it is resolved from subgraphs "Subgraph1 (through @interfaceObject field "I.a")" and "Subgraph2" and defined as non-shareable in all of them"#,
+                    r#"Non-shareable field "A.a" is resolved from multiple subgraphs: it is resolved from subgraphs "Subgraph1" (through @interfaceObject field "I.a") and "Subgraph2" and defined as non-shareable in all of them"#,
                 ),
             ],
         );
@@ -839,7 +839,7 @@ mod interface_object {
                 ),
                 (
                     "INVALID_FIELD_SHARING",
-                    r#"Non-shareable field "A.a" is resolved from multiple subgraphs: it is resolved from subgraphs "Subgraph1 (through @interfaceObject field "I.a")" and "Subgraph2" and defined as non-shareable in all of them"#,
+                    r#"Non-shareable field "A.a" is resolved from multiple subgraphs: it is resolved from subgraphs "Subgraph1" (through @interfaceObject field "I.a") and "Subgraph2" and defined as non-shareable in all of them"#,
                 ),
             ],
         );
@@ -1219,7 +1219,7 @@ mod progressive_override {
             };
 
             let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-            let errors = result.as_ref().expect_err("composition failed");
+            let errors = &result.as_ref().expect_err("composition failed").errors;
             assert_eq!(errors.len(), 1);
             insta::assert_snapshot!(errors[0].to_string(), @r#"
             The following supergraph API query:

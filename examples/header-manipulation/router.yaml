@@ -4,6 +4,7 @@ headers:
   # The following section is applied to all subgraphs.
   all:
     request:
+      operations:
         # Propagate headers matching name but do nothing if the client header did not exist.
         - propagate:
             named: "Propagate"
@@ -45,10 +46,11 @@ headers:
   subgraphs:
     # Anything shown in the above `all` section can be specified on a subgraph specific basis.
     products:
-        request:
-            # Insert a header value
-            - insert:
-                name: "InsertSubgraph"
-                value: "Value"
+      request:
+        operations:
+          # Insert a header value
+          - insert:
+              name: "InsertSubgraph"
+              value: "Value"
 
 

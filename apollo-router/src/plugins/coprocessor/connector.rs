@@ -1,7 +1,8 @@
 //! Connector coprocessor stage implementation
 
+use std::collections::HashSet;
 use std::ops::ControlFlow;
-use std::time::Instant;
+use std::sync::Arc;
 
 use apollo_federation::connectors::runtime::errors::Error as ConnectorError;
 use apollo_federation::connectors::runtime::errors::RuntimeError;
@@ -21,8 +22,8 @@ use super::COPROCESSOR_ERROR_EXTENSION;
 use super::ContextConf;
 use super::EXTERNAL_SPAN_NAME;
 use super::NewContextConf;
+use super::get_coprocessor_timer;
 use super::internalize_header_map;
-use super::record_coprocessor_duration;
 use super::record_coprocessor_operation;
 use super::update_context_from_coprocessor;
 use super::validate_coprocessor_output;
@@ -39,6 +40,7 @@ use crate::services::connector::request_service;
 use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::externalize_header_map;
+use crate::services::header_masking::MaskingRulesMap;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 
@@ -133,6 +135,10 @@ impl ConnectorStage {
                 let service_name = service_name.clone();
 
                 async move {
+                    let header_masking_rules = request
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
                     let mut succeeded = true;
                     let mut executed = false;
                     let result = process_connector_request_stage(
@@ -142,6 +148,7 @@ impl ConnectorStage {
                         request,
                         request_config,
                         &mut executed,
+                        header_masking_rules,
                     )
                     .await
                     .map_err(|error| {
@@ -171,6 +178,9 @@ impl ConnectorStage {
 
                     async move {
                         let response: request_service::Response = fut.await?;
+                        let header_masking_rules = context
+                            .extensions()
+                            .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
 
                         let mut succeeded = true;
                         let mut executed = false;
@@ -182,6 +192,7 @@ impl ConnectorStage {
                             response_config,
                             context,
                             &mut executed,
+                            header_masking_rules,
                         )
                         .await
                         .map_err(|error| {
@@ -235,6 +246,7 @@ async fn process_connector_request_stage<C>(
     mut request: request_service::Request,
     mut request_config: ConnectorRequestConf,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<ControlFlow<request_service::Response, request_service::Request>, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -248,8 +260,10 @@ where
         return Ok(ControlFlow::Continue(request));
     }
 
-    // Extract the transport request parts
-    let TransportRequest::Http(http_request) = request.transport_request;
+    // Mapping-only connectors have no HTTP transport request to intercept
+    let TransportRequest::Http(http_request) = request.transport_request else {
+        return Ok(ControlFlow::Continue(request));
+    };
     let debug = http_request.debug;
     let (parts, body) = http_request.inner.into_parts();
 
@@ -257,11 +271,26 @@ where
         .headers
         .then(|| externalize_header_map(&parts.headers));
 
+    // Log headers with masking for security
+    if request_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        let subgraph_name = request.connector.id.subgraph_name.as_str();
+        tracing::debug!(
+            headers = %rules.get_request(Some(subgraph_name)).mask_headers_debug(&parts.headers),
+            service = %service_name,
+            "Connector request headers (masked)"
+        );
+    }
+
     let body_to_send = request_config.body.then(|| {
         serde_json::from_str::<Value>(&body).unwrap_or_else(|_| Value::String(body.clone().into()))
     });
 
-    let context_to_send = request_config.context.get_context(&request.context);
+    let context_to_send = request_config
+        .context
+        .get_context(&request.context)
+        .map(|(ctx, _keys)| ctx);
     let uri = request_config.uri.then(|| parts.uri.to_string());
     let service_name_to_send = request_config.service_name.then_some(service_name);
 
@@ -277,20 +306,34 @@ where
         .and_uri(uri)
         .build();
 
-    tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
+    let payload_for_log =
+        super::scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+            r.get_request(Some(request.connector.id.subgraph_name.as_str()))
+        });
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
     // understand what could be sent to coprocessors and how that might affect their behavior
-    let co_processor_result = payload
-        .call(http_client, &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::ConnectorRequest);
+        payload
+            .call(http_client, &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::ConnectorRequest, duration);
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    {
+        let co_processor_result_for_log = super::scrub_result_for_log(
+            &co_processor_result,
+            header_masking_rules.as_deref(),
+            |r| r.get_request(Some(request.connector.id.subgraph_name.as_str())),
+        );
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::ConnectorRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
@@ -327,6 +370,7 @@ where
 
         let res = request_service::Response {
             context: request.context.clone(),
+            subgraph_name: request.connector.id.subgraph_name.to_string(),
             transport_result: Err(ConnectorError::TransportFailure(message)),
             mapped_response: MappedResponse::Error {
                 error: runtime_error,
@@ -381,10 +425,10 @@ where
     }
 
     // Reconstruct the transport request
-    request.transport_request = TransportRequest::Http(ConnectorsHttpRequest {
+    request.transport_request = TransportRequest::Http(Box::new(ConnectorsHttpRequest {
         inner: http::Request::from_parts(new_parts, new_body),
         debug,
-    });
+    }));
 
     Ok(ControlFlow::Continue(request))
 }
@@ -396,6 +440,7 @@ where
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_connector_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -404,6 +449,7 @@ async fn process_connector_response_stage<C>(
     response_config: ConnectorResponseConf,
     context: Context,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<request_service::Response, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -423,12 +469,26 @@ where
             let headers = response_config
                 .headers
                 .then(|| externalize_header_map(&http_response.inner.headers));
+
+            // Log headers with masking for security
+            if response_config.headers
+                && let Some(rules) = header_masking_rules.as_deref()
+            {
+                tracing::debug!(
+                    headers = %rules
+                        .get_response(Some(&response.subgraph_name))
+                        .mask_headers_debug(&http_response.inner.headers),
+                    service = %service_name,
+                    "Connector response headers (masked)"
+                );
+            }
+
             let status = response_config
                 .status_code
                 .then(|| http_response.inner.status.as_u16());
             (headers, status)
         }
-        Err(_) => (None, None),
+        Ok(TransportResponse::MappingOnly) | Err(_) => (None, None),
     };
 
     // Extract body from mapped response
@@ -443,7 +503,10 @@ where
         None
     };
 
-    let context_to_send = response_config.context.get_context(&context);
+    let (context_to_send, keys_sent) = match response_config.context.get_context(&context) {
+        Some((ctx, keys)) => (Some(ctx), keys),
+        None => (None, HashSet::new()),
+    };
     let service_name_to_send = response_config.service_name.then_some(service_name);
 
     let payload = Externalizable::connector_builder()
@@ -456,20 +519,34 @@ where
         .and_service_name(service_name_to_send)
         .build();
 
-    tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
+    let payload_for_log =
+        super::scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+            r.get_response(Some(response.subgraph_name.as_str()))
+        });
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
     // understand what could be sent to coprocessors and how that might affect their behavior
-    let co_processor_result = payload
-        .call(http_client, &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::ConnectorResponse);
+        payload
+            .call(http_client, &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::ConnectorResponse, duration);
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    {
+        let co_processor_result_for_log = super::scrub_result_for_log(
+            &co_processor_result,
+            header_masking_rules.as_deref(),
+            |r| r.get_response(Some(response.subgraph_name.as_str())),
+        );
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let co_processor_output = co_processor_result?;
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::ConnectorResponse)?;
@@ -490,7 +567,12 @@ where
     }
 
     if let Some(returned_context) = co_processor_output.context {
-        update_context_from_coprocessor(&context, returned_context, &response_config.context)?;
+        update_context_from_coprocessor(
+            &context,
+            returned_context,
+            &response_config.context,
+            &keys_sent,
+        )?;
     }
 
     if let Some(body) = co_processor_output.body {

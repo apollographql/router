@@ -121,6 +121,8 @@ When using Redis as a cache backend, additional Redis-specific metrics are avail
 - `apollo.router.cache.redis.commands_executed` - Total number of Redis commands executed
 - `apollo.router.cache.redis.redelivery_count` - Number of Redis command redeliveries due to connection issues
 - `apollo.router.cache.redis.errors` - Number of Redis errors by error type and cache kind
+- `apollo.router.cache.redis.reconnection` - Number of Redis client reconnections
+- `apollo.router.cache.redis.unresponsive` - Number of times a Redis server became unresponsive
 - `experimental.apollo.router.cache.redis.latency_avg` - Average Redis command latency in seconds
 - `experimental.apollo.router.cache.redis.network_latency_avg` - Average Redis network latency in seconds
 - `experimental.apollo.router.cache.redis.request_size_avg` - Average Redis request size in bytes
@@ -129,6 +131,10 @@ When using Redis as a cache backend, additional Redis-specific metrics are avail
 All Redis metrics, except for `apollo.router.cache.redis.clients`, include the following attribute:
 
 - `kind`: the cache being queried (`apq`, `query planner`, `introspection`, `entity`)
+
+The `apollo.router.cache.redis.reconnection` and `apollo.router.cache.redis.unresponsive` metrics also include:
+
+- `server`: the Redis server that raised the event
 
 The `apollo.router.cache.redis.errors` metric also includes an `error_type` attribute with possible values:
 - `config` - Configuration errors (invalid Redis settings)
@@ -177,6 +183,7 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 - `apollo.router.query_planning.plan.duration` - Histogram of plan durations isolated to query planning time only.
 - `apollo.router.query_planning.total.duration` - Histogram of plan durations including queue time.
 - `apollo.router.query_planning.plan.evaluated_plans` - Histogram of the number of evaluated query plans.
+- `apollo.router.query_planning.plan.evaluated_paths` - Histogram of the number of paths (including intermediate ones) the planner considers before generating a plan. High values often correlate with long planning times on complex schemas or queries. Tune the limits as described in [Tuning query planner limits](/graphos/routing/query-planning/query-planning-best-practices#tuning-query-planner-limits).
 - `apollo.router.query_planner.memory` - Histogram of memory allocated during query planning, in bytes. Tracks memory allocation patterns specifically for query planning operations executed in the compute job thread pool. Attributes:
   - `allocation.type`: The type of memory operation (`allocated`, `deallocated`, `zeroed`, `reallocated`)
   - `context`: The context name where the allocation occurred (e.g., `query_planning`)
@@ -243,6 +250,14 @@ The initial call to Uplink during router startup is not reflected in metrics.
 Similar to the initial call to Uplink, the router does not record metrics for calls to the graph artifacts endpoint during startup.
 
 </Note>
+
+## Connections
+
+- `apollo.router.connection.acquire.duration` - Time in seconds to establish a new TCP or Unix socket connection to a downstream service. Recorded only when the connection pool opens a new connection — pool hits are not recorded. Attributes:
+  - `network.transport`: `tcp` for HTTP connections, `unix` for Unix socket connections
+  - `subgraph.name`: name of the subgraph (subgraph connections only)
+  - `connector.source.name`: name of the connector source (connector connections only)
+  - `coprocessor`: `true` (coprocessor connections only)
 
 ## Subscriptions
 

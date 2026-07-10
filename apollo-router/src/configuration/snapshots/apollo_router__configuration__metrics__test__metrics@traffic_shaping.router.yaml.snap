@@ -1,7 +1,13 @@
 ---
 source: apollo-router/src/configuration/metrics.rs
+assertion_line: 698
 expression: "& metrics.non_zero()"
 ---
+- name: apollo.router.config.experimental_http2
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
 - name: apollo.router.config.traffic_shaping
   data:
     datapoints:

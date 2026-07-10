@@ -1,0 +1,10 @@
+---
+source: apollo-router/src/configuration/tests.rs
+assertion_line: 680
+expression: new_config
+---
+---
+persisted_queries:
+  enabled: true
+  local_manifests:
+    - "./manifest.json"

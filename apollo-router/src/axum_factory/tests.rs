@@ -367,13 +367,13 @@ async fn it_displays_sandbox() {
             .unwrap(),
     );
 
-    let router_service = router::service::from_supergraph_mock_callback_and_configuration(
-        move |_| {
-            panic!("this should never be called");
-        },
-        conf.clone(),
-    )
-    .await;
+    let (mock, handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    crate::plugin::test::assert_no_mock_calls(handle).await;
+    let router_service =
+        router::service::from_supergraph_mock_with_configuration(mock, conf.clone()).await;
 
     let (server, client) = init_with_config(router_service, conf, MultiMap::new())
         .await
@@ -414,13 +414,13 @@ async fn it_displays_sandbox_with_different_supergraph_path() {
             .unwrap(),
     );
 
-    let router_service = router::service::from_supergraph_mock_callback_and_configuration(
-        move |_| {
-            panic!("this should never be called");
-        },
-        conf.clone(),
-    )
-    .await;
+    let (mock, handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    crate::plugin::test::assert_no_mock_calls(handle).await;
+    let router_service =
+        router::service::from_supergraph_mock_with_configuration(mock, conf.clone()).await;
     let (server, client) = init_with_config(router_service, conf, MultiMap::new())
         .await
         .unwrap();
@@ -450,15 +450,21 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
         .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
         .build();
     let example_response = expected_response.clone();
-    let router_service = router::service::from_supergraph_mock_callback(move |req| {
-        let example_response = example_response.clone();
-
-        Ok(SupergraphResponse::new_from_graphql_response(
-            example_response,
-            req.context,
-        ))
-    })
-    .await;
+    let (mock, mut handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let driver = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let example_response = example_response.clone();
+            responder.send_response(SupergraphResponse::new_from_graphql_response(
+                example_response,
+                req.context,
+            ));
+        }
+    });
+    let router_service = router::service::from_supergraph_mock(mock).await;
     let (server, client) = init(router_service).await;
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
@@ -516,6 +522,7 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
     assert_eq!(graphql_resp, expected_response);
 
     server.shutdown().await?;
+    crate::plugin::test::await_mock_driver(driver).await;
     Ok(())
 }
 
@@ -537,18 +544,22 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
         .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
         .build();
     let example_response = expected_response.clone();
-    let router_service = router::service::from_supergraph_mock_callback(move |req| {
-        let example_response = example_response.clone();
+    let (mock, mut handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
         assert_eq!(
             req.supergraph_request.into_body().query.unwrap(),
             "query { me { name } }"
         );
-        Ok(SupergraphResponse::new_from_graphql_response(
+        responder.send_response(SupergraphResponse::new_from_graphql_response(
             example_response,
             req.context,
-        ))
-    })
-    .await;
+        ));
+    });
+    let router_service = router::service::from_supergraph_mock(mock).await;
     let (server, client) = init(router_service).await;
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
@@ -569,6 +580,7 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
     );
 
     server.shutdown().await?;
+    crate::plugin::test::await_mock_driver(driver).await;
     Ok(())
 }
 
@@ -661,15 +673,21 @@ async fn response() -> Result<(), ApolloRouterError> {
         .data(json!({"response": "yay"}))
         .build();
     let example_response = expected_response.clone();
-    let router_service = router::service::from_supergraph_mock_callback(move |req| {
-        let example_response = example_response.clone();
-
-        Ok(SupergraphResponse::new_from_graphql_response(
-            example_response,
-            req.context,
-        ))
-    })
-    .await;
+    let (mock, mut handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let driver = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let example_response = example_response.clone();
+            responder.send_response(SupergraphResponse::new_from_graphql_response(
+                example_response,
+                req.context,
+            ));
+        }
+    });
+    let router_service = router::service::from_supergraph_mock(mock).await;
     let (server, client) = init(router_service).await;
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
@@ -709,6 +727,7 @@ async fn response() -> Result<(), ApolloRouterError> {
     );
 
     server.shutdown().await?;
+    crate::plugin::test::await_mock_driver(driver).await;
     Ok(())
 }
 
@@ -754,14 +773,21 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
         .build();
     let example_response = expected_response.clone();
 
-    let router_service = router::service::from_supergraph_mock_callback(move |req| {
-        let example_response = example_response.clone();
-        Ok(SupergraphResponse::new_from_graphql_response(
-            example_response,
-            req.context,
-        ))
-    })
-    .await;
+    let (mock, mut handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let driver = tokio::spawn(async move {
+        for _ in 0..3 {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let example_response = example_response.clone();
+            responder.send_response(SupergraphResponse::new_from_graphql_response(
+                example_response,
+                req.context,
+            ));
+        }
+    });
+    let router_service = router::service::from_supergraph_mock(mock).await;
 
     let conf = Configuration::fake_builder()
         .supergraph(
@@ -830,6 +856,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
     );
 
     server.shutdown().await?;
+    crate::plugin::test::await_mock_driver(driver).await;
     Ok(())
 }
 
@@ -840,14 +867,21 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
         .build();
     let example_response = expected_response.clone();
 
-    let router_service = router::service::from_supergraph_mock_callback(move |req| {
-        let example_response = example_response.clone();
-        Ok(SupergraphResponse::new_from_graphql_response(
-            example_response,
-            req.context,
-        ))
-    })
-    .await;
+    let (mock, mut handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let driver = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let example_response = example_response.clone();
+            responder.send_response(SupergraphResponse::new_from_graphql_response(
+                example_response,
+                req.context,
+            ));
+        }
+    });
+    let router_service = router::service::from_supergraph_mock(mock).await;
 
     let conf = Configuration::fake_builder()
         .supergraph(
@@ -895,6 +929,7 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
     );
 
     server.shutdown().await?;
+    crate::plugin::test::await_mock_driver(driver).await;
     Ok(())
 }
 
@@ -904,14 +939,21 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
         .data(json!({"response": "yay"}))
         .build();
     let example_response = expected_response.clone();
-    let router_service = router::service::from_supergraph_mock_callback(move |req| {
-        let example_response = example_response.clone();
-        Ok(SupergraphResponse::new_from_graphql_response(
-            example_response,
-            req.context,
-        ))
-    })
-    .await;
+    let (mock, mut handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let driver = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let example_response = example_response.clone();
+            responder.send_response(SupergraphResponse::new_from_graphql_response(
+                example_response,
+                req.context,
+            ));
+        }
+    });
+    let router_service = router::service::from_supergraph_mock(mock).await;
 
     let conf = Configuration::fake_builder()
         .supergraph(
@@ -959,6 +1001,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
     );
 
     server.shutdown().await?;
+    crate::plugin::test::await_mock_driver(driver).await;
     Ok(())
 }
 
@@ -969,14 +1012,21 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
         .build();
     let example_response = expected_response.clone();
 
-    let router_service = router::service::from_supergraph_mock_callback(move |req| {
-        let example_response = example_response.clone();
-        Ok(SupergraphResponse::new_from_graphql_response(
-            example_response,
-            req.context,
-        ))
-    })
-    .await;
+    let (mock, mut handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let driver = tokio::spawn(async move {
+        for _ in 0..4 {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let example_response = example_response.clone();
+            responder.send_response(SupergraphResponse::new_from_graphql_response(
+                example_response,
+                req.context,
+            ));
+        }
+    });
+    let router_service = router::service::from_supergraph_mock(mock).await;
 
     let conf = Configuration::fake_builder()
         .supergraph(
@@ -1030,25 +1080,30 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
     }
 
     server.shutdown().await?;
+    crate::plugin::test::await_mock_driver(driver).await;
     Ok(())
 }
 
 #[tokio::test]
 async fn response_failure() -> Result<(), ApolloRouterError> {
-    let router_service = router::service::from_supergraph_mock_callback(move |req| {
+    let (mock, mut handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
         let example_response = crate::error::FetchError::SubrequestHttpError {
             status_code: Some(200),
             service: "Mock service".to_string(),
             reason: "Mock error".to_string(),
         }
         .to_response();
-
-        Ok(SupergraphResponse::new_from_graphql_response(
+        responder.send_response(SupergraphResponse::new_from_graphql_response(
             example_response,
             req.context,
-        ))
-    })
-    .await;
+        ));
+    });
+    let router_service = router::service::from_supergraph_mock(mock).await;
     let (server, client) = init(router_service).await;
 
     let response = client
@@ -1079,7 +1134,9 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
         }
         .to_response()
     );
-    server.shutdown().await
+    server.shutdown().await?;
+    crate::plugin::test::await_mock_driver(driver).await;
+    Ok(())
 }
 
 #[tokio::test]
@@ -1165,15 +1222,12 @@ async fn it_errors_on_bad_content_type_header() -> Result<(), ApolloRouterError>
     let query = "query";
     let operation_name = "operationName";
 
-    let router_service = router::service::from_supergraph_mock_callback(|req| {
-        Ok(SupergraphResponse::new_from_graphql_response(
-            graphql::Response::builder()
-                .data(json!({"response": "hey"}))
-                .build(),
-            req.context,
-        ))
-    })
-    .await;
+    let (mock, handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    crate::plugin::test::assert_no_mock_calls(handle).await;
+    let router_service = router::service::from_supergraph_mock(mock).await;
 
     let (server, client) = init(router_service).await;
     let url = format!("{}", server.graphql_listen_address().as_ref().unwrap());
@@ -1200,15 +1254,23 @@ async fn it_errors_on_bad_content_type_header() -> Result<(), ApolloRouterError>
 
 #[test(tokio::test)]
 async fn it_validates_get_request_content_type() -> Result<(), ApolloRouterError> {
-    let router_service = router::service::from_supergraph_mock_callback(|req| {
-        Ok(SupergraphResponse::new_from_graphql_response(
-            graphql::Response::builder()
-                .data(json!({"response": "hey"}))
-                .build(),
-            req.context,
-        ))
-    })
-    .await;
+    let (mock, mut handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let driver = tokio::spawn(async move {
+        // GET with no CT, GET with json, GET with json+charset, POST with json = 4 successful calls
+        for _ in 0..4 {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(SupergraphResponse::new_from_graphql_response(
+                graphql::Response::builder()
+                    .data(json!({"response": "hey"}))
+                    .build(),
+                req.context,
+            ));
+        }
+    });
+    let router_service = router::service::from_supergraph_mock(mock).await;
 
     let (server, client) = init(router_service).await;
     let url = format!("{}", server.graphql_listen_address().as_ref().unwrap());
@@ -1352,7 +1414,9 @@ async fn it_validates_get_request_content_type() -> Result<(), ApolloRouterError
         "POST with application/json should still work"
     );
 
-    server.shutdown().await
+    server.shutdown().await?;
+    crate::plugin::test::await_mock_driver(driver).await;
+    Ok(())
 }
 
 #[test(tokio::test)]
@@ -1360,15 +1424,12 @@ async fn it_errors_on_bad_accept_header() -> Result<(), ApolloRouterError> {
     let query = "query";
     let operation_name = "operationName";
 
-    let router_service = router::service::from_supergraph_mock_callback(|req| {
-        Ok(SupergraphResponse::new_from_graphql_response(
-            graphql::Response::builder()
-                .data(json!({"response": "hey"}))
-                .build(),
-            req.context,
-        ))
-    })
-    .await;
+    let (mock, handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    crate::plugin::test::assert_no_mock_calls(handle).await;
+    let router_service = router::service::from_supergraph_mock(mock).await;
 
     let (server, client) = init(router_service).await;
     let url = format!("{}", server.graphql_listen_address().as_ref().unwrap());
@@ -1398,18 +1459,13 @@ async fn it_errors_on_bad_accept_header() -> Result<(), ApolloRouterError> {
 async fn it_displays_homepage() {
     let conf = Arc::new(Configuration::fake_builder().build().unwrap());
 
-    let router_service = router::service::from_supergraph_mock_callback_and_configuration(
-        |req| {
-            Ok(SupergraphResponse::new_from_graphql_response(
-                graphql::Response::builder()
-                    .data(json!({"response": "test"}))
-                    .build(),
-                req.context,
-            ))
-        },
-        conf.clone(),
-    )
-    .await;
+    let (mock, handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    crate::plugin::test::assert_no_mock_calls(handle).await;
+    let router_service =
+        router::service::from_supergraph_mock_with_configuration(mock, conf.clone()).await;
 
     let (server, client) = init_with_config(router_service, conf, MultiMap::new())
         .await
@@ -1445,18 +1501,13 @@ async fn it_doesnt_display_disabled_homepage() {
             .unwrap(),
     );
 
-    let router_service = router::service::from_supergraph_mock_callback_and_configuration(
-        |req| {
-            Ok(SupergraphResponse::new_from_graphql_response(
-                graphql::Response::builder()
-                    .data(json!({"response": "test"}))
-                    .build(),
-                req.context,
-            ))
-        },
-        conf.clone(),
-    )
-    .await;
+    let (mock, handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    crate::plugin::test::assert_no_mock_calls(handle).await;
+    let router_service =
+        router::service::from_supergraph_mock_with_configuration(mock, conf.clone()).await;
 
     let (server, client) = init_with_config(router_service, conf, MultiMap::new())
         .await
@@ -1855,17 +1906,22 @@ fn origin_valid(headers: &HeaderMap, origin: &str) -> bool {
 
 #[test(tokio::test)]
 async fn response_shape() -> Result<(), ApolloRouterError> {
-    let router_service = router::service::from_supergraph_mock_callback(move |req| {
-        Ok(SupergraphResponse::new_from_graphql_response(
+    let (mock, mut handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(SupergraphResponse::new_from_graphql_response(
             graphql::Response::builder()
                 .data(json!({
                     "test": "hello"
                 }))
                 .build(),
             req.context,
-        ))
-    })
-    .await;
+        ));
+    });
+    let router_service = router::service::from_supergraph_mock(mock).await;
     let (server, client) = init(router_service).await;
     let query = json!(
     {
@@ -1896,12 +1952,19 @@ async fn response_shape() -> Result<(), ApolloRouterError> {
         .unwrap()
     );
 
-    server.shutdown().await
+    server.shutdown().await?;
+    crate::plugin::test::await_mock_driver(driver).await;
+    Ok(())
 }
 
 #[test(tokio::test)]
 async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
-    let router_service = router::service::from_supergraph_mock_callback(|req| {
+    let (mock, mut handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
         let body = stream::iter(vec![
             graphql::Response::builder()
                 .data(json!({
@@ -1923,12 +1986,12 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
             graphql::Response::builder().has_next(false).build(),
         ])
         .boxed();
-        Ok(SupergraphResponse::new_from_response(
+        responder.send_response(SupergraphResponse::new_from_response(
             http::Response::builder().status(200).body(body).unwrap(),
             req.context,
-        ))
-    })
-    .await;
+        ));
+    });
+    let router_service = router::service::from_supergraph_mock(mock).await;
     let (server, client) = init(router_service).await;
     let query = json!(
     {
@@ -1967,12 +2030,19 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
         "\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":false}\r\n--graphql--\r\n"
     );
 
-    server.shutdown().await
+    server.shutdown().await?;
+    crate::plugin::test::await_mock_driver(driver).await;
+    Ok(())
 }
 
 #[test(tokio::test)]
 async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterError> {
-    let router_service = router::service::from_supergraph_mock_callback(move |req| {
+    let (mock, mut handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
         let body = stream::iter(vec![
             graphql::Response::builder()
                 .data(json!({
@@ -1982,13 +2052,12 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
                 .build(),
         ])
         .boxed();
-
-        Ok(SupergraphResponse::new_from_response(
+        responder.send_response(SupergraphResponse::new_from_response(
             http::Response::builder().status(200).body(body).unwrap(),
             req.context,
-        ))
-    })
-    .await;
+        ));
+    });
+    let router_service = router::service::from_supergraph_mock(mock).await;
     let (server, client) = init(router_service).await;
     let query = json!(
     {
@@ -2015,7 +2084,9 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
         "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"name\"},\"hasNext\":false}\r\n--graphql--\r\n"
     );
 
-    server.shutdown().await
+    server.shutdown().await?;
+    crate::plugin::test::await_mock_driver(driver).await;
+    Ok(())
 }
 
 #[tokio::test]
@@ -2311,6 +2382,100 @@ async fn test_defer_is_not_buffered() {
     assert_eq!(counts, [1, 2]);
 }
 
+/// Verifies that compression does not buffer `@defer` parts by gating the deferred subgraph
+/// ("accounts", which is only called for the deferred `author` field) until after the first part is
+/// read. If compression buffered across chunks, `count_after_first` would be 2.
+#[tokio::test]
+async fn test_defer_is_not_buffered_with_compression() {
+    // The "accounts" subgraph is only called for the deferred `author` field. Block it until
+    // we've confirmed the first part arrived with count=1.
+    let (unblock_tx, unblock_rx) = tokio::sync::oneshot::channel::<()>();
+    let users_gate = Arc::new(std::sync::Mutex::new(Some(unblock_rx)));
+
+    let counter = GraphQLResponseCounter::default();
+    let counter_for_hook = counter.clone();
+    let gate_for_hook = Arc::clone(&users_gate);
+
+    let service = TestHarness::builder()
+        .configuration_json(json!({"include_subgraph_errors": {"all": true}}))
+        .unwrap()
+        .supergraph_hook(move |service| {
+            let counter = counter_for_hook.clone();
+            service
+                .map_response(move |mut response| {
+                    response.response.extensions_mut().insert(counter.clone());
+                    response.map_stream(move |graphql_response| {
+                        counter.increment();
+                        graphql_response
+                    })
+                })
+                .boxed()
+        })
+        .subgraph_hook(move |name, service| {
+            if name != "accounts" {
+                return service;
+            }
+            let gate = Arc::clone(&gate_for_hook);
+            service
+                .map_future(move |future| {
+                    let gate = Arc::clone(&gate);
+                    async move {
+                        let rx = gate.lock().unwrap().take();
+                        if let Some(rx) = rx {
+                            let _ = rx.await;
+                        }
+                        future.await
+                    }
+                })
+                .boxed()
+        })
+        .build_http_service()
+        .await
+        .unwrap()
+        .map_err(Into::into);
+
+    let service = http_client::response_decompression(service);
+    let service = http_client::defer_spec_20220824_multipart(service);
+    let service = http_client::json(service);
+
+    let request = http::Request::builder()
+        .method(http::Method::POST)
+        .header("host", "127.0.0.1")
+        .body(json!({
+            "query": "query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } ... @defer { author { id name } } } } }",
+            "variables": {"first": 2_u32},
+        }))
+        .unwrap();
+
+    let mut response = service.oneshot(request).await.unwrap();
+    assert_compressed(&response, true);
+    assert_eq!(response.status().as_u16(), 200);
+
+    let counter: GraphQLResponseCounter = response.extensions_mut().remove().unwrap();
+    let mut parts = response.into_body().expect_multipart();
+
+    let first_part: serde_json::Value = parts.next().await.expect("first part");
+    let count_after_first = counter.get();
+
+    // Release the deferred subgraph now that the first part is in hand.
+    let _ = unblock_tx.send(());
+
+    let second_part: serde_json::Value = parts.next().await.expect("second part");
+    let count_after_second = counter.get();
+
+    let all_parts = serde_json::Value::Array(vec![first_part, second_part]);
+    insta::assert_json_snapshot!(all_parts);
+
+    assert_eq!(
+        count_after_first, 1,
+        "first part arrived before deferred fragment was generated"
+    );
+    assert_eq!(
+        count_after_second, 2,
+        "second part arrived after deferred fragment was generated"
+    );
+}
+
 #[tokio::test]
 #[cfg(unix)]
 async fn listening_to_unix_socket() {
@@ -2320,14 +2485,21 @@ async fn listening_to_unix_socket() {
         .build();
     let example_response = expected_response.clone();
 
-    let router_service = router::service::from_supergraph_mock_callback(move |req| {
-        let example_response = example_response.clone();
-        Ok(SupergraphResponse::new_from_graphql_response(
-            example_response,
-            req.context,
-        ))
-    })
-    .await;
+    let (mock, mut handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let driver = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let example_response = example_response.clone();
+            responder.send_response(SupergraphResponse::new_from_graphql_response(
+                example_response,
+                req.context,
+            ));
+        }
+    });
+    let router_service = router::service::from_supergraph_mock(mock).await;
     let server = init_unix(router_service, &temp_dir).await;
 
     let output = send_to_unix_socket(
@@ -2356,6 +2528,7 @@ async fn listening_to_unix_socket() {
     );
 
     server.shutdown().await.unwrap();
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[cfg(unix)]

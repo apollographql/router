@@ -1483,6 +1483,63 @@ mod transitive_auth {
             )],
         );
     }
+
+    #[test]
+    fn type_condition_auth_error_mentions_inline_fragment() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T
+              }
+
+              type T @key(fields: "id") {
+                id: ID!
+                extra: U @external
+                requiresExtra: String @requires(fields: "extra { ... on A { a } ... on B { b } }")
+              }
+
+              union U = A | B
+
+              type A @key(fields: "a") {
+                a: String
+              }
+
+              type B @key(fields: "b") {
+                b: String
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID!
+                extra: U
+              }
+
+              union U = A | B
+
+              type A @key(fields: "a") @requiresScopes(scopes: [["admin"]]) {
+                a: String
+              }
+
+              type B @key(fields: "b") {
+                b: String
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "MISSING_TRANSITIVE_AUTH_REQUIREMENTS",
+                r#"[Subgraph1] Field "T.requiresExtra" does not specify necessary @authenticated, @requiresScopes and/or @policy auth requirements to access the transitive data in inline fragment type condition "A" from @requires selection set."#,
+            )],
+        );
+    }
 }
 
 #[test]
