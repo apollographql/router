@@ -1,7 +1,6 @@
 //! Service which makes individual requests to Apollo Connectors over some transport
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -164,32 +163,24 @@ pub(crate) struct ConnectorRequestServiceFactory {
 }
 
 impl ConnectorRequestServiceFactory {
+    /// `http_client_service_factory` contains the connector HTTP client factories
+    /// that we'll set up connector request services for.
     pub(crate) fn new(
         http_client_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
         plugins: Arc<Plugins>,
-        connector_sources: Arc<HashSet<String>>,
     ) -> Self {
-        // Pre-build the HTTP client services for each source so that
-        // ConnectorRequestService can clone them per-request instead of
-        // re-folding plugins every time.
-        let mut http_clients = IndexMap::with_capacity(http_client_service_factory.len());
-        for (source_key, factory) in http_client_service_factory.iter() {
+        let mut map = HashMap::with_capacity(http_client_service_factory.len());
+        for (source, factory) in http_client_service_factory.iter() {
             // source_config_key() format is "{subgraph_name}.{source_or_synthetic}";
             // the subgraph name is the first dot-separated component.
-            let subgraph_name = source_key.split('.').next().unwrap_or(source_key);
-            http_clients.insert(source_key.clone(), factory.create(subgraph_name));
-        }
-        let mut map = HashMap::with_capacity(connector_sources.len());
-        for source in connector_sources.iter() {
+            let subgraph_name = source.split('.').next().unwrap_or(source);
+            let http_client = factory.create(subgraph_name);
             // One buffer per connector source provides per-source backpressure and is
             // required for correct LoadShed / RateLimit behaviour from traffic-shaping
             // plugins (mirrors the per-subgraph buffer in SubgraphServiceFactory).
             let service = UnconstrainedBuffer::new(
                 plugins.iter().rev().fold(
-                    ConnectorRequestService {
-                        http_client: http_clients.get(source).cloned(),
-                    }
-                    .boxed_clone(),
+                    ConnectorRequestService { http_client }.boxed_clone(),
                     |acc, (_, e)| e.connector_request_service(acc, source.clone()),
                 ),
                 DEFAULT_BUFFER_SIZE,
@@ -218,7 +209,7 @@ pub(crate) struct ConnectorRequestService {
     /// plugin layers already folded in. Each `ConnectorRequestService`
     /// instance only handles requests for a single source, so we store
     /// just the one client it needs.
-    pub(crate) http_client: Option<crate::services::http::BoxCloneService>,
+    pub(crate) http_client: crate::services::http::BoxCloneService,
 }
 
 impl tower::Service<Request> for ConnectorRequestService {
@@ -226,13 +217,14 @@ impl tower::Service<Request> for ConnectorRequestService {
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.http_client.poll_ready(cx)
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
         let original_subgraph_name = request.connector.id.subgraph_name.to_string();
-        let http_client = self.http_client.clone();
+        let fresh_client = self.http_client.clone();
+        let mut http_client = std::mem::replace(&mut self.http_client, fresh_client);
 
         // Load the information needed from the context
         let (debug, connector_request_event, request_limit) =
@@ -307,26 +299,22 @@ impl tower::Service<Request> for ConnectorRequestService {
                             &original_subgraph_name,
                         );
 
-                        let result = if let Some(http_client) = http_client {
-                            let (parts, body) = http_request.inner.into_parts();
-                            let http_request =
-                                http::Request::from_parts(parts, router::body::from_bytes(body));
+                        let (parts, body) = http_request.inner.into_parts();
+                        let http_request =
+                            http::Request::from_parts(parts, router::body::from_bytes(body));
 
-                            http_client
-                                .oneshot(crate::services::http::HttpRequest {
-                                    http_request,
-                                    context: request.context.clone(),
-                                })
-                                .await
-                                .map(|result| result.http_response)
-                                .map_err(|e|
-                                    // Note: this previously used `#[from] BoxError` but when we moved `Error` into the
-                                    // `apollo-federation` crate, we could longer reference `BoxError` from there.
-                                    Error::TransportFailure((replace_subgraph_name(e, &request.connector)).to_string())
-                                )
-                        } else {
-                            Err(Error::TransportFailure("no http client found".into()))
-                        };
+                        let result = http_client
+                            .call(crate::services::http::HttpRequest {
+                                http_request,
+                                context: request.context.clone(),
+                            })
+                            .await
+                            .map(|result| result.http_response)
+                            .map_err(|e|
+                                // Note: this previously used `#[from] BoxError` but when we moved `Error` into the
+                                // `apollo-federation` crate, we could longer reference `BoxError` from there.
+                                Error::TransportFailure((replace_subgraph_name(e, &request.connector)).to_string())
+                            );
 
                         u64_counter!(
                             "apollo.router.operations.connectors",

@@ -372,10 +372,11 @@ impl YamlRouterFactory {
         async {
             let mut builder = PluggableSupergraphServiceBuilder::new(planner);
             builder = builder.with_configuration(configuration.clone());
-            let http_service_factory =
+            let (http_service_factory, connector_http_service_factory) =
                 create_http_services(&plugins, &schema, &configuration).await?;
             let subgraph_services = create_subgraph_services(&http_service_factory).await?;
             builder = builder.with_http_service_factory(http_service_factory);
+            builder = builder.with_connector_http_service_factory(connector_http_service_factory);
             for (name, subgraph_service) in subgraph_services {
                 builder = builder.with_subgraph_service(&name, subgraph_service);
             }
@@ -402,11 +403,20 @@ pub(crate) async fn create_subgraph_services(
     Ok(subgraph_services)
 }
 
+/// Returns `(subgraph_http_services, connector_http_services)`: HTTP client
+/// service factories for regular subgraphs, and separately for connector
+/// sources (keyed by `source_config_key()`, i.e. `{subgraph_name}.{source_or_synthetic}`).
 pub(crate) async fn create_http_services(
     plugins: &Arc<Plugins>,
     schema: &Schema,
     configuration: &Configuration,
-) -> Result<IndexMap<String, HttpClientServiceFactory>, BoxError> {
+) -> Result<
+    (
+        IndexMap<String, HttpClientServiceFactory>,
+        IndexMap<String, HttpClientServiceFactory>,
+    ),
+    BoxError,
+> {
     // Note we are grabbing these root stores once and then reusing it for each subgraph. Why?
     // When TLS was not configured for subgraphs, the OS provided list of certificates was parsed once per subgraph, which resulted in long loading times on OSX.
     // This generates the native root store once, and reuses it across subgraphs
@@ -465,6 +475,7 @@ pub(crate) async fn create_http_services(
         .map(|c| c.source_config_keys.clone())
         .unwrap_or_default();
 
+    let mut connector_http_services = IndexMap::new();
     for name in connector_sources.iter() {
         let http_service = crate::services::http::HttpClientService::from_config_for_connector(
             name,
@@ -474,10 +485,10 @@ pub(crate) async fn create_http_services(
         )?;
 
         let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
-        http_services.insert(name.clone(), http_service_factory);
+        connector_http_services.insert(name.clone(), http_service_factory);
     }
 
-    Ok(http_services)
+    Ok((http_services, connector_http_services))
 }
 
 impl TlsClient {
