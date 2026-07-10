@@ -42,7 +42,7 @@ use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::layers::query_analysis::QueryAnalysis;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::router::service::RouterCreator;
@@ -268,15 +268,15 @@ impl YamlRouterFactory {
         license: Arc<LicenseState>,
     ) -> Result<RouterCreator, BoxError> {
         // Instantiate the parser here so we can use it to warm up the planner below
-        let query_analysis_layer =
-            Arc::new(QueryAnalysisLayer::new(schema.clone(), configuration.clone()).await);
+        let query_analysis =
+            Arc::new(QueryAnalysis::new(schema.clone(), configuration.clone()).await);
         let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
 
         let (supergraph_creator, warmup) = self
             .inner_create_supergraph(
                 configuration.clone(),
                 schema,
-                query_analysis_layer.clone(),
+                query_analysis.clone(),
                 initial_telemetry_plugin,
                 extra_plugins,
                 license,
@@ -296,7 +296,7 @@ impl YamlRouterFactory {
         .await;
 
         RouterCreator::new(
-            query_analysis_layer,
+            query_analysis,
             persisted_query_layer,
             Arc::new(supergraph_creator),
             configuration,
@@ -309,7 +309,7 @@ impl YamlRouterFactory {
         &mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        query_analysis: Arc<QueryAnalysisLayer>,
+        query_analysis: Arc<QueryAnalysis>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: Arc<LicenseState>,

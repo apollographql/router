@@ -72,7 +72,7 @@ use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_V
 use crate::services::layers::persisted_queries::EnforceSafelistLayer;
 use crate::services::layers::persisted_queries::ExpandIdsLayer;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::layers::query_analysis::QueryAnalysis;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::router;
 use crate::services::router::batching::BatchingLayer;
@@ -101,7 +101,7 @@ impl RouterService {
         supergraph_service: supergraph::BoxCloneService,
         apq_layer: APQLayer,
         persisted_query_layer: Arc<PersistedQueryLayer>,
-        query_analysis_layer: Arc<QueryAnalysisLayer>,
+        query_analysis: Arc<QueryAnalysis>,
         batching: Batching,
     ) -> Self {
         // Some of the layers in the stack are wrapping previous implementations that are called
@@ -114,7 +114,7 @@ impl RouterService {
             .layer(RouterToSupergraphRequestLayer)
             .layer(ExpandIdsLayer::new(persisted_query_layer.clone()))
             .layer(APQCachingLayer::new(apq_layer))
-            .layer(ParseQueryLayer::new(query_analysis_layer))
+            .layer(ParseQueryLayer::new(query_analysis))
             .layer(EnforceSafelistLayer::new(persisted_query_layer))
             .service(supergraph_service)
             .boxed_clone();
@@ -669,7 +669,7 @@ impl RouterFactory for RouterCreator {
 
 impl RouterCreator {
     pub(crate) async fn new(
-        query_analysis_layer: Arc<QueryAnalysisLayer>,
+        query_analysis: Arc<QueryAnalysis>,
         persisted_query_layer: Arc<PersistedQueryLayer>,
         supergraph_creator: Arc<SupergraphCreator>,
         configuration: Arc<Configuration>,
@@ -708,7 +708,7 @@ impl RouterCreator {
                 supergraph_creator.make(),
                 apq_layer,
                 persisted_query_layer,
-                query_analysis_layer,
+                query_analysis,
                 configuration.batching.clone(),
             ),
         );

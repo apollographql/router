@@ -269,7 +269,7 @@ impl PersistedQueryLayer {
 
             match doc_opt {
                 None => {
-                    // For some reason, QueryAnalysisLayer didn't give us a document?
+                    // For some reason, QueryAnalysis didn't give us a document?
                     return Err(supergraph_err(
                         graphql_err(
                             "MISSING_PARSED_OPERATION",
@@ -510,7 +510,7 @@ mod tests {
     use crate::graphql;
     use crate::metrics::FutureMetricsExt;
     use crate::services::layers::persisted_queries::freeform_graphql_behavior::FreeformGraphQLBehavior;
-    use crate::services::layers::query_analysis::QueryAnalysisLayer;
+    use crate::services::layers::query_analysis::QueryAnalysis;
     use crate::spec::Schema;
     use crate::test_harness::mocks::persisted_queries::*;
 
@@ -848,7 +848,7 @@ mod tests {
 
     async fn run_first_two_layers(
         pq_layer: &PersistedQueryLayer,
-        query_analysis_layer: &QueryAnalysisLayer,
+        query_analysis: &QueryAnalysis,
         body: &str,
         skip_enforcement: bool,
     ) -> SupergraphRequest {
@@ -875,7 +875,7 @@ mod tests {
         let updated_request = pq_layer
             .supergraph_request(incoming_request)
             .expect("pq layer returned error response instead of returning a request");
-        query_analysis_layer
+        query_analysis
             .supergraph_request(updated_request)
             .await
             .expect("QA layer returned error response instead of returning a request")
@@ -883,13 +883,13 @@ mod tests {
 
     async fn denied_by_safelist(
         pq_layer: &PersistedQueryLayer,
-        query_analysis_layer: &QueryAnalysisLayer,
+        query_analysis: &QueryAnalysis,
         body: &str,
         log_unknown: bool,
         counter_value: u64,
     ) {
         let request_with_analyzed_query =
-            run_first_two_layers(pq_layer, query_analysis_layer, body, false).await;
+            run_first_two_layers(pq_layer, query_analysis, body, false).await;
 
         let mut supergraph_response = pq_layer
             .supergraph_request_with_analyzed_query(request_with_analyzed_query)
@@ -922,14 +922,14 @@ mod tests {
 
     async fn allowed_by_safelist(
         pq_layer: &PersistedQueryLayer,
-        query_analysis_layer: &QueryAnalysisLayer,
+        query_analysis: &QueryAnalysis,
         body: &str,
         log_unknown: bool,
         skip_enforcement: bool,
         counter_value: u64,
     ) {
         let request_with_analyzed_query =
-            run_first_two_layers(pq_layer, query_analysis_layer, body, skip_enforcement).await;
+            run_first_two_layers(pq_layer, query_analysis, body, skip_enforcement).await;
 
         pq_layer
             .supergraph_request_with_analyzed_query(request_with_analyzed_query)
@@ -992,12 +992,12 @@ mod tests {
 
             let schema = Arc::new(Schema::parse(include_str!("../../../testdata/supergraph.graphql"), &Default::default()).unwrap());
 
-            let query_analysis_layer = QueryAnalysisLayer::new(schema, Arc::new(config)).await;
+            let query_analysis = QueryAnalysis::new(schema, Arc::new(config)).await;
 
             // A random query is blocked.
             denied_by_safelist(
                 &pq_layer,
-                &query_analysis_layer,
+                &query_analysis,
                 "query SomeQuery { me { id } }",
                 log_unknown,
                 1,
@@ -1006,7 +1006,7 @@ mod tests {
             // But it is allowed with skip_enforcement set.
             allowed_by_safelist(
                 &pq_layer,
-                &query_analysis_layer,
+                &query_analysis,
                 "query SomeQuery { me { id } }",
                 log_unknown,
                 true,
@@ -1016,7 +1016,7 @@ mod tests {
             // The exact string from the manifest is allowed.
             allowed_by_safelist(
                 &pq_layer,
-                &query_analysis_layer,
+                &query_analysis,
                 "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{name,username}  } # yeah",
                 log_unknown,
                 false,
@@ -1027,7 +1027,7 @@ mod tests {
             // Reordering definitions and reformatting a bit matches.
             allowed_by_safelist(
                 &pq_layer,
-                &query_analysis_layer,
+                &query_analysis,
                 "#comment\n  fragment, B on Query  , { me{name    username} }    query SomeOp {  ...A ...B }  fragment    \nA on Query { me{ id} }",
                 log_unknown,
                 false,
@@ -1038,7 +1038,7 @@ mod tests {
             // Reordering fields does not match!
             denied_by_safelist(
                 &pq_layer,
-                &query_analysis_layer,
+                &query_analysis,
                 "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{username,name}  } # yeah",
                 log_unknown,
                 2,
@@ -1049,7 +1049,7 @@ mod tests {
             // introspection is enabled.
             allowed_by_safelist(
                 &pq_layer,
-                &query_analysis_layer,
+                &query_analysis,
                 r#"fragment F on Query { __typename foo: __schema { __typename } } query Q { __type(name: "foo") { name } ...F }"#,
                 log_unknown,
                 false,
@@ -1063,7 +1063,7 @@ mod tests {
             // (https://github.com/apollographql/apollo-rs/issues/613)
             allowed_by_safelist(
                 &pq_layer,
-                &query_analysis_layer,
+                &query_analysis,
                 r#"fragment F on Query { __typename foo: __schema { __typename } } query Q { __type(name: "foo") { name } ...F ...F }"#,
                 log_unknown,
                 false,
@@ -1076,7 +1076,7 @@ mod tests {
             // But adding any top-level non-introspection field is enough to make it not count as introspection.
             denied_by_safelist(
                 &pq_layer,
-                &query_analysis_layer,
+                &query_analysis,
                 r#"fragment F on Query { __typename foo: __schema { __typename } me { id } } query Q { __type(name: "foo") { name } ...F }"#,
                 log_unknown,
                 3,
