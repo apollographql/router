@@ -55,10 +55,7 @@ pub(crate) const APOLLO_CONNECTOR_SOURCE_DETAIL: Key =
 
 /// A service for executing connector requests.
 ///
-/// Bound to a single connector (and therefore a single connector source) once, when
-/// [`ConnectorServiceFactory`] pre-builds its per-service-name stacks at reload time, so
-/// that `poll_ready` can propagate the readiness of the one
-/// [`ConnectorRequestService`](super::connector::request_service::ConnectorRequestService)
+/// Bound to a single connector, and therefore a single connector source.
 /// it will actually dispatch to.
 #[derive(Clone)]
 pub(crate) struct ConnectorService {
@@ -240,11 +237,7 @@ async fn execute(
 pub(crate) struct ConnectorServiceFactory {
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
-    /// One fully-composed, buffered stack pre-built per connector service name at reload
-    /// time (mirroring `SubgraphServiceFactory::services`), so no stack allocation happens
-    /// on the request hot path. This is also the intended insertion point for a future
-    /// per-connector-source circuit breaking layer: the buffer here shares state across
-    /// clones of the same stack, just like the per-subgraph buffer does.
+    /// Pre-built services for each connector.
     services: Arc<
         HashMap<String, UnconstrainedBuffer<ConnectRequest, BoxFuture<'static, ServiceResult>>>,
     >,
