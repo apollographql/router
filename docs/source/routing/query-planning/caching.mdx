@@ -176,7 +176,7 @@ or, if configured with multiple URLs:
 
 <Tip>
 
-In your router's YAML config file, always specify Redis URLs via environment variables and [variable expansion](https://www.apollographql.com/docs/graphos/routing/configuration/yaml#variable-expansion). This prevents Redis URLs from being committed to version control, which is especially dangerous if they include authentication information like a username or password.
+In your router's YAML config file, always specify Redis URLs via environment variables and [variable expansion](/graphos/routing/configuration/yaml#variable-expansion). This prevents Redis URLs from being committed to version control, which is especially dangerous if they include authentication information like a username or password.
 
 </Tip>
 
@@ -223,7 +223,7 @@ supergraph:
 
 <Caution>
 Avoid hardcoding `username` and `password` directly in your YAML config file.
-Instead, use [variable expansion](https://www.apollographql.com/docs/graphos/routing/configuration/yaml#variable-expansion) to inject credentials via environment variables or a secrets manager (for example, `${env.REDIS_PASSWORD}`).
+Instead, use [variable expansion](/graphos/routing/configuration/yaml#variable-expansion) to inject credentials via environment variables or a secrets manager (for example, `${env.REDIS_PASSWORD}`).
 This prevents credentials from being committed to version control.
 </Caution>
 
