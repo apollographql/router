@@ -7918,11 +7918,6 @@ expression: "&schema"
             "null"
           ]
         },
-        "jaeger": {
-          "default": false,
-          "description": "Propagate Jaeger",
-          "type": "boolean"
-        },
         "request": {
           "allOf": [
             {

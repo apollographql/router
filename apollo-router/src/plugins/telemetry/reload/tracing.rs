@@ -17,7 +17,7 @@
 //! ## Propagation
 //!
 //! The [`create_propagator`] function builds a composite propagator supporting multiple trace
-//! context formats (W3C Trace Context, Jaeger, Zipkin, Datadog, AWS X-Ray). This allows the router
+//! context formats (W3C Trace Context, Zipkin, Datadog, AWS X-Ray). This allows the router
 //! to interoperate with services using different tracing systems.
 
 use opentelemetry::propagation::TextMapCompositePropagator;
@@ -76,9 +76,6 @@ pub(crate) fn create_propagator(
 ) -> TextMapCompositePropagator {
     let mut propagators: Vec<Box<dyn TextMapPropagator + Send + Sync + 'static>> = Vec::new();
 
-    if tracing.is_jaeger_propagation_enabled() {
-        propagators.push(Box::<opentelemetry_jaeger_propagator::Propagator>::default());
-    }
     if tracing.is_baggage_propagation_enabled() {
         propagators.push(Box::<opentelemetry_sdk::propagation::BaggagePropagator>::default());
     }
@@ -89,8 +86,7 @@ pub(crate) fn create_propagator(
         propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
     }
     if tracing.is_datadog_propagation_enabled() {
-        if tracing.is_jaeger_propagation_enabled()
-            || tracing.is_trace_context_propagation_enabled()
+        if tracing.is_trace_context_propagation_enabled()
             || tracing.is_zipkin_propagation_enabled()
             || tracing.is_aws_xray_propagation_enabled()
         {

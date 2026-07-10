@@ -305,10 +305,6 @@ impl Tracing {
         self.propagation.trace_context || self.otlp.enabled
     }
 
-    pub(crate) fn is_jaeger_propagation_enabled(&self) -> bool {
-        self.propagation.jaeger
-    }
-
     pub(crate) fn is_datadog_propagation_enabled(&self) -> bool {
         self.propagation.datadog.unwrap_or(false) || self.datadog.enabled
     }
@@ -408,8 +404,6 @@ pub(crate) struct Propagation {
     pub(crate) baggage: bool,
     /// Propagate trace context https://www.w3.org/TR/trace-context/
     pub(crate) trace_context: bool,
-    /// Propagate Jaeger
-    pub(crate) jaeger: bool,
     /// Propagate Datadog
     pub(crate) datadog: Option<bool>,
     /// Propagate Zipkin

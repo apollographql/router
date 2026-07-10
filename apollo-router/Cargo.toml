@@ -180,7 +180,6 @@ opentelemetry_sdk = { version = "0.32", default-features = false, features = [
 opentelemetry-aws = "0.20"
 rmp = "0.8"
 opentelemetry-http = "0.32"
-opentelemetry-jaeger-propagator = "0.32"
 opentelemetry-otlp = { version = "0.32", default-features = false, features = [
     "grpc-tonic",
     "gzip-tonic",
