@@ -190,7 +190,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
                 all_routers.main.1,
                 pipeline_ref.clone(),
-                router_service_factory.clone(),
+                Some(router_service_factory),
                 actual_main_listen_address.clone(),
                 main_listener,
                 configuration.clone(),
@@ -238,7 +238,9 @@ impl HttpServerFactory for AxumHttpServerFactory {
                         let (server, shutdown_sender) = serve_router_on_listen_addr(
                             router,
                             pipeline_ref.clone(),
-                            router_service_factory.clone(),
+                            // Extra listeners (health check, metrics, ...) never serve
+                            // GraphQL requests, so they have no need for a router service.
+                            None,
                             listen_addr.clone(),
                             listener,
                             configuration.clone(),

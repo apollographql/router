@@ -319,7 +319,10 @@ async fn process_error(io_error: std::io::Error) {
 pub(super) fn serve_router_on_listen_addr(
     router: axum::Router,
     pipeline_ref: Arc<PipelineRef>,
-    router_service_factory: Arc<dyn Fn() -> router::BoxCloneService + Send + Sync>,
+    // `None` for listeners that never serve GraphQL requests (eg. health, metrics):
+    // they never read the `ConnectionRouterService` extension, so building one per
+    // accepted connection would be pure waste.
+    router_service_factory: Option<Arc<dyn Fn() -> router::BoxCloneService + Send + Sync>>,
     address: ListenAddr,
     mut listener: Listener,
     configuration: Arc<Configuration>,
@@ -350,9 +353,6 @@ pub(super) fn serve_router_on_listen_addr(
                 }
                 res = listener.accept() => {
                     let app = NormalizePathLayer::trim_trailing_slash().layer(router.clone());
-                    // The one and only call to the RF factory for this connection: every
-                    // request on this connection shares this single created service.
-                    let router_service = connection_router_service(router_service_factory());
                     let connection_shutdown = connection_shutdown.clone();
                     let connection_stop_signal = all_connections_stopped_sender.clone();
                     let address = address.clone();
@@ -364,6 +364,14 @@ pub(super) fn serve_router_on_listen_addr(
                                 tracing::info!("can accept connections again");
                                 MAX_FILE_HANDLES_WARN.store(false, Ordering::SeqCst);
                             }
+
+                            // The one and only call to the RF factory for this connection: every
+                            // request on this connection shares this single created service.
+                            // Skipped entirely (and only computed once the connection is known
+                            // to be accepted) when this listener has no router service to serve.
+                            let router_service = router_service_factory
+                                .as_ref()
+                                .map(|factory| connection_router_service(factory()));
 
                             tokio::task::spawn(async move {
                                 // this sender must be moved into the session to track that it is still running
@@ -397,7 +405,7 @@ pub(super) fn serve_router_on_listen_addr(
                                                 peer_address: stream.peer_addr().ok(),
                                                 server_address: stream.local_addr().ok(),
                                             }))
-                                            .layer(AddExtensionLayer::new(router_service))
+                                            .option_layer(router_service.map(AddExtensionLayer::new))
                                             .layer_fn(|inner| IdleConnectionChecker::new(received_first_request.clone(), inner))
                                             .service(app)
                                             .boxed_clone();
@@ -419,7 +427,7 @@ pub(super) fn serve_router_on_listen_addr(
                                     NetworkStream::Unix(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
                                         let app = ServiceBuilder::new()
-                                            .layer(AddExtensionLayer::new(router_service))
+                                            .option_layer(router_service.map(AddExtensionLayer::new))
                                             .layer_fn(|inner| IdleConnectionChecker::new(received_first_request.clone(), inner))
                                             .service(app)
                                             .boxed_clone();
@@ -454,7 +462,7 @@ pub(super) fn serve_router_on_listen_addr(
 
                                         let received_first_request = Arc::new(AtomicBool::new(false));
                                         let app = ServiceBuilder::new()
-                                            .layer(AddExtensionLayer::new(router_service))
+                                            .option_layer(router_service.map(AddExtensionLayer::new))
                                             .layer_fn(|inner| IdleConnectionChecker::new(received_first_request.clone(), inner))
                                             .service(app)
                                             .boxed_clone();
