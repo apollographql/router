@@ -55,7 +55,6 @@ use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::InMemoryQueryPlanCache;
 use crate::router_factory::RouterFactory;
-use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::HasPlugins;
 use crate::services::HasSchema;
 use crate::services::MULTIPART_DEFER_ACCEPT;
@@ -79,6 +78,7 @@ use crate::services::router;
 use crate::services::router::batching::BatchingLayer;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::router::pipeline_handle::PipelineRef;
+use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::supergraph;
 
 pub(crate) static MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =

@@ -164,7 +164,8 @@ impl FetchService {
             let keys = connector.resolvable_key(schema.supergraph_schema())?;
 
             let (_parts, response) = match connector_service_factory
-                .create()
+                .create(&fetch_node.service_name)
+                .expect("we already checked that the connector exists for this service name; qed")
                 .oneshot(
                     ConnectRequest::builder()
                         .service_name(fetch_node.service_name.clone())

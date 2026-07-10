@@ -509,7 +509,6 @@ mod tests {
     use crate::graphql;
     use crate::graphql::Request;
     use crate::layers::ServiceExt as LayerExt;
-    use crate::services::APPLICATION_JSON_HEADER_VALUE;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::services::http::HttpClientServiceFactory;
@@ -520,6 +519,7 @@ mod tests {
     use crate::services::router::body;
     use crate::services::subgraph;
     use crate::services::subgraph::SubgraphRequestId;
+    use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
     use crate::spec::QueryHash;
 
     #[tokio::test(flavor = "multi_thread")]

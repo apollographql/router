@@ -471,6 +471,7 @@ pub(crate) struct PluggableSupergraphServiceBuilder {
     plugins: Arc<Plugins>,
     subgraph_services: Vec<(String, subgraph::BoxCloneService)>,
     http_service_factory: IndexMap<String, HttpClientServiceFactory>,
+    connector_http_service_factory: IndexMap<String, HttpClientServiceFactory>,
     query_planner_service: query_planner::BoxCloneService,
     configuration: Option<Arc<Configuration>>,
     schema: Arc<Schema>,
@@ -490,6 +491,7 @@ impl PluggableSupergraphServiceBuilder {
             plugins: Arc::new(Default::default()),
             subgraph_services: Default::default(),
             http_service_factory: Default::default(),
+            connector_http_service_factory: Default::default(),
             query_planner_service,
             configuration: None,
             schema,
@@ -520,6 +522,14 @@ impl PluggableSupergraphServiceBuilder {
         http_service_factory: IndexMap<String, HttpClientServiceFactory>,
     ) -> PluggableSupergraphServiceBuilder {
         self.http_service_factory = http_service_factory;
+        self
+    }
+
+    pub(crate) fn with_connector_http_service_factory(
+        mut self,
+        connector_http_service_factory: IndexMap<String, HttpClientServiceFactory>,
+    ) -> PluggableSupergraphServiceBuilder {
+        self.connector_http_service_factory = connector_http_service_factory;
         self
     }
 
@@ -568,12 +578,6 @@ impl PluggableSupergraphServiceBuilder {
             .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
             .map(|p| p.config.clone());
 
-        let connector_sources = schema
-            .connectors
-            .as_ref()
-            .map(|c| c.source_config_keys.clone())
-            .unwrap_or_default();
-
         let fetch_service = FetchService::new(
             schema.clone(),
             subgraph_schemas.clone(),
@@ -595,9 +599,8 @@ impl PluggableSupergraphServiceBuilder {
                     .map(|c| c.by_service_name.clone())
                     .unwrap_or_default(),
                 Arc::new(ConnectorRequestServiceFactory::new(
-                    Arc::new(self.http_service_factory),
+                    Arc::new(self.connector_http_service_factory),
                     self.plugins.clone(),
-                    connector_sources,
                 )),
             )),
             Arc::new(configuration.experimental_hoist_orphan_errors.clone()),
