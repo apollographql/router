@@ -319,7 +319,7 @@ async fn test_otlp_request_with_trace_context_propagator_with_datadog() -> Resul
                 .traced(false)
                 .header(
                     "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-02",
+                    "00-0af7651916cd43dd8448eb211c80319d-b7ad6b7169203331-02",
                 )
                 .header("tracestate", "m=1,psr=0")
                 .build(),
@@ -340,7 +340,7 @@ async fn test_otlp_request_with_trace_context_propagator_with_datadog() -> Resul
                 .traced(false)
                 .header(
                     "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-03",
+                    "00-0af7651916cd43dd8448eb211c80319e-b7ad6b7169203331-03",
                 )
                 .header("tracestate", "m=1,psr=1")
                 .build(),
