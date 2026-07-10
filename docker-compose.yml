@@ -14,6 +14,10 @@ services:
   # standalone redis
   redis:
     image: redis:latest
+    # Disable RDB/AOF persistence: the container root is read-only and this
+    # instance only exists for the duration of a test run, so there's nothing
+    # worth persisting and no writable /data to save it to anyway.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
     security_opt:
       - no-new-privileges:true
     read_only: true
