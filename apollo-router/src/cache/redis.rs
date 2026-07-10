@@ -42,7 +42,7 @@ use super::ValueType;
 use super::metrics::RedisMetricsCollector;
 use crate::cache::replica_filter::RouteableReplicaFilter;
 use crate::configuration::RedisCache;
-use crate::services::generate_tls_client_config;
+use crate::services::subgraph::http::generate_tls_client_config;
 
 pub(super) static ACTIVE_CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
 const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [

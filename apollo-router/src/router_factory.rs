@@ -1797,7 +1797,7 @@ mod create_subgraph_services_tests {
     use crate::services::http::HttpClientServiceFactory;
     use crate::services::layers::apq::subgraph::PERSISTED_QUERY_KEY;
     use crate::services::router;
-    use crate::services::subgraph_service::SubgraphServiceFactory;
+    use crate::services::subgraph::service::SubgraphServiceFactory;
 
     async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler) -> std::io::Result<()>
     where

@@ -1792,8 +1792,8 @@ mod redis_tls_config {
     //! Exercises the `generate_tls_client_config` → `TlsConnector` path that Redis uses.
     //!
     //! The router's Redis integration builds a `tokio_rustls::TlsConnector` from a
-    //! `ClientConfig` produced by `crate::services::generate_tls_client_config` (re-exported
-    //! from `subgraph_service`). These tests verify that this construction succeeds for the
+    //! `ClientConfig` produced by `crate::services::subgraph::http::generate_tls_client_config`.
+    //! These tests verify that this construction succeeds for the
     //! same cert scenarios used by the HTTP client, catching API breakages in rustls/tokio-rustls
     //! upgrades even without a live Redis server.
 
@@ -1808,7 +1808,8 @@ mod redis_tls_config {
         }
 
         let tls_config =
-            crate::services::generate_tls_client_config(Some(root_store), None).unwrap();
+            crate::services::subgraph::http::generate_tls_client_config(Some(root_store), None)
+                .unwrap();
         let _connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
     }
 
@@ -1828,15 +1829,18 @@ mod redis_tls_config {
             key: load_key(client_key_pem).unwrap(),
         };
 
-        let tls_config =
-            crate::services::generate_tls_client_config(Some(root_store), Some(&client_auth))
-                .unwrap();
+        let tls_config = crate::services::subgraph::http::generate_tls_client_config(
+            Some(root_store),
+            Some(&client_auth),
+        )
+        .unwrap();
         let _connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
     }
 
     #[test]
     fn native_roots_produces_valid_connector() {
-        let tls_config = crate::services::generate_tls_client_config(None, None).unwrap();
+        let tls_config =
+            crate::services::subgraph::http::generate_tls_client_config(None, None).unwrap();
         let _connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
     }
 }
