@@ -422,6 +422,7 @@ impl<'a> TestHarness<'a> {
     pub async fn build_http_service(self) -> Result<HttpService, BoxError> {
         use crate::axum_factory::ListenAddrAndRouter;
         use crate::axum_factory::axum_http_server_factory::make_axum_router;
+        use crate::axum_factory::utils::connection_router_service;
 
         let (config, _schema, query_analysis, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
@@ -435,7 +436,6 @@ impl<'a> TestHarness<'a> {
         let web_endpoints = router_creator.web_endpoints();
 
         let routers = make_axum_router(
-            router_creator,
             &config,
             web_endpoints,
             Arc::new(LicenseState::Licensed {
@@ -443,6 +443,17 @@ impl<'a> TestHarness<'a> {
             }),
         )?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
+
+        // `make_axum_router` no longer bakes a router service into the router: real
+        // connections get one created once per connection in `listeners.rs`. Here, a single
+        // `build_http_service()` call stands in for one connection/session, so create one
+        // router service up front and layer it on the same way.
+        let router_service = connection_router_service(router_creator.create());
+        let router = ServiceBuilder::new()
+            .layer(tower_http::add_extension::AddExtensionLayer::new(
+                router_service,
+            ))
+            .service(router);
         Ok(router.boxed())
     }
 }

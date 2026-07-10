@@ -29,6 +29,7 @@ use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::load_shed::error::Overloaded;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use tracing::instrument::WithSubscriber;
@@ -39,6 +40,7 @@ use super::listeners::ListenersAndRouters;
 use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
 use super::listeners::extra_endpoints;
+use super::utils::ConnectionRouterService;
 use super::utils::PropagatingMakeSpan;
 use crate::Context;
 use crate::axum_factory::compression::Compressor;
@@ -74,21 +76,16 @@ impl AxumHttpServerFactory {
     }
 }
 
-pub(crate) fn make_axum_router<RF>(
-    service_factory: RF,
+pub(crate) fn make_axum_router(
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
     license: Arc<LicenseState>,
-) -> Result<ListenersAndRouters, ApolloRouterError>
-where
-    RF: RouterFactory,
-{
+) -> Result<ListenersAndRouters, ApolloRouterError> {
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
 
     ensure_endpoints_consistency(configuration, &endpoints)?;
 
     let mut main_endpoint = main_endpoint(
-        service_factory,
         configuration,
         endpoints
             .remove(&configuration.supergraph.listen)
@@ -128,8 +125,13 @@ impl HttpServerFactory for AxumHttpServerFactory {
     {
         Box::pin(async move {
             let pipeline_ref = service_factory.pipeline_ref().clone();
-            let all_routers =
-                make_axum_router(service_factory, &configuration, extra_endpoints, license)?;
+            // Built once here and invoked once per accepted connection (see listeners.rs),
+            // rather than once per request.
+            let router_service_factory: Arc<dyn Fn() -> router::BoxCloneService + Send + Sync> = {
+                let service_factory = service_factory.clone();
+                Arc::new(move || service_factory.create())
+            };
+            let all_routers = make_axum_router(&configuration, extra_endpoints, license)?;
 
             // serve main router
 
@@ -188,6 +190,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
                 all_routers.main.1,
                 pipeline_ref.clone(),
+                router_service_factory.clone(),
                 actual_main_listen_address.clone(),
                 main_listener,
                 configuration.clone(),
@@ -235,6 +238,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                         let (server, shutdown_sender) = serve_router_on_listen_addr(
                             router,
                             pipeline_ref.clone(),
+                            router_service_factory.clone(),
                             listen_addr.clone(),
                             listener,
                             configuration.clone(),
@@ -300,15 +304,11 @@ impl HttpServerFactory for AxumHttpServerFactory {
     }
 }
 
-fn main_endpoint<RF>(
-    service_factory: RF,
+fn main_endpoint(
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
     license: Arc<LicenseState>,
-) -> Result<ListenAddrAndRouter, ApolloRouterError>
-where
-    RF: RouterFactory,
-{
+) -> Result<ListenAddrAndRouter, ApolloRouterError> {
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
@@ -322,7 +322,7 @@ where
         .gzip(true)
         .deflate(true);
 
-    let mut main_route = main_router::<RF>(configuration).layer(
+    let mut main_route = main_router(configuration).layer(
         ServiceBuilder::new()
             // Telemetry layers MUST be first. This means that they will be hit first during execution of the pipeline
             // Adding layers before telemetry will cause us to lose metrics and spans.
@@ -335,7 +335,6 @@ where
             // CORS layer must be before any layer that can short-circuit with an error response, else
             // browser clients will not be able to view the error response body.
             .layer(cors)
-            .layer(Extension(service_factory))
             .layer(LicenseLayer::new(license))
             .layer(decompression),
     );
@@ -376,17 +375,14 @@ struct HandlerOptions {
     experimental_log_on_broken_pipe: bool,
 }
 
-pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router<()>
-where
-    RF: RouterFactory,
-{
+pub(super) fn main_router(configuration: &Configuration) -> axum::Router<()> {
     let mut router = Router::new().route(
         &configuration.supergraph.sanitized_path(),
-        get(handle_graphql::<RF>).post(handle_graphql::<RF>),
+        get(handle_graphql).post(handle_graphql),
     );
 
     if BARE_WILDCARD_PATH_REGEX.is_match(configuration.supergraph.path.as_str()) {
-        router = router.route("/", get(handle_graphql::<RF>).post(handle_graphql::<RF>));
+        router = router.route("/", get(handle_graphql).post(handle_graphql));
     }
 
     router = router.route_layer(Extension(HandlerOptions {
@@ -402,9 +398,9 @@ where
     router
 }
 
-async fn handle_graphql<RF: RouterFactory>(
+async fn handle_graphql(
     Extension(options): Extension<HandlerOptions>,
-    Extension(service_factory): Extension<RF>,
+    Extension(service): Extension<ConnectionRouterService>,
     http_request: Request<axum::body::Body>,
 ) -> impl IntoResponse {
     let _guard = i64_up_down_counter_with_unit!(
@@ -418,7 +414,10 @@ async fn handle_graphql<RF: RouterFactory>(
         early_cancel,
         experimental_log_on_broken_pipe,
     } = options;
-    let service = service_factory.create();
+    let service = service
+        .lock()
+        .expect("router service mutex poisoned")
+        .clone();
 
     let request: router::Request = http_request.into();
     let context = request.context.clone();
@@ -450,6 +449,7 @@ async fn handle_graphql<RF: RouterFactory>(
     };
 
     match res {
+        Err(err) if err.is::<Overloaded>() => overloaded_response(),
         Err(err) => internal_server_error(err),
         Ok(response) => {
             let (mut parts, body) = response.response.into_parts();
@@ -515,6 +515,17 @@ where
     (StatusCode::INTERNAL_SERVER_ERROR, Json(json!(response))).into_response()
 }
 
+fn overloaded_response() -> Response {
+    let error = graphql::Error::builder()
+        .message("service unavailable")
+        .extension_code("SERVICE_UNAVAILABLE")
+        .build();
+
+    let response = graphql::Response::builder().error(error).build();
+
+    (StatusCode::SERVICE_UNAVAILABLE, Json(json!(response))).into_response()
+}
+
 struct CancelHandler<'a> {
     context: &'a Context,
     got_first_response: bool,
@@ -555,12 +566,65 @@ pub(crate) struct CanceledRequest;
 
 #[cfg(test)]
 mod tests {
+    use std::task::Context;
+    use std::task::Poll;
+
     use http::header::ACCEPT;
     use http::header::CONTENT_TYPE;
     use tower::Service;
 
     use super::*;
     use crate::assert_snapshot_subscriber;
+
+    /// A service that never becomes ready, so `call` should never be invoked: standing in for
+    /// a permanently-overloaded pipeline.
+    #[derive(Clone)]
+    struct NeverReady;
+
+    impl Service<router::Request> for NeverReady {
+        type Response = router::Response;
+        type Error = tower::BoxError;
+        type Future = std::future::Pending<Result<router::Response, tower::BoxError>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Pending
+        }
+
+        fn call(&mut self, _req: router::Request) -> Self::Future {
+            unreachable!("load_shed should short-circuit calls to a never-ready service")
+        }
+    }
+
+    /// When the connection-scoped router service is permanently not-ready, `load_shed` (added by
+    /// `connection_router_service`) sheds the request with `Overloaded` rather than hanging, and
+    /// `handle_graphql` must turn that into a `503`, not the generic `500` from
+    /// `internal_server_error` — otherwise a shed request is indistinguishable from a real bug.
+    #[tokio::test]
+    async fn overloaded_router_service_returns_503() {
+        let connection_service =
+            crate::axum_factory::utils::connection_router_service(NeverReady.boxed_clone());
+        let options = HandlerOptions {
+            early_cancel: true,
+            experimental_log_on_broken_pipe: false,
+        };
+
+        let request: Request<axum::body::Body> = http::Request::builder()
+            .method("POST")
+            .uri("/")
+            .header(ACCEPT, "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::from(
+                r#"{"query":"query { __typename }"}"#,
+            ))
+            .unwrap();
+
+        let response = handle_graphql(Extension(options), Extension(connection_service), request)
+            .await
+            .into_response();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
     // Drive the http router call into its cancellation-handling path (where `CancelHandler`
     // is constructed) and then deterministically cancel it before completion. With
     // `experimental_log_on_broken_pipe = true`, dropping `CancelHandler` without an

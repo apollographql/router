@@ -18,6 +18,7 @@ use hyper_util::rt::TokioTimer;
 use hyper_util::server::conn::auto::Builder;
 use hyper_util::server::conn::auto::Http1Builder;
 use hyper_util::server::graceful::GracefulConnection;
+use hyper_util::service::TowerToHyperService;
 use multimap::MultiMap;
 #[cfg(unix)]
 use tokio::net::UnixListener;
@@ -25,7 +26,9 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tokio_util::time::FutureExt;
 use tower::Layer;
-use tower_http::add_extension::AddExtension;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+use tower_http::add_extension::AddExtensionLayer;
 use tower_http::normalize_path::NormalizePathLayer;
 use tower_service::Service;
 
@@ -33,11 +36,13 @@ use crate::ListenAddr;
 use crate::axum_factory::ENDPOINT_CALLBACK;
 use crate::axum_factory::connection_handle::ConnectionHandle;
 use crate::axum_factory::utils::ConnectionInfo;
+use crate::axum_factory::utils::connection_router_service;
 use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
+use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineRef;
 
 static MAX_FILE_HANDLES_WARN: AtomicBool = AtomicBool::new(false);
@@ -314,6 +319,7 @@ async fn process_error(io_error: std::io::Error) {
 pub(super) fn serve_router_on_listen_addr(
     router: axum::Router,
     pipeline_ref: Arc<PipelineRef>,
+    router_service_factory: Arc<dyn Fn() -> router::BoxCloneService + Send + Sync>,
     address: ListenAddr,
     mut listener: Listener,
     configuration: Arc<Configuration>,
@@ -344,6 +350,9 @@ pub(super) fn serve_router_on_listen_addr(
                 }
                 res = listener.accept() => {
                     let app = NormalizePathLayer::trim_trailing_slash().layer(router.clone());
+                    // The one and only call to the RF factory for this connection: every
+                    // request on this connection shares this single created service.
+                    let router_service = connection_router_service(router_service_factory());
                     let connection_shutdown = connection_shutdown.clone();
                     let connection_stop_signal = all_connections_stopped_sender.clone();
                     let address = address.clone();
@@ -383,12 +392,15 @@ pub(super) fn serve_router_on_listen_addr(
                                     NetworkStream::Tcp(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
 
-                                        let app = AddExtension::new(app, ConnectionInfo {
-                                            peer_address: stream.peer_addr().ok(),
-                                            server_address: stream.local_addr().ok(),
-                                        });
-
-                                        let app = IdleConnectionChecker::new(received_first_request.clone(), app);
+                                        let app = ServiceBuilder::new()
+                                            .layer(AddExtensionLayer::new(ConnectionInfo {
+                                                peer_address: stream.peer_addr().ok(),
+                                                server_address: stream.local_addr().ok(),
+                                            }))
+                                            .layer(AddExtensionLayer::new(router_service))
+                                            .layer_fn(|inner| IdleConnectionChecker::new(received_first_request.clone(), inner))
+                                            .service(app)
+                                            .boxed_clone();
 
                                         stream
                                             .set_nodelay(true)
@@ -396,9 +408,7 @@ pub(super) fn serve_router_on_listen_addr(
                                                 "this should not fail unless the socket is invalid",
                                             );
                                         let tokio_stream = TokioIo::new(stream);
-                                        let hyper_service = hyper::service::service_fn(move |request| {
-                                            app.clone().call(request)
-                                        });
+                                        let hyper_service = TowerToHyperService::new(app);
 
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
@@ -408,11 +418,13 @@ pub(super) fn serve_router_on_listen_addr(
                                     #[cfg(unix)]
                                     NetworkStream::Unix(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
-                                        let app = IdleConnectionChecker::new(received_first_request.clone(), app);
+                                        let app = ServiceBuilder::new()
+                                            .layer(AddExtensionLayer::new(router_service))
+                                            .layer_fn(|inner| IdleConnectionChecker::new(received_first_request.clone(), inner))
+                                            .service(app)
+                                            .boxed_clone();
                                         let tokio_stream = TokioIo::new(stream);
-                                        let hyper_service = hyper::service::service_fn(move |request| {
-                                            app.clone().call(request)
-                                        });
+                                        let hyper_service = TowerToHyperService::new(app);
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
                                         let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
@@ -441,7 +453,11 @@ pub(super) fn serve_router_on_listen_addr(
                                         };
 
                                         let received_first_request = Arc::new(AtomicBool::new(false));
-                                        let app = IdleConnectionChecker::new(received_first_request.clone(), app);
+                                        let app = ServiceBuilder::new()
+                                            .layer(AddExtensionLayer::new(router_service))
+                                            .layer_fn(|inner| IdleConnectionChecker::new(received_first_request.clone(), inner))
+                                            .service(app)
+                                            .boxed_clone();
 
                                         tls_stream.get_ref().0
                                             .set_nodelay(true)
@@ -449,9 +465,7 @@ pub(super) fn serve_router_on_listen_addr(
                                                 "this should not fail unless the socket is invalid",
                                             );
 
-                                        let hyper_service = hyper::service::service_fn(move |request| {
-                                            app.clone().call(request)
-                                        });
+                                        let hyper_service = TowerToHyperService::new(app);
 
                                         let tokio_stream = TokioIo::new(tls_stream);
 

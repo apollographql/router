@@ -161,6 +161,145 @@ impl RouterFactory for TestRouterFactory {
     }
 }
 
+/// Like [`TestRouterFactory`], but counts calls to `create()` so tests can observe how many
+/// times the pipeline is actually built, independent of how many requests/connections use it.
+#[derive(Clone)]
+struct CountingRouterFactory {
+    inner: MockRouterServiceType,
+    create_calls: Arc<AtomicU32>,
+}
+
+impl RouterFactory for CountingRouterFactory {
+    fn create(&self) -> router::BoxCloneService {
+        self.create_calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.clone().boxed_clone()
+    }
+
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        MultiMap::new()
+    }
+
+    fn pipeline_ref(&self) -> Arc<PipelineRef> {
+        Arc::new(PipelineRef {
+            schema_id: "dummy".to_string(),
+            launch_id: None,
+            config_hash: "dummy".to_string(),
+        })
+    }
+}
+
+/// Confirms `RouterFactory::create()` is called once per accepted connection, not once per
+/// request: several requests reused on the same keep-alive connection share a single `create()`
+/// call, while a request from a distinct connection triggers its own.
+#[tokio::test]
+async fn it_creates_router_service_once_per_connection_not_once_per_request() {
+    let create_calls = Arc::new(AtomicU32::new(0));
+    let (service, mut handle) = tower_test::mock::spawn::<router::Request, router::Response>();
+
+    tokio::spawn(async move {
+        loop {
+            while let Some((request, responder)) = handle.next_request().await {
+                let response = router::Response::http_response_builder()
+                    .response(
+                        http::Response::builder()
+                            .body::<crate::services::router::Body>(router::body::from_bytes(
+                                r#"{"data":{"__typename":"Query"}}"#,
+                            ))
+                            .unwrap(),
+                    )
+                    .context(request.context)
+                    .build()
+                    .unwrap();
+                responder.send_response(response);
+            }
+        }
+    });
+
+    let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
+    let server_factory = AxumHttpServerFactory::new();
+    let server = server_factory
+        .create(
+            CountingRouterFactory {
+                inner: service.into_inner(),
+                create_calls: create_calls.clone(),
+            },
+            Arc::new(Configuration::fake_builder().build().unwrap()),
+            None,
+            vec![],
+            MultiMap::new(),
+            Arc::new(LicenseState::Unlicensed),
+            all_connections_stopped_sender,
+        )
+        .await
+        .expect("failed to create server");
+
+    let url = server
+        .graphql_listen_address()
+        .as_ref()
+        .unwrap()
+        .to_string();
+    let mut default_headers = HeaderMap::new();
+    default_headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+    );
+    default_headers.insert(
+        ACCEPT,
+        HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+    );
+
+    // reqwest::Client pools and reuses one keep-alive connection per host by default, so
+    // several sequential requests here should all land on the same connection.
+    let client = reqwest::Client::builder()
+        .default_headers(default_headers.clone())
+        .build()
+        .unwrap();
+    for i in 0..3 {
+        let response = client
+            .post(&url)
+            .body(json!({ "query": "query { __typename }" }).to_string())
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        // Draining the body (not just checking the status) is required for reqwest to
+        // consider this HTTP/1.1 connection idle and eligible for reuse by the next request.
+        response.bytes().await.unwrap();
+        assert_eq!(
+            status,
+            reqwest::StatusCode::OK,
+            "request {i} should succeed"
+        );
+    }
+    assert_eq!(
+        create_calls.load(Ordering::SeqCst),
+        1,
+        "requests reused on the same keep-alive connection should share one RouterFactory::create() call"
+    );
+
+    // A distinct client (own connection pool) forces a fresh TCP connection.
+    let client2 = reqwest::Client::builder()
+        .default_headers(default_headers)
+        .build()
+        .unwrap();
+    let response = client2
+        .post(&url)
+        .body(json!({ "query": "query { __typename }" }).to_string())
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    response.bytes().await.unwrap();
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(
+        create_calls.load(Ordering::SeqCst),
+        2,
+        "a request from a distinct connection should trigger its own RouterFactory::create() call"
+    );
+
+    server.shutdown().await.unwrap();
+}
+
 async fn init(
     mut mock: impl Service<
         router::Request,
