@@ -816,7 +816,14 @@ impl SubgraphServiceFactory {
         }
     }
 
-    pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxCloneService> {
+    /// Retrieves the pre-built subgraph service stack for `name`, or `None` if no subgraph
+    /// is registered under that name.
+    ///
+    /// The returned service is a clone of the stack built once in [`Self::new`], so this is
+    /// a cheap retrieval rather than a construction. This is also the intended insertion
+    /// point for a future per-subgraph circuit breaking layer: the buffer here shares state
+    /// across clones of the same stack.
+    pub(crate) fn get(&self, name: &str) -> Option<subgraph::BoxCloneService> {
         self.services.get(name).map(|svc| svc.clone().boxed_clone())
     }
 }

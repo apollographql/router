@@ -15,6 +15,7 @@ use crate::graphql::Request as GraphQLRequest;
 use crate::query_planner::fetch::Variables;
 
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+pub(crate) type ServiceResult = Result<Response, BoxError>;
 
 #[non_exhaustive]
 pub(crate) struct Request {

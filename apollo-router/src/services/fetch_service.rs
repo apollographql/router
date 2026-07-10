@@ -164,7 +164,7 @@ impl FetchService {
             let keys = connector.resolvable_key(schema.supergraph_schema())?;
 
             let (_parts, response) = match connector_service_factory
-                .create(&fetch_node.service_name)
+                .get(&fetch_node.service_name)
                 .expect("we already checked that the connector exists for this service name; qed")
                 .oneshot(
                     ConnectRequest::builder()
@@ -257,7 +257,7 @@ impl FetchService {
         let aqs = aliased_operation.to_string(); // TODO
         let current_dir = current_dir.clone();
         let service = subgraph_service_factory
-            .create(&service_name.clone())
+            .get(&service_name.clone())
             .expect("we already checked that the service exists during planning; qed");
 
         let mut subgraph_request = SubgraphRequest::builder()

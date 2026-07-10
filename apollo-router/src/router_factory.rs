@@ -1906,7 +1906,7 @@ mod create_subgraph_services_tests {
         );
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = factory
-            .create("test")
+            .get("test")
             .unwrap()
             .oneshot(subgraph_request(url, "test", "query"))
             .await
@@ -1962,7 +1962,7 @@ mod create_subgraph_services_tests {
         );
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         factory
-            .create("test")
+            .get("test")
             .unwrap()
             .oneshot(subgraph_request(url, "test", "query"))
             .await
@@ -2080,13 +2080,13 @@ mod create_subgraph_services_tests {
             .build();
 
         factory
-            .create("enabled_subgraph")
+            .get("enabled_subgraph")
             .unwrap()
             .oneshot(enabled_request)
             .await
             .unwrap();
         factory
-            .create("disabled_subgraph")
+            .get("disabled_subgraph")
             .unwrap()
             .oneshot(disabled_request)
             .await
