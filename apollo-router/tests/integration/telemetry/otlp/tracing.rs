@@ -15,6 +15,7 @@ use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
 use crate::integration::common::graph_os_enabled;
 use crate::integration::telemetry::TraceSpec;
+use crate::integration::telemetry::unique_trace_id;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_trace_error() -> Result<(), BoxError> {
@@ -298,7 +299,7 @@ async fn test_otlp_request_with_trace_context_propagator_with_datadog() -> Resul
                 .traced(true)
                 .header(
                     "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+                    format!("00-{}-b7ad6b7169203331-01", unique_trace_id()),
                 )
                 .header("tracestate", "m=1,psr=1")
                 .build(),
@@ -319,7 +320,7 @@ async fn test_otlp_request_with_trace_context_propagator_with_datadog() -> Resul
                 .traced(false)
                 .header(
                     "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319d-b7ad6b7169203331-02",
+                    format!("00-{}-b7ad6b7169203331-02", unique_trace_id()),
                 )
                 .header("tracestate", "m=1,psr=0")
                 .build(),
@@ -340,14 +341,13 @@ async fn test_otlp_request_with_trace_context_propagator_with_datadog() -> Resul
                 .traced(false)
                 .header(
                     "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319e-b7ad6b7169203331-03",
+                    format!("00-{}-b7ad6b7169203331-03", unique_trace_id()),
                 )
                 .header("tracestate", "m=1,psr=1")
                 .build(),
         )
         .await?;
 
-    // Be careful if you add the same kind of test crafting your own trace id, make sure to increment the previous trace id by 1 if not you'll receive all the previous spans tested with the same trace id before
     router.graceful_shutdown().await;
     Ok(())
 }
