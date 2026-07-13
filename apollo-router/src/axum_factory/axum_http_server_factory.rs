@@ -124,7 +124,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         RF: RouterFactory,
     {
         Box::pin(async move {
-            let pipeline_ref = service_factory.pipeline_ref().clone();
+            let pipeline_handle = service_factory.pipeline_handle();
             // Built once here and invoked once per accepted connection (see listeners.rs),
             // rather than once per request.
             let router_service_factory: Arc<dyn Fn() -> router::BoxCloneSyncService + Send + Sync> = {
@@ -189,7 +189,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
 
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
                 all_routers.main.1,
-                pipeline_ref.clone(),
+                pipeline_handle.clone(),
                 Some(router_service_factory),
                 actual_main_listen_address.clone(),
                 main_listener,
@@ -237,7 +237,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     .map(|((listen_addr, listener), router)| {
                         let (server, shutdown_sender) = serve_router_on_listen_addr(
                             router,
-                            pipeline_ref.clone(),
+                            pipeline_handle.clone(),
                             // Extra listeners (health check, metrics, ...) never serve
                             // GraphQL requests, so they have no need for a router service.
                             None,

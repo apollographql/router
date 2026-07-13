@@ -43,7 +43,7 @@ use crate::http_server_factory::NetworkStream;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::services::router;
-use crate::services::router::pipeline_handle::PipelineRef;
+use crate::services::router::pipeline_handle::PipelineHandle;
 
 static MAX_FILE_HANDLES_WARN: AtomicBool = AtomicBool::new(false);
 
@@ -318,7 +318,7 @@ async fn process_error(io_error: std::io::Error) {
 
 pub(super) fn serve_router_on_listen_addr(
     router: axum::Router,
-    pipeline_ref: Arc<PipelineRef>,
+    pipeline_handle: Arc<PipelineHandle>,
     // `None` for listeners that never serve GraphQL requests (eg. health, metrics):
     // they never read the `ConnectionRouterService` extension, so building one per
     // accepted connection would be pure waste.
@@ -356,7 +356,7 @@ pub(super) fn serve_router_on_listen_addr(
                     let connection_shutdown = connection_shutdown.clone();
                     let connection_stop_signal = all_connections_stopped_sender.clone();
                     let address = address.clone();
-                    let pipeline_ref = pipeline_ref.clone();
+                    let pipeline_handle = pipeline_handle.clone();
 
                     match res {
                         Ok(res) => {
@@ -376,7 +376,7 @@ pub(super) fn serve_router_on_listen_addr(
                             tokio::task::spawn(async move {
                                 // this sender must be moved into the session to track that it is still running
                                 let _connection_stop_signal = connection_stop_signal;
-                                let connection_handle = ConnectionHandle::new(pipeline_ref, address);
+                                let connection_handle = ConnectionHandle::new(pipeline_handle, address);
 
                                 // Development note: the following describes the different network
                                 // streams and how to think about them when modifying the logic

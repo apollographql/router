@@ -966,7 +966,7 @@ mod tests {
     use crate::router_factory::RouterFactory;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::services::router;
-    use crate::services::router::pipeline_handle::PipelineRef;
+    use crate::services::router::pipeline_handle::PipelineHandle;
     use crate::uplink::schema::SchemaState;
 
     type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
@@ -2290,7 +2290,7 @@ mod tests {
         impl RouterFactory for MyRouterFactory {
             fn create(&self) -> router::BoxCloneSyncService;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
-            fn pipeline_ref(&self) -> Arc<PipelineRef>;
+            fn pipeline_handle(&self) -> Arc<PipelineHandle>;
         }
 
         impl Clone for MyRouterFactory {

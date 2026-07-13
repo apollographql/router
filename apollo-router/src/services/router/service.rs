@@ -77,7 +77,6 @@ use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::router;
 use crate::services::router::batching::BatchingLayer;
 use crate::services::router::pipeline_handle::PipelineHandle;
-use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::supergraph;
 
@@ -666,8 +665,8 @@ impl RouterFactory for RouterCreator {
         mm
     }
 
-    fn pipeline_ref(&self) -> Arc<PipelineRef> {
-        self.pipeline_handle.pipeline_ref.clone()
+    fn pipeline_handle(&self) -> Arc<PipelineHandle> {
+        self.pipeline_handle.clone()
     }
 }
 

@@ -44,7 +44,7 @@ use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::layers::query_analysis::QueryAnalysis;
 use crate::services::router;
-use crate::services::router::pipeline_handle::PipelineRef;
+use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::spec::Schema;
@@ -149,7 +149,12 @@ pub(crate) trait RouterFactory: Clone + Send + Sync + 'static {
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 
-    fn pipeline_ref(&self) -> Arc<PipelineRef>;
+    /// Returns the handle for this factory's pipeline. Callers that keep a
+    /// clone alive for the lifetime of a connection keep the
+    /// `apollo.router.pipelines` gauge from dropping to 0 while that
+    /// connection is still serving requests from this pipeline, even after a
+    /// reload has replaced this factory.
+    fn pipeline_handle(&self) -> Arc<PipelineHandle>;
 }
 
 /// Factory for creating a RouterFactory

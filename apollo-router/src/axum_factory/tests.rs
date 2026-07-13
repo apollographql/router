@@ -85,7 +85,7 @@ use crate::services::SupergraphResponse;
 use crate::services::layers::static_page::home_page_content;
 use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::router;
-use crate::services::router::pipeline_handle::PipelineRef;
+use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::license_enforcement::LicenseState;
@@ -152,12 +152,12 @@ impl RouterFactory for TestRouterFactory {
         MultiMap::new()
     }
 
-    fn pipeline_ref(&self) -> Arc<PipelineRef> {
-        Arc::new(PipelineRef {
-            schema_id: "dummy".to_string(),
-            launch_id: None,
-            config_hash: "dummy".to_string(),
-        })
+    fn pipeline_handle(&self) -> Arc<PipelineHandle> {
+        Arc::new(PipelineHandle::new(
+            "dummy".to_string(),
+            None,
+            "dummy".to_string(),
+        ))
     }
 }
 
@@ -179,12 +179,12 @@ impl RouterFactory for CountingRouterFactory {
         MultiMap::new()
     }
 
-    fn pipeline_ref(&self) -> Arc<PipelineRef> {
-        Arc::new(PipelineRef {
-            schema_id: "dummy".to_string(),
-            launch_id: None,
-            config_hash: "dummy".to_string(),
-        })
+    fn pipeline_handle(&self) -> Arc<PipelineHandle> {
+        Arc::new(PipelineHandle::new(
+            "dummy".to_string(),
+            None,
+            "dummy".to_string(),
+        ))
     }
 }
 
