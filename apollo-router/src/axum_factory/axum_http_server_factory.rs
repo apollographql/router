@@ -127,7 +127,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let pipeline_ref = service_factory.pipeline_ref().clone();
             // Built once here and invoked once per accepted connection (see listeners.rs),
             // rather than once per request.
-            let router_service_factory: Arc<dyn Fn() -> router::BoxCloneService + Send + Sync> = {
+            let router_service_factory: Arc<dyn Fn() -> router::BoxCloneSyncService + Send + Sync> = {
                 let service_factory = service_factory.clone();
                 Arc::new(move || service_factory.create())
             };
@@ -416,11 +416,6 @@ async fn handle_graphql(
         early_cancel,
         experimental_log_on_broken_pipe,
     } = options;
-    let service = service
-        .lock()
-        .expect("router service mutex poisoned")
-        .clone();
-
     let request: router::Request = http_request.into();
     let context = request.context.clone();
     let accept_encoding = request
@@ -603,8 +598,9 @@ mod tests {
     /// `internal_server_error` — otherwise a shed request is indistinguishable from a real bug.
     #[tokio::test]
     async fn overloaded_router_service_returns_503() {
-        let connection_service =
-            crate::axum_factory::utils::connection_router_service(NeverReady.boxed_clone());
+        let connection_service = crate::axum_factory::utils::connection_router_service(
+            router::BoxCloneSyncService::new(NeverReady),
+        );
         let options = HandlerOptions {
             early_cancel: true,
             experimental_log_on_broken_pipe: false,

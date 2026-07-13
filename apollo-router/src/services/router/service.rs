@@ -653,8 +653,8 @@ pub(crate) struct RouterCreator {
 }
 
 impl RouterFactory for RouterCreator {
-    fn create(&self) -> router::BoxCloneService {
-        self.service.clone().boxed_clone()
+    fn create(&self) -> router::BoxCloneSyncService {
+        router::BoxCloneSyncService::new(self.service.clone())
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {

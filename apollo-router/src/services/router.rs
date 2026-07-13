@@ -41,6 +41,13 @@ use crate::services::TryIntoHeaderName;
 use crate::services::TryIntoHeaderValue;
 
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+/// Like [`BoxCloneService`], but additionally `Sync`.
+///
+/// Used only at the boundary where a per-connection router service is shared across concurrent
+/// requests (see [`crate::router_factory::RouterFactory::create`]); the pipeline built up to
+/// that point uses the plain (`Send`-only) [`BoxCloneService`], since `Sync` is not needed
+/// internally and would otherwise have to be threaded through every plugin.
+pub type BoxCloneSyncService = tower::util::BoxCloneSyncService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
 
 pub type Body = RouterBody;

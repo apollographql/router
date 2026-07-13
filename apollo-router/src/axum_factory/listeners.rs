@@ -322,7 +322,7 @@ pub(super) fn serve_router_on_listen_addr(
     // `None` for listeners that never serve GraphQL requests (eg. health, metrics):
     // they never read the `ConnectionRouterService` extension, so building one per
     // accepted connection would be pure waste.
-    router_service_factory: Option<Arc<dyn Fn() -> router::BoxCloneService + Send + Sync>>,
+    router_service_factory: Option<Arc<dyn Fn() -> router::BoxCloneSyncService + Send + Sync>>,
     address: ListenAddr,
     mut listener: Listener,
     configuration: Arc<Configuration>,

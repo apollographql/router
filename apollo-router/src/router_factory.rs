@@ -143,9 +143,9 @@ impl Endpoint {
 /// Factory for creating a router service instance.
 ///
 /// Instances of this trait are used by the HTTP server to obtain a new
-/// router service for each incoming request.
+/// router service, shared across all requests on a connection.
 pub(crate) trait RouterFactory: Clone + Send + Sync + 'static {
-    fn create(&self) -> router::BoxCloneService;
+    fn create(&self) -> router::BoxCloneSyncService;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 

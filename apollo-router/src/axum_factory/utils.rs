@@ -2,12 +2,10 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::Mutex;
 
 use opentelemetry::global;
 use opentelemetry::trace::TraceContextExt;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 use tower_http::trace::MakeSpan;
 use tracing::Span;
 
@@ -65,12 +63,11 @@ pub(crate) struct ConnectionInfo {
 /// The router pipeline created for a single connection (or, in tests, a single in-process
 /// session), shared across all requests on that connection/session.
 ///
-/// `router::BoxCloneService` is `Send` but not `Sync` (tower's `BoxCloneService` only requires
-/// `+ Send` on its inner trait object), while axum's `Extension`/`http::Extensions` require
-/// `Send + Sync`. `Mutex<T>` is `Sync` for any `T: Send`, so wrapping it here is what makes it
-/// storable as a per-connection `Extension`; each request briefly locks it just to clone the
-/// inner service out before calling it, never holding the lock across an `.await`.
-pub(crate) type ConnectionRouterService = Arc<Mutex<router::BoxCloneService>>;
+/// `RouterFactory::create()` returns `router::BoxCloneSyncService` rather than the plain
+/// (`Send`-only) `router::BoxCloneService` used internally by the pipeline, specifically so it
+/// can be stored directly as an axum `Extension` (which requires `Send + Sync`) and cheaply
+/// `.clone()`-d per request with no `Arc`/`Mutex` wrapper needed.
+pub(crate) type ConnectionRouterService = router::BoxCloneSyncService;
 
 /// Wraps a freshly created router service (`RouterFactory::create()`) for use across a single
 /// connection.
@@ -86,14 +83,9 @@ pub(crate) type ConnectionRouterService = Arc<Mutex<router::BoxCloneService>>;
 /// no such resource to poll, so that failure mode doesn't apply at this outermost boundary; when
 /// `traffic_shaping` is configured with real backpressure, it already guards its own internals.
 pub(crate) fn connection_router_service(
-    service: router::BoxCloneService,
+    service: router::BoxCloneSyncService,
 ) -> ConnectionRouterService {
-    Arc::new(Mutex::new(
-        ServiceBuilder::new()
-            .load_shed()
-            .service(service)
-            .boxed_clone(),
-    ))
+    router::BoxCloneSyncService::new(ServiceBuilder::new().load_shed().service(service))
 }
 
 #[cfg(test)]
@@ -103,6 +95,7 @@ mod tests {
 
     use tower::BoxError;
     use tower::Service;
+    use tower::ServiceExt;
 
     use super::*;
 
@@ -126,17 +119,14 @@ mod tests {
 
     #[tokio::test]
     async fn connection_router_service_sheds_load_instead_of_blocking() {
-        let connection_service = connection_router_service(NeverReady.boxed_clone());
-        let service = connection_service
-            .lock()
-            .expect("router service mutex poisoned")
-            .clone();
+        let connection_service =
+            connection_router_service(router::BoxCloneSyncService::new(NeverReady));
 
         let request = router::Request::fake_builder()
             .build()
             .expect("fake request should build");
 
-        let err = service
+        let err = connection_service
             .oneshot(request)
             .await
             .expect_err("a permanently-pending service should be shed, not succeed");

@@ -2288,7 +2288,7 @@ mod tests {
         MyRouterFactory {}
 
         impl RouterFactory for MyRouterFactory {
-            fn create(&self) -> router::BoxCloneService;
+            fn create(&self) -> router::BoxCloneSyncService;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
             fn pipeline_ref(&self) -> Arc<PipelineRef>;
         }
