@@ -50,14 +50,16 @@ impl PersistedQuery {
     }
 }
 
-/// A layer-like type implementing Automatic Persisted Queries.
+/// Implements caching and expansion of [Automatic Persisted Queries][apq].
+///
+/// [apq]: https://www.apollographql.com/docs/apollo-server/performance/apq
 #[derive(Clone)]
-pub(crate) struct APQLayer {
+pub(crate) struct APQExpander {
     /// set to None if APQ is disabled
     cache: Option<DeduplicatingCache<String, String>>,
 }
 
-impl APQLayer {
+impl APQExpander {
     pub(crate) fn activate(&self) {
         if let Some(cache) = &self.cache {
             cache.activate();
@@ -65,7 +67,7 @@ impl APQLayer {
     }
 }
 
-impl APQLayer {
+impl APQExpander {
     pub(crate) fn with_cache(cache: DeduplicatingCache<String, String>) -> Self {
         Self { cache: Some(cache) }
     }

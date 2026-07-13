@@ -480,11 +480,6 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_reuse_query_plans,
-            "$.supergraph.query_planning.experimental_reuse_query_plans[?(@==true)]"
-        );
-
-        populate_config_instrument!(
             apollo.router.config.experimental_cooperative_cancellation,
             "$.supergraph.query_planning.experimental_cooperative_cancellation"
         );

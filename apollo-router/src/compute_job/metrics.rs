@@ -1,9 +1,12 @@
 use std::time::Duration;
 use std::time::Instant;
 
+use opentelemetry::metrics::MeterProvider as _;
+use opentelemetry::metrics::ObservableGauge;
 use tracing::Span;
 
 use crate::compute_job::ComputeJobType;
+use crate::metrics::meter_provider;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
@@ -90,6 +93,72 @@ pub(super) fn observe_compute_duration(compute_job_type: ComputeJobType, job_dur
         job_duration.as_secs_f64(),
         "job.type" = compute_job_type
     );
+}
+
+fn create_queue_size_gauge() -> ObservableGauge<u64> {
+    meter_provider()
+        .meter("apollo/router")
+        .u64_observable_gauge("apollo.router.compute_jobs.queued")
+        .with_description(
+            "Number of computation jobs (parsing, planning, …) waiting to be scheduled",
+        )
+        .with_callback(move |m| m.observe(super::queue().queued_count() as u64, &[]))
+        .build()
+}
+
+/// A pass-through layer that handles the lifecycle of compute job telemetry.
+///
+/// This must be created once the telemetry plugin is already activated.
+#[derive(Clone)]
+pub(crate) struct ComputeJobMetricsLayer {
+    queue_size_gauge: ObservableGauge<u64>,
+}
+
+impl ComputeJobMetricsLayer {
+    pub(crate) fn new() -> Self {
+        Self {
+            queue_size_gauge: create_queue_size_gauge(),
+        }
+    }
+}
+
+impl<S> tower::Layer<S> for ComputeJobMetricsLayer {
+    type Service = ComputeJobMetricsService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        ComputeJobMetricsService {
+            inner,
+            _queue_size_gauge: self.queue_size_gauge.clone(),
+        }
+    }
+}
+
+/// A pass-through service that just exists to manage the lifecycle of compute job metric
+/// instruments.
+#[derive(Clone)]
+pub(crate) struct ComputeJobMetricsService<S> {
+    inner: S,
+    _queue_size_gauge: ObservableGauge<u64>,
+}
+
+impl<Req, S> tower::Service<Req> for ComputeJobMetricsService<S>
+where
+    S: tower::Service<Req>,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = S::Future;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Req) -> Self::Future {
+        self.inner.call(req)
+    }
 }
 
 #[cfg(test)]

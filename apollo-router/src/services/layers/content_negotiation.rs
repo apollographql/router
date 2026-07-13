@@ -34,7 +34,6 @@ use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::ServiceExt as _;
 use crate::layers::async_checkpoint::AsyncCheckpointService;
-use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_SPEC_PARAMETER;
 use crate::services::MULTIPART_DEFER_SPEC_VALUE;
@@ -46,6 +45,7 @@ use crate::services::router::ClientRequestAccepts;
 use crate::services::router::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
 use crate::services::router::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use crate::services::subgraph;
+use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::supergraph;
 
 pub(crate) const GRAPHQL_JSON_RESPONSE_HEADER_VALUE: &str = "application/graphql-response+json";

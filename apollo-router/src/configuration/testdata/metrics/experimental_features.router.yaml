@@ -23,7 +23,6 @@ supergraph:
   query_planning:
     experimental_plans_limit: 10
     experimental_paths_limit: 10
-    experimental_reuse_query_plans: true
     experimental_cooperative_cancellation:
       enabled: true
 

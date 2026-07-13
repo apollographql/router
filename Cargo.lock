@@ -1889,9 +1889,9 @@ checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
 name = "crossbeam-channel"
-version = "0.5.15"
+version = "0.5.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
+checksum = "d85363c37faeca707aef026efa9f3b34d077bce547e48f770770625c6013679e"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -4065,9 +4065,9 @@ dependencies = [
 
 [[package]]
 name = "jsonschema"
-version = "0.46.8"
+version = "0.46.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24fc8535da347b994f6d2fab0a84b74e3b31ad08ebe4204d95f3e755db7af49b"
+checksum = "1d865ca7ca04445fcaa1d751fda3dc43b0113ba2fcddc65d5a0fcb474a7c3bba"
 dependencies = [
  "ahash",
  "bytecount",
@@ -4078,16 +4078,25 @@ dependencies = [
  "getrandom 0.3.4",
  "idna",
  "itoa",
+ "jsonschema-regex",
  "num-cmp",
  "num-traits",
  "percent-encoding",
  "referencing",
  "regex",
- "regex-syntax",
  "serde",
  "serde_json",
  "unicode-general-category",
  "uuid-simd",
+]
+
+[[package]]
+name = "jsonschema-regex"
+version = "0.46.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6dbd1086b01b9349fd4ef9a07433965af64c8ce8159abe633a189e4ff817bd13"
+dependencies = [
+ "regex-syntax",
 ]
 
 [[package]]

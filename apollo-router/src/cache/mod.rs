@@ -162,10 +162,6 @@ where
         self.storage.insert(key, value).await;
     }
 
-    pub(crate) async fn insert_in_memory(&self, key: K, value: V) {
-        self.storage.insert_in_memory(key, value).await;
-    }
-
     async fn send(
         &self,
         sender: broadcast::Sender<Result<V, UncachedError>>,
@@ -185,11 +181,6 @@ where
 
     pub(crate) fn activate(&self) {
         self.storage.activate()
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn len(&self) -> usize {
-        self.storage.len().await
     }
 }
 

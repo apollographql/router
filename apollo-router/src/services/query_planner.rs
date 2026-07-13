@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use derivative::Derivative;
 use serde::Deserialize;
 use serde::Serialize;
@@ -15,6 +14,7 @@ use super::layers::query_analysis::ParsedDocument;
 use crate::Context;
 use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
+use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::json_ext::Object;
@@ -137,12 +137,7 @@ impl Response {
 
 pub(crate) type ServiceError = MaybeBackPressureError<QueryPlannerError>;
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, ServiceError>;
+pub(crate) type CacheBoxCloneService =
+    tower::util::BoxCloneService<CachingRequest, Response, CacheResolverError>;
 #[allow(dead_code)]
 pub(crate) type ServiceResult = Result<Response, ServiceError>;
-
-#[async_trait]
-pub(crate) trait QueryPlannerPlugin: Send + Sync + 'static {
-    /// This service runs right after the query planner cache, which means that it will be called once per unique
-    /// query, unless the cache entry was evicted
-    fn query_planner_service(&self, service: BoxCloneService) -> BoxCloneService;
-}
