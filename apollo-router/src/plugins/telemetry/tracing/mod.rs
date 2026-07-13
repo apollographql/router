@@ -29,7 +29,6 @@ pub(crate) mod datadog_exporter;
 mod named;
 pub(crate) mod otlp;
 pub(crate) mod reload;
-pub(crate) mod zipkin;
 
 pub(crate) use named::NamedSpanExporter;
 pub(crate) use named::NamedTokioRuntime;
@@ -279,7 +278,7 @@ fn max_concurrent_exports_default() -> usize {
 
 impl BatchProcessorConfig {
     /// Apply OTEL_BSP_* environment variable overrides to this config.
-    /// This should be used for third-party exporters (OTLP, Datadog, Zipkin)
+    /// This should be used for third-party exporters (OTLP, Datadog)
     /// but NOT for Apollo exporters.
     pub(crate) fn with_env_overrides(self) -> Result<Self, BoxError> {
         Ok(BatchProcessorConfig {

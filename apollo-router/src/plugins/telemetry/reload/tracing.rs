@@ -5,13 +5,13 @@
 //! ## Purpose
 //!
 //! The [`TracingBuilder`] constructs a tracer provider that handles distributed tracing across
-//! multiple backends (OTLP, Datadog, Zipkin, Apollo). It also configures trace propagation to
+//! multiple backends (OTLP, Datadog, Apollo). It also configures trace propagation to
 //! ensure trace context is properly propagated across service boundaries.
 //!
 //! ## Configurator Pattern
 //!
 //! The [`TracingConfigurator`] trait allows different trace exporters to contribute span processors
-//! to the builder. Each exporter (OTLP, Datadog, Zipkin, Apollo) implements this trait to add its
+//! to the builder. Each exporter (OTLP, Datadog, Apollo) implements this trait to add its
 //! specific span processing logic.
 //!
 //! ## Propagation

@@ -15,7 +15,7 @@ Apollo Router supports a collection of tracing exporters:
 * [Dynatrace (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/dynatrace)
 * [Jaeger (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/jaeger)
 * [New Relic (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/new-relic)
-* [Zipkin](/router/configuration/telemetry/exporters/tracing/zipkin).
+* [Zipkin (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/zipkin)
 
 The router generates [**spans**](/router/configuration/telemetry/instrumentation/spans) that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
 
@@ -137,7 +137,7 @@ telemetry:
     sampler: 0.1           # 10% reach Apollo Studio (matches common)
 ```
 
-The per-exporter `sampler` is available on `telemetry.exporters.tracing.otlp`, `telemetry.exporters.tracing.zipkin`, `telemetry.exporters.tracing.datadog`, and `telemetry.apollo`.
+The per-exporter `sampler` is available on `telemetry.exporters.tracing.otlp`, `telemetry.exporters.tracing.datadog`, and `telemetry.apollo`.
 
 The value uses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`, so the rate is an absolute fraction of all requests — not a fraction of already-sampled spans. Setting `sampler: 0.02` means 2% of all requests, not "2% of the 10% that pass the common sampler."
 

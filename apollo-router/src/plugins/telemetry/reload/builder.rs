@@ -47,7 +47,6 @@ use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::reload::tracing::create_propagator;
 use crate::plugins::telemetry::tracing::datadog;
-use crate::plugins::telemetry::tracing::zipkin;
 
 /// Static counter for tracking Prometheus reload calls.
 static PROMETHEUS_CALL_COUNT: AtomicUsize = AtomicUsize::new(1);
@@ -133,13 +132,11 @@ impl<'a> Builder<'a> {
     fn setup_public_tracing(&mut self) -> Result<(), BoxError> {
         if self.is_tracing_config_changed::<otlp::Config>()
             || self.is_tracing_config_changed::<datadog::Config>()
-            || self.is_tracing_config_changed::<zipkin::Config>()
             || self.is_tracing_config_changed::<apollo::Config>()
         {
             ::tracing::debug!("configuring tracing");
             let mut builder = TracingBuilder::new(self.config);
             builder.configure(&self.config.exporters.tracing.otlp)?;
-            builder.configure(&self.config.exporters.tracing.zipkin)?;
             builder.configure(&self.config.exporters.tracing.datadog)?;
             builder.configure(&self.config.apollo)?;
 
@@ -871,12 +868,15 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_datadog_exporter_enabled_with_zipkin_exporter_enabled_fails() {
+    async fn test_datadog_exporter_enabled_with_zipkin_propagation_only_fails() {
         use crate::test_harness::tracing_test;
         let _guard = tracing_test::dispatcher_guard();
         let mut config = create_config_with_apollo_enabled();
         config.exporters.tracing.datadog.enabled = true;
-        config.exporters.tracing.zipkin.enabled = true;
+        config.exporters.tracing.propagation = Propagation {
+            zipkin: true,
+            ..Default::default()
+        };
 
         let builder = Builder::new(&None, &config);
         assert!(builder.build().is_ok());

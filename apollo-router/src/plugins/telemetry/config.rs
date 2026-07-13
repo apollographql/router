@@ -290,8 +290,6 @@ pub(crate) struct Tracing {
     pub(crate) common: TracingCommon,
     /// OpenTelemetry native exporter configuration
     pub(crate) otlp: otlp::Config,
-    /// Zipkin exporter configuration
-    pub(crate) zipkin: tracing::zipkin::Config,
     /// Datadog exporter configuration
     pub(crate) datadog: tracing::datadog::Config,
 }
@@ -314,7 +312,7 @@ impl Tracing {
     }
 
     pub(crate) fn is_zipkin_propagation_enabled(&self) -> bool {
-        self.propagation.zipkin || self.zipkin.enabled
+        self.propagation.zipkin
     }
 
     pub(crate) fn is_aws_xray_propagation_enabled(&self) -> bool {
@@ -880,12 +878,8 @@ impl Conf {
     pub(crate) fn validate_per_exporter_samplers(&self) -> Result<(), Error> {
         let common_ratio = sampler_option_to_ratio(&self.exporters.tracing.common.sampler);
 
-        let mut exporters = Vec::with_capacity(4);
+        let mut exporters = Vec::with_capacity(3);
         exporters.push(("apollo", self.apollo.sampler.as_ref()));
-        exporters.push((
-            "exporters.tracing.zipkin",
-            self.exporters.tracing.zipkin.sampler.as_ref(),
-        ));
 
         // OTLP sampler is always applied (even in Datadog agent sampling mode), so always validate.
         exporters.push((

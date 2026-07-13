@@ -193,10 +193,9 @@ opentelemetry-otlp = { version = "0.31", default-features = false, features = [
     "trace",
 ] }
 opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
-opentelemetry-zipkin = { version = "0.31", default-features = false, features = [
-    "reqwest-client",
-    "reqwest-rustls",
-] }
+# Only the Zipkin (B3) propagator is used; the native Zipkin exporter was removed in Router 3.0,
+# so the exporter's HTTP-client features (reqwest-*) are intentionally disabled.
+opentelemetry-zipkin = { version = "0.31", default-features = false }
 opentelemetry-prometheus = "0.31"
 paste = "1.0.15"
 pin-project-lite = "0.2.14"

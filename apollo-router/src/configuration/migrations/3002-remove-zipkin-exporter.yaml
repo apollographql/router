@@ -1,0 +1,11 @@
+description: |
+  The native Zipkin trace exporter (telemetry.exporters.tracing.zipkin) has been removed in
+  Router 3.0. Zipkin ingests OTLP and OpenTelemetry has deprecated native Zipkin exporters in
+  favor of OTLP. Configure telemetry.exporters.tracing.otlp pointing at your Zipkin endpoint
+  instead. Zipkin (B3) propagation via telemetry.exporters.tracing.propagation.zipkin is
+  unaffected.
+actions:
+  - type: log
+    level: warn
+    path: telemetry.exporters.tracing.zipkin
+    log: "The native Zipkin trace exporter (telemetry.exporters.tracing.zipkin) has been removed. Zipkin supports OTLP ingestion — configure telemetry.exporters.tracing.otlp pointing at your Zipkin OTLP endpoint instead. See https://www.apollographql.com/docs/router/configuration/telemetry/exporters/tracing/otlp"
