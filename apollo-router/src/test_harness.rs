@@ -31,8 +31,8 @@ use crate::router_factory::RouterFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::SupergraphCreator;
 use crate::services::execution;
-use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::layers::persisted_queries::PersistedQueryExpander;
+use crate::services::layers::query_analysis::QueryAnalysis;
 use crate::services::router;
 use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
@@ -308,7 +308,7 @@ impl<'a> TestHarness<'a> {
         (
             Arc<Configuration>,
             Arc<Schema>,
-            Arc<QueryAnalysisLayer>,
+            Arc<QueryAnalysis>,
             SupergraphCreator,
         ),
         BoxError,
@@ -339,8 +339,7 @@ impl<'a> TestHarness<'a> {
             limits: Default::default(),
         }));
 
-        let query_analysis =
-            Arc::new(QueryAnalysisLayer::new(schema.clone(), config.clone()).await);
+        let query_analysis = Arc::new(QueryAnalysis::new(schema.clone(), config.clone()).await);
 
         let (supergraph_creator, _warmup) = YamlRouterFactory
             .inner_create_supergraph(
@@ -399,7 +398,7 @@ impl<'a> TestHarness<'a> {
         let (config, _schema, query_analysis, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
             query_analysis,
-            Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
+            Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
             config.clone(),
         )
@@ -427,7 +426,7 @@ impl<'a> TestHarness<'a> {
         let (config, _schema, query_analysis, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
             query_analysis,
-            Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
+            Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
             config.clone(),
         )

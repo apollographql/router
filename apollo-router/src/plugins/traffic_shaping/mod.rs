@@ -699,8 +699,8 @@ mod test {
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
     use crate::services::connector::request_service::Request as ConnectorRequest;
-    use crate::services::layers::persisted_queries::PersistedQueryLayer;
-    use crate::services::layers::query_analysis::QueryAnalysisLayer;
+    use crate::services::layers::persisted_queries::PersistedQueryExpander;
+    use crate::services::layers::query_analysis::QueryAnalysis;
     use crate::services::router;
     use crate::services::router::service::RouterCreator;
     use crate::spec::Schema;
@@ -791,8 +791,7 @@ mod test {
 
         let config = Arc::new(config);
         let schema = Arc::new(Schema::parse(schema, &config).unwrap());
-        let query_analysis =
-            Arc::new(QueryAnalysisLayer::new(schema.clone(), config.clone()).await);
+        let query_analysis = Arc::new(QueryAnalysis::new(schema.clone(), config.clone()).await);
 
         let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
         let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
@@ -837,7 +836,11 @@ mod test {
 
         RouterCreator::new(
             query_analysis,
-            Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
+            Arc::new(
+                PersistedQueryExpander::new(&Default::default())
+                    .await
+                    .unwrap(),
+            ),
             Arc::new(supergraph_creator),
             Arc::new(Configuration::default()),
         )

@@ -11,15 +11,15 @@ use tower::Service;
 
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::services::layers::apq::APQLayer;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::layers::apq::APQExpander;
+use crate::services::layers::query_analysis::QueryAnalysis;
 
 pub(crate) struct APQCachingLayer {
-    wrapped: Arc<APQLayer>,
+    wrapped: Arc<APQExpander>,
 }
 
 impl APQCachingLayer {
-    pub(crate) fn new(wrapped: Arc<APQLayer>) -> Self {
+    pub(crate) fn new(wrapped: Arc<APQExpander>) -> Self {
         Self { wrapped }
     }
 }
@@ -38,7 +38,7 @@ impl<S> tower::Layer<S> for APQCachingLayer {
 #[derive(Clone)]
 pub(crate) struct APQCachingService<S> {
     inner: S,
-    wrapped: Arc<APQLayer>,
+    wrapped: Arc<APQExpander>,
 }
 
 impl<S> Service<SupergraphRequest> for APQCachingService<S>
@@ -75,11 +75,11 @@ where
 }
 
 pub(crate) struct ParseQueryLayer {
-    wrapped: Arc<QueryAnalysisLayer>,
+    wrapped: Arc<QueryAnalysis>,
 }
 
 impl ParseQueryLayer {
-    pub(crate) fn new(wrapped: Arc<QueryAnalysisLayer>) -> Self {
+    pub(crate) fn new(wrapped: Arc<QueryAnalysis>) -> Self {
         Self { wrapped }
     }
 }
@@ -98,7 +98,7 @@ impl<S> tower::Layer<S> for ParseQueryLayer {
 #[derive(Clone)]
 pub(crate) struct ParseQueryService<S> {
     inner: S,
-    wrapped: Arc<QueryAnalysisLayer>,
+    wrapped: Arc<QueryAnalysis>,
 }
 
 impl<S> Service<SupergraphRequest> for ParseQueryService<S>

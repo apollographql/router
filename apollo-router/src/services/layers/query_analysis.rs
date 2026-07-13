@@ -69,10 +69,10 @@ pub(crate) fn recursive_selections_check_enabled() -> bool {
 
 /// A layer-like type that handles several aspects of query parsing and analysis.
 ///
-/// The supergraph layer implementation is in [QueryAnalysisLayer::supergraph_request].
+/// The supergraph layer implementation is in [QueryAnalysis::supergraph_request].
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
-pub(crate) struct QueryAnalysisLayer {
+pub(crate) struct QueryAnalysis {
     pub(crate) schema: Arc<Schema>,
     configuration: Arc<Configuration>,
     cache: Arc<Mutex<LruCache<QueryAnalysisKey, Result<(Context, ParsedDocument), SpecError>>>>,
@@ -86,7 +86,7 @@ struct QueryAnalysisKey {
     operation_name: Option<String>,
 }
 
-impl QueryAnalysisLayer {
+impl QueryAnalysis {
     pub(crate) async fn new(schema: Arc<Schema>, configuration: Arc<Configuration>) -> Self {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema).unwrap_or(false);
@@ -512,7 +512,7 @@ mod tests {
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
 
-    use super::QueryAnalysisLayer;
+    use super::QueryAnalysis;
 
     fn parse(
         schema_sdl: &str,
@@ -528,7 +528,7 @@ mod tests {
     fn count_recursive_selections_simple_query() {
         let doc = parse(SCHEMA, "query { a { b { c } } }");
         let op = doc.operations.get(None).unwrap();
-        let count = QueryAnalysisLayer::count_recursive_selections(
+        let count = QueryAnalysis::count_recursive_selections(
             &doc,
             &mut HashMap::new(),
             &op.selection_set,
@@ -543,7 +543,7 @@ mod tests {
     fn count_recursive_selections_exceeds_limit() {
         let doc = parse(SCHEMA, "query { a { b { c } } }");
         let op = doc.operations.get(None).unwrap();
-        let count = QueryAnalysisLayer::count_recursive_selections(
+        let count = QueryAnalysis::count_recursive_selections(
             &doc,
             &mut HashMap::new(),
             &op.selection_set,
@@ -557,7 +557,7 @@ mod tests {
     fn count_recursive_selections_exactly_at_limit() {
         let doc = parse(SCHEMA, "query { a { b { c } } }");
         let op = doc.operations.get(None).unwrap();
-        let count = QueryAnalysisLayer::count_recursive_selections(
+        let count = QueryAnalysis::count_recursive_selections(
             &doc,
             &mut HashMap::new(),
             &op.selection_set,
@@ -575,7 +575,7 @@ mod tests {
         let op = doc.operations.get(None).unwrap();
 
         // Under a generous limit: a(1) + spread(2) + b(3) + c(4) = 4
-        let count = QueryAnalysisLayer::count_recursive_selections(
+        let count = QueryAnalysis::count_recursive_selections(
             &doc,
             &mut HashMap::new(),
             &op.selection_set,
@@ -585,7 +585,7 @@ mod tests {
         assert_eq!(count, Some(4));
 
         // With a tight limit that the fragment exceeds
-        let count = QueryAnalysisLayer::count_recursive_selections(
+        let count = QueryAnalysis::count_recursive_selections(
             &doc,
             &mut HashMap::new(),
             &op.selection_set,
@@ -602,7 +602,7 @@ mod tests {
         let doc = parse(schema, query);
         let op = doc.operations.get(None).unwrap();
         // a(1) + inline_fragment(2) + b(3) = 3
-        let count = QueryAnalysisLayer::count_recursive_selections(
+        let count = QueryAnalysis::count_recursive_selections(
             &doc,
             &mut HashMap::new(),
             &op.selection_set,
@@ -620,7 +620,7 @@ mod tests {
         let op = doc.operations.get(None).unwrap();
 
         // a(1) + spread(2) + b(3) + a2(4) + spread(5) + b_cached(6) = 6
-        let count = QueryAnalysisLayer::count_recursive_selections(
+        let count = QueryAnalysis::count_recursive_selections(
             &doc,
             &mut HashMap::new(),
             &op.selection_set,
@@ -634,7 +634,7 @@ mod tests {
     fn count_recursive_selections_limit_zero_always_exceeds() {
         let doc = parse("type Query { a: String }", "query { a }");
         let op = doc.operations.get(None).unwrap();
-        let count = QueryAnalysisLayer::count_recursive_selections(
+        let count = QueryAnalysis::count_recursive_selections(
             &doc,
             &mut HashMap::new(),
             &op.selection_set,

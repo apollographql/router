@@ -14,7 +14,7 @@ use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::InMemoryQueryPlanCache;
 use crate::services::CachingRequest;
 use crate::services::PlanOptions;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::layers::query_analysis::QueryAnalysis;
 
 pub(crate) type BoxCloneService =
     tower::util::BoxCloneService<WarmupRequest, (), CacheResolverError>;
@@ -39,11 +39,11 @@ pub(crate) struct WarmupRequest {
 /// different request/response type.
 #[derive(Clone)]
 pub(crate) struct WarmupParseQueryLayer {
-    query_analysis: Arc<QueryAnalysisLayer>,
+    query_analysis: Arc<QueryAnalysis>,
 }
 
 impl WarmupParseQueryLayer {
-    pub(crate) fn new(query_analysis: Arc<QueryAnalysisLayer>) -> Self {
+    pub(crate) fn new(query_analysis: Arc<QueryAnalysis>) -> Self {
         Self { query_analysis }
     }
 }
@@ -61,7 +61,7 @@ impl<S> tower::Layer<S> for WarmupParseQueryLayer {
 
 #[derive(Clone)]
 pub(crate) struct WarmupParseQueryService<S> {
-    query_analysis: Arc<QueryAnalysisLayer>,
+    query_analysis: Arc<QueryAnalysis>,
     inner: S,
 }
 
@@ -246,7 +246,7 @@ mod tests {
     use crate::services::CachingRequest;
     use crate::services::QueryPlannerContent;
     use crate::services::layers::query_analysis::ParsedDocument;
-    use crate::services::layers::query_analysis::QueryAnalysisLayer;
+    use crate::services::layers::query_analysis::QueryAnalysis;
     use crate::spec::Schema;
     use crate::spec::SchemaHash;
 
@@ -413,7 +413,7 @@ mod tests {
             Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
         );
 
-        let query_analysis = Arc::new(QueryAnalysisLayer::new(schema, configuration).await);
+        let query_analysis = Arc::new(QueryAnalysis::new(schema, configuration).await);
 
         let mut service = ServiceBuilder::new()
             .layer(WarmupParseQueryLayer::new(query_analysis))

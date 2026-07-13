@@ -60,8 +60,8 @@ use crate::services::fetch_service::FetchService;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::content_negotiation;
-use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::layers::persisted_queries::PersistedQueryExpander;
+use crate::services::layers::query_analysis::QueryAnalysis;
 use crate::services::query_planner;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph;
@@ -477,7 +477,7 @@ pub(crate) struct PluggableSupergraphServiceBuilder {
     schema: Arc<Schema>,
     subgraph_schemas: Arc<SubgraphSchemas>,
     /// Only for warmup. XXX(@goto-bus-stop): We should delete this when the factories are refactored!
-    query_analysis: Arc<QueryAnalysisLayer>,
+    query_analysis: Arc<QueryAnalysis>,
 }
 
 impl PluggableSupergraphServiceBuilder {
@@ -485,7 +485,7 @@ impl PluggableSupergraphServiceBuilder {
         query_planner_service: query_planner::BoxCloneService,
         schema: Arc<Schema>,
         subgraph_schemas: Arc<SubgraphSchemas>,
-        query_analysis: Arc<QueryAnalysisLayer>,
+        query_analysis: Arc<QueryAnalysis>,
     ) -> Self {
         Self {
             plugins: Arc::new(Default::default()),
@@ -725,7 +725,7 @@ impl SupergraphCreator {
 
     pub(crate) async fn warm_up_query_planner(
         warmup_query_planner_service: warmup::BoxCloneService,
-        persisted_query_layer: &PersistedQueryLayer,
+        persisted_queries: &PersistedQueryExpander,
         previous_cache: Option<InMemoryQueryPlanCache>,
         max_cached_queries: Option<usize>,
         experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
@@ -733,7 +733,7 @@ impl SupergraphCreator {
         let requests = warmup::queries_to_warm_up(
             previous_cache,
             max_cached_queries,
-            persisted_query_layer.all_operations(),
+            persisted_queries.all_operations(),
             experimental_pql_prewarm,
         )
         .await;
