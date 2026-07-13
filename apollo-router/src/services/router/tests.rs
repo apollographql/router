@@ -243,6 +243,73 @@ async fn test_http_max_request_bytes() {
 }
 
 #[tokio::test]
+async fn test_http_max_request_bytes_get() {
+    // Same query/variables as `supergraph::Request::canned_builder()`, but sent via HTTP GET so
+    // the query ends up URL-encoded on the URI instead of in the (empty) body.
+    fn build_get_request() -> router::Request {
+        let canned_query = "
+            query TopProducts($first: Int) {
+                topProducts(first: $first) {
+                    upc
+                    name
+                    reviews {
+                        id
+                        product { name }
+                        author { id name }
+                    }
+                }
+            }
+        ";
+        supergraph::Request::fake_builder()
+            .query(canned_query.to_string())
+            .variables(json!({"first": 2}).as_object().cloned().unwrap())
+            .method(Method::GET)
+            .build()
+            .unwrap()
+            .try_into()
+            .unwrap()
+    }
+
+    async fn with_config(http_max_request_bytes: usize) -> router::Response {
+        let config = serde_json::json!({
+            "limits": {
+                "http_max_request_bytes": http_max_request_bytes
+            }
+        });
+        crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap()
+            .oneshot(build_get_request())
+            .await
+            .unwrap()
+    }
+
+    let query_len = build_get_request()
+        .router_request
+        .uri()
+        .query()
+        .expect("GET request must have a query string")
+        .len();
+    assert!(
+        query_len > 0,
+        "the canned GET request's encoded query string is unexpectedly empty; \
+         query_len - 1 below would underflow"
+    );
+
+    // Send a request just at (under) the limit
+    let response = with_config(query_len).await.response;
+    assert_eq!(response.status(), http::StatusCode::OK);
+
+    // Send a request just over the limit. This is a URI-length violation, not a body-payload
+    // one, so it's reported as 414 URI Too Long rather than 413 Payload Too Large.
+    let response = with_config(query_len - 1).await.response;
+    assert_eq!(response.status(), http::StatusCode::URI_TOO_LONG);
+}
+
+#[tokio::test]
 async fn it_only_accepts_batch_http_link_mode_for_query_batch() {
     let expected_response: serde_json::Value = serde_json::from_str(include_str!(
         "../query_batching/testdata/batching_not_enabled_response.json"
