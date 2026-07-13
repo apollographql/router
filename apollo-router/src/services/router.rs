@@ -47,7 +47,7 @@ pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxEr
 /// requests (see [`crate::router_factory::RouterFactory::create`]); the pipeline built up to
 /// that point uses the plain (`Send`-only) [`BoxCloneService`], since `Sync` is not needed
 /// internally and would otherwise have to be threaded through every plugin.
-pub type BoxCloneSyncService = tower::util::BoxCloneSyncService<Request, Response, BoxError>;
+pub(crate) type BoxCloneSyncService = tower::util::BoxCloneSyncService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
 
 pub type Body = RouterBody;
