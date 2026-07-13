@@ -21,8 +21,7 @@ use tracing_futures::Instrument;
 
 use crate::Configuration;
 use crate::Context;
-use crate::batching::BatchQuery;
-use crate::configuration::Batching;
+use crate::batching::BatchQueryPlanAnalysisLayer;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::configuration::mode::Mode;
 use crate::error::CacheResolverError;
@@ -242,44 +241,6 @@ async fn service_call(
 
             let is_deferred = plan.is_deferred(&variables);
             let is_subscription = plan.is_subscription();
-
-            if let Some(batching) = context
-                .extensions()
-                .with_lock(|lock| lock.get::<Batching>().cloned())
-            {
-                if batching.enabled && (is_deferred || is_subscription) {
-                    let message = if is_deferred {
-                        "BATCHING_DEFER_UNSUPPORTED"
-                    } else {
-                        "BATCHING_SUBSCRIPTION_UNSUPPORTED"
-                    };
-                    let mut response = SupergraphResponse::new_from_graphql_response(
-                            graphql::Response::builder()
-                                .errors(vec![crate::error::Error::builder()
-                                    .message(String::from(
-                                        "Deferred responses and subscriptions aren't supported in batches",
-                                    ))
-                                    .extension_code(message)
-                                    .build()])
-                                .build(),
-                            context.clone(),
-                        );
-                    *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
-                    return Ok(response);
-                }
-                // Now perform query batch analysis
-                let batch_query_opt = context
-                    .extensions()
-                    .with_lock(|lock| lock.get::<BatchQuery>().cloned());
-                if let Some(batch_query) = batch_query_opt {
-                    let query_hashes = plan.query_hashes(batching, &variables)?;
-                    batch_query
-                        .set_query_hashes(query_hashes)
-                        .await
-                        .map_err(|e| CacheResolverError::BatchingError(e.to_string()))?;
-                    tracing::debug!("batch registered: {}", batch_query);
-                }
-            }
 
             let ClientRequestAccepts {
                 multipart_defer: accepts_multipart_defer,
@@ -614,6 +575,7 @@ impl PluggableSupergraphServiceBuilder {
             .map(|t| t.config.apollo.clone());
 
         let execution_service: execution::BoxCloneService = ServiceBuilder::new()
+            .layer(BatchQueryPlanAnalysisLayer::new())
             .layer(SubscriptionExecutionLayer::new(
                 configuration.notify.clone(),
             ))
