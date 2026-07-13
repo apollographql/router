@@ -16,12 +16,14 @@ use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::load_shed::error::Overloaded;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
 use crate::Configuration;
 use crate::Context;
 use crate::batching::BatchQueryPlanAnalysisLayer;
+use crate::compute_job::ComputeBackPressureError;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::configuration::mode::Mode;
 use crate::error::CacheResolverError;
@@ -183,6 +185,10 @@ async fn service_call(
         .with_lock(|extensions| extensions.get::<ParsedDocument>().cloned())
         && introspection::is_introspection_query(&document)
     {
+        // Introspection queries are currently short-circuited: we don't support query planning
+        // them, and we don't support mixed introspection/non-introspection queries.
+        // It's unfortunate that we are _executing_ these queries here rather than in the execution
+        // service, but it's basically the only way we can do it right now.
         let result = introspection_service
             .ready()
             .await?
@@ -197,12 +203,25 @@ async fn service_call(
             Ok(response) => Ok(SupergraphResponse::new_from_graphql_response(
                 response, context,
             )),
-            Err(backpressure) => Ok(SupergraphResponse::error_builder()
-                .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                .context(context)
-                .error(backpressure.to_graphql_error())
-                .build()
-                .unwrap()),
+            Err(error) => {
+                // There are two types of backpressure errors currently: one from tower and one from
+                // the compute job pool. Handle both of them the same way.
+                let backpressure = error
+                    .downcast_ref::<Overloaded>()
+                    .map(|_| &ComputeBackPressureError)
+                    .or_else(|| error.downcast_ref::<ComputeBackPressureError>());
+
+                if let Some(backpressure) = backpressure {
+                    Ok(SupergraphResponse::error_builder()
+                        .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                        .context(context)
+                        .error(backpressure.to_graphql_error())
+                        .build()
+                        .unwrap())
+                } else {
+                    Err(error)
+                }
+            }
         };
     }
 

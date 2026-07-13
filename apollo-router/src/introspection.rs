@@ -7,6 +7,7 @@ use futures::future::BoxFuture;
 use futures::future::Either;
 use sha2::Digest;
 use sha2::Sha256;
+use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt as _;
 use tower::util::BoxCloneService;
@@ -14,7 +15,6 @@ use tower::util::BoxCloneService;
 use crate::Configuration;
 use crate::cache::storage::CacheStorage;
 use crate::compute_job;
-use crate::compute_job::ComputeBackPressureError;
 use crate::compute_job::ComputeJobType;
 use crate::graphql;
 use crate::json_ext::Object;
@@ -39,7 +39,7 @@ pub(crate) type IntrospectionCache = Arc<CacheStorage<IntrospectionCacheKey, gra
 
 /// A terminal service that handles (partial) execution of introspection.
 pub(crate) type IntrospectionService =
-    BoxCloneService<IntrospectionRequest, graphql::Response, ComputeBackPressureError>;
+    BoxCloneService<IntrospectionRequest, graphql::Response, BoxError>;
 
 #[derive(Clone)]
 enum Mode {
@@ -85,7 +85,9 @@ fn introspection_mode(configuration: &Configuration) -> Mode {
 pub(crate) fn introspection_service(
     configuration: &Configuration,
 ) -> (IntrospectionService, Option<IntrospectionCache>) {
-    let builder = ServiceBuilder::new().layer(RejectMixedIntrospectionLayer::new());
+    let builder = ServiceBuilder::new()
+        .load_shed()
+        .layer(RejectMixedIntrospectionLayer::new());
 
     match introspection_mode(configuration) {
         Mode::Enabled { storage, max_depth } => (
@@ -136,7 +138,7 @@ impl IntrospectionDisabledService {
 
 impl tower::Service<IntrospectionRequest> for IntrospectionDisabledService {
     // Actually Infallible, but this matches the IntrospectionExecutionService.
-    type Error = ComputeBackPressureError;
+    type Error = BoxError;
     type Response = graphql::Response;
     type Future = Ready<Result<Self::Response, Self::Error>>;
 
@@ -352,7 +354,7 @@ impl IntrospectionExecutionService {
 
 impl tower::Service<IntrospectionRequest> for IntrospectionExecutionService {
     type Response = graphql::Response;
-    type Error = ComputeBackPressureError;
+    type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(
