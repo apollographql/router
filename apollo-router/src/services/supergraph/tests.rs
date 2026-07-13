@@ -1351,6 +1351,90 @@ async fn subscription_without_header() {
     insta::assert_json_snapshot!(res);
 }
 
+/// Requests without the correct `Accept` header should not reach the batching execution layer.
+#[tokio::test]
+async fn batching_defer_unsupported_and_incorrect_header() {
+    let configuration: Configuration = serde_json::from_value(serde_json::json!({
+        "include_subgraph_errors": { "all": true },
+        "batching": {
+            "enabled": true,
+            "mode": "batch_http_link",
+        },
+    }))
+    .unwrap();
+    let batching = configuration.batching.clone();
+
+    let service = TestHarness::builder()
+        .configuration(Arc::new(configuration))
+        .schema(SCHEMA)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let context = Context::new();
+    context.extensions().with_lock(|lock| {
+        lock.insert(batching);
+    });
+
+    let request = supergraph::Request::fake_builder()
+        .query("query { currentUser { id ...@defer { name } } }")
+        .context(context)
+        .build()
+        .unwrap();
+
+    let mut stream = service.oneshot(request).await.unwrap();
+    let res = stream.next_response().await.unwrap();
+
+    assert!(
+        res.contains_error_code("DEFER_BAD_HEADER"),
+        "expected DEFER_BAD_HEADER, got: {res:?}"
+    );
+}
+
+/// Requests with invalid variables do not reach the execution service, so batching + defer +
+/// invalid variable raises a variable error instead of a batching + defer error.
+#[tokio::test]
+async fn batching_defer_unsupported_and_incorrect_variable() {
+    let configuration: Configuration = serde_json::from_value(serde_json::json!({
+        "include_subgraph_errors": { "all": true },
+        "batching": {
+            "enabled": true,
+            "mode": "batch_http_link",
+        },
+    }))
+    .unwrap();
+    let batching = configuration.batching.clone();
+
+    let service = TestHarness::builder()
+        .configuration(Arc::new(configuration))
+        .schema(SCHEMA)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let context = defer_context();
+    // XXX(@goto-bus-stop): not ideal but this implies that the `Accept` header was passed in
+    // correctly; the router service is normally responsible for populating this context value
+    context.extensions().with_lock(|lock| {
+        lock.insert(batching);
+    });
+
+    let request = supergraph::Request::fake_builder()
+        .query("query($skip: Boolean!) { currentUser { id ...@defer { name @skip(if: $skip) } } }")
+        .variable("skip", "not-a-boolean")
+        .context(context)
+        .build()
+        .unwrap();
+
+    let mut stream = service.oneshot(request).await.unwrap();
+    let res = stream.next_response().await.unwrap();
+
+    assert!(
+        res.contains_error_code("VALIDATION_INVALID_TYPE_VARIABLE"),
+        "expected VALIDATION_INVALID_TYPE_VARIABLE, got: {res:?}"
+    );
+}
+
 #[tokio::test]
 async fn root_typename_with_defer_and_empty_first_response() {
     let subgraphs = MockedSubgraphs([
