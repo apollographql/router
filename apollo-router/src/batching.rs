@@ -5,7 +5,7 @@
 //! - At the router service, a batch query is split apart into multiple requests.
 //! - A single [Batch] structure is created, which is responsible for handling the batch lifecycle.
 //! - Each individual request gets a [BatchQuery] extension.
-//! - After query planning of each individual request, the [PrepareBatchingExecutionLayer] collects
+//! - After query planning of each individual request, the [BatchQueryPlanAnalysisLayer] collects
 //!   the hashes of the plan nodes that will be executed unconditionally as part of the query plan.
 //!   Those query nodes are candidates for being batched up into a single request at the subgraph
 //!   side, as they do not depend on other data being fetched first.
