@@ -99,7 +99,7 @@ impl SpanDynAttribute for ::tracing::Span {
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => {
                                     update_otel_data(otel_data, &key, &value);
-                                    otel_data.push_attribute(KeyValue::new(key, value));
+                                    otel_data.upsert_attribute(KeyValue::new(key, value));
                                 }
                                 None => {
                                     // Can't use ::tracing::error! because it could create deadlock on extensions
@@ -151,7 +151,7 @@ impl SpanDynAttribute for ::tracing::Span {
                                         })
                                         .collect();
                                     for attr in attributes {
-                                        otel_data.push_attribute(attr);
+                                        otel_data.upsert_attribute(attr);
                                     }
                                 }
                                 None => {

@@ -59,14 +59,24 @@ pub(crate) struct OtelData {
 }
 
 impl OtelData {
-    /// Adds or replaces `kv` on the span, whether it's still buffering into a builder
-    /// or has already been built for real - and keeps `attributes` in sync so it can
-    /// be read back later regardless.
-    pub(crate) fn push_attribute(&mut self, kv: KeyValue) {
+    /// Adds `kv` to the span, replacing any existing attribute with the same key - and
+    /// keeps `attributes` in sync so it can be read back later regardless of `state`.
+    ///
+    /// The replace-by-key guarantee is only complete while still buffering into a
+    /// builder (still just our own `Vec`, freely rewritable). Once the span is live
+    /// (`Context`), it's only guaranteed for `attributes` and for anything reading this
+    /// span back through this crate: `opentelemetry_sdk::trace::Span::set_attribute` has
+    /// no replace-by-key primitive at all - it's an unconditional push into storage this
+    /// crate can't read back or rewrite. Setting the same key twice on an already-built
+    /// span therefore still exports both values; this is expected to be resolved as
+    /// last-value-wins by the consuming backend, which is standard OTel practice for
+    /// duplicate-key attributes (and matches the spec's stated "overwrite" intent, even
+    /// though this particular SDK doesn't enforce it internally).
+    pub(crate) fn upsert_attribute(&mut self, kv: KeyValue) {
         upsert_attribute(&mut self.attributes, kv.clone());
         match &mut self.state {
             OtelDataState::Builder { builder, .. } => {
-                builder.attributes.get_or_insert_with(Vec::new).push(kv);
+                upsert_attribute(builder.attributes.get_or_insert_with(Vec::new), kv);
             }
             OtelDataState::Context { current_cx } => current_cx.span().set_attribute(kv),
         }
@@ -92,5 +102,37 @@ impl Default for OtelDataState {
         OtelDataState::Context {
             current_cx: opentelemetry::Context::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upsert_attribute_replaces_same_key_while_buffering() {
+        let mut otel_data = OtelData {
+            state: OtelDataState::Builder {
+                parent_cx: opentelemetry::Context::default(),
+                builder: opentelemetry::trace::SpanBuilder::from_name("test"),
+                status: opentelemetry::trace::Status::Unset,
+            },
+            ..Default::default()
+        };
+
+        otel_data.upsert_attribute(KeyValue::new("cache.status", "MISS"));
+        otel_data.upsert_attribute(KeyValue::new("cache.status", "HIT"));
+
+        assert_eq!(
+            otel_data.attributes,
+            vec![KeyValue::new("cache.status", "HIT")]
+        );
+        let OtelDataState::Builder { builder, .. } = &otel_data.state else {
+            unreachable!("still buffering, no promotion happened in this test");
+        };
+        assert_eq!(
+            builder.attributes.as_ref().unwrap(),
+            &vec![KeyValue::new("cache.status", "HIT")]
+        );
     }
 }

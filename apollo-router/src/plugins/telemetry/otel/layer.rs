@@ -271,7 +271,7 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
         if self.exception_config.propagate
             && let Some(otel_data) = self.otel_data.as_deref_mut()
         {
-            otel_data.push_attribute(KeyValue::new(FIELD_EXCEPTION_MESSAGE, error_msg.clone()));
+            otel_data.upsert_attribute(KeyValue::new(FIELD_EXCEPTION_MESSAGE, error_msg.clone()));
 
             // NOTE: This is actually not the stacktrace of the exception. This is
             // the "source chain". It represents the hierarchy of errors from the
@@ -279,7 +279,7 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
             // of the callsites in the code that led to the error happening.
             // `std::error::Error::backtrace` is a nightly-only API and cannot be
             // used here until the feature is stabilized.
-            otel_data.push_attribute(KeyValue::new(
+            otel_data.upsert_attribute(KeyValue::new(
                 FIELD_EXCEPTION_STACKTRACE,
                 Value::Array(chain.clone().into()),
             ));
@@ -336,7 +336,7 @@ impl field::Visit for SpanAttributeVisitor<'_> {
     /// [`Span`]: opentelemetry::trace::Span
     fn record_bool(&mut self, field: &field::Field, value: bool) {
         self.otel_data
-            .push_attribute(KeyValue::new(field.name(), value));
+            .upsert_attribute(KeyValue::new(field.name(), value));
     }
 
     /// Set attributes on the underlying OpenTelemetry [`Span`] from `f64` values.
@@ -344,7 +344,7 @@ impl field::Visit for SpanAttributeVisitor<'_> {
     /// [`Span`]: opentelemetry::trace::Span
     fn record_f64(&mut self, field: &field::Field, value: f64) {
         self.otel_data
-            .push_attribute(KeyValue::new(field.name(), value));
+            .upsert_attribute(KeyValue::new(field.name(), value));
     }
 
     /// Set attributes on the underlying OpenTelemetry [`Span`] from `i64` values.
@@ -352,7 +352,7 @@ impl field::Visit for SpanAttributeVisitor<'_> {
     /// [`Span`]: opentelemetry::trace::Span
     fn record_i64(&mut self, field: &field::Field, value: i64) {
         self.otel_data
-            .push_attribute(KeyValue::new(field.name(), value));
+            .upsert_attribute(KeyValue::new(field.name(), value));
     }
 
     /// Set attributes on the underlying OpenTelemetry [`Span`] from `&str` values.
@@ -375,7 +375,7 @@ impl field::Visit for SpanAttributeVisitor<'_> {
             OTEL_STATUS_MESSAGE => self.set_status(otel::Status::error(value.to_string())),
             _ => self
                 .otel_data
-                .push_attribute(KeyValue::new(field.name(), value.to_string())),
+                .upsert_attribute(KeyValue::new(field.name(), value.to_string())),
         }
     }
 
@@ -402,7 +402,7 @@ impl field::Visit for SpanAttributeVisitor<'_> {
             OTEL_STATUS_MESSAGE => self.set_status(otel::Status::error(format!("{value:?}"))),
             _ => self
                 .otel_data
-                .push_attribute(KeyValue::new(field.name(), format!("{value:?}"))),
+                .upsert_attribute(KeyValue::new(field.name(), format!("{value:?}"))),
         }
     }
 
@@ -427,7 +427,7 @@ impl field::Visit for SpanAttributeVisitor<'_> {
 
         if self.exception_config.record {
             self.otel_data
-                .push_attribute(KeyValue::new(FIELD_EXCEPTION_MESSAGE, error_msg.clone()));
+                .upsert_attribute(KeyValue::new(FIELD_EXCEPTION_MESSAGE, error_msg.clone()));
 
             // NOTE: This is actually not the stacktrace of the exception. This is
             // the "source chain". It represents the hierarchy of errors from the
@@ -435,15 +435,15 @@ impl field::Visit for SpanAttributeVisitor<'_> {
             // of the callsites in the code that led to the error happening.
             // `std::error::Error::backtrace` is a nightly-only API and cannot be
             // used here until the feature is stabilized.
-            self.otel_data.push_attribute(KeyValue::new(
+            self.otel_data.upsert_attribute(KeyValue::new(
                 FIELD_EXCEPTION_STACKTRACE,
                 Value::Array(chain.clone().into()),
             ));
         }
 
         self.otel_data
-            .push_attribute(KeyValue::new(field.name(), error_msg));
-        self.otel_data.push_attribute(KeyValue::new(
+            .upsert_attribute(KeyValue::new(field.name(), error_msg));
+        self.otel_data.upsert_attribute(KeyValue::new(
             format!("{}.chain", field.name()),
             Value::Array(chain.into()),
         ));
