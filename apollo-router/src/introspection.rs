@@ -45,7 +45,6 @@ impl IntrospectionCache {
                 DEFAULT_INTROSPECTION_CACHE_CAPACITY,
                 "introspection",
             ));
-            storage.activate();
             Self(Mode::Enabled {
                 storage,
                 max_depth: if configuration.limits.router.introspection_max_depth {
@@ -60,9 +59,8 @@ impl IntrospectionCache {
     }
 
     pub(crate) fn activate(&self) {
-        match &self.0 {
-            Mode::Disabled => {}
-            Mode::Enabled { storage, .. } => storage.activate(),
+        if let Mode::Enabled { storage, .. } = &self.0 {
+            storage.activate();
         }
     }
 

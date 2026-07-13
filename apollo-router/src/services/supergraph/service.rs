@@ -42,8 +42,9 @@ use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::supergraph::events::SupergraphEventResponse;
 use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::query_planner::CachingQueryPlanner;
-use crate::query_planner::InMemoryCachePlanner;
-use crate::query_planner::QueryPlannerService;
+use crate::query_planner::InMemoryQueryPlanCache;
+use crate::query_planner::SubgraphSchemas;
+use crate::query_planner::warmup;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::QueryPlannerContent;
@@ -76,7 +77,7 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 /// Containing [`Service`] in the request lifecycle.
 #[derive(Clone)]
 pub(crate) struct SupergraphService {
-    query_planner_service: CachingQueryPlanner<QueryPlannerService>,
+    query_planner_service: query_planner::CacheBoxCloneService,
     execution_service: execution::BoxCloneService,
     schema: Arc<Schema>,
     strict_variable_validation: Mode,
@@ -86,7 +87,7 @@ pub(crate) struct SupergraphService {
 impl SupergraphService {
     #[builder]
     pub(crate) fn new(
-        query_planner_service: CachingQueryPlanner<QueryPlannerService>,
+        query_planner_service: query_planner::CacheBoxCloneService,
         execution_service: execution::BoxCloneService,
         schema: Arc<Schema>,
         strict_variable_validation: Mode,
@@ -156,7 +157,7 @@ impl Service<SupergraphRequest> for SupergraphService {
 }
 
 async fn service_call(
-    planning: CachingQueryPlanner<QueryPlannerService>,
+    planning: query_planner::CacheBoxCloneService,
     mut execution_service: execution::BoxCloneService,
     schema: Arc<Schema>,
     req: SupergraphRequest,
@@ -436,7 +437,7 @@ async fn service_call(
 }
 
 async fn plan_query(
-    mut planning: CachingQueryPlanner<QueryPlannerService>,
+    mut planning: query_planner::CacheBoxCloneService,
     operation_name: Option<String>,
     context: Context,
     query_str: String,
@@ -471,19 +472,31 @@ pub(crate) struct PluggableSupergraphServiceBuilder {
     subgraph_services: Vec<(String, subgraph::BoxCloneService)>,
     http_service_factory: IndexMap<String, HttpClientServiceFactory>,
     connector_http_service_factory: IndexMap<String, HttpClientServiceFactory>,
+    query_planner_service: query_planner::BoxCloneService,
     configuration: Option<Arc<Configuration>>,
-    planner: QueryPlannerService,
+    schema: Arc<Schema>,
+    subgraph_schemas: Arc<SubgraphSchemas>,
+    /// Only for warmup. XXX(@goto-bus-stop): We should delete this when the factories are refactored!
+    query_analysis: Arc<QueryAnalysisLayer>,
 }
 
 impl PluggableSupergraphServiceBuilder {
-    pub(crate) fn new(planner: QueryPlannerService) -> Self {
+    pub(crate) fn new(
+        query_planner_service: query_planner::BoxCloneService,
+        schema: Arc<Schema>,
+        subgraph_schemas: Arc<SubgraphSchemas>,
+        query_analysis: Arc<QueryAnalysisLayer>,
+    ) -> Self {
         Self {
             plugins: Arc::new(Default::default()),
             subgraph_services: Default::default(),
             http_service_factory: Default::default(),
             connector_http_service_factory: Default::default(),
+            query_planner_service,
             configuration: None,
-            planner,
+            schema,
+            subgraph_schemas,
+            query_analysis,
         }
     }
 
@@ -528,20 +541,25 @@ impl PluggableSupergraphServiceBuilder {
         self
     }
 
-    pub(crate) async fn build(self) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
+    pub(crate) async fn build(
+        self,
+    ) -> Result<(SupergraphCreator, warmup::BoxCloneService), crate::error::ServiceBuildError> {
         let configuration = self.configuration.unwrap_or_default();
 
-        let schema = self.planner.schema();
-        let subgraph_schemas = self.planner.subgraph_schemas();
+        let schema = self.schema;
+        let subgraph_schemas = self.subgraph_schemas;
 
+        let query_plan_cache =
+            CachingQueryPlanner::create_cache(&configuration.supergraph.query_planning.cache)
+                .await?;
         let query_planner_service = CachingQueryPlanner::new(
-            self.planner,
+            self.query_planner_service,
             schema.clone(),
             subgraph_schemas.clone(),
             &configuration,
-            IndexMap::default(),
-        )
-        .await?;
+            query_plan_cache.clone(),
+        )?
+        .boxed_clone();
 
         // Activate the telemetry plugin.
         // We must NOT fail to go live with the new router from this point as the telemetry plugin activate interacts with globals.
@@ -551,7 +569,7 @@ impl PluggableSupergraphServiceBuilder {
 
         // We need a non-fallible hook so that once we know we are going live with a pipeline we do final initialization.
         // For now just shoe-horn something in, but if we ever reintroduce the query planner hook in plugins and activate then this can be made clean.
-        query_planner_service.activate();
+        query_plan_cache.activate();
 
         let subscription_plugin_conf = self
             .plugins
@@ -573,7 +591,7 @@ impl PluggableSupergraphServiceBuilder {
             subscription_plugin_conf.clone(),
             Arc::new(ConnectorServiceFactory::new(
                 schema.clone(),
-                subgraph_schemas,
+                subgraph_schemas.clone(),
                 subscription_plugin_conf.clone(),
                 schema
                     .connectors
@@ -605,7 +623,7 @@ impl PluggableSupergraphServiceBuilder {
                         schema: schema.clone(),
                         fetch_service,
                         subscription_config: subscription_plugin_conf,
-                        subgraph_schemas: query_planner_service.subgraph_schemas(),
+                        subgraph_schemas,
                         apollo_telemetry_config: apollo_telemetry_conf,
                         configuration: Arc::clone(&configuration),
                     }
@@ -631,6 +649,7 @@ impl PluggableSupergraphServiceBuilder {
         let sb = UnconstrainedBuffer::new(
             ServiceBuilder::new()
                 .layer(content_negotiation::SupergraphContentNegotiationLayer::default())
+                .layer(crate::compute_job::ComputeJobMetricsLayer::new())
                 .service(
                     self.plugins
                         .iter()
@@ -643,19 +662,33 @@ impl PluggableSupergraphServiceBuilder {
             DEFAULT_BUFFER_SIZE,
         );
 
-        Ok(SupergraphCreator {
-            query_planner_service,
-            schema,
-            plugins: self.plugins,
-            sb,
-        })
+        // XXX(@goto-bus-stop): this shouldn't really be created here, but it's the one
+        // place we have access to the caching query planner service!
+        let warmup_query_planner_service = ServiceBuilder::new()
+            .layer(warmup::WarmupParseQueryLayer::new(
+                self.query_analysis.clone(),
+            ))
+            .map_response(drop) // Ignore response
+            .service(query_planner_service)
+            .boxed_clone();
+
+        Ok((
+            SupergraphCreator {
+                in_memory_query_plan_cache: query_plan_cache.in_memory_cache(),
+                schema,
+                plugins: self.plugins,
+                sb,
+            },
+            warmup_query_planner_service,
+        ))
     }
 }
 
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct SupergraphCreator {
-    query_planner_service: CachingQueryPlanner<QueryPlannerService>,
+    /// A reference to the in-memory query plan cache, kept around so we can peek into it for warm-up
+    in_memory_query_plan_cache: InMemoryQueryPlanCache,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
     sb: UnconstrainedBuffer<supergraph::Request, BoxFuture<'static, supergraph::ServiceResult>>,
@@ -686,28 +719,32 @@ impl SupergraphCreator {
         self.sb.clone().boxed_clone()
     }
 
-    pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
-        self.query_planner_service.previous_cache()
+    pub(crate) fn previous_cache(&self) -> InMemoryQueryPlanCache {
+        self.in_memory_query_plan_cache.clone()
     }
 
     pub(crate) async fn warm_up_query_planner(
-        &mut self,
-        query_parser: &QueryAnalysisLayer,
+        warmup_query_planner_service: warmup::BoxCloneService,
         persisted_query_layer: &PersistedQueryLayer,
-        previous_cache: Option<InMemoryCachePlanner>,
-        count: Option<usize>,
-        experimental_reuse_query_plans: bool,
+        previous_cache: Option<InMemoryQueryPlanCache>,
+        max_cached_queries: Option<usize>,
         experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
     ) {
-        self.query_planner_service
-            .warm_up(
-                query_parser,
-                persisted_query_layer,
-                previous_cache,
-                count,
-                experimental_reuse_query_plans,
-                experimental_pql_prewarm,
-            )
-            .await
+        let requests = warmup::queries_to_warm_up(
+            previous_cache,
+            max_cached_queries,
+            persisted_query_layer.all_operations(),
+            experimental_pql_prewarm,
+        )
+        .await;
+
+        if !requests.is_empty() {
+            tracing::info!(
+                "warming up the query plan cache with {} queries, this might take a while",
+                requests.len(),
+            );
+        }
+
+        warmup::warm_up(warmup_query_planner_service, requests).await;
     }
 }

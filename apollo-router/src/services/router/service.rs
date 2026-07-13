@@ -53,7 +53,7 @@ use crate::plugins::telemetry::config_new::router::events::DisplayRouterRequest;
 use crate::plugins::telemetry::config_new::router::events::DisplayRouterResponse;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
-use crate::query_planner::InMemoryCachePlanner;
+use crate::query_planner::InMemoryQueryPlanCache;
 use crate::router_factory::RouterFactory;
 use crate::services::HasPlugins;
 use crate::services::HasSchema;
@@ -101,13 +101,12 @@ impl RouterService {
         supergraph_service: supergraph::BoxCloneService,
         apq_layer: APQLayer,
         persisted_query_layer: Arc<PersistedQueryLayer>,
-        query_analysis_layer: QueryAnalysisLayer,
+        query_analysis_layer: Arc<QueryAnalysisLayer>,
         batching: Batching,
     ) -> Self {
         // Some of the layers in the stack are wrapping previous implementations that are called
         // layers, but are not tower layers at all.
         let apq_layer = Arc::new(apq_layer);
-        let query_analysis_layer = Arc::new(query_analysis_layer);
 
         let service = ServiceBuilder::new()
             .layer(DisplayRouterRequestLayer)
@@ -149,7 +148,7 @@ pub(crate) async fn from_supergraph_mock_with_configuration(
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
 + Clone {
-    let (_, _, supergraph_creator) = crate::TestHarness::builder()
+    let (_, _, query_analysis, supergraph_creator) = crate::TestHarness::builder()
         .configuration(configuration.clone())
         .supergraph_hook(move |_| mock.clone().boxed_clone())
         .build_common()
@@ -157,7 +156,7 @@ pub(crate) async fn from_supergraph_mock_with_configuration(
         .unwrap();
 
     RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
+        query_analysis,
         Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
         Arc::new(supergraph_creator),
         configuration,
@@ -191,7 +190,7 @@ pub(crate) async fn empty() -> impl Service<
     // to be called. Any call would block indefinitely.
     let (mock, _handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-    let (_, _, supergraph_creator) = crate::TestHarness::builder()
+    let (_, _, query_analysis, supergraph_creator) = crate::TestHarness::builder()
         .configuration(Default::default())
         .supergraph_hook(move |_| mock.clone().boxed_clone())
         .build_common()
@@ -199,7 +198,7 @@ pub(crate) async fn empty() -> impl Service<
         .unwrap();
 
     RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
+        query_analysis,
         Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
         Arc::new(supergraph_creator),
         Arc::new(Configuration::default()),
@@ -670,7 +669,7 @@ impl RouterFactory for RouterCreator {
 
 impl RouterCreator {
     pub(crate) async fn new(
-        query_analysis_layer: QueryAnalysisLayer,
+        query_analysis_layer: Arc<QueryAnalysisLayer>,
         persisted_query_layer: Arc<PersistedQueryLayer>,
         supergraph_creator: Arc<SupergraphCreator>,
         configuration: Arc<Configuration>,
@@ -746,7 +745,7 @@ impl RouterCreator {
 }
 
 impl RouterCreator {
-    pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
+    pub(crate) fn previous_cache(&self) -> InMemoryQueryPlanCache {
         self.supergraph_creator.previous_cache()
     }
 }
