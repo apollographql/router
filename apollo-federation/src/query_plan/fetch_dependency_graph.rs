@@ -1,4 +1,6 @@
 use std::fmt::Write as _;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::iter;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -176,6 +178,11 @@ pub(crate) struct FetchDependencyGraphNode {
     /// As query plan execution runs, it accumulates fetch data into a response object. This is the
     /// path at which to merge in the data for this particular fetch.
     merge_at: Option<Vec<FetchDataPathElement>>,
+    /// Precomputed hash of (subgraph_name, merge_at, defer_ref) for fast-reject in merge key
+    /// comparisons. Two nodes with different hashes cannot share a merge key, avoiding expensive
+    /// deep Vec<FetchDataPathElement> equality checks.
+    #[serde(skip)]
+    merge_key_hash: u64,
     /// The fetch ID generation, if one is necessary (used when handling `@defer`).
     ///
     /// This can be treated as an Option using `OnceLock::get()`.
@@ -191,6 +198,18 @@ pub(crate) struct FetchDependencyGraphNode {
     /// If true, then we skip an expensive computation during `is_useless()`. (This partially
     /// caches that computation.)
     is_known_useful: bool,
+}
+
+fn compute_merge_key_hash(
+    subgraph_name: &str,
+    merge_at: &Option<Vec<FetchDataPathElement>>,
+    defer_ref: &Option<DeferRef>,
+) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    subgraph_name.hash(&mut hasher);
+    merge_at.hash(&mut hasher);
+    defer_ref.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Safely generate IDs for fetch dependency nodes without mutable access.
@@ -610,10 +629,9 @@ impl FetchDependencyGraphNodePath {
 
         let mut res: IndexSet<Name> = self
             .possible_types
-            .clone()
-            .into_iter()
+            .iter()
             .map(|pt| {
-                let field = CompositeTypeDefinitionPosition::try_from(self.schema.get_type(&pt)?)?
+                let field = CompositeTypeDefinitionPosition::try_from(self.schema.get_type(pt)?)?
                     .field(element.name().clone())?
                     .get(self.schema.schema())?;
                 let typ = self
@@ -784,6 +802,7 @@ impl FetchDependencyGraph {
             .schema_by_source(&subgraph_name)?
             .clone();
         self.on_modification();
+        let merge_key_hash = compute_merge_key_hash(&subgraph_name, &merge_at, &defer_ref);
         Ok(self.graph.add_node(Arc::new(FetchDependencyGraphNode {
             subgraph_name,
             root_kind,
@@ -794,6 +813,7 @@ impl FetchDependencyGraph {
                 .then(|| Arc::new(FetchInputs::empty(self.supergraph_schema.clone()))),
             input_rewrites: Default::default(),
             merge_at,
+            merge_key_hash,
             id: OnceLock::new(),
             defer_ref,
             cached_cost: None,
@@ -1602,8 +1622,8 @@ impl FetchDependencyGraph {
             // the `merge_sibling_in` would shrink `children_nodes` dynamically. I found it easier
             // to reason about it the other way around by incrementing `i` when it's merged into
             // `j` without modifying `children_nodes`.
-            for (i, i_node_index) in children_nodes.iter().cloned().enumerate() {
-                for (_j, j_node_index) in children_nodes.iter().cloned().enumerate().skip(i + 1) {
+            for (i, i_node_index) in children_nodes.iter().copied().enumerate() {
+                for (_j, j_node_index) in children_nodes.iter().copied().enumerate().skip(i + 1) {
                     if self.can_merge_sibling_in(j_node_index, i_node_index)? {
                         // Merge node `i` into node `j`.
                         // In theory, we can merge in any direction. But, we merge i into j,
@@ -2290,8 +2310,10 @@ impl FetchDependencyGraph {
             return Ok(false);
         };
 
-        // we compare the subgraph names last because on average it improves performance
-        Ok(node.merge_at == sibling.merge_at
+        // Hash check rejects mismatched merge keys without deep Vec comparison.
+        // We compare the subgraph names last because on average it improves performance.
+        Ok(node.merge_key_hash == sibling.merge_key_hash
+            && node.merge_at == sibling.merge_at
             && own_parent_id == sibling_parent_id
             && node.defer_ref == sibling.defer_ref
             && node.subgraph_name == sibling.subgraph_name)
@@ -2323,9 +2345,11 @@ impl FetchDependencyGraph {
             return Ok(false);
         };
 
-        // we compare the subgraph names last because on average it improves performance
+        // Hash check rejects mismatched merge keys without deep Vec comparison.
+        // We compare the subgraph names last because on average it improves performance.
         Ok(grand_child_parent_relation.path_in_parent.is_some()
             && grand_child_parent_parent_relation.path_in_parent.is_some()
+            && child.merge_key_hash == grand_child.merge_key_hash
             && child.merge_at == grand_child.merge_at
             && child_inputs.contains(grand_child_inputs)
             && node.defer_ref == grand_child.defer_ref
@@ -3147,23 +3171,16 @@ impl FetchDependencyGraphNode {
     }
 
     // PORT_NOTE: In JS version, this value is memoized on the node struct.
-    fn subgraph_and_merge_at_key(&self) -> Option<String> {
-        // PORT_NOTE: In JS version, this hash value is defined as below.
-        // ```
-        // hasInputs ? `${toValidGraphQLName(subgraphName)}-${mergeAt?.join('::') ?? ''}` : undefined,
-        // ```
-        // TODO: We could use a numeric hash key in Rust, instead of a string key as done in JS.
+    // Uses a numeric hash instead of the JS string key to avoid per-node
+    // string allocation + formatting. Hash collisions are safe because the
+    // caller (merge_fetches_with_same_subgraph_and_merge_at) does a full
+    // equality check via has_equal_inputs within each bucket.
+    fn subgraph_and_merge_at_key(&self) -> Option<u64> {
         self.inputs.as_ref()?;
-        let subgraph_name = &self.subgraph_name;
-        let merge_at_str = match self.merge_at {
-            Some(ref merge_at) => merge_at
-                .iter()
-                .map(|m| m.to_string())
-                .collect::<Vec<_>>()
-                .join("::"),
-            None => "".to_string(),
-        };
-        Some(format!("{subgraph_name}-{merge_at_str}"))
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.subgraph_name.hash(&mut hasher);
+        self.merge_at.hash(&mut hasher);
+        Some(hasher.finish())
     }
 
     fn add_context_renamer(&mut self, renamer: FetchDataKeyRenamer) {
