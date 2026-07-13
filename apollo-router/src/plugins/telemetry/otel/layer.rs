@@ -685,21 +685,24 @@ where
     /// Builds the real OTel span for `otel_data`, consuming the `SpanBuilder`
     /// within it in the process. A no-op if it's already built.
     fn start_cx(&self, otel_data: &mut OtelData) {
-        if let OtelDataState::Context { .. } = &otel_data.state {
+        if matches!(otel_data.state, OtelDataState::Context { .. }) {
             return;
         }
-        if let OtelDataState::Builder {
+        let OtelDataState::Builder {
             parent_cx,
             builder,
             status,
             ..
         } = std::mem::take(&mut otel_data.state)
-        {
-            let mut span = builder.start_with_context(&self.tracer, &parent_cx);
-            span.set_status(status);
-            let current_cx = parent_cx.with_span(span);
-            otel_data.state = OtelDataState::Context { current_cx };
-        }
+        else {
+            unreachable!("state is Builder: the Context case returned above");
+        };
+
+        let mut span = builder.start_with_context(&self.tracer, &parent_cx);
+        span.set_status(status);
+        otel_data.state = OtelDataState::Context {
+            current_cx: parent_cx.with_span(span),
+        };
     }
 
     fn with_started_cx<U>(&self, otel_data: &mut OtelData, f: &dyn Fn(&OtelContext) -> U) -> U {
