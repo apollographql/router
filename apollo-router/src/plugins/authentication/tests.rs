@@ -33,8 +33,9 @@ use jsonwebtoken::jwk::KeyOperations;
 use jsonwebtoken::jwk::PublicKeyUse;
 use mime::APPLICATION_JSON;
 use p256::ecdsa::SigningKey;
-use p256::ecdsa::signature::rand_core::OsRng;
+use p256::elliptic_curve::Generate;
 use p256::pkcs8::EncodePrivateKey;
+use rand::rngs::SysRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::ServiceExt;
@@ -979,9 +980,9 @@ fn make_manager(jwk: &Jwk, issuers: Option<Issuers>, audiences: Option<Audiences
 
 #[tokio::test]
 async fn issuer_check() {
-    let signing_key = SigningKey::random(&mut OsRng);
+    let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
     let verifying_key = signing_key.verifying_key();
-    let point = verifying_key.to_encoded_point(false);
+    let point = verifying_key.to_sec1_point(false);
 
     let encoding_key = EncodingKey::from_ec_der(&signing_key.to_pkcs8_der().unwrap().to_bytes());
 
@@ -1170,9 +1171,9 @@ async fn issuer_check() {
 
 #[tokio::test]
 async fn audience_check() {
-    let signing_key = SigningKey::random(&mut OsRng);
+    let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
     let verifying_key = signing_key.verifying_key();
-    let point = verifying_key.to_encoded_point(false);
+    let point = verifying_key.to_sec1_point(false);
 
     let encoding_key = EncodingKey::from_ec_der(&signing_key.to_pkcs8_der().unwrap().to_bytes());
 
@@ -1607,7 +1608,7 @@ mod common {
 
     pub(super) fn jwk_with_kid(signing_key: &SigningKey, kid: &str) -> Jwk {
         let verifying_key = signing_key.verifying_key();
-        let point = verifying_key.to_encoded_point(false);
+        let point = verifying_key.to_sec1_point(false);
         Jwk {
             common: CommonParameters {
                 public_key_use: Some(PublicKeyUse::Signature),
@@ -1686,7 +1687,8 @@ mod expiry_validation {
     use jsonwebtoken::get_current_timestamp;
     use jsonwebtoken::jwk::JwkSet;
     use p256::ecdsa::SigningKey;
-    use p256::ecdsa::signature::rand_core::OsRng;
+    use p256::elliptic_curve::Generate;
+    use rand::rngs::SysRng;
     use url::Url;
 
     use super::common::build_request_with_header_token;
@@ -1707,7 +1709,7 @@ mod expiry_validation {
         token_claims: serde_json::Value,
         allow_missing_exp: bool,
     ) -> ControlFlow<router::Response, router::Request> {
-        let signing_key = SigningKey::random(&mut OsRng);
+        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let manager = if allow_missing_exp {
             make_manager_with_allow_missing_exp(&jwk(&signing_key), None, None, true)
         } else {
@@ -1792,7 +1794,7 @@ mod expiry_validation {
         audiences: Option<Audiences>,
         allow_missing_exp: bool,
     ) -> ControlFlow<router::Response, router::Request> {
-        let signing_key = SigningKey::random(&mut OsRng);
+        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let manager = make_manager_with_allow_missing_exp(
             &jwk(&signing_key),
             issuers,
@@ -1845,11 +1847,11 @@ mod expiry_validation {
     #[test]
     fn it_respects_per_jwks_allow_missing_exp_scoping() {
         // JWKS A: allow_missing_exp = true, kid = "key-a"
-        let signing_key_a = SigningKey::random(&mut OsRng);
+        let signing_key_a = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let jwk_a = jwk_with_kid(&signing_key_a, "key-a");
 
         // JWKS B: allow_missing_exp = false, kid = "key-b"
-        let signing_key_b = SigningKey::random(&mut OsRng);
+        let signing_key_b = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let jwk_b = jwk_with_kid(&signing_key_b, "key-b");
 
         let url_a = Url::from_str("file:///jwks-a.json").unwrap();
@@ -1917,7 +1919,8 @@ mod audience_validation {
     use http::StatusCode;
     use jsonwebtoken::get_current_timestamp;
     use p256::ecdsa::SigningKey;
-    use p256::ecdsa::signature::rand_core::OsRng;
+    use p256::elliptic_curve::Generate;
+    use rand::rngs::SysRng;
 
     use super::common::build_request_with_header_token;
     use super::common::jwk;
@@ -1930,7 +1933,7 @@ mod audience_validation {
         manager_aud: &[&str],
         token_aud: serde_json::Value,
     ) -> ControlFlow<router::Response, router::Request> {
-        let signing_key = SigningKey::random(&mut OsRng);
+        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let manager_audiences = if manager_aud.is_empty() {
             None
         } else {
@@ -1999,7 +2002,8 @@ mod issuer_validation {
     use http::StatusCode;
     use jsonwebtoken::get_current_timestamp;
     use p256::ecdsa::SigningKey;
-    use p256::ecdsa::signature::rand_core::OsRng;
+    use p256::elliptic_curve::Generate;
+    use rand::rngs::SysRng;
 
     use super::common::build_request_with_header_token;
     use super::common::jwk;
@@ -2012,7 +2016,7 @@ mod issuer_validation {
         manager_iss: &[&str],
         token_iss: serde_json::Value,
     ) -> ControlFlow<router::Response, router::Request> {
-        let signing_key = SigningKey::random(&mut OsRng);
+        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
 
         let manager_issuers = if manager_iss.is_empty() {
             None
@@ -2092,7 +2096,8 @@ mod duplicate_key_retry {
     use jsonwebtoken::get_current_timestamp;
     use jsonwebtoken::jwk::JwkSet;
     use p256::ecdsa::SigningKey;
-    use p256::ecdsa::signature::rand_core::OsRng;
+    use p256::elliptic_curve::Generate;
+    use rand::rngs::SysRng;
     use url::Url;
 
     use super::common::build_request_with_header_token;
@@ -2108,7 +2113,7 @@ mod duplicate_key_retry {
         // entry B (index 1) expects "tenant-b". iter_jwks uses list.pop() so entry B is tried
         // first. A token with issuer "tenant-a" fails entry B's issuer check; the retry loop
         // must continue to entry A and succeed.
-        let signing_key = SigningKey::random(&mut OsRng);
+        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let shared_jwk = JwkSet {
             keys: vec![jwk(&signing_key)],
         };
@@ -2158,7 +2163,7 @@ mod duplicate_key_retry {
     #[test]
     fn it_fails_when_no_jwks_entry_issuer_matches() {
         // Both entries have specific issuers, neither matches the token issuer.
-        let signing_key = SigningKey::random(&mut OsRng);
+        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let shared_jwk = JwkSet {
             keys: vec![jwk(&signing_key)],
         };
@@ -2216,7 +2221,7 @@ mod duplicate_key_retry {
         // entry B (index 1) expects "aud-b". iter_jwks uses list.pop() so entry B is tried
         // first. A token with audience "aud-a" fails entry B's audience check; the retry loop
         // must continue to entry A and succeed.
-        let signing_key = SigningKey::random(&mut OsRng);
+        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let shared_jwk = JwkSet {
             keys: vec![jwk(&signing_key)],
         };
