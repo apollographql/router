@@ -3744,3 +3744,161 @@ async fn invalid_input_enum() {
 
     insta::assert_json_snapshot!(response);
 }
+
+#[tokio::test]
+async fn test_cache_warmup() {
+    use std::fmt::Debug;
+    use std::sync::atomic::AtomicBool;
+
+    use tower::ServiceBuilder;
+
+    use crate::query_planner::QueryPlan;
+    use crate::services::PluggableSupergraphServiceBuilder;
+    use crate::services::QueryPlannerContent;
+    use crate::services::QueryPlannerResponse;
+    use crate::services::layers::persisted_queries::PersistedQueryExpander;
+    use crate::services::layers::query_analysis::QueryAnalysis;
+    use crate::services::query_planner;
+    use crate::services::supergraph::service::SupergraphCreator;
+
+    let configuration = Configuration::default();
+    let schema = Arc::new(
+        Schema::parse(
+            include_str!("../../testdata/starstuff@current.graphql"),
+            &configuration,
+        )
+        .unwrap(),
+    );
+
+    // We have to do a bunch of setup here...
+    let query_analysis =
+        Arc::new(QueryAnalysis::new(schema.clone(), Arc::new(configuration.clone())).await);
+    let pq_layer = PersistedQueryExpander::new(&configuration).await.unwrap();
+
+    /// Return an empty plan that doesn't require any subgraph requests to fulfill.
+    fn empty_query_plan() -> QueryPlannerResponse {
+        let plan = Arc::new(QueryPlan::fake_new(None, None));
+        QueryPlannerResponse::builder()
+            .content(QueryPlannerContent::Plan { plan })
+            .build()
+    }
+
+    /// Execute a constant mock query against the given supergraph service.
+    async fn execute_query(
+        mut supergraph_service: impl tower::Service<
+            supergraph::Request,
+            Response = supergraph::Response,
+            Error: Debug,
+        >,
+    ) -> graphql::Response {
+        supergraph_service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                supergraph::Request::fake_builder()
+                    .query("query ExampleQuery { me { name } }")
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap()
+    }
+
+    // First we run a query normally, so that the plan enters the in-memory cache.
+
+    let (mock, mut handle) =
+        tower_test::mock::pair::<query_planner::Request, query_planner::Response>();
+    let driver = tokio::spawn(async move {
+        let (_req, responder) = handle
+            .next_request()
+            .await
+            .expect("mock planner should receive exactly one request");
+        // HACK: Return an empty plan so we don't do any work in execution
+        responder.send_response(empty_query_plan());
+    });
+
+    let (supergraph_creator, _warmup) = PluggableSupergraphServiceBuilder::new(
+        mock.map_err(|err| panic!("mock driver failed: {err}"))
+            .boxed_clone(),
+        schema.clone(),
+        Arc::new(Default::default()),
+        query_analysis.clone(),
+    )
+    .build()
+    .await
+    .unwrap();
+
+    let supergraph_service = ServiceBuilder::new()
+        .load_shed()
+        .layer(crate::services::router::tower_compat::ParseQueryLayer::new(
+            query_analysis.clone(),
+        ))
+        .service(supergraph_creator.make());
+
+    let response = execute_query(supergraph_service).await;
+    assert!(response.errors.is_empty());
+
+    crate::plugin::test::await_mock_driver(driver).await;
+
+    let previous_cache = supergraph_creator.previous_cache();
+
+    // Second, we warm up a new service using the cache from the previous service.
+
+    let (mock, mut handle) =
+        tower_test::mock::pair::<query_planner::Request, query_planner::Response>();
+    // ...warm-up should submit the query that we planned above to the new query planner service
+    let did_plan = Arc::new(AtomicBool::new(false));
+    let did_plan_2 = did_plan.clone();
+    let driver = tokio::spawn(async move {
+        let (_req, responder) = handle
+            .next_request()
+            .await
+            .expect("mock planner should receive exactly one request");
+        // HACK: Return an empty plan so we don't do any work in execution
+        responder.send_response(empty_query_plan());
+        did_plan_2.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+
+    let (supergraph_creator, warmup_service) = PluggableSupergraphServiceBuilder::new(
+        mock.map_err(|err| panic!("mock driver failed: {err}"))
+            .boxed_clone(),
+        schema.clone(),
+        Arc::new(Default::default()),
+        query_analysis.clone(),
+    )
+    .build()
+    .await
+    .unwrap();
+
+    SupergraphCreator::warm_up_query_planner(
+        warmup_service,
+        &pq_layer,
+        Some(previous_cache),
+        Some(1),
+        &Default::default(),
+    )
+    .await;
+
+    assert!(
+        did_plan.load(std::sync::atomic::Ordering::Relaxed),
+        "should have submitted a query to the planner"
+    );
+
+    // Our query planner mock doesn't expect any further requests. Check that the same query can
+    // still be resolved because it hits the cache.
+    let supergraph_service = ServiceBuilder::new()
+        .load_shed()
+        .layer(crate::services::router::tower_compat::ParseQueryLayer::new(
+            query_analysis.clone(),
+        ))
+        .service(supergraph_creator.make());
+
+    let response = execute_query(supergraph_service).await;
+    assert!(response.errors.is_empty());
+
+    crate::plugin::test::await_mock_driver(driver).await;
+}

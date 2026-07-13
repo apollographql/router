@@ -22,9 +22,9 @@ use crate::http_ext;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::fetch_service_handle_subscription;
 use crate::query_planner::FETCH_SPAN_NAME;
+use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
-use crate::query_planner::fetch::SubgraphSchemas;
 use crate::services::FetchResponse;
 use crate::services::SubgraphServiceFactory;
 use crate::services::fetch::ErrorMapping;
@@ -230,7 +230,7 @@ impl FetchService {
         let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
         let aliased_operation = if let Some(ctx_arg) = &variables.contextual_arguments {
             if let Some(subgraph_schema) = subgraph_schemas.get(&service_name.to_string()) {
-                match build_operation_with_aliasing(operation, ctx_arg, &subgraph_schema.schema) {
+                match build_operation_with_aliasing(operation, ctx_arg, subgraph_schema) {
                     Ok(op) => {
                         alias_query_string = op.serialize().no_indent().to_string();
                         alias_query_string.as_str()

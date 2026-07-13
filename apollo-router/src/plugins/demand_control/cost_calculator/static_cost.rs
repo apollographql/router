@@ -851,9 +851,16 @@ mod tests {
             .unwrap_or_default();
         let supergraph_schema = schema.supergraph_schema().clone();
 
-        let mut planner = QueryPlannerService::new(schema.into(), config.clone())
-            .await
-            .unwrap();
+        let schema_arc: Arc<crate::spec::Schema> = schema.into();
+        let qp_arc = QueryPlannerService::create_planner(&schema_arc, &config).unwrap();
+        let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
+        let mut planner = QueryPlannerService::new(
+            schema_arc,
+            config.clone(),
+            qp_arc,
+            Arc::new(crate::introspection::IntrospectionCache::new(&config)),
+        )
+        .unwrap();
 
         let ctx = Context::new();
         ctx.extensions()
@@ -878,11 +885,11 @@ mod tests {
 
         let schema = DemandControlledSchema::new(Arc::new(supergraph_schema)).unwrap();
         let mut demand_controlled_subgraph_schemas = HashMap::new();
-        for (subgraph_name, subgraph_schema) in planner.subgraph_schemas().iter() {
+        for (subgraph_name, subgraph_schema) in subgraph_schemas.iter() {
             let demand_controlled_subgraph_schema =
-                DemandControlledSchema::new(subgraph_schema.schema.clone()).unwrap();
+                DemandControlledSchema::new(subgraph_schema.clone()).unwrap();
             demand_controlled_subgraph_schemas
-                .insert(subgraph_name.to_string(), demand_controlled_subgraph_schema);
+                .insert(subgraph_name.clone(), demand_controlled_subgraph_schema);
         }
 
         let calculator = StaticCostCalculator::new(

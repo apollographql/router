@@ -107,11 +107,6 @@ expression: "& metrics.non_zero()"
     datapoints:
       - value: 1
         attributes: {}
-- name: apollo.router.config.experimental_reuse_query_plans
-  data:
-    datapoints:
-      - value: 1
-        attributes: {}
 - name: apollo.router.config.experimental_type_conditioned_fetching
   data:
     datapoints:

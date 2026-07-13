@@ -99,7 +99,7 @@ pub(crate) static PLUGIN_NAME: LazyLock<&'static str> =
 
 struct MockSubgraphsPlugin {
     per_subgraph_config: Config,
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
+    subgraph_schemas: Arc<crate::query_planner::SubgraphSchemas>,
 }
 
 #[async_trait::async_trait]
