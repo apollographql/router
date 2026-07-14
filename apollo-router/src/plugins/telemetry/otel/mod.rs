@@ -13,10 +13,7 @@ pub(crate) use span_ext::OpenTelemetrySpanExt;
 
 use super::utils::upsert_attribute;
 
-/// Per-span OpenTelemetry data tracked by this crate.
-///
-/// `current_cx` always holds a live, already-built otel span — `OtelData` is never
-/// constructed before the span is built, so there is no "building" state to represent.
+/// OpenTelemetry span data attached to a tracing span by this crate's layer.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct OtelData {
     /// The live otel `Span`, wrapped in its `Context`. Always already built.
