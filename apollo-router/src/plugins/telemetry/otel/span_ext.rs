@@ -3,7 +3,6 @@ use opentelemetry::KeyValue;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::TraceContextExt;
 
-use super::OtelDataState;
 use super::layer::WithContext;
 /// Utility functions to allow tracing [`Span`]s to accept and return
 /// [OpenTelemetry] [`Context`]s.
@@ -97,14 +96,10 @@ impl OpenTelemetrySpanExt for tracing::Span {
             let mut att = Some(attributes);
             self.with_subscriber(move |(id, subscriber)| {
                 if let Some(get_context) = subscriber.downcast_ref::<WithContext>() {
-                    // `with_context` forces the span to build for real if it hasn't
-                    // already, so `data.state` is guaranteed to be `Context` here.
                     get_context.with_context(subscriber, id, move |data| {
-                        if let (Some(cx), OtelDataState::Context { current_cx }) =
-                            (cx.take(), &data.state)
-                        {
+                        if let Some(cx) = cx.take() {
                             let attr = att.take().unwrap_or_default();
-                            current_cx.span().add_link(cx, attr);
+                            data.current_cx.span().add_link(cx, attr);
                         }
                     });
                 }
@@ -117,9 +112,7 @@ impl OpenTelemetrySpanExt for tracing::Span {
         self.with_subscriber(|(id, subscriber)| {
             if let Some(get_context) = subscriber.downcast_ref::<WithContext>() {
                 get_context.with_context(subscriber, id, |data| {
-                    if let OtelDataState::Context { current_cx } = &data.state {
-                        cx = Some(current_cx.clone());
-                    }
+                    cx = Some(data.current_cx.clone());
                 })
             }
         });

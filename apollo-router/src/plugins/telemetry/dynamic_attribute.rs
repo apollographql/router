@@ -21,8 +21,6 @@ use super::consts::OTEL_STATUS_MESSAGE;
 use super::formatters::APOLLO_CONNECTOR_PREFIX;
 use super::formatters::APOLLO_PRIVATE_PREFIX;
 use super::otel::OtelData;
-use super::otel::OtelDataState;
-use super::otel::layer::str_to_span_kind;
 use super::otel::layer::str_to_status;
 use super::utils::upsert_attribute;
 use crate::plugins::telemetry::reload::otel::IsSampled;
@@ -195,19 +193,15 @@ fn update_otel_data(otel_data: &mut OtelData, key: &Key, value: &opentelemetry::
             otel_data.forced_span_name = Some(value.to_string())
         }
         OTEL_KIND => {
-            // Span kind can't be changed once the span has actually been built, so this
-            // only has an effect if it's still buffering into a builder.
-            if let OtelDataState::Builder { builder, .. } = &mut otel_data.state {
-                builder.span_kind = str_to_span_kind(&value.as_str());
-            }
+            // Span kind can't be changed once a span is built, and by the time a
+            // dynamic attribute can be set here, it always already is (see `OtelData`'s
+            // doc comment) - so this is a no-op, matching the limitation
+            // `tracing-opentelemetry` itself accepts for the same reason.
         }
         OTEL_STATUS_CODE => otel_data.forced_status = str_to_status(&value.as_str()).into(),
         OTEL_STATUS_MESSAGE => {
             let status = opentelemetry::trace::Status::error(value.as_str().to_string());
-            match &mut otel_data.state {
-                OtelDataState::Builder { status: s, .. } => *s = status,
-                OtelDataState::Context { current_cx } => current_cx.span().set_status(status),
-            }
+            otel_data.current_cx.span().set_status(status);
         }
         _ => {}
     }

@@ -30,7 +30,6 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
 
 use super::OtelData;
-use super::OtelDataState;
 use crate::plugins::response_cache::invalidation_endpoint::INVALIDATION_ENDPOINT_SPAN_NAME;
 use crate::plugins::telemetry::consts::FIELD_EXCEPTION_MESSAGE;
 use crate::plugins::telemetry::consts::FIELD_EXCEPTION_STACKTRACE;
@@ -43,6 +42,7 @@ use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::reload::otel::IsSampled;
 use crate::plugins::telemetry::reload::otel::SampledSpan;
+use crate::plugins::telemetry::utils::upsert_attribute;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::router_factory::STARTING_SPAN_NAME;
 
@@ -116,8 +116,8 @@ pub(crate) struct WithContext(
 
 impl WithContext {
     // This function allows a function to be called in the context of the
-    // "remembered" subscriber. The `OtelData` is guaranteed to already be built (its
-    // `state` is `OtelDataState::Context`) by the time `f` is invoked.
+    // "remembered" subscriber. `OtelData` is always already built by the time `f` is
+    // invoked - see the doc comment on `OtelData` itself.
     pub(crate) fn with_context(
         &self,
         dispatch: &tracing::Dispatch,
@@ -307,15 +307,124 @@ struct ExceptionFieldConfig {
     propagate: bool,
 }
 
-/// Visitor applying `tracing` field values onto a span's [`OtelData`], whether it's
-/// still buffering into a builder or has already been built for real (used in both
-/// `on_new_span` and `on_record`).
+/// Visitor applying `tracing` field values while a span is still being assembled into
+/// a `SpanBuilder`, before it's built for real. Used only in `on_new_span`, on local
+/// variables - no `OtelData` exists yet at this point (see `OtelData`'s doc comment).
+struct NewSpanAttributeVisitor<'a> {
+    builder: &'a mut otel::SpanBuilder,
+    status: &'a mut otel::Status,
+    attributes: &'a mut Vec<KeyValue>,
+    exception_config: ExceptionFieldConfig,
+}
+
+impl NewSpanAttributeVisitor<'_> {
+    /// Adds or replaces `kv` by key in both `attributes` (the mirror that seeds
+    /// `OtelData::attributes`) and the real builder.
+    fn push_attribute(&mut self, kv: KeyValue) {
+        upsert_attribute(self.attributes, kv.clone());
+        upsert_attribute(self.builder.attributes.get_or_insert_with(Vec::new), kv);
+    }
+}
+
+impl field::Visit for NewSpanAttributeVisitor<'_> {
+    /// Set attributes on the underlying OpenTelemetry [`Span`] from `bool` values.
+    ///
+    /// [`Span`]: opentelemetry::trace::Span
+    fn record_bool(&mut self, field: &field::Field, value: bool) {
+        self.push_attribute(KeyValue::new(field.name(), value));
+    }
+
+    /// Set attributes on the underlying OpenTelemetry [`Span`] from `f64` values.
+    ///
+    /// [`Span`]: opentelemetry::trace::Span
+    fn record_f64(&mut self, field: &field::Field, value: f64) {
+        self.push_attribute(KeyValue::new(field.name(), value));
+    }
+
+    /// Set attributes on the underlying OpenTelemetry [`Span`] from `i64` values.
+    ///
+    /// [`Span`]: opentelemetry::trace::Span
+    fn record_i64(&mut self, field: &field::Field, value: i64) {
+        self.push_attribute(KeyValue::new(field.name(), value));
+    }
+
+    /// Set attributes on the underlying OpenTelemetry [`Span`] from `&str` values.
+    ///
+    /// [`Span`]: opentelemetry::trace::Span
+    fn record_str(&mut self, field: &field::Field, value: &str) {
+        match field.name() {
+            OTEL_NAME => self.builder.name = value.to_string().into(),
+            OTEL_KIND => self.builder.span_kind = str_to_span_kind(value),
+            OTEL_STATUS_CODE => *self.status = str_to_status(value),
+            OTEL_STATUS_MESSAGE => *self.status = otel::Status::error(value.to_string()),
+            _ => self.push_attribute(KeyValue::new(field.name(), value.to_string())),
+        }
+    }
+
+    /// Set attributes on the underlying OpenTelemetry [`Span`] from values that
+    /// implement Debug.
+    ///
+    /// [`Span`]: opentelemetry::trace::Span
+    fn record_debug(&mut self, field: &field::Field, value: &dyn fmt::Debug) {
+        match field.name() {
+            OTEL_NAME => self.builder.name = format!("{value:?}").into(),
+            OTEL_KIND => self.builder.span_kind = str_to_span_kind(&format!("{value:?}")),
+            OTEL_STATUS_CODE => *self.status = str_to_status(&format!("{value:?}")),
+            OTEL_STATUS_MESSAGE => *self.status = otel::Status::error(format!("{value:?}")),
+            _ => self.push_attribute(KeyValue::new(field.name(), format!("{value:?}"))),
+        }
+    }
+
+    /// Set attributes on the underlying OpenTelemetry [`Span`] using a [`std::error::Error`]'s
+    /// [`std::fmt::Display`] implementation. Also adds the `source` chain as an extra field
+    ///
+    /// [`Span`]: opentelemetry::trace::Span
+    fn record_error(
+        &mut self,
+        field: &tracing_core::Field,
+        value: &(dyn std::error::Error + 'static),
+    ) {
+        let mut chain: Vec<StringValue> = Vec::new();
+        let mut next_err = value.source();
+
+        while let Some(err) = next_err {
+            chain.push(err.to_string().into());
+            next_err = err.source();
+        }
+
+        let error_msg = value.to_string();
+
+        if self.exception_config.record {
+            self.push_attribute(KeyValue::new(FIELD_EXCEPTION_MESSAGE, error_msg.clone()));
+
+            // NOTE: This is actually not the stacktrace of the exception. This is
+            // the "source chain". It represents the hierarchy of errors from the
+            // app level to the lowest level such as IO. It does not represent all
+            // of the callsites in the code that led to the error happening.
+            // `std::error::Error::backtrace` is a nightly-only API and cannot be
+            // used here until the feature is stabilized.
+            self.push_attribute(KeyValue::new(
+                FIELD_EXCEPTION_STACKTRACE,
+                Value::Array(chain.clone().into()),
+            ));
+        }
+
+        self.push_attribute(KeyValue::new(field.name(), error_msg));
+        self.push_attribute(KeyValue::new(
+            format!("{}.chain", field.name()),
+            Value::Array(chain.into()),
+        ));
+    }
+}
+
+/// Visitor applying `tracing` field values onto an already-live span - used only in
+/// `on_record` (`span.record(...)` called on an existing span), where `OtelData` is
+/// always already built by the time this runs (see `OtelData`'s doc comment).
 ///
-/// Unlike the still-buffering case, an already-built span can't have its kind
-/// changed (there's no public API to do so once built) or its current name read
-/// back (needed to snapshot `otel.name` renames), so those are no-ops in that case -
-/// matching the limitation `tracing-opentelemetry` itself accepts for the same
-/// reason.
+/// The live span can't have its kind changed (there's no public API to do so once
+/// built) or its current name read back (needed to snapshot `otel.name` renames), so
+/// those are no-ops here - matching the limitation `tracing-opentelemetry` itself
+/// accepts for the same reason.
 struct SpanAttributeVisitor<'a> {
     otel_data: &'a mut OtelData,
     exception_config: ExceptionFieldConfig,
@@ -323,10 +432,7 @@ struct SpanAttributeVisitor<'a> {
 
 impl SpanAttributeVisitor<'_> {
     fn set_status(&mut self, status: otel::Status) {
-        match &mut self.otel_data.state {
-            OtelDataState::Builder { status: s, .. } => *s = status,
-            OtelDataState::Context { current_cx } => current_cx.span().set_status(status),
-        }
+        self.otel_data.current_cx.span().set_status(status);
     }
 }
 
@@ -360,17 +466,12 @@ impl field::Visit for SpanAttributeVisitor<'_> {
     /// [`Span`]: opentelemetry::trace::Span
     fn record_str(&mut self, field: &field::Field, value: &str) {
         match field.name() {
-            OTEL_NAME => match &mut self.otel_data.state {
-                OtelDataState::Builder { builder, .. } => builder.name = value.to_string().into(),
-                OtelDataState::Context { current_cx } => {
-                    current_cx.span().update_name(value.to_string())
-                }
-            },
-            OTEL_KIND => {
-                if let OtelDataState::Builder { builder, .. } = &mut self.otel_data.state {
-                    builder.span_kind = str_to_span_kind(value);
-                }
-            }
+            OTEL_NAME => self
+                .otel_data
+                .current_cx
+                .span()
+                .update_name(value.to_string()),
+            OTEL_KIND => {}
             OTEL_STATUS_CODE => self.set_status(str_to_status(value)),
             OTEL_STATUS_MESSAGE => self.set_status(otel::Status::error(value.to_string())),
             _ => self
@@ -385,19 +486,12 @@ impl field::Visit for SpanAttributeVisitor<'_> {
     /// [`Span`]: opentelemetry::trace::Span
     fn record_debug(&mut self, field: &field::Field, value: &dyn fmt::Debug) {
         match field.name() {
-            OTEL_NAME => match &mut self.otel_data.state {
-                OtelDataState::Builder { builder, .. } => {
-                    builder.name = format!("{value:?}").into()
-                }
-                OtelDataState::Context { current_cx } => {
-                    current_cx.span().update_name(format!("{value:?}"))
-                }
-            },
-            OTEL_KIND => {
-                if let OtelDataState::Builder { builder, .. } = &mut self.otel_data.state {
-                    builder.span_kind = str_to_span_kind(&format!("{value:?}"));
-                }
-            }
+            OTEL_NAME => self
+                .otel_data
+                .current_cx
+                .span()
+                .update_name(format!("{value:?}")),
+            OTEL_KIND => {}
             OTEL_STATUS_CODE => self.set_status(str_to_status(&format!("{value:?}"))),
             OTEL_STATUS_MESSAGE => self.set_status(otel::Status::error(format!("{value:?}"))),
             _ => self
@@ -622,9 +716,6 @@ where
     /// [`span`] through the [`Registry`]. This [`Context`] links spans to their
     /// parent for proper hierarchical visualization.
     ///
-    /// Forces the parent span to build for real if it hasn't already, since a
-    /// stable, valid parent context is needed right away to link this new span.
-    ///
     /// [`Context`]: opentelemetry::Context
     /// [`span`]: tracing::Span
     /// [`Registry`]: tracing_subscriber::Registry
@@ -635,7 +726,7 @@ where
             let mut extensions = span.extensions_mut();
             extensions
                 .get_mut::<OtelData>()
-                .map(|data| self.with_started_cx(data, &|cx| cx.clone()))
+                .map(|data| data.current_cx.clone())
                 .unwrap_or_default()
         // Else if the span is inferred from context, look up any available current span.
         } else if attrs.is_contextual() {
@@ -644,7 +735,7 @@ where
                     let mut extensions = span.extensions_mut();
                     extensions
                         .get_mut::<OtelData>()
-                        .map(|data| self.with_started_cx(data, &|cx| cx.clone()))
+                        .map(|data| data.current_cx.clone())
                 })
                 .unwrap_or_else(OtelContext::current)
         // Explicit root spans should have no parent context.
@@ -660,13 +751,9 @@ where
         let span = subscriber
             .span(id)
             .expect("registry should have a span for the current ID");
-        let layer = dispatch
-            .downcast_ref::<OpenTelemetryLayer<S, T>>()
-            .expect("layer should downcast to expected type; this is a bug!");
 
         let mut extensions = span.extensions_mut();
         if let Some(otel_data) = extensions.get_mut::<OtelData>() {
-            layer.start_cx(otel_data);
             f(otel_data);
         }
     }
@@ -680,39 +767,6 @@ where
             extra_attrs += 2;
         }
         extra_attrs
-    }
-
-    /// Builds the real OTel span for `otel_data`, consuming the `SpanBuilder`
-    /// within it in the process. A no-op if it's already built.
-    fn start_cx(&self, otel_data: &mut OtelData) {
-        if matches!(otel_data.state, OtelDataState::Context { .. }) {
-            return;
-        }
-        let OtelDataState::Builder {
-            parent_cx,
-            builder,
-            status,
-            ..
-        } = std::mem::take(&mut otel_data.state)
-        else {
-            unreachable!("state is Builder: the Context case returned above");
-        };
-
-        let mut span = builder.start_with_context(&self.tracer, &parent_cx);
-        span.set_status(status);
-        otel_data.state = OtelDataState::Context {
-            current_cx: parent_cx.with_span(span),
-        };
-    }
-
-    fn with_started_cx<U>(&self, otel_data: &mut OtelData, f: &dyn Fn(&OtelContext) -> U) -> U {
-        self.start_cx(otel_data);
-        match &otel_data.state {
-            OtelDataState::Context { current_cx } => f(current_cx),
-            OtelDataState::Builder { .. } => {
-                unreachable!("OtelDataState should be a Context after starting it; this is a bug!")
-            }
-        }
     }
 }
 
@@ -883,22 +937,13 @@ where
                 }
             }
 
-            let seed_attributes = builder.attributes.clone().unwrap_or_default();
+            let mut attributes = builder.attributes.clone().unwrap_or_default();
+            let mut status = otel::Status::Unset;
 
-            let mut otel_data = OtelData {
-                state: OtelDataState::Builder {
-                    parent_cx,
-                    builder,
-                    status: otel::Status::Unset,
-                },
-                attributes: seed_attributes,
-                original_name: attrs.metadata().name(),
-                event_attributes: None,
-                forced_status: None,
-                forced_span_name: None,
-            };
-            attrs.record(&mut SpanAttributeVisitor {
-                otel_data: &mut otel_data,
+            attrs.record(&mut NewSpanAttributeVisitor {
+                builder: &mut builder,
+                status: &mut status,
+                attributes: &mut attributes,
                 exception_config: self.exception_config,
             });
 
@@ -909,9 +954,17 @@ where
             // the id actually exported is to build for real up front - `SpanBuilder`
             // no longer lets us force a specific trace/span id into a deferred build
             // (removed upstream in opentelemetry 0.32).
-            self.start_cx(&mut otel_data);
+            let mut span = builder.start_with_context(&self.tracer, &parent_cx);
+            span.set_status(status);
 
-            extensions.insert(otel_data);
+            extensions.insert(OtelData {
+                current_cx: parent_cx.with_span(span),
+                attributes,
+                original_name: attrs.metadata().name(),
+                event_attributes: None,
+                forced_status: None,
+                forced_span_name: None,
+            });
         } else {
             eprintln!("OpenTelemetryLayer::on_new_span: Span not found, this is a bug");
         }
@@ -994,7 +1047,7 @@ where
                     .get_mut::<OtelData>()
                     .expect("Missing otel data span extensions");
 
-                self.with_started_cx(follows_data, &|cx| cx.span().span_context().clone())
+                follows_data.current_cx.span().span_context().clone()
             };
 
             let mut extensions = span.extensions_mut();
@@ -1002,19 +1055,7 @@ where
                 .get_mut::<OtelData>()
                 .expect("Missing otel data span extensions");
 
-            match &mut data.state {
-                OtelDataState::Builder { builder, .. } => {
-                    let follows_link = otel::Link::new(follows_context, Vec::new(), 0);
-                    if let Some(ref mut links) = builder.links {
-                        links.push(follows_link);
-                    } else {
-                        builder.links = Some(vec![follows_link]);
-                    }
-                }
-                OtelDataState::Context { current_cx } => {
-                    current_cx.span().add_link(follows_context, Vec::new());
-                }
-            }
+            data.current_cx.span().add_link(follows_context, Vec::new());
         } else {
             eprintln!("OpenTelemetryLayer::on_follows_from: Span not found, this is a bug");
         }
@@ -1094,29 +1135,11 @@ where
             }
 
             if let Some(o) = otel_data {
-                match &mut o.state {
-                    OtelDataState::Builder {
-                        builder, status, ..
-                    } => {
-                        if *status == otel::Status::Unset
-                            && *meta.level() == tracing_core::Level::ERROR
-                        {
-                            *status = otel::Status::error("");
-                        }
-                        if let Some(ref mut events) = builder.events {
-                            events.push(otel_event);
-                        } else {
-                            builder.events = Some(vec![otel_event]);
-                        }
-                    }
-                    OtelDataState::Context { current_cx } => {
-                        let live_span = current_cx.span();
-                        if *meta.level() == tracing_core::Level::ERROR {
-                            live_span.set_status(otel::Status::error(""));
-                        }
-                        live_span.add_event(otel_event.name, otel_event.attributes);
-                    }
+                let live_span = o.current_cx.span();
+                if *meta.level() == tracing_core::Level::ERROR {
+                    live_span.set_status(otel::Status::error(""));
                 }
+                live_span.add_event(otel_event.name, otel_event.attributes);
             }
         };
     }
@@ -1132,7 +1155,7 @@ where
 
             let mut extensions = span.extensions_mut();
             if let Some(OtelData {
-                state,
+                current_cx,
                 forced_status,
                 forced_span_name,
                 original_name,
@@ -1150,57 +1173,21 @@ where
                     None
                 };
 
-                match state {
-                    OtelDataState::Builder {
-                        mut builder,
-                        parent_cx,
-                        mut status,
-                        ..
-                    } => {
-                        if let Some(timing_attrs) = timing_attrs {
-                            builder
-                                .attributes
-                                .get_or_insert_with(|| Vec::with_capacity(timing_attrs.len()))
-                                .extend(timing_attrs);
-                        }
-                        if let Some(forced_status) = forced_status {
-                            status = forced_status;
-                        }
-                        if let Some(forced_span_name) = forced_span_name {
-                            // Insert the original span name as an attribute so that we can map it later
-                            let attributes = builder
-                                .attributes
-                                .get_or_insert_with(|| Vec::with_capacity(1));
-                            attributes.push(KeyValue::new(OTEL_ORIGINAL_NAME, builder.name));
-                            builder.name = forced_span_name.into();
-                        }
-                        // Build and start the span, then assign status and end time before
-                        // dropping it to export. `SpanBuilder` no longer carries `status` or
-                        // `end_time` (removed upstream in opentelemetry 0.32), so they're
-                        // applied directly to the built `Span` instead.
-                        let mut otel_span = builder.start_with_context(&self.tracer, &parent_cx);
-                        otel_span.set_status(status);
-                        otel_span.end_with_timestamp(SystemTime::now());
-                    }
-                    OtelDataState::Context { current_cx } => {
-                        let live_span = current_cx.span();
-                        if let Some(timing_attrs) = timing_attrs {
-                            live_span.set_attributes(timing_attrs);
-                        }
-                        if let Some(forced_status) = forced_status {
-                            live_span.set_status(forced_status);
-                        }
-                        if let Some(forced_span_name) = forced_span_name {
-                            // Unlike the not-yet-built case, there's no way to read the
-                            // span's current name back once it's live, so we rely on the
-                            // name captured up front in `OtelData::original_name` instead.
-                            live_span
-                                .set_attribute(KeyValue::new(OTEL_ORIGINAL_NAME, original_name));
-                            live_span.update_name(forced_span_name);
-                        }
-                        live_span.end_with_timestamp(SystemTime::now());
-                    }
+                let live_span = current_cx.span();
+                if let Some(timing_attrs) = timing_attrs {
+                    live_span.set_attributes(timing_attrs);
                 }
+                if let Some(forced_status) = forced_status {
+                    live_span.set_status(forced_status);
+                }
+                if let Some(forced_span_name) = forced_span_name {
+                    // There's no way to read the span's current name back once it's
+                    // live, so we rely on the name captured up front in
+                    // `OtelData::original_name` instead.
+                    live_span.set_attribute(KeyValue::new(OTEL_ORIGINAL_NAME, original_name));
+                    live_span.update_name(forced_span_name);
+                }
+                live_span.end_with_timestamp(SystemTime::now());
             }
         } else {
             eprintln!("OpenTelemetryLayer::on_close: Span not found, this is a bug");
@@ -1264,11 +1251,27 @@ mod tests {
     use crate::plugins::telemetry::OTEL_NAME;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 
-    /// A span returned by [`TestTracer`], writing status changes back into the
-    /// shared [`OtelData`] since (as of opentelemetry 0.32) status is no longer
-    /// part of `SpanBuilder` and is instead applied to the built `Span`.
+    /// What [`TestTracer`] captured about a span: the `SpanBuilder` it was given to
+    /// build (kept around, and mutated further by [`TestBuiltSpan`], instead of
+    /// actually being consumed by a real tracer - there's nothing to build "for real"
+    /// in a test), its status (no longer part of `SpanBuilder` as of opentelemetry
+    /// 0.32 - applied to the built `Span` instead), and its parent context.
+    ///
+    /// Deliberately a test-only shape, independent of `OtelData`: production code
+    /// never has anything like this lying around (see `OtelData`'s doc comment), it
+    /// only exists so tests can inspect what would have been built without a real
+    /// tracer.
     #[derive(Debug, Clone)]
-    struct TestBuiltSpan(Arc<Mutex<Option<OtelData>>>, otel::SpanContext);
+    struct TestSpanRecord {
+        builder: otel::SpanBuilder,
+        status: otel::Status,
+        parent_cx: OtelContext,
+    }
+
+    /// A span returned by [`TestTracer`], writing subsequent changes back into the
+    /// shared [`TestSpanRecord`].
+    #[derive(Debug, Clone)]
+    struct TestBuiltSpan(Arc<Mutex<Option<TestSpanRecord>>>, otel::SpanContext);
     impl otel::Span for TestBuiltSpan {
         fn add_event_with_timestamp<T: Into<Cow<'static, str>>>(
             &mut self,
@@ -1286,35 +1289,29 @@ mod tests {
             true
         }
         fn set_attribute(&mut self, attribute: KeyValue) {
-            if let Some(data) = self.0.lock().as_mut()
-                && let OtelDataState::Builder { builder, .. } = &mut data.state
-            {
-                builder
+            if let Some(record) = self.0.lock().as_mut() {
+                record
+                    .builder
                     .attributes
                     .get_or_insert_with(Vec::new)
                     .push(attribute);
             }
         }
         fn set_status(&mut self, status: otel::Status) {
-            if let Some(data) = self.0.lock().as_mut()
-                && let OtelDataState::Builder { status: s, .. } = &mut data.state
-            {
-                *s = status;
+            if let Some(record) = self.0.lock().as_mut() {
+                record.status = status;
             }
         }
         fn update_name<T: Into<Cow<'static, str>>>(&mut self, new_name: T) {
-            if let Some(data) = self.0.lock().as_mut()
-                && let OtelDataState::Builder { builder, .. } = &mut data.state
-            {
-                builder.name = new_name.into();
+            if let Some(record) = self.0.lock().as_mut() {
+                record.builder.name = new_name.into();
             }
         }
         fn end_with_timestamp(&mut self, _timestamp: SystemTime) {}
         fn add_link(&mut self, span_context: otel::SpanContext, attributes: Vec<KeyValue>) {
-            if let Some(data) = self.0.lock().as_mut()
-                && let OtelDataState::Builder { builder, .. } = &mut data.state
-            {
-                builder
+            if let Some(record) = self.0.lock().as_mut() {
+                record
+                    .builder
                     .links
                     .get_or_insert_with(Vec::new)
                     .push(otel::Link::new(span_context, attributes, 0));
@@ -1323,7 +1320,7 @@ mod tests {
     }
 
     #[derive(Debug, Clone)]
-    struct TestTracer(Arc<Mutex<Option<OtelData>>>);
+    struct TestTracer(Arc<Mutex<Option<TestSpanRecord>>>);
     impl otel::Tracer for TestTracer {
         type Span = TestBuiltSpan;
         fn start_with_context<T>(&self, _name: T, _context: &OtelContext) -> Self::Span
@@ -1343,17 +1340,10 @@ mod tests {
             builder: otel::SpanBuilder,
             parent_cx: &OtelContext,
         ) -> Self::Span {
-            *self.0.lock() = Some(OtelData {
-                state: OtelDataState::Builder {
-                    builder,
-                    parent_cx: parent_cx.clone(),
-                    status: otel::Status::Unset,
-                },
-                attributes: Vec::new(),
-                original_name: "",
-                event_attributes: None,
-                forced_status: None,
-                forced_span_name: None,
+            *self.0.lock() = Some(TestSpanRecord {
+                builder,
+                status: otel::Status::Unset,
+                parent_cx: parent_cx.clone(),
             });
             TestBuiltSpan(self.0.clone(), otel::SpanContext::empty_context())
         }
@@ -1362,26 +1352,16 @@ mod tests {
     impl TestTracer {
         fn with_data<T>(&self, f: impl FnOnce(&otel::SpanBuilder, &otel::Status) -> T) -> T {
             let lock = self.0.lock();
-            let data = lock.as_ref().expect("no span data has been recorded yet");
-            match &data.state {
-                OtelDataState::Builder {
-                    builder, status, ..
-                } => f(builder, status),
-                OtelDataState::Context { .. } => {
-                    panic!("expected the span to still be buffering into a builder")
-                }
-            }
+            let record = lock.as_ref().expect("no span data has been recorded yet");
+            f(&record.builder, &record.status)
         }
 
         fn parent_cx(&self) -> OtelContext {
             let lock = self.0.lock();
-            let data = lock.as_ref().expect("no span data has been recorded yet");
-            match &data.state {
-                OtelDataState::Builder { parent_cx, .. } => parent_cx.clone(),
-                OtelDataState::Context { .. } => {
-                    panic!("expected the span to still be buffering into a builder")
-                }
-            }
+            lock.as_ref()
+                .expect("no span data has been recorded yet")
+                .parent_cx
+                .clone()
         }
     }
 
@@ -1470,28 +1450,19 @@ mod tests {
             );
         });
 
-        // The span is already built (`Context`) by the time `on_close` renames it, so
-        // it goes through `TestBuiltSpan::update_name`/`set_attribute` instead of the
-        // builder directly - those route back into the same shared `OtelData` the test
-        // tracer's `build_with_context` captured, still reported as `Builder` for the
-        // test's convenience (see `TestBuiltSpan`'s doc comment).
-        let (recorded_name, original_name_attr) = tracer
-            .0
-            .lock()
-            .as_ref()
-            .map(|data| match &data.state {
-                OtelDataState::Builder { builder, .. } => (
-                    builder.name.clone(),
-                    builder.attributes.as_ref().and_then(|attrs| {
-                        attrs
-                            .iter()
-                            .find(|kv| kv.key.as_str() == OTEL_ORIGINAL_NAME)
-                            .map(|kv| kv.value.clone())
-                    }),
-                ),
-                OtelDataState::Context { .. } => panic!("expected a Builder state"),
-            })
-            .expect("span data must have been recorded");
+        // `on_close` renames the already-built span via `TestBuiltSpan::update_name`/
+        // `set_attribute`, which route back into the shared `TestSpanRecord`.
+        let (recorded_name, original_name_attr) = tracer.with_data(|builder, _| {
+            (
+                builder.name.clone(),
+                builder.attributes.as_ref().and_then(|attrs| {
+                    attrs
+                        .iter()
+                        .find(|kv| kv.key.as_str() == OTEL_ORIGINAL_NAME)
+                        .map(|kv| kv.value.clone())
+                }),
+            )
+        });
         assert_eq!(recorded_name, Cow::<str>::Owned(forced_dynamic_name));
         // The pre-rename name preserved under `OTEL_ORIGINAL_NAME` is the span's literal
         // metadata name ("static_name"), not `dynamic_name` - the `otel.name` field set
