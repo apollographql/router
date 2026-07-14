@@ -150,7 +150,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: true,
+        output_is_list: Some(
+            true,
+        ),
+        output_is_non_null: Some(
+            false,
+        ),
         label: Label(
             "connectors.example http: GET /",
         ),
@@ -393,7 +398,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: false,
+        output_is_list: Some(
+            false,
+        ),
+        output_is_non_null: Some(
+            false,
+        ),
         label: Label(
             "connectors.example http: GET /{$args.id}",
         ),
@@ -638,7 +648,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: false,
+        output_is_list: Some(
+            false,
+        ),
+        output_is_non_null: Some(
+            false,
+        ),
         label: Label(
             "connectors.example http: GET /{$this.c}/d",
         ),

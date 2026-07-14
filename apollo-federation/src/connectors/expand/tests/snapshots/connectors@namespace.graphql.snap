@@ -146,7 +146,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/namespa
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: false,
+        output_is_list: Some(
+            false,
+        ),
+        output_is_non_null: Some(
+            false,
+        ),
         label: Label(
             "connectors.v1 http: GET /me",
         ),
@@ -221,7 +226,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/namespa
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: false,
+        output_is_list: Some(
+            false,
+        ),
+        output_is_non_null: Some(
+            false,
+        ),
         label: Label(
             "connectors. mappingOnly",
         ),
@@ -397,7 +407,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/namespa
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: false,
+        output_is_list: Some(
+            false,
+        ),
+        output_is_non_null: Some(
+            false,
+        ),
         label: Label(
             "connectors.v1 http: POST /api/users/{$args.id}",
         ),

@@ -113,7 +113,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: true,
+        output_is_list: Some(
+            true,
+        ),
+        output_is_non_null: Some(
+            true,
+        ),
         label: Label(
             "one.json http: GET /users",
         ),
@@ -372,7 +377,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: false,
+        output_is_list: None,
+        output_is_non_null: None,
         label: Label(
             "[BATCH] one.json http: POST /users-batch",
         ),

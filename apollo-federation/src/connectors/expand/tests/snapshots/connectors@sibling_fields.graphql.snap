@@ -141,7 +141,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: false,
+        output_is_list: Some(
+            false,
+        ),
+        output_is_non_null: Some(
+            false,
+        ),
         label: Label(
             "connectors. http: GET https://my.api/t",
         ),
@@ -316,7 +321,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: false,
+        output_is_list: Some(
+            false,
+        ),
+        output_is_non_null: Some(
+            false,
+        ),
         label: Label(
             "connectors. http: GET https://my.api/t/{$this.k.id}",
         ),

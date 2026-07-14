@@ -18,6 +18,7 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
+use crate::connectors::ConnectSpec;
 use crate::connectors::Connector;
 use crate::connectors::JSONSelection;
 use crate::connectors::ProblemLocation;
@@ -131,10 +132,26 @@ pub fn handle_raw_response(
     }
 }
 
-/// Returns an error when the mapped response value doesn't match the expected
-/// arrayness of the schema field. When the schema declares `[T]` but the
-/// connector returns a non-array value (or vice versa), the GraphQL runtime
-/// silently nullifies the field, so this provides an actionable error instead.
+/// The error code used for [`check_list_mismatch`] errors, distinguishing a
+/// response-shape violation from an ordinary fetch failure (`CONNECTORS_FETCH`).
+const RESPONSE_SHAPE_ERROR_CODE: &str = "CONNECTORS_RESPONSE_SHAPE";
+
+/// Returns an error when the mapped response value doesn't match the shape
+/// the schema declares for this field: arrayness (`[T]` vs `T`) or
+/// non-null (`T!` receiving `null`). Without this check, a shape mismatch is
+/// silently nullified by the GraphQL runtime, and a `null` for a non-null
+/// field is only reported via the `extensions.valueCompletion` side channel
+/// rather than a top-level error — both making the underlying bug nearly
+/// impossible to diagnose. This provides an actionable error instead.
+///
+/// `output_is_list` / `output_is_non_null` are `None` for type-level
+/// connectors (e.g. `BatchEntity`, which always returns an array by design
+/// and has its own validation in `add_to_data`), since they have no field
+/// definition to derive shape from; the check is skipped in that case.
+///
+/// Only runs for connect/v0.5+ connectors: this changes visible behavior (a
+/// case that used to return null now returns an error), so v0.4-and-earlier
+/// connectors are unaffected when they upgrade.
 fn check_list_mismatch(connector: &Connector, response: MappedResponse) -> MappedResponse {
     let MappedResponse::Data {
         data,
@@ -145,11 +162,7 @@ fn check_list_mismatch(connector: &Connector, response: MappedResponse) -> Mappe
         return response;
     };
 
-    // BatchEntity connectors (type-level @connect with $batch) always return
-    // an array by design; they have their own validation in add_to_data.
-    // Type-level connectors also have no field definition, so output_is_list
-    // is always false and the reverse check below would be a false positive.
-    if matches!(key, ResponseKey::BatchEntity { .. }) {
+    if connector.spec < ConnectSpec::V0_5 {
         return MappedResponse::Data {
             data,
             key,
@@ -160,14 +173,20 @@ fn check_list_mismatch(connector: &Connector, response: MappedResponse) -> Mappe
     let is_array = matches!(data, Value::Array(_));
     let is_null = matches!(data, Value::Null);
 
-    let message = if connector.output_is_list && !is_array && !is_null {
+    let message = if is_null {
+        (connector.output_is_non_null == Some(true)).then(|| {
+            "Response was null. The schema declares this field non-nullable, \
+             but the connector returned no data."
+                .to_string()
+        })
+    } else if connector.output_is_list == Some(true) && !is_array {
         Some(
             "Response was not a list. The schema expects a list for this field, \
              but the connector returned a single object. \
              Check that the API returns an array."
                 .to_string(),
         )
-    } else if !connector.output_is_list && is_array {
+    } else if connector.output_is_list == Some(false) && is_array {
         Some(
             "Response was a list. The schema expects a single object for this field, \
              but the connector returned an array."
@@ -178,7 +197,7 @@ fn check_list_mismatch(connector: &Connector, response: MappedResponse) -> Mappe
     };
 
     if let Some(message) = message {
-        let mut error = RuntimeError::new(message, &key);
+        let mut error = RuntimeError::new(message, &key).with_code(RESPONSE_SHAPE_ERROR_CODE);
         error.subgraph_name = Some(connector.id.subgraph_name.clone());
         error.coordinate = Some(connector.id.coordinate());
         MappedResponse::Error {
@@ -838,6 +857,7 @@ mod tests {
     use super::MappedResponse;
     use super::deserialize_response;
     use super::is_success;
+    use crate::connectors::ConnectSpec;
     use crate::connectors::JSONSelection;
     use crate::connectors::runtime::inputs::RequestInputs;
     use crate::connectors::runtime::key::ResponseKey;
@@ -984,11 +1004,14 @@ mod tests {
         );
     }
 
-    fn make_connector(output_is_list: bool) -> crate::connectors::models::Connector {
+    fn make_connector(
+        output_is_list: Option<bool>,
+        output_is_non_null: Option<bool>,
+        spec: ConnectSpec,
+    ) -> crate::connectors::models::Connector {
         use apollo_compiler::name;
 
         use crate::connectors::ConnectId;
-        use crate::connectors::ConnectSpec;
         use crate::connectors::models::Connector;
         use crate::connectors::models::ConnectorErrorsSettings;
 
@@ -1006,7 +1029,7 @@ mod tests {
             config: None,
             max_requests: None,
             entity_resolver: None,
-            spec: ConnectSpec::V0_1,
+            spec,
             schema_subtypes_map: Default::default(),
             request_headers: Default::default(),
             response_headers: Default::default(),
@@ -1015,7 +1038,16 @@ mod tests {
             batch_settings: None,
             error_settings: ConnectorErrorsSettings::default(),
             output_is_list,
+            output_is_non_null,
             label: "test".into(),
+        }
+    }
+
+    fn root_field_key(name: &str) -> ResponseKey {
+        ResponseKey::RootField {
+            name: name.to_string(),
+            inputs: RequestInputs::default(),
+            selection: Arc::new(JSONSelection::parse("$").unwrap()),
         }
     }
 
@@ -1024,12 +1056,8 @@ mod tests {
     // the wrong-shaped data (which the router would null without explanation).
     #[test]
     fn list_field_with_object_response_produces_error() {
-        let connector = make_connector(true);
-        let key = ResponseKey::RootField {
-            name: "posts".to_string(),
-            inputs: RequestInputs::default(),
-            selection: Arc::new(JSONSelection::parse("$").unwrap()),
-        };
+        let connector = make_connector(Some(true), Some(false), ConnectSpec::V0_5);
+        let key = root_field_key("posts");
         let response = MappedResponse::Data {
             data: json!({"id": 1, "title": "First"}),
             key,
@@ -1046,18 +1074,15 @@ mod tests {
             "error message should explain the mismatch, got: {:?}",
             error.message
         );
+        assert_eq!(error.code(), "CONNECTORS_RESPONSE_SHAPE");
     }
 
     // CNN-564: when schema declares a single-object field but API returns an array,
     // check_list_mismatch must return an error.
     #[test]
     fn non_list_field_with_array_response_produces_error() {
-        let connector = make_connector(false);
-        let key = ResponseKey::RootField {
-            name: "post".to_string(),
-            inputs: RequestInputs::default(),
-            selection: Arc::new(JSONSelection::parse("$").unwrap()),
-        };
+        let connector = make_connector(Some(false), Some(false), ConnectSpec::V0_5);
+        let key = root_field_key("post");
         let response = MappedResponse::Data {
             data: json!([{"id": 1}, {"id": 2}]),
             key,
@@ -1074,18 +1099,15 @@ mod tests {
             "error message should explain the mismatch, got: {:?}",
             error.message
         );
+        assert_eq!(error.code(), "CONNECTORS_RESPONSE_SHAPE");
     }
 
-    // CNN-564: when schema declares a list field and API returns null,
-    // do NOT emit a list-mismatch error (null is a valid/separate failure mode).
+    // CNN-564: when schema declares a nullable list field and API returns null,
+    // do NOT emit a shape-mismatch error (null is a valid/separate failure mode).
     #[test]
-    fn list_field_with_null_response_passes_through() {
-        let connector = make_connector(true);
-        let key = ResponseKey::RootField {
-            name: "posts".to_string(),
-            inputs: RequestInputs::default(),
-            selection: Arc::new(JSONSelection::parse("$").unwrap()),
-        };
+    fn nullable_list_field_with_null_response_passes_through() {
+        let connector = make_connector(Some(true), Some(false), ConnectSpec::V0_5);
+        let key = root_field_key("posts");
         let response = MappedResponse::Data {
             data: Value::Null,
             key,
@@ -1096,7 +1118,76 @@ mod tests {
 
         assert!(
             matches!(result, MappedResponse::Data { .. }),
-            "null data should pass through without a list-mismatch error"
+            "null data should pass through without a shape-mismatch error"
+        );
+    }
+
+    // CNN-564: when the field's arrayness is unknown (e.g. type-level
+    // connectors with no field definition), skip the check entirely rather
+    // than treating `None` as `false` and false-positiving on arrayness.
+    #[test]
+    fn unknown_arrayness_skips_check() {
+        let connector = make_connector(None, None, ConnectSpec::V0_5);
+        let key = root_field_key("posts");
+        let response = MappedResponse::Data {
+            data: json!([{"id": 1}, {"id": 2}]),
+            key,
+            problems: vec![],
+        };
+
+        let result = super::check_list_mismatch(&connector, response);
+
+        assert!(
+            matches!(result, MappedResponse::Data { .. }),
+            "unknown arrayness should not produce a shape-mismatch error"
+        );
+    }
+
+    // CNN-564: when schema declares a non-null field and the API returns
+    // null, emit an actionable error instead of relying on the generic
+    // null-bubbling machinery, which by default only surfaces via
+    // `extensions.valueCompletion` rather than a top-level error.
+    #[test]
+    fn non_null_field_with_null_response_produces_error() {
+        let connector = make_connector(Some(true), Some(true), ConnectSpec::V0_5);
+        let key = root_field_key("posts");
+        let response = MappedResponse::Data {
+            data: Value::Null,
+            key,
+            problems: vec![],
+        };
+
+        let result = super::check_list_mismatch(&connector, response);
+
+        let MappedResponse::Error { error, .. } = result else {
+            panic!("expected Error variant, got Data");
+        };
+        assert!(
+            error.message.contains("non-nullable"),
+            "error message should explain the non-null violation, got: {:?}",
+            error.message
+        );
+        assert_eq!(error.code(), "CONNECTORS_RESPONSE_SHAPE");
+    }
+
+    // CNN-564: this check is a visible behavior change (null -> error), so it
+    // must only run for connect/v0.5+; earlier connectors are unaffected when
+    // they upgrade.
+    #[test]
+    fn pre_v0_5_connectors_are_unaffected() {
+        let connector = make_connector(Some(true), Some(true), ConnectSpec::V0_4);
+        let key = root_field_key("posts");
+        let response = MappedResponse::Data {
+            data: json!({"id": 1, "title": "First"}),
+            key,
+            problems: vec![],
+        };
+
+        let result = super::check_list_mismatch(&connector, response);
+
+        assert!(
+            matches!(result, MappedResponse::Data { .. }),
+            "v0.4 and earlier connectors must not be affected by this check"
         );
     }
 
@@ -1106,12 +1197,8 @@ mod tests {
     fn error_response_is_unchanged_by_list_check() {
         use crate::connectors::runtime::errors::RuntimeError;
 
-        let connector = make_connector(true);
-        let key = ResponseKey::RootField {
-            name: "posts".to_string(),
-            inputs: RequestInputs::default(),
-            selection: Arc::new(JSONSelection::parse("$").unwrap()),
-        };
+        let connector = make_connector(Some(true), Some(false), ConnectSpec::V0_5);
+        let key = root_field_key("posts");
         let error = RuntimeError::new("original error", &key);
         let response = MappedResponse::Error {
             error,
