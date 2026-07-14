@@ -38,6 +38,7 @@ use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::config::InstrumentNameMatcher;
 use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::config::MetricsCommon;
 
@@ -196,12 +197,14 @@ impl<'a> MetricsBuilder<'a> {
     pub(crate) fn configure_views(&mut self, meter_provider_type: MeterProviderType) {
         let bucket_boundaries = self.metrics_common().buckets.clone();
         let cardinality_limit = self.metrics_common().cardinality_limit;
-        let user_views: HashMap<String, MetricView> = self
+        // Preserve declaration order so earlier, more-specific views win over later
+        // wildcards, and compile each view's name into a matcher exactly once.
+        let user_views: Vec<(InstrumentNameMatcher, MetricView)> = self
             .metrics_common()
             .views
             .clone()
             .into_iter()
-            .map(|v| (v.name.clone(), v))
+            .map(|v| (v.name_matcher(), v))
             .collect();
 
         self.with_view(meter_provider_type, move |instrument: &Instrument| {
@@ -220,13 +223,17 @@ impl<'a> MetricsBuilder<'a> {
 /// seeded only for histogram instruments, never for counters or gauges.
 fn resolve_view(
     instrument: &Instrument,
-    user_views: &HashMap<String, MetricView>,
+    user_views: &[(InstrumentNameMatcher, MetricView)],
     bucket_boundaries: &[f64],
     cardinality_limit: Option<NonZeroU32>,
 ) -> Option<Stream> {
     let is_histogram = instrument.kind() == InstrumentKind::Histogram;
     let histogram_buckets = is_histogram.then(|| bucket_boundaries.to_vec());
-    let user_view = user_views.get(instrument.name()).cloned();
+    // First match wins: earlier views take precedence over later wildcards.
+    let user_view = user_views
+        .iter()
+        .find(|(matcher, _)| matcher.matches(instrument.name()))
+        .map(|(_, view)| view.clone());
 
     if histogram_buckets.is_none() && cardinality_limit.is_none() && user_view.is_none() {
         return None;
@@ -253,6 +260,7 @@ mod view_selection_tests {
     use opentelemetry_sdk::runtime;
 
     use super::*;
+    use crate::plugins::telemetry::config::MetricAggregation;
 
     const BUCKETS: &[f64] = &[0.1, 0.5, 1.0, 5.0];
 
@@ -273,9 +281,9 @@ mod view_selection_tests {
         user_views: Vec<MetricView>,
         global_cardinality_limit: Option<NonZeroU32>,
     ) -> SdkMeterProvider {
-        let user_views: HashMap<String, MetricView> = user_views
+        let user_views: Vec<(InstrumentNameMatcher, MetricView)> = user_views
             .into_iter()
-            .map(|v| (v.name.clone(), v))
+            .map(|v| (v.name_matcher(), v))
             .collect();
         let bucket_boundaries = BUCKETS.to_vec();
         MeterProviderBuilder::default()
@@ -312,6 +320,22 @@ mod view_selection_tests {
             }
         }
         panic!("metric {name} not exported")
+    }
+
+    /// Collects the names of every metric the exporter received.
+    fn exported_metric_names(exporter: &InMemoryMetricExporter) -> Vec<String> {
+        let metrics = exporter
+            .get_finished_metrics()
+            .expect("exporter returns metrics");
+        let mut names = Vec::new();
+        for rm in &metrics {
+            for sm in rm.scope_metrics() {
+                for metric in sm.metrics() {
+                    names.push(metric.name().to_string());
+                }
+            }
+        }
+        names
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -425,5 +449,216 @@ mod view_selection_tests {
                  a global limit of 1000 alone would emit no overflow"
             );
         });
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn wildcard_view_applies_custom_buckets_to_matching_instruments() {
+        let exporter = InMemoryMetricExporter::default();
+        let custom = vec![1.0, 5.0, 10.0, 50.0, 100.0];
+        let mut view = empty_view("request.*");
+        view.aggregation = Some(MetricAggregation::Histogram {
+            buckets: custom.clone(),
+        });
+        let provider = meter_provider_with(exporter.clone(), vec![view], None);
+
+        for name in ["request.duration", "request.size"] {
+            let histogram = provider.meter("t").f64_histogram(name).build();
+            histogram.record(3.0, &[]);
+        }
+        provider.force_flush().unwrap();
+
+        for name in ["request.duration", "request.size"] {
+            with_metric(&exporter, name, |data| {
+                let AggregatedMetrics::F64(MetricData::Histogram(hist)) = data else {
+                    panic!("expected Histogram aggregation for {name}, got {data:?}")
+                };
+                let bounds: Vec<f64> = hist
+                    .data_points()
+                    .next()
+                    .map(|dp| dp.bounds().collect())
+                    .unwrap_or_default();
+                assert_eq!(bounds, custom, "custom buckets should apply to {name}");
+            });
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn catchall_drop_rule_suppresses_non_whitelisted_metrics() {
+        let exporter = InMemoryMetricExporter::default();
+        let kept = empty_view("request.kept");
+        let mut drop_all = empty_view("*");
+        drop_all.aggregation = Some(MetricAggregation::Drop);
+        // Declaration order matters: the specific view precedes the catch-all.
+        let provider = meter_provider_with(exporter.clone(), vec![kept, drop_all], None);
+
+        let kept_counter = provider.meter("t").u64_counter("request.kept").build();
+        kept_counter.add(1, &[]);
+        let dropped_counter = provider.meter("t").u64_counter("request.dropped").build();
+        dropped_counter.add(1, &[]);
+        provider.force_flush().unwrap();
+
+        let names = exported_metric_names(&exporter);
+        assert!(
+            names.iter().any(|n| n == "request.kept"),
+            "whitelisted metric should be exported; got {names:?}"
+        );
+        assert!(
+            !names.iter().any(|n| n == "request.dropped"),
+            "catch-all drop should suppress the non-whitelisted metric; got {names:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn exact_match_takes_precedence_over_wildcard() {
+        let exporter = InMemoryMetricExporter::default();
+        let exact_buckets = vec![1.0, 2.0, 3.0];
+        let wildcard_buckets = vec![100.0, 200.0];
+
+        let mut exact = empty_view("request.duration");
+        exact.aggregation = Some(MetricAggregation::Histogram {
+            buckets: exact_buckets.clone(),
+        });
+        let mut wildcard = empty_view("request.*");
+        wildcard.aggregation = Some(MetricAggregation::Histogram {
+            buckets: wildcard_buckets.clone(),
+        });
+        // Exact view first, then the wildcard.
+        let provider = meter_provider_with(exporter.clone(), vec![exact, wildcard], None);
+
+        let duration = provider
+            .meter("t")
+            .f64_histogram("request.duration")
+            .build();
+        duration.record(1.5, &[]);
+        let size = provider.meter("t").f64_histogram("request.size").build();
+        size.record(1.5, &[]);
+        provider.force_flush().unwrap();
+
+        with_metric(&exporter, "request.duration", |data| {
+            let AggregatedMetrics::F64(MetricData::Histogram(hist)) = data else {
+                panic!("expected Histogram, got {data:?}")
+            };
+            let bounds: Vec<f64> = hist
+                .data_points()
+                .next()
+                .map(|dp| dp.bounds().collect())
+                .unwrap_or_default();
+            assert_eq!(
+                bounds, exact_buckets,
+                "the exact view listed first should win over the wildcard"
+            );
+        });
+        with_metric(&exporter, "request.size", |data| {
+            let AggregatedMetrics::F64(MetricData::Histogram(hist)) = data else {
+                panic!("expected Histogram, got {data:?}")
+            };
+            let bounds: Vec<f64> = hist
+                .data_points()
+                .next()
+                .map(|dp| dp.bounds().collect())
+                .unwrap_or_default();
+            assert_eq!(
+                bounds, wildcard_buckets,
+                "request.size matches only the wildcard view"
+            );
+        });
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn combined_views_keep_bucket_and_drop_in_declaration_order() {
+        // Mirrors the shape of a real user config: a couple of exact views (one
+        // customizing buckets, one just keeping the metric), a wildcard view
+        // customizing buckets, and a trailing catch-all `*` drop. Verifies that each
+        // instrument lands in the right place — bucketed, kept, or dropped — within a
+        // single provider, honoring declaration order.
+        let exporter = InMemoryMetricExporter::default();
+        let exact_buckets = vec![0.005, 0.01, 0.025];
+        let wildcard_buckets = vec![0.0, 10.0, 100.0, 1000.0];
+
+        let mut exact_histogram = empty_view("http.server.duration");
+        exact_histogram.aggregation = Some(MetricAggregation::Histogram {
+            buckets: exact_buckets.clone(),
+        });
+        let keep = empty_view("operations.count");
+        let mut wildcard = empty_view("pipeline.*");
+        wildcard.aggregation = Some(MetricAggregation::Histogram {
+            buckets: wildcard_buckets.clone(),
+        });
+        let mut drop_rest = empty_view("*");
+        drop_rest.aggregation = Some(MetricAggregation::Drop);
+
+        let provider = meter_provider_with(
+            exporter.clone(),
+            vec![exact_histogram, keep, wildcard, drop_rest],
+            None,
+        );
+
+        let http = provider
+            .meter("t")
+            .f64_histogram("http.server.duration")
+            .build();
+        http.record(0.02, &[]);
+        let kept = provider.meter("t").u64_counter("operations.count").build();
+        kept.add(1, &[]);
+        for name in ["pipeline.estimated", "pipeline.actual"] {
+            let histogram = provider.meter("t").f64_histogram(name).build();
+            histogram.record(50.0, &[]);
+        }
+        let dropped_counter = provider.meter("t").u64_counter("internal.noise").build();
+        dropped_counter.add(1, &[]);
+        let dropped_histogram = provider
+            .meter("t")
+            .f64_histogram("some.other.duration")
+            .build();
+        dropped_histogram.record(1.0, &[]);
+        provider.force_flush().unwrap();
+
+        // The exact view wins with its own buckets.
+        with_metric(&exporter, "http.server.duration", |data| {
+            let AggregatedMetrics::F64(MetricData::Histogram(hist)) = data else {
+                panic!("expected Histogram, got {data:?}")
+            };
+            let bounds: Vec<f64> = hist
+                .data_points()
+                .next()
+                .map(|dp| dp.bounds().collect())
+                .unwrap_or_default();
+            assert_eq!(bounds, exact_buckets);
+        });
+
+        // The wildcard view applies its buckets to every matching instrument.
+        for name in ["pipeline.estimated", "pipeline.actual"] {
+            with_metric(&exporter, name, |data| {
+                let AggregatedMetrics::F64(MetricData::Histogram(hist)) = data else {
+                    panic!("expected Histogram for {name}, got {data:?}")
+                };
+                let bounds: Vec<f64> = hist
+                    .data_points()
+                    .next()
+                    .map(|dp| dp.bounds().collect())
+                    .unwrap_or_default();
+                assert_eq!(
+                    bounds, wildcard_buckets,
+                    "wildcard buckets should apply to {name}"
+                );
+            });
+        }
+
+        let names = exported_metric_names(&exporter);
+        // The explicitly listed metric is kept.
+        assert!(
+            names.iter().any(|n| n == "operations.count"),
+            "explicitly listed metric should be kept; got {names:?}"
+        );
+        // Everything not matched by an earlier view is dropped by the catch-all,
+        // regardless of instrument kind.
+        assert!(
+            !names.iter().any(|n| n == "internal.noise"),
+            "unlisted counter should be dropped by the catch-all; got {names:?}"
+        );
+        assert!(
+            !names.iter().any(|n| n == "some.other.duration"),
+            "unlisted histogram should be dropped by the catch-all; got {names:?}"
+        );
     }
 }
