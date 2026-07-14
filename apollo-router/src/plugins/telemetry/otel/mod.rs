@@ -15,32 +15,19 @@ use super::utils::upsert_attribute;
 
 /// Per-span OpenTelemetry data tracked by this crate.
 ///
-/// As of opentelemetry 0.32, `SpanBuilder` no longer carries `trace_id`, `span_id`,
-/// `status`, `end_time` or `sampling_result` (they were removed upstream). Upstream
-/// `tracing-opentelemetry` responds to that by building the real otel `Span` lazily -
-/// only the first time something needs a context for it. This crate does *not* take
-/// that approach: router code (log correlation, response headers) expects a sampled
-/// span's trace/span id to be available as soon as it's created, so `on_new_span`
-/// (`OpenTelemetryLayer`) builds the real span and resolves `current_cx` before the
-/// `OtelData` is even constructed - there's no "not yet built" state to represent,
-/// because nothing outside `on_new_span`'s own local variables ever sees this type
-/// before it's fully built.
+/// `current_cx` always holds a live, already-built otel span — `OtelData` is never
+/// constructed before the span is built, so there is no "building" state to represent.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct OtelData {
-    /// The live otel `Span`, wrapped in its `Context`. Always already built - see the
-    /// struct-level doc comment.
+    /// The live otel `Span`, wrapped in its `Context`. Always already built.
     pub(crate) current_cx: opentelemetry::Context,
 
-    /// Mirrors every attribute set on this span. A live `Span` (via `SpanRef`) offers
-    /// no way to read attributes back once set, so this is kept in sync for code that
-    /// needs to inspect a span's attributes (log formatting, log correlation, response
-    /// headers, etc).
+    /// Mirrors every attribute set on this span. A live span's attributes aren't
+    /// readable once set; this vec keeps them accessible.
     pub(crate) attributes: Vec<KeyValue>,
 
-    /// The tracing span's original name, from before any `forced_span_name`
-    /// override. A live `Span` offers no way to read its current name back once
-    /// set, so this is captured up front and used to record `OTEL_ORIGINAL_NAME`
-    /// on close.
+    /// The span's original name, captured before any `forced_span_name` override.
+    /// A live span's name isn't readable once set.
     pub(crate) original_name: &'static str,
 
     /// Attributes gathered for the next event
@@ -57,19 +44,16 @@ pub(crate) struct OtelData {
 }
 
 impl OtelData {
-    /// Adds `kv` to the span, replacing any existing attribute with the same key in
-    /// `attributes` (this crate's own mirror, kept in sync so it can be read back
-    /// later regardless of what the live span itself allows).
-    ///
-    /// The live span has no replace-by-key primitive at all:
-    /// `opentelemetry_sdk::trace::Span::set_attribute` is an unconditional push into
-    /// storage this crate can't read back or rewrite. Setting the same key twice
-    /// therefore still exports both values there; this is expected to be resolved as
-    /// last-value-wins by the consuming backend, which is standard OTel practice for
-    /// duplicate-key attributes (and matches the spec's stated "overwrite" intent, even
-    /// though this particular SDK doesn't enforce it internally).
+    /// Adds `kv` to the span, replacing any existing value for the same key in
+    /// `attributes`. The live span receives an additional `set_attribute` call
+    /// regardless; backends typically resolve duplicate-key attributes as
+    /// last-value-wins.
     pub(crate) fn upsert_attribute(&mut self, kv: KeyValue) {
         upsert_attribute(&mut self.attributes, kv.clone());
+        // `Span::set_attribute` is an unconditional push with no replace-by-key
+        // primitive, so setting the same key twice results in both values being
+        // exported. Backends are expected to resolve this as last-value-wins
+        // (standard OTel practice), so the duplicate is harmless in practice.
         self.current_cx.span().set_attribute(kv);
     }
 }

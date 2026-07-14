@@ -307,9 +307,8 @@ struct ExceptionFieldConfig {
     propagate: bool,
 }
 
-/// Visitor applying `tracing` field values while a span is still being assembled into
-/// a `SpanBuilder`, before it's built for real. Used only in `on_new_span`, on local
-/// variables - no `OtelData` exists yet at this point (see `OtelData`'s doc comment).
+/// Visitor applying `tracing` field values while a span is still being assembled
+/// into a `SpanBuilder`, before it's built for real.
 struct NewSpanAttributeVisitor<'a> {
     builder: &'a mut otel::SpanBuilder,
     status: &'a mut otel::Status,
@@ -318,8 +317,7 @@ struct NewSpanAttributeVisitor<'a> {
 }
 
 impl NewSpanAttributeVisitor<'_> {
-    /// Adds or replaces `kv` by key in both `attributes` (the mirror that seeds
-    /// `OtelData::attributes`) and the real builder.
+    /// Adds or replaces `kv` by key in both the local attribute mirror and the span builder.
     fn push_attribute(&mut self, kv: KeyValue) {
         upsert_attribute(self.attributes, kv.clone());
         upsert_attribute(self.builder.attributes.get_or_insert_with(Vec::new), kv);
@@ -417,14 +415,10 @@ impl field::Visit for NewSpanAttributeVisitor<'_> {
     }
 }
 
-/// Visitor applying `tracing` field values onto an already-live span - used only in
-/// `on_record` (`span.record(...)` called on an existing span), where `OtelData` is
-/// always already built by the time this runs (see `OtelData`'s doc comment).
+/// Visitor applying `tracing` field values onto an already-live span.
 ///
-/// The live span can't have its kind changed (there's no public API to do so once
-/// built) or its current name read back (needed to snapshot `otel.name` renames), so
-/// those are no-ops here - matching the limitation `tracing-opentelemetry` itself
-/// accepts for the same reason.
+/// `otel.kind` and `otel.name` are no-ops here: a live span's kind can't be changed
+/// (no public API) and its current name can't be read back.
 struct SpanAttributeVisitor<'a> {
     otel_data: &'a mut OtelData,
     exception_config: ExceptionFieldConfig,
