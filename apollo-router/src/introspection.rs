@@ -425,6 +425,7 @@ mod tests {
 
     use super::IntrospectionCacheLayer;
     use super::IntrospectionRequest;
+    use super::RejectMixedIntrospectionLayer;
     use super::introspection_service;
     use crate::Configuration;
     use crate::cache::storage::CacheStorage;
@@ -494,6 +495,75 @@ mod tests {
             .unwrap();
 
         drop(service);
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test]
+    async fn test_reject_mixed_introspection() {
+        let (mock, mut handle) =
+            tower_test::mock::pair::<IntrospectionRequest, graphql::Response>();
+
+        // We expect one introspection request to go through, and the mixed request not to reach the
+        // inner service.
+        let driver = tokio::task::spawn(async move {
+            let (_request, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                graphql::Response::builder()
+                    .data(serde_json_bytes::json!({
+                        "__schema": {
+                            "queryType": {
+                                "name": "Query",
+                            },
+                        },
+                    }))
+                    .build(),
+            );
+        });
+
+        let config = Configuration::default();
+        let schema =
+            Arc::new(Schema::parse(include_str!("testdata/supergraph.graphql"), &config).unwrap());
+
+        let introspection_query = r#"{ __schema { queryType { name } } }"#;
+        let introspection_document =
+            Query::parse_document(introspection_query, None, &schema, &config).unwrap();
+
+        let mixed_query = r#"{
+            __schema { queryType { name } }
+            me { id }
+        }"#;
+        let mixed_document = Query::parse_document(mixed_query, None, &schema, &config).unwrap();
+
+        let mut service = ServiceBuilder::new()
+            .layer(RejectMixedIntrospectionLayer::new())
+            .service(mock);
+
+        let mixed_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(IntrospectionRequest {
+                schema: schema.clone(),
+                document: mixed_document,
+                variables: Default::default(),
+            })
+            .await
+            .unwrap();
+        assert!(mixed_response.contains_error_code("MIXED_INTROSPECTION"));
+
+        let introspection_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(IntrospectionRequest {
+                schema,
+                document: introspection_document,
+                variables: Default::default(),
+            })
+            .await
+            .unwrap();
+        assert!(introspection_response.errors.is_empty());
+
         crate::plugin::test::await_mock_driver(driver).await;
     }
 
