@@ -316,7 +316,8 @@ mod tests {
             .expect(
                 "lightweight task did not complete within 5 s: \
                  the blocking spawn may have starved the worker thread",
-            );
+            )
+            .expect("oneshot sender dropped before sending");
     }
 
     /// Simulates `concurrent_processors` real `BatchSpanProcessor`s all calling the
