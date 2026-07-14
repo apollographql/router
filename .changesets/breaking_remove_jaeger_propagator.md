@@ -1,6 +1,6 @@
 ### Remove the Jaeger trace propagator ([PR #9787](https://github.com/apollographql/router/pull/9787))
 
-The `opentelemetry-jaeger-propagator` crate has deprecated the Jaeger propagation format in favor of W3C TraceContext propagation, and building against it now fails under `-D warnings`. Rather than suppress the warning, the Jaeger propagator has been removed entirely.
+The `opentelemetry-jaeger-propagator` crate has deprecated the Jaeger propagation format in favor of W3C TraceContext propagation. The Jaeger propagator has been removed.
 
 The `telemetry.exporters.tracing.propagation.jaeger` configuration option has been removed. If your router config sets `propagation: jaeger: true`, remove it and use `propagation: trace_context: true` instead:
 
