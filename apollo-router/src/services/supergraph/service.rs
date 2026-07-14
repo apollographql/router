@@ -190,6 +190,7 @@ async fn service_call(
         // It's unfortunate that we are _executing_ these queries here rather than in the execution
         // service, but it's basically the only way we can do it right now.
         let result = introspection_service
+            // This has a load shed layer on it, so it will definitely be ready.
             .ready()
             .await?
             .call(introspection::IntrospectionRequest {
