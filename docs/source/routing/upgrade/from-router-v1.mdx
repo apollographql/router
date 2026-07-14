@@ -214,11 +214,11 @@ The following deprecated methods are removed from the public crate API available
 - `PluginInit::new()`. Use `PluginInit::builder()` instead.
 - `PluginInit::try_new()`. Use `PluginInit::try_builder()` instead.
 
-### Removed Jaeger tracing exporter and propagator
+### Removed Jaeger tracing exporter
 
-The `jaeger` exporter and the `propagation.jaeger` propagator have been removed, as Jaeger now fully supports the OTLP format.
+The `jaeger` exporter has been removed, as Jaeger now fully supports the OTLP format. 
 
-**Upgrade step**:
+**Upgrade step**: 
 
 - Change your router config to use the `otlp` exporter:
 
@@ -226,6 +226,8 @@ The `jaeger` exporter and the `propagation.jaeger` propagator have been removed,
 telemetry:
   exporters:
     tracing:
+      propagation:
+        jaeger: true
       otlp:
         enabled: true
 ```
