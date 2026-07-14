@@ -252,13 +252,71 @@ impl MetricView {
     pub(crate) fn into_view_fn(
         self,
     ) -> impl Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static {
-        let name = self.name.clone();
+        let matcher = self.name_matcher();
         let view = self;
         move |instrument: &Instrument| {
-            if instrument.name() != name {
+            if !matcher.matches(instrument.name()) {
                 return None;
             }
             Some(view.clone().into_stream())
+        }
+    }
+
+    /// Compiles this view's `name` into a matcher used to select instruments.
+    pub(crate) fn name_matcher(&self) -> InstrumentNameMatcher {
+        InstrumentNameMatcher::new(&self.name)
+    }
+}
+
+/// Matches an instrument name against a metric view's configured `name`.
+///
+/// This restores the wildcard selection the OpenTelemetry SDK performed natively
+/// before the 0.31 View API migration, which replaced pattern-aware selection with a
+/// plain closure. `*` matches zero or more characters and `?` matches exactly one; a
+/// bare `*` or an empty name matches every instrument. Any other character (including
+/// `.`) is matched literally, and names without a wildcard are matched exactly.
+#[derive(Clone, Debug)]
+pub(crate) enum InstrumentNameMatcher {
+    /// Matches every instrument (empty name or a bare `*`).
+    All,
+    /// Matches a single instrument name exactly.
+    Exact(String),
+    /// Matches instrument names against a wildcard pattern (`*`, `?`).
+    Pattern(regex::Regex),
+}
+
+impl InstrumentNameMatcher {
+    fn new(name: &str) -> Self {
+        if name.is_empty() || name == "*" {
+            return Self::All;
+        }
+        // Only `*`/`?` opt a name into wildcard matching, mirroring the pre-0.31 SDK.
+        if name.contains('*') || name.contains('?') {
+            // Translate the glob into an anchored regex: escape every character, then
+            // turn the escaped wildcards back into their regex equivalents (`*` -> zero
+            // or more, `?` -> exactly one). Everything else stays literal.
+            let translated = regex::escape(name).replace(r"\*", ".*").replace(r"\?", ".");
+            match regex::Regex::new(&format!("^{translated}$")) {
+                Ok(pattern) => return Self::Pattern(pattern),
+                Err(error) => {
+                    // Unreachable in practice because the input is fully escaped, but
+                    // fall back to exact matching rather than risk matching nothing.
+                    ::tracing::warn!(
+                        metric_view.name = name,
+                        %error,
+                        "invalid metric view name pattern; falling back to exact match"
+                    );
+                }
+            }
+        }
+        Self::Exact(name.to_string())
+    }
+
+    pub(crate) fn matches(&self, name: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::Exact(expected) => expected == name,
+            Self::Pattern(pattern) => pattern.is_match(name),
         }
     }
 }
@@ -1022,6 +1080,36 @@ mod tests {
         AttributeValue::try_from(json!([1, true])).expect_err("mixed conversion must fail");
         AttributeValue::try_from(json!([1.1, true])).expect_err("mixed conversion must fail");
         AttributeValue::try_from(json!([true, "bar"])).expect_err("mixed conversion must fail");
+    }
+
+    #[test]
+    fn instrument_name_matcher_exact_and_wildcards() {
+        let matcher = |name: &str| MetricView::default_view(name, None, None).name_matcher();
+
+        // Exact (no wildcard chars)
+        assert!(matcher("request.duration").matches("request.duration"));
+        assert!(!matcher("request.duration").matches("request.size"));
+
+        // `*` = zero or more characters; `.` in the pattern is a literal
+        assert!(matcher("request.*").matches("request.duration"));
+        assert!(matcher("request.*").matches("request.size"));
+        assert!(matcher("request.*").matches("request."));
+        assert!(!matcher("request.*").matches("response.duration"));
+        assert!(!matcher("request.*").matches("requests")); // requires the literal '.'
+
+        // `?` = exactly one character
+        assert!(matcher("request.coun?").matches("request.count"));
+        assert!(!matcher("request.coun?").matches("request.coun"));
+        assert!(!matcher("request.coun?").matches("request.counts"));
+
+        // Catch-alls: bare `*` and empty string match everything
+        assert!(matcher("*").matches("anything.at.all"));
+        assert!(matcher("").matches("anything.at.all"));
+
+        // Metacharacters in the name stay literal, not regex syntax: the `.` must
+        // match a literal dot.
+        assert!(matcher("a.b*").matches("a.bcd"));
+        assert!(!matcher("a.b*").matches("axbcd"));
     }
 
     #[test]
