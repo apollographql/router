@@ -301,7 +301,6 @@ mod tests {
         use std::sync::Arc;
         use std::sync::atomic::AtomicBool;
         use std::sync::atomic::Ordering;
-        use std::time::Duration;
 
         let lightweight_task_completed = Arc::new(AtomicBool::new(false));
         let lightweight_task_completed_clone = lightweight_task_completed.clone();
@@ -323,6 +322,112 @@ mod tests {
             lightweight_task_completed.load(Ordering::SeqCst),
             "a lightweight task on the same single-worker-thread runtime was starved by \
              a synchronously-blocking future spawned through Runtime::spawn"
+        );
+    }
+
+    /// Simulates `concurrent_processors` real `BatchSpanProcessor`s all calling the
+    /// real, synchronous `force_flush` at once, on a runtime with only
+    /// `worker_threads` threads - e.g. a reload tearing down every active exporter
+    /// simultaneously, on a runtime sized to a CPU-constrained container
+    /// (`worker_threads` defaults to `available_parallelism()`, which reflects a
+    /// cgroup CPU quota, not the host's full core count).
+    ///
+    /// `force_flush` blocks its caller waiting for a reply from the processor's own
+    /// background worker task. With more concurrent callers than worker threads, every
+    /// thread ends up occupied by a blocked caller before any worker task gets a
+    /// chance to run - a deadlock with the plain `opentelemetry_sdk::runtime::Tokio`,
+    /// and not with `NamedTokioRuntime`, whose worker task runs on a separate,
+    /// dedicated `spawn_blocking` thread instead.
+    fn force_flush_completes_within<R>(
+        runtime: R,
+        worker_threads: usize,
+        concurrent_processors: usize,
+        bound: Duration,
+    ) -> bool
+    where
+        R: RuntimeChannel,
+    {
+        use opentelemetry_sdk::trace::InMemorySpanExporterBuilder;
+        use opentelemetry_sdk::trace::SpanProcessor;
+        use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
+
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(worker_threads)
+                .enable_all()
+                .build()
+                .expect("failed to build tokio runtime");
+            rt.block_on(async move {
+                let mut flushes = Vec::with_capacity(concurrent_processors);
+                for _ in 0..concurrent_processors {
+                    let exporter = InMemorySpanExporterBuilder::new().build();
+                    let processor = BatchSpanProcessor::builder(exporter, runtime.clone()).build();
+                    flushes.push(tokio::spawn(async move { processor.force_flush() }));
+                }
+                for flush in flushes {
+                    let _ = flush.await;
+                }
+            });
+            // Only reached if the block_on above actually returned, i.e. every
+            // force_flush call above completed without deadlocking.
+            let _ = done_tx.send(());
+        });
+
+        // This function has no tokio runtime of its own to protect - a plain,
+        // synchronous, bounded wait is all that's needed.
+        done_rx.recv_timeout(bound).is_ok()
+    }
+
+    #[test]
+    fn regular_tokio_runtime_deadlocks_force_flush_on_a_single_worker_thread() {
+        assert!(
+            !force_flush_completes_within(Tokio, 1, 1, Duration::from_secs(2)),
+            "expected the plain opentelemetry_sdk::runtime::Tokio to deadlock force_flush \
+             on a single-worker-thread runtime (this is the bug fixed in this PR) - if this \
+             fails, either the upstream SDK changed, or this test itself is unreliable"
+        );
+    }
+
+    #[test]
+    fn named_tokio_runtime_does_not_deadlock_force_flush_on_a_single_worker_thread() {
+        assert!(
+            force_flush_completes_within(
+                NamedTokioRuntime::new("test_processor"),
+                1,
+                1,
+                Duration::from_secs(2)
+            ),
+            "NamedTokioRuntime should not deadlock force_flush on a single-worker-thread runtime"
+        );
+    }
+
+    /// Same failure mode, but demonstrating it doesn't require a literal
+    /// single-worker-thread runtime: 4 worker threads, 8 processors concurrently
+    /// calling `force_flush` - more simultaneous demand than the pool has capacity
+    /// for, e.g. several slow/blocking exporters all flushing at once, or one reload
+    /// tearing down every active exporter simultaneously.
+    #[test]
+    fn regular_tokio_runtime_deadlocks_force_flush_when_demand_exceeds_a_larger_pool() {
+        assert!(
+            !force_flush_completes_within(Tokio, 4, 8, Duration::from_secs(2)),
+            "expected the plain opentelemetry_sdk::runtime::Tokio to deadlock force_flush \
+             when 8 processors concurrently flush on a 4-worker-thread runtime - if this \
+             fails, either the upstream SDK changed, or this test itself is unreliable"
+        );
+    }
+
+    #[test]
+    fn named_tokio_runtime_does_not_deadlock_force_flush_when_demand_exceeds_a_larger_pool() {
+        assert!(
+            force_flush_completes_within(
+                NamedTokioRuntime::new("test_processor"),
+                4,
+                8,
+                Duration::from_secs(2)
+            ),
+            "NamedTokioRuntime should not deadlock force_flush even when 8 processors \
+             concurrently flush on a 4-worker-thread runtime"
         );
     }
 }
