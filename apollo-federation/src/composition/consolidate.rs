@@ -73,27 +73,28 @@ pub(super) fn consolidate_for_satisfiability(expanded_sdl: &str) -> String {
         Err(_) => return expanded_sdl.to_string(),
     };
 
-    // --- pass 1: per-graph resolvable-key signature + spec-link scope ---
-    // A graph's key signature is the set of (type, key) it can be entered by. Its link scope is
-    // the set of `@join__directive(name: "link", args)` entries it belongs to (e.g. connect
-    // v0.2 vs v0.3) — merging across link scopes would make the representative link the same
-    // feature twice. Two graphs merge only if both match: interchangeable entry points within
-    // one link scope.
-    let mut keyed_sig: HashMap<Name, BTreeSet<(String, String)>> = HashMap::new();
-    for (type_name, ty) in &schema.types {
+    let all_graphs: Vec<Name> = match schema.types.get(&name!("join__Graph")) {
+        Some(ExtendedType::Enum(e)) => e.values.keys().cloned().collect(),
+        _ => return expanded_sdl.to_string(), // not a connector supergraph; nothing to do
+    };
+
+    // Graphs with any `@join__type(…, key:)` entry point are keyed and never merge (see the
+    // module doc's Soundness section for why keyless-only merging is what makes this safe).
+    let mut keyed: HashSet<Name> = HashSet::new();
+    for ty in schema.types.values() {
         for d in type_directives(ty)
             .iter()
             .filter(|d| d.name == name!("join__type"))
         {
-            if let (Some(graph), Some(key)) = (arg_enum(d, "graph"), arg_str(d, "key")) {
-                keyed_sig
-                    .entry(graph.clone())
-                    .or_default()
-                    .insert((type_name.to_string(), key.to_string()));
+            if let (Some(graph), Some(_key)) = (arg_enum(d, "graph"), arg_str(d, "key")) {
+                keyed.insert(graph.clone());
             }
         }
     }
 
+    // A graph's spec-link scope is the set of `@join__directive(name: "link", args)` entries
+    // it belongs to (e.g. connect v0.2 vs v0.3). Merging across scopes would make the
+    // representative link the same feature twice, so the scope is the grouping key.
     let mut link_scope: HashMap<Name, BTreeSet<String>> = HashMap::new();
     for d in schema.schema_definition.directives.iter() {
         if d.name != name!("join__directive") || arg_str(d, "name") != Some("link") {
@@ -109,23 +110,12 @@ pub(super) fn consolidate_for_satisfiability(expanded_sdl: &str) -> String {
         }
     }
 
-    let all_graphs: Vec<Name> = match schema.types.get(&name!("join__Graph")) {
-        Some(ExtendedType::Enum(e)) => e.values.keys().cloned().collect(),
-        _ => return expanded_sdl.to_string(), // not a connector supergraph; nothing to do
-    };
-
-    // --- field-compatibility data: per (type, field), each graph's `@join__field` application ---
-    // A participation-merge folds two graphs' applications for the SAME (type, field) into the
-    // representative. That is only sound when those applications are byte-identical (they fold
-    // to one). If two keyless graphs declare the same (type, field) with *differing*
-    // `@join__field` metadata — e.g. divergent `type:` overrides on a `@shareable` field —
-    // folding them would leave two conflicting `@join__field(graph: REP)` on one field, which
-    // makes `extract_subgraphs_from_supergraph` define that field twice and fail (a spurious
-    // composition error). Field-disjoint graphs (all connector synthetic subgraphs) never hit
-    // this. Record each graph's application (its args minus `graph:`) so we can taint colliders.
+    // Each graph's `@join__field` application (args minus `graph:`) per (type, field), to
+    // detect merge candidates declaring the same field with differing metadata (see the module
+    // doc's final paragraph).
     let mut field_apps: HashMap<(Name, Name), Vec<(Name, String)>> = HashMap::new();
-    {
-        let mut collect = |type_name: &Name, field_name: &Name, dl: &ast::DirectiveList| {
+    for (type_name, ty) in &schema.types {
+        for (field_name, dl) in field_directive_lists(ty) {
             for d in dl.iter().filter(|d| d.name == name!("join__field")) {
                 if let Some(graph) = arg_enum(d, "graph") {
                     field_apps
@@ -134,47 +124,19 @@ pub(super) fn consolidate_for_satisfiability(expanded_sdl: &str) -> String {
                         .push((graph.clone(), join_field_app(d)));
                 }
             }
-        };
-        for (type_name, ty) in &schema.types {
-            match ty {
-                ExtendedType::Object(t) => {
-                    for (fname, f) in &t.fields {
-                        collect(type_name, fname, &f.directives);
-                    }
-                }
-                ExtendedType::Interface(t) => {
-                    for (fname, f) in &t.fields {
-                        collect(type_name, fname, &f.directives);
-                    }
-                }
-                ExtendedType::InputObject(t) => {
-                    for (fname, f) in &t.fields {
-                        collect(type_name, fname, &f.directives);
-                    }
-                }
-                _ => {}
-            }
         }
     }
 
-    // --- group root-field (keyless) graphs by link scope; representative = smallest member ---
-    // Only keyless graphs are eligible to merge. A keyless graph is reachable only at root
-    // operation fields (never via an entity key-jump), so co-locating two keyless graphs adds
-    // no reachability and the merge is reachability-preserving by construction — which is what
-    // sidesteps every `@key`-related hazard (`@key(resolvable: false)`, `@external` key fields,
-    // `@override`, differing key-field types), since all of those attach to keyed types we
-    // never touch. Keyless graphs still may not merge across spec-link scopes, or the
-    // representative would link the same feature twice; so the grouping key is the link scope.
-    // Keyed graphs are omitted here and therefore each remain their own representative.
+    // Merge candidates: the keyless graphs, each tagged with its link scope.
     let mut graph_scope: HashMap<Name, BTreeSet<String>> = HashMap::new();
     for g in &all_graphs {
-        if keyed_sig.get(g).is_none_or(|sig| sig.is_empty()) {
+        if !keyed.contains(g) {
             graph_scope.insert(g.clone(), link_scope.get(g).cloned().unwrap_or_default());
         }
     }
 
-    // Taint keyless graphs that would collide: within one scope group, if two members declare
-    // the same (type, field) with different applications, every member declaring that field is
+    // Taint candidates that would collide: within one scope group, if two members declare the
+    // same (type, field) with different applications, every member declaring that field is
     // excluded from merging and keeps its own representative.
     let mut tainted: HashSet<Name> = HashSet::new();
     for apps in field_apps.values() {
@@ -185,30 +147,25 @@ pub(super) fn consolidate_for_satisfiability(expanded_sdl: &str) -> String {
             }
         }
         for members in by_scope.values() {
-            let distinct: HashSet<&&String> = members.iter().map(|(_, a)| a).collect();
-            if distinct.len() > 1 {
-                for (g, _) in members {
-                    tainted.insert((*g).clone());
-                }
+            if members.iter().any(|(_, app)| *app != members[0].1) {
+                tainted.extend(members.iter().map(|(g, _)| (*g).clone()));
             }
         }
     }
 
-    let mut groups: HashMap<BTreeSet<String>, Vec<Name>> = HashMap::new();
+    // Group the untainted candidates by scope; representative = smallest member.
+    let mut groups: HashMap<&BTreeSet<String>, Vec<&Name>> = HashMap::new();
     for (g, scope) in &graph_scope {
-        if tainted.contains(g) {
-            continue; // field-incompatible: keep its own representative
+        if !tainted.contains(g) {
+            groups.entry(scope).or_default().push(g);
         }
-        groups.entry(scope.clone()).or_default().push(g.clone());
     }
     let mut sym2rep: HashMap<Name, Name> = HashMap::new();
-    let mut reps: HashSet<Name> = all_graphs.iter().cloned().collect();
     for members in groups.values() {
-        let rep = members.iter().min().cloned().unwrap();
+        let rep = *members.iter().min().unwrap();
         for m in members {
             if *m != rep {
-                sym2rep.insert(m.clone(), rep.clone());
-                reps.remove(m);
+                sym2rep.insert((*m).clone(), rep.clone());
             }
         }
     }
@@ -216,47 +173,23 @@ pub(super) fn consolidate_for_satisfiability(expanded_sdl: &str) -> String {
         return expanded_sdl.to_string(); // nothing merges
     }
 
-    // --- pass 2: remap graph references + prune the join__Graph enum ---
+    // Remap every graph reference to its representative, folding applications that become
+    // identical, and prune the merged-away values from the join__Graph enum.
     let join_graph = name!("join__Graph");
     for (type_name, ty) in schema.types.iter_mut() {
-        match ty {
-            ExtendedType::Scalar(t) => {
-                process_schema_dl(&mut t.make_mut().directives, &sym2rep);
-            }
-            ExtendedType::Object(t) => {
-                let t = t.make_mut();
-                process_schema_dl(&mut t.directives, &sym2rep);
-                for (_, f) in t.fields.iter_mut() {
-                    process_ast_dl(&mut f.make_mut().directives, &sym2rep);
+        process_schema_dl(type_directives_mut(ty), &sym2rep);
+        if let ExtendedType::Enum(t) = ty {
+            let t = t.make_mut();
+            if *type_name == join_graph {
+                t.values.retain(|k, _| !sym2rep.contains_key(k));
+            } else {
+                for v in t.values.values_mut() {
+                    process_ast_dl(&mut v.make_mut().directives, &sym2rep);
                 }
             }
-            ExtendedType::Interface(t) => {
-                let t = t.make_mut();
-                process_schema_dl(&mut t.directives, &sym2rep);
-                for (_, f) in t.fields.iter_mut() {
-                    process_ast_dl(&mut f.make_mut().directives, &sym2rep);
-                }
-            }
-            ExtendedType::Union(t) => {
-                process_schema_dl(&mut t.make_mut().directives, &sym2rep);
-            }
-            ExtendedType::InputObject(t) => {
-                let t = t.make_mut();
-                process_schema_dl(&mut t.directives, &sym2rep);
-                for (_, f) in t.fields.iter_mut() {
-                    process_ast_dl(&mut f.make_mut().directives, &sym2rep);
-                }
-            }
-            ExtendedType::Enum(t) => {
-                let t = t.make_mut();
-                process_schema_dl(&mut t.directives, &sym2rep);
-                if *type_name == join_graph {
-                    t.values.retain(|k, _| reps.contains(k));
-                } else {
-                    for (_, v) in t.values.iter_mut() {
-                        process_ast_dl(&mut v.make_mut().directives, &sym2rep);
-                    }
-                }
+        } else {
+            for dl in field_directive_lists_mut(ty) {
+                process_ast_dl(dl, &sym2rep);
             }
         }
     }
@@ -278,6 +211,57 @@ fn type_directives(ty: &ExtendedType) -> &DirectiveList {
         ExtendedType::Union(t) => &t.directives,
         ExtendedType::Enum(t) => &t.directives,
         ExtendedType::InputObject(t) => &t.directives,
+    }
+}
+
+fn type_directives_mut(ty: &mut ExtendedType) -> &mut DirectiveList {
+    match ty {
+        ExtendedType::Scalar(t) => &mut t.make_mut().directives,
+        ExtendedType::Object(t) => &mut t.make_mut().directives,
+        ExtendedType::Interface(t) => &mut t.make_mut().directives,
+        ExtendedType::Union(t) => &mut t.make_mut().directives,
+        ExtendedType::Enum(t) => &mut t.make_mut().directives,
+        ExtendedType::InputObject(t) => &mut t.make_mut().directives,
+    }
+}
+
+/// The (field name, directives) pairs of a type's fields, uniform across the three
+/// field-bearing type kinds (empty for the rest).
+fn field_directive_lists(
+    ty: &ExtendedType,
+) -> Box<dyn Iterator<Item = (&Name, &ast::DirectiveList)> + '_> {
+    match ty {
+        ExtendedType::Object(t) => Box::new(t.fields.iter().map(|(n, f)| (n, &f.directives))),
+        ExtendedType::Interface(t) => Box::new(t.fields.iter().map(|(n, f)| (n, &f.directives))),
+        ExtendedType::InputObject(t) => Box::new(t.fields.iter().map(|(n, f)| (n, &f.directives))),
+        _ => Box::new(std::iter::empty()),
+    }
+}
+
+/// Mutable counterpart of [`field_directive_lists`].
+fn field_directive_lists_mut(
+    ty: &mut ExtendedType,
+) -> Box<dyn Iterator<Item = &mut ast::DirectiveList> + '_> {
+    match ty {
+        ExtendedType::Object(t) => Box::new(
+            t.make_mut()
+                .fields
+                .values_mut()
+                .map(|f| &mut f.make_mut().directives),
+        ),
+        ExtendedType::Interface(t) => Box::new(
+            t.make_mut()
+                .fields
+                .values_mut()
+                .map(|f| &mut f.make_mut().directives),
+        ),
+        ExtendedType::InputObject(t) => Box::new(
+            t.make_mut()
+                .fields
+                .values_mut()
+                .map(|f| &mut f.make_mut().directives),
+        ),
+        _ => Box::new(std::iter::empty()),
     }
 }
 
@@ -318,10 +302,9 @@ fn remapped_directive(d: &Directive, sym2rep: &HashMap<Name, Name>) -> Directive
     for arg in nd.arguments.iter_mut() {
         match arg.name.as_str() {
             "graph" => {
-                if let Some(g) = arg.value.as_enum().cloned()
-                    && let Some(rep) = sym2rep.get(&g).filter(|rep| **rep != g)
-                {
-                    arg.make_mut().value = Value::Enum(rep.clone()).into();
+                let rep = arg.value.as_enum().and_then(|g| sym2rep.get(g)).cloned();
+                if let Some(rep) = rep {
+                    arg.make_mut().value = Value::Enum(rep).into();
                 }
             }
             // `graphs: [...]` (e.g. on `@join__directive`): remap each enum, dropping the
@@ -346,30 +329,23 @@ fn remapped_directive(d: &Directive, sym2rep: &HashMap<Name, Name>) -> Directive
     nd
 }
 
-/// Remap and fold byte-identical duplicates in a schema-level (`Component`) directive list.
-fn process_schema_dl(dl: &mut DirectiveList, sym2rep: &HashMap<Name, Name>) {
-    let mut out = DirectiveList::new();
+/// Fold directives that became byte-identical after remapping (e.g. two
+/// `@join__type(graph: REP)` on one type → one).
+fn dedup(dirs: Vec<Directive>) -> impl Iterator<Item = Directive> {
     let mut seen = HashSet::new();
-    for comp in dl.iter() {
-        let nd = remapped_directive(comp, sym2rep);
-        if seen.insert(nd.to_string()) {
-            out.push(Component::new(nd));
-        }
-    }
-    *dl = out;
+    dirs.into_iter().filter(move |d| seen.insert(d.to_string()))
 }
 
-/// Remap and fold byte-identical duplicates in an AST (`Node`) directive list.
+/// Remap and fold a schema-level (`Component`) directive list.
+fn process_schema_dl(dl: &mut DirectiveList, sym2rep: &HashMap<Name, Name>) {
+    let remapped = dl.iter().map(|d| remapped_directive(d, sym2rep)).collect();
+    dl.0 = dedup(remapped).map(Component::new).collect();
+}
+
+/// Remap and fold an AST (`Node`) directive list.
 fn process_ast_dl(dl: &mut ast::DirectiveList, sym2rep: &HashMap<Name, Name>) {
-    let mut out = ast::DirectiveList::new();
-    let mut seen = HashSet::new();
-    for d in dl.iter() {
-        let nd = remapped_directive(d, sym2rep);
-        if seen.insert(nd.to_string()) {
-            out.push(Node::new(nd));
-        }
-    }
-    *dl = out;
+    let remapped = dl.iter().map(|d| remapped_directive(d, sym2rep)).collect();
+    dl.0 = dedup(remapped).map(Node::new).collect();
 }
 
 #[cfg(test)]
