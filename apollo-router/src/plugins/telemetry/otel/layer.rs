@@ -41,7 +41,7 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_MESSAGE;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::reload::otel::IsSampled;
-use crate::plugins::telemetry::reload::otel::SampledSpan;
+use crate::plugins::telemetry::reload::otel::UnsampledSpan;
 use crate::plugins::telemetry::utils::upsert_attribute;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::router_factory::STARTING_SPAN_NAME;
@@ -833,19 +833,14 @@ where
         true
     }
 
-    /// Check whether this span should be sampled by looking at `SampledSpan` in the span's
-    /// extensions.
+    /// Check whether this span is sampled by looking for [`OtelData`] in its extensions.
     ///
     /// # Panics
     ///
     /// This function takes (and then drops) a read lock on `Extensions`. Be careful with using it,
     /// since if you're already holding a write lock on `Extensions` the code can deadlock.
     fn sampled(span: &SpanRef<S>) -> bool {
-        let extensions = span.extensions();
-        extensions
-            .get::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::Sampled))
-            .unwrap_or(false)
+        span.extensions().get::<OtelData>().is_some()
     }
 }
 
@@ -878,7 +873,7 @@ where
                 } else {
                     id_generator.new_trace_id()
                 };
-                extensions.insert(SampledSpan::NotSampled(
+                extensions.insert(UnsampledSpan(
                     trace_id.to_bytes().into(),
                     id_generator.new_span_id(),
                 ));
@@ -889,8 +884,6 @@ where
                 }
                 return;
             }
-            extensions.insert(SampledSpan::Sampled);
-
             if self.tracked_inactivity && extensions.get_mut::<Timings>().is_none() {
                 extensions.insert(Timings::new());
             }

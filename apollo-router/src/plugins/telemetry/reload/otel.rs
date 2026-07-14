@@ -57,6 +57,7 @@ use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::otel;
 use crate::plugins::telemetry::otel::OpenTelemetryLayer;
+use crate::plugins::telemetry::otel::OtelData;
 use crate::plugins::telemetry::reload::rate_limit::RateLimitLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::tracer::TraceId;
@@ -162,23 +163,12 @@ pub(crate) fn prepare_context(context: Context) -> Context {
     context
 }
 
+/// Fabricated trace/span IDs for log correlation on unsampled spans.
+///
+/// Nothing is ever exported for an unsampled span, so these IDs are invented
+/// purely to keep logs correlated. They never need to match anything real.
 #[derive(Clone, Debug)]
-pub(crate) enum SampledSpan {
-    /// The span isn't sampled, so nothing is ever exported for it. `trace_id`/`span_id`
-    /// are fabricated purely for local log correlation and never need to match anything.
-    NotSampled(TraceId, SpanId),
-    /// The span is sampled.
-    Sampled,
-}
-
-impl SampledSpan {
-    pub(crate) fn trace_and_span_id(&self) -> Option<(TraceId, SpanId)> {
-        match self {
-            SampledSpan::NotSampled(trace_id, span_id) => Some((trace_id.clone(), *span_id)),
-            SampledSpan::Sampled => None,
-        }
-    }
-}
+pub(crate) struct UnsampledSpan(pub(crate) TraceId, pub(crate) SpanId);
 
 pub(crate) trait IsSampled {
     fn is_sampled(&self) -> bool;
@@ -190,18 +180,12 @@ where
     T: tracing_subscriber::registry::LookupSpan<'a>,
 {
     fn is_sampled(&self) -> bool {
-        // if this extension is set, that means the parent span was accepted, and so the
-        // entire trace is accepted
-        self.extensions()
-            .get::<SampledSpan>()
-            .is_some_and(|s| matches!(s, SampledSpan::Sampled))
+        self.extensions().get::<OtelData>().is_some()
     }
 
     fn get_trace_id(&self) -> Option<TraceId> {
-        let extensions = self.extensions();
-        extensions
-            .get::<SampledSpan>()
-            .and_then(|s| s.trace_and_span_id())
-            .map(|(trace_id, _)| trace_id)
+        self.extensions()
+            .get::<UnsampledSpan>()
+            .map(|s| s.0.clone())
     }
 }

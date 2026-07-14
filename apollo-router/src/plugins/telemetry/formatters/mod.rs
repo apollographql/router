@@ -25,7 +25,7 @@ use tracing_subscriber::registry::SpanRef;
 use super::config_new::logging::RateLimit;
 use super::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::otel::OtelData;
-use crate::plugins::telemetry::reload::otel::SampledSpan;
+use crate::plugins::telemetry::reload::otel::UnsampledSpan;
 
 pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
 // FIXME: this is a temporary solution to avoid exposing hardcoded attributes in connector spans instead of using the custom telemetry features.
@@ -281,12 +281,10 @@ where
         let span_context = live_span.span_context();
         return Some((span_context.trace_id(), span_context.span_id()));
     }
-    if let Some(sampled_span) = ext.get::<SampledSpan>()
-        && let Some((trace_id, span_id)) = sampled_span.trace_and_span_id()
-    {
+    if let Some(unsampled) = ext.get::<UnsampledSpan>() {
         return Some((
-            opentelemetry::trace::TraceId::from(trace_id.to_u128()),
-            span_id,
+            opentelemetry::trace::TraceId::from(unsampled.0.to_u128()),
+            unsampled.1,
         ));
     }
 
