@@ -51,11 +51,10 @@ mod tests {
     /// `futures_executor::block_on` - a real, synchronous block, not just an await.
     /// `Runtime::spawn` must run that on a thread dedicated to blocking work
     /// (`spawn_blocking`), not the shared async worker pool, otherwise it starves
-    /// everything else scheduled on the same worker thread. Regression test for the fix
-    /// in this PR: pin the runtime to a single worker thread, spawn a
-    /// synchronously-blocking future through `Runtime::spawn`, and confirm a normal
-    /// lightweight task on the same runtime still makes progress concurrently instead
-    /// of waiting for the blocking one to finish.
+    /// everything else scheduled on the same worker thread. Pins the runtime to a
+    /// single worker thread, spawns a synchronously-blocking future through
+    /// `Runtime::spawn`, and confirms a normal lightweight task on the same runtime
+    /// still makes progress concurrently.
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn spawn_does_not_block_other_tasks_on_the_same_worker() {
         let lightweight_task_completed = Arc::new(AtomicBool::new(false));
@@ -156,8 +155,8 @@ mod tests {
                 Duration::from_secs(2)
             ),
             "expected the plain opentelemetry_sdk::runtime::Tokio to deadlock force_flush \
-             on a single-worker-thread runtime (this is the bug fixed in this PR) - if this \
-             fails, either the upstream SDK changed, or this test itself is unreliable"
+             on a single-worker-thread runtime - if this fails, either the upstream SDK \
+             changed its blocking behavior, or this test is unreliable"
         );
     }
 
