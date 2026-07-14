@@ -1245,16 +1245,7 @@ mod tests {
     use crate::plugins::telemetry::OTEL_NAME;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 
-    /// What [`TestTracer`] captured about a span: the `SpanBuilder` it was given to
-    /// build (kept around, and mutated further by [`TestBuiltSpan`], instead of
-    /// actually being consumed by a real tracer - there's nothing to build "for real"
-    /// in a test), its status (no longer part of `SpanBuilder` as of opentelemetry
-    /// 0.32 - applied to the built `Span` instead), and its parent context.
-    ///
-    /// Deliberately a test-only shape, independent of `OtelData`: production code
-    /// never has anything like this lying around (see `OtelData`'s doc comment), it
-    /// only exists so tests can inspect what would have been built without a real
-    /// tracer.
+    /// Span data captured by [`TestTracer`] for inspection in tests.
     #[derive(Debug, Clone)]
     struct TestSpanRecord {
         builder: otel::SpanBuilder,
@@ -1262,8 +1253,7 @@ mod tests {
         parent_cx: OtelContext,
     }
 
-    /// A span returned by [`TestTracer`], writing subsequent changes back into the
-    /// shared [`TestSpanRecord`].
+    /// Test span that records mutations into the shared [`TestSpanRecord`].
     #[derive(Debug, Clone)]
     struct TestBuiltSpan(Arc<Mutex<Option<TestSpanRecord>>>, otel::SpanContext);
     impl otel::Span for TestBuiltSpan {

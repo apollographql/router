@@ -277,9 +277,7 @@ fn max_concurrent_exports_default() -> usize {
 }
 
 impl BatchProcessorConfig {
-    /// Apply OTEL_BSP_* environment variable overrides to this config.
-    /// This should be used for third-party exporters (OTLP, Datadog)
-    /// but NOT for Apollo exporters.
+    /// Applies `OTEL_BSP_*` environment variable overrides to this config.
     pub(crate) fn with_env_overrides(self) -> Result<Self, BoxError> {
         Ok(BatchProcessorConfig {
             scheduled_delay: Self::parse_duration_env(

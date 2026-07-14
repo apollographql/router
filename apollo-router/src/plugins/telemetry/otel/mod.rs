@@ -16,15 +16,13 @@ use super::utils::upsert_attribute;
 /// OpenTelemetry span data attached to a tracing span by this crate's layer.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct OtelData {
-    /// The live otel `Span`, wrapped in its `Context`. Always already built.
+    /// The otel span and its propagation context.
     pub(crate) current_cx: opentelemetry::Context,
 
-    /// Mirrors every attribute set on this span. A live span's attributes aren't
-    /// readable once set; this vec keeps them accessible.
+    /// Every attribute set on this span, kept accessible for downstream readers.
     pub(crate) attributes: Vec<KeyValue>,
 
-    /// The span's original name, captured before any `forced_span_name` override.
-    /// A live span's name isn't readable once set.
+    /// The span's original name, before any `forced_span_name` override.
     pub(crate) original_name: &'static str,
 
     /// Attributes gathered for the next event

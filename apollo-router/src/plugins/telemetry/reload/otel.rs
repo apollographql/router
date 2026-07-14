@@ -167,9 +167,7 @@ pub(crate) enum SampledSpan {
     /// The span isn't sampled, so nothing is ever exported for it. `trace_id`/`span_id`
     /// are fabricated purely for local log correlation and never need to match anything.
     NotSampled(TraceId, SpanId),
-    /// The span is sampled. Its real trace/span id are only known once it's actually
-    /// built (see `OtelDataState`), so they aren't tracked here to avoid ever
-    /// displaying an id that could diverge from the one that gets exported.
+    /// The span is sampled.
     Sampled,
 }
 
