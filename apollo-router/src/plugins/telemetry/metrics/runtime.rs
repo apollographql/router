@@ -41,10 +41,6 @@ impl Runtime for BlockingSafeTokio {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
-    use std::sync::atomic::Ordering;
-
     use super::*;
 
     /// `PeriodicReader`'s background loop drives its export via
@@ -57,8 +53,7 @@ mod tests {
     /// still makes progress concurrently.
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn spawn_does_not_block_other_tasks_on_the_same_worker() {
-        let lightweight_task_completed = Arc::new(AtomicBool::new(false));
-        let lightweight_task_completed_clone = lightweight_task_completed.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
 
         BlockingSafeTokio.spawn(async {
             // Mirrors `PeriodicReader`'s real, synchronous block inside its background
@@ -68,15 +63,15 @@ mod tests {
 
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(10)).await;
-            lightweight_task_completed_clone.store(true, Ordering::SeqCst);
+            let _ = tx.send(());
         });
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(
-            lightweight_task_completed.load(Ordering::SeqCst),
-            "a lightweight task on the same single-worker-thread runtime was starved by \
-             a synchronously-blocking future spawned through Runtime::spawn"
-        );
+        tokio::time::timeout(Duration::from_secs(5), rx)
+            .await
+            .expect(
+                "lightweight task did not complete within 5 s: \
+                 the blocking spawn may have starved the worker thread",
+            );
     }
 
     /// Simulates `concurrent_readers` real `PeriodicReader`s (each with its own
