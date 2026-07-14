@@ -639,7 +639,7 @@ mod tests {
         annotations: Option<BTreeMap<String, String>>,
     ) -> SchemaLayerManifest {
         let schema_layer = ImageLayer {
-            data: schema_data.to_string().into_bytes().into(),
+            data: schema_data.to_string().into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -844,7 +844,7 @@ mod tests {
             ..Default::default()
         });
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes().into(),
+            data: "test schema".to_string().into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -898,7 +898,7 @@ mod tests {
             ..Default::default()
         });
         let random_layer = ImageLayer {
-            data: "foo_bar".to_string().into_bytes().into(),
+            data: "foo_bar".to_string().into(),
             media_type: "foo_bar".to_string(),
             annotations: None,
         };
@@ -1107,7 +1107,7 @@ mod tests {
         let mock_server = &MockServer::start().await;
 
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes().into(),
+            data: "test schema".to_string().into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1139,7 +1139,7 @@ mod tests {
         let mock_server = &MockServer::start().await;
 
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes().into(),
+            data: "test schema".to_string().into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1167,7 +1167,7 @@ mod tests {
         let mock_server = &MockServer::start().await;
 
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes().into(),
+            data: "test schema".to_string().into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1293,7 +1293,7 @@ mod tests {
     async fn test_create_oci_schema_stream_tag_with_hot_reload() {
         let mock_server = &MockServer::start().await;
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes().into(),
+            data: "test schema".to_string().into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1329,7 +1329,7 @@ mod tests {
     async fn test_create_oci_schema_stream_tag_without_hot_reload() {
         let mock_server = &MockServer::start().await;
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes().into(),
+            data: "test schema".to_string().into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1388,7 +1388,7 @@ mod tests {
     async fn test_create_oci_schema_stream_digest_without_hot_reload() {
         let mock_server = &MockServer::start().await;
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes().into(),
+            data: "test schema".to_string().into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };

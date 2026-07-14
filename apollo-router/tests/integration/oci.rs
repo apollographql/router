@@ -95,7 +95,7 @@ async fn setup_mock_oci_server(schema_content: &str) -> (MockServer, String) {
 
     // Create schema layer
     let schema_layer = ImageLayer {
-        data: schema_content.to_string().into_bytes().into(),
+        data: schema_content.to_string().into(),
         media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
         annotations: None,
     };
@@ -175,7 +175,7 @@ async fn setup_mock_oci_server_with_tag(
 
     // Create initial schema layer
     let initial_schema_layer = ImageLayer {
-        data: initial_schema.to_string().into_bytes().into(),
+        data: initial_schema.to_string().into(),
         media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
         annotations: None,
     };
@@ -183,7 +183,7 @@ async fn setup_mock_oci_server_with_tag(
 
     // Create updated schema layer
     let updated_schema_layer = ImageLayer {
-        data: updated_schema.to_string().into_bytes().into(),
+        data: updated_schema.to_string().into(),
         media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
         annotations: None,
     };
