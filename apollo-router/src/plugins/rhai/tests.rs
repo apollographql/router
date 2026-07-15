@@ -239,6 +239,72 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
     .await
 }
 
+// Regression test for the Rhai plugin blocking the async executor: a script that runs for
+// longer than 1ms must not stall other work scheduled on the same executor thread, because
+// script evaluation is expected to run on the blocking thread pool via `spawn_blocking`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn rhai_script_execution_does_not_block_async_executor() -> Result<(), BoxError> {
+    let (mock_service, mut handle) =
+        tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            SupergraphResponse::fake_builder()
+                .context(req.context)
+                .build()
+                .unwrap(),
+        );
+    });
+
+    let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.rhai")
+        .expect("Plugin not found")
+        .create_instance_without_schema(
+            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"slow_request.rhai"}"#)
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed_clone());
+
+    // Ticks on the runtime's single worker thread, unless that thread is monopolized by the
+    // Rhai script's evaluation.
+    let ticks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let ticker_ticks = ticks.clone();
+    let ticker = tokio::spawn(async move {
+        loop {
+            ticker_ticks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    });
+    // Let the ticker get going before measuring.
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+
+    let before = ticks.load(std::sync::atomic::Ordering::Relaxed);
+    // Spawned so the request is handled by the runtime's (single) worker thread, the same
+    // thread the ticker task above is scheduled on -- `#[tokio::test]`'s own body runs on the
+    // test-harness thread via `block_on`, which is not a worker thread and wouldn't contend
+    // with the ticker at all.
+    let supergraph_req = SupergraphRequest::fake_builder().build()?;
+    tokio::spawn(async move { router_service.ready().await?.call(supergraph_req).await }).await??;
+    let after = ticks.load(std::sync::atomic::Ordering::Relaxed);
+
+    ticker.abort();
+    crate::plugin::test::await_mock_driver(driver).await;
+
+    // The script busy-loops on the worker thread for ~50ms. If it runs inline on the async
+    // executor, the ticker (sharing that single worker thread) gets essentially no ticks in
+    // (observed 1-2); off the executor, via `spawn_blocking`, it keeps ticking normally
+    // (observed 20+). 8 comfortably separates the two.
+    let ticked = after - before;
+    assert!(
+        ticked >= 8,
+        "the async ticker only progressed by {ticked} ticks while the rhai script executed; \
+         the executor thread was blocked"
+    );
+    Ok(())
+}
+
 // A Rhai engine suitable for minimal testing. There are no scripts and the SDL is an empty
 // string.
 fn new_rhai_test_engine() -> Engine {
