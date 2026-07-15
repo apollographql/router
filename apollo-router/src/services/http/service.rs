@@ -652,6 +652,9 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use hyper_rustls::ConfigBuilderExt;
     use mime::APPLICATION_JSON;
+    use opentelemetry::InstrumentationScope;
+    use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
     use tokio::net::TcpListener;
     use tower::ServiceExt;
     use tracing::Subscriber;
@@ -659,10 +662,6 @@ mod tests {
     use tracing_subscriber::Layer;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::registry::LookupSpan;
-
-    use opentelemetry::InstrumentationScope;
-    use opentelemetry::trace::TracerProvider as _;
-    use opentelemetry_sdk::trace::SdkTracerProvider;
 
     use super::super::ServiceTarget;
     use crate::Context;
