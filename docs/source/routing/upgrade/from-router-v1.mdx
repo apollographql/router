@@ -361,9 +361,9 @@ The router supports reporting operation usage metrics to GraphOS via OpenTelemet
 
 Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](/graphos/metrics/sending-operation-metrics#reporting-format). In v1.49.0, we introduced support for using OTel to perform this reporting. In v1.x, this is controlled using the `otlp_tracing_sampler` (or `experimental_otlp_tracing_sampler` prior to v1.61) flag, and it's off by default.
 
-Now in v2.x, this flag is renamed to `otlp_tracing_sampler`, and it's enabled by default.
+In v2.x, this flag is renamed to `otlp_tracing_sampler`, and it's enabled by default. In v3.x, the legacy trace transport is removed entirely: traces are always reported via OTLP and the `otlp_tracing_sampler` option no longer exists.
 
-**Upgrade step**: in your router config, replace uses of `experimental_otlp_tracing_sampler` to `otlp_tracing_sampler`.
+**Upgrade step**: in your router config, remove any use of `experimental_otlp_tracing_sampler` or `otlp_tracing_sampler`.
 
 Learn more about configuring [usage reporting via OTLP](/router/configuration/telemetry/apollo-telemetry#usage-reporting-via-opentelemetry-protocol-otlp).
 
