@@ -1328,11 +1328,8 @@ mod tests {
 
     #[test]
     fn forced_dynamic_span_status() {
-        // Unlike `otel.status_code` set as a span-creation field (covered by
-        // `span_status_code` above, applied while still buffering into a builder),
-        // `set_span_dyn_attribute` after creation only records `forced_status` on
-        // `OtelData` - the span is already built (`Context`) by then, so `on_close`
-        // applies it to the live span instead (mirrors the `OTEL_ORIGINAL_NAME` fix).
+        // `set_span_dyn_attribute` with `otel.status_code` after span creation goes
+        // through `forced_status` on `OtelData`; `on_close` applies it to the live span.
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry()
             .with(layer().with_tracer(tracer.clone()));
