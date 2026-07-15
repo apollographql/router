@@ -1,25 +1,19 @@
 //! A [`Runtime`] for `opentelemetry_sdk`'s `PeriodicReader` that doesn't block a shared
 //! tokio worker thread.
-//!
-//! `opentelemetry_sdk::runtime::Tokio::spawn` runs the given future via a plain
-//! `tokio::spawn`, on the regular async worker pool. `PeriodicReader`'s own background
-//! loop calls `futures_executor::block_on(self.exporter.export(rm))` on every scheduled
-//! flush (not just on shutdown) - a real, synchronous block, not just an await. Doing
-//! that on a shared worker thread can starve everything else scheduled on that thread
-//! (including other connections' I/O readiness), especially under a slow or unreachable
-//! export endpoint. The `Runtime` trait's own documentation acknowledges runtimes need
-//! to keep working even while another thread blocks waiting for shutdown; a plain
-//! `tokio::spawn` doesn't guarantee that on a runtime whose worker pool is otherwise busy.
-//!
-//! This spawns onto `tokio::task::spawn_blocking`'s dedicated blocking thread pool
-//! instead, where a real blocking wait is expected and safe, then drives the future via
-//! `Handle::block_on` (which still correctly integrates with the runtime's I/O reactor,
-//! unlike `futures_executor::block_on`).
 use std::future::Future;
 use std::time::Duration;
 
 use opentelemetry_sdk::runtime::Runtime;
 
+/// A [`Runtime`] for `opentelemetry_sdk`'s `PeriodicReader` that doesn't block a shared
+/// tokio worker thread.
+///
+/// `opentelemetry_sdk::runtime::Tokio::spawn` runs the given future via a plain
+/// `tokio::spawn`, on the regular async worker pool. `PeriodicReader` calls
+/// `futures_executor::block_on` inside the spawned task, and it can take a long
+/// time because it usually does network I/O.
+///
+/// This version spawns onto Tokio's dedicated blocking thread pool instead.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct BlockingSafeTokio;
 
@@ -43,14 +37,8 @@ impl Runtime for BlockingSafeTokio {
 mod tests {
     use super::*;
 
-    /// `PeriodicReader`'s background loop drives its export via
-    /// `futures_executor::block_on` - a real, synchronous block, not just an await.
-    /// `Runtime::spawn` must run that on a thread dedicated to blocking work
-    /// (`spawn_blocking`), not the shared async worker pool, otherwise it starves
-    /// everything else scheduled on the same worker thread. Pins the runtime to a
-    /// single worker thread, spawns a synchronously-blocking future through
-    /// `Runtime::spawn`, and confirms a normal lightweight task on the same runtime
-    /// still makes progress concurrently.
+    /// Use a single worker thread to prove that `BlockingSafeTokio` doesn't prevent other
+    /// work from going through.
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn spawn_does_not_block_other_tasks_on_the_same_worker() {
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
@@ -66,10 +54,10 @@ mod tests {
             let _ = tx.send(());
         });
 
-        tokio::time::timeout(Duration::from_secs(5), rx)
+        tokio::time::timeout(Duration::from_millis(100), rx)
             .await
             .expect(
-                "lightweight task did not complete within 5 s: \
+                "lightweight task did not complete within 100 ms: \
                  the blocking spawn may have starved the worker thread",
             )
             .expect("oneshot sender dropped before sending");
