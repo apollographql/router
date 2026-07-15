@@ -178,13 +178,13 @@ where
     }
 
     fn get_trace_id(&self) -> Option<TraceId> {
-        self.extensions().get::<OtelData>().map(|d| {
-            d.current_cx
-                .span()
-                .span_context()
-                .trace_id()
-                .to_bytes()
-                .into()
-        })
+        // OtelData is always inserted by on_new_span; the ? is a defensive fallback.
+        // Return None for invalid contexts (NoopTracer / pre-init) rather than
+        // propagating all-zero IDs.
+        let extensions = self.extensions();
+        let d = extensions.get::<OtelData>()?;
+        let otel_span = d.current_cx.span();
+        let sc = otel_span.span_context();
+        sc.is_valid().then(|| sc.trace_id().to_bytes().into())
     }
 }

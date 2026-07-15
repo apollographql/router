@@ -274,12 +274,14 @@ pub(crate) fn get_trace_and_span_id<S>(span: &SpanRef<S>) -> Option<(TraceId, Sp
 where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
 {
-    // OtelData is present for all spans — recording and non-recording alike. Both
-    // carry a real SpanContext with valid IDs, so log correlation works regardless
-    // of whether the span is exported.
-    span.extensions().get::<OtelData>().map(|d| {
-        let span = d.current_cx.span();
-        let sc = span.span_context();
-        (sc.trace_id(), sc.span_id())
-    })
+    // OtelData is always inserted by on_new_span — the ? here is a defensive
+    // fallback for the impossible case.  The Option signals whether the span
+    // context is valid: a NoopTracer or a not-yet-initialised provider produces
+    // an invalid context (all-zero IDs) which callers should omit rather than
+    // emit as zeros.
+    let extensions = span.extensions();
+    let d = extensions.get::<OtelData>()?;
+    let otel_span = d.current_cx.span();
+    let sc = otel_span.span_context();
+    sc.is_valid().then(|| (sc.trace_id(), sc.span_id()))
 }
