@@ -436,7 +436,10 @@ mod tests {
     use std::sync::Mutex;
 
     use futures::stream;
+    use opentelemetry::InstrumentationScope;
     use opentelemetry::KeyValue;
+    use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
     use serde_json_bytes::ByteString;
     use tracing_subscriber::Layer;
     use tracing_subscriber::layer::Context;
@@ -448,6 +451,11 @@ mod tests {
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::otel;
     use crate::plugins::telemetry::otel::OtelData;
+
+    fn make_tracer() -> opentelemetry_sdk::trace::Tracer {
+        SdkTracerProvider::default()
+            .tracer_with_scope(InstrumentationScope::builder("test").build())
+    }
 
     #[derive(Clone, Default)]
     struct EndReasonCapture {
@@ -476,7 +484,7 @@ mod tests {
         let layer = EndReasonCapture::default();
         let subscriber = tracing_subscriber::Registry::default()
             .with(DynAttributeLayer::new())
-            .with(otel::layer())
+            .with(otel::layer().with_tracer(make_tracer()))
             .with(layer.clone());
         let guard = tracing::subscriber::set_default(subscriber);
         (guard, layer)

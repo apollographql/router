@@ -660,6 +660,10 @@ mod tests {
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::registry::LookupSpan;
 
+    use opentelemetry::InstrumentationScope;
+    use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
+
     use super::super::ServiceTarget;
     use crate::Context;
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
@@ -670,6 +674,11 @@ mod tests {
     use crate::services::http::HttpRequest;
     use crate::services::http::service::WireByteCount;
     use crate::services::router;
+
+    fn make_tracer() -> opentelemetry_sdk::trace::Tracer {
+        SdkTracerProvider::default()
+            .tracer_with_scope(InstrumentationScope::builder("test").build())
+    }
 
     async fn emulate_subgraph_with_status_code(listener: TcpListener, status_code: StatusCode) {
         crate::services::http::tests::serve(listener, move |_| async move {
@@ -734,7 +743,7 @@ mod tests {
         let layer = DynAttributeLayer;
         let subscriber = tracing_subscriber::Registry::default()
             .with(layer)
-            .with(otel::layer())
+            .with(otel::layer().with_tracer(make_tracer()))
             .with(recording_layer.clone());
         let guard = tracing::subscriber::set_default(subscriber);
         (guard, recording_layer)
@@ -860,7 +869,7 @@ mod tests {
             let layer = DynAttributeLayer;
             let subscriber = tracing_subscriber::Registry::default()
                 .with(layer)
-                .with(otel::layer())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(recording_layer.clone());
             let guard = tracing::subscriber::set_default(subscriber);
             (guard, recording_layer)
