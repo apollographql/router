@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -189,7 +188,7 @@ expression: "&schema"
         },
         "endpoint": {
           "default": "https://usage-reporting.api.apollographql.com/api/ingress/traces",
-          "description": "The Apollo Studio endpoint for exporting traces and metrics.",
+          "description": "The Apollo Studio endpoint for exporting usage report metrics.",
           "type": "string"
         },
         "errors": {
@@ -267,14 +266,6 @@ expression: "&schema"
             }
           ],
           "description": "Set the Apollo usage report reference reporting mode to use."
-        },
-        "otlp_tracing_sampler": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/SamplerOption"
-            }
-          ],
-          "description": "Percentage of traces to send via the OTel protocol when sending to Apollo Studio."
         },
         "sampler": {
           "anyOf": [

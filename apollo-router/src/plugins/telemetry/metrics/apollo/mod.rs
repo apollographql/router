@@ -658,14 +658,13 @@ mod test {
             .collect::<Vec<_>>()
             .await
             .into_iter()
-            .filter_map(|m| match m {
+            .map(|m| match m {
                 apollo::SingleReport::Stats(mut m) => {
                     m.stats.iter_mut().for_each(|(_k, v)| {
                         v.stats_with_context.query_latency_stats.latency = default_latency
                     });
-                    Some(m)
+                    m
                 }
-                apollo::SingleReport::Traces(_) => None,
             })
             .collect();
         Ok(results)

@@ -1,9 +1,6 @@
 //! Configuration for apollo telemetry exporter.
 use std::fmt::Debug;
 use std::io::Write;
-use std::str::FromStr;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -21,7 +18,6 @@ use parking_lot::Mutex;
 pub(crate) use prost::*;
 use reqwest::Client;
 use serde::ser::SerializeStruct;
-use serde_json::Value;
 use sys_info::hostname;
 use tokio::sync::mpsc;
 use tower::BoxError;
@@ -32,7 +28,6 @@ use super::apollo::SingleReport;
 use super::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::apollo::ApolloUsageReportsBatchProcessorConfiguration;
 
-const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 const ROUTER_REPORT_TYPE_METRICS: &str = "metrics";
 pub(crate) const ROUTER_REPORT_TYPE_TRACES: &str = "traces";
 const ROUTER_TRACING_PROTOCOL_APOLLO: &str = "apollo";
@@ -83,15 +78,13 @@ impl Sender {
 }
 
 /// The Apollo exporter is responsible for attaching report header information for individual requests
-/// Retrying when sending fails.
-/// Sending periodically (in the case of metrics).
+/// and sending usage report metrics periodically.
 pub(crate) struct ApolloExporter {
     batch_config: ApolloUsageReportsBatchProcessorConfiguration,
     endpoint: Url,
     apollo_key: String,
     header: proto::reports::ReportHeader,
     client: Client,
-    strip_traces: AtomicBool,
     studio_backoff: Mutex<Instant>,
     metrics_reference_mode: ApolloMetricsReferenceMode,
 }
@@ -132,7 +125,6 @@ impl ApolloExporter {
                 .build()
                 .map_err(BoxError::from)?,
             header,
-            strip_traces: Default::default(),
             studio_backoff: Mutex::new(Instant::now()),
             metrics_reference_mode,
         })
@@ -188,7 +180,7 @@ impl ApolloExporter {
     }
 
     pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
-        // We may be sending traces but with no operation count
+        // Nothing to report
         if report.licensed_operation_count_by_type.is_empty() && report.traces_per_query.is_empty()
         {
             return Ok(());
@@ -213,7 +205,7 @@ impl ApolloExporter {
         tracing::debug!("submitting report: {:?}", report);
         // Protobuf encode message
         let mut content = BytesMut::new();
-        let mut proto_report =
+        let proto_report =
             report.build_proto_report(self.header.clone(), extended_references_enabled);
         prost::Message::encode(&proto_report, &mut content)
             .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
@@ -227,7 +219,6 @@ impl ApolloExporter {
         let compressed_content = encoder
             .finish()
             .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
-        let mut backoff = Duration::from_millis(0);
         let req = self
             .client
             .post(self.endpoint.clone())
@@ -247,104 +238,54 @@ impl ApolloExporter {
             .build()
             .map_err(|e| ApolloExportError::Unavailable(e.to_string()))?;
 
-        let mut msg = "default error message".to_string();
-        let mut has_traces = false;
-
-        for (_, traces_and_stats) in proto_report.traces_per_query.iter_mut() {
-            if !traces_and_stats.trace.is_empty() {
-                has_traces = true;
-                if self.strip_traces.load(Ordering::SeqCst) {
-                    traces_and_stats.trace.clear();
-                }
-            }
-        }
-
-        // We want to retry if we have traces...
-        let retries = if has_traces { 5 } else { 1 };
-
-        for i in 0..retries {
-            let task_req = req.try_clone().ok_or_else(|| {
-                ApolloExportError::ServerError(
-                    "Tried to clone a request that cannot be cloned".to_string(),
-                )
-            })?;
-            match self.client.execute(task_req).await {
-                Ok(v) => {
-                    let status = v.status();
-                    let opt_header_retry = v.headers().get(RETRY_AFTER).cloned();
-                    let data = v
-                        .text()
-                        .await
-                        .map_err(|e| ApolloExportError::ServerError(e.to_string()))?;
-                    // Handle various kinds of status:
-                    //  - if client error, terminate immediately
-                    //  - if server error, it may be transient so treat as retry-able
-                    //  - if ok, return ok
-                    if status.is_client_error() {
-                        tracing::error!("client error reported at ingress: {}", data);
-                        return Err(ApolloExportError::ClientError(data));
-                    } else if status.is_server_error() {
-                        tracing::warn!("attempt: {}, could not transfer: {}", i + 1, data);
-                        msg = data;
-                        if status == StatusCode::TOO_MANY_REQUESTS {
-                            // We should have a Retry-After header to go with the status code
-                            // If we don't have the header, or it isn't a valid string or we can't
-                            // convert it to u64, just ignore it. Otherwise, interpret it as a
-                            // number of seconds for which we should not attempt to send any more
-                            // reports.
-                            let mut retry_after = 0;
-                            if let Some(returned_retry_after) =
-                                opt_header_retry.and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
-                            {
-                                retry_after = returned_retry_after;
-                                *self.studio_backoff.lock() =
-                                    Instant::now() + Duration::from_secs(retry_after);
-                            }
-                            // Even if we can't update the studio_backoff, we should not continue to
-                            // retry here. We'd better just return the error.
-                            return Err(ApolloExportError::StudioBackoff(report, retry_after));
+        match self.client.execute(req).await {
+            Ok(v) => {
+                let status = v.status();
+                let opt_header_retry = v.headers().get(RETRY_AFTER).cloned();
+                let data = v
+                    .text()
+                    .await
+                    .map_err(|e| ApolloExportError::ServerError(e.to_string()))?;
+                if status.is_client_error() {
+                    tracing::error!("client error reported at ingress: {}", data);
+                    Err(ApolloExportError::ClientError(data))
+                } else if status.is_server_error() {
+                    tracing::warn!("could not transfer: {}", data);
+                    if status == StatusCode::TOO_MANY_REQUESTS {
+                        // We should have a Retry-After header to go with the status code
+                        // If we don't have the header, or it isn't a valid string or we can't
+                        // convert it to u64, just ignore it. Otherwise, interpret it as a
+                        // number of seconds for which we should not attempt to send any more
+                        // reports.
+                        let mut retry_after = 0;
+                        if let Some(returned_retry_after) =
+                            opt_header_retry.and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
+                        {
+                            retry_after = returned_retry_after;
+                            *self.studio_backoff.lock() =
+                                Instant::now() + Duration::from_secs(retry_after);
                         }
-                    } else {
-                        tracing::debug!("ingress response text: {:?}", data);
-                        let report_type = if has_traces {
-                            ROUTER_REPORT_TYPE_TRACES
-                        } else {
-                            ROUTER_REPORT_TYPE_METRICS
-                        };
-                        u64_counter!(
-                            "apollo.router.telemetry.studio.reports",
-                            "The number of reports submitted to Studio by the Router",
-                            1,
-                            report.type = report_type,
-                            report.protocol = ROUTER_TRACING_PROTOCOL_APOLLO,
-                            report.extended_references_enabled = extended_references_enabled
-                        );
-                        if has_traces && !self.strip_traces.load(Ordering::SeqCst) {
-                            // If we had traces then maybe disable sending traces from this exporter based on the response.
-                            if let Ok(response) = serde_json::Value::from_str(&data)
-                                && let Some(Value::Bool(true)) = response.get("tracesIgnored")
-                            {
-                                tracing::warn!(
-                                    "traces will not be sent to Apollo as this account is on a free plan"
-                                );
-                                self.strip_traces.store(true, Ordering::SeqCst);
-                            }
-                        }
-                        return Ok(());
+                        return Err(ApolloExportError::StudioBackoff(report, retry_after));
                     }
-                }
-                Err(e) => {
-                    // TODO: Ultimately need more sophisticated handling here. For example
-                    // a redirect should not be treated the same way as a connect or a
-                    // type builder error...
-                    tracing::warn!("attempt: {}, could not transfer: {}", i + 1, e);
-                    msg = e.to_string();
+                    Err(ApolloExportError::Unavailable(data))
+                } else {
+                    tracing::debug!("ingress response text: {:?}", data);
+                    u64_counter!(
+                        "apollo.router.telemetry.studio.reports",
+                        "The number of reports submitted to Studio by the Router",
+                        1,
+                        report.type = ROUTER_REPORT_TYPE_METRICS,
+                        report.protocol = ROUTER_TRACING_PROTOCOL_APOLLO,
+                        report.extended_references_enabled = extended_references_enabled
+                    );
+                    Ok(())
                 }
             }
-            backoff += BACKOFF_INCREMENT;
-            tokio::time::sleep(backoff).await;
+            Err(e) => {
+                tracing::warn!("could not transfer: {}", e);
+                Err(ApolloExportError::Unavailable(e.to_string()))
+            }
         }
-        Err(ApolloExportError::Unavailable(msg))
     }
 }
 
