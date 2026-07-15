@@ -1,4 +1,4 @@
-### Fix missing `Content-Type` header on 413 responses when `http_max_request_bytes` limit is exceeded ([Issue #XXXX](https://github.com/apollographql/router/issues/XXXX))
+### Fix missing `Content-Type` header on 413 responses when `http_max_request_bytes` limit is exceeded ([PR #9801](https://github.com/apollographql/router/pull/9801))
 
 When a request exceeded the `limits.router.http_max_request_bytes` threshold, the Router correctly returned a `413 Payload Too Large` response with a JSON error body, but omitted the `Content-Type: application/json` response header — in violation of the HTTP spec.
 
