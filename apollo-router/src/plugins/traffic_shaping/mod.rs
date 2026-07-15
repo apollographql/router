@@ -795,14 +795,9 @@ mod test {
 
         let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
         let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
-        let planner = QueryPlannerService::new(
-            schema.clone(),
-            config.clone(),
-            qp_arc,
-            Arc::new(crate::introspection::IntrospectionCache::new(&config)),
-        )
-        .unwrap()
-        .boxed_clone();
+        let planner = QueryPlannerService::new(schema.clone(), config.clone(), qp_arc)
+            .unwrap()
+            .boxed_clone();
 
         let mut builder = PluggableSupergraphServiceBuilder::new(
             planner,

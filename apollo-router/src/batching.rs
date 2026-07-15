@@ -5,10 +5,10 @@
 //! - At the router service, a batch query is split apart into multiple requests.
 //! - A single [Batch] structure is created, which is responsible for handling the batch lifecycle.
 //! - Each individual request gets a [BatchQuery] extension.
-//! - After query planning of each individual request, we collect the hashes of the plan nodes that
-//!   will be executed unconditionally as part of the query plan. Those query nodes are candidates
-//!   for being batched up into a single request at the subgraph side, as they do not depend on
-//!   other data being fetched first.
+//! - After query planning of each individual request, the [BatchQueryPlanAnalysisLayer] collects
+//!   the hashes of the plan nodes that will be executed unconditionally as part of the query plan.
+//!   Those query nodes are candidates for being batched up into a single request at the subgraph
+//!   side, as they do not depend on other data being fetched first.
 //! - [BatchQuery::set_query_hashes] is called with those hashes, to set the expected number of
 //!   subgraph requests. The hashes are also used to track successful and unsuccessful responses to
 //!   each individual subgraph request.
@@ -51,6 +51,9 @@ use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::spec::QueryHash;
+
+mod query_plan_analysis_layer;
+pub(crate) use self::query_plan_analysis_layer::*;
 
 /// A query that is part of a batch.
 /// Note: It's ok to make transient clones of this struct, but *do not* store clones anywhere apart

@@ -15,19 +15,21 @@ use opentelemetry::KeyValue;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::load_shed::error::Overloaded;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
 use crate::Configuration;
 use crate::Context;
-use crate::batching::BatchQuery;
-use crate::configuration::Batching;
+use crate::batching::BatchQueryPlanAnalysisLayer;
+use crate::compute_job::ComputeBackPressureError;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::configuration::mode::Mode;
 use crate::error::CacheResolverError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
-use crate::json_ext::Object;
+use crate::introspection;
+use crate::introspection::IntrospectionService;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugin::DynPlugin;
@@ -61,6 +63,7 @@ use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::content_negotiation;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
+use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::QueryAnalysis;
 use crate::services::query_planner;
 use crate::services::router::ClientRequestAccepts;
@@ -78,6 +81,7 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 pub(crate) struct SupergraphService {
     query_planner_service: query_planner::CacheBoxCloneService,
     execution_service: execution::BoxCloneService,
+    introspection_service: IntrospectionService,
     schema: Arc<Schema>,
     strict_variable_validation: Mode,
 }
@@ -88,12 +92,14 @@ impl SupergraphService {
     pub(crate) fn new(
         query_planner_service: query_planner::CacheBoxCloneService,
         execution_service: execution::BoxCloneService,
+        introspection_service: IntrospectionService,
         schema: Arc<Schema>,
         strict_variable_validation: Mode,
     ) -> Self {
         SupergraphService {
             query_planner_service,
             execution_service,
+            introspection_service,
             schema,
             strict_variable_validation,
         }
@@ -120,18 +126,24 @@ impl Service<SupergraphRequest> for SupergraphService {
         }
 
         // Consume our cloned services and allow ownership to be transferred to the async block.
-        let planning_clone = self.query_planner_service.clone();
-        let planning = std::mem::replace(&mut self.query_planner_service, planning_clone);
+        let query_planner_service = self.query_planner_service.clone();
+        let query_planner_service =
+            std::mem::replace(&mut self.query_planner_service, query_planner_service);
 
-        let execution_clone = self.execution_service.clone();
-        let execution = std::mem::replace(&mut self.execution_service, execution_clone);
+        let execution_service = self.execution_service.clone();
+        let execution_service = std::mem::replace(&mut self.execution_service, execution_service);
+
+        // We won't do a readiness dance here because we didn't ready the service: we don't know if
+        // we'll need it.
+        let introspection_service = self.introspection_service.clone();
 
         let schema = self.schema.clone();
 
         let context_cloned = req.context.clone();
         let fut = service_call(
-            planning,
-            execution,
+            query_planner_service,
+            execution_service,
+            introspection_service,
             schema,
             req,
             self.strict_variable_validation,
@@ -158,6 +170,7 @@ impl Service<SupergraphRequest> for SupergraphService {
 async fn service_call(
     planning: query_planner::CacheBoxCloneService,
     mut execution_service: execution::BoxCloneService,
+    mut introspection_service: IntrospectionService,
     schema: Arc<Schema>,
     req: SupergraphRequest,
     strict_variable_validation: Mode,
@@ -165,6 +178,52 @@ async fn service_call(
     let context = req.context;
     let body = req.supergraph_request.body();
     let variables = body.variables.clone();
+
+    if let Some(document) = context
+        .extensions()
+        .with_lock(|extensions| extensions.get::<ParsedDocument>().cloned())
+        && introspection::is_introspection_query(&document)
+    {
+        // Introspection queries are currently short-circuited: we don't support query planning
+        // them, and we don't support mixed introspection/non-introspection queries.
+        // It's unfortunate that we are _executing_ these queries here rather than in the execution
+        // service, but it's basically the only way we can do it right now.
+        let result = introspection_service
+            // This has a load shed layer on it, so it will definitely be ready.
+            .ready()
+            .await?
+            .call(introspection::IntrospectionRequest {
+                schema,
+                document,
+                variables,
+            })
+            .await;
+
+        return match result {
+            Ok(response) => Ok(SupergraphResponse::new_from_graphql_response(
+                response, context,
+            )),
+            Err(error) => {
+                // There are two types of backpressure errors currently: one from tower and one from
+                // the compute job pool. Handle both of them the same way.
+                let backpressure = error
+                    .downcast_ref::<Overloaded>()
+                    .map(|_| &ComputeBackPressureError)
+                    .or_else(|| error.downcast_ref::<ComputeBackPressureError>());
+
+                if let Some(backpressure) = backpressure {
+                    Ok(SupergraphResponse::error_builder()
+                        .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                        .context(context)
+                        .error(backpressure.to_graphql_error())
+                        .build()
+                        .unwrap())
+                } else {
+                    Err(error)
+                }
+            }
+        };
+    }
 
     let QueryPlannerResponse { content, errors } = match plan_query(
         planning,
@@ -179,7 +238,6 @@ async fn service_call(
             .query
             .clone()
             .unwrap_or_default(),
-        variables.clone(),
     )
     .await
     {
@@ -213,67 +271,12 @@ async fn service_call(
     }
 
     match content {
-        Some(QueryPlannerContent::Response { response })
-        | Some(QueryPlannerContent::CachedIntrospectionResponse { response }) => Ok(
+        Some(QueryPlannerContent::Response { response }) => Ok(
             SupergraphResponse::new_from_graphql_response(*response, context),
         ),
-        Some(QueryPlannerContent::IntrospectionDisabled) => {
-            let mut response = SupergraphResponse::new_from_graphql_response(
-                graphql::Response::builder()
-                    .errors(vec![
-                        crate::error::Error::builder()
-                            .message(String::from("introspection has been disabled"))
-                            .extension_code("INTROSPECTION_DISABLED")
-                            .build(),
-                    ])
-                    .build(),
-                context,
-            );
-            *response.response.status_mut() = StatusCode::BAD_REQUEST;
-            Ok(response)
-        }
-
         Some(QueryPlannerContent::Plan { plan }) => {
             let is_deferred = plan.is_deferred(&variables);
             let is_subscription = plan.is_subscription();
-
-            if let Some(batching) = context
-                .extensions()
-                .with_lock(|lock| lock.get::<Batching>().cloned())
-            {
-                if batching.enabled && (is_deferred || is_subscription) {
-                    let message = if is_deferred {
-                        "BATCHING_DEFER_UNSUPPORTED"
-                    } else {
-                        "BATCHING_SUBSCRIPTION_UNSUPPORTED"
-                    };
-                    let mut response = SupergraphResponse::new_from_graphql_response(
-                            graphql::Response::builder()
-                                .errors(vec![crate::error::Error::builder()
-                                    .message(String::from(
-                                        "Deferred responses and subscriptions aren't supported in batches",
-                                    ))
-                                    .extension_code(message)
-                                    .build()])
-                                .build(),
-                            context.clone(),
-                        );
-                    *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
-                    return Ok(response);
-                }
-                // Now perform query batch analysis
-                let batch_query_opt = context
-                    .extensions()
-                    .with_lock(|lock| lock.get::<BatchQuery>().cloned());
-                if let Some(batch_query) = batch_query_opt {
-                    let query_hashes = plan.query_hashes(batching, &variables)?;
-                    batch_query
-                        .set_query_hashes(query_hashes)
-                        .await
-                        .map_err(|e| CacheResolverError::BatchingError(e.to_string()))?;
-                    tracing::debug!("batch registered: {}", batch_query);
-                }
-            }
 
             let ClientRequestAccepts {
                 multipart_defer: accepts_multipart_defer,
@@ -435,7 +438,6 @@ async fn plan_query(
     operation_name: Option<String>,
     context: Context,
     query_str: String,
-    variables: Object,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
     let qpr = planning
         .call(
@@ -443,7 +445,6 @@ async fn plan_query(
                 .query(query_str)
                 .and_operation_name(operation_name)
                 .context(context.clone())
-                .variables(variables)
                 .build(),
         )
         .instrument(tracing::info_span!(
@@ -555,6 +556,9 @@ impl PluggableSupergraphServiceBuilder {
         )?
         .boxed_clone();
 
+        let (introspection_service, introspection_cache) =
+            introspection::introspection_service(&configuration);
+
         // Activate the telemetry plugin.
         // We must NOT fail to go live with the new router from this point as the telemetry plugin activate interacts with globals.
         for (_, plugin) in self.plugins.iter() {
@@ -564,6 +568,9 @@ impl PluggableSupergraphServiceBuilder {
         // We need a non-fallible hook so that once we know we are going live with a pipeline we do final initialization.
         // For now just shoe-horn something in, but if we ever reintroduce the query planner hook in plugins and activate then this can be made clean.
         query_plan_cache.activate();
+        if let Some(introspection_cache) = introspection_cache {
+            introspection_cache.activate();
+        }
 
         let subscription_plugin_conf = self
             .plugins
@@ -608,6 +615,7 @@ impl PluggableSupergraphServiceBuilder {
             .map(|t| t.config.apollo.clone());
 
         let execution_service: execution::BoxCloneService = ServiceBuilder::new()
+            .layer(BatchQueryPlanAnalysisLayer::new())
             .layer(SubscriptionExecutionLayer::new(
                 configuration.notify.clone(),
             ))
@@ -630,6 +638,7 @@ impl PluggableSupergraphServiceBuilder {
         let supergraph_service = SupergraphService::builder()
             .query_planner_service(query_planner_service.clone())
             .execution_service(execution_service)
+            .introspection_service(introspection_service)
             .schema(schema.clone())
             .strict_variable_validation(configuration.supergraph.strict_variable_validation)
             .build();
