@@ -195,12 +195,6 @@ async fn test_shutdown_with_idle_connection() -> Result<(), BoxError> {
     router.assert_started().await;
     let _conn = std::net::TcpStream::connect(router.bind_address()).unwrap();
     router.execute_default_query().await;
-    // Bare `graceful_shutdown()` (not a hand-rolled short timeout): it goes through
-    // `assert_shutdown()`'s 20s budget, which absorbs ordinary CI scheduling slack and
-    // OTel export-flush latency (see `assert_shutdown`'s doc comment) while still
-    // failing loudly - with a stack dump - on a genuine hang. This test only needs to
-    // prove an idle connection doesn't block shutdown *indefinitely*, not that shutdown
-    // completes within an arbitrary tight bound.
     router.graceful_shutdown().await;
     Ok(())
 }
