@@ -178,11 +178,6 @@ pub(crate) struct FetchDependencyGraphNode {
     /// As query plan execution runs, it accumulates fetch data into a response object. This is the
     /// path at which to merge in the data for this particular fetch.
     merge_at: Option<Vec<FetchDataPathElement>>,
-    /// Precomputed hash of (subgraph_name, merge_at, defer_ref) for fast-reject in merge key
-    /// comparisons. Two nodes with different hashes cannot share a merge key, avoiding expensive
-    /// deep Vec<FetchDataPathElement> equality checks.
-    #[serde(skip)]
-    merge_key_hash: u64,
     /// The fetch ID generation, if one is necessary (used when handling `@defer`).
     ///
     /// This can be treated as an Option using `OnceLock::get()`.
@@ -198,18 +193,6 @@ pub(crate) struct FetchDependencyGraphNode {
     /// If true, then we skip an expensive computation during `is_useless()`. (This partially
     /// caches that computation.)
     is_known_useful: bool,
-}
-
-fn compute_merge_key_hash(
-    subgraph_name: &str,
-    merge_at: &Option<Vec<FetchDataPathElement>>,
-    defer_ref: &Option<DeferRef>,
-) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    subgraph_name.hash(&mut hasher);
-    merge_at.hash(&mut hasher);
-    defer_ref.hash(&mut hasher);
-    hasher.finish()
 }
 
 /// Safely generate IDs for fetch dependency nodes without mutable access.
@@ -802,7 +785,6 @@ impl FetchDependencyGraph {
             .schema_by_source(&subgraph_name)?
             .clone();
         self.on_modification();
-        let merge_key_hash = compute_merge_key_hash(&subgraph_name, &merge_at, &defer_ref);
         Ok(self.graph.add_node(Arc::new(FetchDependencyGraphNode {
             subgraph_name,
             root_kind,
@@ -813,7 +795,6 @@ impl FetchDependencyGraph {
                 .then(|| Arc::new(FetchInputs::empty(self.supergraph_schema.clone()))),
             input_rewrites: Default::default(),
             merge_at,
-            merge_key_hash,
             id: OnceLock::new(),
             defer_ref,
             cached_cost: None,
@@ -2310,10 +2291,8 @@ impl FetchDependencyGraph {
             return Ok(false);
         };
 
-        // Hash check rejects mismatched merge keys without deep Vec comparison.
-        // We compare the subgraph names last because on average it improves performance.
-        Ok(node.merge_key_hash == sibling.merge_key_hash
-            && node.merge_at == sibling.merge_at
+        // we compare the subgraph names last because on average it improves performance
+        Ok(node.merge_at == sibling.merge_at
             && own_parent_id == sibling_parent_id
             && node.defer_ref == sibling.defer_ref
             && node.subgraph_name == sibling.subgraph_name)
@@ -2345,11 +2324,9 @@ impl FetchDependencyGraph {
             return Ok(false);
         };
 
-        // Hash check rejects mismatched merge keys without deep Vec comparison.
-        // We compare the subgraph names last because on average it improves performance.
+        // we compare the subgraph names last because on average it improves performance
         Ok(grand_child_parent_relation.path_in_parent.is_some()
             && grand_child_parent_parent_relation.path_in_parent.is_some()
-            && child.merge_key_hash == grand_child.merge_key_hash
             && child.merge_at == grand_child.merge_at
             && child_inputs.contains(grand_child_inputs)
             && node.defer_ref == grand_child.defer_ref
