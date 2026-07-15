@@ -476,7 +476,7 @@ mod tests {
         let layer = EndReasonCapture::default();
         let subscriber = tracing_subscriber::Registry::default()
             .with(DynAttributeLayer::new())
-            .with(otel::layer().force_sampling())
+            .with(otel::layer())
             .with(layer.clone());
         let guard = tracing::subscriber::set_default(subscriber);
         (guard, layer)

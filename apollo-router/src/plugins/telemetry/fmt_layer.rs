@@ -280,7 +280,10 @@ mod tests {
     use apollo_federation::connectors::runtime::responses::MappedResponse;
     use http::HeaderValue;
     use http::header::CONTENT_LENGTH;
+    use opentelemetry::InstrumentationScope;
+    use opentelemetry::trace::TracerProvider as _;
     use opentelemetry_sdk::Resource;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
     use parking_lot::Mutex;
     use parking_lot::MutexGuard;
     use tests::events::EventLevel;
@@ -450,6 +453,11 @@ connector:
 
             write!(f, "{content}")
         }
+    }
+
+    fn make_tracer() -> opentelemetry_sdk::trace::Tracer {
+        SdkTracerProvider::default()
+            .tracer_with_scope(InstrumentationScope::builder("test").build())
     }
 
     fn generate_simple_span() {
@@ -637,7 +645,7 @@ connector:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             || {
                 let test_span = info_span!(
@@ -686,7 +694,7 @@ connector:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             || {
                 let test_span = info_span!(
@@ -737,7 +745,7 @@ connector:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             move || {
                 let test_span = info_span!(
@@ -985,7 +993,7 @@ connector:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             || {
                 let span = info_span!("test_expand_json");
@@ -1081,7 +1089,7 @@ subgraph:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             move || {
                 let test_span = info_span!("test");
@@ -1168,7 +1176,7 @@ subgraph:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             move || {
                 let test_span = info_span!(

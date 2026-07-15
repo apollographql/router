@@ -34,7 +34,6 @@ use once_cell::sync::OnceCell;
 use opentelemetry::Context;
 use opentelemetry::InstrumentationScope;
 use opentelemetry::trace::SpanContext;
-use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
@@ -163,13 +162,6 @@ pub(crate) fn prepare_context(context: Context) -> Context {
     context
 }
 
-/// Fabricated trace/span IDs for log correlation on unsampled spans.
-///
-/// Nothing is ever exported for an unsampled span, so these IDs are invented
-/// purely to keep logs correlated. They never need to match anything real.
-#[derive(Clone, Debug)]
-pub(crate) struct UnsampledSpan(pub(crate) TraceId, pub(crate) SpanId);
-
 pub(crate) trait IsSampled {
     fn is_sampled(&self) -> bool;
     fn get_trace_id(&self) -> Option<TraceId>;
@@ -180,12 +172,19 @@ where
     T: tracing_subscriber::registry::LookupSpan<'a>,
 {
     fn is_sampled(&self) -> bool {
-        self.extensions().get::<OtelData>().is_some()
+        self.extensions()
+            .get::<OtelData>()
+            .is_some_and(|d| d.current_cx.span().is_recording())
     }
 
     fn get_trace_id(&self) -> Option<TraceId> {
-        self.extensions()
-            .get::<UnsampledSpan>()
-            .map(|s| s.0.clone())
+        self.extensions().get::<OtelData>().map(|d| {
+            d.current_cx
+                .span()
+                .span_context()
+                .trace_id()
+                .to_bytes()
+                .into()
+        })
     }
 }

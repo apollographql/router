@@ -734,7 +734,7 @@ mod tests {
         let layer = DynAttributeLayer;
         let subscriber = tracing_subscriber::Registry::default()
             .with(layer)
-            .with(otel::layer().force_sampling())
+            .with(otel::layer())
             .with(recording_layer.clone());
         let guard = tracing::subscriber::set_default(subscriber);
         (guard, recording_layer)
@@ -860,7 +860,7 @@ mod tests {
             let layer = DynAttributeLayer;
             let subscriber = tracing_subscriber::Registry::default()
                 .with(layer)
-                .with(otel::layer().force_sampling())
+                .with(otel::layer())
                 .with(recording_layer.clone());
             let guard = tracing::subscriber::set_default(subscriber);
             (guard, recording_layer)

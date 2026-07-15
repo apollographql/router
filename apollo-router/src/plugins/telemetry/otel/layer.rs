@@ -11,12 +11,11 @@ use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::StringValue;
 use opentelemetry::Value;
+use std::borrow::Cow;
+
 use opentelemetry::trace as otel;
-use opentelemetry::trace::Span as _;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::noop;
-use opentelemetry_sdk::trace::IdGenerator;
-use opentelemetry_sdk::trace::RandomIdGenerator;
 use tracing_core::Event;
 use tracing_core::Subscriber;
 use tracing_core::field;
@@ -30,7 +29,6 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
 
 use super::OtelData;
-use crate::plugins::response_cache::invalidation_endpoint::INVALIDATION_ENDPOINT_SPAN_NAME;
 use crate::plugins::telemetry::consts::FIELD_EXCEPTION_MESSAGE;
 use crate::plugins::telemetry::consts::FIELD_EXCEPTION_STACKTRACE;
 use crate::plugins::telemetry::consts::OTEL_KIND;
@@ -38,22 +36,12 @@ use crate::plugins::telemetry::consts::OTEL_NAME;
 use crate::plugins::telemetry::consts::OTEL_ORIGINAL_NAME;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_MESSAGE;
-use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
-use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
-use crate::plugins::telemetry::reload::otel::IsSampled;
-use crate::plugins::telemetry::reload::otel::UnsampledSpan;
-use crate::plugins::telemetry::utils::upsert_attribute;
-use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
-use crate::router_factory::STARTING_SPAN_NAME;
-
 /// An [OpenTelemetry] propagation layer for use in a project that uses
 /// [tracing].
 ///
 /// [OpenTelemetry]: https://opentelemetry.io
 /// [tracing]: https://github.com/tokio-rs/tracing
 pub(crate) struct OpenTelemetryLayer<S, T> {
-    /// ONLY for tests
-    force_sampling: bool,
     tracer: T,
     location: bool,
     tracked_inactivity: bool,
@@ -75,11 +63,6 @@ impl<S> OpenTelemetryLayer<S, noop::NoopTracer>
 where
     S: Subscriber + for<'span> LookupSpan<'span>,
 {
-    #[cfg(test)]
-    pub(crate) fn force_sampling(mut self) -> Self {
-        self.force_sampling = true;
-        self
-    }
 }
 
 /// Construct a layer to track spans via [OpenTelemetry].
@@ -307,112 +290,38 @@ struct ExceptionFieldConfig {
     propagate: bool,
 }
 
-/// Visitor applying `tracing` field values while a span is still being assembled
-/// into a `SpanBuilder`, before it's built for real.
-struct NewSpanAttributeVisitor<'a> {
-    builder: &'a mut otel::SpanBuilder,
-    status: &'a mut otel::Status,
-    attributes: &'a mut Vec<KeyValue>,
-    exception_config: ExceptionFieldConfig,
+/// Cheap pre-scan visitor that extracts only the two fields that must be set on
+/// the `SpanBuilder` before the span is built: `otel.kind` (can't be changed once
+/// built) and `otel.name` (optional override for the span name). All other fields
+/// are ignored — they're handled by [`SpanAttributeVisitor`] after building.
+#[derive(Default)]
+struct SpanBuilderVisitor {
+    kind: Option<otel::SpanKind>,
+    name: Option<Cow<'static, str>>,
 }
 
-impl NewSpanAttributeVisitor<'_> {
-    /// Adds or replaces `kv` by key in both the local attribute mirror and the span builder.
-    fn push_attribute(&mut self, kv: KeyValue) {
-        upsert_attribute(self.attributes, kv.clone());
-        upsert_attribute(self.builder.attributes.get_or_insert_with(Vec::new), kv);
-    }
-}
-
-impl field::Visit for NewSpanAttributeVisitor<'_> {
-    /// Set attributes on the underlying OpenTelemetry [`Span`] from `bool` values.
-    ///
-    /// [`Span`]: opentelemetry::trace::Span
-    fn record_bool(&mut self, field: &field::Field, value: bool) {
-        self.push_attribute(KeyValue::new(field.name(), value));
-    }
-
-    /// Set attributes on the underlying OpenTelemetry [`Span`] from `f64` values.
-    ///
-    /// [`Span`]: opentelemetry::trace::Span
-    fn record_f64(&mut self, field: &field::Field, value: f64) {
-        self.push_attribute(KeyValue::new(field.name(), value));
-    }
-
-    /// Set attributes on the underlying OpenTelemetry [`Span`] from `i64` values.
-    ///
-    /// [`Span`]: opentelemetry::trace::Span
-    fn record_i64(&mut self, field: &field::Field, value: i64) {
-        self.push_attribute(KeyValue::new(field.name(), value));
-    }
-
-    /// Set attributes on the underlying OpenTelemetry [`Span`] from `&str` values.
-    ///
-    /// [`Span`]: opentelemetry::trace::Span
+impl field::Visit for SpanBuilderVisitor {
     fn record_str(&mut self, field: &field::Field, value: &str) {
         match field.name() {
-            OTEL_NAME => self.builder.name = value.to_string().into(),
-            OTEL_KIND => self.builder.span_kind = str_to_span_kind(value),
-            OTEL_STATUS_CODE => *self.status = str_to_status(value),
-            OTEL_STATUS_MESSAGE => *self.status = otel::Status::error(value.to_string()),
-            _ => self.push_attribute(KeyValue::new(field.name(), value.to_string())),
+            OTEL_KIND => self.kind = str_to_span_kind(value),
+            OTEL_NAME => self.name = Some(value.to_string().into()),
+            _ => {}
         }
     }
 
-    /// Set attributes on the underlying OpenTelemetry [`Span`] from values that
-    /// implement Debug.
-    ///
-    /// [`Span`]: opentelemetry::trace::Span
     fn record_debug(&mut self, field: &field::Field, value: &dyn fmt::Debug) {
         match field.name() {
-            OTEL_NAME => self.builder.name = format!("{value:?}").into(),
-            OTEL_KIND => self.builder.span_kind = str_to_span_kind(&format!("{value:?}")),
-            OTEL_STATUS_CODE => *self.status = str_to_status(&format!("{value:?}")),
-            OTEL_STATUS_MESSAGE => *self.status = otel::Status::error(format!("{value:?}")),
-            _ => self.push_attribute(KeyValue::new(field.name(), format!("{value:?}"))),
+            OTEL_KIND => self.kind = str_to_span_kind(&format!("{value:?}")),
+            OTEL_NAME => self.name = Some(format!("{value:?}").into()),
+            _ => {}
         }
     }
 
-    /// Set attributes on the underlying OpenTelemetry [`Span`] using a [`std::error::Error`]'s
-    /// [`std::fmt::Display`] implementation. Also adds the `source` chain as an extra field
-    ///
-    /// [`Span`]: opentelemetry::trace::Span
-    fn record_error(
-        &mut self,
-        field: &tracing_core::Field,
-        value: &(dyn std::error::Error + 'static),
-    ) {
-        let mut chain: Vec<StringValue> = Vec::new();
-        let mut next_err = value.source();
-
-        while let Some(err) = next_err {
-            chain.push(err.to_string().into());
-            next_err = err.source();
-        }
-
-        let error_msg = value.to_string();
-
-        if self.exception_config.record {
-            self.push_attribute(KeyValue::new(FIELD_EXCEPTION_MESSAGE, error_msg.clone()));
-
-            // NOTE: This is actually not the stacktrace of the exception. This is
-            // the "source chain". It represents the hierarchy of errors from the
-            // app level to the lowest level such as IO. It does not represent all
-            // of the callsites in the code that led to the error happening.
-            // `std::error::Error::backtrace` is a nightly-only API and cannot be
-            // used here until the feature is stabilized.
-            self.push_attribute(KeyValue::new(
-                FIELD_EXCEPTION_STACKTRACE,
-                Value::Array(chain.clone().into()),
-            ));
-        }
-
-        self.push_attribute(KeyValue::new(field.name(), error_msg));
-        self.push_attribute(KeyValue::new(
-            format!("{}.chain", field.name()),
-            Value::Array(chain.into()),
-        ));
-    }
+    fn record_bool(&mut self, _: &field::Field, _: bool) {}
+    fn record_f64(&mut self, _: &field::Field, _: f64) {}
+    fn record_i64(&mut self, _: &field::Field, _: i64) {}
+    fn record_u64(&mut self, _: &field::Field, _: u64) {}
+    fn record_error(&mut self, _: &tracing_core::Field, _: &(dyn std::error::Error + 'static)) {}
 }
 
 /// Visitor applying `tracing` field values onto an already-live span.
@@ -574,7 +483,6 @@ where
     pub(crate) fn new(tracer: T) -> Self {
         OpenTelemetryLayer {
             tracer,
-            force_sampling: false,
             location: true,
             tracked_inactivity: true,
             with_threads: true,
@@ -606,7 +514,7 @@ where
     ///     .expect("Error initializing Jaeger exporter");
     ///
     /// // Create a layer with the configured tracer
-    /// let otel_layer = tracing_opentelemetry::layer().force_sampling().with_tracer(tracer);
+    /// let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
     ///
     /// // Use the tracing subscriber `Registry`, or any other subscriber
     /// // that impls `LookupSpan`
@@ -620,7 +528,6 @@ where
     {
         OpenTelemetryLayer {
             tracer,
-            force_sampling: self.force_sampling,
             location: self.location,
             tracked_inactivity: self.tracked_inactivity,
             with_threads: self.with_threads,
@@ -752,16 +659,6 @@ where
         }
     }
 
-    fn extra_span_attrs(&self) -> usize {
-        let mut extra_attrs = 0;
-        if self.location {
-            extra_attrs += 3;
-        }
-        if self.with_threads {
-            extra_attrs += 2;
-        }
-        extra_attrs
-    }
 }
 
 thread_local! {
@@ -783,64 +680,20 @@ where
     T: otel::Tracer + 'static,
     T::Span: Send + Sync,
 {
-    fn enabled(
-        &self,
-        meta: &tracing::Metadata<'_>,
-        cx: &tracing_subscriber::layer::Context<'_, S>,
-    ) -> bool {
-        // we ignore metric events
-        if !meta.is_span() {
-            return meta.fields().iter().any(|f| f.name() == "message");
-        }
-
-        if self.force_sampling {
-            return true;
-        }
-
-        // if there's an existing otel context set by the client request, and it is sampled,
-        // then that trace is sampled
-        let current_otel_context = opentelemetry::Context::current();
-        if current_otel_context.span().span_context().is_sampled() {
-            return true;
-        }
-
-        let current_span = cx.current_span();
-        if let Some(spanref) = current_span
-            // the current span, which is the parent of the span that might get enabled here,
-            // exists, but it might have been enabled by another layer like metrics
-            .id()
-            .and_then(|id| cx.span(id))
-        {
-            return spanref.is_sampled();
-        }
-
-        // always sample the router loading trace
-        if meta.name() == STARTING_SPAN_NAME {
-            return true;
-        }
-
-        // we only make the sampling decision on the root span. If we reach here for any other span,
-        // it means that the parent span was not enabled, so we should not enable this span either
-        if meta.name() != REQUEST_SPAN_NAME
-            && meta.name() != ROUTER_SPAN_NAME
-            && meta.name() != SUBSCRIPTION_EVENT_SPAN_NAME
-            && meta.name() != INVALIDATION_ENDPOINT_SPAN_NAME
-        {
-            return false;
-        }
-
-        // - there's no parent span (it's the root), so we make the sampling decision
-        true
-    }
-
-    /// Check whether this span is sampled by looking for [`OtelData`] in its extensions.
+    /// Check whether this span is sampled.
+    ///
+    /// A span is sampled when its `OtelData` holds a recording span. Non-recording
+    /// spans still have `OtelData` (their span context carries real IDs for log
+    /// correlation) but are not exported.
     ///
     /// # Panics
     ///
     /// This function takes (and then drops) a read lock on `Extensions`. Be careful with using it,
     /// since if you're already holding a write lock on `Extensions` the code can deadlock.
     fn sampled(span: &SpanRef<S>) -> bool {
-        span.extensions().get::<OtelData>().is_some()
+        span.extensions()
+            .get::<OtelData>()
+            .is_some_and(|d| d.current_cx.span().is_recording())
     }
 }
 
@@ -861,97 +714,74 @@ where
             let parent_cx = self.parent_context(attrs, &ctx);
             let mut extensions = span.extensions_mut();
 
-            if !self.enabled(attrs.metadata(), &ctx) {
-                // Nothing is ever exported for a span that isn't sampled, so it's safe to
-                // fabricate a trace/span id here purely for local log correlation. Prefer
-                // inheriting the parent's trace id where there is one (e.g. an externally
-                // propagated, deliberately-unsampled trace) for continuity.
-                let id_generator = RandomIdGenerator::default();
-                let parent_trace_id = parent_cx.span().span_context().trace_id();
-                let trace_id = if parent_trace_id != otel::TraceId::INVALID {
-                    parent_trace_id
-                } else {
-                    id_generator.new_trace_id()
-                };
-                extensions.insert(UnsampledSpan(
-                    trace_id.to_bytes().into(),
-                    id_generator.new_span_id(),
-                ));
-
-                // Inactivity may still be tracked even if the span isn't sampled.
-                if self.tracked_inactivity && extensions.get_mut::<Timings>().is_none() {
-                    extensions.insert(Timings::new());
-                }
-                return;
-            }
             if self.tracked_inactivity && extensions.get_mut::<Timings>().is_none() {
                 extensions.insert(Timings::new());
             }
 
+            // Cheap pre-scan: extract fields that must be given to the builder before
+            // the span is built (kind can't be changed afterwards; name is just an
+            // optimisation to avoid a rename call on recording spans).
+            let mut builder_visitor = SpanBuilderVisitor::default();
+            attrs.record(&mut builder_visitor);
+
             let mut builder = self
                 .tracer
-                .span_builder(attrs.metadata().name())
+                .span_builder(
+                    builder_visitor
+                        .name
+                        .unwrap_or_else(|| attrs.metadata().name().into()),
+                )
                 .with_start_time(SystemTime::now());
-
-            let builder_attrs = builder.attributes.get_or_insert(Vec::with_capacity(
-                attrs.fields().len() + self.extra_span_attrs(),
-            ));
-
-            if self.location {
-                let meta = attrs.metadata();
-
-                if let Some(filename) = meta.file() {
-                    builder_attrs.push(KeyValue::new("code.filepath", filename));
-                }
-
-                if let Some(module) = meta.module_path() {
-                    builder_attrs.push(KeyValue::new("code.namespace", module));
-                }
-
-                if let Some(line) = meta.line() {
-                    builder_attrs.push(KeyValue::new("code.lineno", line as i64));
-                }
+            if let Some(kind) = builder_visitor.kind {
+                builder = builder.with_kind(kind);
             }
 
-            if self.with_threads {
-                THREAD_ID.with(|id| builder_attrs.push(KeyValue::new("thread.id", **id as i64)));
-                if let Some(name) = std::thread::current().name() {
-                    // TODO(eliza): it's a bummer that we have to allocate here, but
-                    // we can't easily get the string as a `static`. it would be
-                    // nice if `opentelemetry` could also take `Arc<str>`s as
-                    // `String` values...
-                    builder_attrs.push(KeyValue::new("thread.name", name.to_owned()));
-                }
-            }
+            // Build the span now. The SDK's ParentBased(AlwaysOn) sampler propagates
+            // the parent's recording flag automatically: root spans are always recording;
+            // children of non-recording spans are dropped here without any extra work.
+            let otel_span = builder.start_with_context(&self.tracer, &parent_cx);
 
-            let mut attributes = builder.attributes.clone().unwrap_or_default();
-            let mut status = otel::Status::Unset;
-
-            attrs.record(&mut NewSpanAttributeVisitor {
-                builder: &mut builder,
-                status: &mut status,
-                attributes: &mut attributes,
-                exception_config: self.exception_config,
-            });
-
-            // Build the span for real immediately, rather than deferring to the first
-            // access. Router code (log correlation, response headers) expects a
-            // sampled span's trace/span id to be available as soon as it's created,
-            // and the only way to guarantee that without risking it diverging from
-            // the id actually exported is to build for real up front - `SpanBuilder`
-            // no longer lets us force a specific trace/span id into a deferred build
-            // (removed upstream in opentelemetry 0.32).
-            let mut span = builder.start_with_context(&self.tracer, &parent_cx);
-            span.set_status(status);
-
-            extensions.insert(OtelData {
-                current_cx: parent_cx.with_span(span),
-                attributes,
+            let mut otel_data = OtelData {
+                current_cx: parent_cx.with_span(otel_span),
+                attributes: Vec::new(),
                 original_name: attrs.metadata().name(),
                 event_attributes: None,
                 forced_status: None,
                 forced_span_name: None,
-            });
+            };
+
+            // Only pay for attribute collection when the span will actually be exported.
+            if otel_data.current_cx.span().is_recording() {
+                if self.location {
+                    let meta = attrs.metadata();
+                    if let Some(filename) = meta.file() {
+                        otel_data.upsert_attribute(KeyValue::new("code.filepath", filename));
+                    }
+                    if let Some(module) = meta.module_path() {
+                        otel_data.upsert_attribute(KeyValue::new("code.namespace", module));
+                    }
+                    if let Some(line) = meta.line() {
+                        otel_data.upsert_attribute(KeyValue::new("code.lineno", line as i64));
+                    }
+                }
+
+                if self.with_threads {
+                    THREAD_ID.with(|id| {
+                        otel_data.upsert_attribute(KeyValue::new("thread.id", **id as i64))
+                    });
+                    if let Some(name) = std::thread::current().name() {
+                        otel_data
+                            .upsert_attribute(KeyValue::new("thread.name", name.to_owned()));
+                    }
+                }
+
+                attrs.record(&mut SpanAttributeVisitor {
+                    otel_data: &mut otel_data,
+                    exception_config: self.exception_config,
+                });
+            }
+
+            extensions.insert(otel_data);
         } else {
             eprintln!("OpenTelemetryLayer::on_new_span: Span not found, this is a bug");
         }
@@ -1400,7 +1230,7 @@ mod tests {
         let dynamic_name = "GET http://example.com".to_string();
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry()
-            .with(layer().force_sampling().with_tracer(tracer.clone()));
+            .with(layer().with_tracer(tracer.clone()));
 
         tracing::subscriber::with_default(subscriber, || {
             tracing::debug_span!("static_name", otel.name = dynamic_name.as_str());
@@ -1416,7 +1246,7 @@ mod tests {
         let forced_dynamic_name = "OVERRIDE GET http://example.com".to_string();
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry()
-            .with(layer().force_sampling().with_tracer(tracer.clone()));
+            .with(layer().with_tracer(tracer.clone()));
 
         tracing::subscriber::with_default(subscriber, || {
             let span = tracing::debug_span!("static_name", otel.name = dynamic_name.as_str());
@@ -1455,7 +1285,7 @@ mod tests {
     fn span_kind() {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry()
-            .with(layer().force_sampling().with_tracer(tracer.clone()));
+            .with(layer().with_tracer(tracer.clone()));
 
         tracing::subscriber::with_default(subscriber, || {
             tracing::debug_span!("request", otel.kind = "server");
@@ -1469,7 +1299,7 @@ mod tests {
     fn span_status_code() {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry()
-            .with(layer().force_sampling().with_tracer(tracer.clone()));
+            .with(layer().with_tracer(tracer.clone()));
 
         tracing::subscriber::with_default(subscriber, || {
             tracing::debug_span!("request", otel.status_code = ?otel::Status::Ok);
@@ -1483,7 +1313,7 @@ mod tests {
     fn span_status_message() {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry()
-            .with(layer().force_sampling().with_tracer(tracer.clone()));
+            .with(layer().with_tracer(tracer.clone()));
 
         let message = "message";
 
@@ -1505,7 +1335,7 @@ mod tests {
         // applies it to the live span instead (mirrors the `OTEL_ORIGINAL_NAME` fix).
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry()
-            .with(layer().force_sampling().with_tracer(tracer.clone()));
+            .with(layer().with_tracer(tracer.clone()));
 
         tracing::subscriber::with_default(subscriber, || {
             let span = tracing::debug_span!("request");
@@ -1524,7 +1354,7 @@ mod tests {
     fn trace_id_from_existing_context() {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry()
-            .with(layer().force_sampling().with_tracer(tracer.clone()));
+            .with(layer().with_tracer(tracer.clone()));
         let trace_id = otel::TraceId::from(42u128);
         let existing_cx = OtelContext::current_with_span(TestSpan(otel::SpanContext::new(
             trace_id,
@@ -1548,7 +1378,7 @@ mod tests {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry().with(
             layer()
-                .force_sampling()
+                
                 .with_tracer(tracer.clone())
                 .with_tracked_inactivity(true),
         );
@@ -1572,7 +1402,7 @@ mod tests {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry().with(
             layer()
-                .force_sampling()
+                
                 .with_tracer(tracer.clone())
                 .with_exception_fields(true),
         );
@@ -1625,7 +1455,7 @@ mod tests {
     fn includes_span_location() {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry()
-            .with(layer().force_sampling().with_tracer(tracer.clone()));
+            .with(layer().with_tracer(tracer.clone()));
 
         tracing::subscriber::with_default(subscriber, || {
             tracing::debug_span!("request");
@@ -1653,7 +1483,7 @@ mod tests {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry().with(
             layer()
-                .force_sampling()
+                
                 .with_tracer(tracer.clone())
                 .with_threads(true),
         );
@@ -1676,7 +1506,7 @@ mod tests {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry().with(
             layer()
-                .force_sampling()
+                
                 .with_tracer(tracer.clone())
                 .with_threads(false),
         );
@@ -1700,7 +1530,7 @@ mod tests {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry().with(
             layer()
-                .force_sampling()
+                
                 .with_tracer(tracer.clone())
                 .with_exception_field_propagation(true),
         );

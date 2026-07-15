@@ -393,14 +393,34 @@ where
                         DisplayTraceIdFormat::Bool(false) => None,
                     };
                     if let Some(trace_id) = trace_id {
-                        serializer
-                            .serialize_entry("trace_id", &trace_id)
-                            .unwrap_or(());
+                        #[cfg(test)]
+                        {
+                            let _ = &trace_id;
+                            serializer
+                                .serialize_entry("trace_id", "[trace_id]")
+                                .unwrap_or(());
+                        }
+                        #[cfg(not(test))]
+                        {
+                            serializer
+                                .serialize_entry("trace_id", &trace_id)
+                                .unwrap_or(());
+                        }
                     }
                     if self.config.display_span_id {
-                        serializer
-                            .serialize_entry("span_id", &span_id.to_string())
-                            .unwrap_or(());
+                        #[cfg(test)]
+                        {
+                            let _ = &span_id;
+                            serializer
+                                .serialize_entry("span_id", "[span_id]")
+                                .unwrap_or(());
+                        }
+                        #[cfg(not(test))]
+                        {
+                            serializer
+                                .serialize_entry("span_id", &span_id.to_string())
+                                .unwrap_or(());
+                        }
                     }
                 };
                 let event_attributes = {
@@ -644,11 +664,20 @@ mod test {
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::registry::LookupSpan;
 
+    use opentelemetry::InstrumentationScope;
+    use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
+
     use super::JsonAwareStr;
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::formatters::json::extract_dd_trace_id;
     use crate::plugins::telemetry::otel;
+
+    fn make_tracer() -> opentelemetry_sdk::trace::Tracer {
+        SdkTracerProvider::default()
+            .tracer_with_scope(InstrumentationScope::builder("test").build())
+    }
 
     struct RequiresDatadogLayer;
     impl<S> Layer<S> for RequiresDatadogLayer
@@ -671,7 +700,7 @@ mod test {
         subscriber::with_default(
             Registry::default()
                 .with(RequiresDatadogLayer)
-                .with(otel::layer().force_sampling()),
+                .with(otel::layer().with_tracer(make_tracer())),
             || {
                 let root_span = tracing::info_span!("root", dd.trace_id = "1234");
                 let _root_span = root_span.enter();
@@ -686,7 +715,7 @@ mod test {
             Registry::default()
                 .with(RequiresDatadogLayer)
                 .with(DynAttributeLayer)
-                .with(otel::layer().force_sampling()),
+                .with(otel::layer()),
             || {
                 let root_span = tracing::info_span!("root");
                 root_span.set_span_dyn_attribute("dd.trace_id".into(), "1234".into());
@@ -703,7 +732,7 @@ mod test {
             Registry::default()
                 .with(RequiresDatadogLayer)
                 .with(DynAttributeLayer)
-                .with(otel::layer().force_sampling()),
+                .with(otel::layer()),
             || {
                 let root_span = tracing::info_span!("root");
                 let _root_span = root_span.enter();

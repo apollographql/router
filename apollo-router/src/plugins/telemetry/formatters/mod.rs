@@ -25,7 +25,6 @@ use tracing_subscriber::registry::SpanRef;
 use super::config_new::logging::RateLimit;
 use super::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::otel::OtelData;
-use crate::plugins::telemetry::reload::otel::UnsampledSpan;
 
 pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
 // FIXME: this is a temporary solution to avoid exposing hardcoded attributes in connector spans instead of using the custom telemetry features.
@@ -275,18 +274,12 @@ pub(crate) fn get_trace_and_span_id<S>(span: &SpanRef<S>) -> Option<(TraceId, Sp
 where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
 {
-    let ext = span.extensions();
-    if let Some(otel_data) = ext.get::<OtelData>() {
-        let live_span = otel_data.current_cx.span();
-        let span_context = live_span.span_context();
-        return Some((span_context.trace_id(), span_context.span_id()));
-    }
-    if let Some(unsampled) = ext.get::<UnsampledSpan>() {
-        return Some((
-            opentelemetry::trace::TraceId::from(unsampled.0.to_u128()),
-            unsampled.1,
-        ));
-    }
-
-    None
+    // OtelData is present for all spans — recording and non-recording alike. Both
+    // carry a real SpanContext with valid IDs, so log correlation works regardless
+    // of whether the span is exported.
+    span.extensions().get::<OtelData>().map(|d| {
+        let span = d.current_cx.span();
+        let sc = span.span_context();
+        (sc.trace_id(), sc.span_id())
+    })
 }
