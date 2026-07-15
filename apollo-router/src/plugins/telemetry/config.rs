@@ -866,14 +866,14 @@ impl Conf {
     pub(crate) fn validate_per_exporter_samplers(&self) -> Result<(), Error> {
         let common_ratio = sampler_option_to_ratio(&self.exporters.tracing.common.sampler);
 
-        let mut exporters = Vec::with_capacity(3);
-        exporters.push(("apollo", self.apollo.sampler.as_ref()));
-
         // OTLP sampler is always applied (even in Datadog agent sampling mode), so always validate.
-        exporters.push((
-            "exporters.tracing.otlp",
-            self.exporters.tracing.otlp.sampler.as_ref(),
-        ));
+        let mut exporters = vec![
+            ("apollo", self.apollo.sampler.as_ref()),
+            (
+                "exporters.tracing.otlp",
+                self.exporters.tracing.otlp.sampler.as_ref(),
+            ),
+        ];
 
         // In Datadog agent sampling mode the Datadog exporter ignores its per-exporter sampler
         // (it must forward all spans unfiltered so the agent can make its own decisions).
