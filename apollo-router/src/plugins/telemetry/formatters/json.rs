@@ -655,6 +655,9 @@ impl fmt::Debug for WriteAdaptor<'_> {
 
 #[cfg(test)]
 mod test {
+    use opentelemetry::InstrumentationScope;
+    use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
     use tracing::subscriber;
     use tracing_core::Event;
     use tracing_core::Subscriber;
@@ -663,10 +666,6 @@ mod test {
     use tracing_subscriber::layer::Context;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::registry::LookupSpan;
-
-    use opentelemetry::InstrumentationScope;
-    use opentelemetry::trace::TracerProvider as _;
-    use opentelemetry_sdk::trace::SdkTracerProvider;
 
     use super::JsonAwareStr;
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;

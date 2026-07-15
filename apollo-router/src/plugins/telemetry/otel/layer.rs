@@ -1,4 +1,5 @@
 use std::any::TypeId;
+use std::borrow::Cow;
 use std::fmt;
 use std::marker;
 use std::thread;
@@ -11,8 +12,6 @@ use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::StringValue;
 use opentelemetry::Value;
-use std::borrow::Cow;
-
 use opentelemetry::trace as otel;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::noop;
@@ -59,11 +58,7 @@ where
     }
 }
 
-impl<S> OpenTelemetryLayer<S, noop::NoopTracer>
-where
-    S: Subscriber + for<'span> LookupSpan<'span>,
-{
-}
+impl<S> OpenTelemetryLayer<S, noop::NoopTracer> where S: Subscriber + for<'span> LookupSpan<'span> {}
 
 /// Construct a layer to track spans via [OpenTelemetry].
 ///
@@ -658,7 +653,6 @@ where
             f(otel_data);
         }
     }
-
 }
 
 thread_local! {
@@ -770,8 +764,7 @@ where
                         otel_data.upsert_attribute(KeyValue::new("thread.id", **id as i64))
                     });
                     if let Some(name) = std::thread::current().name() {
-                        otel_data
-                            .upsert_attribute(KeyValue::new("thread.name", name.to_owned()));
+                        otel_data.upsert_attribute(KeyValue::new("thread.name", name.to_owned()));
                     }
                 }
 
@@ -1229,8 +1222,7 @@ mod tests {
     fn dynamic_span_names() {
         let dynamic_name = "GET http://example.com".to_string();
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
-        let subscriber = tracing_subscriber::registry()
-            .with(layer().with_tracer(tracer.clone()));
+        let subscriber = tracing_subscriber::registry().with(layer().with_tracer(tracer.clone()));
 
         tracing::subscriber::with_default(subscriber, || {
             tracing::debug_span!("static_name", otel.name = dynamic_name.as_str());
@@ -1245,8 +1237,7 @@ mod tests {
         let dynamic_name = "GET http://example.com".to_string();
         let forced_dynamic_name = "OVERRIDE GET http://example.com".to_string();
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
-        let subscriber = tracing_subscriber::registry()
-            .with(layer().with_tracer(tracer.clone()));
+        let subscriber = tracing_subscriber::registry().with(layer().with_tracer(tracer.clone()));
 
         tracing::subscriber::with_default(subscriber, || {
             let span = tracing::debug_span!("static_name", otel.name = dynamic_name.as_str());
@@ -1284,8 +1275,7 @@ mod tests {
     #[test]
     fn span_kind() {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
-        let subscriber = tracing_subscriber::registry()
-            .with(layer().with_tracer(tracer.clone()));
+        let subscriber = tracing_subscriber::registry().with(layer().with_tracer(tracer.clone()));
 
         tracing::subscriber::with_default(subscriber, || {
             tracing::debug_span!("request", otel.kind = "server");
@@ -1298,8 +1288,7 @@ mod tests {
     #[test]
     fn span_status_code() {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
-        let subscriber = tracing_subscriber::registry()
-            .with(layer().with_tracer(tracer.clone()));
+        let subscriber = tracing_subscriber::registry().with(layer().with_tracer(tracer.clone()));
 
         tracing::subscriber::with_default(subscriber, || {
             tracing::debug_span!("request", otel.status_code = ?otel::Status::Ok);
@@ -1312,8 +1301,7 @@ mod tests {
     #[test]
     fn span_status_message() {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
-        let subscriber = tracing_subscriber::registry()
-            .with(layer().with_tracer(tracer.clone()));
+        let subscriber = tracing_subscriber::registry().with(layer().with_tracer(tracer.clone()));
 
         let message = "message";
 
@@ -1331,8 +1319,7 @@ mod tests {
         // `set_span_dyn_attribute` with `otel.status_code` after span creation goes
         // through `forced_status` on `OtelData`; `on_close` applies it to the live span.
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
-        let subscriber = tracing_subscriber::registry()
-            .with(layer().with_tracer(tracer.clone()));
+        let subscriber = tracing_subscriber::registry().with(layer().with_tracer(tracer.clone()));
 
         tracing::subscriber::with_default(subscriber, || {
             let span = tracing::debug_span!("request");
@@ -1350,8 +1337,7 @@ mod tests {
     #[test]
     fn trace_id_from_existing_context() {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
-        let subscriber = tracing_subscriber::registry()
-            .with(layer().with_tracer(tracer.clone()));
+        let subscriber = tracing_subscriber::registry().with(layer().with_tracer(tracer.clone()));
         let trace_id = otel::TraceId::from(42u128);
         let existing_cx = OtelContext::current_with_span(TestSpan(otel::SpanContext::new(
             trace_id,
@@ -1375,7 +1361,6 @@ mod tests {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry().with(
             layer()
-                
                 .with_tracer(tracer.clone())
                 .with_tracked_inactivity(true),
         );
@@ -1399,7 +1384,6 @@ mod tests {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry().with(
             layer()
-                
                 .with_tracer(tracer.clone())
                 .with_exception_fields(true),
         );
@@ -1451,8 +1435,7 @@ mod tests {
     #[test]
     fn includes_span_location() {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
-        let subscriber = tracing_subscriber::registry()
-            .with(layer().with_tracer(tracer.clone()));
+        let subscriber = tracing_subscriber::registry().with(layer().with_tracer(tracer.clone()));
 
         tracing::subscriber::with_default(subscriber, || {
             tracing::debug_span!("request");
@@ -1478,12 +1461,8 @@ mod tests {
         let expected_id = Value::I64(thread_id_integer(thread.id()) as i64);
 
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
-        let subscriber = tracing_subscriber::registry().with(
-            layer()
-                
-                .with_tracer(tracer.clone())
-                .with_threads(true),
-        );
+        let subscriber = tracing_subscriber::registry()
+            .with(layer().with_tracer(tracer.clone()).with_threads(true));
 
         tracing::subscriber::with_default(subscriber, || {
             tracing::debug_span!("request");
@@ -1501,12 +1480,8 @@ mod tests {
     #[test]
     fn excludes_thread() {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
-        let subscriber = tracing_subscriber::registry().with(
-            layer()
-                
-                .with_tracer(tracer.clone())
-                .with_threads(false),
-        );
+        let subscriber = tracing_subscriber::registry()
+            .with(layer().with_tracer(tracer.clone()).with_threads(false));
 
         tracing::subscriber::with_default(subscriber, || {
             tracing::debug_span!("request");
@@ -1527,7 +1502,6 @@ mod tests {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry().with(
             layer()
-                
                 .with_tracer(tracer.clone())
                 .with_exception_field_propagation(true),
         );
