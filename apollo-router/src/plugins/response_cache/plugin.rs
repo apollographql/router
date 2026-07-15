@@ -97,13 +97,6 @@ pub(crate) const CACHE_TAG_DIRECTIVE_NAME: &str = "federation__cacheTag";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo::response_cache::key";
-/// Context key exposing the aggregated cache tags for a request to rhai scripts and
-/// coprocessors as a sorted JSON string array. This is a read-only mirror of the set the router
-/// emits as the `propagate_cache_tags` response header — the typed `CacheTagsAggregator`
-/// extension is not visible to rhai/coprocessors. Populated only when
-/// `propagate_cache_tags.enabled` is true. To change what propagates to a CDN, read this set and
-/// rewrite the response header from a script or coprocessor.
-pub(crate) const CONTEXT_CACHE_TAGS: &str = "apollo::response_cache::cache_tags";
 /// Context key to enable support of debugger
 pub(crate) const CONTEXT_DEBUG_CACHE_KEYS: &str = "apollo::response_cache::debug_cached_keys";
 pub(crate) const CACHE_DEBUG_HEADER_NAME: &str = "apollo-cache-debugging";
@@ -503,20 +496,6 @@ impl PluginPrivate for ResponseCache {
                             .map(|a| a.snapshot())
                             .unwrap_or_default()
                     });
-                    // Mirror the aggregated tags onto the string-keyed request context as a
-                    // sorted JSON array so rhai scripts and coprocessors can read them; the
-                    // typed `CacheTagsAggregator` extension above is not visible to either. This
-                    // is a read surface — to change what propagates to a CDN, a customer rewrites
-                    // the emitted header from a script/coprocessor (whose `map_response` runs
-                    // after this one, since `response_cache` is registered inner of rhai and the
-                    // coprocessor). See the response-cache customization docs.
-                    let mut sorted_tags: Vec<String> = aggregated.iter().cloned().collect();
-                    sorted_tags.sort();
-                    if let Ok(tags_value) = serde_json_bytes::to_value(&sorted_tags) {
-                        response
-                            .context
-                            .insert_json_value(CONTEXT_CACHE_TAGS, tags_value);
-                    }
                     emit_cache_tag_header(
                         response.response.headers_mut(),
                         aggregated,
@@ -1428,7 +1407,9 @@ async fn cache_lookup_root(
     // entries are internal-only and filtered out by `user_value()`.
     record_external_cache_tags(
         &request.context,
-        cache_tags.iter().filter_map(|t| t.user_value().map(String::from)),
+        cache_tags
+            .iter()
+            .filter_map(|t| t.user_value().map(String::from)),
     );
 
     Span::current().record("cache.key", key.clone());
