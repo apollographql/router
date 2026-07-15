@@ -854,13 +854,7 @@ mod tests {
         let schema_arc: Arc<crate::spec::Schema> = schema.into();
         let qp_arc = QueryPlannerService::create_planner(&schema_arc, &config).unwrap();
         let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
-        let mut planner = QueryPlannerService::new(
-            schema_arc,
-            config.clone(),
-            qp_arc,
-            Arc::new(crate::introspection::IntrospectionCache::new(&config)),
-        )
-        .unwrap();
+        let mut planner = QueryPlannerService::new(schema_arc, config.clone(), qp_arc).unwrap();
 
         let ctx = Context::new();
         ctx.extensions()
@@ -874,7 +868,6 @@ mod tests {
                 CacheKeyMetadata::default(),
                 PlanOptions::default(),
                 ComputeJobType::QueryPlanning,
-                variables.clone(),
             ))
             .await
             .unwrap();
