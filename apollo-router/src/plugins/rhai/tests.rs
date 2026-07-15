@@ -919,16 +919,17 @@ async fn it_can_access_demand_control_context() -> Result<(), BoxError> {
 
 #[tokio::test]
 async fn it_can_read_response_cache_tags_and_rewrite_header() -> Result<(), BoxError> {
-    let mut mock_service = MockSupergraphService::new();
-    mock_service
-        .expect_call()
-        .times(1)
-        .returning(move |req: SupergraphRequest| {
-            Ok(SupergraphResponse::fake_builder()
+    let (mock_service, mut handle) =
+        tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            SupergraphResponse::fake_builder()
                 .context(req.context)
                 .build()
-                .unwrap())
-        });
+                .unwrap(),
+        );
+    });
 
     let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
         .find(|factory| factory.name == "apollo.rhai")
@@ -939,7 +940,7 @@ async fn it_can_read_response_cache_tags_and_rewrite_header() -> Result<(), BoxE
         .await
         .unwrap();
 
-    let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+    let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed());
     let context = Context::new();
     // Mirror what `response_cache` writes under `propagate_cache_tags.enabled`: a sorted string
     // array under the `apollo::response_cache::cache_tags` context key.
@@ -964,6 +965,7 @@ async fn it_can_read_response_cache_tags_and_rewrite_header() -> Result<(), BoxE
         "acme:homepage,acme:product-42"
     );
 
+    crate::plugin::test::await_mock_driver(driver).await;
     Ok(())
 }
 
