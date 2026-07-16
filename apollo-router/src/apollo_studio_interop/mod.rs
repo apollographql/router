@@ -1156,8 +1156,7 @@ fn format_fragment(
     write!(
         f,
         "fragment {} on {}",
-        &fragment.name.to_string(),
-        &fragment.selection_set.ty.to_string()
+        fragment.name, fragment.selection_set.ty
     )?;
     format_directives(&fragment.directives, true, normalization_algorithm, f)?;
     format_selection_set(&fragment.selection_set, normalization_algorithm, f)

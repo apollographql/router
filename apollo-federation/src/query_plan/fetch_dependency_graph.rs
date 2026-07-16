@@ -5214,7 +5214,7 @@ fn inputs_for_require(
             |_| {
                 Err(FederationError::internal(format!(
                     "Type {} should exist in the supergraph and be a composite type",
-                    &input_type_name
+                    input_type_name
                 )))
             },
             Ok,
