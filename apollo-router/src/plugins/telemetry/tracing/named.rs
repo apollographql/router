@@ -18,6 +18,8 @@ use opentelemetry_sdk::runtime::TrySendError;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
 
+use crate::plugins::telemetry::metrics::runtime::BlockingSafeTokio;
+
 /// Wrapper that modifies trace export errors to include exporter name.
 pub(crate) struct NamedSpanExporter<E> {
     name: &'static str,
@@ -84,24 +86,12 @@ impl Runtime for NamedTokioRuntime {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        // Not `Tokio.spawn(future)` (a plain `tokio::spawn`, on the shared async worker
-        // pool): `BatchSpanProcessor`'s background task services `force_flush`/`shutdown`
-        // requests via `futures_executor::block_on` on a oneshot channel from *its own*
-        // task, and separately, callers of `force_flush`/`shutdown` themselves
-        // synchronously block waiting on that same channel. Spawning this background
-        // task onto a shared worker thread risks it competing with, or being starved by,
-        // other work on that same thread - including the blocking caller itself if they
-        // happen to land on the same worker. `spawn_blocking` runs it on a thread
-        // dedicated to blocking work instead, then drives it with `Handle::block_on`,
-        // which still correctly integrates with the runtime's I/O reactor.
-        let handle = tokio::runtime::Handle::current();
-        tokio::task::spawn_blocking(move || {
-            handle.block_on(future);
-        });
+        // Delegate to BlockingSafeTokio to avoid duplicating the spawn_blocking logic.
+        BlockingSafeTokio.spawn(future);
     }
 
     fn delay(&self, duration: Duration) -> impl Future<Output = ()> + Send + 'static {
-        Tokio.delay(duration)
+        BlockingSafeTokio.delay(duration)
     }
 }
 
