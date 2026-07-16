@@ -147,7 +147,6 @@ mod tests {
                     .document(document)
                     .metadata(crate::plugins::authorization::CacheKeyMetadata::default())
                     .plan_options(crate::services::PlanOptions::default())
-                    .variables(serde_json_bytes::Map::new())
                     .compute_job_type(ComputeJobType::QueryPlanning)
                     .build(),
             )

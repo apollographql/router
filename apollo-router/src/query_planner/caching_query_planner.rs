@@ -302,7 +302,6 @@ where
             query,
             operation_name,
             context,
-            variables,
         } = request;
 
         if self.enable_authorization_directives {
@@ -347,7 +346,6 @@ where
             .metadata(metadata.clone())
             .plan_options(plan_options.clone())
             .compute_job_type(compute_job_type)
-            .variables(variables)
             .build();
 
         // Check the cache first
@@ -395,22 +393,9 @@ where
                 match res {
                     Ok(QueryPlannerResponse { content, errors }) => {
                         if let Some(content) = content.clone() {
-                            let can_cache = match &content {
-                                // Already cached in an introspection-specific, small-size,
-                                // in-memory-only cache.
-                                QueryPlannerContent::CachedIntrospectionResponse { .. } => false,
-                                _ => true,
-                            };
-
-                            if can_cache {
-                                tokio::spawn(async move {
-                                    entry.insert(Ok(content)).await;
-                                });
-                            } else {
-                                tokio::spawn(async move {
-                                    entry.send(Ok(Ok(content))).await;
-                                });
-                            }
+                            tokio::spawn(async move {
+                                entry.insert(Ok(content)).await;
+                            });
                         }
 
                         // This will be overridden by the Rust usage reporting implementation
@@ -722,11 +707,7 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
     fn estimated_size(&self) -> Option<usize> {
         match self {
             Ok(QueryPlannerContent::Plan { plan }) => Some(plan.estimated_size()),
-            Ok(QueryPlannerContent::Response { response })
-            | Ok(QueryPlannerContent::CachedIntrospectionResponse { response }) => {
-                Some(estimate_size(response))
-            }
-            Ok(QueryPlannerContent::IntrospectionDisabled) => None,
+            Ok(QueryPlannerContent::Response { response }) => Some(estimate_size(response)),
             Err(e) => Some(estimate_size(e)),
         }
     }
@@ -741,7 +722,6 @@ mod tests {
     use bytesize::ByteSize;
     use mockall::mock;
     use parking_lot::Mutex;
-    use serde_json_bytes::json;
     use test_log::test;
     use tower::Service;
     use tracing::Subscriber;
@@ -757,7 +737,6 @@ mod tests {
     use crate::apollo_studio_interop::UsageReporting;
     use crate::configuration::QueryPlanning;
     use crate::configuration::Supergraph;
-    use crate::json_ext::Object;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
     use crate::spec::Schema;
@@ -967,8 +946,7 @@ mod tests {
                     .call(query_planner::CachingRequest::new(
                         "query Me { me { username } }".to_string(),
                         Some("".into()),
-                        context.clone(),
-                        Default::default()
+                        context.clone()
                     ))
                     .await
                     .is_err()
@@ -992,8 +970,7 @@ mod tests {
                 .call(query_planner::CachingRequest::new(
                     "query Me { me { name { first } } }".to_string(),
                     Some("".into()),
-                    context.clone(),
-                    Default::default()
+                    context.clone()
                 ))
                 .await
                 .is_err()
@@ -1055,7 +1032,6 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default(),
             ))
             .await;
 
@@ -1130,7 +1106,6 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1246,7 +1221,6 @@ mod tests {
                     "query Me { me { name { first } } }".to_string(),
                     Some("".into()),
                     context.clone(),
-                    Default::default(),
                 ))
                 .await
         });
@@ -1329,7 +1303,6 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default(),
             ))
             .await;
 
@@ -1405,7 +1378,6 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1481,7 +1453,6 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1558,7 +1529,6 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1638,7 +1608,6 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1717,7 +1686,6 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1795,7 +1763,6 @@ mod tests {
                     "query Me { me { name { first } } }".to_string(),
                     Some("".into()),
                     context.clone(),
-                    Default::default(),
                 ))
                 .await;
 
@@ -1872,7 +1839,6 @@ mod tests {
                     "query Me { me { username } }".to_string(),
                     Some("".into()),
                     context.clone(),
-                    Default::default(),
                 ))
                 .await
                 .unwrap();
@@ -1884,133 +1850,30 @@ mod tests {
         }
     }
 
-    #[test(tokio::test)]
-    async fn test_introspection_cache() {
-        let mut delegate = MockMyQueryPlanner::new();
-        delegate
-            .expect_clone()
-            // This is the main point of the test: if introspection queries are not cached, then the delegate
-            // will be called twice when we send the same request twice
-            .times(2)
-            .returning(|| {
-                let mut planner = MockMyQueryPlanner::new();
-                planner.expect_sync_call().returning(|_| {
-                    let qp_content = QueryPlannerContent::CachedIntrospectionResponse {
-                        response: Box::new(
-                            crate::graphql::Response::builder()
-                                .data(Object::new())
-                                .build(),
-                        ),
-                    };
-
-                    Ok(QueryPlannerResponse::builder().content(qp_content).build())
-                });
-                planner
-            });
-
-        let configuration = Default::default();
-        let schema = include_str!("testdata/schema.graphql");
-        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
-
-        let mut planner = CachingQueryPlanner::for_test(
-            delegate,
-            schema.clone(),
-            Default::default(),
-            &configuration,
-        )
-        .await
-        .unwrap();
-
-        let configuration = Configuration::default();
-
-        let doc1 = Query::parse_document(
-            "{
-              __schema {
-                  types {
-                  name
-                }
-              }
-            }",
-            None,
-            &schema,
-            &configuration,
-        )
-        .unwrap();
-
-        let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|lock| lock.insert::<ParsedDocument>(doc1));
-
-        assert!(
-            planner
-                .call(query_planner::CachingRequest::new(
-                    "{
-                    __schema {
-                        types {
-                        name
-                      }
-                    }
-                  }"
-                    .to_string(),
-                    Some("".into()),
-                    context.clone(),
-                    Default::default()
-                ))
-                .await
-                .is_ok()
-        );
-
-        assert!(
-            planner
-                .call(query_planner::CachingRequest::new(
-                    "{
-                        __schema {
-                            types {
-                            name
-                          }
-                        }
-                      }"
-                    .to_string(),
-                    Some("".into()),
-                    context.clone(),
-                    Default::default()
-                ))
-                .await
-                .is_ok()
-        );
-    }
-
     // Expect that if we call the CQP twice, the second call will return cached data
     #[test(tokio::test)]
     async fn test_cache_works() {
-        let mut delegate = MockMyQueryPlanner::new();
-        delegate.expect_clone().times(2).returning(|| {
-            let mut planner = MockMyQueryPlanner::new();
-            planner
-                .expect_sync_call()
-                // Don't allow the delegate to be called more than once
-                .times(1)
-                .returning(|_| {
-                    let qp_content = QueryPlannerContent::CachedIntrospectionResponse {
-                        response: Box::new(
-                            crate::graphql::Response::builder()
-                                .data(json!(r#"{"data":{"me":{"name":"Ada Lovelace"}}}%"#))
-                                .build(),
-                        ),
-                    };
+        let (mock, mut handle) =
+            tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
+        let driver = tokio::task::spawn(async move {
+            let (_request, responder) = handle
+                .next_request()
+                .await
+                .expect("should receive one request");
 
-                    Ok(QueryPlannerResponse::builder().content(qp_content).build())
-                });
-            planner
+            let content = QueryPlannerContent::Plan {
+                plan: Arc::new(QueryPlan::fake_new(None, None)),
+            };
+
+            responder.send_response(QueryPlannerResponse::builder().content(content).build());
         });
 
         let configuration = Default::default();
         let schema = include_str!("../testdata/starstuff@current.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::for_test(
-            delegate,
+        let mut service = CachingQueryPlanner::for_test(
+            mock.map_err(|err| panic!("tower-test errored: {err}")),
             schema.clone(),
             Default::default(),
             &configuration,
@@ -2018,47 +1881,39 @@ mod tests {
         .await
         .unwrap();
 
-        let doc = Query::parse_document(
-            "query ExampleQuery { me { name } }",
-            None,
-            &schema,
-            &configuration,
-        )
-        .unwrap();
+        let query = "query ExampleQuery { me { name } }";
+        let doc = Query::parse_document(query, None, &schema, &configuration).unwrap();
         let context = Context::new();
         context
             .extensions()
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
 
-        let _ = planner
+        let _ = service
+            .ready()
+            .await
+            .unwrap()
             .call(query_planner::CachingRequest::new(
-                "query ExampleQuery {
-                  me {
-                    name
-                  }
-                }"
-                .to_string(),
+                query.to_string(),
                 None,
                 context.clone(),
-                Default::default(),
             ))
             .await
             .unwrap();
 
-        let _ = planner
+        let _ = service
+            .ready()
+            .await
+            .unwrap()
             .call(query_planner::CachingRequest::new(
-                "query ExampleQuery {
-                  me {
-                    name
-                  }
-                }"
-                .to_string(),
+                query.to_string(),
                 None,
                 context.clone(),
-                Default::default(),
             ))
             .await
             .unwrap();
+
+        drop(service);
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[test(tokio::test)]
@@ -2106,6 +1961,9 @@ mod tests {
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
 
         let r = planner
+            .ready()
+            .await
+            .unwrap()
             .call(query_planner::CachingRequest::new(
                 "query ExampleQuery {
                   me {
@@ -2115,11 +1973,13 @@ mod tests {
                 .to_string(),
                 None,
                 context.clone(),
-                Default::default(),
             ))
             .await;
 
         let r2 = planner
+            .ready()
+            .await
+            .unwrap()
             .call(query_planner::CachingRequest::new(
                 "query ExampleQuery {
                   me {
@@ -2129,7 +1989,6 @@ mod tests {
                 .to_string(),
                 None,
                 context.clone(),
-                Default::default(),
             ))
             .await;
 

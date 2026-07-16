@@ -126,7 +126,6 @@ where
                     query: req.query,
                     operation_name: req.operation_name,
                     context,
-                    variables: Default::default(),
                 })
                 .await
         })
