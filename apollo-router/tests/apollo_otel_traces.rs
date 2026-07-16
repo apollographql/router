@@ -106,6 +106,12 @@ async fn config(
         &mut |_| Some(serde_json::Value::String("http".to_string())),
     )
     .expect("Could not sub in otlp protocol");
+    // The shared reports fixtures set `sampler: always_off` so the reports tests don't export
+    // traces to an unmocked endpoint. These trace tests mock the OTLP collector, so re-enable it.
+    config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.sampler", &mut |_| {
+        Some(serde_json::Value::String("always_on".to_string()))
+    })
+    .expect("Could not sub in apollo sampler");
     (task, config)
 }
 
