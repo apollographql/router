@@ -5,23 +5,28 @@
 //!   - Curried (closure) callbacks: `FnPtr::call`, no shared state touched.
 //!   - Non-curried (named function / `Fn("name")`) callbacks: `Engine::call_fn` against a
 //!     single `Arc<Mutex<Scope<'static>>>` shared by every clone of the plugin's `RhaiService`
-//!     for the lifetime of the router's Rhai instance (until the next hot-reload).
+//!     for the lifetime of the router's Rhai instance (until the next hot-reload). `execute()`
+//!     clones the scope under the lock and calls against the private clone, so the lock is
+//!     only ever held for the clone, not the call.
 //!
 //! This benchmark isolates that difference: it does not touch the string interner lock
-//! (disabled via `set_max_strings_interned(0)` in both configurations, matching the
+//! (disabled via `set_max_strings_interned(0)` in every configuration, matching the
 //! recommended `intern_strings: false` setting — see `rhai_string_interning.rs`), so any
 //! throughput gap observed here is attributable to the `scope` mutex alone.
 //!
-//! Two configurations:
-//!   - `non_curried` — one shared `Arc<Mutex<Scope>>`, `Engine::call_fn` locks it on every call,
-//!     exactly mirroring `execute()`'s non-curried branch.
+//! Three configurations:
 //!   - `curried` — a curried `FnPtr` (closure capturing a bound value, matching the docs'
 //!     own curried example), `FnPtr::call` touches no shared scope at all.
+//!   - `non_curried_cloned` — one shared `Arc<Mutex<Scope>>`, locked only to `Scope::clone()`
+//!     it, then `Engine::call_fn` against the owned clone. Mirrors `execute()`'s current
+//!     non-curried branch.
+//!   - `non_curried_locked` — the pre-fix shape: the same shared `Arc<Mutex<Scope>>` held
+//!     for the full `call_fn`. Kept as a baseline to show the size of the improvement.
 //!
 //! Two variants:
 //!   - `sequential` — single thread, measures raw per-call cost with no contention.
 //!   - `concurrent_N` — N OS threads sharing one `Arc<Engine>` (+ one shared `Arc<Mutex<Scope>>`
-//!     for the non-curried case), surfacing scope-mutex serialization under concurrent load —
+//!     for the non-curried cases), surfacing scope-mutex serialization under concurrent load —
 //!     the scenario that matters for a router handling concurrent requests, or fanning out to
 //!     multiple subgraphs within a single request.
 //!
@@ -49,6 +54,8 @@ use rhai::AST;
 // How many OS threads share the engine (and, for non-curried, the scope mutex) in the
 // concurrent variant. Matches rhai_string_interning.rs.
 const CONCURRENCY: usize = 8;
+
+const ARG: &str = "a=1;b=2;c=3";
 
 // A script body representative of typical request-callback work (cookie/header parsing,
 // map building, string ops) -- deliberately modest, not a worst case, since this is meant to
@@ -108,7 +115,73 @@ fn get_curried_fnptr(engine: &Engine, ast: &AST) -> FnPtr {
     fnptr
 }
 
-const ARG: &str = "a=1;b=2;c=3";
+/// One non-curried call, current (post-fix) shape: lock only to clone the scope.
+fn call_non_curried_cloned(engine: &Engine, ast: &AST, scope: &Mutex<Scope<'static>>) {
+    let mut scope = scope.lock().unwrap().clone();
+    let _: Dynamic = engine
+        .call_fn(&mut scope, ast, "process_request", (ARG.to_string(),))
+        .expect("call_fn ok");
+}
+
+/// One non-curried call, pre-fix shape: lock held for the whole call_fn. Baseline only.
+fn call_non_curried_locked(engine: &Engine, ast: &AST, scope: &Mutex<Scope<'static>>) {
+    let mut guard = scope.lock().unwrap();
+    let _: Dynamic = engine
+        .call_fn(&mut guard, ast, "process_request", (ARG.to_string(),))
+        .expect("call_fn ok");
+}
+
+fn bench_variant(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    label: &'static str,
+    call: fn(&Engine, &AST, &Mutex<Scope<'static>>),
+) {
+    let engine = Arc::new(make_engine());
+    let ast = Arc::new(engine.compile(non_curried_script()).expect("compiles"));
+
+    // Sequential: one call at a time, still through the same lock/clone/call_fn path.
+    {
+        let engine = engine.clone();
+        let ast = ast.clone();
+        let scope = Arc::new(Mutex::new(Scope::new()));
+        group.bench_with_input(BenchmarkId::new("sequential", label), label, |b, _| {
+            b.iter(|| call(&engine, &ast, &scope));
+        });
+    }
+
+    // Concurrent: CONCURRENCY threads sharing one Arc<Mutex<Scope>>, exactly mirroring
+    // every request-time invocation of a non-curried callback in execute().
+    {
+        let engine = engine.clone();
+        let ast = ast.clone();
+        group.bench_with_input(
+            BenchmarkId::new(format!("concurrent_{CONCURRENCY}"), label),
+            label,
+            |b, _| {
+                b.iter_custom(|iters| {
+                    let per_thread = (iters as usize).max(1).div_ceil(CONCURRENCY);
+                    let engine = engine.clone();
+                    let ast = ast.clone();
+                    let scope = Arc::new(Mutex::new(Scope::new()));
+                    let start = Instant::now();
+                    std::thread::scope(|s| {
+                        for _ in 0..CONCURRENCY {
+                            let engine = engine.clone();
+                            let ast = ast.clone();
+                            let scope = scope.clone();
+                            s.spawn(move || {
+                                for _ in 0..per_thread {
+                                    call(&engine, &ast, &scope);
+                                }
+                            });
+                        }
+                    });
+                    start.elapsed()
+                });
+            },
+        );
+    }
+}
 
 fn rhai_scope_lock_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("rhai_scope_lock");
@@ -117,71 +190,8 @@ fn rhai_scope_lock_benchmark(c: &mut Criterion) {
         .sample_size(200)
         .throughput(Throughput::Elements(1));
 
-    // ---------------- non_curried: shared Arc<Mutex<Scope>>, locked every call ----------------
-    {
-        let engine = Arc::new(make_engine());
-        let ast = Arc::new(engine.compile(non_curried_script()).expect("compiles"));
-
-        // Sequential: one call at a time, still through the same lock/call_fn path.
-        {
-            let engine = engine.clone();
-            let ast = ast.clone();
-            let scope = Arc::new(Mutex::new(Scope::new()));
-            group.bench_with_input(
-                BenchmarkId::new("sequential", "non_curried"),
-                "non_curried",
-                |b, _| {
-                    b.iter(|| {
-                        let mut guard = scope.lock().unwrap();
-                        let _: Dynamic = engine
-                            .call_fn(&mut guard, &ast, "process_request", (ARG.to_string(),))
-                            .expect("call_fn ok");
-                    });
-                },
-            );
-        }
-
-        // Concurrent: CONCURRENCY threads sharing one Arc<Mutex<Scope>>, exactly mirroring
-        // every request-time invocation of a non-curried callback in execute().
-        {
-            let engine = engine.clone();
-            let ast = ast.clone();
-            group.bench_with_input(
-                BenchmarkId::new(format!("concurrent_{CONCURRENCY}"), "non_curried"),
-                "non_curried",
-                |b, _| {
-                    b.iter_custom(|iters| {
-                        let per_thread = (iters as usize).max(1).div_ceil(CONCURRENCY);
-                        let engine = engine.clone();
-                        let ast = ast.clone();
-                        let scope = Arc::new(Mutex::new(Scope::new()));
-                        let start = Instant::now();
-                        std::thread::scope(|s| {
-                            for _ in 0..CONCURRENCY {
-                                let engine = engine.clone();
-                                let ast = ast.clone();
-                                let scope = scope.clone();
-                                s.spawn(move || {
-                                    for _ in 0..per_thread {
-                                        let mut guard = scope.lock().unwrap();
-                                        let _: Dynamic = engine
-                                            .call_fn(
-                                                &mut guard,
-                                                &ast,
-                                                "process_request",
-                                                (ARG.to_string(),),
-                                            )
-                                            .expect("call_fn ok");
-                                    }
-                                });
-                            }
-                        });
-                        start.elapsed()
-                    });
-                },
-            );
-        }
-    }
+    bench_variant(&mut group, "non_curried_locked", call_non_curried_locked);
+    bench_variant(&mut group, "non_curried_cloned", call_non_curried_cloned);
 
     // ---------------- curried: no shared scope, FnPtr::call ----------------
     {

@@ -811,6 +811,16 @@ fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
 /// The script runs on Tokio's blocking thread pool via `spawn_blocking`, so it never occupies
 /// an async executor thread for the duration of its evaluation.
 ///
+/// Non-curried callbacks (`Fn("name")`) need a `Scope` to call into, since Rhai's `call_fn`
+/// takes one by mutable reference. Rather than holding `rhai_service.scope`'s mutex for the
+/// call's full duration -- which would serialize every non-curried callback across every
+/// concurrent request and every subgraph in a fan-out -- we hold it only long enough to clone
+/// the scope, then run the call against the private clone. This is cheap: under Rhai's `sync`
+/// feature, `Scope`'s `Dynamic` entries are `Arc`-backed, so cloning is O(number of globals),
+/// not O(their size). The trade-off is that a callback's writes to a global no longer persist
+/// to the next call -- only the router's own `apollo_sdl`/`apollo_start` constants and whatever
+/// the script's top-level statements populated at startup are guaranteed visible.
+///
 /// Emits a metric recording the time spent executing the Rhai script.
 async fn execute(
     rhai_service: &RhaiService,
@@ -826,10 +836,10 @@ async fn execute(
         let result = if callback.is_curried() {
             callback.call(&rhai_service.engine, &rhai_service.ast, args)
         } else {
-            let mut guard = rhai_service.scope.lock();
+            let mut scope = rhai_service.scope.lock().clone();
             rhai_service
                 .engine
-                .call_fn(&mut guard, &rhai_service.ast, callback.fn_name(), args)
+                .call_fn(&mut scope, &rhai_service.ast, callback.fn_name(), args)
         };
 
         (result, start.elapsed())
