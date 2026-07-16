@@ -44,11 +44,12 @@ pub(super) struct CacheEntry {
     pub(super) key: String,
     pub(super) data: serde_json_bytes::Value,
     pub(super) control: CacheControl,
-    /// Document-supplied invalidation keys (pre-permutation), persisted so cache hits can
-    /// surface them via the cache debugger and the supergraph response cache-tag header.
-    /// `None` indicates a legacy entry written before router#9481; such entries contribute
-    /// zero tags until they age out via TTL.
-    pub(super) cache_tags: Option<HashSet<String>>,
+    /// Invalidation labels are those labels used to invalidate cached data; they pick out data
+    /// uniquely or, if the label applies more coarsely, to sets of data. They're used for Redis
+    /// cache invalidation through the invalidation endpoint and by CDNs through their CDN-specific
+    /// endpoints; for CDNs, they're emitted as a header and separated by a delimiter, which are
+    /// both configurable
+    pub(super) invalidation_labels: Option<HashSet<String>>,
 }
 
 /// The `CacheStorage` trait defines an API that the backing storage layer must implement for

@@ -47,7 +47,7 @@ const CACHE_TAG_CHANNEL_SIZE: usize = 1000;
 struct CacheValue {
     data: serde_json_bytes::Value,
     cache_control: CacheControl,
-    // Only set in debug mode
+    // Only set in debug mode. These are the `@cacheTag`s, tags set by extensions
     cache_tags: Option<HashSet<String>>,
 }
 
@@ -59,7 +59,10 @@ impl From<(&str, CacheValue)> for CacheEntry {
             key: cache_key.to_string(),
             data: cache_value.data,
             control: cache_value.cache_control,
-            cache_tags: cache_value.cache_tags,
+            // cache tags are used to populate the initial set of invalidation labels; they get
+            // expanded from the schema, too, for capturing subgraphs and types to have a broader
+            // set of invalidation labels
+            invalidation_labels: cache_value.cache_tags,
         }
     }
 }
