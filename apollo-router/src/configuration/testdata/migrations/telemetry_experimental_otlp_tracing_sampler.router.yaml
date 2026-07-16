@@ -1,3 +1,0 @@
-telemetry:
-  apollo:
-    experimental_otlp_tracing_sampler: always_off

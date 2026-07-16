@@ -6,10 +6,3 @@ actions:
     log: "telemetry.apollo.otlp_tracing_sampler has been removed. Router 3 uses OTLP exclusively for traces. Remove this key from your config."
   - type: delete
     path: telemetry.apollo.otlp_tracing_sampler
-  # v1.49-1.60 spelled this key experimental_otlp_tracing_sampler; handle it too.
-  - type: log
-    level: warn
-    path: telemetry.apollo.experimental_otlp_tracing_sampler
-    log: "telemetry.apollo.experimental_otlp_tracing_sampler has been removed. Router 3 uses OTLP exclusively for traces. Remove this key from your config."
-  - type: delete
-    path: telemetry.apollo.experimental_otlp_tracing_sampler
