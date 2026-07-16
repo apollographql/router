@@ -267,18 +267,23 @@ async fn rhai_script_execution_does_not_block_async_executor() -> Result<(), Box
         .unwrap();
     let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed_clone());
 
-    // Ticks on the runtime's single worker thread, unless that thread is monopolized by the
-    // Rhai script's evaluation.
+    // Yields on the runtime's single worker thread as fast as the scheduler allows, unless that
+    // thread is monopolized by the Rhai script's evaluation. Using `yield_now` instead of racing
+    // a fixed-interval timer against the script means the blocked/unblocked tick counts differ
+    // by orders of magnitude instead of a fragile handful, so the outcome doesn't depend on
+    // precise timer resolution or CI scheduling jitter.
     let ticks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let ticker_ticks = ticks.clone();
     let ticker = tokio::spawn(async move {
         loop {
             ticker_ticks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            tokio::task::yield_now().await;
         }
     });
-    // Let the ticker get going before measuring.
-    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    // Wait until the ticker has actually run at least once before measuring
+    while ticks.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+        tokio::task::yield_now().await;
+    }
 
     let before = ticks.load(std::sync::atomic::Ordering::Relaxed);
     // Spawned so the request is handled by the runtime's (single) worker thread, the same
@@ -293,12 +298,13 @@ async fn rhai_script_execution_does_not_block_async_executor() -> Result<(), Box
     crate::plugin::test::await_mock_driver(driver).await;
 
     // The script busy-loops on the worker thread for ~50ms. If it runs inline on the async
-    // executor, the ticker (sharing that single worker thread) gets essentially no ticks in
-    // (observed 1-2); off the executor, via `spawn_blocking`, it keeps ticking normally
-    // (observed 20+). 8 comfortably separates the two.
+    // executor, the ticker (sharing that single worker thread) gets no chance to run at all
+    // (observed 0); off the executor, via `spawn_blocking`, the worker thread keeps scheduling
+    // it as fast as `yield_now` allows (observed in the thousands). 100 comfortably separates
+    // the two without relying on any timer's precision.
     let ticked = after - before;
     assert!(
-        ticked >= 8,
+        ticked >= 100,
         "the async ticker only progressed by {ticked} ticks while the rhai script executed; \
          the executor thread was blocked"
     );
