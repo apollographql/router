@@ -486,11 +486,6 @@ pub(crate) enum ForwardValues {
     Except(Vec<String>),
 }
 
-#[derive(Debug, Serialize)]
-pub(crate) enum SingleReport {
-    Stats(SingleStatsReport),
-}
-
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct Report {
     pub(crate) traces_per_query: HashMap<String, TracesAndStats>,
@@ -604,14 +599,6 @@ impl Report {
         }
 
         report
-    }
-}
-
-impl AddAssign<SingleReport> for Report {
-    fn add_assign(&mut self, report: SingleReport) {
-        match report {
-            SingleReport::Stats(stats) => self.add_assign(stats),
-        }
     }
 }
 

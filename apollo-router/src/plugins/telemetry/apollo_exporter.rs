@@ -1,20 +1,15 @@
 //! Configuration for apollo telemetry exporter.
 use std::fmt::Debug;
 use std::io::Write;
-use std::time::Duration;
-use std::time::Instant;
 
 use bytes::BytesMut;
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use http::StatusCode;
 use http::header::ACCEPT;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
-use http::header::RETRY_AFTER;
 use http::header::USER_AGENT;
 use opentelemetry_sdk::ExportError;
-use parking_lot::Mutex;
 pub(crate) use prost::*;
 use reqwest::Client;
 use serde::ser::SerializeStruct;
@@ -24,8 +19,8 @@ use tower::BoxError;
 use url::Url;
 
 use super::apollo::Report;
-use super::apollo::SingleReport;
 use super::config::ApolloMetricsReferenceMode;
+use super::metrics::apollo::studio::SingleStatsReport;
 use crate::plugins::telemetry::apollo::ApolloUsageReportsBatchProcessorConfiguration;
 
 const ROUTER_REPORT_TYPE_METRICS: &str = "metrics";
@@ -43,9 +38,6 @@ pub(crate) enum ApolloExportError {
 
     #[error("Apollo exporter unavailable error: {0}")]
     Unavailable(String),
-
-    #[error("Apollo Studio not accepting reports for {1} seconds")]
-    StudioBackoff(Report, u64),
 }
 
 impl ExportError for ApolloExportError {
@@ -58,11 +50,11 @@ impl ExportError for ApolloExportError {
 pub(crate) enum Sender {
     #[default]
     Noop,
-    Apollo(mpsc::Sender<SingleReport>),
+    Apollo(mpsc::Sender<SingleStatsReport>),
 }
 
 impl Sender {
-    pub(crate) fn send(&self, report: SingleReport) {
+    pub(crate) fn send(&self, report: SingleStatsReport) {
         match &self {
             Sender::Noop => {}
             Sender::Apollo(channel) => {
@@ -85,7 +77,6 @@ pub(crate) struct ApolloExporter {
     apollo_key: String,
     header: proto::reports::ReportHeader,
     client: Client,
-    studio_backoff: Mutex<Instant>,
     metrics_reference_mode: ApolloMetricsReferenceMode,
 }
 
@@ -125,17 +116,15 @@ impl ApolloExporter {
                 .build()
                 .map_err(BoxError::from)?,
             header,
-            studio_backoff: Mutex::new(Instant::now()),
             metrics_reference_mode,
         })
     }
 
     pub(crate) fn start(self) -> Sender {
-        let (tx, mut rx) = mpsc::channel::<SingleReport>(self.batch_config.max_queue_size);
+        let (tx, mut rx) = mpsc::channel::<SingleStatsReport>(self.batch_config.max_queue_size);
         tokio::spawn(async move {
             let timeout = tokio::time::interval(self.batch_config.scheduled_delay);
             let mut report = Report::default();
-            let mut backoff_warn = true;
 
             tokio::pin!(timeout);
 
@@ -145,20 +134,8 @@ impl ApolloExporter {
                     // pseudo-random and may never choose the timeout tick
                     biased;
                     _ = timeout.tick() => {
-                        match self.submit_report(std::mem::take(&mut report)).await {
-                            Ok(_) => backoff_warn = true,
-                            Err(err) => {
-                                match err {
-                                    ApolloExportError::StudioBackoff(unsubmitted, remaining) => {
-                                        if backoff_warn {
-                                            tracing::warn!("Apollo Studio not accepting reports for {remaining} seconds");
-                                            backoff_warn = false;
-                                        }
-                                        report = unsubmitted;
-                                    },
-                                    _ => tracing::error!("failed to submit Apollo report: {}", err)
-                                }
-                            }
+                        if let Err(err) = self.submit_report(std::mem::take(&mut report)).await {
+                            tracing::error!("failed to submit Apollo report: {}", err)
                         }
                     }
                     single_report = rx.recv() => {
@@ -180,21 +157,9 @@ impl ApolloExporter {
     }
 
     pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
-        // Nothing to report
         if report.licensed_operation_count_by_type.is_empty() && report.traces_per_query.is_empty()
         {
             return Ok(());
-        }
-
-        // If studio has previously told us not to submit reports, return for further processing
-        let expires_at = *self.studio_backoff.lock();
-        let now = Instant::now();
-        if expires_at > now {
-            let remaining = expires_at - now;
-            return Err(ApolloExportError::StudioBackoff(
-                report,
-                remaining.as_secs(),
-            ));
         }
 
         let extended_references_enabled = matches!(
@@ -241,7 +206,6 @@ impl ApolloExporter {
         match self.client.execute(req).await {
             Ok(v) => {
                 let status = v.status();
-                let opt_header_retry = v.headers().get(RETRY_AFTER).cloned();
                 let data = v
                     .text()
                     .await
@@ -251,22 +215,6 @@ impl ApolloExporter {
                     Err(ApolloExportError::ClientError(data))
                 } else if status.is_server_error() {
                     tracing::warn!("could not transfer: {}", data);
-                    if status == StatusCode::TOO_MANY_REQUESTS {
-                        // We should have a Retry-After header to go with the status code
-                        // If we don't have the header, or it isn't a valid string or we can't
-                        // convert it to u64, just ignore it. Otherwise, interpret it as a
-                        // number of seconds for which we should not attempt to send any more
-                        // reports.
-                        let mut retry_after = 0;
-                        if let Some(returned_retry_after) =
-                            opt_header_retry.and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
-                        {
-                            retry_after = returned_retry_after;
-                            *self.studio_backoff.lock() =
-                                Instant::now() + Duration::from_secs(retry_after);
-                        }
-                        return Err(ApolloExportError::StudioBackoff(report, retry_after));
-                    }
                     Err(ApolloExportError::Unavailable(data))
                 } else {
                     tracing::debug!("ingress response text: {:?}", data);
