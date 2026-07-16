@@ -205,7 +205,7 @@ fn compute_merge_key_hash(
     merge_at: &Option<Vec<FetchDataPathElement>>,
     defer_ref: &Option<DeferRef>,
 ) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut hasher = ahash::AHasher::default();
     subgraph_name.hash(&mut hasher);
     merge_at.hash(&mut hasher);
     defer_ref.hash(&mut hasher);
@@ -3175,7 +3175,7 @@ impl FetchDependencyGraphNode {
     // equality check via has_equal_inputs within each bucket.
     fn subgraph_and_merge_at_key(&self) -> Option<u64> {
         self.inputs.as_ref()?;
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = ahash::AHasher::default();
         self.subgraph_name.hash(&mut hasher);
         self.merge_at.hash(&mut hasher);
         Some(hasher.finish())
