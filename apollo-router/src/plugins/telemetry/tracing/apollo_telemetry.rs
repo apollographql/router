@@ -10,7 +10,6 @@ use base64::prelude::BASE64_STANDARD;
 use derivative::Derivative;
 use lru::LruCache;
 use opentelemetry::Key;
-use opentelemetry::KeyValue;
 use opentelemetry::Value;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::SpanKind;
@@ -191,54 +190,45 @@ pub(crate) struct LightSpanData {
 
 impl LightSpanData {
     /// Convert from a full Span into a lighter more memory-efficient span for caching purposes.
-    /// - If `include_attr_names` is passed, filter out any attributes that are not in the list.
+    /// Only attributes/events whose keys are in the allowlists are retained; everything else is
+    /// dropped so we never forward un-vetted attributes to Apollo.
     fn from_span_data(
         value: SpanData,
-        include_attr_names: &Option<HashSet<Key>>,
-        include_attr_event_names: &Option<HashSet<Key>>,
+        include_attr_names: &HashSet<Key>,
+        include_attr_event_names: &HashSet<Key>,
     ) -> Self {
-        let filtered_attributes = match include_attr_names {
-            None => value
-                .attributes
-                .into_iter()
-                .map(|KeyValue { key, value, .. }| (key, value))
-                .collect(),
-            Some(attr_names) => value
-                .attributes
-                .into_iter()
-                .filter_map(|kv| {
-                    if attr_names.contains(&kv.key) {
-                        Some((kv.key, kv.value))
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
-        };
+        let filtered_attributes = value
+            .attributes
+            .into_iter()
+            .filter_map(|kv| {
+                if include_attr_names.contains(&kv.key) {
+                    Some((kv.key, kv.value))
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-        let filtered_events = match include_attr_event_names {
-            None => vec![],
-            Some(event_names) => value
-                .events
-                .into_iter()
-                .map(|event| LightSpanEventData {
-                    timestamp: event.timestamp,
-                    name: event.name,
-                    attributes: event
-                        .attributes
-                        .into_iter()
-                        .filter_map(|kv| {
-                            if event_names.contains(&kv.key) {
-                                Some((kv.key, kv.value))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect(),
-                })
-                .filter(|event| !event.attributes.is_empty())
-                .collect(),
-        };
+        let filtered_events = value
+            .events
+            .into_iter()
+            .map(|event| LightSpanEventData {
+                timestamp: event.timestamp,
+                name: event.name,
+                attributes: event
+                    .attributes
+                    .into_iter()
+                    .filter_map(|kv| {
+                        if include_attr_event_names.contains(&kv.key) {
+                            Some((kv.key, kv.value))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+            })
+            .filter(|event| !event.attributes.is_empty())
+            .collect();
 
         Self {
             trace_id: value.span_context.trace_id(),
@@ -268,16 +258,16 @@ pub(crate) struct Exporter {
     span_lru_size_instrument: LruSizeInstrument,
     #[derivative(Debug = "ignore")]
     otlp_exporter: ApolloOtlpExporter,
-    include_attr_names: Option<HashSet<Key>>,
-    include_attr_event_names: Option<HashSet<Key>>,
+    include_attr_names: HashSet<Key>,
+    include_attr_event_names: HashSet<Key>,
 }
 
 #[buildstructor::buildstructor]
 impl Exporter {
     #[builder]
     pub(crate) fn new<'a>(
-        otlp_endpoint: &'a Url,
-        otlp_tracing_protocol: &'a Protocol,
+        endpoint: &'a Url,
+        tracing_protocol: &'a Protocol,
         apollo_key: &'a str,
         apollo_graph_ref: &'a str,
         schema_id: &'a str,
@@ -298,18 +288,18 @@ impl Exporter {
             span_cache: Mutex::new(span_cache),
             span_lru_size_instrument,
             otlp_exporter: ApolloOtlpExporter::new(
-                otlp_endpoint,
-                otlp_tracing_protocol,
+                endpoint,
+                tracing_protocol,
                 batch_processor_config,
                 apollo_key,
                 apollo_graph_ref,
                 schema_id,
                 errors_configuration,
             )?,
-            include_attr_names: Some(HashSet::from_iter(
+            include_attr_names: HashSet::from_iter(
                 [&REPORTS_INCLUDE_ATTRS[..], &OTLP_EXT_INCLUDE_ATTRS[..]].concat(),
-            )),
-            include_attr_event_names: Some(HashSet::from(OTLP_EXT_INCLUDE_EVENT_ATTRS)),
+            ),
+            include_attr_event_names: HashSet::from(OTLP_EXT_INCLUDE_EVENT_ATTRS),
         })
     }
 }
@@ -320,7 +310,7 @@ impl SpanExporter for Exporter {
         // Exporting to apollo means that we must have complete trace as the entire trace must be built.
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
-        let mut otlp_trace_spans: Vec<Vec<SpanData>> = Vec::new();
+        let mut grouped_traces: Vec<Vec<LightSpanData>> = Vec::new();
 
         {
             let mut span_cache = self.span_cache.lock();
@@ -336,11 +326,7 @@ impl SpanExporter for Exporter {
                         &self.include_attr_names,
                         &self.include_attr_event_names,
                     );
-                    let grouped_trace_spans = span_cache.group_by_trace(root_span);
-                    if let Some(trace) = self.otlp_exporter.prepare_for_export(grouped_trace_spans)
-                    {
-                        otlp_trace_spans.push(trace);
-                    }
+                    grouped_traces.push(span_cache.pop_spans_for_tree(root_span));
                 } else if span.parent_span_id != SpanId::INVALID {
                     // Not a root span, we may need it later so stash it.
                     span_cache.insert(LightSpanData::from_span_data(
@@ -356,6 +342,12 @@ impl SpanExporter for Exporter {
             self.span_lru_size_instrument
                 .update(span_cache.len() as u64);
         }
+
+        // ftv1 decode/re-encode is CPU-heavy, so run it after releasing the span_cache lock.
+        let otlp_trace_spans: Vec<Vec<SpanData>> = grouped_traces
+            .into_iter()
+            .filter_map(|grouped| self.otlp_exporter.prepare_for_export(grouped))
+            .collect();
 
         if !otlp_trace_spans.is_empty() {
             self.otlp_exporter
@@ -407,7 +399,10 @@ impl SpanCache {
     }
 
     /// Collects the subtree for a trace by calling pop() on the LRU cache for
-    /// all spans in the tree.
+    /// all spans in the tree, given an initial "root span". Used by the OTLP exporter
+    /// to build up a complete trace.
+    /// For a future iteration, consider using the same algorithm in the `groupbytrace`
+    /// processor, which groups based on trace ID instead of connecting recursively by parent ID.
     fn pop_spans_for_tree(&mut self, root_span: LightSpanData) -> Vec<LightSpanData> {
         let root_span_id = root_span.span_id;
         let mut child_spans = match self.spans_by_parent_id.pop(&root_span_id) {
@@ -420,14 +415,6 @@ impl SpanCache {
         let mut spans_for_tree = vec![root_span];
         spans_for_tree.append(&mut child_spans);
         spans_for_tree
-    }
-
-    /// Used by the OTLP exporter to build up a complete trace given an initial "root span".
-    /// Iterates over all children and recursively collect the entire subtree.
-    /// For a future iteration, consider using the same algorithm in `groupbytrace` processor, which
-    /// groups based on trace ID instead of connecting recursively by parent ID.
-    fn group_by_trace(&mut self, span: LightSpanData) -> Vec<LightSpanData> {
-        self.pop_spans_for_tree(span)
     }
 
     /// Returns the size of the span LRU cache.
