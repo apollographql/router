@@ -820,10 +820,9 @@ async fn execute(
 ) -> Result<Dynamic, Box<EvalAltResult>> {
     let rhai_service = rhai_service.clone();
     let callback = callback.clone();
+    let start = Instant::now();
 
     let (result, duration) = match tokio::task::spawn_blocking(move || {
-        let start = Instant::now();
-
         let result = if callback.is_curried() {
             callback.call(&rhai_service.engine, &rhai_service.ast, args)
         } else {
