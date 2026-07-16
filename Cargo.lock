@@ -211,6 +211,7 @@ dependencies = [
 name = "apollo-federation"
 version = "2.16.0"
 dependencies = [
+ "ahash",
  "apollo-compiler",
  "apollo-federation",
  "apollo-parser",
