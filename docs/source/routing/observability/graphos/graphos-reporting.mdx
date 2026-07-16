@@ -49,14 +49,15 @@ To control how many traces are sent to GraphOS, use the common tracing sampler o
 ```yaml title="router.yaml"
 telemetry:
   apollo:
-    # Sample traces sent to GraphOS at 50% of sampled traffic
-    sampler: 0.5
+    # Send 10% of all requests to GraphOS. This is an absolute fraction of all
+    # traffic and must not exceed the common sampler below.
+    sampler: 0.1
 
   exporters:
     tracing:
       common:
-        # Sample traces at 1% of all traffic
-        sampler: 0.01
+        # Trace 50% of all requests globally
+        sampler: 0.5
 ```
 
 <OTelEnvVarsCaution />
