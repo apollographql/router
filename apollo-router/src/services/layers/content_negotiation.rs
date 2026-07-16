@@ -1,8 +1,10 @@
 //! Layers that do HTTP content negotiation using the Accept and Content-Type headers.
 //!
-//! Content negotiation uses a pair of layers that work together at the router and supergraph stages.
+//! Content negotiation uses pairs of layers that work together at the router, supergraph, and
+//! subgraph stages.
 
 use std::ops::ControlFlow;
+use std::task::Poll;
 
 use futures::FutureExt;
 use futures::future::BoxFuture;
@@ -11,6 +13,8 @@ use http::Method;
 use http::StatusCode;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use http::response::Parts;
+use mediatype::MediaType;
 use mediatype::MediaTypeList;
 use mediatype::ReadParams;
 use mediatype::names::_STAR;
@@ -25,11 +29,11 @@ use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::error::FetchError;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::ServiceExt as _;
 use crate::layers::async_checkpoint::AsyncCheckpointService;
-use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_SPEC_PARAMETER;
 use crate::services::MULTIPART_DEFER_SPEC_VALUE;
@@ -40,9 +44,131 @@ use crate::services::router;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::router::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
 use crate::services::router::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
+use crate::services::subgraph;
+use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::supergraph;
 
 pub(crate) const GRAPHQL_JSON_RESPONSE_HEADER_VALUE: &str = "application/graphql-response+json";
+
+const GRAPHQL_RESPONSE: mediatype::Name = mediatype::Name::new_unchecked("graphql-response");
+
+#[allow(clippy::declare_interior_mutable_const)]
+pub(crate) static ACCEPT_GRAPHQL_JSON: http::HeaderValue =
+    http::HeaderValue::from_static("application/json, application/graphql-response+json");
+
+#[derive(Clone, Debug)]
+pub(crate) enum ContentType {
+    ApplicationJson,
+    ApplicationGraphqlResponseJson,
+}
+
+pub(crate) fn get_graphql_content_type(
+    service_name: &str,
+    parts: &Parts,
+) -> Result<ContentType, FetchError> {
+    if let Some(raw_content_type) = parts.headers.get(CONTENT_TYPE) {
+        let content_type = raw_content_type
+            .to_str()
+            .ok()
+            .and_then(|str| MediaType::parse(str).ok());
+
+        match content_type {
+            Some(mime) if mime.ty == APPLICATION && mime.subty == JSON => {
+                Ok(ContentType::ApplicationJson)
+            }
+            Some(mime)
+                if mime.ty == APPLICATION
+                    && mime.subty == GRAPHQL_RESPONSE
+                    && mime.suffix == Some(JSON) =>
+            {
+                Ok(ContentType::ApplicationGraphqlResponseJson)
+            }
+            Some(mime) => Err(format!(
+                "subgraph response contains unsupported content-type: {mime}",
+            )),
+            None => Err(format!(
+                "subgraph response contains invalid 'content-type' header value {raw_content_type:?}",
+            )),
+        }
+    } else {
+        Err("subgraph response does not contain 'content-type' header".to_owned())
+    }
+    .map_err(|reason| FetchError::SubrequestHttpError {
+        status_code: Some(parts.status.as_u16()),
+        service: service_name.to_string(),
+        reason: format!(
+            "{}; expected content-type: {} or content-type: {}",
+            reason,
+            APPLICATION_JSON.essence_str(),
+            GRAPHQL_JSON_RESPONSE_HEADER_VALUE
+        ),
+    })
+}
+
+/// Sets the outbound `Content-Type` to `application/json` and appends an `Accept` header
+/// advertising support for both GraphQL-over-HTTP response media types.
+///
+/// Used by [`SubgraphContentNegotiationLayer`]. Batched subgraph requests get these headers too, since each request
+/// making up a batch passes through `SubgraphContentNegotiationLayer` before being diverted into batching.
+pub(crate) fn inject_subgraph_request_headers(headers: &mut HeaderMap) {
+    headers.insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
+    headers.append(ACCEPT, ACCEPT_GRAPHQL_JSON.clone());
+}
+
+/// A layer for the subgraph service that injects `Accept` and `Content-Type` headers on outbound
+/// requests. Content-type validation and HTTP-to-GraphQL response conversion still happen inline
+/// in the subgraph service, since they operate on the response side rather than the request.
+#[derive(Clone, Default)]
+pub(crate) struct SubgraphContentNegotiationLayer {}
+
+impl<S> Layer<S> for SubgraphContentNegotiationLayer
+where
+    S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    <S as Service<subgraph::Request>>::Future: Send + 'static,
+{
+    type Service = SubgraphContentNegotiationService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        SubgraphContentNegotiationService { inner }
+    }
+}
+
+pub(crate) struct SubgraphContentNegotiationService<S> {
+    inner: S,
+}
+
+impl<S: Clone> Clone for SubgraphContentNegotiationService<S> {
+    fn clone(&self) -> Self {
+        SubgraphContentNegotiationService {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<S> Service<subgraph::Request> for SubgraphContentNegotiationService<S>
+where
+    S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = subgraph::Response;
+    type Error = S::Error;
+    type Future = S::Future;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut request: subgraph::Request) -> Self::Future {
+        inject_subgraph_request_headers(request.subgraph_request.headers_mut());
+        self.inner.call(request)
+    }
+}
 
 /// A layer for the router service that rejects requests that do not have an expected Content-Type,
 /// or that have an Accept header that is not supported by the router.
@@ -53,9 +179,9 @@ pub(crate) const GRAPHQL_JSON_RESPONSE_HEADER_VALUE: &str = "application/graphql
 /// # Context
 /// If the request is valid, this layer adds a [`ClientRequestAccepts`] value to the context.
 #[derive(Clone, Default)]
-pub(crate) struct RouterLayer {}
+pub(crate) struct RouterContentNegotiationLayer {}
 
-impl<S> Layer<S> for RouterLayer
+impl<S> Layer<S> for RouterContentNegotiationLayer
 where
     S: Service<router::Request, Response = router::Response, Error = BoxError>
         + Send
@@ -167,13 +293,13 @@ where
 /// A layer for the supergraph service that populates the Content-Type response header.
 ///
 /// The content type is decided based on the [`ClientRequestAccepts`] context value, which is
-/// populated by the content negotiation [`RouterLayer`].
+/// populated by the content negotiation [`RouterContentNegotiationLayer`].
 // XXX(@goto-bus-stop): this feels a bit odd. It probably works fine because we can only ever respond
 // with JSON, but maybe this should be done as close as possible to where we populate the response body..?
 #[derive(Clone, Default)]
-pub(crate) struct SupergraphLayer {}
+pub(crate) struct SupergraphContentNegotiationLayer {}
 
-impl<S> Layer<S> for SupergraphLayer
+impl<S> Layer<S> for SupergraphContentNegotiationLayer
 where
     S: Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>
         + Send
@@ -319,8 +445,12 @@ fn parse_accept(headers: &HeaderMap) -> ClientRequestAccepts {
 #[cfg(test)]
 mod tests {
     use http::HeaderValue;
+    use http::StatusCode;
+    use tower::ServiceExt as _;
 
     use super::*;
+    use crate::services::SubgraphRequest;
+    use crate::services::SubgraphResponse;
 
     #[rstest::rstest]
     #[case::empty(HeaderMap::new())]
@@ -393,5 +523,79 @@ mod tests {
         );
         let accepts = parse_accept(&default_headers);
         assert!(accepts.multipart_subscription);
+    }
+
+    #[tokio::test]
+    async fn subgraph_layer_injects_accept_and_content_type_headers() {
+        use std::sync::Arc;
+        use std::sync::Mutex;
+
+        let captured: Arc<Mutex<Option<http::HeaderMap>>> = Arc::new(Mutex::new(None));
+        let captured_clone = captured.clone();
+
+        let inner = tower::service_fn(move |req: SubgraphRequest| {
+            *captured_clone.lock().unwrap() = Some(req.subgraph_request.headers().clone());
+            async move { Ok::<_, tower::BoxError>(SubgraphResponse::fake_builder().build()) }
+        });
+
+        let mut svc = SubgraphContentNegotiationLayer::default().layer(inner);
+        let req = SubgraphRequest::fake_builder().build();
+        svc.ready().await.unwrap().call(req).await.unwrap();
+
+        let headers = captured.lock().unwrap().take().unwrap();
+        assert_eq!(
+            headers.get(ACCEPT).unwrap(),
+            "application/json, application/graphql-response+json"
+        );
+        assert_eq!(headers.get(CONTENT_TYPE).unwrap(), "application/json");
+    }
+
+    #[test]
+    fn get_graphql_content_type_accepts_application_json() {
+        let (parts, _) = http::Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, "application/json")
+            .body(())
+            .unwrap()
+            .into_parts();
+        assert!(matches!(
+            get_graphql_content_type("svc", &parts),
+            Ok(ContentType::ApplicationJson)
+        ));
+    }
+
+    #[test]
+    fn get_graphql_content_type_accepts_graphql_response_json() {
+        let (parts, _) = http::Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, "application/graphql-response+json")
+            .body(())
+            .unwrap()
+            .into_parts();
+        assert!(matches!(
+            get_graphql_content_type("svc", &parts),
+            Ok(ContentType::ApplicationGraphqlResponseJson)
+        ));
+    }
+
+    #[test]
+    fn get_graphql_content_type_rejects_missing_header() {
+        let (parts, _) = http::Response::builder()
+            .status(StatusCode::OK)
+            .body(())
+            .unwrap()
+            .into_parts();
+        assert!(get_graphql_content_type("svc", &parts).is_err());
+    }
+
+    #[test]
+    fn get_graphql_content_type_rejects_unsupported_type() {
+        let (parts, _) = http::Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, "text/plain")
+            .body(())
+            .unwrap()
+            .into_parts();
+        assert!(get_graphql_content_type("svc", &parts).is_err());
     }
 }

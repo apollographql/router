@@ -11,14 +11,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 > Important: X breaking changes below, indicated by **BREAKING**
 
-## BREAKING
-
-## Features
-
-## Fixes
-
-## Maintenance
-## Documentation-->
+## ❗ BREAKING CHANGES ❗
+## 🚀 Features
+## 🐛 Fixes
+## 🛠 Maintenance
+## 📚 Documentation
+-->
 
 # [2.16.x](unreleased) - Unreleased
 
@@ -29,6 +27,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 When composition merges fields with different return types, it was previously allowing nullable types to be considered subtypes of non-null supertypes. The resulting supergraph schema could cause query plan execution to error if the subgraph returns null at runtime. This bug has been fixed, and composition will now appropriately error.
 
 By [@sachindshinde](https://github.com/sachindshinde) in https://github.com/apollographql/router/pull/9751
+
+### Skip `@requires` field set validation during fed v1 schema upgrade ([PR #9722](https://github.com/apollographql/router/pull/9722))
+
+Updates `@requires` validation logic to allow type selection conditions in the field selections that are only valid
+against the supergraph. `@requires` is now partially validated against subgraph schema during subgraph upgrade process
+and fully validated against supergraph schema during the merge process.
+
+By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/9722
 
 # [2.16.0](https://crates.io/crates/apollo-federation/2.16.0) - 2026-06-30
 

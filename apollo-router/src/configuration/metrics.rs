@@ -335,8 +335,6 @@ impl InstrumentData {
             "$..tracing.otlp[?(@.enabled==true)]",
             opt.tracing.datadog,
             "$..tracing.datadog[?(@.enabled==true)]",
-            opt.tracing.zipkin,
-            "$..tracing.zipkin[?(@.enabled==true)]",
             opt.events,
             "$..events",
             opt.events.router,
@@ -479,11 +477,6 @@ impl InstrumentData {
         populate_config_instrument!(
             apollo.router.config.experimental_paths_limit,
             "$.supergraph.query_planning.experimental_paths_limit"
-        );
-
-        populate_config_instrument!(
-            apollo.router.config.experimental_reuse_query_plans,
-            "$.supergraph.query_planning.experimental_reuse_query_plans[?(@==true)]"
         );
 
         populate_config_instrument!(

@@ -26,7 +26,6 @@ executors:
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
       - image: cimg/redis:7.4.9
-      - image: openzipkin/zipkin:3.6.1
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.50.0
       # redis cluster - 3 primaries, 3 replicas
       - image: cimg/redis:7.4.9
@@ -109,9 +108,6 @@ parameters:
     default: false
   # quick_nightly will skip testing and only build the release artifacts.
   quick_nightly:
-    type: boolean
-    default: false
-  test_updated_cargo_deps:
     type: boolean
     default: false
 
@@ -604,90 +600,6 @@ jobs:
                       }
                     ]
                   }
-  test_updated:
-    environment:
-      <<: *common_job_environment
-    parameters:
-      platform:
-        type: executor
-        default: amd_linux_test
-      from_test_updated_cargo_deps_workflow:
-        type: boolean
-        default: false
-    executor: << parameters.platform >>
-    steps:
-      - checkout
-      - setup_environment:
-          platform: << parameters.platform >>
-      - run:
-          name: Update all Rust dependencies
-          command: |
-            rm Cargo.lock
-            cargo fetch
-      - xtask_test:
-          variant: "updated"
-
-      - when:
-          condition:
-            equal:
-              [true, << parameters.from_test_updated_cargo_deps_workflow >>]
-          steps:
-            - slack/notify:
-                event: fail
-                custom: |
-                  {
-                    "blocks": [
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": ":x: The `test_updated_cargo_deps` workflow has *failed* for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`!"
-                        }
-                      },
-                      {
-                        "type": "actions",
-                        "elements": [
-                          {
-                            "type": "button",
-                            "action_id": "success_tagged_deploy_view",
-                            "text": {
-                              "type": "plain_text",
-                              "text": "View Job"
-                            },
-                            "url": "${CIRCLE_BUILD_URL}"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-            - slack/notify:
-                event: pass
-                custom: |
-                  {
-                    "blocks": [
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": ":white_check_mark: The `test_updated_cargo_deps` workflow has passed for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`."
-                        }
-                      },
-                      {
-                        "type": "actions",
-                        "elements": [
-                          {
-                            "type": "button",
-                            "action_id": "success_tagged_deploy_view",
-                            "text": {
-                              "type": "plain_text",
-                              "text": "View Job"
-                            },
-                            "url": "${CIRCLE_BUILD_URL}"
-                          }
-                        ]
-                      }
-                    ]
-                  }
   pre_verify_release:
     environment:
       <<: *common_job_environment
@@ -1066,19 +978,12 @@ jobs:
                   cargo xtask release notes "$VERSION_WITHOUT_LEADING_V" || true
 
 workflows:
-  test_updated_cargo_deps:
-    when: << pipeline.parameters.test_updated_cargo_deps >>
-    jobs:
-      - test_updated:
-          platform: amd_linux_test
-          from_test_updated_cargo_deps_workflow: true
   ci_checks:
     when:
       not:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
-          - << pipeline.parameters.test_updated_cargo_deps >>
     jobs:
       - fmt_check:
           matrix:
@@ -1182,7 +1087,6 @@ workflows:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
-          - << pipeline.parameters.test_updated_cargo_deps >>
     jobs:
       - pre_verify_release:
           matrix:
@@ -1260,7 +1164,6 @@ workflows:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
-          - << pipeline.parameters.test_updated_cargo_deps >>
     jobs:
       - secops/gitleaks:
           context:

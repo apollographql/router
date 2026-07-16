@@ -15,7 +15,7 @@ use http::header::HeaderName;
 use multimap::MultiMap;
 
 use crate::graphql;
-use crate::services::APPLICATION_JSON_HEADER_VALUE;
+use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
 
 /// Delayed-fallibility wrapper for conversion to [`http::header::HeaderName`].
 ///

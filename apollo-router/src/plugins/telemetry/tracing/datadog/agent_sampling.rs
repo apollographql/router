@@ -1,10 +1,10 @@
 use opentelemetry::KeyValue;
 use opentelemetry::Value;
 use opentelemetry::trace::Link;
-use opentelemetry::trace::SamplingDecision;
-use opentelemetry::trace::SamplingResult;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceId;
+use opentelemetry_sdk::trace::SamplingDecision;
+use opentelemetry_sdk::trace::SamplingResult;
 use opentelemetry_sdk::trace::ShouldSample;
 
 use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
@@ -104,8 +104,6 @@ mod tests {
     use opentelemetry::KeyValue;
     use opentelemetry::Value;
     use opentelemetry::trace::Link;
-    use opentelemetry::trace::SamplingDecision;
-    use opentelemetry::trace::SamplingResult;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
     use opentelemetry::trace::SpanKind;
@@ -114,6 +112,8 @@ mod tests {
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
     use opentelemetry_sdk::trace::Sampler;
+    use opentelemetry_sdk::trace::SamplingDecision;
+    use opentelemetry_sdk::trace::SamplingResult;
     use opentelemetry_sdk::trace::ShouldSample;
 
     use crate::plugins::telemetry::tracing::datadog::DatadogAgentSampling;

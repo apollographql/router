@@ -39,7 +39,7 @@ use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
-use crate::query_planner::fetch::SubgraphSchemas;
+use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;

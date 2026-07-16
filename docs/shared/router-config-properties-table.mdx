@@ -706,7 +706,6 @@ supergraph:
         username: example_username
     experimental_paths_limit: null
     experimental_plans_limit: null
-    experimental_reuse_query_plans: false
     warmed_up_queries: null
 ```
 
@@ -928,25 +927,10 @@ telemetry:
         aws_xray: false
         baggage: false
         datadog: false
-        jaeger: false
         request:
           format: hexadecimal
           header_name: example_header_name
         trace_context: false
-        zipkin: false
-      zipkin:
-        batch_processor:
-          max_concurrent_exports: 1
-          max_export_batch_size: 512
-          max_export_timeout:
-            nanos: 0
-            secs: 30
-          max_queue_size: 2048
-          scheduled_delay:
-            nanos: 0
-            secs: 5
-        enabled: false
-        endpoint: example_endpoint
   instrumentation:
     events:
       connector:

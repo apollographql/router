@@ -967,10 +967,6 @@ pub(crate) struct QueryPlanning {
     /// The default value is None, which specifies no limit.
     pub(crate) experimental_paths_limit: Option<u32>,
 
-    /// If cache warm up is configured, this will allow the router to keep a query plan created with
-    /// the old schema, if it determines that the schema update does not affect the corresponding query
-    pub(crate) experimental_reuse_query_plans: bool,
-
     /// Configures cooperative cancellation of query planning
     ///
     /// See [`CooperativeCancellation`] for more details.
@@ -986,7 +982,6 @@ impl QueryPlanning {
         warmed_up_queries: Option<usize>,
         experimental_plans_limit: Option<u32>,
         experimental_paths_limit: Option<u32>,
-        experimental_reuse_query_plans: Option<bool>,
         experimental_cooperative_cancellation: Option<CooperativeCancellation>,
     ) -> Self {
         Self {
@@ -994,7 +989,6 @@ impl QueryPlanning {
             warmed_up_queries,
             experimental_plans_limit,
             experimental_paths_limit,
-            experimental_reuse_query_plans: experimental_reuse_query_plans.unwrap_or_default(),
             experimental_cooperative_cancellation: experimental_cooperative_cancellation
                 .unwrap_or_default(),
         }

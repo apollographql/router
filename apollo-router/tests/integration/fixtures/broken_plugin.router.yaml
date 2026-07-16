@@ -9,8 +9,6 @@ telemetry:
       experimental_response_trace_id:
         enabled: true
         header_name: apollo-custom-trace-id
-      propagation:
-        jaeger: true
       common:
         service_name: router
       otlp:

@@ -537,18 +537,22 @@ async fn test_gauges_on_reload() {
     router
         .assert_metrics_contains(r#"apollo_router_cache_storage_estimated_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} "#, None)
         .await;
+
+    // APQ cache should contain the persisted query
     router
         .assert_metrics_contains(
             r#"apollo_router_cache_size{kind="APQ",type="memory",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
+    // Query plan cache should contain the regular query + the persisted query
     router
         .assert_metrics_contains(
-            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 1"#,
+            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 2"#,
             None,
         )
         .await;
+    // Introspection cache should contain the introspection query
     router
         .assert_metrics_contains(
             r#"apollo_router_cache_size{kind="introspection",type="memory",otel_scope_name="apollo/router"} 1"#,

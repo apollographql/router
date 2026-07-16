@@ -694,14 +694,13 @@ mod test {
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::RouterFactory;
     use crate::router_factory::create_plugins;
-    use crate::services::HasSchema;
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
     use crate::services::connector::request_service::Request as ConnectorRequest;
-    use crate::services::layers::persisted_queries::PersistedQueryLayer;
-    use crate::services::layers::query_analysis::QueryAnalysisLayer;
+    use crate::services::layers::persisted_queries::PersistedQueryExpander;
+    use crate::services::layers::query_analysis::QueryAnalysis;
     use crate::services::router;
     use crate::services::router::service::RouterCreator;
     use crate::spec::Schema;
@@ -792,19 +791,21 @@ mod test {
 
         let config = Arc::new(config);
         let schema = Arc::new(Schema::parse(schema, &config).unwrap());
-        let planner = QueryPlannerService::new(schema.clone(), config.clone())
-            .await
-            .unwrap();
-        let subgraph_schemas = Arc::new(
-            planner
-                .subgraph_schemas()
-                .iter()
-                .map(|(k, v)| (k.clone(), v.schema.clone()))
-                .collect(),
-        );
+        let query_analysis = Arc::new(QueryAnalysis::new(schema.clone(), config.clone()).await);
 
-        let mut builder =
-            PluggableSupergraphServiceBuilder::new(planner).with_configuration(config.clone());
+        let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
+        let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
+        let planner = QueryPlannerService::new(schema.clone(), config.clone(), qp_arc)
+            .unwrap()
+            .boxed_clone();
+
+        let mut builder = PluggableSupergraphServiceBuilder::new(
+            planner,
+            schema.clone(),
+            subgraph_schemas.clone(),
+            query_analysis.clone(),
+        )
+        .with_configuration(config.clone());
 
         let plugins = Arc::new(
             create_plugins(
@@ -826,11 +827,15 @@ mod test {
             .with_subgraph_service("reviews", review_service.boxed_clone())
             .with_subgraph_service("products", product_service.boxed_clone());
 
-        let supergraph_creator = builder.build().await.expect("should build");
+        let (supergraph_creator, _warmup) = builder.build().await.expect("should build");
 
         RouterCreator::new(
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
-            Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
+            query_analysis,
+            Arc::new(
+                PersistedQueryExpander::new(&Default::default())
+                    .await
+                    .unwrap(),
+            ),
             Arc::new(supergraph_creator),
             Arc::new(Configuration::default()),
         )

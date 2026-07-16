@@ -32,7 +32,7 @@ use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::query_planner::QueryPlannerService;
-use crate::services::HasSchema;
+use crate::query_planner::warmup;
 use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::Plugins;
 use crate::services::SubgraphService;
@@ -40,8 +40,8 @@ use crate::services::SupergraphCreator;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
-use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::layers::persisted_queries::PersistedQueryExpander;
+use crate::services::layers::query_analysis::QueryAnalysis;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::router::service::RouterCreator;
@@ -266,10 +266,16 @@ impl YamlRouterFactory {
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: Arc<LicenseState>,
     ) -> Result<RouterCreator, BoxError> {
-        let mut supergraph_creator = self
+        // Instantiate the parser here so we can use it to warm up the planner below
+        let query_analysis =
+            Arc::new(QueryAnalysis::new(schema.clone(), configuration.clone()).await);
+        let persisted_queries = Arc::new(PersistedQueryExpander::new(&configuration).await?);
+
+        let (supergraph_creator, warmup) = self
             .inner_create_supergraph(
                 configuration.clone(),
                 schema,
+                query_analysis.clone(),
                 initial_telemetry_plugin,
                 extra_plugins,
                 license,
@@ -277,113 +283,88 @@ impl YamlRouterFactory {
             )
             .await?;
 
-        // Instantiate the parser here so we can use it to warm up the planner below
-        let query_analysis_layer =
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await;
+        SupergraphCreator::warm_up_query_planner(
+            warmup,
+            &persisted_queries,
+            previous_router.map(|previous| previous.previous_cache()),
+            configuration.supergraph.query_planning.warmed_up_queries,
+            &configuration
+                .persisted_queries
+                .experimental_prewarm_query_plan_cache,
+        )
+        .await;
 
-        let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
-
-        if let Some(previous_router) = previous_router {
-            let previous_cache = previous_router.previous_cache();
-
-            supergraph_creator
-                .warm_up_query_planner(
-                    &query_analysis_layer,
-                    &persisted_query_layer,
-                    Some(previous_cache),
-                    configuration.supergraph.query_planning.warmed_up_queries,
-                    configuration
-                        .supergraph
-                        .query_planning
-                        .experimental_reuse_query_plans,
-                    &configuration
-                        .persisted_queries
-                        .experimental_prewarm_query_plan_cache,
-                )
-                .await;
-        } else {
-            supergraph_creator
-                .warm_up_query_planner(
-                    &query_analysis_layer,
-                    &persisted_query_layer,
-                    None,
-                    configuration.supergraph.query_planning.warmed_up_queries,
-                    configuration
-                        .supergraph
-                        .query_planning
-                        .experimental_reuse_query_plans,
-                    &configuration
-                        .persisted_queries
-                        .experimental_prewarm_query_plan_cache,
-                )
-                .await;
-        };
         RouterCreator::new(
-            query_analysis_layer,
-            persisted_query_layer,
+            query_analysis,
+            persisted_queries,
             Arc::new(supergraph_creator),
             configuration,
         )
         .await
     }
 
+    #[allow(clippy::too_many_arguments)] // True, but internal, and probably not anymore in the future
     pub(crate) async fn inner_create_supergraph(
         &mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
+        query_analysis: Arc<QueryAnalysis>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: Arc<LicenseState>,
         previous_router: Option<&crate::services::router::service::RouterCreator>,
-    ) -> Result<SupergraphCreator, BoxError> {
-        let query_planner_span = tracing::info_span!("query_planner_creation");
-        // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let planner = QueryPlannerService::new(schema.clone(), configuration.clone())
-            .instrument(query_planner_span)
-            .await?;
+    ) -> Result<(SupergraphCreator, warmup::BoxCloneService), BoxError> {
+        let (query_planner_service, subgraph_schemas) = {
+            let _span = tracing::info_span!("query_planner_creation").entered();
 
-        let span = tracing::info_span!("plugins");
+            let planner = QueryPlannerService::create_planner(&schema, &configuration)?;
+            let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&planner);
+
+            let query_planner_service =
+                QueryPlannerService::new(schema.clone(), configuration.clone(), planner.clone())?
+                    .boxed_clone();
+
+            (query_planner_service, subgraph_schemas)
+        };
 
         // Process the plugins.
-        let subgraph_schemas = Arc::new(
-            planner
-                .subgraph_schemas()
-                .iter()
-                .map(|(k, v)| (k.clone(), v.schema.clone()))
-                .collect(),
-        );
-
         let plugins: Arc<Plugins> = Arc::new(
             create_plugins(
                 &configuration,
                 &schema,
-                subgraph_schemas,
+                subgraph_schemas.clone(),
                 initial_telemetry_plugin,
                 extra_plugins,
                 license,
                 previous_router,
             )
-            .instrument(span)
+            .instrument(tracing::info_span!("plugins"))
             .await?
             .into_iter()
             .collect(),
         );
 
         async {
-            let mut builder = PluggableSupergraphServiceBuilder::new(planner);
+            let mut builder = PluggableSupergraphServiceBuilder::new(
+                query_planner_service,
+                schema.clone(),
+                subgraph_schemas,
+                query_analysis,
+            );
             builder = builder.with_configuration(configuration.clone());
-            let http_service_factory =
+            let (http_service_factory, connector_http_service_factory) =
                 create_http_services(&plugins, &schema, &configuration).await?;
             let subgraph_services = create_subgraph_services(&http_service_factory).await?;
             builder = builder.with_http_service_factory(http_service_factory);
+            builder = builder.with_connector_http_service_factory(connector_http_service_factory);
             for (name, subgraph_service) in subgraph_services {
                 builder = builder.with_subgraph_service(&name, subgraph_service);
             }
 
             // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
-            let supergraph_creator = builder.with_plugins(plugins).build().await?;
+            let pair = builder.with_plugins(plugins).build().await?;
 
-            Ok(supergraph_creator)
+            Ok(pair)
         }
         .instrument(tracing::info_span!("supergraph_creation"))
         .await
@@ -402,11 +383,20 @@ pub(crate) async fn create_subgraph_services(
     Ok(subgraph_services)
 }
 
+/// Returns `(subgraph_http_services, connector_http_services)`: HTTP client
+/// service factories for regular subgraphs, and separately for connector
+/// sources (keyed by `source_config_key()`, i.e. `{subgraph_name}.{source_or_synthetic}`).
 pub(crate) async fn create_http_services(
     plugins: &Arc<Plugins>,
     schema: &Schema,
     configuration: &Configuration,
-) -> Result<IndexMap<String, HttpClientServiceFactory>, BoxError> {
+) -> Result<
+    (
+        IndexMap<String, HttpClientServiceFactory>,
+        IndexMap<String, HttpClientServiceFactory>,
+    ),
+    BoxError,
+> {
     // Note we are grabbing these root stores once and then reusing it for each subgraph. Why?
     // When TLS was not configured for subgraphs, the OS provided list of certificates was parsed once per subgraph, which resulted in long loading times on OSX.
     // This generates the native root store once, and reuses it across subgraphs
@@ -465,6 +455,7 @@ pub(crate) async fn create_http_services(
         .map(|c| c.source_config_keys.clone())
         .unwrap_or_default();
 
+    let mut connector_http_services = IndexMap::new();
     for name in connector_sources.iter() {
         let http_service = crate::services::http::HttpClientService::from_config_for_connector(
             name,
@@ -474,10 +465,10 @@ pub(crate) async fn create_http_services(
         )?;
 
         let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
-        http_services.insert(name.clone(), http_service_factory);
+        connector_http_services.insert(name.clone(), http_service_factory);
     }
 
-    Ok(http_services)
+    Ok((http_services, connector_http_services))
 }
 
 impl TlsClient {
@@ -561,7 +552,7 @@ pub(crate) async fn add_plugin(
     schema: Arc<String>,
     schema_id: Arc<String>,
     supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    subgraph_schemas: Arc<crate::query_planner::SubgraphSchemas>,
     launch_id: Option<Arc<String>>,
     notify: &Notify<String, crate::graphql::Response>,
     plugin_instances: &mut Plugins,
@@ -598,7 +589,7 @@ pub(crate) async fn add_plugin(
 pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    subgraph_schemas: Arc<crate::query_planner::SubgraphSchemas>,
     initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     license: Arc<LicenseState>,
@@ -1786,7 +1777,7 @@ mod create_subgraph_services_tests {
     use crate::services::http::HttpClientServiceFactory;
     use crate::services::layers::apq::subgraph::PERSISTED_QUERY_KEY;
     use crate::services::router;
-    use crate::services::subgraph_service::SubgraphServiceFactory;
+    use crate::services::subgraph::service::SubgraphServiceFactory;
 
     async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler) -> std::io::Result<()>
     where
@@ -1895,7 +1886,7 @@ mod create_subgraph_services_tests {
         );
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = factory
-            .create("test")
+            .get("test")
             .unwrap()
             .oneshot(subgraph_request(url, "test", "query"))
             .await
@@ -1951,7 +1942,7 @@ mod create_subgraph_services_tests {
         );
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         factory
-            .create("test")
+            .get("test")
             .unwrap()
             .oneshot(subgraph_request(url, "test", "query"))
             .await
@@ -2069,13 +2060,13 @@ mod create_subgraph_services_tests {
             .build();
 
         factory
-            .create("enabled_subgraph")
+            .get("enabled_subgraph")
             .unwrap()
             .oneshot(enabled_request)
             .await
             .unwrap();
         factory
-            .create("disabled_subgraph")
+            .get("disabled_subgraph")
             .unwrap()
             .oneshot(disabled_request)
             .await

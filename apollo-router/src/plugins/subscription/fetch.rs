@@ -137,7 +137,7 @@ fn subscription_with_subgraph_service(
     };
 
     let service = subgraph_service_factory
-        .create(&service_name)
+        .get(&service_name)
         .expect("we already checked that the service exists during planning; qed");
 
     let uri = schema
