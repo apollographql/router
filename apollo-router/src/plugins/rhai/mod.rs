@@ -390,8 +390,8 @@ macro_rules! gen_map_router_deferred_request {
 macro_rules! gen_map_response {
     ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $stage: expr) => {
         $borrow.replace(|service| {
-            service.and_then(
-                move |response: $base::Response| async move {
+            service
+                .and_then(move |response: $base::Response| async move {
                     let shared_response = Shared::new(Mutex::new(Some(response)));
                     let result: Result<Dynamic, Box<EvalAltResult>> = execute(
                         &$rhai_service,
@@ -416,8 +416,8 @@ macro_rules! gen_map_response {
                     let mut guard = shared_response.lock();
                     let response_opt = guard.take();
                     Ok(response_opt.unwrap())
-                }
-            ).boxed_clone()
+                })
+                .boxed_clone()
         })
     };
 }
