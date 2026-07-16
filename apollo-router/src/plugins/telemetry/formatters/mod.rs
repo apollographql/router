@@ -269,16 +269,16 @@ pub(crate) trait EventFormatter<S> {
         W: std::fmt::Write;
 }
 
+/// Returns the trace ID and span ID for the given span, or `None` if the span context is invalid.
+///
+/// A span context is invalid (all-zero IDs) when produced by a `NoopTracer` or a not-yet-
+/// initialised provider. Callers should omit trace/span IDs from output rather than emit zeros.
 #[inline]
 pub(crate) fn get_trace_and_span_id<S>(span: &SpanRef<S>) -> Option<(TraceId, SpanId)>
 where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
 {
-    // OtelData is always inserted by on_new_span — the ? here is a defensive
-    // fallback for the impossible case.  The Option signals whether the span
-    // context is valid: a NoopTracer or a not-yet-initialised provider produces
-    // an invalid context (all-zero IDs) which callers should omit rather than
-    // emit as zeros.
+    // OtelData is always inserted by on_new_span — the ? here is a defensive fallback.
     let extensions = span.extensions();
     let d = extensions.get::<OtelData>()?;
     let otel_span = d.current_cx.span();

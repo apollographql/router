@@ -177,10 +177,12 @@ where
             .is_some_and(|d| d.current_cx.span().is_recording())
     }
 
+    /// Returns the trace ID for this span, or `None` if the span context is invalid.
+    ///
+    /// An invalid span context (all-zero IDs) is produced by a `NoopTracer` or a not-yet-
+    /// initialised provider. Callers should not propagate all-zero IDs into headers or logs.
     fn get_trace_id(&self) -> Option<TraceId> {
         // OtelData is always inserted by on_new_span; the ? is a defensive fallback.
-        // Return None for invalid contexts (NoopTracer / pre-init) rather than
-        // propagating all-zero IDs.
         let extensions = self.extensions();
         let d = extensions.get::<OtelData>()?;
         let otel_span = d.current_cx.span();
