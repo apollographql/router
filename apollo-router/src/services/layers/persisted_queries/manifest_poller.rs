@@ -116,11 +116,12 @@ impl PersistedQueryManifestPoller {
     pub(crate) fn action_for_freeform_graphql(
         &self,
         ast: Result<&ast::Document, &str>,
+        client_name: Option<String>,
     ) -> FreeformGraphQLAction {
         let state = self.state.read();
         state
             .freeform_graphql_behavior
-            .action_for_freeform_graphql(ast)
+            .action_for_freeform_graphql(ast, client_name)
     }
 
     // Some(bool) means "never allows freeform GraphQL, bool is whether or not to log"
