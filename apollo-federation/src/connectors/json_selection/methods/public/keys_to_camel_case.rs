@@ -457,7 +457,7 @@ mod shape_tests {
     #[test]
     fn shape_should_error_on_non_object_input() {
         let result = get_shape(Shape::string([]));
-        assert!(matches!(result.case(), ShapeCase::Error { .. }));
+        assert!(result.has_own_errors());
     }
 
     #[test]
@@ -473,7 +473,7 @@ mod shape_tests {
             Shape::unknown([]),
             Shape::unknown([]),
         );
-        assert!(matches!(result.case(), ShapeCase::Error { .. }));
+        assert!(result.has_own_errors());
     }
 
     #[test]

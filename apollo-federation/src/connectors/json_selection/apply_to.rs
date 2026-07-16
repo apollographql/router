@@ -562,7 +562,7 @@ impl ApplyToInternal for NamedSelection {
         if let Some(single_output_key) = self.get_single_key() {
             let mut map = Shape::empty_map();
             map.insert(single_output_key.as_string(), path_shape);
-            Shape::record(map, self.shape_location(context.source_id()))
+            Shape::closed_record(map, self.shape_location(context.source_id()))
         } else {
             path_shape
         }
@@ -804,38 +804,57 @@ impl ApplyToInternal for WithRange<PathList> {
         input_shape: Shape,
         dollar_shape: Shape,
     ) -> Shape {
+        // Errors are now stored as metadata on `input_shape` rather than as a
+        // `ShapeCase::Error` variant wrapping a partial. Capture them up-front
+        // so they can be reapplied to whatever the structural recursion below
+        // produces. A pure error (case == Unknown carrying error metadata) has
+        // no partial structure to drive shape computation, so we short-circuit
+        // and return it as-is.
+        let pending_errors: Vec<(String, Vec<Location>)> = if input_shape.has_own_errors() {
+            if matches!(input_shape.case(), ShapeCase::Unknown) {
+                return input_shape;
+            }
+            let locations: Vec<Location> = input_shape.locations().cloned().collect();
+            input_shape
+                .own_errors()
+                .map(|e| (e.message.clone(), locations.clone()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
         match input_shape.case() {
             ShapeCase::One(shapes) => {
-                return Shape::one(
+                let distributed = Shape::one(
                     shapes.iter().map(|shape| {
                         self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                     }),
                     input_shape.locations().cloned(),
                 );
+                return pending_errors
+                    .into_iter()
+                    .fold(distributed, |acc, (msg, locs)| {
+                        Shape::error_with_partial(msg, acc, locs)
+                    });
             }
             ShapeCase::All(shapes) => {
-                return Shape::all(
+                let distributed = Shape::all(
                     shapes.iter().map(|shape| {
                         self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                     }),
                     input_shape.locations().cloned(),
                 );
-            }
-            ShapeCase::Error(error) => {
-                return match error.partial.as_ref() {
-                    Some(partial) => Shape::error_with_partial(
-                        error.message.clone(),
-                        self.compute_output_shape(context, partial.clone(), dollar_shape),
-                        input_shape.locations().cloned(),
-                    ),
-                    None => input_shape.clone(),
-                };
+                return pending_errors
+                    .into_iter()
+                    .fold(distributed, |acc, (msg, locs)| {
+                        Shape::error_with_partial(msg, acc, locs)
+                    });
             }
             _ => {}
         };
 
-        // Given the base cases above, we can assume below that input_shape is
-        // neither ::One, ::All, nor ::Error.
+        // Below, input_shape is neither ::One nor ::All; any pending_errors
+        // captured above will be reapplied at the bottom of this function.
 
         let mut extra_vars_opt: Option<Shape> = None;
         let (current_shape, tail_opt) = match self.as_ref() {
@@ -1042,7 +1061,7 @@ impl ApplyToInternal for WithRange<PathList> {
             }
         };
 
-        if let Some(tail) = tail_opt {
+        let tail_result = if let Some(tail) = tail_opt {
             // Recurses over extra_vars_opt, which is usually None, but could be
             // Some(object_shape) (when handling ArrowMethod::As), and might
             // sometimes be Some(error_shape) with an object partial shape.
@@ -1053,7 +1072,13 @@ impl ApplyToInternal for WithRange<PathList> {
                 input_shape: Shape,
                 dollar_shape: Shape,
             ) -> Shape {
-                match extra_vars_opt.as_ref().map(|s| s.case()) {
+                let pending_messages: Vec<String> = extra_vars_opt
+                    .as_ref()
+                    .map(|s| s.own_errors().map(|e| e.message.clone()).collect())
+                    .unwrap_or_default();
+                let tail_location = tail.shape_location(context.source_id());
+
+                let inner_shape = match extra_vars_opt.as_ref().map(|s| s.case()) {
                     Some(ShapeCase::Object { fields, .. }) => {
                         // TODO Refactor the internal ShapeContext
                         // representation to make this cloning
@@ -1066,28 +1091,26 @@ impl ApplyToInternal for WithRange<PathList> {
                         tail.compute_output_shape(&new_context, input_shape, dollar_shape)
                     }
 
-                    Some(ShapeCase::Error(shape::Error { message, partial })) => {
-                        if partial.is_some() {
-                            let tail_shape = compute_tail_shape(
-                                tail,
-                                partial,
-                                context,
-                                input_shape,
-                                dollar_shape,
-                            );
-
-                            Shape::error_with_partial(
-                                message.clone(),
-                                tail_shape,
-                                tail.shape_location(context.source_id()),
-                            )
-                        } else {
-                            Shape::error(message.clone(), tail.shape_location(context.source_id()))
-                        }
+                    // A pure error (case == Unknown carrying error metadata) has
+                    // no partial structure to drive name installation; emit a
+                    // fresh error shape carrying the same messages.
+                    Some(ShapeCase::Unknown) if !pending_messages.is_empty() => {
+                        let mut iter = pending_messages.into_iter();
+                        let first = iter.next().unwrap_or_default();
+                        return iter.fold(Shape::error(first, tail_location), |acc, msg| {
+                            acc.with_error(shape::Error { message: msg })
+                        });
                     }
 
                     _ => tail.compute_output_shape(context, input_shape, dollar_shape),
-                }
+                };
+
+                // Reattach any error metadata that was sitting on
+                // extra_vars_opt, so the structural recursion's output still
+                // surfaces the original error messages.
+                pending_messages.into_iter().fold(inner_shape, |acc, msg| {
+                    Shape::error_with_partial(msg, acc, tail_location.clone())
+                })
             }
 
             compute_tail_shape(
@@ -1101,7 +1124,16 @@ impl ApplyToInternal for WithRange<PathList> {
             )
         } else {
             current_shape
-        }
+        };
+
+        // Reapply any pending errors that were attached to the original
+        // input_shape, so callers see the same error metadata they would have
+        // seen when errors were a dedicated `ShapeCase::Error` variant.
+        pending_errors
+            .into_iter()
+            .fold(tail_result, |acc, (msg, locs)| {
+                Shape::error_with_partial(msg, acc, locs)
+            })
     }
 }
 
@@ -1420,7 +1452,7 @@ impl SubSelection {
         }
 
         if all_shape.is_unknown() {
-            Shape::empty_object(locations)
+            Shape::any_object(locations)
         } else {
             all_shape
         }
@@ -3420,7 +3452,7 @@ mod tests {
         named_shapes.insert(
             "$batch".to_string(),
             Shape::list(
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert("id".to_string(), Shape::int([]));
@@ -3439,7 +3471,7 @@ mod tests {
 
         let computed_batch_id =
             selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
-        assert_eq!(computed_batch_id.pretty_print(), "List<Int>");
+        assert_eq!(computed_batch_id.pretty_print(), "[...Int]");
 
         let computed_first = selection!("$batch.id->first", spec)
             .compute_output_shape(&shape_context, root_shape.clone());
@@ -3522,7 +3554,7 @@ mod tests {
         named_shapes.insert(
             "$batch".to_string(),
             Shape::list(
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert("id".to_string(), Shape::int([]));
@@ -3541,7 +3573,7 @@ mod tests {
 
         let computed_batch_id =
             selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
-        assert_eq!(computed_batch_id.pretty_print(), "List<Int>");
+        assert_eq!(computed_batch_id.pretty_print(), "[...Int]");
 
         let computed_first = selection!("$batch.id->first", spec)
             .compute_output_shape(&shape_context, root_shape.clone());
@@ -3569,35 +3601,35 @@ mod tests {
             selection!("$batch.id->map(@)->echo(@)", spec)
                 .shape()
                 .pretty_print(),
-            "List<$batch.id.*>",
+            "[...$batch.id.*]",
         );
 
         assert_eq!(
             selection!("$batch.id->map(@)->echo([@])", spec)
                 .shape()
                 .pretty_print(),
-            "[List<$batch.id.*>]",
+            "[[...$batch.id.*]]",
         );
 
         assert_eq!(
             selection!("$batch.id->map([@])->echo(@)", spec)
                 .shape()
                 .pretty_print(),
-            "List<[$batch.id.*]>",
+            "[...[$batch.id.*]]",
         );
 
         assert_eq!(
             selection!("$batch.id->map([@])->echo([@])", spec)
                 .shape()
                 .pretty_print(),
-            "[List<[$batch.id.*]>]",
+            "[[...[$batch.id.*]]]",
         );
 
         assert_eq!(
             selection!("$batch.id->map([@])->echo([@])", spec)
                 .compute_output_shape(&shape_context, root_shape,)
                 .pretty_print(),
-            "[List<[Int]>]",
+            "[[...[Int]]]",
         );
     }
 
@@ -4054,7 +4086,7 @@ mod tests {
     fn test_compute_output_shape() {
         let spec = ConnectSpec::V0_3;
 
-        assert_eq!(selection!("", spec).shape().pretty_print(), "{}");
+        assert_eq!(selection!("", spec).shape().pretty_print(), "{...}");
 
         assert_eq!(
             selection!("id name", spec).shape().pretty_print(),
@@ -4118,7 +4150,7 @@ mod tests {
     x: $root.*.arrayOfArrays.*.x,
     y: $root.*.arrayOfArrays.*.y,
   },
-  friends: List<{ id: $root.*.friend_ids.* }>,
+  friends: [...{ id: $root.*.friend_ids.* }],
   id: $root.*.id,
   name: $root.*.name,
   xs: $root.*.arrayOfArrays.x,
@@ -4567,14 +4599,14 @@ mod tests {
             .with_spec(spec)
             .with_named_shapes([(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
                             "unreliableAuthor".to_string(),
                             Shape::one(
                                 [
-                                    Shape::record(
+                                    Shape::closed_record(
                                         {
                                             let mut map = Shape::empty_map();
                                             map.insert("age".to_string(), Shape::int([]));
@@ -5809,7 +5841,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -5877,7 +5909,7 @@ mod tests {
         let shape_context = {
             let mut named_shapes = IndexMap::default();
 
-            let person_shape = Shape::record(
+            let person_shape = Shape::closed_record(
                 {
                     let mut map = Shape::empty_map();
                     map.insert("name".to_string(), Shape::string([]));
@@ -5889,7 +5921,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert("person".to_string(), person_shape);
@@ -5945,7 +5977,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -5985,7 +6017,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -6024,7 +6056,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -6054,7 +6086,7 @@ mod tests {
         );
 
         // The question mark should be applied recursively to the partial shape within the error
-        assert!(result_shape.pretty_print().contains("Error"));
+        assert!(result_shape.pretty_print().contains("(err "));
         assert!(result_shape.pretty_print().contains("None"));
     }
 
@@ -6067,7 +6099,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -6093,7 +6125,7 @@ mod tests {
                     shape_context.named_shapes()["$root"].clone()
                 )
                 .pretty_print(),
-            "Error<\"Something went wrong\">",
+            "Unknown (err \"Something went wrong\")",
         );
     }
 
@@ -6106,7 +6138,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -6152,7 +6184,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -6191,7 +6223,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert("nonNullString".to_string(), Shape::string([]));
@@ -6248,17 +6280,17 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
                             "level1".to_string(),
-                            Shape::record(
+                            Shape::closed_record(
                                 {
                                     let mut inner_map = Shape::empty_map();
                                     inner_map.insert(
                                         "level2".to_string(),
-                                        Shape::record(
+                                        Shape::closed_record(
                                             {
                                                 let mut inner_inner_map = Shape::empty_map();
                                                 inner_inner_map
@@ -6351,7 +6383,7 @@ mod tests {
         let mut named_shapes = IndexMap::default();
         named_shapes.insert(
             "$root".to_string(),
-            Shape::record(
+            Shape::closed_record(
                 {
                     let mut map = Shape::empty_map();
                     map.insert(
@@ -6392,7 +6424,7 @@ mod tests {
         let mut named_shapes = IndexMap::default();
         named_shapes.insert(
             "$root".to_string(),
-            Shape::record(
+            Shape::closed_record(
                 {
                     let mut map = Shape::empty_map();
                     map.insert(
@@ -6432,7 +6464,7 @@ mod tests {
             .with_spec(spec)
             .with_named_shapes([(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
