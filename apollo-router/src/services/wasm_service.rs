@@ -246,7 +246,13 @@ impl WasmComponent {
     pub(crate) async fn invoke(&self, field: &FieldMapping, args: &JsonValue) -> Result<JsonValue> {
         let ctx = WasmHostCtx {
             table: ResourceTable::new(),
-            wasi: WasiCtx::builder().build(),
+            // Grant outbound network access: components may open raw TCP
+            // connections (wasi:sockets) and resolve hostnames, letting them
+            // speak non-HTTP protocols (e.g. database wire protocols) directly.
+            wasi: WasiCtx::builder()
+                .inherit_network()
+                .allow_ip_name_lookup(true)
+                .build(),
             http: WasiHttpCtx::new(),
             secrets: self.config.clone().into_iter().collect(),
         };
