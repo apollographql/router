@@ -14,7 +14,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "http 1.4.2",
+ "http 1.4.0",
  "serde_json",
  "tokio",
  "tower",
@@ -224,7 +224,7 @@ dependencies = [
  "hashbrown 0.17.1",
  "heck",
  "hex",
- "http 1.4.2",
+ "http 1.4.0",
  "indexmap 2.14.0",
  "insta",
  "itertools 0.15.0",
@@ -337,7 +337,7 @@ dependencies = [
  "hex",
  "hickory-resolver",
  "hmac 0.12.1",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
  "http-serde",
@@ -570,7 +570,7 @@ dependencies = [
  "anyhow",
  "apollo-router",
  "async-trait",
- "http 1.4.2",
+ "http 1.4.0",
  "schemars",
  "serde",
  "serde_json",
@@ -611,7 +611,7 @@ dependencies = [
  "fnv",
  "futures-util",
  "handlebars",
- "http 1.4.2",
+ "http 1.4.0",
  "indexmap 2.14.0",
  "mime",
  "multer",
@@ -776,7 +776,7 @@ dependencies = [
  "aws-types",
  "bytes",
  "fastrand",
- "http 1.4.2",
+ "http 1.4.0",
  "time",
  "tokio",
  "tracing",
@@ -812,7 +812,7 @@ dependencies = [
  "bytes",
  "bytes-utils",
  "fastrand",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body 1.0.1",
  "percent-encoding",
  "pin-project-lite",
@@ -842,7 +842,7 @@ dependencies = [
  "aws-types",
  "fastrand",
  "http 0.2.12",
- "http 1.4.2",
+ "http 1.4.0",
  "regex-lite",
  "tracing",
 ]
@@ -862,7 +862,7 @@ dependencies = [
  "hex",
  "hmac 0.13.0",
  "http 0.2.12",
- "http 1.4.2",
+ "http 1.4.0",
  "percent-encoding",
  "sha2 0.11.0",
  "time",
@@ -892,7 +892,7 @@ dependencies = [
  "bytes-utils",
  "futures-core",
  "futures-util",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
  "percent-encoding",
@@ -911,7 +911,7 @@ dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
  "h2",
- "http 1.4.2",
+ "http 1.4.0",
  "hyper",
  "hyper-rustls",
  "hyper-util",
@@ -970,7 +970,7 @@ dependencies = [
  "bytes",
  "fastrand",
  "http 0.2.12",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body 0.4.6",
  "http-body 1.0.1",
  "http-body-util",
@@ -991,7 +991,7 @@ dependencies = [
  "aws-smithy-types",
  "bytes",
  "http 0.2.12",
- "http 1.4.2",
+ "http 1.4.0",
  "pin-project-lite",
  "tokio",
  "tracing",
@@ -1017,7 +1017,7 @@ checksum = "7d56e0a4e53127a632224e43633b0fe045fa9e1e3cfc68b9830f1115e103f910"
 dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
- "http 1.4.2",
+ "http 1.4.0",
 ]
 
 [[package]]
@@ -1030,7 +1030,7 @@ dependencies = [
  "bytes",
  "bytes-utils",
  "http 0.2.12",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body 0.4.6",
  "http-body 1.0.1",
  "http-body-util",
@@ -1081,7 +1081,7 @@ dependencies = [
  "bytes",
  "form_urlencoded",
  "futures-util",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
  "hyper",
@@ -1114,7 +1114,7 @@ checksum = "59446ce19cd142f8833f856eb31f3eb097812d1479ab224f54d72428ca21ea22"
 dependencies = [
  "bytes",
  "futures-core",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
  "mime",
@@ -1369,7 +1369,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "http 1.4.2",
+ "http 1.4.0",
  "serde_json",
  "tokio",
  "tower",
@@ -1700,7 +1700,7 @@ dependencies = [
  "anyhow",
  "apollo-router",
  "async-trait",
- "http 1.4.2",
+ "http 1.4.0",
  "tower",
  "tracing",
 ]
@@ -1736,7 +1736,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "http 1.4.2",
+ "http 1.4.0",
  "serde_json",
  "tokio",
  "tower",
@@ -2302,7 +2302,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -2576,7 +2576,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body-util",
  "multimap 0.9.1",
  "schemars",
@@ -2718,7 +2718,7 @@ dependencies = [
  "anyhow",
  "apollo-router",
  "async-trait",
- "http 1.4.2",
+ "http 1.4.0",
  "serde_json",
  "tokio",
  "tower",
@@ -2732,7 +2732,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "http 1.4.2",
+ "http 1.4.0",
  "serde_json",
  "tokio",
  "tower",
@@ -3201,7 +3201,7 @@ dependencies = [
  "fnv",
  "futures-core",
  "futures-sink",
- "http 1.4.2",
+ "http 1.4.0",
  "indexmap 2.14.0",
  "slab",
  "tokio",
@@ -3434,9 +3434,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "1.4.2"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6970f50e31d6fc17d3fa27329444bfa74e196cf62e95052a3f6fee181dba6425"
+checksum = "e3ba2a386d7f85a81f119ad7498ebe444d2e22c2af0b86b069416ace48b3311a"
 dependencies = [
  "bytes",
  "itoa",
@@ -3469,7 +3469,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1efedce1fb8e6913f23e0c92de8e62cd5b772a67e7b3946df930a62566c93184"
 dependencies = [
  "bytes",
- "http 1.4.2",
+ "http 1.4.0",
 ]
 
 [[package]]
@@ -3480,7 +3480,7 @@ checksum = "b021d93e26becf5dc7e1b75b1bed1fd93124b374ceb73f43d4d4eafec896a64a"
 dependencies = [
  "bytes",
  "futures-core",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body 1.0.1",
  "pin-project-lite",
 ]
@@ -3497,7 +3497,7 @@ version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f056c8559e3757392c8d091e796416e4649d8e49e88b8d76df6c002f05027fd"
 dependencies = [
- "http 1.4.2",
+ "http 1.4.0",
  "serde",
 ]
 
@@ -3551,7 +3551,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "h2",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body 1.0.1",
  "httparse",
  "httpdate",
@@ -3568,7 +3568,7 @@ version = "0.27.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f"
 dependencies = [
- "http 1.4.2",
+ "http 1.4.0",
  "hyper",
  "hyper-util",
  "rustls",
@@ -3602,7 +3602,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-util",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body 1.0.1",
  "hyper",
  "ipnet",
@@ -4111,7 +4111,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "http 1.4.2",
+ "http 1.4.0",
  "serde_json",
  "tokio",
  "tower",
@@ -4481,7 +4481,7 @@ dependencies = [
  "bytes",
  "encoding_rs",
  "futures-util",
- "http 1.4.2",
+ "http 1.4.0",
  "httparse",
  "memchr",
  "mime",
@@ -4598,7 +4598,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -4785,7 +4785,7 @@ dependencies = [
  "bytes",
  "chrono",
  "futures-util",
- "http 1.4.2",
+ "http 1.4.0",
  "http-auth",
  "jwt",
  "lazy_static",
@@ -4858,7 +4858,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "http 1.4.2",
+ "http 1.4.0",
  "serde_json",
  "tokio",
  "tower",
@@ -4903,7 +4903,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a6b2d4db32343691eb945e6153e5a4bd494dbf9d931d5bf7d1d7f59bee156d0"
 dependencies = [
  "ahash",
- "http 1.4.2",
+ "http 1.4.0",
  "indexmap 2.14.0",
  "itoa",
  "opentelemetry",
@@ -4925,7 +4925,7 @@ checksum = "d7a6d09a73194e6b66df7c8f1b680f156d916a1a942abf2de06823dd02b7855d"
 dependencies = [
  "async-trait",
  "bytes",
- "http 1.4.2",
+ "http 1.4.0",
  "opentelemetry",
  "reqwest",
 ]
@@ -4946,7 +4946,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f69cd6acbb9af919df949cd1ec9e5e7fdc2ef15d234b6b795aaa525cc02f71f"
 dependencies = [
  "flate2",
- "http 1.4.2",
+ "http 1.4.0",
  "opentelemetry",
  "opentelemetry-http",
  "opentelemetry-proto",
@@ -5011,7 +5011,7 @@ version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27fcd074586dab55936b003c6a499acaabd6debbd539c3f36356bca2ef2fce2"
 dependencies = [
- "http 1.4.2",
+ "http 1.4.0",
  "once_cell",
  "opentelemetry",
  "opentelemetry-http",
@@ -5530,7 +5530,7 @@ dependencies = [
  "anyhow",
  "apollo-router",
  "async-trait",
- "http 1.4.2",
+ "http 1.4.0",
  "schemars",
  "serde",
  "serde_json",
@@ -6015,7 +6015,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
  "hyper",
@@ -6099,7 +6099,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "http 1.4.2",
+ "http 1.4.0",
  "serde_json",
  "tokio",
  "tower",
@@ -6111,7 +6111,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "http 1.4.2",
+ "http 1.4.0",
  "serde_json",
  "tokio",
  "tower",
@@ -6123,7 +6123,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "http 1.4.2",
+ "http 1.4.0",
  "serde_json",
  "tokio",
  "tower",
@@ -6136,7 +6136,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "http 1.4.2",
+ "http 1.4.0",
  "serde_json",
  "tokio",
  "tower",
@@ -6148,7 +6148,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "http 1.4.2",
+ "http 1.4.0",
  "serde_json",
  "tokio",
  "tower",
@@ -6214,7 +6214,7 @@ dependencies = [
  "async-trait",
  "bnf",
  "env_logger",
- "http 1.4.2",
+ "http 1.4.0",
  "libfuzzer-sys",
  "log",
  "reqwest",
@@ -6385,7 +6385,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -6935,7 +6935,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -7175,10 +7175,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -7294,7 +7294,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body-util",
  "serde_json",
  "tokio",
@@ -7531,7 +7531,7 @@ dependencies = [
  "bytes",
  "flate2",
  "h2",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
  "hyper",
@@ -7619,7 +7619,7 @@ dependencies = [
  "bitflags 2.11.0",
  "bytes",
  "futures-util",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body 1.0.1",
  "pin-project-lite",
  "tower",
@@ -7640,7 +7640,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
  "http-range-header",
@@ -7863,7 +7863,7 @@ checksum = "6c01152af293afb9c7c2a57e4b559c5620b421f6d133261c60dd2d0cdb38e6b8"
 dependencies = [
  "bytes",
  "data-encoding",
- "http 1.4.2",
+ "http 1.4.0",
  "httparse",
  "log",
  "rand 0.9.2",
@@ -8329,7 +8329,7 @@ version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0978bf7171b3d90bac376700cb56d606feb40f251a475a5d6634613564460b22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8832,7 +8832,7 @@ dependencies = [
  "base64 0.22.1",
  "deadpool",
  "futures",
- "http 1.4.2",
+ "http 1.4.0",
  "http-body-util",
  "hyper",
  "hyper-util",
