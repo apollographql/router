@@ -79,7 +79,7 @@ pub(crate) fn check(
         return Ok(());
     }
 
-    let exceeded = max.combine(*query_metrics_in, |_, config, measured| {
+    let exceeded = max.combine(measured, |_, config, measured| {
         if let Some(limit) = config {
             measured > limit
         } else {
@@ -89,7 +89,7 @@ pub(crate) fn check(
 
     if exceeded.any() {
         let mut messages = Vec::new();
-        max.combine(*query_metrics_in, |ident, max, measured| {
+        max.combine(measured, |ident, max, measured| {
             if let Some(max) = max
                 && measured > max
             {
