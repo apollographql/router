@@ -351,17 +351,10 @@ where
             let mut serializer = serializer.serialize_map(None)?;
 
             if self.config.display_timestamp {
-                #[cfg(test)]
-                {
-                    serializer.serialize_entry("timestamp", "[timestamp]")?;
-                }
-                #[cfg(not(test))]
-                {
-                    let timestamp = time::OffsetDateTime::now_utc()
-                        .format(&time::format_description::well_known::Iso8601::DEFAULT)
-                        .map_err(|e| serde::ser::Error::custom(e.to_string()))?;
-                    serializer.serialize_entry("timestamp", &timestamp)?;
-                }
+                let timestamp = time::OffsetDateTime::now_utc()
+                    .format(&time::format_description::well_known::Iso8601::DEFAULT)
+                    .map_err(|e| serde::ser::Error::custom(e.to_string()))?;
+                serializer.serialize_entry("timestamp", &timestamp)?;
             }
 
             if self.config.display_level {
@@ -393,34 +386,14 @@ where
                         DisplayTraceIdFormat::Bool(false) => None,
                     };
                     if let Some(trace_id) = trace_id {
-                        #[cfg(test)]
-                        {
-                            let _ = &trace_id;
-                            serializer
-                                .serialize_entry("trace_id", "[trace_id]")
-                                .unwrap_or(());
-                        }
-                        #[cfg(not(test))]
-                        {
-                            serializer
-                                .serialize_entry("trace_id", &trace_id)
-                                .unwrap_or(());
-                        }
+                        serializer
+                            .serialize_entry("trace_id", &trace_id)
+                            .unwrap_or(());
                     }
                     if self.config.display_span_id {
-                        #[cfg(test)]
-                        {
-                            let _ = &span_id;
-                            serializer
-                                .serialize_entry("span_id", "[span_id]")
-                                .unwrap_or(());
-                        }
-                        #[cfg(not(test))]
-                        {
-                            serializer
-                                .serialize_entry("span_id", &span_id.to_string())
-                                .unwrap_or(());
-                        }
+                        serializer
+                            .serialize_entry("span_id", &span_id.to_string())
+                            .unwrap_or(());
                     }
                 };
                 let event_attributes = {

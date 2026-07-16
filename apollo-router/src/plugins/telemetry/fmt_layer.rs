@@ -460,6 +460,19 @@ connector:
             .tracer_with_scope(InstrumentationScope::builder("test").build())
     }
 
+    /// Return insta filters that redact non-deterministic values from JSON log snapshots.
+    ///
+    /// The JSON formatter emits real timestamps and OTel trace/span IDs whose values change
+    /// every run.  Applying these filters in tests keeps the snapshots hermetic without
+    /// changing the formatter's behaviour in production.
+    fn json_snapshot_filters() -> Vec<(&'static str, &'static str)> {
+        vec![
+            (r#""timestamp":"[^"]*""#, r#""timestamp":"[timestamp]""#),
+            (r#""trace_id":"[0-9a-f]{32}""#, r#""trace_id":"[trace_id]""#),
+            (r#""span_id":"[0-9a-f]{16}""#, r#""span_id":"[span_id]""#),
+        ]
+    }
+
     fn generate_simple_span() {
         let test_span = info_span!(
             "test",
@@ -575,7 +588,9 @@ connector:
             fmt::Subscriber::new().with(fmt_layer),
             generate_simple_span,
         );
-        insta::assert_snapshot!(buff);
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -589,7 +604,9 @@ connector:
             generate_nested_spans,
         );
 
-        insta::assert_snapshot!(buff.to_string());
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -609,7 +626,9 @@ connector:
             generate_nested_spans,
         );
 
-        insta::assert_snapshot!(buff.to_string());
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -726,7 +745,9 @@ connector:
             },
         );
 
-        insta::assert_snapshot!(buff.to_string());
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -975,7 +996,9 @@ connector:
             },
         );
 
-        insta::assert_snapshot!(buff.to_string());
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -1156,7 +1179,9 @@ subgraph:
             },
         );
 
-        insta::assert_snapshot!(buff.to_string());
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
