@@ -664,14 +664,7 @@ impl PluggableSupergraphServiceBuilder {
             ServiceBuilder::new()
                 .layer(content_negotiation::SupergraphContentNegotiationLayer::default())
                 .layer(crate::compute_job::ComputeJobMetricsLayer::new())
-                .service(
-                    self.plugins
-                        .iter()
-                        .rev()
-                        .fold(supergraph_service.boxed_clone(), |acc, (_, e)| {
-                            e.supergraph_service(acc)
-                        }),
-                )
+                .service(supergraph_service)
                 .boxed_clone(),
             DEFAULT_BUFFER_SIZE,
         );
