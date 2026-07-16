@@ -7,10 +7,10 @@ use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::metrics::BlockingSafeTokioRuntime;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::NamedSpanExporter;
-use crate::plugins::telemetry::tracing::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::apollo_telemetry;
 
@@ -49,10 +49,12 @@ impl TracingConfigurator for Config {
             .metrics_reference_mode(self.metrics_reference_mode)
             .build()?;
         let named_exporter = NamedSpanExporter::new(exporter, "apollo");
-        let batch_span_processor =
-            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("apollo-tracing"))
-                .with_batch_config(self.tracing.batch_processor.clone().into())
-                .build();
+        let batch_span_processor = BatchSpanProcessor::builder(
+            named_exporter,
+            BlockingSafeTokioRuntime::new_for_tracing("apollo-tracing"),
+        )
+        .with_batch_config(self.tracing.batch_processor.clone().into())
+        .build();
 
         if let Some(sampler) = &self.sampler {
             let common = builder.tracing_common();

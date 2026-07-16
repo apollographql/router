@@ -280,7 +280,7 @@ impl SpanExporter for ApolloOtlpExporter {
         Ok(())
     }
 
-    fn shutdown_with_timeout(&mut self, timeout: std::time::Duration) -> OTelSdkResult {
+    fn shutdown_with_timeout(&self, timeout: std::time::Duration) -> OTelSdkResult {
         self.otlp_exporter.shutdown_with_timeout(timeout)
     }
 }

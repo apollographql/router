@@ -586,7 +586,6 @@ pub enum Telemetry {
         endpoint: Option<String>,
     },
     Datadog,
-    Zipkin,
     #[default]
     None,
 }
@@ -637,24 +636,6 @@ impl Telemetry {
                     .build(),
                 )
                 .build(),
-            Telemetry::Zipkin => SdkTracerProvider::builder()
-                .with_resource(resource)
-                .with_span_processor(
-                    BatchSpanProcessor::builder(
-                        opentelemetry_zipkin::ZipkinExporter::builder()
-                            .with_collector_endpoint("http://127.0.0.1:9411/api/v2/spans")
-                            .build()
-                            .expect("zipkin pipeline failed"),
-                        runtime::Tokio,
-                    )
-                    .with_batch_config(
-                        BatchConfigBuilder::default()
-                            .with_scheduled_delay(Duration::from_millis(10))
-                            .build(),
-                    )
-                    .build(),
-                )
-                .build(),
             Telemetry::None | Telemetry::Otlp { endpoint: None } => SdkTracerProvider::builder()
                 .with_resource(resource)
                 .with_simple_exporter(NoopSpanExporter::default())
@@ -687,13 +668,6 @@ impl Telemetry {
             }
             Telemetry::Otlp { .. } => {
                 let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
-                propagator.inject_context(
-                    &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                )
-            }
-            Telemetry::Zipkin => {
-                let propagator = opentelemetry_zipkin::Propagator::new();
                 propagator.inject_context(
                     &ctx,
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
@@ -754,10 +728,6 @@ impl Telemetry {
             }
             Telemetry::Otlp { .. } => {
                 let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
-                propagator.extract_with_context(context, &headers)
-            }
-            Telemetry::Zipkin => {
-                let propagator = opentelemetry_zipkin::Propagator::new();
                 propagator.extract_with_context(context, &headers)
             }
             _ => context.clone(),

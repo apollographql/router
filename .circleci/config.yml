@@ -26,7 +26,6 @@ executors:
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
       - image: cimg/redis:7.4.9
-      - image: openzipkin/zipkin:3.6.1
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.50.0
       # redis cluster - 3 primaries, 3 replicas
       - image: cimg/redis:7.4.9
