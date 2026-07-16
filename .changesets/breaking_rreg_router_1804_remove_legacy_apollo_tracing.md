@@ -4,4 +4,4 @@ Router 3.0 exports traces to GraphOS exclusively via OTLP. The legacy protobuf-o
 
 An automatic configuration migration deletes `telemetry.apollo.otlp_tracing_sampler` on router startup and logs a warning. To sample traces sent to GraphOS, use `telemetry.apollo.sampler` or the common tracing sampler instead.
 
-By [@rregitsky](https://github.com/rregitsky) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@rregitsky](https://github.com/rregitsky) in https://github.com/apollographql/router/pull/9819
