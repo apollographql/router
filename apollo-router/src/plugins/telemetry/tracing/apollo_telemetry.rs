@@ -512,12 +512,15 @@ pub(crate) fn encode_ftv1_trace(trace: &proto::reports::Trace) -> String {
 mod test {
     use opentelemetry::Value;
 
-    use crate::plugins::telemetry::apollo::{ErrorConfiguration, ErrorRedactionPolicy};
+    use crate::plugins::telemetry::apollo::ErrorConfiguration;
+    use crate::plugins::telemetry::apollo::ErrorRedactionPolicy;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
-    use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::{Error, Node};
-    use crate::plugins::telemetry::tracing::apollo_telemetry::{
-        encode_ftv1_trace, extract_ftv1_trace_with_error_count, extract_string, preprocess_errors,
-    };
+    use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Error;
+    use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Node;
+    use crate::plugins::telemetry::tracing::apollo_telemetry::encode_ftv1_trace;
+    use crate::plugins::telemetry::tracing::apollo_telemetry::extract_ftv1_trace_with_error_count;
+    use crate::plugins::telemetry::tracing::apollo_telemetry::extract_string;
+    use crate::plugins::telemetry::tracing::apollo_telemetry::preprocess_errors;
 
     #[test]
     fn test_extract_string() {

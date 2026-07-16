@@ -329,7 +329,6 @@ mod test {
     use crate::plugins::subscription;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
     use crate::plugins::telemetry::Telemetry;
-    use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::query_planner::OperationKind;
