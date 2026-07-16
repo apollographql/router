@@ -31,7 +31,6 @@ pub(crate) mod otlp;
 pub(crate) mod reload;
 
 pub(crate) use named::NamedSpanExporter;
-pub(crate) use named::NamedTokioRuntime;
 
 #[derive(Debug)]
 struct ApolloFilterSpanProcessor<T: SpanProcessor> {
