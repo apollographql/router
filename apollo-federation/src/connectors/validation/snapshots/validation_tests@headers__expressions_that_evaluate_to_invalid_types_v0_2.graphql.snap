@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/connectors/validation/mod.rs
-expression: "format!(\"{:#?}\", result.errors)"
+expression: result.errors
 input_file: apollo-federation/src/connectors/validation/test_data/headers/expressions_that_evaluate_to_invalid_types_v0_2.graphql
 ---
 [
@@ -13,7 +13,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/headers/expres
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.blah`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<List<One<String, null>>, null>`",
+        message: "In `@connect(http.headers:)` on `Query.blah`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<[...One<String, null>], null>`",
         locations: [
             19:10..19:27,
             21:73..21:80,
