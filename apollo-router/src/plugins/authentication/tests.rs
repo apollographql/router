@@ -1240,16 +1240,20 @@ async fn issuer_check() {
     });
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
-            panic!("unexpected response: {res:?}");
+            let response: graphql::Response = serde_json::from_slice(
+                &router::body::into_bytes(res.response.into_body())
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_response_eq_ignoring_error_id!(response, graphql::Response::builder()
+            .errors(vec![graphql::Error::builder()
+                .extension_code("AUTH_ERROR")
+                .message("Invalid issuer: the token's `iss` was 'null', but signed with a key from JWKS configured to only accept from 'goodbye, hello'")
+                .build()]).build());
         }
-        ControlFlow::Continue(req) => {
-            println!("got req with issuer check");
-            let claims: serde_json::Value = req
-                .context
-                .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
-                .unwrap()
-                .unwrap();
-            println!("claims: {claims:?}");
+        ControlFlow::Continue(_) => {
+            panic!("issuer check should have failed")
         }
     }
 
