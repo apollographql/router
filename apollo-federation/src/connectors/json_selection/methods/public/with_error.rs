@@ -1,6 +1,5 @@
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::ShapeCase;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
@@ -202,7 +201,10 @@ fn with_error_shape(
     for arg in args {
         let arg_shape =
             arg.compute_output_shape(context, input_shape.clone(), dollar_shape.clone());
-        if matches!(arg_shape.case(), ShapeCase::Error(_)) {
+        // Shape errors are carried as metadata rather than a dedicated
+        // `ShapeCase::Error` variant, so an argument that failed to compute is
+        // recognized by its own errors rather than by its case.
+        if arg_shape.has_own_errors() {
             return arg_shape;
         }
     }
