@@ -18,6 +18,12 @@ pub fn to_camel_case(kebab: &str) -> String {
     out
 }
 
+/// SCREAMING_SNAKE_CASE for GraphQL enum values: kebab-case WIT enum cases with `-` → `_`,
+/// uppercased. `deploy-key` → `DEPLOY_KEY`.
+pub fn to_screaming_snake(kebab: &str) -> String {
+    kebab.replace('-', "_").to_uppercase()
+}
+
 pub fn to_pascal_case(kebab: &str) -> String {
     let mut out = String::with_capacity(kebab.len());
     let mut upper_next = true;

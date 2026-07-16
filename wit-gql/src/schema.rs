@@ -6,7 +6,7 @@ use wit_parser::{
     WorldKey,
 };
 
-use crate::naming::{to_camel_case, to_pascal_case};
+use crate::naming::{to_camel_case, to_pascal_case, to_screaming_snake};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub(crate) enum FieldKind {
@@ -48,6 +48,9 @@ struct ResultWrapper {
     pascal: String,
     ok_ty: Option<String>,
     err_ty: Option<String>,
+    /// Whether the err arm is a plain string, making this wrapper's union eligible for the
+    /// shared [`SHARED_ERROR_TYPE`] member instead of a per-operation `<Field>Err` type.
+    shared_err: bool,
 }
 
 struct Gen<'a> {
@@ -186,6 +189,7 @@ impl<'a> Gen<'a> {
                     pascal: pascal.to_string(),
                     ok_ty: Some(ok_str),
                     err_ty: Some(err_str),
+                    shared_err: is_string_error_arm(self.resolve, &err_ty),
                 });
                 format!("{}Result!", pascal)
             }
@@ -228,21 +232,8 @@ impl<'a> Gen<'a> {
         self.format_type_kind(&def.kind)
     }
 
-    /// Pascal-case GraphQL type name, prefixed by the owning interface name when the
-    /// type lives inside an interface. Records named `list-op-params` in the
-    /// `incidents-v2` interface get rendered as `IncidentsV2ListOpParams`; the same
-    /// record name in `alerts-v2` becomes `AlertsV2ListOpParams`, avoiding collisions.
     fn qualified_type_name(&self, id: TypeId) -> String {
-        let def = &self.resolve.types[id];
-        let name = def.name.as_deref().unwrap_or("");
-        let prefix = match def.owner {
-            TypeOwner::Interface(iid) => self.resolve.interfaces[iid].name.as_deref(),
-            _ => None,
-        };
-        match prefix {
-            Some(p) => to_pascal_case(&format!("{p}-{name}")),
-            None => to_pascal_case(name),
-        }
+        qualified_type_name(self.resolve, id)
     }
 
     fn format_type_kind(&mut self, kind: &TypeDefKind) -> String {
@@ -372,21 +363,36 @@ impl<'a> Gen<'a> {
             self.emit_named_type(&mut out, id)?;
         }
 
-        // 2. Result wrappers + unions.
+        // 2. Result wrappers + unions. Operations whose err arm is a plain string all share one
+        // `Error { error }` member instead of minting a per-operation `<Field>Err` clone of it
+        // (GraphQL allows one object type in many unions); typed err arms keep their own wrapper.
+        // When a WIT type already claims the name `Error`, every wrapper falls back to per-op.
+        let shared_error = shared_error_type_available(self.resolve);
+        if shared_error && self.result_wrappers.iter().any(|w| w.shared_err) {
+            writeln!(out, "type {SHARED_ERROR_TYPE} {{")?;
+            writeln!(out, "  error: String!")?;
+            writeln!(out, "}}")?;
+            writeln!(out)?;
+        }
         for w in &self.result_wrappers {
             let ok_field = w.ok_ty.clone().unwrap_or_else(|| "Boolean!".into());
-            let err_field = w.err_ty.clone().unwrap_or_else(|| "String!".into());
             writeln!(out, "type {}Ok {{", w.pascal)?;
             writeln!(out, "  value: {}", ok_field)?;
             writeln!(out, "}}")?;
             writeln!(out)?;
-            writeln!(out, "type {}Err {{", w.pascal)?;
-            writeln!(out, "  error: {}", err_field)?;
-            writeln!(out, "}}")?;
-            writeln!(out)?;
+            let err_member = if shared_error && w.shared_err {
+                SHARED_ERROR_TYPE.to_string()
+            } else {
+                let err_field = w.err_ty.clone().unwrap_or_else(|| "String!".into());
+                writeln!(out, "type {}Err {{", w.pascal)?;
+                writeln!(out, "  error: {}", err_field)?;
+                writeln!(out, "}}")?;
+                writeln!(out)?;
+                format!("{}Err", w.pascal)
+            };
             writeln!(
                 out,
-                "union {pascal}Result = {pascal}Ok | {pascal}Err",
+                "union {pascal}Result = {pascal}Ok | {err_member}",
                 pascal = w.pascal
             )?;
             writeln!(out)?;
@@ -527,7 +533,7 @@ impl<'a> Gen<'a> {
             TypeDefKind::Enum(e) => {
                 writeln!(out, "enum {} {{", name)?;
                 for c in &e.cases {
-                    writeln!(out, "  {}", screaming_snake(&c.name))?;
+                    writeln!(out, "  {}", to_screaming_snake(&c.name))?;
                 }
                 writeln!(out, "}}")?;
                 writeln!(out)?;
@@ -661,6 +667,64 @@ fn collect_type_refs(kind: &TypeDefKind, refs: &mut Vec<TypeId>) {
     }
 }
 
+/// The shared union member emitted for operations whose WIT err arm is a plain string:
+/// `type Error { error: String! }`. One type serves every such result union, instead of a
+/// per-operation `<Field>Err` clone.
+pub const SHARED_ERROR_TYPE: &str = "Error";
+
+/// Whether the shared [`SHARED_ERROR_TYPE`] can be emitted: true unless some named WIT type
+/// would itself render as `Error`, in which case generation falls back to per-operation
+/// `<Field>Err` wrappers. The router's wasm runtime calls this too, so the `__typename` it
+/// stamps on string-error results always matches the SDL generated from the same WIT.
+pub fn shared_error_type_available(resolve: &Resolve) -> bool {
+    !resolve.types.iter().any(|(id, def)| {
+        def.name.is_some()
+            && matches!(
+                def.kind,
+                TypeDefKind::Record(_)
+                    | TypeDefKind::Enum(_)
+                    | TypeDefKind::Variant(_)
+                    | TypeDefKind::Flags(_)
+                    | TypeDefKind::Resource
+            )
+            && qualified_type_name(resolve, id) == SHARED_ERROR_TYPE
+    })
+}
+
+/// Whether a result's err arm is a plain string (traversing type aliases) — the condition for
+/// using the shared [`SHARED_ERROR_TYPE`] union member. Shared between SDL generation and the
+/// router's wasm runtime so the two can never disagree on a result's error `__typename`.
+pub fn is_string_error_arm(resolve: &Resolve, ty: &Type) -> bool {
+    match ty {
+        Type::String | Type::Char | Type::ErrorContext | Type::S64 | Type::U64 => true,
+        Type::Id(id) => match &resolve.types[*id].kind {
+            TypeDefKind::Type(inner) => is_string_error_arm(resolve, inner),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// Pascal-case GraphQL type name, prefixed by the owning interface name when the
+/// type lives inside an interface. Records named `list-op-params` in the
+/// `incidents-v2` interface get rendered as `IncidentsV2ListOpParams`; the same
+/// record name in `alerts-v2` becomes `AlertsV2ListOpParams`, avoiding collisions.
+///
+/// Public because the router's wasm runtime needs the same naming to tag variant values with
+/// their GraphQL union-member `__typename`s.
+pub fn qualified_type_name(resolve: &Resolve, id: TypeId) -> String {
+    let def = &resolve.types[id];
+    let name = def.name.as_deref().unwrap_or("");
+    let prefix = match def.owner {
+        TypeOwner::Interface(iid) => resolve.interfaces[iid].name.as_deref(),
+        _ => None,
+    };
+    match prefix {
+        Some(p) => to_pascal_case(&format!("{p}-{name}")),
+        None => to_pascal_case(name),
+    }
+}
+
 fn type_id_at(resolve: &Resolve, index: usize) -> TypeId {
     resolve
         .types
@@ -668,10 +732,6 @@ fn type_id_at(resolve: &Resolve, index: usize) -> TypeId {
         .find(|(id, _)| id.index() == index)
         .map(|(id, _)| id)
         .expect("type index in needed set must exist in resolve")
-}
-
-fn screaming_snake(kebab: &str) -> String {
-    kebab.replace('-', "_").to_uppercase()
 }
 
 #[cfg(test)]
@@ -745,9 +805,11 @@ mod tests {
         let sdl = generate(&resolve, world_id, "test.wasm").unwrap();
         assert!(sdl.contains("type GetUserOk {"), "missing Ok wrapper:\n{}", sdl);
         assert!(sdl.contains("value: String!"));
-        assert!(sdl.contains("type GetUserErr {"));
+        // A plain-string err arm uses the one shared `Error` member, not a per-op `GetUserErr`.
+        assert!(sdl.contains("type Error {"), "missing shared Error type:\n{}", sdl);
         assert!(sdl.contains("error: String!"));
-        assert!(sdl.contains("union GetUserResult = GetUserOk | GetUserErr"));
+        assert!(!sdl.contains("type GetUserErr"), "unexpected per-op Err wrapper:\n{}", sdl);
+        assert!(sdl.contains("union GetUserResult = GetUserOk | Error"));
         assert!(sdl.contains("type Query {"));
         assert!(sdl.contains("getUser(userName: String!): GetUserResult!"));
     }

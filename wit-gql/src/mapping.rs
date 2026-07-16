@@ -7,7 +7,7 @@
 //! computed from the SAME traversal and naming rules the SDL generator uses, so the two can never
 //! drift.
 
-use wit_parser::{Function, InterfaceId, Resolve, WorldId, WorldItem, WorldKey};
+use wit_parser::{Function, InterfaceId, Resolve, Type, WorldId, WorldItem, WorldKey};
 
 use crate::naming::to_camel_case;
 use crate::schema::{FieldKind, classify};
@@ -54,6 +54,10 @@ pub struct FieldMapping {
     pub func: String,
     /// GraphQL argument ↔ WIT parameter correspondence, in declaration order.
     pub params: Vec<ParamMapping>,
+    /// The WIT function's declared result type (`None` for `func() -> ()`). The router uses it
+    /// (with the component's [`Resolve`]) to convert the returned value into JSON matching the
+    /// SDL that [`schema::generate`](crate::schema::generate) rendered from the same type.
+    pub result: Option<Type>,
 }
 
 /// The complete field→export mapping for a component's world.
@@ -148,6 +152,7 @@ fn build_field(
         export,
         func: func_kebab.to_string(),
         params,
+        result: func.result,
     }
 }
 

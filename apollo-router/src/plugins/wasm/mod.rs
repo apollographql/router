@@ -15,8 +15,12 @@
 //!     source:
 //!       path: ./incidentio.wasm       # OR  oci: ghcr.io/acme/incidentio:1.2.3
 //!     config:
-//!       INCIDENT_IO_API_KEY: "${env.INCIDENT_IO_API_KEY}"   # exposed via wasi:config/store
+//!       INCIDENT_IO_API_KEY: "${env.INCIDENT_IO_API_KEY}"   # exposed via wasmcloud:secrets
 //! ```
+//!
+//! `config` keys become the component's `wasmcloud:secrets` keystore keys, so they must match
+//! the secret names the component looks up — for autostamp-generated components that is the
+//! OpenAPI security-scheme name (e.g. `apikey`, `bearer_auth`), not an env-var-style name.
 //!
 //! Gated behind the `wasm-components` cargo feature.
 
@@ -54,8 +58,9 @@ pub(crate) struct ComponentConf {
     pub(crate) subgraph: String,
     /// Where to load the `.wasm` component from.
     pub(crate) source: Source,
-    /// Configuration values exposed to the component via `wasi:config/store` (e.g. API keys).
-    /// Values support the router's `${env.VAR}` expansion.
+    /// Configuration values exposed to the component via `wasmcloud:secrets` (e.g. API keys).
+    /// Keys must match the secret names the component looks up (for autostamp components, the
+    /// OpenAPI security-scheme name such as `apikey`). Values support `${env.VAR}` expansion.
     #[serde(default)]
     pub(crate) config: BTreeMap<String, String>,
 }

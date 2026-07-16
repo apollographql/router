@@ -16,4 +16,10 @@ pub mod schema;
 
 pub use decode::decode_component;
 pub use mapping::{ExportLocation, FieldMapping, OpKind, OperationMap, ParamMapping, operation_map};
-pub use schema::generate;
+pub use schema::{
+    SHARED_ERROR_TYPE, generate, is_string_error_arm, qualified_type_name,
+    shared_error_type_available,
+};
+// Re-exported so the router can name `wit_parser` types (`Resolve`, `Type`, …) carried by
+// [`FieldMapping::result`] without pinning its own copy of the version-sensitive dependency.
+pub use wit_parser;
