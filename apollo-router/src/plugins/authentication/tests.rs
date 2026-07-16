@@ -1257,17 +1257,11 @@ async fn issuer_check() {
         value_prefix: super::default_header_value_prefix(),
     });
     match authenticate(&config, &manager, request.try_into().unwrap()) {
-        ControlFlow::Break(res) => {
-            panic!("unexpected response: {res:?}");
+        ControlFlow::Break(_res) => {
+            // Rejected: the token has no issuer but the JWKS entry configures an issuers allowlist.
         }
-        ControlFlow::Continue(req) => {
-            println!("got req with issuer check");
-            let claims: serde_json::Value = req
-                .context
-                .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
-                .unwrap()
-                .unwrap();
-            println!("claims: {claims:?}");
+        ControlFlow::Continue(_) => {
+            panic!("expected a rejection when the token has no issuer but issuers are configured");
         }
     }
 
@@ -2275,8 +2269,6 @@ mod issuer_validation {
     #[case::single_iss(&["hello"], serde_json::json!("hello"))]
     #[case::null_mgr_iss_with_token_iss(&[], serde_json::json!("hello"))]
     #[case::null_mgr_iss_with_empty_token_iss(&[], serde_json::Value::Null)]
-    #[case::empty_token_iss(&["hello", "world"], serde_json::Value::Null)]
-    #[case::empty_token_iss(&["hello"], serde_json::Value::Null)]
     fn it_accepts_jwt(#[case] manager_iss: &[&str], #[case] token_iss: serde_json::Value) {
         match authenticate_request(manager_iss, token_iss.clone()) {
             ControlFlow::Continue(_) => {}
@@ -2294,6 +2286,8 @@ mod issuer_validation {
     #[case::single_with_array_accepted_any_of(&["hello"], serde_json::json!(["hello", "world"]))]
     #[case::single_with_array_accepted(&["hello"], serde_json::json!(["hello"]))]
     #[case::missing_token_iss(&["hello", "world"], serde_json::json!(""))]
+    #[case::null_token_iss(&["hello", "world"], serde_json::Value::Null)]
+    #[case::null_token_iss_single(&["hello"], serde_json::Value::Null)]
     #[case::mismatched_single_iss(&["hello"], serde_json::json!("world"))]
     #[case::mismatched_single_iss_array(&["hello"], serde_json::json!(["world"]))]
     #[case::mismatched_single_iss_array(&["hello"], serde_json::json!(["world", "planet"]))]
@@ -2310,6 +2304,33 @@ mod issuer_validation {
                     response.response.status(),
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "manager_iss = {manager_iss:?}, token_iss = {token_iss}, response = {response:?}"
+                );
+            }
+        }
+    }
+
+    // The parametrized helper always inserts an `iss` key (even if null), so it can't exercise the
+    // truly-absent-claim path. This builds a token whose claims object omits `iss` entirely and
+    // asserts it is rejected when an issuers allowlist is configured.
+    #[test]
+    fn it_rejects_jwt_with_absent_iss_claim() {
+        let signing_key = SigningKey::random(&mut OsRng);
+        let manager = make_manager(&jwk(&signing_key), Some(["hello".to_string()].into()), None);
+
+        let token_claims = serde_json::json!({
+            "sub": "test",
+            "exp": get_current_timestamp(),
+        });
+        let request = build_request_with_header_token(signing_key, token_claims);
+
+        match authenticate(&jwt_conf_with_header_source(), &manager, request) {
+            ControlFlow::Continue(_) => {
+                panic!("token with no `iss` claim should be rejected when issuers are configured");
+            }
+            ControlFlow::Break(response) => {
+                assert_eq!(
+                    response.response.status(),
+                    StatusCode::INTERNAL_SERVER_ERROR
                 );
             }
         }

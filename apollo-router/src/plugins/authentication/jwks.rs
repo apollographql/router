@@ -717,10 +717,11 @@ fn validate_issuers(
     }
 
     match token_issuer {
-        None | Some(Value::Null) => {
-            // No issuer in token; allow this as well
-            Ok(())
-        }
+        // With an issuers allowlist configured, a token that omits `iss` cannot satisfy it, so
+        // reject it rather than letting it through. Mirrors `validate_audiences`. `iss` is OPTIONAL
+        // per RFC 7519 §4.1.1, which leaves the required/optional decision to the application;
+        // configuring an allowlist is that decision.
+        None => issuer_error("<none>".to_string()),
 
         Some(Value::String(token_issuer)) => {
             // Check if this issuer is in our list
@@ -732,8 +733,7 @@ fn validate_issuers(
         }
 
         Some(unexpected_value) => {
-            // If the token has an incorrectly configured issuer, we cannot validate it against
-            // the configured issuers.
+            // A null or otherwise non-string `iss` cannot match any configured issuer.
             issuer_error(unexpected_value.to_string())
         }
     }
