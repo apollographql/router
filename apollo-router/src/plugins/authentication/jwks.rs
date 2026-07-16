@@ -287,6 +287,16 @@ pub(super) struct JWTCriteria {
 
 pub(super) type SearchResult = (Option<Issuers>, Option<Audiences>, Jwk);
 
+/// A key that matched the search criteria, tagged with *why* it matched so `search_jwks` can
+/// filter results (by kid) and order them (by alg).
+struct Candidate {
+    /// The token carried a kid and it equalled this key's kid.
+    kid_matched: bool,
+    /// The token's alg explicitly matched this key's declared algorithm.
+    alg_matched: bool,
+    result: SearchResult,
+}
+
 /// Search the list of JWKS to find a key we can use to decode a JWT.
 ///
 /// The search criteria allow us to match a variety of keys depending on which criteria are provided
@@ -296,9 +306,13 @@ pub(super) fn search_jwks(
     jwks_manager: &JwksManager,
     criteria: &JWTCriteria,
 ) -> Option<Vec<SearchResult>> {
-    const HIGHEST_SCORE: usize = 2;
-    let mut candidates = vec![];
-    let mut found_highest_score = false;
+    // For each key we track two independent signals: whether the token's kid matched the key's
+    // kid, and whether the token's alg matched the key's algorithm. A kid match is more specific
+    // than an alg match: per RFC 7517 §4.5 the "kid" is "used to match a specific key" (and
+    // RFC 7515 §4.1.4 makes it a hint to which key signed the JWS), whereas "alg" (RFC 7517 §4.4)
+    // only identifies an algorithm category that many keys can share. We use the kid signal to
+    // decide which candidates to keep (see below) and the alg signal only to order them.
+    let mut candidates: Vec<Candidate> = vec![];
     for JwkSetInfo {
         jwks,
         issuers,
@@ -331,21 +345,17 @@ pub(super) fn search_jwks(
                 }
             }
         }) {
-            let mut key_score = 0;
-
             // Let's see if we have a specified kid and if they match
-            if criteria.kid.is_some() && key.common.key_id == criteria.kid {
-                key_score += 1;
-            }
+            let kid_matched = criteria.kid.is_some() && key.common.key_id == criteria.kid;
 
-            // Furthermore, we would like our algorithms to match, or at least the kty
-            // If we have an algorithm that matches, boost the score
-            match key.common.key_algorithm {
+            // Furthermore, we would like our algorithms to match, or at least the kty.
+            // Record whether the algorithm explicitly matched so we can order candidates by it.
+            let alg_matched = match key.common.key_algorithm {
                 Some(algorithm) => {
                     if convert_key_algorithm(algorithm) != Some(criteria.alg) {
                         continue;
                     }
-                    key_score += 1;
+                    true
                 }
                 // If a key doesn't have an algorithm, then we match the "alg" specified in the
                 // search criteria against all of the algorithms that we support.  If the
@@ -356,62 +366,60 @@ pub(super) fn search_jwks(
                 // Note: Matching algorithm parameters may seem unusual, but the appropriate
                 // algorithm details are not structured for easy consumption in jsonwebtoken and
                 // this is the simplest way to determine algorithm family.
-                None => match (criteria.alg, &key.algorithm) {
-                    (
-                        Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512,
-                        AlgorithmParameters::OctetKey(_),
-                    ) => {
-                        key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
-                    }
-                    (
-                        Algorithm::RS256
-                        | Algorithm::RS384
-                        | Algorithm::RS512
-                        | Algorithm::PS256
-                        | Algorithm::PS384
-                        | Algorithm::PS512,
-                        AlgorithmParameters::RSA(_),
-                    ) => {
-                        key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
-                    }
-                    (Algorithm::ES256, AlgorithmParameters::EllipticCurve(params)) => {
-                        if params.curve == EllipticCurve::P256 {
+                None => {
+                    match (criteria.alg, &key.algorithm) {
+                        (
+                            Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512,
+                            AlgorithmParameters::OctetKey(_),
+                        ) => {
                             key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
                         }
-                    }
-                    (Algorithm::ES384, AlgorithmParameters::EllipticCurve(params)) => {
-                        if params.curve == EllipticCurve::P384 {
+                        (
+                            Algorithm::RS256
+                            | Algorithm::RS384
+                            | Algorithm::RS512
+                            | Algorithm::PS256
+                            | Algorithm::PS384
+                            | Algorithm::PS512,
+                            AlgorithmParameters::RSA(_),
+                        ) => {
                             key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
                         }
-                    }
-                    (Algorithm::EdDSA, AlgorithmParameters::EllipticCurve(params)) => {
-                        if params.curve == EllipticCurve::Ed25519 {
-                            key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
+                        (Algorithm::ES256, AlgorithmParameters::EllipticCurve(params)) => {
+                            if params.curve == EllipticCurve::P256 {
+                                key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
+                            }
+                        }
+                        (Algorithm::ES384, AlgorithmParameters::EllipticCurve(params)) => {
+                            if params.curve == EllipticCurve::P384 {
+                                key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
+                            }
+                        }
+                        (Algorithm::EdDSA, AlgorithmParameters::EllipticCurve(params)) => {
+                            if params.curve == EllipticCurve::Ed25519 {
+                                key.common.key_algorithm = Some(convert_algorithm(criteria.alg));
+                            }
+                        }
+                        _ => {
+                            // We'll ignore combinations we don't recognise
+                            continue;
                         }
                     }
-                    _ => {
-                        // We'll ignore combinations we don't recognise
-                        continue;
-                    }
-                },
+                    // A key without a declared "alg" that matches by family is usable, but this
+                    // is not an explicit algorithm match.
+                    false
+                }
             };
 
             // If we get here we have a key that:
             //  - may be used for signature verification
             //  - has a matching algorithm, or if JWT has no algorithm, a matching key type
-            // It may have a matching kid if the JWT has a kid and it matches the key kid
-            //
-            // Multiple keys may meet the matching criteria, but they have a score. They get 1
-            // point for having an explicitly matching algorithm and 1 point for an explicitly
-            // matching kid. We will sort our candidates and pick the key with the highest score.
-
-            // If we find a key with a HIGHEST_SCORE, we will filter the list to only keep those
-            // with that score
-            if key_score == HIGHEST_SCORE {
-                found_highest_score = true;
-            }
-
-            candidates.push((key_score, (issuers.clone(), audiences.clone(), key)));
+            //  - may have a matching kid, if the JWT has a kid and it matches the key's kid
+            candidates.push(Candidate {
+                kid_matched,
+                alg_matched,
+                result: (issuers.clone(), audiences.clone(), key),
+            });
         }
     }
 
@@ -419,44 +427,44 @@ pub(super) fn search_jwks(
         "jwk candidates: {:?}",
         candidates
             .iter()
-            .map(|(score, (_, _, candidate))| (
-                score,
-                &candidate.common.key_id,
-                candidate.common.key_algorithm
+            .map(|candidate| (
+                candidate.kid_matched,
+                candidate.alg_matched,
+                &candidate.result.2.common.key_id,
+                candidate.result.2.common.key_algorithm
             ))
-            .collect::<Vec<(&usize, &Option<String>, Option<KeyAlgorithm>)>>()
+            .collect::<Vec<(bool, bool, &Option<String>, Option<KeyAlgorithm>)>>()
     );
 
-    if candidates.is_empty() {
-        None
-    } else {
-        // Only sort if we need to
-        if candidates.len() > 1 {
-            candidates.sort_by(|a, b| a.0.cmp(&b.0));
-        }
-
-        if found_highest_score {
-            Some(
-                candidates
-                    .into_iter()
-                    .filter_map(|(score, candidate)| {
-                        if score == HIGHEST_SCORE {
-                            Some(candidate)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect(),
-            )
-        } else {
-            Some(
-                candidates
-                    .into_iter()
-                    .map(|(_score, candidate)| candidate)
-                    .collect(),
-            )
-        }
+    // The token's kid, when present and matched, identifies the specific key(s) intended to
+    // validate it (RFC 7517 §4.5). If any candidate matched the kid, drop the ones that did not,
+    // so a matched kid-specific entry (and its issuer/audience constraints) can't be bypassed by
+    // falling through to a key the kid never matched (ROUTER-1990).
+    //
+    // We keep *all* kid-matched candidates rather than a single "best" one: the same key may be
+    // duplicated across entries with different constraints (e.g. multi-tenant IdPs), so decode_jwt
+    // must be able to retry each in turn (ROUTER-1691). This holds even when the duplicates differ
+    // in algorithm specificity — one declares "alg", another does not — since "alg" only names a
+    // category, not a specific key. When the kid matched nothing, every candidate is kept,
+    // preserving the pre-existing algorithm-based matching.
+    if candidates.iter().any(|candidate| candidate.kid_matched) {
+        candidates.retain(|candidate| candidate.kid_matched);
     }
+
+    // The surviving candidates now share the same `kid_matched` value, so order them (stably) by
+    // `alg_matched` alone — least- to most-specific — so callers that take the last element get the
+    // best match, while the relative order decode_jwt retries in is otherwise preserved.
+    if candidates.len() > 1 {
+        candidates.sort_by_key(|candidate| candidate.alg_matched);
+    }
+
+    // Return None rather than an empty list when nothing matched, so the caller reports that no
+    // suitable key was found.
+    let results: Vec<SearchResult> = candidates
+        .into_iter()
+        .map(|candidate| candidate.result)
+        .collect();
+    (!results.is_empty()).then_some(results)
 }
 
 pub(super) fn extract_jwt<'a, 'b: 'a>(
