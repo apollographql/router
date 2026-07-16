@@ -25,7 +25,6 @@ use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::util::BoxCloneService;
 
 use self::engine::RhaiService;
 use self::engine::SharedMut;
@@ -391,8 +390,8 @@ macro_rules! gen_map_router_deferred_request {
 macro_rules! gen_map_response {
     ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $stage: expr) => {
         $borrow.replace(|service| {
-            BoxCloneService::new(
-                service.and_then(move |response: $base::Response| async move {
+            service.and_then(
+                move |response: $base::Response| async move {
                     let shared_response = Shared::new(Mutex::new(Some(response)));
                     let result: Result<Dynamic, Box<EvalAltResult>> = execute(
                         &$rhai_service,
@@ -417,8 +416,8 @@ macro_rules! gen_map_response {
                     let mut guard = shared_response.lock();
                     let response_opt = guard.take();
                     Ok(response_opt.unwrap())
-                }),
-            )
+                }
+            ).boxed_clone()
         })
     };
 }
@@ -431,7 +430,7 @@ macro_rules! gen_map_response {
 macro_rules! gen_map_router_deferred_response {
     ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $stage: expr) => {
         $borrow.replace(|service| {
-            BoxCloneService::new(service.and_then(
+            service.and_then(
                 |mapped_response: $base::Response| async move {
                     // we split the response stream into headers+first response, then a stream of deferred responses
                     // for which we will implement mapping later
@@ -535,7 +534,7 @@ macro_rules! gen_map_router_deferred_response {
                         response: http::Response::from_parts(parts, hyper::Body::wrap_stream(final_stream)),
                     })*/
                 },
-            ))
+            ).boxed_clone()
         })
     };
 }
@@ -543,7 +542,7 @@ macro_rules! gen_map_router_deferred_response {
 macro_rules! gen_map_deferred_response {
     ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $stage: expr) => {
         $borrow.replace(|service| {
-            BoxCloneService::new(service.and_then(
+            service.and_then(
                 |mapped_response: $base::Response| async move {
                     // we split the response stream into headers+first response, then a stream of deferred responses
                     // for which we will implement mapping later
@@ -654,7 +653,7 @@ macro_rules! gen_map_deferred_response {
                         response,
                     })
                 },
-            ))
+            ).boxed_clone()
         })
     };
 }
