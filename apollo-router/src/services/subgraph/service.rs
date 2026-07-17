@@ -36,9 +36,9 @@ use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::json_ext::Object;
-use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::InternalServiceBuilderExt as _;
+use crate::layers::ServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
-use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
 use crate::plugins::telemetry::config_new::events::log_event;
@@ -786,7 +786,15 @@ impl SubgraphServiceFactory {
             // right place: *after* all user plugins, but *before* the subgraph service proper.
             let apq_enabled = apq_config.get(&name).enabled;
 
-            let inner_service = ServiceBuilder::new()
+            // One buffer per named subgraph provides per-subgraph backpressure and is
+            // required for correct LoadShed / RateLimit behaviour from traffic-shaping
+            // plugins (see ServiceBuilderExt::buffered).
+            let service = ServiceBuilder::new()
+                .buffered()
+                .rust_plugins(plugins.clone(), |plugin, service| {
+                    plugin.subgraph_service(&name, service)
+                })
+                .concrete_boxed_clone()
                 .layer(SubscriptionSubgraphLayer::new(
                     notify.clone(),
                     subscription_config.clone(),
@@ -794,20 +802,8 @@ impl SubgraphServiceFactory {
                 ))
                 .layer(SubgraphApqLayer::new(apq_enabled))
                 .layer(SubgraphContentNegotiationLayer::default())
-                .service(service)
-                .boxed_clone();
+                .service(service);
 
-            // One buffer per named subgraph provides per-subgraph backpressure and is
-            // required for correct LoadShed / RateLimit behaviour from traffic-shaping
-            // plugins (see ServiceBuilderExt::buffered).
-            let service = ServiceBuilder::new()
-                .layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE))
-                .service(
-                    plugins
-                        .iter()
-                        .rev()
-                        .fold(inner_service, |acc, (_, e)| e.subgraph_service(&name, acc)),
-                );
             map.insert(name, service);
         }
 
