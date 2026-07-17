@@ -33,8 +33,12 @@ use serde::Deserialize;
 use tracing_subscriber::prelude::*;
 
 mod bench;
+mod plan_diff;
 use bench::BenchOutput;
 use bench::run_bench;
+use plan_diff::ModeOutcome;
+use plan_diff::PlanMode;
+use plan_diff::classify;
 
 /// Rover supergraph config file format
 #[derive(Debug, Deserialize)]
@@ -154,6 +158,26 @@ enum Command {
         planner: QueryPlannerArgs,
     },
 
+    /// Plan one operation two ways and classify the difference (Phase 0 Spike B).
+    ///
+    /// The left mode is today's expansion planner. The right mode defaults to
+    /// the expansion planner with `--generate-fragments` flipped on (a real
+    /// structural-but-equivalent difference to exercise the classifier); pass
+    /// `--compare-source-aware` to select the not-yet-implemented source-aware
+    /// planner seam instead.
+    PlanDiff {
+        /// Path to the operation document.
+        query: PathBuf,
+        /// Path(s) to one supergraph schema file, `-` for stdin or multiple subgraph schemas.
+        schemas: Vec<PathBuf>,
+        /// Emit a JSON report instead of the human-readable one.
+        #[arg(long)]
+        json: bool,
+        /// Compare against the source-aware planner seam (currently unimplemented).
+        #[arg(long)]
+        compare_source_aware: bool,
+    },
+
     /// Expand connector-enabled supergraphs
     Expand {
         /// The path to the supergraph schema file, or `-` for stdin
@@ -230,6 +254,12 @@ fn main() -> ExitCode {
             operations_dir,
             planner,
         } => cmd_bench(&supergraph_schema, &operations_dir, planner),
+        Command::PlanDiff {
+            query,
+            schemas,
+            json,
+            compare_source_aware,
+        } => cmd_plan_diff(&query, &schemas, json, compare_source_aware),
         Command::Expand {
             supergraph_schema,
             destination_dir,
@@ -503,6 +533,126 @@ fn cmd_plan(
         Ok(_) => Ok(()),
         Err(err) => Err(anyhow!("{err}")),
     }
+}
+
+/// Plan `query_doc` under `config` against `supergraph`, render the plan, and
+/// run the correctness engine over it — packaged as a [`ModeOutcome`] so a
+/// planning failure becomes data (a `Failed` outcome) rather than aborting the
+/// whole diff.
+fn plan_once(
+    supergraph: &apollo_federation::Supergraph,
+    subgraphs_by_name: &apollo_compiler::collections::IndexMap<
+        std::sync::Arc<str>,
+        apollo_federation::schema::ValidFederationSchema,
+    >,
+    query_doc: &apollo_compiler::validation::Valid<ExecutableDocument>,
+    config: QueryPlannerConfig,
+) -> ModeOutcome {
+    let planner = match QueryPlanner::new(supergraph, config) {
+        Ok(planner) => planner,
+        Err(e) => {
+            return ModeOutcome::Failed {
+                reason: format!("planner construction failed: {e}"),
+            };
+        }
+    };
+    let plan = match planner.build_query_plan(query_doc, None, Default::default()) {
+        Ok(plan) => plan,
+        Err(e) => {
+            return ModeOutcome::Failed {
+                reason: format!("query planning failed: {e}"),
+            };
+        }
+    };
+    let correctness = apollo_federation::correctness::check_plan(
+        planner.api_schema(),
+        &supergraph.schema,
+        subgraphs_by_name,
+        query_doc,
+        &plan,
+    )
+    .map_err(|e| e.to_string());
+    ModeOutcome::Planned {
+        rendered: format!("{plan}"),
+        correctness,
+    }
+}
+
+fn cmd_plan_diff(
+    query_path: &Path,
+    schema_paths: &[PathBuf],
+    use_json: bool,
+    compare_source_aware: bool,
+) -> Result<(), AnyError> {
+    let query = read_input(query_path);
+    let supergraph = load_supergraph(schema_paths)?;
+
+    let subgraphs_by_name: apollo_compiler::collections::IndexMap<_, _> = supergraph
+        .extract_subgraphs()?
+        .into_iter()
+        .map(|(name, subgraph)| (name, subgraph.schema))
+        .collect();
+
+    // The query document validates against the API schema, which is identical
+    // across planner configurations, so we build and parse it once.
+    let base_planner = QueryPlanner::new(&supergraph, QueryPlannerConfig::default())?;
+    let query_doc = ExecutableDocument::parse_and_validate(
+        base_planner.api_schema().schema(),
+        query,
+        query_path,
+    )
+    .map_err(FederationError::from)?;
+    drop(base_planner);
+
+    let operation = query_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("operation")
+        .to_string();
+
+    // Left: today's expansion planner.
+    let left = plan_once(
+        &supergraph,
+        &subgraphs_by_name,
+        &query_doc,
+        QueryPlannerConfig::default(),
+    );
+
+    // Right: either the source-aware seam (unimplemented) or the expansion
+    // planner with fragment generation on — a real structural-but-equivalent
+    // difference that exercises the classifier.
+    let (right_mode, right) = if compare_source_aware {
+        (
+            PlanMode::SourceAware,
+            ModeOutcome::Failed {
+                reason: "source-aware planner not yet implemented (Phase 1 seam)".to_string(),
+            },
+        )
+    } else {
+        let mut config = QueryPlannerConfig::default();
+        config.generate_query_fragments = true;
+        (
+            PlanMode::Expansion,
+            plan_once(&supergraph, &subgraphs_by_name, &query_doc, config),
+        )
+    };
+
+    let diff = classify(operation, PlanMode::Expansion, right_mode, &left, &right);
+
+    if use_json {
+        println!("{}", serde_json::to_string_pretty(&diff).unwrap());
+    } else {
+        println!("operation: {}", diff.operation);
+        println!("modes:     {} vs {}", diff.left_mode, diff.right_mode);
+        println!("verdict:   {:?}", diff.verdict);
+        if let Some(detail) = &diff.detail {
+            println!("detail:\n{detail}");
+        }
+        if let Some(structural) = &diff.structural_diff {
+            println!("plan diff:\n{structural}");
+        }
+    }
+    Ok(())
 }
 
 fn cmd_validate(file_paths: &[PathBuf]) -> Result<(), AnyError> {
