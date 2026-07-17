@@ -794,7 +794,7 @@ impl SubgraphServiceFactory {
                 .rust_plugins(plugins.clone(), |plugin, service| {
                     plugin.subgraph_service(&name, service)
                 })
-                .box_clone()
+                .concrete_boxed_clone()
                 .layer(SubscriptionSubgraphLayer::new(
                     notify.clone(),
                     subscription_config.clone(),

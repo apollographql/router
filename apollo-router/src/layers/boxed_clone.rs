@@ -4,9 +4,9 @@ use tower::util::BoxCloneService;
 
 /// Layer that produces a [`BoxCloneService`].
 ///
-/// See [`InternalServiceBuilderExt::box_clone`].
+/// See [`InternalServiceBuilderExt::concrete_boxed_clone`].
 ///
-/// [`InternalServiceBuilderExt::box_clone`]: crate::layers::InternalServiceBuilderExt::box_clone
+/// [`InternalServiceBuilderExt::concrete_boxed_clone`]: crate::layers::InternalServiceBuilderExt::concrete_boxed_clone
 #[derive(Clone)]
 pub(crate) struct BoxCloneLayer<R> {
     _private: PhantomData<R>,

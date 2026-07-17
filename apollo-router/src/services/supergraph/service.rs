@@ -659,7 +659,7 @@ impl PluggableSupergraphServiceBuilder {
             .rust_plugins(self.plugins.clone(), |plugin, service| {
                 plugin.supergraph_service(service)
             })
-            .box_clone()
+            .concrete_boxed_clone()
             .layer(AllowOnlyHttpPostMutationsLayer::default())
             .service(supergraph_service);
 
