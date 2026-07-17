@@ -432,13 +432,16 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
     ///     .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
     ///     .service(router_service.boxed_clone());
     /// ```
-    fn rust_plugins<F, S>(
+    fn rust_plugins<F, R, Resp, Err>(
         self,
         plugins: Arc<Plugins>,
         apply: F,
-    ) -> ServiceBuilder<Stack<RustPluginsLayer<F>, L>>
+    ) -> ServiceBuilder<Stack<RustPluginsLayer<F, R>, L>>
     where
-        F: Fn(&dyn DynPlugin, S) -> S;
+        F: Fn(
+            &dyn DynPlugin,
+            tower::util::BoxCloneService<R, Resp, Err>,
+        ) -> tower::util::BoxCloneService<R, Resp, Err>;
 
     /// Box the inner service.
     ///
@@ -451,13 +454,16 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
 }
 
 impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
-    fn rust_plugins<F, S>(
+    fn rust_plugins<F, R, Resp, Err>(
         self,
         plugins: Arc<Plugins>,
         apply: F,
-    ) -> ServiceBuilder<Stack<RustPluginsLayer<F>, L>>
+    ) -> ServiceBuilder<Stack<RustPluginsLayer<F, R>, L>>
     where
-        F: Fn(&dyn DynPlugin, S) -> S,
+        F: Fn(
+            &dyn DynPlugin,
+            tower::util::BoxCloneService<R, Resp, Err>,
+        ) -> tower::util::BoxCloneService<R, Resp, Err>,
     {
         self.layer(RustPluginsLayer::new(plugins, apply))
     }

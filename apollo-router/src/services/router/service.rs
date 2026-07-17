@@ -723,12 +723,10 @@ impl RouterCreator {
         // return Pending spuriously and trigger Overloaded responses.
         let service = ServiceBuilder::new()
             .buffered()
-            .concrete_boxed_clone()
             .layer(static_page.clone())
             .rust_plugins(supergraph_creator.plugins(), |plugin, service| {
                 plugin.router_service(service)
             })
-            .concrete_boxed_clone()
             .layer(content_negotiation::RouterContentNegotiationLayer::default())
             .service(router_service);
 
