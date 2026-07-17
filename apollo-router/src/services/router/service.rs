@@ -42,6 +42,7 @@ use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::InternalServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
@@ -726,15 +727,10 @@ impl RouterCreator {
         let service = UnconstrainedBuffer::new(
             ServiceBuilder::new()
                 .layer(static_page.clone())
-                .service(
-                    supergraph_creator
-                        .plugins()
-                        .iter()
-                        .rev()
-                        .fold(router_service.boxed_clone(), |acc, (_, e)| {
-                            e.router_service(acc)
-                        }),
-                )
+                .rust_plugins(supergraph_creator.plugins(), |plugin, service| {
+                    plugin.router_service(service)
+                })
+                .service(router_service.boxed_clone())
                 .boxed_clone(),
             DEFAULT_BUFFER_SIZE,
         );

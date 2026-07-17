@@ -32,6 +32,7 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::introspection;
 use crate::introspection::IntrospectionService;
 use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::InternalServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugin::DynPlugin;
 use crate::plugins::connectors::query_plans::store_connectors;
@@ -625,19 +626,19 @@ impl PluggableSupergraphServiceBuilder {
             .layer(SubscriptionExecutionLayer::new(
                 configuration.notify.clone(),
             ))
+            .rust_plugins(self.plugins.clone(), |plugin, service| {
+                plugin.execution_service(service)
+            })
             .service(
-                self.plugins.iter().rev().fold(
-                    ExecutionService {
-                        schema: schema.clone(),
-                        fetch_service,
-                        subscription_config: subscription_plugin_conf,
-                        subgraph_schemas,
-                        apollo_telemetry_config: apollo_telemetry_conf,
-                        configuration: Arc::clone(&configuration),
-                    }
-                    .boxed_clone(),
-                    |acc, (_, e)| e.execution_service(acc),
-                ),
+                ExecutionService {
+                    schema: schema.clone(),
+                    fetch_service,
+                    subscription_config: subscription_plugin_conf,
+                    subgraph_schemas,
+                    apollo_telemetry_config: apollo_telemetry_conf,
+                    configuration: Arc::clone(&configuration),
+                }
+                .boxed_clone(),
             )
             .boxed_clone();
 
@@ -659,14 +660,10 @@ impl PluggableSupergraphServiceBuilder {
             ServiceBuilder::new()
                 .layer(content_negotiation::SupergraphContentNegotiationLayer::default())
                 .layer(crate::compute_job::ComputeJobMetricsLayer::new())
-                .service(
-                    self.plugins
-                        .iter()
-                        .rev()
-                        .fold(supergraph_service.boxed_clone(), |acc, (_, e)| {
-                            e.supergraph_service(acc)
-                        }),
-                )
+                .rust_plugins(self.plugins.clone(), |plugin, service| {
+                    plugin.supergraph_service(service)
+                })
+                .service(supergraph_service.boxed_clone())
                 .boxed_clone(),
             DEFAULT_BUFFER_SIZE,
         );

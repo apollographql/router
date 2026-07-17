@@ -37,6 +37,7 @@ use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::InternalServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -802,12 +803,10 @@ impl SubgraphServiceFactory {
             // plugins (see ServiceBuilderExt::buffered).
             let service = ServiceBuilder::new()
                 .layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE))
-                .service(
-                    plugins
-                        .iter()
-                        .rev()
-                        .fold(inner_service, |acc, (_, e)| e.subgraph_service(&name, acc)),
-                );
+                .rust_plugins(plugins.clone(), |plugin, service| {
+                    plugin.subgraph_service(&name, service)
+                })
+                .service(inner_service);
             map.insert(name, service);
         }
 
