@@ -13,7 +13,6 @@ use indexmap::IndexMap;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use tower::BoxError;
-use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::load_shed::error::Overloaded;
@@ -31,8 +30,8 @@ use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::introspection;
 use crate::introspection::IntrospectionService;
-use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::InternalServiceBuilderExt as _;
+use crate::layers::ServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugin::DynPlugin;
 use crate::plugins::connectors::query_plans::store_connectors;
@@ -650,23 +649,19 @@ impl PluggableSupergraphServiceBuilder {
             .strict_variable_validation(configuration.supergraph.strict_variable_validation)
             .build();
 
-        let supergraph_service =
-            AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
-
         // The outer buffer provides backpressure for the full supergraph pipeline and is
         // required for correct LoadShed / ConcurrencyLimit / RateLimit behaviour introduced
         // by traffic-shaping and other plugins (see ServiceBuilderExt::buffered).
-        let sb = UnconstrainedBuffer::new(
-            ServiceBuilder::new()
-                .layer(content_negotiation::SupergraphContentNegotiationLayer::default())
-                .layer(crate::compute_job::ComputeJobMetricsLayer::new())
-                .rust_plugins(self.plugins.clone(), |plugin, service| {
-                    plugin.supergraph_service(service)
-                })
-                .service(supergraph_service.boxed_clone())
-                .boxed_clone(),
-            DEFAULT_BUFFER_SIZE,
-        );
+        let sb = ServiceBuilder::new()
+            .buffered()
+            .layer(content_negotiation::SupergraphContentNegotiationLayer::default())
+            .layer(crate::compute_job::ComputeJobMetricsLayer::new())
+            .rust_plugins(self.plugins.clone(), |plugin, service| {
+                plugin.supergraph_service(service)
+            })
+            .box_clone()
+            .layer(AllowOnlyHttpPostMutationsLayer::default())
+            .service(supergraph_service);
 
         // XXX(@goto-bus-stop): this shouldn't really be created here, but it's the one
         // place we have access to the caching query planner service!

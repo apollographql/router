@@ -15,6 +15,7 @@ use self::map_first_graphql_response::MapFirstGraphqlResponseService;
 use crate::Context;
 use crate::graphql;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
+use crate::layers::box_clone::BoxCloneLayer;
 use crate::layers::instrument::InstrumentLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataService;
@@ -25,6 +26,7 @@ use crate::services::Plugins;
 use crate::services::supergraph;
 
 pub mod async_checkpoint;
+pub(crate) mod box_clone;
 pub mod instrument;
 pub mod map_first_graphql_response;
 pub mod map_future_with_request_data;
@@ -437,6 +439,14 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
     ) -> ServiceBuilder<Stack<RustPluginsLayer<F>, L>>
     where
         F: Fn(&dyn DynPlugin, S) -> S;
+
+    /// Box the service.
+    ///
+    /// The resulting service type is a [`BoxCloneService`][tower::util::BoxCloneService].
+    ///
+    /// This has the same effect as [`ServiceBuilder::boxed_clone`], but it uses a named layer that
+    /// is kinder to type inference. Prefer this over using `.boxed_clone()` in a service builder.
+    fn box_clone<R>(self) -> ServiceBuilder<Stack<BoxCloneLayer<R>, L>>;
 }
 
 impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
@@ -449,5 +459,9 @@ impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
         F: Fn(&dyn DynPlugin, S) -> S,
     {
         self.layer(RustPluginsLayer::new(plugins, apply))
+    }
+
+    fn box_clone<R>(self) -> ServiceBuilder<Stack<BoxCloneLayer<R>, L>> {
+        self.layer(BoxCloneLayer::new())
     }
 }
