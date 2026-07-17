@@ -32,6 +32,7 @@ mod json_selection;
 pub mod migration;
 mod models;
 mod schema_type_ref;
+pub(crate) mod source_aware;
 pub use models::ProblemLocation;
 pub mod runtime;
 pub(crate) mod spec;
