@@ -6,7 +6,9 @@ use std::error::Error;
 use async_trait::async_trait;
 use bytesize::ByteSize;
 use http::StatusCode;
+use http::header::CONTENT_TYPE;
 pub(crate) use layer::BodyLimitControl;
+use mime::APPLICATION_JSON;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -372,6 +374,7 @@ impl RequestSizeLimitError {
                     .build(),
             )
             .status_code(self.status_code())
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
             .context(ctx)
             .build()
             .unwrap()
@@ -432,6 +435,10 @@ mod test {
         assert!(resp.is_ok());
         let resp = resp.unwrap();
         assert_eq!(resp.response.status(), expected_status);
+        assert_eq!(
+            resp.response.headers().get(http::header::CONTENT_TYPE),
+            Some(&http::HeaderValue::from_static("application/json"))
+        );
         let expected_body = format!(
             r#"{{"errors":[{{"message":"{expected_message}","extensions":{{"details":"{expected_message}","code":"INVALID_GRAPHQL_REQUEST"}}}}]}}"#
         );
