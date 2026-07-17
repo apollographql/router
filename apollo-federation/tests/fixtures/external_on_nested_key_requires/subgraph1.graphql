@@ -1,0 +1,12 @@
+type Query {
+  t: T
+}
+
+type T @key(fields: "id") {
+  id: ID!
+  u: U @shareable
+}
+
+type U @shareable {
+  x: String
+}

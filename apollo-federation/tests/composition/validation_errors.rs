@@ -124,6 +124,50 @@ mod requires_tests {
             )],
         );
     }
+
+    #[test]
+    fn fails_when_external_on_nested_key_fields_with_cross_subgraph_requires() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: include_str!(
+                "../fixtures/external_on_nested_key_requires/subgraph1.graphql"
+            ),
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: include_str!(
+                "../fixtures/external_on_nested_key_requires/subgraph2.graphql"
+            ),
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: include_str!(
+                "../fixtures/external_on_nested_key_requires/subgraph3.graphql"
+            ),
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "SATISFIABILITY_ERROR",
+                r#"
+                The following supergraph API query:
+                {
+                  t {
+                    computed
+                  }
+                }
+                cannot be satisfied by the subgraphs because:
+                - from subgraph "Subgraph1": cannot find field "T.computed".
+                - from subgraph "Subgraph2": cannot find field "T.computed".
+                - from subgraph "Subgraph3": @requires condition on field "T.computed" can be satisfied but missing usable key on "T" in subgraph "Subgraph3" to resume query.
+                "#,
+            )],
+        );
+    }
 }
 
 mod non_resolvable_keys_tests {
