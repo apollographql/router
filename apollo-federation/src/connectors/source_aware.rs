@@ -37,6 +37,7 @@ use apollo_compiler::Schema;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
 
+use crate::connectors::ConnectSpec;
 use crate::connectors::Connector;
 use crate::connectors::EntityResolver;
 use crate::connectors::Namespace;
@@ -113,8 +114,14 @@ pub(crate) fn classify(connector: &Connector) -> ConnectorInputClassification {
 /// that expansion's `process_outputs` applies on top of a `None` key:
 ///
 /// * An [`EntityResolver::Implicit`] resolver with no `$this` inputs yields the
-///   `__typename` **singleton** condition (the "namespace container" pattern);
-///   expansion fabricates `@key(fields: "__typename")` for exactly this case.
+///   `__typename` **singleton** condition (the "namespace container" pattern).
+///   This matches only the **v0.4+** shape-driven expander
+///   (`expand/mod.rs:604`), which fabricates `@key(fields: "__typename")` here.
+///   The **legacy** expander for connect spec v0.1–v0.3 (`expand/mod.rs:1252`)
+///   does *not* — it falls straight through to `copy_interface_object_keys`.
+///   We therefore gate the singleton on `spec >= V0_4`, matching the expander
+///   fork at `expand/mod.rs:174`, so a legacy connector gets no phantom
+///   condition the legacy expander would never create.
 /// * Any other resolver with no key contributes no condition (`Ok(None)`). The
 ///   interface-object key copying expansion does in this case is an
 ///   output-schema concern, not an input condition.
@@ -145,8 +152,12 @@ pub(crate) fn derive_condition(
 
     match merge_condition(connector, schema, &key_type_name, namespace)? {
         Some(field_set) => Ok(Some(field_set)),
-        // Fabricated fallback: implicit resolver, no `$this` → __typename singleton.
-        None if matches!(resolver, EntityResolver::Implicit) => {
+        // Fabricated fallback: implicit resolver, no `$this` → __typename
+        // singleton — but only for v0.4+, matching the shape-driven expander.
+        // The legacy expander (v0.1–v0.3) does not fabricate this key.
+        None if matches!(resolver, EntityResolver::Implicit)
+            && connector.spec >= ConnectSpec::V0_4 =>
+        {
             Ok(Some(parse_field_set(schema, &key_type_name, "__typename")?))
         }
         None => Ok(None),
@@ -162,6 +173,9 @@ fn merge_condition(
     key_type_name: &Name,
     namespace: Namespace,
 ) -> Result<Option<Valid<FieldSet>>, String> {
+    // `make_key_field_set_from_variables` applies `.unique()` before merging;
+    // we don't need to because `SelectionTrie::extend` is idempotent, so merging
+    // a duplicate reference is a no-op.
     let mut merged = SelectionTrie::new();
     let mut matched = false;
     for reference in connector.variable_references() {
@@ -192,6 +206,51 @@ fn parse_field_set(
     .map_err(|errors| format!("failed to parse condition field set `{fields}`: {errors}"))
 }
 
+/// Everything a source-aware connect `FetchNode` needs to carry, derived
+/// directly from a [`Connector`] with **no expanded schema** — the Phase-1
+/// request-side seam.
+///
+/// The proposal's target design says a connect `FetchNode` carries "the
+/// connector **id** (for direct dispatch), a **`SelectionTrie`/supergraph-schema
+/// selection** (not an operation against a synthetic subgraph schema), and
+/// resolved inputs." This is that payload, minus the per-request runtime input
+/// *values* (which the executor resolves): the static plan-time shape.
+///
+/// Dispatch today keys on the synthetic subgraph *service name*
+/// (`fetch_service.rs`); `coordinate` is the id that replaces it.
+#[derive(Debug)]
+pub(crate) struct ConnectFetchDescriptor {
+    /// Stable connector identity for direct dispatch — no synthetic service name.
+    pub(crate) coordinate: String,
+    /// The entity-resolver kind, or `None` for a plain root-field connector.
+    pub(crate) entity_resolver: Option<EntityResolver>,
+    /// The type this connector produces (its base type), when determinable.
+    pub(crate) output_type: Option<Name>,
+    /// The connector's output selection against the supergraph schema — the
+    /// selection the FetchNode applies, not a synthetic-schema operation.
+    pub(crate) output_selection: String,
+    /// The parent-data condition the entering edge must satisfy (Spike A). The
+    /// planner uses this exactly as it uses a `@key`/`@requires` condition.
+    pub(crate) condition: Option<Valid<FieldSet>>,
+    /// The connector's variable inputs partitioned by how the planner satisfies
+    /// them (Spike A).
+    pub(crate) inputs: ConnectorInputClassification,
+}
+
+impl ConnectFetchDescriptor {
+    /// Build the descriptor for `connector` against its original schema.
+    pub(crate) fn build(connector: &Connector, schema: &Schema) -> Result<Self, String> {
+        Ok(ConnectFetchDescriptor {
+            coordinate: connector.id.coordinate(),
+            entity_resolver: connector.entity_resolver.clone(),
+            output_type: connector.id.directive.base_type_name(schema),
+            output_selection: connector.selection.to_string(),
+            condition: derive_condition(connector, schema)?,
+            inputs: classify(connector),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Schema;
@@ -201,6 +260,7 @@ mod tests {
     use super::classify;
     use super::classify_namespace;
     use super::derive_condition;
+    use crate::connectors::ConnectSpec;
     use crate::connectors::Connector;
     use crate::connectors::EntityResolver;
     use crate::connectors::Namespace;
@@ -237,8 +297,12 @@ mod tests {
     /// what expansion fabricates via `resolvable_key` + `process_outputs`:
     ///
     /// * `resolvable_key == Some(fs)` → `derive_condition == Some(fs)`.
-    /// * `resolvable_key == None`, implicit resolver → derived `__typename`
-    ///   singleton (the fabricated "namespace container" key).
+    /// * `resolvable_key == None`, implicit resolver, **spec ≥ v0.4** → derived
+    ///   `__typename` singleton (the fabricated "namespace container" key — the
+    ///   shape-driven expander fabricates this at `expand/mod.rs:604`).
+    /// * `resolvable_key == None`, implicit resolver, **spec < v0.4** → no
+    ///   condition (the legacy expander at `expand/mod.rs:1252` does not
+    ///   fabricate the singleton).
     /// * `resolvable_key == None`, otherwise → no condition.
     #[test]
     fn derived_condition_matches_resolvable_key_over_expand_fixtures() {
@@ -295,10 +359,12 @@ mod tests {
                                 );
                                 parent_data_conditions += 1;
                             }
-                            (None, Some(EntityResolver::Implicit)) => {
+                            (None, Some(EntityResolver::Implicit))
+                                if connector.spec >= ConnectSpec::V0_4 =>
+                            {
                                 let derived = derived.unwrap_or_else(|| {
                                     panic!(
-                                        "implicit connector {} in {path:?} should derive a __typename singleton",
+                                        "v0.4+ implicit connector {} in {path:?} should derive a __typename singleton",
                                         connector.id.coordinate()
                                     )
                                 });
@@ -310,6 +376,9 @@ mod tests {
                                 );
                                 singleton_conditions += 1;
                             }
+                            // Legacy implicit resolver (spec < v0.4) and every
+                            // non-implicit resolver: the expander fabricates no
+                            // key, so we must derive no condition.
                             (None, _) => {
                                 assert!(
                                     derived.is_none(),
@@ -371,5 +440,70 @@ mod tests {
                 }
             });
         });
+    }
+
+    #[test]
+    fn connect_fetch_descriptor_is_consistent_over_fixtures() {
+        use super::ConnectFetchDescriptor;
+
+        let mut built = 0usize;
+        insta::with_settings!({prepend_module_to_snapshot => false}, {
+            glob!("expand/tests/schemas/expand", "*.graphql", |path| {
+                let sdl = std::fs::read_to_string(path).unwrap();
+                let supergraph_schema =
+                    FederationSchema::new(Schema::parse(&sdl, "supergraph.graphql").unwrap())
+                        .unwrap();
+                let Ok(subgraphs) =
+                    extract_subgraphs_from_supergraph(&supergraph_schema, Some(true))
+                else {
+                    return;
+                };
+                for (_, subgraph) in subgraphs.subgraphs.iter() {
+                    let schema = subgraph.schema.schema();
+                    let Ok(connectors) = Connector::from_schema(schema, &subgraph.name) else {
+                        continue;
+                    };
+                    for connector in &connectors {
+                        let descriptor = ConnectFetchDescriptor::build(connector, schema)
+                            .unwrap_or_else(|e| {
+                                panic!("descriptor build failed for {} in {path:?}: {e}",
+                                    connector.id.coordinate())
+                            });
+                        built += 1;
+
+                        // The descriptor is a faithful bundle of the Spike A
+                        // primitives — no drift between them.
+                        assert_eq!(
+                            descriptor.coordinate,
+                            connector.id.coordinate(),
+                            "coordinate drift in {path:?}"
+                        );
+                        assert_eq!(
+                            descriptor.condition.as_ref().map(|c| c.serialize().no_indent().to_string()),
+                            derive_condition(connector, schema).unwrap()
+                                .as_ref().map(|c| c.serialize().no_indent().to_string()),
+                            "condition drift for {} in {path:?}",
+                            connector.id.coordinate()
+                        );
+                        let inputs_total = descriptor.inputs.operation_satisfiable.len()
+                            + descriptor.inputs.parent_data.len()
+                            + descriptor.inputs.environment.len();
+                        assert_eq!(
+                            inputs_total,
+                            connector.variable_references().count(),
+                            "input classification drift for {} in {path:?}",
+                            connector.id.coordinate()
+                        );
+                        // A connector always has a non-empty output selection.
+                        assert!(
+                            !descriptor.output_selection.is_empty(),
+                            "empty output selection for {} in {path:?}",
+                            connector.id.coordinate()
+                        );
+                    }
+                }
+            });
+        });
+        assert!(built > 0, "no descriptors built — did the fixture glob match?");
     }
 }
