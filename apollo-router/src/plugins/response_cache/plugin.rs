@@ -15,8 +15,6 @@ use apollo_compiler::resolvers;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::StringTemplate;
-use http::HeaderName;
-use http::HeaderValue;
 use http::header::CACHE_CONTROL;
 use itertools::Itertools;
 use lru::LruCache;
@@ -24,7 +22,6 @@ use multimap::MultiMap;
 use opentelemetry::Array;
 use opentelemetry::Key;
 use opentelemetry::StringValue;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
@@ -104,11 +101,11 @@ pub(crate) const CACHE_DEBUG_EXTENSIONS_KEY: &str = "apolloCacheDebugging";
 pub(crate) const CACHE_DEBUGGER_VERSION: &str = "1.0";
 pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS: &str = "apolloCacheTags";
 pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS: &str = "apolloEntityCacheTags";
-/// Used to mark cache tags as internal and should not be exported or displayed to our users
-pub(crate) const INTERNAL_CACHE_TAG_PREFIX: &str = "__apollo_internal::";
 const DEFAULT_LRU_PRIVATE_QUERIES_SIZE: NonZeroUsize = NonZeroUsize::new(2048).unwrap();
 const LRU_PRIVATE_QUERIES_INSTRUMENT_NAME: &str =
     "apollo.router.response_cache.private_queries.lru.size";
+// TODO: docs
+const DEFAULT_ROOT_FIELD_TYPE_NAME: &str = "Query";
 
 register_private_plugin!("apollo", "response_cache", ResponseCache);
 
@@ -488,14 +485,15 @@ impl PluginPrivate for ResponseCache {
                 }
 
                 if cdn_invalidation.enabled {
-                    let aggregated = response.context.extensions().with_lock(|lock| {
+                    let invalidation_labels = response.context.extensions().with_lock(|lock| {
                         lock.get::<CacheTagsAggregator>()
-                            .map(|a| a.snapshot())
+                            .map(|a| a.invalidation_labels())
                             .unwrap_or_default()
                     });
+
                     maybe_emit_invalidation_labels_header(
                         response.response.headers_mut(),
-                        aggregated,
+                        invalidation_labels,
                         &cdn_invalidation,
                     );
                 }
@@ -819,6 +817,7 @@ fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, Stri
     subgraph_enums
 }
 
+// TODO: docs
 #[derive(Clone)]
 struct CacheService {
     service: subgraph::BoxCloneService,
@@ -1037,6 +1036,7 @@ impl CacheService {
         Ok(resp)
     }
 
+    // TODO: document
     async fn call_service_for_root_fields_operation(
         mut self,
         request: subgraph::Request,
@@ -1078,7 +1078,10 @@ impl CacheService {
         .await?
         {
             ControlFlow::Break(response) => {
-                cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 1, miss: 0 });
+                cache_hit.insert(
+                    DEFAULT_ROOT_FIELD_TYPE_NAME.to_string(),
+                    CacheHitMiss { hit: 1, miss: 0 },
+                );
                 let _ = response.context.insert(
                     CacheMetricContextKey::new(response.subgraph_name.clone()),
                     CacheSubgraph(cache_hit),
@@ -1087,7 +1090,10 @@ impl CacheService {
                 Ok(response)
             }
             ControlFlow::Continue((request, mut root_cache_key, mut cache_tags)) => {
-                cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 0, miss: 1 });
+                cache_hit.insert(
+                    DEFAULT_ROOT_FIELD_TYPE_NAME.to_string(),
+                    CacheHitMiss { hit: 0, miss: 1 },
+                );
                 let _ = request.context.insert(
                     CacheMetricContextKey::new(request.subgraph_name.clone()),
                     CacheSubgraph(cache_hit),
@@ -1109,6 +1115,7 @@ impl CacheService {
                 // Support cache tags coming from subgraph response extensions. Gated on the
                 // CacheTag index being active for this subgraph; when disabled, the extension
                 // values are ignored on the cache write path.
+                // FIXME: shouldn't be gated by indexes being enabled
                 if self.indexes.is_enabled(IndexMode::CacheTag)
                     && let Some(Value::Array(extension_tags)) = response
                         .get_from_extensions(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
@@ -1118,9 +1125,18 @@ impl CacheService {
                         .filter_map(|v| v.as_str())
                         .map(|s| s.to_owned())
                         .collect();
-                    record_external_cache_tags(
+
+                    record_external_cache_tags_to_context(
                         &response.context,
                         extension_tag_strings.iter().cloned(),
+                        // TODO: docs on the fields so that this would ahve been easier to identify
+                        // as the subgraph name
+                        &self.name,
+                        // TODO: docs on why entity type then default; make explicit what's
+                        // implicit for root fields ("Query") and why
+                        &self
+                            .entity_type
+                            .unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME.to_string()),
                     );
                     cache_tags.extend(extension_tag_strings.into_iter().map(CacheTag::Tag));
                 }
@@ -1361,6 +1377,7 @@ impl CacheService {
     }
 }
 
+// TODO: document; make clear that name is subgraph name
 #[allow(clippy::too_many_arguments)]
 async fn cache_lookup_root(
     name: String,
@@ -1402,11 +1419,13 @@ async fn cache_lookup_root(
     // Surface schema-resolved @cacheTag values on the supergraph response aggregator. These
     // apply to the request regardless of whether the lookup hits or misses. Type/Subgraph
     // entries are internal-only and filtered out by `user_value()`.
-    record_external_cache_tags(
+    record_external_cache_tags_to_context(
         &request.context,
         cache_tags
             .iter()
             .filter_map(|t| t.user_value().map(String::from)),
+        &name,
+        entity_type_opt.unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME),
     );
 
     Span::current().record("cache.key", key.clone());
@@ -1474,8 +1493,13 @@ async fn cache_lookup_root(
                 // Surface the cache tags persisted with the entry so the supergraph response
                 // aggregator can reflect this hit. Done before the response builder consumes
                 // the request context.
-                if let Some(tags) = value.invalidation_labels.clone() {
-                    record_external_cache_tags(&request.context, tags);
+                if let Some(invalidation_labels) = value.invalidation_labels.clone() {
+                    record_external_cache_tags_to_context(
+                        &request.context,
+                        invalidation_labels,
+                        &name,
+                        entity_type_opt.unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME),
+                    );
                 }
 
                 let mut response = subgraph::Response::builder()
@@ -1527,7 +1551,7 @@ fn get_invalidation_root_keys_from_schema(
 
     impl resolvers::ObjectValue for Root<'_> {
         fn type_name(&self) -> &str {
-            "Query"
+            DEFAULT_ROOT_FIELD_TYPE_NAME
         }
 
         fn resolve_field<'a>(
@@ -1673,6 +1697,7 @@ async fn cache_lookup_entities(
         .iter()
         .map(|k| k.cache_key.as_str())
         .collect::<Vec<&str>>();
+
     Span::current().set_span_dyn_attribute(
         "cache.keys".into(),
         opentelemetry::Value::Array(Array::String(
@@ -1709,14 +1734,6 @@ async fn cache_lookup_entities(
         }
     };
 
-    // Surface cache tags from every usable hit on the supergraph response aggregator. This
-    // covers both the full-hit short-circuit below and the partial-hit path where the error
-    // branch may rebuild a response from only cached entities.
-    for entry in cache_result.iter().flatten() {
-        if let Some(tags) = entry.invalidation_labels.clone() {
-            record_external_cache_tags(&request.context, tags);
-        }
-    }
     let body = request.subgraph_request.body_mut();
 
     let representations = body
@@ -1737,6 +1754,21 @@ async fn cache_lookup_entities(
         &request.context,
         !is_no_cache,
     )?;
+
+    // Surface cache tags from every usable hit on the supergraph response aggregator. This
+    // covers both the full-hit short-circuit below and the partial-hit path where the error
+    // branch may rebuild a response from only cached entities.
+    // TODO: docs, explain ^ and sanity check ^
+    for entry in cache_result.iter() {
+        if let Some(invalidation_labels) = entry.invalidation_labels {
+            record_external_cache_tags_to_context(
+                &request.context,
+                invalidation_labels,
+                &name,
+                &entry.typename,
+            );
+        }
+    }
 
     if !new_representations.is_empty() {
         body.variables
@@ -1986,7 +2018,7 @@ fn extract_cache_key_root(
     indexes: &InvalidationIndexes,
 ) -> (String, Vec<CacheTag>) {
     let _ = subgraph_name; // kept for parity; subgraph context is encoded by the caller
-    let entity_type = entity_type_opt.unwrap_or("Query");
+    let entity_type = entity_type_opt.unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME);
 
     let key = PrimaryCacheKeyRoot {
         subgraph_name,
@@ -2114,7 +2146,14 @@ fn extract_cache_keys(
                 typename,
                 representation,
             )?;
-            record_external_cache_tags(context, invalidation_cache_keys.iter().cloned());
+
+            record_external_cache_tags_to_context(
+                context,
+                invalidation_cache_keys.iter().cloned(),
+                subgraph_name,
+                typename,
+            );
+
             cache_tags.extend(invalidation_cache_keys.into_iter().map(CacheTag::Tag));
         }
 
@@ -2511,6 +2550,7 @@ struct IntermediateResult {
     // Only set when debug mode is enabled
     entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
     cache_entry: Option<CacheEntry>,
+    invalidation_labels: Option<HashSet<String>>,
 }
 
 // build a new list of representations without the ones we got from the cache
@@ -2589,6 +2629,8 @@ fn filter_representations(
             typename,
             cache_entry,
             entity_key,
+            // TODO: sanity check that this is fine
+            invalidation_labels: cache_entry.unwrap_or_default().invalidation_labels,
         });
     }
 
@@ -2698,6 +2740,7 @@ async fn insert_entities_in_result(
 
                 // Per-entity cache tags from the subgraph's `apolloEntityCacheTags` extension.
                 // Gated on the CacheTag index being active.
+                // FIXME: shouldn't be gated on indexes
                 if indexes.is_enabled(IndexMode::CacheTag)
                     && let Some(Value::Array(keys)) = specific_surrogate_keys
                 {
@@ -2706,7 +2749,13 @@ async fn insert_entities_in_result(
                         .filter_map(|v| v.as_str())
                         .map(|s| s.to_owned())
                         .collect();
-                    record_external_cache_tags(&context, entity_tags.iter().cloned());
+
+                    record_external_cache_tags_to_context(
+                        &context,
+                        entity_tags.iter().cloned(),
+                        subgraph_name,
+                        &typename,
+                    );
                     cache_tags.extend(entity_tags.into_iter().map(CacheTag::Tag));
                 }
 
@@ -2782,13 +2831,6 @@ async fn insert_entities_in_result(
     }
 
     Ok((new_entities, new_errors))
-}
-
-fn external_invalidation_keys<I: IntoIterator<Item = String>>(invalidation_keys: I) -> Vec<String> {
-    invalidation_keys
-        .into_iter()
-        .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-        .collect()
 }
 
 fn assemble_response_from_errors(
@@ -2875,247 +2917,6 @@ async fn reattempt_connection(
 }
 
 pub(crate) type CacheControls = HashMap<SubgraphRequestId, CacheControl>;
-
-/// Per-request aggregator of cache tags surfaced by response_cache.
-///
-/// Populated as the router walks the resolution tree: each subgraph response — cache hit,
-/// cache miss, or partial entity hit — contributes its tag set. The supergraph_service
-/// `map_response` consumes the union to emit the configured cache-tag header when
-/// `cdn_invalidation.enabled` is true.
-///
-/// Stored as a typed `Context` extension; the type itself is the key. Tags pushed through
-/// `add_many` are expected to be filtered through `external_invalidation_keys` first so
-/// internal `__apollo_internal::` prefixed tags do not leak.
-#[derive(Default)]
-pub(crate) struct CacheTagsAggregator {
-    tags: HashSet<String>,
-}
-
-impl CacheTagsAggregator {
-    pub(crate) fn add_many(&mut self, tags: impl IntoIterator<Item = String>) {
-        self.tags.extend(tags);
-    }
-
-    pub(crate) fn snapshot(&self) -> HashSet<String> {
-        self.tags.clone()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn take(&mut self) -> HashSet<String> {
-        std::mem::take(&mut self.tags)
-    }
-}
-
-/// Push a set of cache tags into the per-request aggregator, filtering out tags that begin
-/// with the internal-cache-tag prefix so they cannot leak to the client.
-fn record_external_cache_tags(context: &Context, tags: impl IntoIterator<Item = String>) {
-    let external: Vec<String> = external_invalidation_keys(tags);
-    if external.is_empty() {
-        return;
-    }
-    context.extensions().with_lock(|lock| {
-        lock.get_or_default_mut::<CacheTagsAggregator>()
-            .add_many(external);
-    });
-}
-
-fn build_invalidation_labels_header(
-    tags: HashSet<String>,
-    config: &CdnInvalidationConfig,
-) -> Option<String> {
-    if tags.is_empty() {
-        return None;
-    }
-
-    let mut sorted: Vec<String> = tags.into_iter().collect();
-    sorted.sort();
-
-    let joined = sorted.join(&config.header_delimiter);
-    if joined.len() <= config.max_bytes {
-        return Some(joined);
-    }
-
-    let mut included: Vec<&str> = Vec::new();
-    let mut current_len = 0usize;
-
-    for tag in &sorted {
-        let next_len = if included.is_empty() {
-            tag.len()
-        } else {
-            current_len + config.header_delimiter.len() + tag.len()
-        };
-        if next_len > config.max_bytes {
-            break;
-        }
-        included.push(tag.as_str());
-        current_len = next_len;
-    }
-
-    let dropped = sorted.len() - included.len();
-
-    tracing::warn!(
-        max_bytes = %config.max_bytes,
-        actual_bytes = %joined.len(),
-        dropped_count = %dropped,
-        "response_cache cache-tag header exceeds max_bytes; truncated per on_overflow=truncate"
-    );
-
-    Some(included.join(&config.header_delimiter))
-}
-
-fn maybe_emit_invalidation_labels_header(
-    headers: &mut http::HeaderMap,
-    tags: HashSet<String>,
-    config: &CdnInvalidationConfig,
-) {
-    let invalidation_labels_header =
-        if let Some(labels) = build_invalidation_labels_header(tags, config) {
-            labels
-        } else {
-            // TODO: add metric for empty invalidation labels header
-            // TODO: add debug-level log for ^
-            return;
-        };
-
-    let header_name = match HeaderName::from_bytes(config.header_name.as_bytes()) {
-        Ok(name) => name,
-        Err(err) => {
-            tracing::warn!(
-                header = %config.header_name,
-                error = %err,
-                "response_cache cdn_invalidation.header is not a valid HTTP header name; skipping emission"
-            );
-
-            // TODO: metric for error/skipping ^
-            return;
-        }
-    };
-
-    match HeaderValue::from_str(&invalidation_labels_header) {
-        Ok(invalidation_labels) => {
-            headers.insert(header_name, invalidation_labels);
-            tracing::debug!("response_cache emitted aggregated cache-tag header");
-            // TODO: decide on whether to emit the full header (might be large--per req)
-        }
-        Err(err) => {
-            tracing::warn!(
-                error = %err,
-                "response_cache aggregated cache-tag header value is not a valid HTTP header value; skipping emission"
-            );
-            // TODO: metric for error/skipping ^
-        }
-    }
-}
-
-#[cfg(test)]
-mod cdn_invalidation_tests {
-    use http::HeaderMap;
-
-    use super::*;
-
-    fn tags(items: &[&str]) -> HashSet<String> {
-        items.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn sort_is_deterministic_across_runs() {
-        let first = build_invalidation_labels_header(
-            tags(&["c", "a", "b"]),
-            &CdnInvalidationConfig::default(),
-        );
-        let second = build_invalidation_labels_header(
-            tags(&["b", "c", "a"]),
-            &CdnInvalidationConfig::default(),
-        );
-        assert_eq!(first, second);
-    }
-
-    #[test]
-    fn emit_sets_header_for_single_plan() {
-        let mut headers = HeaderMap::new();
-        maybe_emit_invalidation_labels_header(
-            &mut headers,
-            tags(&["alpha", "beta"]),
-            &CdnInvalidationConfig::default(),
-        );
-        let value = headers.get("Cache-Tag").expect("header should be set");
-        assert_eq!(value.to_str().unwrap(), "alpha,beta");
-    }
-
-    #[test]
-    fn emit_omits_header_when_empty() {
-        let mut headers = HeaderMap::new();
-        maybe_emit_invalidation_labels_header(
-            &mut headers,
-            HashSet::new(),
-            &CdnInvalidationConfig::default(),
-        );
-        assert!(headers.get("Cache-Tag").is_none());
-    }
-
-    #[test]
-    fn emit_skips_invalid_header_name() {
-        let config = CdnInvalidationConfig {
-            header_name: "not a valid header name".to_string(),
-            ..CdnInvalidationConfig::default()
-        };
-        let mut headers = HeaderMap::new();
-        maybe_emit_invalidation_labels_header(&mut headers, tags(&["alpha"]), &config);
-        assert!(headers.is_empty());
-    }
-}
-
-#[cfg(test)]
-mod cache_tags_aggregator_tests {
-    use super::*;
-
-    #[test]
-    fn snapshot_is_empty_by_default() {
-        let aggregator = CacheTagsAggregator::default();
-        assert!(aggregator.snapshot().is_empty());
-    }
-
-    #[test]
-    fn add_many_inserts_tags() {
-        let mut aggregator = CacheTagsAggregator::default();
-        aggregator.add_many(["alpha".to_string(), "beta".to_string()]);
-        let snapshot = aggregator.snapshot();
-        assert!(snapshot.contains("alpha"));
-        assert!(snapshot.contains("beta"));
-        assert_eq!(snapshot.len(), 2);
-    }
-
-    #[test]
-    fn add_many_deduplicates_across_calls() {
-        let mut aggregator = CacheTagsAggregator::default();
-        aggregator.add_many(["alpha".to_string()]);
-        aggregator.add_many(["alpha".to_string(), "beta".to_string()]);
-        assert_eq!(aggregator.snapshot().len(), 2);
-    }
-
-    #[test]
-    fn take_leaves_aggregator_empty() {
-        let mut aggregator = CacheTagsAggregator::default();
-        aggregator.add_many(["alpha".to_string()]);
-        let taken = aggregator.take();
-        assert_eq!(taken.len(), 1);
-        assert!(aggregator.snapshot().is_empty());
-    }
-
-    #[test]
-    fn record_external_cache_tags_filters_internal_prefix() {
-        let context = Context::new();
-        let internal = format!("{INTERNAL_CACHE_TAG_PREFIX}only");
-        record_external_cache_tags(&context, vec![internal.clone(), "public-tag".to_string()]);
-        let snapshot = context.extensions().with_lock(|lock| {
-            lock.get::<CacheTagsAggregator>()
-                .map(|a| a.snapshot())
-                .unwrap_or_default()
-        });
-        assert!(snapshot.contains("public-tag"));
-        assert!(!snapshot.contains(&internal));
-    }
-}
 
 #[cfg(all(
     test,
