@@ -111,9 +111,6 @@ parameters:
   quick_nightly:
     type: boolean
     default: false
-  test_updated_cargo_deps:
-    type: boolean
-    default: false
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -495,12 +492,14 @@ jobs:
       - run:
           name: Skip if no source files changed
           command: |
-            # Always run on dev (post-merge); CIRCLE_BRANCH is 'dev' for nightly triggers too
-            if [ "$CIRCLE_BRANCH" = "dev" ]; then
+            # Always run on the default branch (post-merge); nightly triggers also target it
+            git remote set-head origin -a
+            DEFAULT_BRANCH=$(git rev-parse --abbrev-ref origin/HEAD | sed 's|^origin/||')
+            if [ "$CIRCLE_BRANCH" = "$DEFAULT_BRANCH" ]; then
               exit 0
             fi
-            git fetch origin dev --depth=100
-            BASE=$(git merge-base HEAD origin/dev 2>/dev/null || git rev-parse HEAD~1)
+            git fetch origin "$DEFAULT_BRANCH" --depth=100
+            BASE=$(git merge-base HEAD "origin/$DEFAULT_BRANCH" 2>/dev/null || git rev-parse HEAD~1)
             CHANGED=$(git diff --name-only "$BASE" HEAD)
             echo "Changed files:"
             echo "$CHANGED"
@@ -535,7 +534,7 @@ jobs:
                         "type": "section",
                         "text": {
                           "type": "mrkdwn",
-                          "text": ":x: CI tests *failed* on `dev` for `${CIRCLE_JOB}` — a merge may have broken the build!\n<${CIRCLE_BUILD_URL}|View failed job>"
+                          "text": ":x: CI tests *failed* on `${CIRCLE_BRANCH}` for `${CIRCLE_JOB}` — a merge may have broken the build!\n<${CIRCLE_BUILD_URL}|View failed job>"
                         }
                       }
                     ]
@@ -584,90 +583,6 @@ jobs:
                         "text": {
                           "type": "mrkdwn",
                           "text": ":white_check_mark: A `nightly` test run has passed for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`."
-                        }
-                      },
-                      {
-                        "type": "actions",
-                        "elements": [
-                          {
-                            "type": "button",
-                            "action_id": "success_tagged_deploy_view",
-                            "text": {
-                              "type": "plain_text",
-                              "text": "View Job"
-                            },
-                            "url": "${CIRCLE_BUILD_URL}"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-  test_updated:
-    environment:
-      <<: *common_job_environment
-    parameters:
-      platform:
-        type: executor
-        default: amd_linux_test
-      from_test_updated_cargo_deps_workflow:
-        type: boolean
-        default: false
-    executor: << parameters.platform >>
-    steps:
-      - checkout
-      - setup_environment:
-          platform: << parameters.platform >>
-      - run:
-          name: Update all Rust dependencies
-          command: |
-            rm Cargo.lock
-            cargo fetch
-      - xtask_test:
-          variant: "updated"
-
-      - when:
-          condition:
-            equal:
-              [true, << parameters.from_test_updated_cargo_deps_workflow >>]
-          steps:
-            - slack/notify:
-                event: fail
-                custom: |
-                  {
-                    "blocks": [
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": ":x: The `test_updated_cargo_deps` workflow has *failed* for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`!"
-                        }
-                      },
-                      {
-                        "type": "actions",
-                        "elements": [
-                          {
-                            "type": "button",
-                            "action_id": "success_tagged_deploy_view",
-                            "text": {
-                              "type": "plain_text",
-                              "text": "View Job"
-                            },
-                            "url": "${CIRCLE_BUILD_URL}"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-            - slack/notify:
-                event: pass
-                custom: |
-                  {
-                    "blocks": [
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": ":white_check_mark: The `test_updated_cargo_deps` workflow has passed for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`."
                         }
                       },
                       {
@@ -1051,21 +966,25 @@ jobs:
                   helm show all oci://ghcr.io/apollographql/helm-charts/router --version ${VERSION} > /dev/null && exit 1
                   # Push chart to repository
                   helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
+            - run:
+                # Runs AFTER all artifacts (binaries, Docker, Helm) are up so
+                # the release page is fully populated before notes appear.
+                # Dry-run for now — prints what would be posted.  Flip to
+                # `--publish` once we've watched a real release land.
+                # `|| true` so a bad extract doesn't fail the pipeline.
+                name: Publish release notes (dry-run)
+                command: |
+                  case "$VERSION" in *-*) echo "Prerelease — skipping notes"; exit 0 ;; esac
+                  VERSION_WITHOUT_LEADING_V="${VERSION#v}"
+                  cargo xtask release notes "$VERSION_WITHOUT_LEADING_V" || true
 
 workflows:
-  test_updated_cargo_deps:
-    when: << pipeline.parameters.test_updated_cargo_deps >>
-    jobs:
-      - test_updated:
-          platform: amd_linux_test
-          from_test_updated_cargo_deps_workflow: true
   ci_checks:
     when:
       not:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
-          - << pipeline.parameters.test_updated_cargo_deps >>
     jobs:
       - fmt_check:
           matrix:
@@ -1169,7 +1088,6 @@ workflows:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
-          - << pipeline.parameters.test_updated_cargo_deps >>
     jobs:
       - pre_verify_release:
           matrix:
@@ -1247,7 +1165,6 @@ workflows:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
-          - << pipeline.parameters.test_updated_cargo_deps >>
     jobs:
       - secops/gitleaks:
           context:

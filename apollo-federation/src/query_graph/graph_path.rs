@@ -272,10 +272,6 @@ impl Default for ExcludedDestinations {
 pub(crate) struct ExcludedConditions(Arc<Vec<Arc<SelectionSet>>>);
 
 impl ExcludedConditions {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
     fn is_excluded(&self, condition: Option<&Arc<SelectionSet>>) -> bool {
         let Some(condition) = condition else {
             return false;
@@ -288,6 +284,13 @@ impl ExcludedConditions {
         let mut result = self.0.as_ref().clone();
         result.push(value.clone().into());
         ExcludedConditions(Arc::new(result))
+    }
+}
+
+impl PartialEq for ExcludedConditions {
+    fn eq(&self, other: &ExcludedConditions) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+            || (self.0.len() == other.0.len() && self.0.iter().all(|x| other.0.contains(x)))
     }
 }
 

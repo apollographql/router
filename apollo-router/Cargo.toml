@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "2.15.1"
+version = "2.16.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -59,7 +59,7 @@ snapshot = []
 addr2line = "0.27.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=2.15.1" }
+apollo-federation = { path = "../apollo-federation", version = "=2.16.0" }
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "futures-io",
@@ -138,7 +138,7 @@ indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.15.0"
 jsonpath_lib = "0.3.0"
 jsonpath-rust = "0.3.5"
-jsonschema = { version = "0.46.0", default-features = false }
+jsonschema = { version = "0.48.0", default-features = false }
 jsonwebtoken = { version = "10.0.0", features = ["rust_crypto"] }
 libc = "0.2.155"
 linkme = "0.3.30"
@@ -205,7 +205,7 @@ prost = "0.14.0"
 prost-types = "0.14.0"
 proteus = "0.5.0"
 rand = "0.10.0"
-rhai = { version = "~1.23.6", features = ["sync", "serde", "internals"] }
+rhai = { version = "~1.25.0", features = ["sync", "serde", "internals"] }
 regex = "1.10.5"
 reqwest = { workspace = true, default-features = false, features = [
     "rustls-tls",
@@ -247,7 +247,7 @@ tonic = { version = "0.14.5", features = [
     "gzip",
 ] }
 tower.workspace = true
-tower-http = { version = "0.6.2", features = ["full"] }
+tower-http = { version = "0.7.0", features = ["full"] }
 tower-service = "0.3.2"
 tracing = "0.1.40"
 tracing-core = "0.1.32"
@@ -285,7 +285,7 @@ time = { version = "0.3.36", features = ["serde"] }
 similar.workspace = true
 console = "0.16.0"
 bytesize = { version = "1.3.0", features = ["serde"] }
-ahash = "0.8.11"
+ahash.workspace = true
 itoa = "1.0.9"
 ryu = "1.0.15"
 apollo-environment-detector = "0.1.0"
@@ -333,7 +333,7 @@ opentelemetry-proto = { version = "0.31", features = [
     "with-serde",
 ] }
 opentelemetry-datadog = { version = "0.19", features = ["reqwest-client"] }
-p256 = "0.13.2"
+p256 = "0.14.0"
 pretty_assertions = "1.4.1"
 reqwest = { version = "0.12.9", default-features = false, features = [
     "json",
