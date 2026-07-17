@@ -1,6 +1,8 @@
 use anyhow::Result;
 use xtask::*;
 
+const RELEASE_DIST_DIR: &str = "release-dist";
+
 #[derive(Debug, clap::Parser)]
 pub struct Dist {
     #[clap(long)]
@@ -13,7 +15,7 @@ pub struct Dist {
 
 impl Dist {
     pub fn run(&self) -> Result<()> {
-        let mut args = vec!["build", "--release"];
+        let mut args = vec!["build", "--profile", "release-dist"];
         if let Some(features) = &self.features {
             args.push("--features");
             args.push(features);
@@ -25,14 +27,17 @@ impl Dist {
                 args.push(target);
                 cargo!(args);
 
-                let bin_path = TARGET_DIR.join(target).join("release").join(RELEASE_BIN);
+                let bin_path = TARGET_DIR
+                    .join(target)
+                    .join(RELEASE_DIST_DIR)
+                    .join(RELEASE_BIN);
 
                 eprintln!("successfully compiled to: {}", &bin_path);
             }
             None => {
                 cargo!(args);
 
-                let bin_path = TARGET_DIR.join("release").join(RELEASE_BIN);
+                let bin_path = TARGET_DIR.join(RELEASE_DIST_DIR).join(RELEASE_BIN);
 
                 eprintln!("successfully compiled to: {}", &bin_path);
             }

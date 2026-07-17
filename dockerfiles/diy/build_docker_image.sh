@@ -18,9 +18,10 @@
 # Note: This utility makes assumptions about the existence of files relative
 #       to the directory where it is executed. To work correctly you must
 #       execute in the "repo"/dockerfiles/diy directory.
-# Note: A debug image is an image where heaptrack is installed. The router
-#       is still a release build router, but all memory is being tracked
-#       under heaptrack. (https://github.com/KDE/heaptrack)
+# Note: A debug image is an image where heaptrack is installed and the router
+#       binary retains debuginfo (line tables). Memory is tracked under
+#       heaptrack (https://github.com/KDE/heaptrack). When building from a
+#       released version, the -debug tarball (unstripped binary) is used.
 # Note: When I first wrote this script, I was careful to make sure that various
 #       invalid combinations of parameters were detected. As the functionality
 #       has grown, I've become less careful. So, take care you don't do things
@@ -38,7 +39,7 @@ usage () {
    printf "Usage: build_docker_image.sh [-b [-r <repo>]] [-d] [-m <arch>] [-n <name>] [<release>]\n"
    printf "\t-a build docker image from a build artifact\n"
    printf "\t-b build docker image from the default repo, if not present build from a released version\n"
-   printf "\t-d build debug image, router will run under control of heaptrack\n"
+   printf "\t-d build debug image, unstripped router under heaptrack\n"
    printf "\t-m override machine architecture. valid options are: amd64 or arm64 (DEFAULT: machine architecture)\n"
    printf "\t-n override image name (DEFAULT: router)\n"
    printf "\t-r build docker image from a specified repo, only valid with -b flag\n"

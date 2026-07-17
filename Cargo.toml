@@ -44,6 +44,13 @@ incremental = false
 inherits = "release"
 debug = 1
 
+# Used by `cargo xtask dist` for release artifacts. Keeps line-table debuginfo
+# so package can emit both a stripped tarball and an unstripped -debug tarball
+# from a single build.
+[profile.release-dist]
+inherits = "release"
+debug = 1
+
 # Dependencies used in more than one place are specified here in order to keep versions in sync:
 # https://doc.rust-lang.org/cargo/reference/workspaces.html#the-dependencies-table
 [workspace.dependencies]

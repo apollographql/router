@@ -57,33 +57,39 @@ fi
 
 if [ -z "${ARTIFACT_URL}" ]; then
     echo "Downloading Router release: ${ROUTER_RELEASE}"
-    # Download router tarball directly instead of using installer
-    TARBALL_NAME="router-${ROUTER_RELEASE}-${ARCH}.tar.gz"
 
-    # We use the rover-plugin service to download the Router tarball, rather
-    # than the actual executable which is what our usual curl installer does.
-    #
-    # Expanding on that with a couple notes:
-    #
-    #   - There is, as of the time of this writing, NO fixed Apollo-controlled URL
-    #     that lets you download a specific Router release tarball.
-    #   - We currently only have the curl installer which downloads and extracts
-    #     the tarballs.
-    #   - This approach is acceptable and defensive since rover is guaranteed to
-    #     have this in order for it to download the router, and that's not going
-    #     away. They also go through the same Orbiter endpoint/code anyhow.
-    #   - It IS possible to fix orbiter to also serve on the router domain and w
-    #     could do that, but this seemed more than acceptable, and is a well-tested
-    #     and monitored endpoint.
-    #   - The architecture is determined from TARGETPLATFORM, an environment variable
-    #     made available by Docker: https://docs.docker.com/build/building/multi-platform/
-    #     These are usually from `--platform` values passed within CircleCI's config where
-    #     this release process is invoked.
+    if [ "${DEBUG_IMAGE}" = "true" ]; then
+        # Debug images ship the unstripped binary. Rover only serves the
+        # stripped production tarball, so fetch the -debug artifact from GitHub.
+        TARBALL_NAME="router-${ROUTER_RELEASE}-${ARCH}-debug.tar.gz"
+        DOWNLOAD_URL="https://github.com/apollographql/router/releases/download/${ROUTER_RELEASE}/${TARBALL_NAME}"
+    else
+        TARBALL_NAME="router-${ROUTER_RELEASE}-${ARCH}.tar.gz"
+        # We use the rover-plugin service to download the Router tarball, rather
+        # than the actual executable which is what our usual curl installer does.
+        #
+        # Expanding on that with a couple notes:
+        #
+        #   - There is, as of the time of this writing, NO fixed Apollo-controlled URL
+        #     that lets you download a specific Router release tarball.
+        #   - We currently only have the curl installer which downloads and extracts
+        #     the tarballs.
+        #   - This approach is acceptable and defensive since rover is guaranteed to
+        #     have this in order for it to download the router, and that's not going
+        #     away. They also go through the same Orbiter endpoint/code anyhow.
+        #   - It IS possible to fix orbiter to also serve on the router domain and w
+        #     could do that, but this seemed more than acceptable, and is a well-tested
+        #     and monitored endpoint.
+        #   - The architecture is determined from TARGETPLATFORM, an environment variable
+        #     made available by Docker: https://docs.docker.com/build/building/multi-platform/
+        #     These are usually from `--platform` values passed within CircleCI's config where
+        #     this release process is invoked.
+        DOWNLOAD_URL="https://rover.apollo.dev/tar/router/${ARCH}/${ROUTER_RELEASE}"
+    fi
 
     # Download the router tarball from the rover service
-    curl -sSL \
-      "https://rover.apollo.dev/tar/router/${ARCH}/${ROUTER_RELEASE}" \
-        -o "${TARBALL_NAME}"
+
+    curl -sSL "${DOWNLOAD_URL}" -o "${TARBALL_NAME}"
 
     # Download and validate checksum
     curl -sSL \
