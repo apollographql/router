@@ -36,6 +36,7 @@ use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::json_ext::Object;
+use crate::layers::ServiceBuilderExt as _;
 use crate::layers::InternalServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::subscription::SubscriptionConfig;
