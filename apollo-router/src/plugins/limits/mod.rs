@@ -6,7 +6,9 @@ use std::error::Error;
 use async_trait::async_trait;
 use bytesize::ByteSize;
 use http::StatusCode;
+use http::header::CONTENT_TYPE;
 pub(crate) use layer::BodyLimitControl;
+use mime::APPLICATION_JSON;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -359,6 +361,7 @@ impl BodyLimitError {
                         .build(),
                 )
                 .status_code(StatusCode::PAYLOAD_TOO_LARGE)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .context(ctx)
                 .build()
                 .unwrap(),
@@ -420,6 +423,10 @@ mod test {
         let resp = resp.unwrap();
         assert_eq!(resp.response.status(), StatusCode::PAYLOAD_TOO_LARGE);
         assert_eq!(
+            resp.response.headers().get(http::header::CONTENT_TYPE),
+            Some(&http::HeaderValue::from_static("application/json"))
+        );
+        assert_eq!(
             String::from_utf8(
                 router::body::into_bytes(resp.response.into_body())
                     .await
@@ -480,6 +487,10 @@ mod test {
         assert!(resp.is_ok());
         let resp = resp.unwrap();
         assert_eq!(resp.response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(
+            resp.response.headers().get(http::header::CONTENT_TYPE),
+            Some(&http::HeaderValue::from_static("application/json"))
+        );
         assert_eq!(
             String::from_utf8(
                 router::body::into_bytes(resp.response.into_body())
