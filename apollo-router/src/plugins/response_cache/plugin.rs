@@ -121,7 +121,7 @@ pub(crate) struct ResponseCache {
     enabled: bool,
     debug: bool,
     include_cache_control_header_on_router_response: bool,
-    propagate_cache_tags: PropagateCacheTagsConfig,
+    cdn_invalidation: CdnInvalidationConfig,
     private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     pub(crate) invalidation: Invalidation,
     supergraph_schema: Arc<Valid<Schema>>,
@@ -200,8 +200,8 @@ pub(crate) struct Config {
     #[serde(default)]
     pub(crate) enabled: bool,
 
-    #[serde(default)]
     /// Enable debug mode for the debugger
+    #[serde(default)]
     debug: bool,
 
     /// Whether to include a Cache-Control header in the supergraph response sent to clients.
@@ -223,11 +223,13 @@ pub(crate) struct Config {
 
     /// Propagation of aggregated response_cache cache tags to the supergraph response.
     /// Off by default; opt in to surface cache tags to a CDN for tag-based purging.
+    /// TODO: docs
     #[serde(default)]
-    pub(crate) propagate_cache_tags: PropagateCacheTagsConfig,
+    pub(crate) cdn_invalidation: CdnInvalidationConfig,
 }
 
-/// Configuration for surfacing aggregated response_cache cache tags on the supergraph response.
+/// Configuration for surfacing invalidation labels to a CDN as a header (for example, Cloudflare)
+/// separated by a delimiting character (by default, ",")
 ///
 /// When enabled, the router collects the union of cache tags contributed by each subgraph
 /// (from `apolloCacheTags`, `apolloEntityCacheTags`, and resolved `@cacheTag` directive values)
@@ -236,7 +238,7 @@ pub(crate) struct Config {
 /// whether the header is emitted.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
-pub(crate) struct PropagateCacheTagsConfig {
+pub(crate) struct CdnInvalidationConfig {
     /// Whether to emit the configured header on the supergraph response. Defaults to false.
     pub(crate) enabled: bool,
 
@@ -244,7 +246,7 @@ pub(crate) struct PropagateCacheTagsConfig {
     pub(crate) header_name: String,
 
     /// The delimiter used by the invalidation labels header (eg, `" "`, `","`). Defaults to `","`.
-    pub(crate) separator: String,
+    pub(crate) header_delimiter: String,
 
     /// Maximum number of bytes for the joined header value. When the joined value would exceed
     /// this size, `on_overflow` decides what to do. Defaults to 16kb.
@@ -262,15 +264,16 @@ pub(crate) struct PropagateCacheTagsConfig {
     ///
     /// This is an experimental configuration option that might be removed in future releases,
     /// please use caution when deciding to use it
+    /// TODO: document defaults
     pub(crate) experimental_drop_on_overflow: bool,
 }
 
-impl Default for PropagateCacheTagsConfig {
+impl Default for CdnInvalidationConfig {
     fn default() -> Self {
         Self {
             enabled: false,
             header_name: "Cache-Tag".to_string(),
-            separator: ",".to_string(),
+            header_delimiter: ",".to_string(),
             max_bytes: 16384,
             experimental_drop_on_overflow: false,
         }
@@ -438,7 +441,7 @@ impl PluginPrivate for ResponseCache {
             include_cache_control_header_on_router_response: init
                 .config
                 .include_cache_control_header_on_router_response,
-            propagate_cache_tags: init.config.propagate_cache_tags.clone(),
+            cdn_invalidation: init.config.cdn_invalidation.clone(),
             endpoint_config: init.config.invalidation.clone().map(Arc::new),
             subgraphs: Arc::new(init.config.subgraph),
             private_queries: Arc::new(RwLock::new(LruCache::new(
@@ -460,7 +463,8 @@ impl PluginPrivate for ResponseCache {
         let debug = self.debug;
         let include_cache_control_header_on_router_response =
             self.include_cache_control_header_on_router_response;
-        let propagate_cache_tags = self.propagate_cache_tags.clone();
+        let cdn_invalidation = self.cdn_invalidation.clone();
+
         ServiceBuilder::new()
             .map_response(move |mut response: supergraph::Response| {
                 if include_cache_control_header_on_router_response
@@ -483,7 +487,7 @@ impl PluginPrivate for ResponseCache {
                     let _ = cache_control.update_response_headers(response.response.headers_mut());
                 }
 
-                if propagate_cache_tags.enabled {
+                if cdn_invalidation.enabled {
                     let aggregated = response.context.extensions().with_lock(|lock| {
                         lock.get::<CacheTagsAggregator>()
                             .map(|a| a.snapshot())
@@ -492,7 +496,7 @@ impl PluginPrivate for ResponseCache {
                     maybe_emit_invalidation_labels_header(
                         response.response.headers_mut(),
                         aggregated,
-                        &propagate_cache_tags,
+                        &cdn_invalidation,
                     );
                 }
 
@@ -679,7 +683,7 @@ impl ResponseCache {
             enabled: true,
             debug: true,
             include_cache_control_header_on_router_response,
-            propagate_cache_tags: PropagateCacheTagsConfig::default(),
+            cdn_invalidation: CdnInvalidationConfig::default(),
             subgraphs: Arc::new(subgraphs),
             private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
@@ -725,7 +729,7 @@ impl ResponseCache {
             enabled: true,
             debug: true,
             include_cache_control_header_on_router_response: true,
-            propagate_cache_tags: PropagateCacheTagsConfig::default(),
+            cdn_invalidation: CdnInvalidationConfig::default(),
             subgraphs: Arc::new(SubgraphConfiguration {
                 all: Subgraph {
                     invalidation: Some(SubgraphInvalidationConfig {
@@ -2877,7 +2881,7 @@ pub(crate) type CacheControls = HashMap<SubgraphRequestId, CacheControl>;
 /// Populated as the router walks the resolution tree: each subgraph response — cache hit,
 /// cache miss, or partial entity hit — contributes its tag set. The supergraph_service
 /// `map_response` consumes the union to emit the configured cache-tag header when
-/// `propagate_cache_tags.enabled` is true.
+/// `cdn_invalidation.enabled` is true.
 ///
 /// Stored as a typed `Context` extension; the type itself is the key. Tags pushed through
 /// `add_many` are expected to be filtered through `external_invalidation_keys` first so
@@ -2917,7 +2921,7 @@ fn record_external_cache_tags(context: &Context, tags: impl IntoIterator<Item = 
 
 fn build_invalidation_labels_header(
     tags: HashSet<String>,
-    config: &PropagateCacheTagsConfig,
+    config: &CdnInvalidationConfig,
 ) -> Option<String> {
     if tags.is_empty() {
         return None;
@@ -2926,7 +2930,7 @@ fn build_invalidation_labels_header(
     let mut sorted: Vec<String> = tags.into_iter().collect();
     sorted.sort();
 
-    let joined = sorted.join(&config.separator);
+    let joined = sorted.join(&config.header_delimiter);
     if joined.len() <= config.max_bytes {
         return Some(joined);
     }
@@ -2938,7 +2942,7 @@ fn build_invalidation_labels_header(
         let next_len = if included.is_empty() {
             tag.len()
         } else {
-            current_len + config.separator.len() + tag.len()
+            current_len + config.header_delimiter.len() + tag.len()
         };
         if next_len > config.max_bytes {
             break;
@@ -2956,13 +2960,13 @@ fn build_invalidation_labels_header(
         "response_cache cache-tag header exceeds max_bytes; truncated per on_overflow=truncate"
     );
 
-    Some(included.join(&config.separator))
+    Some(included.join(&config.header_delimiter))
 }
 
 fn maybe_emit_invalidation_labels_header(
     headers: &mut http::HeaderMap,
     tags: HashSet<String>,
-    config: &PropagateCacheTagsConfig,
+    config: &CdnInvalidationConfig,
 ) {
     let invalidation_labels_header =
         if let Some(labels) = build_invalidation_labels_header(tags, config) {
@@ -2979,7 +2983,7 @@ fn maybe_emit_invalidation_labels_header(
             tracing::warn!(
                 header = %config.header_name,
                 error = %err,
-                "response_cache propagate_cache_tags.header is not a valid HTTP header name; skipping emission"
+                "response_cache cdn_invalidation.header is not a valid HTTP header name; skipping emission"
             );
 
             // TODO: metric for error/skipping ^
@@ -3004,7 +3008,7 @@ fn maybe_emit_invalidation_labels_header(
 }
 
 #[cfg(test)]
-mod propagate_cache_tags_tests {
+mod cdn_invalidation_tests {
     use http::HeaderMap;
 
     use super::*;
@@ -3017,11 +3021,11 @@ mod propagate_cache_tags_tests {
     fn sort_is_deterministic_across_runs() {
         let first = build_invalidation_labels_header(
             tags(&["c", "a", "b"]),
-            &PropagateCacheTagsConfig::default(),
+            &CdnInvalidationConfig::default(),
         );
         let second = build_invalidation_labels_header(
             tags(&["b", "c", "a"]),
-            &PropagateCacheTagsConfig::default(),
+            &CdnInvalidationConfig::default(),
         );
         assert_eq!(first, second);
     }
@@ -3032,7 +3036,7 @@ mod propagate_cache_tags_tests {
         maybe_emit_invalidation_labels_header(
             &mut headers,
             tags(&["alpha", "beta"]),
-            &PropagateCacheTagsConfig::default(),
+            &CdnInvalidationConfig::default(),
         );
         let value = headers.get("Cache-Tag").expect("header should be set");
         assert_eq!(value.to_str().unwrap(), "alpha,beta");
@@ -3044,16 +3048,16 @@ mod propagate_cache_tags_tests {
         maybe_emit_invalidation_labels_header(
             &mut headers,
             HashSet::new(),
-            &PropagateCacheTagsConfig::default(),
+            &CdnInvalidationConfig::default(),
         );
         assert!(headers.get("Cache-Tag").is_none());
     }
 
     #[test]
     fn emit_skips_invalid_header_name() {
-        let config = PropagateCacheTagsConfig {
+        let config = CdnInvalidationConfig {
             header_name: "not a valid header name".to_string(),
-            ..PropagateCacheTagsConfig::default()
+            ..CdnInvalidationConfig::default()
         };
         let mut headers = HeaderMap::new();
         maybe_emit_invalidation_labels_header(&mut headers, tags(&["alpha"]), &config);

@@ -950,6 +950,40 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "CdnInvalidationConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for surfacing invalidation labels to a CDN as a header (for example, Cloudflare)\nseparated by a delimiting character (by default, \",\")\n\nWhen enabled, the router collects the union of cache tags contributed by each subgraph\n(from `apolloCacheTags`, `apolloEntityCacheTags`, and resolved `@cacheTag` directive values)\nand emits them as a single configurable header on the supergraph response. The tags are\nalways available on the request context for coprocessor or rhai consumption regardless of\nwhether the header is emitted.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Whether to emit the configured header on the supergraph response. Defaults to false.",
+          "type": "boolean"
+        },
+        "experimental_drop_on_overflow": {
+          "default": false,
+          "description": "Whether to drop the invalidation labels header when its size is greater than the maximum\nbytes allowed. Note: this does not drop the `Cache-Control` header so data will still be\ncached. This drops the invalidation labels header, which is useful as a signal to CDNs for\nfurther business logic at the CDN level\n\nCDNs (eg, Cloudflare) have ways of setting rules (eg, Cloudflare's response rules) for handling caching\nand the absence of the invalidation labels header can be used to set `no-store` for the\n`Cache-Control` header to prevent CDN caching of responses or entities that don't have\nfine-grained invalidation labels\n\nThis is an experimental configuration option that might be removed in future releases,\nplease use caution when deciding to use it\nTODO: document defaults",
+          "type": "boolean"
+        },
+        "header_delimiter": {
+          "default": ",",
+          "description": "The delimiter used by the invalidation labels header (eg, `\" \"`, `\",\"`). Defaults to `\",\"`.",
+          "type": "string"
+        },
+        "header_name": {
+          "default": "Cache-Tag",
+          "description": "Name of the invalidation labels header used by CDNs",
+          "type": "string"
+        },
+        "max_bytes": {
+          "default": 16384,
+          "description": "Maximum number of bytes for the joined header value. When the joined value would exceed\nthis size, `on_overflow` decides what to do. Defaults to 16kb.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "Client": {
       "additionalProperties": false,
       "description": "HTTP client configuration",
@@ -2042,6 +2076,21 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
+        "cdn_invalidation": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CdnInvalidationConfig"
+            }
+          ],
+          "default": {
+            "enabled": false,
+            "experimental_drop_on_overflow": false,
+            "header_delimiter": ",",
+            "header_name": "Cache-Tag",
+            "max_bytes": 16384
+          },
+          "description": "Propagation of aggregated response_cache cache tags to the supergraph response.\nOff by default; opt in to surface cache tags to a CDN for tag-based purging.\nTODO: docs"
+        },
         "debug": {
           "default": false,
           "description": "Enable debug mode for the debugger",
@@ -2074,22 +2123,6 @@ expression: "&schema"
           "format": "uint",
           "minimum": 1,
           "type": "integer"
-        },
-        "propagate_cache_tags": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/PropagateCacheTagsConfig"
-            }
-          ],
-          "default": {
-            "deduplicate": true,
-            "enabled": false,
-            "header": "Cache-Tag",
-            "max_bytes": 16384,
-            "on_overflow": "truncate",
-            "separator": ","
-          },
-          "description": "Propagation of aggregated response_cache cache tags to the supergraph response.\nOff by default; opt in to surface cache tags to a CDN for tag-based purging."
         },
         "subgraph": {
           "allOf": [
@@ -7749,26 +7782,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "OverflowPolicy": {
-      "description": "Behavior when a joined cache-tag header value exceeds `max_bytes`.",
-      "oneOf": [
-        {
-          "const": "truncate",
-          "description": "Emit the header with as many tags as fit, in deterministic (lexicographic) order. Drop\nthe rest and log a `tracing::warn!` with `max_bytes`, `actual_bytes`, and `dropped_count`.",
-          "type": "string"
-        },
-        {
-          "const": "drop",
-          "description": "Omit the header entirely when the joined value would overflow.",
-          "type": "string"
-        },
-        {
-          "const": "header_per_tag",
-          "description": "Emit one header per tag instead of joining. Each header value carries a single tag.",
-          "type": "string"
-        }
-      ]
-    },
     "PersistedQueries": {
       "additionalProperties": false,
       "description": "Persisted Queries (PQ) configuration",
@@ -8068,49 +8081,6 @@ expression: "&schema"
         }
       ],
       "description": "Propagate header"
-    },
-    "PropagateCacheTagsConfig": {
-      "additionalProperties": false,
-      "description": "Configuration for surfacing aggregated response_cache cache tags on the supergraph response.\n\nWhen enabled, the router collects the union of cache tags contributed by each subgraph\n(from `apolloCacheTags`, `apolloEntityCacheTags`, and resolved `@cacheTag` directive values)\nand emits them as a single configurable header on the supergraph response. The tags are\nalways available on the request context for coprocessor or rhai consumption regardless of\nwhether the header is emitted.",
-      "properties": {
-        "deduplicate": {
-          "default": true,
-          "description": "Whether to deduplicate tags before joining. Tags are stored in a `HashSet` so duplicates\nare already collapsed; this flag is reserved for future header emission strategies.",
-          "type": "boolean"
-        },
-        "enabled": {
-          "default": false,
-          "description": "Whether to emit the configured header on the supergraph response. Defaults to false.",
-          "type": "boolean"
-        },
-        "header": {
-          "default": "Cache-Tag",
-          "description": "Name of the response header used to surface aggregated cache tags.",
-          "type": "string"
-        },
-        "max_bytes": {
-          "default": 16384,
-          "description": "Maximum number of bytes for the joined header value. When the joined value would exceed\nthis size, `on_overflow` decides what to do.",
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "on_overflow": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/OverflowPolicy"
-            }
-          ],
-          "default": "truncate",
-          "description": "Policy applied when the joined header value would exceed `max_bytes`."
-        },
-        "separator": {
-          "default": ",",
-          "description": "Separator used to join multiple tags into a single header value.",
-          "type": "string"
-        }
-      },
-      "type": "object"
     },
     "Propagation": {
       "additionalProperties": false,
