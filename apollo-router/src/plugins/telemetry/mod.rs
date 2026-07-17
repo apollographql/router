@@ -1841,9 +1841,6 @@ impl Telemetry {
         if config.exporters.tracing.datadog.is_enabled() {
             attributes.push(KeyValue::new("telemetry.tracing.datadog", true));
         }
-        if config.exporters.tracing.zipkin.is_enabled() {
-            attributes.push(KeyValue::new("telemetry.tracing.zipkin", true));
-        }
 
         if !attributes.is_empty() {
             u64_counter!(

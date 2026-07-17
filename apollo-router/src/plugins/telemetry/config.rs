@@ -290,8 +290,6 @@ pub(crate) struct Tracing {
     pub(crate) common: TracingCommon,
     /// OpenTelemetry native exporter configuration
     pub(crate) otlp: otlp::Config,
-    /// Zipkin exporter configuration
-    pub(crate) zipkin: tracing::zipkin::Config,
     /// Datadog exporter configuration
     pub(crate) datadog: tracing::datadog::Config,
 }
@@ -305,16 +303,8 @@ impl Tracing {
         self.propagation.trace_context || self.otlp.enabled
     }
 
-    pub(crate) fn is_jaeger_propagation_enabled(&self) -> bool {
-        self.propagation.jaeger
-    }
-
     pub(crate) fn is_datadog_propagation_enabled(&self) -> bool {
         self.propagation.datadog.unwrap_or(false) || self.datadog.enabled
-    }
-
-    pub(crate) fn is_zipkin_propagation_enabled(&self) -> bool {
-        self.propagation.zipkin || self.zipkin.enabled
     }
 
     pub(crate) fn is_aws_xray_propagation_enabled(&self) -> bool {
@@ -408,12 +398,8 @@ pub(crate) struct Propagation {
     pub(crate) baggage: bool,
     /// Propagate trace context https://www.w3.org/TR/trace-context/
     pub(crate) trace_context: bool,
-    /// Propagate Jaeger
-    pub(crate) jaeger: bool,
     /// Propagate Datadog
     pub(crate) datadog: Option<bool>,
-    /// Propagate Zipkin
-    pub(crate) zipkin: bool,
     /// Propagate AWS X-Ray
     pub(crate) aws_xray: bool,
 }
@@ -880,18 +866,14 @@ impl Conf {
     pub(crate) fn validate_per_exporter_samplers(&self) -> Result<(), Error> {
         let common_ratio = sampler_option_to_ratio(&self.exporters.tracing.common.sampler);
 
-        let mut exporters = Vec::with_capacity(4);
-        exporters.push(("apollo", self.apollo.sampler.as_ref()));
-        exporters.push((
-            "exporters.tracing.zipkin",
-            self.exporters.tracing.zipkin.sampler.as_ref(),
-        ));
-
         // OTLP sampler is always applied (even in Datadog agent sampling mode), so always validate.
-        exporters.push((
-            "exporters.tracing.otlp",
-            self.exporters.tracing.otlp.sampler.as_ref(),
-        ));
+        let mut exporters = vec![
+            ("apollo", self.apollo.sampler.as_ref()),
+            (
+                "exporters.tracing.otlp",
+                self.exporters.tracing.otlp.sampler.as_ref(),
+            ),
+        ];
 
         // In Datadog agent sampling mode the Datadog exporter ignores its per-exporter sampler
         // (it must forward all spans unfiltered so the agent can make its own decisions).

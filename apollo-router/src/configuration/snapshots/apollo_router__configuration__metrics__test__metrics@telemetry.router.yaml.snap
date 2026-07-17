@@ -29,4 +29,3 @@ expression: "& metrics.non_zero()"
           opt.tracing.common.sampler: false
           opt.tracing.datadog: true
           opt.tracing.otlp: true
-          opt.tracing.zipkin: true

@@ -4053,7 +4053,7 @@ mod tests {
     /// Verify that the `RouterInstruments::on_response` dispatch to `subscriptions_terminated`
     /// is wired up end-to-end. If the delegation were removed or mis-wired, `stashed_attributes`
     /// would be empty and the `subgraph.name`/`client.name` labels would silently disappear from
-    /// the metric — exactly the regression this PR guards against.
+    /// the metric.
     #[tokio::test]
     async fn test_router_instruments_on_response_wires_subscriptions_terminated() {
         async {

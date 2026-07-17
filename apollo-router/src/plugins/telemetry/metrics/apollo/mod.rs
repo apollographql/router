@@ -16,7 +16,6 @@ use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::Stream;
 use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
-use opentelemetry_sdk::runtime;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tonic::transport::ClientTlsConfig;
@@ -32,6 +31,7 @@ use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::metrics::BlockingSafeTokioRuntime;
 use crate::plugins::telemetry::metrics::NamedMetricExporter;
 use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::metrics::RetryMetricExporter;
@@ -200,13 +200,17 @@ impl Config {
             "apollo",
         );
 
-        let default_reader = PeriodicReader::builder(named_exporter, runtime::Tokio)
-            .with_interval(Duration::from_secs(60))
-            .build();
+        let default_reader =
+            PeriodicReader::builder(named_exporter, BlockingSafeTokioRuntime::new_for_metrics())
+                .with_interval(Duration::from_secs(60))
+                .build();
 
-        let realtime_reader = PeriodicReader::builder(named_realtime_exporter, runtime::Tokio)
-            .with_interval(batch_config.scheduled_delay)
-            .build();
+        let realtime_reader = PeriodicReader::builder(
+            named_realtime_exporter,
+            BlockingSafeTokioRuntime::new_for_metrics(),
+        )
+        .with_interval(batch_config.scheduled_delay)
+        .build();
 
         let resource = Resource::builder_empty()
             .with_attributes([
