@@ -22,7 +22,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## 🐛 Fixes
 
-### Reject `@external` fields on nested `@key` paths with cross-subgraph `@requires` ([PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+### Reject `@external` fields on nested `@key` paths with cross-subgraph `@requires` ([PR #9832](https://github.com/apollographql/router/pull/9832))
 
 When a subgraph declared a nested `@key` (e.g., `@key(fields: "id u { x }")`) where
 fields along the key path were marked `@external`, and also had a `@requires` that
@@ -34,7 +34,7 @@ Composition now catches this as a `SATISFIABILITY_ERROR`. To fix affected schema
 replace `@external` with `@shareable` on key-path fields, which is the intended
 Federation 2 pattern.
 
-By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/XXXX>
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9832>
 
 ### Fix composition field merging when subtyping ([PR #9751](https://github.com/apollographql/router/pull/9751))
 
