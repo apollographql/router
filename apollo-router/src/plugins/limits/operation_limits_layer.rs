@@ -13,7 +13,12 @@ use crate::services::supergraph;
 
 /// Layer that enforces operation limits and rejects GraphQL requests that exceed the limits.
 ///
-/// `ParsedDocument` must be available in the context. Otherwise, no limits are enforced.
+/// # Context
+/// This layer requires the following context values to be available on the request:
+/// - [`ParsedDocument`] - An error is returned if the document is missing.
+///
+/// This layer populates the following context values on the request:
+/// - [`OperationLimits`] - This can then be used to report telemetry.
 pub(crate) struct EnforceOperationLimitsLayer {
     config: Arc<RouterLimitsConfig>,
 }
@@ -39,13 +44,6 @@ impl<S> tower::Layer<S> for EnforceOperationLimitsLayer {
 }
 
 /// Service that enforces operation limits.
-///
-/// # Context
-/// This layer requires the following context values to be available on the request:
-/// - [`ParsedDocument`] - The layer **panics** if this is not available.
-///
-/// This layer populates the following context values on the request:
-/// - [`OperationLimits`] - This can then be used to report telemetry.
 #[derive(Clone)]
 pub(crate) struct EnforceOperationLimits<S> {
     inner: S,
@@ -75,11 +73,26 @@ where
         let mut inner = std::mem::replace(&mut self.inner, inner);
 
         Box::pin(async move {
-            let document = req
+            let Some(document) = req
                 .context
                 .extensions()
                 .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
-                .expect("expected a ParsedDocument in limits enforcement");
+            else {
+                // We shouldn't ever reach here unless the pipeline was set up
+                // improperly (i.e. programmer error), but do something better than
+                // panicking just in case.
+                return Ok(supergraph::Response::error_builder()
+                    .status_code(http::StatusCode::INTERNAL_SERVER_ERROR)
+                    .context(req.context)
+                    .error(
+                        graphql::Error::builder()
+                            .message("Cannot find executable document")
+                            .extension_code("MISSING_EXECUTABLE_DOCUMENT")
+                            .build(),
+                    )
+                    .build()
+                    .expect("body is valid"));
+            };
 
             let mut query_metrics = OperationLimits::default();
 
