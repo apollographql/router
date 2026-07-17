@@ -22,11 +22,25 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## 🐛 Fixes
 
+### Reject `@external` fields on nested `@key` paths with cross-subgraph `@requires` ([PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+
+When a subgraph declared a nested `@key` (e.g., `@key(fields: "id u { x }")`) where
+fields along the key path were marked `@external`, and also had a `@requires` that
+pulled data from a different subgraph, the query planner would fail at planning time
+with an internal error. Composition passed without errors, so there was no warning
+until the query failed at runtime.
+
+Composition now catches this as a `SATISFIABILITY_ERROR`. To fix affected schemas,
+replace `@external` with `@shareable` on key-path fields, which is the intended
+Federation 2 pattern.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/XXXX>
+
 ### Fix composition field merging when subtyping ([PR #9751](https://github.com/apollographql/router/pull/9751))
 
 When composition merges fields with different return types, it was previously allowing nullable types to be considered subtypes of non-null supertypes. The resulting supergraph schema could cause query plan execution to error if the subgraph returns null at runtime. This bug has been fixed, and composition will now appropriately error.
 
-By [@sachindshinde](https://github.com/sachindshinde) in https://github.com/apollographql/router/pull/9751
+By [@sachindshinde](https://github.com/sachindshinde) in <https://github.com/apollographql/router/pull/9751>
 
 ### Skip `@requires` field set validation during fed v1 schema upgrade ([PR #9722](https://github.com/apollographql/router/pull/9722))
 
@@ -34,7 +48,7 @@ Updates `@requires` validation logic to allow type selection conditions in the f
 against the supergraph. `@requires` is now partially validated against subgraph schema during subgraph upgrade process
 and fully validated against supergraph schema during the merge process.
 
-By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/9722
+By [@dariuszkuc](https://github.com/dariuszkuc) in <https://github.com/apollographql/router/pull/9722>
 
 # [2.16.0](https://crates.io/crates/apollo-federation/2.16.0) - 2026-06-30
 
@@ -96,4 +110,3 @@ If a field's default value is a coercible type (for example, an integer default 
 ##### Errors include line numbers and schema references
 
 Error messages now include line numbers and point to the relevant parts of your schema, making it faster to locate and fix problems.
-
