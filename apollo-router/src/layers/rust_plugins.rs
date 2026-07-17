@@ -1,12 +1,14 @@
 //! Layer that folds the configured Rust plugins over a service to build a plugin pipeline.
 
-use crate::plugin::DynPlugin;
-use crate::services::Plugins;
 use std::marker::PhantomData;
 use std::sync::Arc;
+
 use tower::Layer;
 use tower::util::BoxCloneService;
 use tower_service::Service;
+
+use crate::plugin::DynPlugin;
+use crate::services::Plugins;
 
 /// A [`Layer`] that folds the configured plugins over the inner service to build a plugin
 /// pipeline.
