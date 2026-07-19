@@ -19,7 +19,6 @@ use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
 use itertools::Itertools;
-use multimap::MultiMap;
 use petgraph::adj::List as AdjList;
 use petgraph::algo::tred::dag_transitive_reduction_closure;
 use petgraph::graph::IndexType;
@@ -1713,9 +1712,14 @@ impl FetchDependencyGraph {
         // merge an ancestor node into a descendant node. JS version's insertion order is almost
         // topologically sorted, thanks to the way the graph is constructed from the root. However,
         // it's not exactly topologically sorted. So, it's unclear whether that is 100% safe.
-        // Note: MultiMap preserves insertion order for values of the same key. Thus, the values
-        // of the same key in `by_subgraphs` will be topologically sorted as well.
-        let mut by_subgraphs = MultiMap::new();
+        // Note: `by_subgraphs` must be an insertion-ordered map. A HashMap-backed map here
+        // iterates its keys in a `RandomState`-random order per planning call, which executes
+        // the per-key merges below in a random across-key order; the merge order changes edge
+        // insertion order and merge outcomes downstream, producing nondeterministic plan shapes
+        // (differing `_entities` type-condition batching) across identical calls. Keys are
+        // inserted in topological-sort order, and values pushed under the same key inherit that
+        // order too, so each key's values remain topologically sorted as well.
+        let mut by_subgraphs: IndexMap<u64, Vec<NodeIndex>> = IndexMap::default();
         let sorted_nodes = petgraph::algo::toposort(&self.graph, None)
             .map_err(|_| FederationError::internal("Failed to sort nodes due to cycle(s)"))?;
         for node_index in sorted_nodes {
@@ -1725,7 +1729,7 @@ impl FetchDependencyGraph {
             let Some(key) = node.subgraph_and_merge_at_key() else {
                 continue;
             };
-            by_subgraphs.insert(key, node_index);
+            by_subgraphs.entry(key).or_default().push(node_index);
         }
 
         for (_key, nodes) in by_subgraphs {
