@@ -458,8 +458,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "latest() was just bumped to V0_4; @benjamn is updating DEFAULT_CONNECT_SPEC \
-                (and related follow-up) directly, see PR discussion on #9714"]
+    #[ignore = "latest() was just bumped to V0_4; DEFAULT_CONNECT_SPEC will be handled \
+                separately, see PR discussion on #9714"]
     fn test_expected_connect_spec_latest() {
         // We probably want to update DEFAULT_CONNECT_SPEC when
         // ConnectSpec::latest() changes, but we don't want it to happen
