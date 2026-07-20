@@ -686,10 +686,94 @@ mod tests {
     }
 
     #[test]
-    fn test_lit_expr_parse_objects() {
+    fn test_lit_expr_parse_objects_v0_3() {
+        // v0.3 and earlier parse object literals as an unordered
+        // `LitExpr::LegacyObject` map. Pinned to V0_3 so bumping
+        // `ConnectSpec::latest()` can't silently drop this coverage; v0.4+
+        // `Object` parsing is covered by `test_lit_expr_parse_objects_v0_4`.
+        #[track_caller]
+        fn check_parse(input: &str, expected: LitExpr) {
+            check_parse_with_spec(input, ConnectSpec::V0_3, expected);
+        }
+
+        check_parse(
+            "{a: 1}",
+            LitExpr::LegacyObject({
+                let mut map = IndexMap::default();
+                map.insert(
+                    Key::field("a").into_with_range(),
+                    LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
+                );
+                map
+            }),
+        );
+
+        check_parse(
+            "{'a': 1}",
+            LitExpr::LegacyObject({
+                let mut map = IndexMap::default();
+                map.insert(
+                    Key::quoted("a").into_with_range(),
+                    LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
+                );
+                map
+            }),
+        );
+
+        {
+            fn make_expected(a_key: Key, b_key: Key) -> LitExpr {
+                let mut map = IndexMap::default();
+                map.insert(
+                    a_key.into_with_range(),
+                    LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
+                );
+                map.insert(
+                    b_key.into_with_range(),
+                    LitExpr::Number(serde_json::Number::from(2)).into_with_range(),
+                );
+                LitExpr::LegacyObject(map)
+            }
+            check_parse(
+                "{'a': 1, 'b': 2}",
+                make_expected(Key::quoted("a"), Key::quoted("b")),
+            );
+            check_parse(
+                "{ a : 1, 'b': 2}",
+                make_expected(Key::field("a"), Key::quoted("b")),
+            );
+            check_parse(
+                "{ a : 1, b: 2}",
+                make_expected(Key::field("a"), Key::field("b")),
+            );
+            check_parse(
+                "{ \"a\" : 1, \"b\": 2 }",
+                make_expected(Key::quoted("a"), Key::quoted("b")),
+            );
+            check_parse(
+                "{ \"a\" : 1, b: 2 }",
+                make_expected(Key::quoted("a"), Key::field("b")),
+            );
+            check_parse(
+                "{ a : 1, \"b\": 2 }",
+                make_expected(Key::field("a"), Key::quoted("b")),
+            );
+        }
+    }
+
+    #[test]
+    fn test_lit_expr_parse_objects_v0_4() {
         // As of connect/v0.4, object literals are syntactically identical to
         // a `SubSelection`, so `{a: 1}` parses as `LitExpr::Object`, wrapping
-        // one `NamedSelection` per property, rather than `LitExpr::LegacyObject`.
+        // one `NamedSelection` per property, rather than `LitExpr::LegacyObject`
+        // (see `test_lit_expr_parse_objects_v0_3`). Behavior is identical across
+        // v0.4 and v0.5, so assert both.
+        #[track_caller]
+        fn check_parse(input: &str, expected: LitExpr) {
+            for spec in [ConnectSpec::V0_4, ConnectSpec::V0_5] {
+                check_parse_with_spec(input, spec, expected.clone());
+            }
+        }
+
         fn named_number(alias: Alias, value: i64) -> NamedSelection {
             NamedSelection {
                 prefix: NamingPrefix::Alias(alias),
@@ -876,7 +960,15 @@ mod tests {
             // As of connect/v0.4, object literals are syntactically identical
             // to a `SubSelection`, so `{a: ..., b: ...}` parses as
             // `LitExpr::Object`, preserving property order as written (unlike
-            // the unordered `LegacyObject` map used before v0.4).
+            // the unordered `LegacyObject` map used before v0.4, pinned in the
+            // block below). Identical across v0.4 and v0.5, so assert both.
+            #[track_caller]
+            fn check_parse(input: &str, expected: LitExpr) {
+                for spec in [ConnectSpec::V0_4, ConnectSpec::V0_5] {
+                    check_parse_with_spec(input, spec, expected.clone());
+                }
+            }
+
             fn var_path(var: KnownVariable, key: &str) -> LitExpr {
                 LitExpr::Path(PathSelection {
                     path: PathList::Var(
@@ -938,6 +1030,74 @@ mod tests {
                     selections: vec![a, b],
                     ..Default::default()
                 }),
+            );
+        }
+
+        {
+            // v0.3 parses the same object literals as an unordered
+            // `LegacyObject` map (property order not preserved, so all three
+            // orderings compare equal). Pinned to V0_3 so bumping `latest()`
+            // can't silently drop this coverage.
+            #[track_caller]
+            fn check_parse(input: &str, expected: LitExpr) {
+                check_parse_with_spec(input, ConnectSpec::V0_3, expected);
+            }
+
+            let expected = LitExpr::LegacyObject({
+                let mut map = IndexMap::default();
+                map.insert(
+                    Key::field("a").into_with_range(),
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Var(
+                            KnownVariable::External(Namespace::Args.to_string()).into_with_range(),
+                            PathList::Key(
+                                Key::field("a").into_with_range(),
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    })
+                    .into_with_range(),
+                );
+                map.insert(
+                    Key::field("b").into_with_range(),
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Var(
+                            KnownVariable::External(Namespace::This.to_string()).into_with_range(),
+                            PathList::Key(
+                                Key::field("b").into_with_range(),
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    })
+                    .into_with_range(),
+                );
+                map
+            });
+
+            check_parse(
+                r#"{
+                a: $args.a,
+                b: $this.b,
+            }"#,
+                expected.clone(),
+            );
+            check_parse(
+                r#"{
+                b: $this.b,
+                a: $args.a,
+            }"#,
+                expected.clone(),
+            );
+            check_parse(
+                r#" {
+                a : $args . a ,
+                b : $this . b
+            ,} "#,
+                expected,
             );
         }
     }
