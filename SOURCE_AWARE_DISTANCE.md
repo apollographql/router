@@ -121,6 +121,22 @@ Two caveats keep this honest:
   exactly the `build_connector_source_edges` output — and that path is not yet
   exercised end-to-end. That, plus the fetch seam, is the remaining Phase-1 body.
 
+### …and it runs end-to-end (narrow)
+
+`steel_thread_root_field_end_to_end` closes the loop for the root-field class,
+deterministically and in-crate (no router service, no network):
+
+1. **Plan** `{ users { id name } }` over the raw connector graph → `Fetch(connectors)`.
+2. **Dispatch:** build the connector's real HTTP request via
+   `runtime::make_request` → `GET …/users`.
+3. **Map:** apply the connector selection `id name` to a mock response array →
+   `[{id,name},…]` (extra fields dropped, element-wise over the list).
+
+So for one query class the thread genuinely works plan → request → mapped
+result. The manual step here is the plan→connector hand-off (step 1→2), which in
+production is the fetch-seam dispatch — the one piece of glue still to build for
+this class.
+
 ## Honest verdict
 
 The spike answers "how far off": **the graph-*data* problems are largely solved

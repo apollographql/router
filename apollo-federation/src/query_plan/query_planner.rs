@@ -1557,4 +1557,105 @@ type User
             Err(e) => eprintln!("STEELTHREAD PLAN ERROR: {e}"),
         }
     }
+
+    /// STEEL THREAD (narrow, but end-to-end). For the root-field connector class
+    /// `{ users { id name } }`, run the whole pipeline with **no expansion**:
+    ///   (1) PLAN over the raw connector graph → a fetch to the connector,
+    ///   (2) DISPATCH: build the actual HTTP request from the connector,
+    ///   (3) MAP: apply the connector selection to a mock response.
+    /// Deterministic, in-crate (no router service, no network). This is the
+    /// "narrow definition of fully works" the operator asked for: one query
+    /// class, but plan → request → mapped result, all the way through.
+    #[test]
+    fn steel_thread_root_field_end_to_end() {
+        use apollo_compiler::ExecutableDocument;
+        use apollo_compiler::Schema;
+        use apollo_compiler::collections::IndexMap;
+        use serde_json_bytes::json;
+
+        use crate::ApiSchemaOptions;
+        use crate::Supergraph;
+        use crate::connectors::Connector;
+        use crate::connectors::runtime::http_json_transport::TransportRequest;
+        use crate::connectors::runtime::http_json_transport::make_request;
+        use crate::query_graph::build_federated_query_graph;
+        use crate::schema::FederationSchema;
+        use crate::supergraph::extract_subgraphs_from_supergraph;
+
+        let sdl =
+            include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
+
+        // (1) PLAN — over the raw, non-expanded connector graph.
+        let supergraph = Supergraph::new_with_router_specs(sdl).unwrap();
+        let api = supergraph.to_api_schema(ApiSchemaOptions::default()).unwrap();
+        let graph = build_federated_query_graph(
+            supergraph.schema.clone(),
+            api.clone(),
+            Some(false),
+            Some(true),
+        )
+        .unwrap();
+        let planner = QueryPlanner::from_query_graph(
+            QueryPlannerConfig::default(),
+            graph,
+            supergraph.schema.clone(),
+            api.clone(),
+        )
+        .unwrap();
+        let query = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            "{ users { id name } }",
+            "q.graphql",
+        )
+        .unwrap();
+        let plan = planner
+            .build_query_plan(&query, None, Default::default())
+            .unwrap();
+        assert!(
+            format!("{plan}").contains("Fetch(service: \"connectors\")"),
+            "plan should fetch the connector:\n{plan}"
+        );
+
+        // (2) DISPATCH — find the connector for `Query.users` and build its
+        // real HTTP request.
+        let fed = FederationSchema::new(Schema::parse(sdl, "s.graphql").unwrap()).unwrap();
+        let subgraphs = extract_subgraphs_from_supergraph(&fed, Some(false)).unwrap();
+        let connectors: Vec<Connector> = subgraphs
+            .subgraphs
+            .values()
+            .flat_map(|sg| {
+                Connector::from_schema(sg.schema.schema(), &sg.name).unwrap_or_default()
+            })
+            .collect();
+        let connector = connectors
+            .iter()
+            .find(|c| c.id.coordinate().contains("Query.users["))
+            .expect("a connector for Query.users");
+        let transport = connector.transport.as_ref().expect("http transport");
+        let (request, _problems) =
+            make_request(transport, IndexMap::default(), &http::HeaderMap::new(), &None)
+                .unwrap();
+        let TransportRequest::Http(http_req) = request else {
+            panic!("expected an HTTP request");
+        };
+        assert_eq!(http_req.inner.method(), "GET");
+        assert!(
+            http_req.inner.uri().to_string().ends_with("/users"),
+            "expected GET .../users, got {}",
+            http_req.inner.uri()
+        );
+
+        // (3) MAP — apply the connector selection ("id name") to a mock
+        // response; extra fields drop, the array maps element-wise.
+        let mock = json!([
+            {"id": "1", "name": "Alice", "extra": "drop me"},
+            {"id": "2", "name": "Bob"}
+        ]);
+        let (mapped, errors) = connector.selection.apply_to(&mock);
+        assert!(errors.is_empty(), "mapping errors: {errors:?}");
+        assert_eq!(
+            mapped.expect("mapped output"),
+            json!([{"id": "1", "name": "Alice"}, {"id": "2", "name": "Bob"}]),
+        );
+    }
 }
