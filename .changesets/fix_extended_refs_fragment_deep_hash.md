@@ -4,4 +4,4 @@
 
 The set now keys on the response object's pointer identity, which is `O(1)` and sufficient for the deduplication and cycle protection this function needs. Reported reference data is unchanged.
 
-By [@ebylund](https://github.com/ebylund) in https://github.com/apollographql/router/pull/XXXX
+By [@ebylund](https://github.com/ebylund) in https://github.com/apollographql/router/pull/9840
