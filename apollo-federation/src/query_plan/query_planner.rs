@@ -1558,6 +1558,81 @@ type User
         }
     }
 
+    /// MIRAGE CHECK (spike diagnostic). Plan several entity/@requires queries
+    /// over the raw connector graph and print each outcome. The question: does
+    /// the raw graph already resolve entities (because steelthread declares
+    /// `@join__type(key: "id")` explicitly), and where does it fail for a key
+    /// that only expansion fabricates (`d @requires("c")`, keyed on `$this.c`,
+    /// no `key: "c"` in the raw supergraph)? That failure is where a
+    /// source-aware connector edge does real, non-mirage work.
+    ///
+    /// Run: `cargo test -p apollo-federation mirage_check -- --nocapture`
+    #[test]
+    fn mirage_check_entity_queries_over_raw_graph() {
+        use crate::ApiSchemaOptions;
+        use crate::Supergraph;
+        use crate::query_graph::build_federated_query_graph;
+        use apollo_compiler::ExecutableDocument;
+
+        let sdl =
+            include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
+        let supergraph = Supergraph::new_with_router_specs(sdl).unwrap();
+        let api = supergraph.to_api_schema(ApiSchemaOptions::default()).unwrap();
+        let graph = build_federated_query_graph(
+            supergraph.schema.clone(),
+            api.clone(),
+            Some(false),
+            Some(true),
+        )
+        .unwrap();
+        let planner = QueryPlanner::from_query_graph(
+            QueryPlannerConfig::default(),
+            graph,
+            supergraph.schema.clone(),
+            api.clone(),
+        )
+        .unwrap();
+
+        // Correctness oracle: is each raw-graph plan actually semantically
+        // correct, or just plausible-looking (the real mirage)?
+        let subgraphs_by_name: apollo_compiler::collections::IndexMap<_, _> = supergraph
+            .extract_subgraphs()
+            .unwrap()
+            .into_iter()
+            .map(|(name, sg)| (name, sg.schema))
+            .collect();
+
+        for q in [
+            "{ user(id: \"1\") { name } }",     // key: id (declared) — should plan
+            "{ user(id: \"1\") { c } }",        // c resolved by GRAPHQL via key id
+            "{ user(id: \"1\") { d } }",        // d @requires(c); key c only expansion fabricates
+            "{ user(id: \"1\") { name d } }",   // mix
+        ] {
+            let doc = ExecutableDocument::parse_and_validate(
+                planner.api_schema().schema(),
+                q,
+                "q.graphql",
+            )
+            .unwrap();
+            match planner.build_query_plan(&doc, None, Default::default()) {
+                Ok(plan) => {
+                    let correct = crate::correctness::check_plan(
+                        planner.api_schema(),
+                        &supergraph.schema,
+                        &subgraphs_by_name,
+                        &doc,
+                        &plan,
+                    );
+                    match correct {
+                        Ok(()) => eprintln!("MIRAGE  PLAN-OK CHECK-OK   {q}"),
+                        Err(e) => eprintln!("MIRAGE  PLAN-OK CHECK-FAIL {q}\n    {e}"),
+                    }
+                }
+                Err(e) => eprintln!("MIRAGE  PLAN-ERROR {q}\n    {e}"),
+            }
+        }
+    }
+
     /// STEEL THREAD (narrow, but end-to-end). For the root-field connector class
     /// `{ users { id name } }`, run the whole pipeline with **no expansion**:
     ///   (1) PLAN over the raw connector graph → a fetch to the connector,

@@ -137,6 +137,41 @@ result. The manual step here is the plan→connector hand-off (step 1→2), whic
 production is the fetch-seam dispatch — the one piece of glue still to build for
 this class.
 
+## Mirage check — the most important finding
+
+Skepticism warranted, so I validated with the correctness oracle. Over the
+**raw, non-expanded** steelthread graph, all of these plan **and pass
+`check_plan`** (`mirage_check_entity_queries_over_raw_graph`):
+
+| query | plan | correctness |
+|---|---|---|
+| `{ user(id) { name } }` | Fetch(connectors) | ✅ |
+| `{ user(id) { c } }` | connectors → graphql (key id) | ✅ |
+| `{ user(id) { d } }` — `d @requires(c)` | connectors → graphql → connectors(c) | ✅ |
+| `{ user(id) { name d } }` | ✅ | ✅ |
+
+**The existing planner already produces semantically-correct plans for connector
+supergraphs over the non-expanded graph** — including `@requires` and
+cross-source resolution — because composition emits full join metadata
+(`@join__type(key:)`, `@join__field(requires:)`) and the planner **treats
+`connectors` as an ordinary subgraph, ignoring `@connect`**. The
+synthetic-subgraph expansion is fundamentally an **execution-layer device** (so
+connectors *look* like fetchable subgraphs), not a planning necessity.
+
+Where the mirage actually is: those correct plans emit `Fetch(service:
+"connectors")` — a **subgraph fetch that no real service backs**. Turning it into
+connector HTTP calls is the fetch seam. So the distance relocates:
+
+- **Planner / traversal: largely already works** (validated by `check_plan`).
+  The 2024 estimate over-weighted this. Open planner work is narrow: the
+  fabricated-structure cases that live *only* in expansion, not in join
+  metadata (Implicit-singleton "namespace container", etc.), and confirming
+  raw-vs-expanded plan *equivalence* over the corpus (Spike B is built for this).
+- **The real bulk is the router fetch seam** (execute `Fetch(connectors)` as
+  connector requests — proven end-to-end for the root-field class above) **and
+  composition-side satisfiability** (Phase 2, where the 2–9× expansion blowup is
+  the compose-time cost).
+
 ## Honest verdict
 
 The spike answers "how far off": **the graph-*data* problems are largely solved
