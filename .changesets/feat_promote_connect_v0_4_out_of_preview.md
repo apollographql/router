@@ -4,4 +4,4 @@
 
 `connect/v0.5` remains a preview version, gated behind the `connectors.preview_connect_v0_5` opt-in.
 
-By [@briannafugate408](https://github.com/briannafugate408) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@briannafugate408](https://github.com/briannafugate408) in https://github.com/apollographql/router/pull/9839
