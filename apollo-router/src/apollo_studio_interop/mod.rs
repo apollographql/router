@@ -434,7 +434,13 @@ fn extract_enums_from_selection_set(
     result_set: &mut ReferencedEnums,
 ) {
     let mut stack: Vec<(&[SpecSelection], &Object)> = vec![(selection_set, selection_response)];
-    let mut visited_fragments: HashSet<(&str, &Object)> = HashSet::new();
+    // Key visited fragments by the response object's pointer identity, not by value.
+    // Keying on `&Object` would hash/compare the entire response subtree on every
+    // fragment spread (its `Hash`/`Eq` delegate to the pointee), so extraction cost
+    // would grow with response size. Address identity is sufficient for dedup and
+    // cycle protection here: the pointer is only ever compared, never dereferenced,
+    // and all referents outlive this call.
+    let mut visited_fragments: HashSet<(&str, *const Object)> = HashSet::new();
 
     while let Some((selections, response)) = stack.pop() {
         for selection in selections.iter() {
@@ -465,7 +471,7 @@ fn extract_enums_from_selection_set(
                     stack.push((selection_set, response));
                 }
                 SpecSelection::FragmentSpread { name, .. } => {
-                    let key = (name.as_str(), response);
+                    let key = (name.as_str(), response as *const Object);
                     if visited_fragments.insert(key)
                         && let Some(fragment) = fragments.get(name)
                     {
