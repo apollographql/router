@@ -32,6 +32,7 @@ use crate::cache::storage::KeyType;
 use crate::cache::storage::ValueType;
 use crate::metrics::FutureMetricsExt;
 use crate::plugins::response_cache::cache_control::CacheControl;
+use crate::plugins::response_cache::invalidation_labels::InvalidationLabels;
 use crate::plugins::response_cache::metrics::record_maintenance_commands;
 use crate::plugins::response_cache::metrics::record_maintenance_duration;
 use crate::plugins::response_cache::metrics::record_maintenance_error;
@@ -62,7 +63,12 @@ impl From<(&str, CacheValue)> for CacheEntry {
             // cache tags are used to populate the initial set of invalidation labels; they get
             // expanded from the schema, too, for capturing subgraphs and types to have a broader
             // set of invalidation labels
-            invalidation_labels: cache_value.cache_tags,
+            invalidation_labels: cache_value.cache_tags.and_then(|tags| {
+                Some(InvalidationLabels {
+                    tags,
+                    ..Default::default()
+                })
+            }),
         }
     }
 }

@@ -13,6 +13,7 @@ use tokio_util::time::FutureExt;
 use super::cache_control::CacheControl;
 use crate::plugins::response_cache::cache_tag::CacheTag;
 use crate::plugins::response_cache::invalidation::InvalidationKind;
+use crate::plugins::response_cache::invalidation_labels::InvalidationLabels;
 use crate::plugins::response_cache::metrics::record_fetch_duration;
 use crate::plugins::response_cache::metrics::record_fetch_error;
 use crate::plugins::response_cache::metrics::record_insert_duration;
@@ -49,7 +50,8 @@ pub(super) struct CacheEntry {
     /// cache invalidation through the invalidation endpoint and by CDNs through their CDN-specific
     /// endpoints; for CDNs, they're emitted as a header and separated by a delimiter, which are
     /// both configurable
-    pub(super) invalidation_labels: Option<HashSet<String>>,
+    /// TODO: are all invalidationlabels being added properly to cacheentry?
+    pub(super) invalidation_labels: Option<InvalidationLabels>,
 }
 
 /// The `CacheStorage` trait defines an API that the backing storage layer must implement for

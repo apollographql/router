@@ -10,6 +10,9 @@ pub(crate) mod plugin;
 pub(crate) mod serde_blake3;
 mod storage;
 
+/// Used to mark cache tags as internal and should not be exported or displayed to our users
+const INTERNAL_CACHE_TAG_PREFIX: &str = "__apollo_internal::";
+
 #[cfg(all(
     test,
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
