@@ -286,8 +286,22 @@ impl QueryPlanner {
             Some(true),
         )?;
 
-        let interface_types_with_interface_objects = supergraph
-            .schema
+        Self::from_query_graph(config, query_graph, supergraph_schema, api_schema)
+    }
+
+    /// Phase-1 spike seam: build a planner over a **pre-built** query graph
+    /// (e.g. a source-aware graph) rather than one derived from the supergraph
+    /// by `build_federated_query_graph`. `new` is exactly this preceded by the
+    /// standard graph build. Everything downstream (traversal, fetch-dep graph)
+    /// consumes `federated_query_graph` and is agnostic to how it was produced,
+    /// which is what lets a source-aware graph be dropped in here.
+    pub(crate) fn from_query_graph(
+        config: QueryPlannerConfig,
+        query_graph: QueryGraph,
+        supergraph_schema: ValidFederationSchema,
+        api_schema: ValidFederationSchema,
+    ) -> Result<Self, FederationError> {
+        let interface_types_with_interface_objects = supergraph_schema
             .get_types()
             .filter_map(|position| match position {
                 TypeDefinitionPosition::Interface(interface_position) => Some(interface_position),
@@ -350,8 +364,7 @@ impl QueryPlanner {
             !sources.all(|runtimes| runtimes == expected_runtimes)
         };
 
-        let abstract_types_with_inconsistent_runtime_types = supergraph
-            .schema
+        let abstract_types_with_inconsistent_runtime_types = supergraph_schema
             .get_types()
             .filter_map(|position| AbstractTypeDefinitionPosition::try_from(position).ok())
             .filter(|position| is_inconsistent(position.clone()))
@@ -1471,5 +1484,77 @@ type User
         let deserialized: QueryPlanningStatistics =
             serde_json::from_str(&serialized).expect("Deserializing");
         assert!(deserialized.best_plan_cost.is_nan());
+    }
+
+    /// STEEL-THREAD PROBE (spike diagnostic). Drive the real planner over a
+    /// query graph built from a **raw, non-expanded** connector supergraph via
+    /// the `from_query_graph` seam, and print what traversal produces for the
+    /// simplest connector query. The point is the console output — does the
+    /// planner even traverse a connector graph without the synthetic-subgraph
+    /// expansion, and if so, what does the plan look like?
+    ///
+    /// Run: `cargo test -p apollo-federation steel_thread_probe -- --nocapture`
+    #[test]
+    fn steel_thread_probe_plan_over_raw_connector_graph() {
+        use crate::ApiSchemaOptions;
+        use crate::Supergraph;
+        use crate::query_graph::build_federated_query_graph;
+
+        let sdl = include_str!(
+            "../connectors/expand/tests/schemas/expand/steelthread.graphql"
+        );
+
+        let supergraph = match Supergraph::new_with_router_specs(sdl) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("STEELTHREAD: supergraph parse failed: {e}");
+                return;
+            }
+        };
+        let api_schema = supergraph
+            .to_api_schema(ApiSchemaOptions::default())
+            .expect("api schema");
+
+        // Build the query graph from the RAW connector supergraph (no expansion).
+        let graph = match build_federated_query_graph(
+            supergraph.schema.clone(),
+            api_schema.clone(),
+            Some(false),
+            Some(true),
+        ) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("STEELTHREAD: raw graph build failed: {e}");
+                return;
+            }
+        };
+
+        let planner = match QueryPlanner::from_query_graph(
+            QueryPlannerConfig::default(),
+            graph,
+            supergraph.schema.clone(),
+            api_schema.clone(),
+        ) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("STEELTHREAD: planner construction failed: {e}");
+                return;
+            }
+        };
+
+        let query = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            "{ users { id name } }",
+            "steelthread_query.graphql",
+        )
+        .expect("valid query");
+
+        match planner.build_query_plan(&query, None, Default::default()) {
+            Ok(plan) => {
+                eprintln!("STEELTHREAD PLAN (raw connector graph) Display:\n{plan}");
+                eprintln!("STEELTHREAD PLAN Debug:\n{plan:#?}");
+            }
+            Err(e) => eprintln!("STEELTHREAD PLAN ERROR: {e}"),
+        }
     }
 }

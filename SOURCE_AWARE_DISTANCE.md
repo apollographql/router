@@ -92,6 +92,35 @@ For each expand fixture: build the federated query graph from the **raw**
   types, cache + telemetry-name migration): unchanged from the proposal; the
   long tail.
 
+## Steel-thread result (the headline)
+
+With a ~15-line `QueryPlanner::from_query_graph` seam, I drove the **real
+planner** over the query graph built from the **raw, non-expanded** steelthread
+connector supergraph and planned `{ users { id name } }`. It produced a correct,
+non-empty plan with **no expansion and no augmentation**:
+
+```
+QueryPlan {
+  Fetch(service: "connectors") {
+    { users { id name } }
+  },
+}
+```
+
+So for the **root-field (non-entity) connector class, source-aware planning
+essentially already works** — the traversal, cost model, and fetch-dep graph
+handle the non-expanded connector graph and emit a coherent single fetch. This
+is a much shorter distance than the 2024 write-up implied for the easy class.
+
+Two caveats keep this honest:
+- The `FetchNode` is a **subgraph-style fetch** (`subgraph_name: "connectors"`),
+  not yet a connector HTTP dispatch — turning it into real connector requests is
+  the router fetch-seam work (`ConnectFetchDescriptor` is the payload for it).
+- This is the *easy* class. **Entity resolution** (the `user(id:)` / `@requires`
+  / cross-source cases) needs the connector `@key` edges added to the graph —
+  exactly the `build_connector_source_edges` output — and that path is not yet
+  exercised end-to-end. That, plus the fetch seam, is the remaining Phase-1 body.
+
 ## Honest verdict
 
 The spike answers "how far off": **the graph-*data* problems are largely solved
