@@ -2309,17 +2309,11 @@ mod tests {
             (Some(json!({"__typename": "Product"})), vec![]),
         );
 
+        // As of connect/v0.4, a bare quoted string after an alias is a
+        // string literal, not a key-path lookup, so this no longer errors.
         assert_eq!(
             selection!(" __typename : 'Product' ").apply_to(&json!({})),
-            (
-                Some(json!({})),
-                vec![ApplyToError::new(
-                    "Property .\"Product\" not found in object".to_string(),
-                    vec![json!("Product")],
-                    Some(14..23),
-                    ConnectSpec::latest(),
-                )],
-            ),
+            (Some(json!({"__typename": "Product"})), vec![]),
         );
 
         assert_eq!(
@@ -3088,26 +3082,39 @@ mod tests {
         });
 
         assert_eq!(
-            // The grammar enforces that we must always provide identifier aliases
-            // for non-identifier properties, so the data we get back will always be
-            // GraphQL-safe.
+            // Unlike `alias: 'key' { ... }` at the top level (a key-shaped
+            // literal followed by a subselection, still read as a path in
+            // connect/v0.4), a bare `safe: 'key'` with no trailing
+            // subselection is a string literal as of v0.4, not a key lookup.
             selection!("alias: 'not an identifier' { safe: 'also.not.an.identifier' }")
                 .apply_to(&data),
             (
                 Some(json!({
                     "alias": [
-                        { "safe": 0 },
-                        { "safe": 1 },
-                        { "safe": 2 },
+                        { "safe": "also.not.an.identifier" },
+                        { "safe": "also.not.an.identifier" },
+                        { "safe": "also.not.an.identifier" },
                     ],
                 })),
                 vec![],
             ),
         );
 
+        // As of connect/v0.4, a leading bare quoted literal (with no `$.`
+        // prefix) is a string literal, not the start of a key path, so
+        // chaining `.key` off of it now applies a property lookup to the
+        // literal string itself rather than to the root value.
         assert_eq!(
             selection!("'not an identifier'.'also.not.an.identifier'").apply_to(&data),
-            (Some(json!([0, 1, 2])), vec![],),
+            (
+                None,
+                vec![ApplyToError::new(
+                    "Property .\"also.not.an.identifier\" not found in string".to_string(),
+                    vec![json!("also.not.an.identifier")],
+                    Some(20..44),
+                    ConnectSpec::latest(),
+                )],
+            ),
         );
 
         assert_eq!(
@@ -3120,9 +3127,9 @@ mod tests {
                 .apply_to(&data),
             (
                 Some(json!([
-                    { "safe": 0 },
-                    { "safe": 1 },
-                    { "safe": 2 },
+                    { "safe": "also.not.an.identifier" },
+                    { "safe": "also.not.an.identifier" },
+                    { "safe": "also.not.an.identifier" },
                 ])),
                 vec![],
             ),
@@ -3143,7 +3150,7 @@ mod tests {
                     "another": {
                         "pesky": {
                             "identifier": 123,
-                            "evil": true,
+                            "evil": "{ evil braces }",
                         },
                     },
                 })),

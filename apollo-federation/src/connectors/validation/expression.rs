@@ -880,13 +880,14 @@ mod tests {
     fn valid_expressions(#[case] selection: &str) {
         // If this fails, another ConnectSpec version has probably been added,
         // and should be accounted for in the loop below.
-        assert_eq!(ConnectSpec::next(), ConnectSpec::V0_4);
+        assert_eq!(ConnectSpec::next(), ConnectSpec::V0_5);
 
         for spec in [
             ConnectSpec::V0_1,
             ConnectSpec::V0_2,
             ConnectSpec::V0_3,
             ConnectSpec::V0_4,
+            ConnectSpec::V0_5,
         ] {
             validate_with_context(selection, scalars(), spec).unwrap();
         }
@@ -908,13 +909,14 @@ mod tests {
     fn common_invalid_expressions(#[case] selection: &str) {
         // If this fails, another ConnectSpec version has probably been added,
         // and should be accounted for in the loop below.
-        assert_eq!(ConnectSpec::next(), ConnectSpec::V0_4);
+        assert_eq!(ConnectSpec::next(), ConnectSpec::V0_5);
 
         for spec in [
             ConnectSpec::V0_1,
             ConnectSpec::V0_2,
             ConnectSpec::V0_3,
             ConnectSpec::V0_4,
+            ConnectSpec::V0_5,
         ] {
             let err = validate_with_context(selection, scalars(), spec);
             assert!(err.is_err());
@@ -940,10 +942,10 @@ mod tests {
     #[case::last("$args.array->last")]
     fn invalid_expressions_with_method_shape_checking(#[case] selection: &str) {
         // If this fails, another ConnectSpec version has probably been added,
-        // and should probably be tested here in addition to v0.3/v0.4.
-        assert_eq!(ConnectSpec::next(), ConnectSpec::V0_4);
+        // and should probably be tested here in addition to v0.3/v0.4/v0.5.
+        assert_eq!(ConnectSpec::next(), ConnectSpec::V0_5);
 
-        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4] {
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
             let err = validate_with_context(selection, scalars(), spec);
             assert!(err.is_err());
             assert!(

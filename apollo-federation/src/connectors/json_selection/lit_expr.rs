@@ -107,7 +107,9 @@ impl LitExpr {
                 let (input, _) = spaces_or_comments(input)?;
                 Self::parse_primary(input)
             }
-            ConnectSpec::V0_3 | ConnectSpec::V0_4 => Self::parse_with_operators(input),
+            ConnectSpec::V0_3 | ConnectSpec::V0_4 | ConnectSpec::V0_5 => {
+                Self::parse_with_operators(input)
+            }
         }
     }
 
@@ -584,6 +586,9 @@ mod tests {
     use crate::connectors::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::connectors::json_selection::location::new_span;
     use crate::connectors::json_selection::location::new_span_with_spec;
+    use crate::connectors::json_selection::parser::Alias;
+    use crate::connectors::json_selection::parser::NamedSelection;
+    use crate::connectors::json_selection::parser::NamingPrefix;
     use crate::connectors::spec::ConnectSpec;
 
     #[track_caller]
@@ -682,66 +687,62 @@ mod tests {
 
     #[test]
     fn test_lit_expr_parse_objects() {
+        // As of connect/v0.4, object literals are syntactically identical to
+        // a `SubSelection`, so `{a: 1}` parses as `LitExpr::Object`, wrapping
+        // one `NamedSelection` per property, rather than `LitExpr::LegacyObject`.
+        fn named_number(alias: Alias, value: i64) -> NamedSelection {
+            NamedSelection {
+                prefix: NamingPrefix::Alias(alias),
+                path: LitExpr::Number(serde_json::Number::from(value)).into_with_range(),
+            }
+        }
+
         check_parse(
             "{a: 1}",
-            LitExpr::LegacyObject({
-                let mut map = IndexMap::default();
-                map.insert(
-                    Key::field("a").into_with_range(),
-                    LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
-                );
-                map
+            LitExpr::Object(SubSelection {
+                selections: vec![named_number(Alias::field("a"), 1)],
+                ..Default::default()
             }),
         );
 
         check_parse(
             "{'a': 1}",
-            LitExpr::LegacyObject({
-                let mut map = IndexMap::default();
-                map.insert(
-                    Key::quoted("a").into_with_range(),
-                    LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
-                );
-                map
+            LitExpr::Object(SubSelection {
+                selections: vec![named_number(Alias::quoted("a"), 1)],
+                ..Default::default()
             }),
         );
 
         {
-            fn make_expected(a_key: Key, b_key: Key) -> LitExpr {
-                let mut map = IndexMap::default();
-                map.insert(
-                    a_key.into_with_range(),
-                    LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
-                );
-                map.insert(
-                    b_key.into_with_range(),
-                    LitExpr::Number(serde_json::Number::from(2)).into_with_range(),
-                );
-                LitExpr::LegacyObject(map)
+            fn make_expected(a_alias: Alias, b_alias: Alias) -> LitExpr {
+                LitExpr::Object(SubSelection {
+                    selections: vec![named_number(a_alias, 1), named_number(b_alias, 2)],
+                    ..Default::default()
+                })
             }
             check_parse(
                 "{'a': 1, 'b': 2}",
-                make_expected(Key::quoted("a"), Key::quoted("b")),
+                make_expected(Alias::quoted("a"), Alias::quoted("b")),
             );
             check_parse(
                 "{ a : 1, 'b': 2}",
-                make_expected(Key::field("a"), Key::quoted("b")),
+                make_expected(Alias::field("a"), Alias::quoted("b")),
             );
             check_parse(
                 "{ a : 1, b: 2}",
-                make_expected(Key::field("a"), Key::field("b")),
+                make_expected(Alias::field("a"), Alias::field("b")),
             );
             check_parse(
                 "{ \"a\" : 1, \"b\": 2 }",
-                make_expected(Key::quoted("a"), Key::quoted("b")),
+                make_expected(Alias::quoted("a"), Alias::quoted("b")),
             );
             check_parse(
                 "{ \"a\" : 1, b: 2 }",
-                make_expected(Key::quoted("a"), Key::field("b")),
+                make_expected(Alias::quoted("a"), Alias::field("b")),
             );
             check_parse(
                 "{ a : 1, \"b\": 2 }",
-                make_expected(Key::field("a"), Key::quoted("b")),
+                make_expected(Alias::field("a"), Alias::quoted("b")),
             );
         }
     }
@@ -872,47 +873,49 @@ mod tests {
         }
 
         {
-            let expected = LitExpr::LegacyObject({
-                let mut map = IndexMap::default();
-                map.insert(
-                    Key::field("a").into_with_range(),
-                    LitExpr::Path(PathSelection {
-                        path: PathList::Var(
-                            KnownVariable::External(Namespace::Args.to_string()).into_with_range(),
-                            PathList::Key(
-                                Key::field("a").into_with_range(),
-                                PathList::Empty.into_with_range(),
-                            )
-                            .into_with_range(),
+            // As of connect/v0.4, object literals are syntactically identical
+            // to a `SubSelection`, so `{a: ..., b: ...}` parses as
+            // `LitExpr::Object`, preserving property order as written (unlike
+            // the unordered `LegacyObject` map used before v0.4).
+            fn var_path(var: KnownVariable, key: &str) -> LitExpr {
+                LitExpr::Path(PathSelection {
+                    path: PathList::Var(
+                        var.into_with_range(),
+                        PathList::Key(
+                            Key::field(key).into_with_range(),
+                            PathList::Empty.into_with_range(),
                         )
                         .into_with_range(),
-                    })
+                    )
                     .into_with_range(),
-                );
-                map.insert(
-                    Key::field("b").into_with_range(),
-                    LitExpr::Path(PathSelection {
-                        path: PathList::Var(
-                            KnownVariable::External(Namespace::This.to_string()).into_with_range(),
-                            PathList::Key(
-                                Key::field("b").into_with_range(),
-                                PathList::Empty.into_with_range(),
-                            )
-                            .into_with_range(),
-                        )
-                        .into_with_range(),
-                    })
-                    .into_with_range(),
-                );
-                map
-            });
+                })
+            }
+
+            fn named(alias: &str, value: LitExpr) -> NamedSelection {
+                NamedSelection {
+                    prefix: NamingPrefix::Alias(Alias::field(alias)),
+                    path: value.into_with_range(),
+                }
+            }
+
+            let a = named(
+                "a",
+                var_path(KnownVariable::External(Namespace::Args.to_string()), "a"),
+            );
+            let b = named(
+                "b",
+                var_path(KnownVariable::External(Namespace::This.to_string()), "b"),
+            );
 
             check_parse(
                 r#"{
                 a: $args.a,
                 b: $this.b,
             }"#,
-                expected.clone(),
+                LitExpr::Object(SubSelection {
+                    selections: vec![a.clone(), b.clone()],
+                    ..Default::default()
+                }),
             );
 
             check_parse(
@@ -920,7 +923,10 @@ mod tests {
                 b: $this.b,
                 a: $args.a,
             }"#,
-                expected.clone(),
+                LitExpr::Object(SubSelection {
+                    selections: vec![b.clone(), a.clone()],
+                    ..Default::default()
+                }),
             );
 
             check_parse(
@@ -928,7 +934,10 @@ mod tests {
                 a : $args . a ,
                 b : $this . b
             ,} "#,
-                expected,
+                LitExpr::Object(SubSelection {
+                    selections: vec![a, b],
+                    ..Default::default()
+                }),
             );
         }
     }
