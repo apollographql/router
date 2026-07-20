@@ -35,7 +35,7 @@ pub(crate) const CONNECT_BATCH_NAME_IN_SPEC: Name = name!("ConnectBatch");
 pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
 pub(crate) const BATCH_ARGUMENT_NAME: Name = name!("batch");
 pub(crate) const IS_SUCCESS_ARGUMENT_NAME: Name = name!("isSuccess");
-pub(super) const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_3;
+pub(super) const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_4;
 
 pub(crate) fn extract_connect_directive_arguments(
     schema: &Schema,
@@ -458,7 +458,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "latest() was just bumped to V0_4; DEFAULT_CONNECT_SPEC will be handled separately"]
     fn test_expected_connect_spec_latest() {
         // We probably want to update DEFAULT_CONNECT_SPEC when
         // ConnectSpec::latest() changes, but we don't want it to happen
