@@ -2372,6 +2372,40 @@ mod tests {
     }
 
     #[test]
+    fn test_aliased_quoted_string_value_v0_3() {
+        // In v0.3 and earlier, a quoted string after an alias with no trailing
+        // subselection is a key/field selection (`Key::quoted`), not a string
+        // literal — the `leggo`/`let go` cases in `test_named_selection` assert
+        // the v0.4 `LitExpr::String` reinterpretation. Pinned to V0_3 so bumping
+        // `ConnectSpec::latest()` can't silently drop this v0.3 coverage.
+        let spec = ConnectSpec::V0_3;
+
+        let (remainder, selection) =
+            NamedSelection::parse(new_span_with_spec("leggo: 'my ego'", spec)).unwrap();
+        assert!(span_is_all_spaces_or_comments(remainder));
+        assert_eq!(
+            selection.strip_ranges(),
+            NamedSelection::field(
+                Some(Alias::new("leggo")),
+                Key::quoted("my ego").into_with_range(),
+                None,
+            ),
+        );
+
+        let (remainder, selection) =
+            NamedSelection::parse(new_span_with_spec("'let go': 'my ego'", spec)).unwrap();
+        assert!(span_is_all_spaces_or_comments(remainder));
+        assert_eq!(
+            selection.strip_ranges(),
+            NamedSelection::field(
+                Some(Alias::quoted("let go")),
+                Key::quoted("my ego").into_with_range(),
+                None,
+            ),
+        );
+    }
+
+    #[test]
     fn test_selection() {
         assert_eq!(
             selection!("").strip_ranges(),
