@@ -344,14 +344,14 @@ impl SpanExporter for Exporter {
         }
 
         // ftv1 decode/re-encode is CPU-heavy, so run it after releasing the span_cache lock.
-        let otlp_trace_spans: Vec<Vec<SpanData>> = grouped_traces
+        let otlp_traces: Vec<Vec<SpanData>> = grouped_traces
             .into_iter()
             .filter_map(|grouped| self.otlp_exporter.prepare_for_export(grouped))
             .collect();
 
-        if !otlp_trace_spans.is_empty() {
+        if !otlp_traces.is_empty() {
             self.otlp_exporter
-                .export(otlp_trace_spans.into_iter().flatten().collect())
+                .export(otlp_traces.into_iter().flatten().collect())
                 .await
         } else {
             Ok(())
@@ -776,5 +776,102 @@ mod test {
         assert_eq!(error_count, 0);
         assert!(node.error.is_empty());
         assert!(node.child[0].error.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod span_cache_test {
+    use std::collections::HashMap;
+    use std::num::NonZeroUsize;
+    use std::time::SystemTime;
+
+    use lru::LruCache;
+    use opentelemetry::trace::SpanId;
+    use opentelemetry::trace::SpanKind;
+    use opentelemetry::trace::Status;
+    use opentelemetry::trace::TraceId;
+
+    use super::LightSpanData;
+    use super::SpanCache;
+
+    fn empty_cache() -> SpanCache {
+        SpanCache {
+            spans_by_parent_id: LruCache::new(NonZeroUsize::new(100).unwrap()),
+        }
+    }
+
+    fn light_span(span_id: u64, parent_span_id: u64) -> LightSpanData {
+        LightSpanData {
+            trace_id: TraceId::from(1u128),
+            span_id: SpanId::from(span_id),
+            parent_span_id: SpanId::from(parent_span_id),
+            span_kind: SpanKind::Internal,
+            name: "test".into(),
+            start_time: SystemTime::UNIX_EPOCH,
+            end_time: SystemTime::UNIX_EPOCH,
+            attributes: HashMap::new(),
+            status: Status::Unset,
+            droppped_attribute_count: 0,
+            events: Vec::new(),
+        }
+    }
+
+    fn span_ids(spans: &[LightSpanData]) -> Vec<u64> {
+        let mut ids: Vec<u64> = spans
+            .iter()
+            .map(|s| u64::from_be_bytes(s.span_id.to_bytes()))
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// Children can arrive in any order before the root completes; the whole subtree
+    /// must still be popped, and the cache must be drained afterwards.
+    #[test]
+    fn pops_full_tree_regardless_of_child_arrival_order() {
+        let mut cache = empty_cache();
+        // Insert the two children before the root shows up, out of id order.
+        cache.insert(light_span(3, 1));
+        cache.insert(light_span(2, 1));
+
+        let tree = cache.pop_spans_for_tree(light_span(1, 0));
+
+        assert_eq!(span_ids(&tree), vec![1, 2, 3]);
+        assert_eq!(
+            cache.len(),
+            0,
+            "cache must be empty once the tree is popped"
+        );
+    }
+
+    /// `pop_spans_for_tree` recurses through parent -> child links, so a grandchild
+    /// stashed under its own parent is collected too.
+    #[test]
+    fn pops_multi_level_tree() {
+        let mut cache = empty_cache();
+        cache.insert(light_span(3, 2)); // grandchild
+        cache.insert(light_span(2, 1)); // child
+
+        let tree = cache.pop_spans_for_tree(light_span(1, 0));
+
+        assert_eq!(span_ids(&tree), vec![1, 2, 3]);
+        assert_eq!(cache.len(), 0);
+    }
+
+    /// A child whose root never arrives is an incomplete trace: popping an unrelated
+    /// root must leave the orphan in the cache for a later export event.
+    #[test]
+    fn retains_orphans_when_root_is_absent() {
+        let mut cache = empty_cache();
+        cache.insert(light_span(2, 1)); // orphan child of a root we never see
+
+        let tree = cache.pop_spans_for_tree(light_span(99, 0));
+
+        assert_eq!(
+            span_ids(&tree),
+            vec![99],
+            "only the popped root is returned"
+        );
+        assert_eq!(cache.len(), 1, "orphan child must be retained");
     }
 }
