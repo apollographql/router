@@ -36,8 +36,11 @@ mod bench;
 mod plan_diff;
 use bench::BenchOutput;
 use bench::run_bench;
+use plan_diff::CorpusReport;
 use plan_diff::ModeOutcome;
+use plan_diff::PlanDiff;
 use plan_diff::PlanMode;
+use plan_diff::Verdict;
 use plan_diff::classify;
 
 /// Rover supergraph config file format
@@ -166,7 +169,8 @@ enum Command {
     /// `--compare-source-aware` to select the not-yet-implemented source-aware
     /// planner seam instead.
     PlanDiff {
-        /// Path to the operation document.
+        /// Path to the operation document, or a directory of `*.graphql`
+        /// operations to run as a corpus (aggregate report).
         query: PathBuf,
         /// Path(s) to one supergraph schema file, `-` for stdin or multiple subgraph schemas.
         schemas: Vec<PathBuf>,
@@ -578,43 +582,23 @@ fn plan_once(
     }
 }
 
-fn cmd_plan_diff(
-    query_path: &Path,
-    schema_paths: &[PathBuf],
-    use_json: bool,
+/// Plan one operation under the left (expansion) and right (source-aware seam,
+/// or expansion+fragments) modes and classify the pair.
+fn diff_operation(
+    supergraph: &apollo_federation::Supergraph,
+    subgraphs_by_name: &apollo_compiler::collections::IndexMap<
+        std::sync::Arc<str>,
+        apollo_federation::schema::ValidFederationSchema,
+    >,
+    query_doc: &apollo_compiler::validation::Valid<ExecutableDocument>,
+    operation: String,
     compare_source_aware: bool,
-) -> Result<(), AnyError> {
-    let query = read_input(query_path);
-    let supergraph = load_supergraph(schema_paths)?;
-
-    let subgraphs_by_name: apollo_compiler::collections::IndexMap<_, _> = supergraph
-        .extract_subgraphs()?
-        .into_iter()
-        .map(|(name, subgraph)| (name, subgraph.schema))
-        .collect();
-
-    // The query document validates against the API schema, which is identical
-    // across planner configurations, so we build and parse it once.
-    let base_planner = QueryPlanner::new(&supergraph, QueryPlannerConfig::default())?;
-    let query_doc = ExecutableDocument::parse_and_validate(
-        base_planner.api_schema().schema(),
-        query,
-        query_path,
-    )
-    .map_err(FederationError::from)?;
-    drop(base_planner);
-
-    let operation = query_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("operation")
-        .to_string();
-
+) -> PlanDiff {
     // Left: today's expansion planner.
     let left = plan_once(
-        &supergraph,
-        &subgraphs_by_name,
-        &query_doc,
+        supergraph,
+        subgraphs_by_name,
+        query_doc,
         QueryPlannerConfig::default(),
     );
 
@@ -633,24 +617,137 @@ fn cmd_plan_diff(
         config.generate_query_fragments = true;
         (
             PlanMode::Expansion,
-            plan_once(&supergraph, &subgraphs_by_name, &query_doc, config),
+            plan_once(supergraph, subgraphs_by_name, query_doc, config),
         )
     };
 
-    let diff = classify(operation, PlanMode::Expansion, right_mode, &left, &right);
+    classify(operation, PlanMode::Expansion, right_mode, &left, &right)
+}
+
+fn print_plan_diff(diff: &PlanDiff) {
+    println!("operation: {}", diff.operation);
+    println!("modes:     {} vs {}", diff.left_mode, diff.right_mode);
+    println!("verdict:   {:?}", diff.verdict);
+    if let Some(detail) = &diff.detail {
+        println!("detail:\n{detail}");
+    }
+    if let Some(structural) = &diff.structural_diff {
+        println!("plan diff:\n{structural}");
+    }
+}
+
+fn cmd_plan_diff(
+    query_path: &Path,
+    schema_paths: &[PathBuf],
+    use_json: bool,
+    compare_source_aware: bool,
+) -> Result<(), AnyError> {
+    let supergraph = load_supergraph(schema_paths)?;
+
+    let subgraphs_by_name: apollo_compiler::collections::IndexMap<_, _> = supergraph
+        .extract_subgraphs()?
+        .into_iter()
+        .map(|(name, subgraph)| (name, subgraph.schema))
+        .collect();
+
+    // The API schema is identical across planner configurations, so we build one
+    // planner just to parse/validate operations against it.
+    let base_planner = QueryPlanner::new(&supergraph, QueryPlannerConfig::default())?;
+    let api_schema = base_planner.api_schema().clone();
+
+    // Corpus mode: a directory of *.graphql operations → aggregate report.
+    if query_path.is_dir() {
+        let mut op_paths: Vec<PathBuf> = fs::read_dir(query_path)?
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|ext| ext == "graphql"))
+            .collect();
+        op_paths.sort(); // deterministic report ordering
+
+        let mut diffs = Vec::new();
+        for op_path in &op_paths {
+            let operation = op_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("operation")
+                .to_string();
+            let text = read_input(op_path);
+            match ExecutableDocument::parse_and_validate(api_schema.schema(), text, op_path) {
+                Ok(query_doc) => diffs.push(diff_operation(
+                    &supergraph,
+                    &subgraphs_by_name,
+                    &query_doc,
+                    operation,
+                    compare_source_aware,
+                )),
+                // A malformed operation becomes an Error verdict, not an abort,
+                // so one bad file doesn't sink the whole corpus run.
+                Err(e) => diffs.push(PlanDiff {
+                    operation,
+                    left_mode: PlanMode::Expansion,
+                    right_mode: if compare_source_aware {
+                        PlanMode::SourceAware
+                    } else {
+                        PlanMode::Expansion
+                    },
+                    verdict: Verdict::Error,
+                    detail: Some(format!("operation failed to parse/validate: {e}")),
+                    structural_diff: None,
+                }),
+            }
+        }
+
+        let report = CorpusReport::from_diffs(diffs);
+        if use_json {
+            println!("{}", serde_json::to_string_pretty(&report).unwrap());
+        } else {
+            println!(
+                "corpus: {} operations — identical={} equivalent={} different={} error={}",
+                report.total,
+                report.identical,
+                report.equivalent,
+                report.different,
+                report.error
+            );
+            for diff in &report.diffs {
+                println!("  {:?}\t{}", diff.verdict, diff.operation);
+            }
+        }
+        // Non-zero exit when anything diverged or errored, so CI can gate on it.
+        return if report.all_ok() {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "plan-diff: {} different, {} error across {} operations",
+                report.different,
+                report.error,
+                report.total
+            ))
+        };
+    }
+
+    // Single-operation mode.
+    let operation = query_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("operation")
+        .to_string();
+    let text = read_input(query_path);
+    let query_doc =
+        ExecutableDocument::parse_and_validate(api_schema.schema(), text, query_path)
+            .map_err(FederationError::from)?;
+
+    let diff = diff_operation(
+        &supergraph,
+        &subgraphs_by_name,
+        &query_doc,
+        operation,
+        compare_source_aware,
+    );
 
     if use_json {
         println!("{}", serde_json::to_string_pretty(&diff).unwrap());
     } else {
-        println!("operation: {}", diff.operation);
-        println!("modes:     {} vs {}", diff.left_mode, diff.right_mode);
-        println!("verdict:   {:?}", diff.verdict);
-        if let Some(detail) = &diff.detail {
-            println!("detail:\n{detail}");
-        }
-        if let Some(structural) = &diff.structural_diff {
-            println!("plan diff:\n{structural}");
-        }
+        print_plan_diff(&diff);
     }
     Ok(())
 }

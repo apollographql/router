@@ -95,6 +95,46 @@ pub struct PlanDiff {
     pub structural_diff: Option<String>,
 }
 
+/// Aggregate verdict tally over a corpus of operations, plus the per-operation
+/// diffs — the JSON report shape for a CI parity run.
+#[derive(Debug, Clone, Serialize)]
+pub struct CorpusReport {
+    pub total: usize,
+    pub identical: usize,
+    pub equivalent: usize,
+    pub different: usize,
+    pub error: usize,
+    pub diffs: Vec<PlanDiff>,
+}
+
+impl CorpusReport {
+    pub fn from_diffs(diffs: Vec<PlanDiff>) -> Self {
+        let mut report = CorpusReport {
+            total: diffs.len(),
+            identical: 0,
+            equivalent: 0,
+            different: 0,
+            error: 0,
+            diffs: Vec::new(),
+        };
+        for diff in &diffs {
+            match diff.verdict {
+                Verdict::Identical => report.identical += 1,
+                Verdict::Equivalent => report.equivalent += 1,
+                Verdict::Different => report.different += 1,
+                Verdict::Error => report.error += 1,
+            }
+        }
+        report.diffs = diffs;
+        report
+    }
+
+    /// True when no operation diverged or errored — the CI-green condition.
+    pub fn all_ok(&self) -> bool {
+        self.different == 0 && self.error == 0
+    }
+}
+
 /// Classify one operation's pair of [`ModeOutcome`]s into a [`Verdict`].
 ///
 /// This is the whole decision procedure, kept pure so it can be unit-tested
@@ -291,5 +331,32 @@ mod tests {
     fn structural_diff_handles_insertions() {
         let diff = structural_diff("a\nc\n", "a\nb\nc\n");
         assert_eq!(diff, "  a\n+ b\n  c\n");
+    }
+
+    #[test]
+    fn corpus_report_tallies_verdicts() {
+        let diffs = vec![
+            classify("op1", PlanMode::Expansion, PlanMode::Expansion,
+                &planned("P", Ok(())), &planned("P", Ok(()))),          // identical
+            classify("op2", PlanMode::Expansion, PlanMode::Expansion,
+                &planned("P", Ok(())), &planned("Q", Ok(()))),          // equivalent
+            classify("op3", PlanMode::Expansion, PlanMode::Expansion,
+                &planned("P", Ok(())), &planned("Q", Err("mismatch"))), // different
+            classify("op4", PlanMode::Expansion, PlanMode::SourceAware,
+                &planned("P", Ok(())), &ModeOutcome::Failed { reason: "x".into() }), // error
+        ];
+        let report = CorpusReport::from_diffs(diffs);
+        assert_eq!(report.total, 4);
+        assert_eq!(report.identical, 1);
+        assert_eq!(report.equivalent, 1);
+        assert_eq!(report.different, 1);
+        assert_eq!(report.error, 1);
+        assert!(!report.all_ok());
+
+        let clean = CorpusReport::from_diffs(vec![
+            classify("op", PlanMode::Expansion, PlanMode::Expansion,
+                &planned("P", Ok(())), &planned("P", Ok(()))),
+        ]);
+        assert!(clean.all_ok());
     }
 }
