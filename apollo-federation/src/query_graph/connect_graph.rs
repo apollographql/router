@@ -243,6 +243,78 @@ mod tests {
         );
     }
 
+    /// DISTANCE PROBE (spike diagnostic, not an assertion of desired behavior).
+    ///
+    /// For each fixture, measure three things and print them:
+    /// 1. Can we even build a federated query graph from the **raw**
+    ///    (non-expanded) connector supergraph? (If not, that's a hard gap.)
+    /// 2. The **expanded** supergraph's query graph — today's correct target:
+    ///    total nodes/edges and how many are `KeyResolution`.
+    /// 3. How many source-entering edges my source-aware builder derives from
+    ///    the raw supergraph.
+    ///
+    /// The point is the console output, read during the spike — hence the loose
+    /// asserts. Run with: `cargo test -p apollo-federation distance_probe -- --nocapture`.
+    #[test]
+    fn distance_probe_raw_vs_expanded_graph() {
+        use crate::ApiSchemaOptions;
+        use crate::Supergraph;
+        use crate::connectors::expand::ExpansionResult;
+        use crate::connectors::expand::expand_connectors;
+        use crate::query_graph::build_query_graph::build_federated_query_graph;
+
+        fn key_edges(graph: &crate::query_graph::QueryGraph) -> usize {
+            graph
+                .graph()
+                .edge_weights()
+                .filter(|e| e.transition == QueryGraphEdgeTransition::KeyResolution)
+                .count()
+        }
+
+        insta::with_settings!({prepend_module_to_snapshot => false}, {
+            glob!("../connectors/expand/tests/schemas/expand", "*.graphql", |path| {
+                let name = path.file_name().unwrap().to_string_lossy().to_string();
+                let sdl = std::fs::read_to_string(path).unwrap();
+
+                // (3) source-aware edges derived from the raw supergraph.
+                let raw_fed = FederationSchema::new(
+                    Schema::parse(&sdl, "supergraph.graphql").unwrap(),
+                );
+                let my_edges = raw_fed
+                    .as_ref()
+                    .ok()
+                    .and_then(|fed| build_connector_source_edges(fed).ok())
+                    .map(|e| e.len());
+
+                // (1) raw connector supergraph → federated query graph?
+                let raw_graph = Supergraph::new_with_router_specs(&sdl).ok().and_then(|sg| {
+                    let api = sg.to_api_schema(ApiSchemaOptions::default()).ok()?;
+                    build_federated_query_graph(sg.schema.clone(), api, Some(false), Some(true)).ok()
+                });
+
+                // (2) expanded supergraph → federated query graph (today's target).
+                let expanded_graph = match expand_connectors(
+                    &sdl,
+                    &ApiSchemaOptions { include_defer: true, ..Default::default() },
+                ) {
+                    Ok(ExpansionResult::Expanded { raw_sdl, .. }) => {
+                        Supergraph::new_with_router_specs(&raw_sdl).ok().and_then(|sg| {
+                            let api = sg.to_api_schema(ApiSchemaOptions::default()).ok()?;
+                            build_federated_query_graph(sg.schema.clone(), api, Some(false), Some(true)).ok()
+                        })
+                    }
+                    _ => None,
+                };
+
+                eprintln!(
+                    "DISTANCE {name}: source_aware_edges={my_edges:?}  raw_graph=[{}]  expanded_graph=[{}]",
+                    raw_graph.as_ref().map(|g| format!("nodes={} edges={} key={}", g.graph().node_count(), g.graph().edge_count(), key_edges(g))).unwrap_or_else(|| "BUILD FAILED".into()),
+                    expanded_graph.as_ref().map(|g| format!("nodes={} edges={} key={}", g.graph().node_count(), g.graph().edge_count(), key_edges(g))).unwrap_or_else(|| "BUILD FAILED".into()),
+                );
+            });
+        });
+    }
+
     /// The supergraph-level collector gathers a `KeyResolution` edge with a
     /// non-empty condition for every keyed connector across all subgraphs of a
     /// (non-expanded) supergraph.
