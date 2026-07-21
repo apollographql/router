@@ -13,6 +13,8 @@ use tower::Service;
 use tower::ServiceExt;
 use uuid::Uuid;
 
+use rstest::rstest;
+
 use super::plugin::CacheSubgraph;
 use super::plugin::ResponseCache;
 use crate::Context;
@@ -24,10 +26,12 @@ use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
 use crate::plugins::response_cache::debugger::CacheKeysContext;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
+use crate::plugins::response_cache::invalidation_endpoint::InvalidationIndexes;
 use crate::plugins::response_cache::invalidation_endpoint::SubgraphInvalidationConfig;
 use crate::plugins::response_cache::metrics::CacheMetricContextKey;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CONTEXT_CACHE_KEY;
+use crate::plugins::response_cache::plugin::CdnInvalidationConfig;
 use crate::plugins::response_cache::plugin::INVALIDATION_SHARED_KEY;
 use crate::plugins::response_cache::plugin::Subgraph;
 use crate::plugins::response_cache::storage::CacheStorage;
@@ -126,6 +130,18 @@ fn get_cache_control_header(response: &supergraph::Response) -> Option<Vec<Strin
     }
 
     Some(cache_control_headers)
+}
+
+fn get_cache_tag_header(response: &supergraph::Response) -> Option<Vec<String>> {
+    let header = response.response.headers().get("Cache-Tag")?;
+    Some(
+        header
+            .to_str()
+            .unwrap()
+            .split(',')
+            .map(ToString::to_string)
+            .collect(),
+    )
 }
 
 fn cache_control_contains_no_store(cache_control_header: &[String]) -> bool {
@@ -3392,6 +3408,149 @@ async fn complex_cache_tag() {
         }
         "#);
     }.with_metrics().await;
+}
+
+/// Shared setup for the `cdn_invalidation_enabled` vs. `IndexMode::CacheTag` decoupling tests:
+/// one query that touches both a root field with a schema-derived `@cacheTag` (`currentUser` on
+/// the `user` subgraph, format `"currentUser"`) and an entity type with schema-derived
+/// `@cacheTag`s (`Organization` on the `orga` subgraph, formats `"organization"` and
+/// `"organizationid-id--{$key.id}"`). Both subgraphs share the same `cache_tag` index setting,
+/// since the point here is proving the CDN header doesn't depend on that setting at all, not
+/// exercising per-subgraph config resolution (already covered elsewhere).
+async fn setup_cdn_invalidation_gating_test(
+    cache_tag_index_enabled: bool,
+    cdn_invalidation_enabled: bool,
+) -> supergraph::Response {
+    let valid_schema =
+        Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+    // `creatorUser` is `@join__field(graph: ORGA)` only, so requesting it forces an actual
+    // `_entities` fetch to `orga` — requesting only `id` (a key field) lets `user` answer the
+    // whole query itself, with no entity fetch at all.
+    let query = "query { currentUser { activeOrganization { ... on Organization { id creatorUser { __typename id } } } } }";
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
+                        "__typename": "Organization",
+                        "id": "1",
+                    }
+                }
+            },
+            "headers": {"cache-control": "public"},
+        },
+        "orga": {
+            "entities": [
+                {
+                    "__typename": "Organization",
+                    "id": "1",
+                    "creatorUser": {
+                        "__typename": "User",
+                        "id": 2
+                    }
+                }
+            ],
+            "headers": {"cache-control": "public"},
+        },
+    });
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+    let subgraph_config = || Subgraph {
+        redis: None,
+        private_id: Some("sub".to_string()),
+        enabled: true.into(),
+        ttl: None,
+        invalidation: Some(SubgraphInvalidationConfig {
+            indexes: InvalidationIndexes {
+                cache_tag: cache_tag_index_enabled,
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    };
+    let map = [
+        ("user".to_string(), subgraph_config()),
+        ("orga".to_string(), subgraph_config()),
+    ]
+    .into_iter()
+    .collect();
+    let subgraphs_conf = create_subgraph_conf(map);
+    let response_cache = ResponseCache::for_test_with_cdn_invalidation(
+        storage.clone(),
+        subgraphs_conf,
+        valid_schema.clone(),
+        true,
+        drop_tx,
+        true,
+        CdnInvalidationConfig {
+            enabled: cdn_invalidation_enabled,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": subgraphs,
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    service.oneshot(request).await.unwrap()
+}
+
+#[rstest]
+#[case::cdn_only_still_emits_header(false, true, true)]
+#[case::redis_index_alone_does_not_emit_header(true, false, false)]
+#[case::both_enabled(true, true, true)]
+#[tokio::test(flavor = "multi_thread")]
+async fn cdn_invalidation_header_gates_independently_of_cache_tag_index(
+    #[case] cache_tag_index_enabled: bool,
+    #[case] cdn_invalidation_enabled: bool,
+    #[case] expect_header_present: bool,
+) {
+    async move {
+        let response =
+            setup_cdn_invalidation_gating_test(cache_tag_index_enabled, cdn_invalidation_enabled)
+                .await;
+        let header = get_cache_tag_header(&response);
+
+        assert_eq!(
+            header.is_some(),
+            expect_header_present,
+            "cache_tag_index_enabled={cache_tag_index_enabled}, cdn_invalidation_enabled={cdn_invalidation_enabled}: got header {header:?}"
+        );
+
+        if let Some(header) = header {
+            // Root's schema-derived tag (`user` subgraph) and the entity's schema-derived tags
+            // (`orga` subgraph) should both be present regardless of `cache_tag_index_enabled` —
+            // the CDN header only depends on `cdn_invalidation_enabled`.
+            assert!(
+                header.contains(&"currentUser".to_string()),
+                "missing root tag in {header:?}"
+            );
+            assert!(
+                header.contains(&"organization".to_string()),
+                "missing entity tag in {header:?}"
+            );
+        }
+    }
+    .with_metrics()
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

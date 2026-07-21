@@ -661,6 +661,64 @@ impl ResponseCache {
     where
         Self: Sized,
     {
+        Self::build_for_test(
+            storage,
+            subgraphs,
+            supergraph_schema,
+            truncate_namespace,
+            drop_tx,
+            include_cache_control_header_on_router_response,
+            CdnInvalidationConfig::default(),
+        )
+        .await
+    }
+
+    #[cfg(all(
+        test,
+        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+    ))]
+    /// Like `for_test`, but lets the caller configure `cdn_invalidation` instead of always
+    /// disabling it — needed by any test that exercises the CDN `Cache-Tag` header path.
+    pub(crate) async fn for_test_with_cdn_invalidation(
+        storage: Storage,
+        subgraphs: SubgraphConfiguration<Subgraph>,
+        supergraph_schema: Arc<Valid<Schema>>,
+        truncate_namespace: bool,
+        drop_tx: broadcast::Sender<()>,
+        include_cache_control_header_on_router_response: bool,
+        cdn_invalidation: CdnInvalidationConfig,
+    ) -> Result<Self, BoxError>
+    where
+        Self: Sized,
+    {
+        Self::build_for_test(
+            storage,
+            subgraphs,
+            supergraph_schema,
+            truncate_namespace,
+            drop_tx,
+            include_cache_control_header_on_router_response,
+            cdn_invalidation,
+        )
+        .await
+    }
+
+    #[cfg(all(
+        test,
+        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+    ))]
+    async fn build_for_test(
+        storage: Storage,
+        subgraphs: SubgraphConfiguration<Subgraph>,
+        supergraph_schema: Arc<Valid<Schema>>,
+        truncate_namespace: bool,
+        drop_tx: broadcast::Sender<()>,
+        include_cache_control_header_on_router_response: bool,
+        cdn_invalidation: CdnInvalidationConfig,
+    ) -> Result<Self, BoxError>
+    where
+        Self: Sized,
+    {
         use std::net::IpAddr;
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
@@ -679,7 +737,7 @@ impl ResponseCache {
             enabled: true,
             debug: true,
             include_cache_control_header_on_router_response,
-            cdn_invalidation: CdnInvalidationConfig::default(),
+            cdn_invalidation,
             subgraphs: Arc::new(subgraphs),
             private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
