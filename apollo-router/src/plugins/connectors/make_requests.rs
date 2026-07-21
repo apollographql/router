@@ -555,6 +555,7 @@ mod tests {
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::StringTemplate;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+    use apollo_federation::connectors::runtime::key::ResponseKey;
     use apollo_federation::connectors::runtime::responses::MappedResponse;
     use insta::assert_debug_snapshot;
     use serde_json_bytes::Value;
@@ -2086,6 +2087,96 @@ mod tests {
             ),
         ]
         "#);
+    }
+
+    /// SOURCE-AWARE ROOT-FIELD DISPATCH (router-crate steel thread). Drive the
+    /// supergraph-level operation `{ users { id name } }` — exactly the shape a
+    /// source-aware plan's fetch node carries (a plain supergraph selection, no
+    /// synthetic `_entities` operation) — through the *real*
+    /// `make_requests`/`root_fields` production path and assert it builds the
+    /// connector's actual HTTP request. This is the router-crate analogue of
+    /// apollo-federation's `steel_thread_root_field_end_to_end`, which proved
+    /// the same result with the plan→dispatch step hand-wired; here it runs
+    /// through router execution code instead.
+    ///
+    /// The connector is hand-built (the router crate cannot cheaply extract
+    /// real connectors from a supergraph — every test here hand-builds), but the
+    /// *operation* is the source-aware artifact under test, and it is a plain
+    /// supergraph selection with a nested selection set — the steelthread
+    /// `Query.users` shape.
+    #[test]
+    fn source_aware_root_field_dispatch() {
+        let schema = Schema::parse_and_validate(
+            "type Query { users: [User] } type User { id: ID name: String }",
+            "./",
+        )
+        .unwrap();
+        let operation = ExecutableDocument::parse_and_validate(
+            &schema,
+            "{ users { id name } }".to_string(),
+            "./",
+        )
+        .unwrap();
+        let variables = Variables {
+            variables: Default::default(),
+            inverted_paths: Default::default(),
+            contextual_arguments: Default::default(),
+        };
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
+            id: ConnectId::new("connectors".into(), None, name!(Query), name!(users), None, 0),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/users".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("id name").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            label: "test".into(),
+        };
+
+        let requests = super::make_requests(
+            &operation,
+            &variables,
+            None,
+            &Context::new(),
+            supergraph_request,
+            Arc::new(connector),
+            &None,
+        )
+        .unwrap();
+
+        assert_eq!(requests.len(), 1, "one root-field request for `users`");
+        let req = requests.into_iter().next().unwrap();
+        assert!(
+            matches!(req.key, ResponseKey::RootField { .. }),
+            "expected a RootField response key, got {:?}",
+            req.key
+        );
+        let TransportRequest::Http(http_request) = req.transport_request else {
+            panic!("expected an HTTP transport request");
+        };
+        assert_eq!(http_request.inner.method(), "GET");
+        assert!(
+            http_request.inner.uri().to_string().ends_with("/users"),
+            "expected GET .../users, got {}",
+            http_request.inner.uri()
+        );
     }
 
     /// Helper function for full pipeline: parse query → `root_fields()` → apply connector

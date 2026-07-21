@@ -240,6 +240,75 @@ corpus-backed, not a single-fixture anecdote. The distance that remains is
 unchanged and unmeasured by this experiment: the **router fetch seam** and
 **composition-side satisfiability** (Phase 2).
 
+## Phase 1 — the router fetch seam (first slices)
+
+The planner-side spike above ends with correct plans that emit
+`Fetch(service: "connectors")` — a subgraph fetch no real service backs. This
+section records the first slices of turning that into real connector dispatch
+in the router (`PHASE1_FETCH_SEAM_HANDOFF.md` is the full brief). Two slices
+have landed, and probing the third relocates the entity-class distance.
+
+### Slice 1 — coordinate-keyed dispatch (landed)
+
+In an *expanded* supergraph every connector becomes its own synthetic subgraph,
+so a fetch node's `service_name` uniquely identifies which connector to
+dispatch — `ConnectorService::call` keys on it. Source-aware collapses all
+connectors into one `connectors` subgraph, so `service_name` is `"connectors"`
+for every connector fetch and no longer disambiguates. The
+`ConnectFetchDescriptor.coordinate` (`ConnectId::coordinate`) is the stable id
+that does. `connectors_by_coordinate()` (`plugins/connectors/query_plans.rs`)
+is the lossless re-index dispatch will key on; tested.
+
+### Slice 2 — root-field dispatch through real router code (landed)
+
+`steel_thread_root_field_end_to_end` (apollo-federation) proved
+plan → `GET /users` → mapped response for the root-field class, but with the
+plan→dispatch step hand-wired *in the federation crate* via
+`runtime::make_request`. Slice 2 reproduces the dispatch half through the
+**router's** production path: `source_aware_root_field_dispatch`
+(`plugins/connectors/make_requests.rs`) drives the supergraph-level operation
+`{ users { id name } }` — the exact shape a source-aware plan's fetch node
+carries, no synthetic `_entities` operation — through the real
+`make_requests`/`root_fields` code and asserts it builds the connector's actual
+`GET …/users` request with a `RootField` response key. **The root-field class
+now works through router execution code, not just a hand-wired thread.**
+
+### Slice 3 — entity dispatch: the distance is plumbing, not algorithm
+
+Reading the entity path (`entities_from_request`) reframes the remaining entity
+work. Two observations:
+
+1. **Entity `RequestInputs` are already synthetic-operation-independent.** For
+   each representation `{ "__typename": "User", "id": "1" }`, the inputs are
+   built *directly* from that object (`args: rep` for Explicit, `this: rep` for
+   TypeSingle). The synthetic `_entities` operation is used **only** to derive
+   the response *selection* — not the inputs.
+2. **The representations themselves are already accounted for.** Source-aware
+   builds each representation from parent data using the entering-edge
+   condition (the Spike-A `FieldSet`), not a fabricated synthetic `@key`. Spike
+   A's differential test already proved `derive_condition ≡ resolvable_key`
+   over the whole corpus — i.e. the condition enumerates exactly the key fields
+   expansion fabricates. So "which fields form the representation" is a solved,
+   tested question.
+
+What remains for the entity class is therefore **executor plumbing, not a new
+algorithm**:
+
+- Derive the entity response *selection* from the descriptor's
+  `output_selection` (supergraph-schema selection) instead of from
+  `apply_selection_set` over a synthetic `_entities` operation.
+- Thread the `ConnectFetchDescriptor` onto the source-aware fetch node and into
+  `make_requests`, and have the executor build representations from parent data
+  via the condition. This is genuine cross-crate work — it needs
+  `ConnectFetchDescriptor` exposed beyond `apollo-federation`, a fetch-node
+  field, and changes to core execution — and it is where, per the handoff, "the
+  spike stops being cheap."
+
+Net: the entity class has **no unproven algorithmic content left** (inputs +
+key-fields are both already validated); its distance is the descriptor-threading
+plumbing through the executor. That is a real, higher-blast-radius chunk, but a
+*known* one — not a research risk.
+
 ## Honest verdict
 
 The spike answers "how far off": **the graph-*data* problems are largely solved
@@ -247,7 +316,14 @@ and turned out cheaper than the 2024 write-up implied — a raw connector
 supergraph is already most of a query graph, and connector conditions derive
 cleanly.** The distance that remains is the same distance that has always been
 the hard part: **planner traversal + the router fetch executor over a
-non-expanded topology**, neither of which this spike touched. Those are the
-gating unknowns, and they are real, multi-quarter work. The parity harness
-(Spike B, corpus-ready) is in place to measure progress on them the moment a
-source-aware plan can be produced.
+non-expanded topology**. Planner traversal turned out largely already-working
+(corpus-backed above). The fetch executor is no longer entirely untouched: the
+**root-field class now dispatches through real router code** (Slice 2), and
+probing the **entity class** showed its remaining distance is descriptor-
+threading *plumbing* through the executor, not unproven algorithm (Slice 3
+analysis) — a known, higher-blast-radius chunk rather than a research risk.
+What is still genuinely unbuilt and multi-quarter: that entity-path executor
+plumbing end-to-end, and **composition-side satisfiability** (Phase 2), which
+this spike has not touched at all. The parity harness (Spike B, corpus-ready)
+remains in place to measure progress the moment a full source-aware plan
+executes.
