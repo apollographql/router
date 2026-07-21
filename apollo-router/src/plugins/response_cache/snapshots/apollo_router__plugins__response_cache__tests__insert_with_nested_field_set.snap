@@ -5,7 +5,7 @@ expression: cache_keys
 ---
 [
   {
-    "key": "version:1.2:subgraph:products:type:Query:hash:c3cc442a017430d067db270500b300d923c99444048d4e8e2bbb2aa5b719a524:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.2:subgraph:products:type:Query:hash:37eabfc9a3c49e8c9220d3930629d0e7299a05d79f014dd8c4e09f06f7dbb091:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "allProducts",
       "subgraph-products",
@@ -51,7 +51,7 @@ expression: cache_keys
     "warnings": []
   },
   {
-    "key": "version:1.2:subgraph:users:type:User:representation:e2d4bfa6d172a744110f37cd5227ffb3d146259fe84d19a6c91d8da877373f3e:hash:776f57d4068ba3af9b26a5cf41813c1b13b35e3865676d9d298c1037b058377e:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.2:subgraph:users:type:User:representation:e2d4bfa6d172a744110f37cd5227ffb3d146259fe84d19a6c91d8da877373f3e:hash:5e7543ebe7d65c6e10db4dbe0e54759f492553a1a7c03fc383fe7773ef5cdb7b:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "subgraph-users",
       "type-users-User",
