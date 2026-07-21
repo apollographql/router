@@ -184,16 +184,16 @@ impl InvalidationLabels {
     ) -> Result<Self, InvalidationLabelsError> {
         self.context
             .clone()
-            .unwrap_or(Err(InvalidationLabelsError::FailedToMerge(
+            .ok_or(InvalidationLabelsError::FailedToMerge(
                 "Missing Context".to_string(),
-            ))?)
+            ))?
             .extensions()
             .with_lock(|lock| {
-                let invalidation_labels = lock.get_mut::<InvalidationLabels>().unwrap_or(Err(
+                let invalidation_labels = lock.get_mut::<InvalidationLabels>().ok_or(
                     InvalidationLabelsError::FailedToMerge(
                         "Missing InvalidationLabels on Context".to_string(),
                     ),
-                )?);
+                )?;
 
                 invalidation_labels
                     .tags
@@ -567,5 +567,228 @@ mod tests {
         );
 
         assert!(headers.is_empty());
+    }
+
+    #[rstest]
+    #[case::empty(HashSet::new(), HashSet::new())]
+    #[case::one_subgraph(
+        HashSet::from(["products".to_string()]),
+        HashSet::from(["subgraph-products".to_string()]),
+    )]
+    #[case::multiple_subgraphs(
+        HashSet::from(["products".to_string(), "reviews".to_string()]),
+        HashSet::from(["subgraph-products".to_string(), "subgraph-reviews".to_string()]),
+    )]
+    fn format_subgraph_labels_prefixes_each_subgraph(
+        #[case] subgraphs: HashSet<String>,
+        #[case] expected: HashSet<String>,
+    ) {
+        let labels = InvalidationLabels {
+            subgraphs,
+            ..Default::default()
+        };
+
+        let got: HashSet<String> = labels.format_subgraph_labels().into_iter().collect();
+        assert_eq!(got, expected);
+    }
+
+    #[rstest]
+    #[case::empty(HashSet::new(), HashSet::new())]
+    #[case::one_type(
+        HashSet::from([("products".to_string(), "Query".to_string())]),
+        HashSet::from(["type-products-Query".to_string()]),
+    )]
+    #[case::multiple_types_same_subgraph(
+        HashSet::from([
+            ("products".to_string(), "Query".to_string()),
+            ("products".to_string(), "Product".to_string()),
+        ]),
+        HashSet::from([
+            "type-products-Query".to_string(),
+            "type-products-Product".to_string(),
+        ]),
+    )]
+    #[case::same_type_name_different_subgraphs(
+        HashSet::from([
+            ("reviews".to_string(), "Product".to_string()),
+            ("pricing".to_string(), "Product".to_string()),
+        ]),
+        HashSet::from([
+            "type-reviews-Product".to_string(),
+            "type-pricing-Product".to_string(),
+        ]),
+    )]
+    fn format_type_labels_renders_subgraph_and_type_distinctly(
+        #[case] types: HashSet<(String, String)>,
+        #[case] expected: HashSet<String>,
+    ) {
+        let labels = InvalidationLabels {
+            types,
+            ..Default::default()
+        };
+
+        let got: HashSet<String> = labels.format_type_labels().into_iter().collect();
+        assert_eq!(got, expected);
+    }
+
+    #[rstest]
+    #[case::all_empty(HashSet::new(), HashSet::new(), HashSet::new(), None)]
+    #[case::only_subgraphs(
+        HashSet::new(),
+        HashSet::new(),
+        HashSet::from(["products".to_string()]),
+        Some("subgraph-products"),
+    )]
+    #[case::only_types(
+        HashSet::new(),
+        HashSet::from([("products".to_string(), "Query".to_string())]),
+        HashSet::new(),
+        Some("type-products-Query"),
+    )]
+    #[case::only_tags(
+        HashSet::from(["homepage".to_string()]),
+        HashSet::new(),
+        HashSet::new(),
+        Some("homepage"),
+    )]
+    fn maybe_emit_header_present_iff_any_tier_nonempty(
+        #[case] tags: HashSet<String>,
+        #[case] types: HashSet<(String, String)>,
+        #[case] subgraphs: HashSet<String>,
+        #[case] expected_content: Option<&str>,
+    ) {
+        let labels = InvalidationLabels {
+            tags,
+            types,
+            subgraphs,
+            ..Default::default()
+        };
+        let mut headers = http::HeaderMap::new();
+
+        labels.maybe_emit_header(&mut headers, &cdn_config(|_| {}));
+
+        match expected_content {
+            None => assert!(
+                headers.is_empty(),
+                "expected no header when every tier is empty"
+            ),
+            Some(expected) => {
+                assert_eq!(headers.get("Cache-Tag").unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn maybe_emit_header_orders_subgraphs_then_types_then_tags() {
+        let labels = InvalidationLabels {
+            tags: HashSet::from(["homepage".to_string(), "checkout".to_string()]),
+            types: HashSet::from([
+                ("products".to_string(), "Query".to_string()),
+                ("products".to_string(), "Product".to_string()),
+            ]),
+            subgraphs: HashSet::from(["products".to_string(), "reviews".to_string()]),
+            ..Default::default()
+        };
+        let mut headers = http::HeaderMap::new();
+
+        // Generous budget: nothing truncates, so this only tests ordering, not byte math
+        // (that's covered separately by `maybe_emit_header_truncation_protects_coarse_tiers_first`).
+        labels.maybe_emit_header(&mut headers, &cdn_config(|c| c.max_bytes = 1000));
+
+        let value = headers.get("Cache-Tag").unwrap().to_str().unwrap();
+        let segments: Vec<&str> = value.split(',').collect();
+
+        // Neither fixture tag starts with "subgraph-"/"type-", so tier classification below is
+        // unambiguous; keep that true if these fixture values ever change.
+        let classify = |s: &str| {
+            if s.starts_with("subgraph-") {
+                0
+            } else if s.starts_with("type-") {
+                1
+            } else {
+                2
+            }
+        };
+
+        let classes: Vec<i32> = segments.iter().map(|s| classify(s)).collect();
+        let mut sorted = classes.clone();
+        sorted.sort();
+        assert_eq!(
+            classes, sorted,
+            "expected subgraph labels before type labels before tags, got {value:?}"
+        );
+        assert!(
+            classes.contains(&0) && classes.contains(&1) && classes.contains(&2),
+            "fixture should exercise all three tiers, got {value:?}"
+        );
+    }
+
+    #[rstest]
+    // All labels within a tier are deliberately the same rendered length (12 bytes for both
+    // subgraph and type labels, 3 bytes for tags) so the number that fits at a given max_bytes
+    // is exactly predictable regardless of the HashSet's arbitrary iteration order. Cumulative
+    // next_len after each of the 8 items, in tier order, is: 13, 26, 39, 52, 56, 60, 64, 68.
+    #[case::only_coarse_tiers_fit(54, 2, 2, 0)]
+    #[case::coarse_tiers_plus_some_tags_fit(62, 2, 2, 2)]
+    #[case::everything_fits(100, 2, 2, 4)]
+    #[case::not_even_the_first_coarsest_label_fits(10, 0, 0, 0)]
+    fn maybe_emit_header_truncation_protects_coarse_tiers_first(
+        #[case] max_bytes: usize,
+        #[case] expected_subgraphs: usize,
+        #[case] expected_types: usize,
+        #[case] expected_tags: usize,
+    ) {
+        let labels = InvalidationLabels {
+            subgraphs: HashSet::from(["aaa".to_string(), "bbb".to_string()]),
+            types: HashSet::from([
+                ("ccc".to_string(), "ddd".to_string()),
+                ("eee".to_string(), "fff".to_string()),
+            ]),
+            tags: HashSet::from([
+                "ggg".to_string(),
+                "hhh".to_string(),
+                "iii".to_string(),
+                "jjj".to_string(),
+            ]),
+            ..Default::default()
+        };
+        let mut headers = http::HeaderMap::new();
+
+        labels.maybe_emit_header(&mut headers, &cdn_config(|c| c.max_bytes = max_bytes));
+
+        let total_expected = expected_subgraphs + expected_types + expected_tags;
+        if total_expected == 0 {
+            // Budget too small even for the single coarsest label: the pre-truncation label set
+            // wasn't empty, so this is an empty-*value* header, not a suppressed one — the
+            // `None` path (see `maybe_emit_header_present_iff_any_tier_nonempty`) only fires
+            // when there's nothing to consider at all, which isn't the case here.
+            assert_eq!(headers.get("Cache-Tag").unwrap(), "");
+            return;
+        }
+
+        let value = headers.get("Cache-Tag").unwrap().to_str().unwrap();
+        let segments: Vec<&str> = value.split(',').collect();
+        assert_eq!(
+            segments.len(),
+            total_expected,
+            "unexpected segment count in {value:?}"
+        );
+
+        let subgraph_count = segments
+            .iter()
+            .filter(|s| s.starts_with("subgraph-"))
+            .count();
+        let type_count = segments.iter().filter(|s| s.starts_with("type-")).count();
+        let tag_count = segments.len() - subgraph_count - type_count;
+
+        assert_eq!(
+            subgraph_count, expected_subgraphs,
+            "subgraph count mismatch in {value:?}"
+        );
+        assert_eq!(
+            type_count, expected_types,
+            "type count mismatch in {value:?}"
+        );
+        assert_eq!(tag_count, expected_tags, "tag count mismatch in {value:?}");
     }
 }
