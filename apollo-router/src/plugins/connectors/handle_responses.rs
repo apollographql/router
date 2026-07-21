@@ -466,8 +466,6 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
-            output_is_list: Some(false),
-            output_is_non_null: Some(false),
             label: "test label".into(),
         });
 
@@ -583,8 +581,6 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
-            output_is_list: Some(false),
-            output_is_non_null: Some(false),
             label: "test label".into(),
         });
 
@@ -701,8 +697,6 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
-            output_is_list: Some(false),
-            output_is_non_null: Some(false),
             label: "test label".into(),
         });
 
@@ -830,8 +824,6 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
-            output_is_list: Some(false),
-            output_is_non_null: Some(false),
             label: "test label".into(),
         });
 
@@ -963,8 +955,6 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
-            output_is_list: Some(false),
-            output_is_non_null: Some(false),
             label: "test label".into(),
         });
 
@@ -1250,8 +1240,6 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: IndexMap::from_iter([(Namespace::Status, Default::default())]),
             error_settings: Default::default(),
-            output_is_list: Some(false),
-            output_is_non_null: Some(false),
             label: "test label".into(),
         });
 
@@ -1350,8 +1338,6 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: IndexMap::from_iter([(Namespace::Status, Default::default())]),
             error_settings,
-            output_is_list: Some(false),
-            output_is_non_null: Some(false),
             label: Label::from("test label"),
         });
 
@@ -1460,8 +1446,6 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
-            output_is_list: Some(false),
-            output_is_non_null: Some(false),
             label: "test label".into(),
         })
     }
@@ -1602,8 +1586,6 @@ mod tests {
                 source_extensions: None,
                 connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
             },
-            output_is_list: Some(false),
-            output_is_non_null: Some(false),
             label: "test label".into(),
         });
 
@@ -1734,8 +1716,6 @@ mod tests {
                 source_extensions: None,
                 connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
             },
-            output_is_list: Some(false),
-            output_is_non_null: Some(false),
             label: "test label".into(),
         });
 
@@ -1841,8 +1821,6 @@ mod tests {
                 ),
                 connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
             },
-            output_is_list: Some(false),
-            output_is_non_null: Some(false),
             label: "test label".into(),
         });
 
