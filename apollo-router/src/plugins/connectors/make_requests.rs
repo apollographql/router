@@ -283,6 +283,72 @@ fn entities_from_request(
         .collect::<Result<Vec<_>, _>>()
 }
 
+// --- SOURCE-AWARE ENTITIES ---------------------------------------------------
+
+/// Source-aware analogue of [`entities_from_request`]. Builds the entity
+/// `ResponseKey`s from a **supergraph-level entity selection** — the selection
+/// a source-aware plan's fetch node carries — plus the `representations` the
+/// executor extracts from parent data via the entering-edge condition (the
+/// Spike-A `FieldSet`), with **no synthetic `_entities` operation**.
+///
+/// The only difference from `entities_from_request` is *where the requested
+/// entity selection set comes from*: here it is passed in directly (the fetch
+/// node's supergraph selection) instead of being parsed out of an `_entities`
+/// field. The representation→`RequestInputs` mapping is byte-identical to
+/// `entities_from_request`, so entity inputs are synthetic-operation-independent
+/// by construction; only the selection derivation shifts its source.
+// Consumed by the source-aware executor path, which is not wired into
+// `make_requests` yet (that lands with the fetch-node descriptor plumbing);
+// exercised by tests.
+#[allow(dead_code)]
+fn entities_from_source_aware(
+    connector: Arc<Connector>,
+    operation: &Valid<ExecutableDocument>,
+    entity_selection_set: &apollo_compiler::executable::SelectionSet,
+    representations: &[serde_json_bytes::Value],
+) -> Result<Vec<ResponseKey>, MakeRequestError> {
+    use MakeRequestError::*;
+
+    let selection = Arc::new(connector.selection.apply_selection_set(
+        &connector.abstract_types(),
+        operation.as_ref(),
+        entity_selection_set,
+        None,
+    ));
+
+    representations
+        .iter()
+        .enumerate()
+        .map(|(i, rep)| {
+            let rep_obj = rep
+                .as_object()
+                .ok_or_else(|| InvalidRepresentations("representation is not an object".into()))?
+                .clone();
+            let request_inputs = match connector.entity_resolver {
+                Some(EntityResolver::Explicit) => RequestInputs {
+                    args: rep_obj,
+                    ..Default::default()
+                },
+                Some(EntityResolver::TypeSingle) => RequestInputs {
+                    this: rep_obj,
+                    ..Default::default()
+                },
+                _ => {
+                    return Err(InvalidRepresentations(
+                        "entity resolver not supported for this connector".into(),
+                    ));
+                }
+            };
+
+            Ok(ResponseKey::Entity {
+                index: i,
+                selection: selection.clone(),
+                inputs: request_inputs,
+            })
+        })
+        .collect()
+}
+
 // --- ENTITY FIELDS -----------------------------------------------------------
 
 /// This is effectively the combination of the other two functions:
@@ -2177,6 +2243,104 @@ mod tests {
             "expected GET .../users, got {}",
             http_request.inner.uri()
         );
+    }
+
+    /// SOURCE-AWARE ENTITY DISPATCH (increment 3a). Build the entity
+    /// `ResponseKey`s for `{ user(id: "1") { field } }` from the *supergraph*
+    /// entity selection (`{ field }`, taken straight off the operation's `user`
+    /// field) plus representations — with no synthetic `_entities` operation.
+    /// Asserts the response key carries the connector selection and the
+    /// representation as `this` inputs (TypeSingle). This is the entity-class
+    /// analogue of `source_aware_root_field_dispatch`: it proves an entity fetch
+    /// is constructible from a plain supergraph selection, the shape a
+    /// source-aware plan's fetch node carries.
+    #[test]
+    fn source_aware_entity_dispatch() {
+        use apollo_compiler::executable::Selection;
+
+        let schema = Schema::parse_and_validate(
+            "type Query { user(id: ID!): User } type User { field: String }",
+            "./",
+        )
+        .unwrap();
+        let operation = ExecutableDocument::parse_and_validate(
+            &schema,
+            r#"{ user(id: "1") { field } }"#.to_string(),
+            "./",
+        )
+        .unwrap();
+
+        // The entity selection a source-aware fetch node carries: the `user`
+        // field's supergraph selection set (`{ field }`).
+        let op = operation.operations.get(None).unwrap();
+        let Selection::Field(user_field) = &op.selection_set.selections[0] else {
+            panic!("expected the `user` field");
+        };
+        let entity_selection_set = &user_field.selection_set;
+
+        // Representations the executor would extract from parent data via the
+        // entering-edge condition (here supplied directly).
+        let representations = vec![
+            serde_json_bytes::json!({ "__typename": "User", "id": "1" }),
+            serde_json_bytes::json!({ "__typename": "User", "id": "2" }),
+        ];
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
+            id: ConnectId::new_on_object("connectors".into(), None, name!(User), None, 0),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: StringTemplate::parse_with_spec(
+                    "/users/{$this.id}",
+                    ConnectSpec::V0_1,
+                )
+                .unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("field").unwrap(),
+            entity_resolver: Some(super::EntityResolver::TypeSingle),
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            label: "test".into(),
+        };
+
+        let keys = super::entities_from_source_aware(
+            Arc::new(connector),
+            &operation,
+            entity_selection_set,
+            &representations,
+        )
+        .unwrap();
+
+        assert_eq!(keys.len(), 2, "one entity request per representation");
+        for (i, key) in keys.iter().enumerate() {
+            let ResponseKey::Entity {
+                index,
+                selection,
+                inputs,
+            } = key
+            else {
+                panic!("expected an Entity response key, got {key:?}");
+            };
+            assert_eq!(*index, i);
+            // Selection comes from the connector selection applied to the
+            // supergraph `{ field }` selection — no synthetic `_entities` doc.
+            assert_eq!(selection.to_string(), "field");
+            // Inputs come straight from the representation (TypeSingle → `this`),
+            // identical to how `entities_from_request` maps them.
+            assert_eq!(
+                inputs.this,
+                representations[i].as_object().unwrap().clone(),
+                "representation flows through as `this` inputs"
+            );
+        }
     }
 
     /// Helper function for full pipeline: parse query → `root_fields()` → apply connector
