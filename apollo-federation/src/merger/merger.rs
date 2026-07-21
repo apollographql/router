@@ -12,6 +12,7 @@ use apollo_compiler::Schema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
+use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
@@ -1988,6 +1989,8 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     ) -> Result<(), FederationError> {
         let mut fields_to_insert: IndexMap<ObjectFieldDefinitionPosition, FieldDefinition> =
             IndexMap::default();
+        let mut external_fields_to_update: IndexMap<ObjectFieldDefinitionPosition, DirectiveList> =
+            IndexMap::default();
 
         let access_control_directive_names: IndexSet<Name> = self
             .access_control_directives_in_supergraph
@@ -2006,9 +2009,56 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                                 type_name: name.clone(),
                                 field_name: intf_field_name.clone(),
                             };
-                            if !object.fields.contains_key(intf_field_name)
-                                && !fields_to_insert.contains_key(&candidate_field)
+
+                            // check if field was already processed
+                            if fields_to_insert.contains_key(&candidate_field)
+                                || external_fields_to_update.contains_key(&candidate_field)
                             {
+                                continue;
+                            }
+
+                            if let Some(obj_field) = object.fields.get(intf_field_name) {
+                                // An implementation may locally declare a field as `@external` purely to reference it in
+                                // a `@requires` clause, in which case it already exists on the object so it won't be
+                                // propagated from interface object. But that field's only "real" definition is the abstracting
+                                // `@interfaceObject` field, so directives that only apply there (e.g. `@tag`) still need
+                                // to be propagated onto it.
+
+                                // we need to check if field is fully @external i.e. it is defined in all subgraphs as @external
+                                if !obj_field.directives.is_empty()
+                                    && obj_field.directives.iter().all(|d| {
+                                        self.join_spec_definition
+                                            .field_directive_arguments(d)
+                                            .is_ok_and(|args| args.external.is_some_and(|e| e))
+                                    })
+                                {
+                                    // NOTE: This is a sanity check as this field HAS TO be provided by
+                                    // @interfaceObject. Otherwise, it would result in invalid graph as
+                                    // we wouldn't be able to resolve a field that is external everywhere
+                                    // (we already validated it when merging field).
+                                    if self.is_field_provided_by_an_interface_object(
+                                        intf_field_name,
+                                        intf,
+                                    ) {
+                                        let copied_directives = intf_field
+                                            .directives
+                                            .iter()
+                                            .filter(|d| {
+                                                // filter access control directives for now as they will be merged later one
+                                                !access_control_directive_names.contains(&d.name)
+                                                // filter join__field directives as they don't have to be added
+                                                && !self
+                                                .join_spec_definition
+                                                .is_spec_directive_name(&self.merged, &d.name)
+                                                .unwrap_or(false)
+                                            })
+                                            .cloned()
+                                            .collect();
+                                        external_fields_to_update
+                                            .insert(candidate_field, copied_directives);
+                                    }
+                                }
+                            } else {
                                 // Note that we don't blindly add the field yet, that would be incorrect in many cases (and we
                                 // have a specific validation that return a user-friendly error in such incorrect cases, see
                                 // `postMergeValidations`). We must first check that there is some subgraph that implement
@@ -2092,6 +2142,27 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 &dest.clone().into(),
                 &FieldMergeContext::new(sources.keys().copied()),
             )?;
+        }
+
+        for (external_field, directives_to_copy) in external_fields_to_update {
+            trace!("Propagating @interfaceObject directives onto external field {external_field}");
+            let dest_position: DirectiveTargetPosition = external_field.clone().into();
+            external_field
+                .directives_mut(self.merged.schema_mut())?
+                .extend(directives_to_copy);
+
+            let additional_sources = self.access_control_additional_sources()?;
+            let ac_directives_to_merge: Vec<_> = self
+                .access_control_directives_in_supergraph
+                .iter()
+                .filter(|(ac_name, _)| {
+                    additional_sources.contains_key(&format!("{dest_position}_{ac_name}"))
+                })
+                .map(|(_, name_in_supergraph)| name_in_supergraph.clone())
+                .collect();
+            for name in &ac_directives_to_merge {
+                self.merge_applied_directive(name, &Default::default(), &dest_position)?;
+            }
         }
 
         Ok(())
