@@ -52,7 +52,6 @@ use crate::services::query_planner::PlanOptions;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
-use crate::spec::operation_limits::OperationLimits;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const UNSUPPORTED_FED1: &str = "fed1";
@@ -250,16 +249,8 @@ impl QueryPlannerService {
         query: String,
         operation_name: Option<&str>,
         doc: &ParsedDocument,
-        query_metrics_in: &mut OperationLimits<u32>,
     ) -> Result<Query, QueryPlannerError> {
         let executable = &doc.executable;
-        crate::spec::operation_limits::check(
-            query_metrics_in,
-            &self.configuration.limits.router,
-            &query,
-            executable,
-            operation_name,
-        )?;
 
         let (fragments, operation, defer_stats, schema_aware_hash) =
             Query::extract_query_information(&self.schema, &query, executable, operation_name)?;
@@ -297,7 +288,6 @@ impl QueryPlannerService {
         plan_options: PlanOptions,
         doc: &ParsedDocument,
         compute_job_type: ComputeJobType,
-        query_metrics: OperationLimits<u32>,
     ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
         let plan_result = self
             .plan_inner(
@@ -360,7 +350,6 @@ impl QueryPlannerService {
                 root: query_plan_root_node,
                 formatted_query_plan,
                 query: Arc::new(selections),
-                query_metrics,
                 estimated_size: Default::default(),
             }),
         })
@@ -465,13 +454,11 @@ impl QueryPlannerService {
         mut doc: ParsedDocument,
         compute_job_type: ComputeJobType,
     ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
-        let mut query_metrics = Default::default();
         let mut selections = self
             .parse_selections(
                 key.original_query.clone(),
                 key.operation_name.as_deref(),
                 &doc,
-                &mut query_metrics,
             )
             .await?;
 
@@ -528,7 +515,6 @@ impl QueryPlannerService {
                     key.filtered_query.clone(),
                     key.operation_name.as_deref(),
                     &doc,
-                    &mut query_metrics,
                 )
                 .await?;
             filtered.is_original = false;
@@ -544,7 +530,6 @@ impl QueryPlannerService {
             key.plan_options,
             &doc,
             compute_job_type,
-            query_metrics,
         )
         .await
     }
