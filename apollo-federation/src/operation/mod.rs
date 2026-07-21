@@ -2438,6 +2438,10 @@ impl DeferNormalizer {
             {
                 let DeferDirectiveArguments { label, if_: _ } = args;
                 if let Some(label) = label {
+                    // Reject duplicate labels (should've been a validation error)
+                    if digest.used_labels.contains(&label) {
+                        return Err(SingleFederationError::DuplicateDeferLabel { label }.into());
+                    }
                     digest.used_labels.insert(label);
                 }
             }
