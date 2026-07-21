@@ -5,6 +5,7 @@ use crate::{Context, plugins::response_cache::plugin::CdnInvalidationConfig};
 use http::{HeaderName, HeaderValue};
 use itertools::Itertools;
 use std::collections::HashSet;
+use thiserror::Error;
 
 use crate::plugins::response_cache::INTERNAL_CACHE_TAG_PREFIX;
 use crate::plugins::response_cache::metrics::CdnTagHeaderOutcome;
@@ -207,52 +208,47 @@ impl InvalidationLabels {
         &self,
         other_invalidatoin_labels: InvalidationLabels,
     ) -> Result<Self, InvalidationLabelsError> {
-        self.context
+        let context = self
+            .context
             .clone()
-            .ok_or(InvalidationLabelsError::FailedToMerge(
+            .ok_or(InvalidationLabelsError::MissingContext(
                 "Missing Context".to_string(),
-            ))?
-            .extensions()
-            .with_lock(|lock| {
-                let invalidation_labels = lock.get_mut::<InvalidationLabels>().ok_or(
-                    InvalidationLabelsError::FailedToMerge(
-                        "Missing InvalidationLabels on Context".to_string(),
-                    ),
-                )?;
+            ))?;
+        context.extensions().with_lock(|lock| {
+            let invalidation_labels = lock.get_or_default_mut::<InvalidationLabels>();
+            // make sure we don't lose context; it connects request/responses together
+            invalidation_labels.context = Some(context.clone());
 
-                invalidation_labels
-                    .tags
-                    .extend(other_invalidatoin_labels.tags);
-                invalidation_labels
-                    .types
-                    .extend(other_invalidatoin_labels.types);
-                invalidation_labels
-                    .subgraphs
-                    .extend(other_invalidatoin_labels.subgraphs);
+            invalidation_labels
+                .tags
+                .extend(other_invalidatoin_labels.tags);
+            invalidation_labels
+                .types
+                .extend(other_invalidatoin_labels.types);
+            invalidation_labels
+                .subgraphs
+                .extend(other_invalidatoin_labels.subgraphs);
 
-                // TODO: clone explanation
-                // fresh view of InvalidationLabels after writing to context
-                Ok(invalidation_labels.clone())
-            })
+            // fresh view of InvalidationLabels after writing to context
+            Ok(invalidation_labels.clone())
+        })
     }
 
     // TODO: docs
     pub(crate) fn add_tags(&mut self, tags: Vec<String>) -> Result<Self, InvalidationLabelsError> {
-        self.context
+        let context = self
+            .context
             .clone()
-            .ok_or(InvalidationLabelsError::FailedToMerge(
+            .ok_or(InvalidationLabelsError::MissingContext(
                 "Missing Context".to_string(),
-            ))?
-            .extensions()
-            .with_lock(|lock| {
-                let invalidation_labels = lock.get_mut::<InvalidationLabels>().ok_or(
-                    InvalidationLabelsError::FailedToMerge(
-                        "Missing InvalidationLabels on Context".to_string(),
-                    ),
-                )?;
-                invalidation_labels.tags.extend(tags);
-                Ok(invalidation_labels.clone())
-            })
+            ))?;
+        context.extensions().with_lock(|lock| {
+            let invalidation_labels = lock.get_or_default_mut::<InvalidationLabels>();
+            // make sure we don't lose context; it connects request/responses together
+            invalidation_labels.context = Some(context.clone());
+            invalidation_labels.tags.extend(tags);
+            Ok(invalidation_labels.clone())
+        })
     }
 
     // TODO: docs
@@ -261,50 +257,56 @@ impl InvalidationLabels {
         subgraph: &str,
         r#type: &str,
     ) -> Result<Self, InvalidationLabelsError> {
-        self.context
+        let context = self
+            .context
             .clone()
-            .ok_or(InvalidationLabelsError::FailedToMerge(
+            .ok_or(InvalidationLabelsError::MissingContext(
                 "Missing Context".to_string(),
-            ))?
-            .extensions()
-            .with_lock(|lock| {
-                let invalidation_labels = lock.get_mut::<InvalidationLabels>().ok_or(
-                    InvalidationLabelsError::FailedToMerge(
-                        "Missing InvalidationLabels on Context".to_string(),
-                    ),
-                )?;
-                invalidation_labels
-                    .types
-                    .insert((subgraph.to_string(), r#type.to_string()));
-                Ok(invalidation_labels.clone())
-            })
+            ))?;
+        context.extensions().with_lock(|lock| {
+            let invalidation_labels = lock.get_or_default_mut::<InvalidationLabels>();
+            // make sure we don't lose context; it connects request/responses together
+            invalidation_labels.context = Some(context.clone());
+            invalidation_labels
+                .types
+                .insert((subgraph.to_string(), r#type.to_string()));
+            Ok(invalidation_labels.clone())
+        })
     }
 
     // TODO: docs
     pub(crate) fn add_subgraph(&mut self, subgraph: &str) -> Result<Self, InvalidationLabelsError> {
-        self.context
+        let context = self
+            .context
             .clone()
-            .ok_or(InvalidationLabelsError::FailedToMerge(
+            .ok_or(InvalidationLabelsError::MissingContext(
                 "Missing Context".to_string(),
-            ))?
-            .extensions()
-            .with_lock(|lock| {
-                let invalidation_labels = lock.get_mut::<InvalidationLabels>().ok_or(
-                    InvalidationLabelsError::FailedToMerge(
-                        "Missing InvalidationLabels on Context".to_string(),
-                    ),
-                )?;
-                invalidation_labels.subgraphs.insert(subgraph.to_string());
-                Ok(invalidation_labels.clone())
-            })
+            ))?;
+        context.extensions().with_lock(|lock| {
+            let invalidation_labels = lock.get_or_default_mut::<InvalidationLabels>();
+            // make sure we don't lose context; it connects request/responses together
+            invalidation_labels.context = Some(context.clone());
+            invalidation_labels.subgraphs.insert(subgraph.to_string());
+            Ok(invalidation_labels.clone())
+        })
     }
 }
 
-// TODO: thiserror enumify this
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub(crate) enum InvalidationLabelsError {
-    // TODO: bettername
-    FailedToMerge(String),
+    #[error("failed to record invalidation labels on context: {0}")]
+    MissingContext(String),
+}
+
+/// Logs a failed invalidation-label write without panicking. Every call site is expected to go
+/// through `get_or_create` first, which always populates `context`, so `MissingContext` should be
+/// unreachable in practice — but invalidation-label bookkeeping is best-effort and must never
+/// crash a request in flight, so failures are logged and swallowed rather than unwrapped.
+pub(crate) fn log_invalidation_label_error(err: InvalidationLabelsError) {
+    tracing::error!(
+        error = %err,
+        "response_cache failed to record an invalidation label on context; CDN/Redis invalidation may be incomplete for this response"
+    );
 }
 
 #[cfg(test)]
@@ -425,49 +427,112 @@ mod tests {
     }
 
     #[test]
-    fn mutators_without_context_return_failed_to_merge_error() {
+    fn mutators_without_context_return_missing_context_error() {
         let mut labels = InvalidationLabels::default();
         assert!(labels.context.is_none());
 
         assert!(matches!(
             labels.add_tags(vec!["a".to_string()]),
-            Err(InvalidationLabelsError::FailedToMerge(_))
+            Err(InvalidationLabelsError::MissingContext(_))
         ));
         assert!(matches!(
             labels.add_type("accounts", "User"),
-            Err(InvalidationLabelsError::FailedToMerge(_))
+            Err(InvalidationLabelsError::MissingContext(_))
         ));
         assert!(matches!(
             labels.add_subgraph("accounts"),
-            Err(InvalidationLabelsError::FailedToMerge(_))
+            Err(InvalidationLabelsError::MissingContext(_))
         ));
         assert!(matches!(
             labels.merge(InvalidationLabels::default()),
-            Err(InvalidationLabelsError::FailedToMerge(_))
+            Err(InvalidationLabelsError::MissingContext(_))
         ));
     }
 
-    #[test]
-    fn mutators_with_unseeded_context_return_failed_to_merge_error() {
+    // `unseeded_handle` gives a handle whose context is seeded but whose context's extensions
+    // map has no `InvalidationLabels` entry yet (i.e. `get_or_create` was never called first).
+    // Mutators should auto-vivify that missing entry via `get_or_default_mut` rather than
+    // erroring, mirroring `mutator_persists_across_separate_get_or_create_calls` above: mutate
+    // through one handle, then check a SEPARATE `get_or_create` call sees the change.
+    #[rstest]
+    #[case::add_tags(
+        (|labels: &mut InvalidationLabels| labels.add_tags(vec!["a".to_string(), "b".to_string()]).map(|_| ())) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
+        (|refetched: &InvalidationLabels| {
+            assert_eq!(refetched.tags, HashSet::from(["a".to_string(), "b".to_string()]));
+        }) as fn(&InvalidationLabels),
+    )]
+    #[case::add_type(
+        (|labels: &mut InvalidationLabels| labels.add_type("accounts", "User").map(|_| ())) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
+        (|refetched: &InvalidationLabels| {
+            assert_eq!(
+                refetched.types,
+                HashSet::from([("accounts".to_string(), "User".to_string())]),
+            );
+        }) as fn(&InvalidationLabels),
+    )]
+    #[case::add_subgraph(
+        (|labels: &mut InvalidationLabels| labels.add_subgraph("accounts").map(|_| ())) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
+        (|refetched: &InvalidationLabels| {
+            assert_eq!(
+                refetched.subgraphs,
+                HashSet::from(["accounts".to_string()]),
+            );
+        }) as fn(&InvalidationLabels),
+    )]
+    #[case::merge(
+        (|labels: &mut InvalidationLabels| {
+            let other = InvalidationLabels {
+                tags: HashSet::from(["homepage".to_string()]),
+                types: HashSet::from([("accounts".to_string(), "User".to_string())]),
+                subgraphs: HashSet::from(["accounts".to_string()]),
+                context: None,
+            };
+            labels.merge(other).map(|_| ())
+        }) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
+        (|refetched: &InvalidationLabels| {
+            assert_eq!(refetched.tags, HashSet::from(["homepage".to_string()]));
+            assert_eq!(
+                refetched.types,
+                HashSet::from([("accounts".to_string(), "User".to_string())])
+            );
+            assert_eq!(refetched.subgraphs, HashSet::from(["accounts".to_string()]));
+        }) as fn(&InvalidationLabels),
+    )]
+    fn mutators_auto_create_missing_context_entry(
+        #[case] mutate: fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
+        #[case] check: fn(&InvalidationLabels),
+    ) {
         let context = Context::new();
         let mut labels = unseeded_handle(&context);
 
-        assert!(matches!(
-            labels.add_tags(vec!["a".to_string()]),
-            Err(InvalidationLabelsError::FailedToMerge(_))
-        ));
-        assert!(matches!(
-            labels.add_type("accounts", "User"),
-            Err(InvalidationLabelsError::FailedToMerge(_))
-        ));
-        assert!(matches!(
-            labels.add_subgraph("accounts"),
-            Err(InvalidationLabelsError::FailedToMerge(_))
-        ));
-        assert!(matches!(
-            labels.merge(InvalidationLabels::default()),
-            Err(InvalidationLabelsError::FailedToMerge(_))
-        ));
+        mutate(&mut labels).expect(
+            "mutator should auto-create the missing InvalidationLabels entry instead of erroring",
+        );
+
+        let refetched = InvalidationLabels::get_or_create(&context);
+        check(&refetched);
+    }
+
+    // A mutator, not `get_or_create`, is what first vivifies the entry here (via
+    // `unseeded_handle`, same as above). If the mutator didn't also stamp `context` onto the
+    // stored entry the way `get_or_create` does, a second independently-constructed handle
+    // (again bypassing `get_or_create`) would hit `MissingContext` on the stored entry even
+    // though the first call already proved the context was valid.
+    #[test]
+    fn mutator_stamps_context_so_a_later_mutator_call_does_not_need_get_or_create_first() {
+        let context = Context::new();
+
+        unseeded_handle(&context)
+            .add_tags(vec!["a".to_string()])
+            .expect("first mutator call should auto-create the entry");
+
+        unseeded_handle(&context).add_subgraph("accounts").expect(
+            "second mutator call should see the context stamped by the first, not MissingContext",
+        );
+
+        let refetched = InvalidationLabels::get_or_create(&context);
+        assert_eq!(refetched.tags, HashSet::from(["a".to_string()]));
+        assert_eq!(refetched.subgraphs, HashSet::from(["accounts".to_string()]));
     }
 
     #[rstest]

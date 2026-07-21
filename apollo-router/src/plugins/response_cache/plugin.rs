@@ -76,6 +76,7 @@ use crate::plugins::response_cache::debugger::CacheKeySource;
 use crate::plugins::response_cache::debugger::add_cache_key_to_context;
 use crate::plugins::response_cache::debugger::add_cache_keys_to_context;
 use crate::plugins::response_cache::invalidation_labels::InvalidationLabels;
+use crate::plugins::response_cache::invalidation_labels::log_invalidation_label_error;
 use crate::plugins::response_cache::storage;
 use crate::plugins::response_cache::storage::CacheEntry;
 use crate::plugins::response_cache::storage::CacheStorage;
@@ -1187,21 +1188,24 @@ impl CacheService {
                         .map(|s| s.to_owned())
                         .collect();
 
-                    InvalidationLabels::get_or_create(&response.context)
-                        // TODO: error handling
-                        .add_tags(extension_tag_strings.clone())
-                        .unwrap()
-                        // TODO: error handling
-                        .add_subgraph(&self.name)
-                        .unwrap()
-                        // TODO: error handling
-                        .add_type(
-                            &self.name,
-                            &self
-                                .entity_type
-                                .unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME.to_string()),
-                        )
-                        .unwrap();
+                    let mut invalidation_labels =
+                        InvalidationLabels::get_or_create(&response.context);
+                    if let Err(err) =
+                        invalidation_labels.add_tags(extension_tag_strings.clone())
+                    {
+                        log_invalidation_label_error(err);
+                    }
+                    if let Err(err) = invalidation_labels.add_subgraph(&self.name) {
+                        log_invalidation_label_error(err);
+                    }
+                    if let Err(err) = invalidation_labels.add_type(
+                        &self.name,
+                        &self
+                            .entity_type
+                            .unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME.to_string()),
+                    ) {
+                        log_invalidation_label_error(err);
+                    }
 
                     // `cache_tags` feeds the intermediate result on cache misses which gets ZADDed for redis;
                     // it's not part of the CDN-invalidation path; each sink below applies its own gate
@@ -1525,21 +1529,20 @@ async fn cache_lookup_root(
     }
 
     let mut invalidation_labels = InvalidationLabels::get_or_create(&request.context);
-    if cdn_invalidation_enabled {
-        // TODO: error handling
-        invalidation_labels
-            .add_tags(invalidation_cache_keys.into_iter().collect())
-            .unwrap();
+    if cdn_invalidation_enabled
+        && let Err(err) = invalidation_labels.add_tags(invalidation_cache_keys.into_iter().collect())
+    {
+        log_invalidation_label_error(err);
     }
-    // TODO: error handling
-    invalidation_labels.add_subgraph(&name).unwrap();
-    // TODO: error handling
-    invalidation_labels
-        .add_type(
-            &name,
-            entity_type_opt.unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME),
-        )
-        .unwrap();
+    if let Err(err) = invalidation_labels.add_subgraph(&name) {
+        log_invalidation_label_error(err);
+    }
+    if let Err(err) = invalidation_labels.add_type(
+        &name,
+        entity_type_opt.unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME),
+    ) {
+        log_invalidation_label_error(err);
+    }
 
     Span::current().record("cache.key", key.clone());
 
@@ -1607,23 +1610,23 @@ async fn cache_lookup_root(
                 // Surface the cache tags persisted with the entry so the supergraph response
                 // aggregator can reflect this hit. Done before the response builder consumes
                 // the request context.
-                if let Some(invalidation_labels) = value.invalidation_labels {
+                if let Some(hit_labels) = value.invalidation_labels {
                     // backfill the subgraph and type--the CacheEntry doesn't store those, just the
                     // previous invalidation labels
-                    // TODO: error handling
-                    InvalidationLabels::get_or_create(&request.context)
-                        // TODO: error handling
-                        .merge(invalidation_labels)
-                        .unwrap()
-                        // TODO: error handling
-                        .add_subgraph(&name)
-                        .unwrap()
-                        // TODO: error handling
-                        .add_type(
-                            &name,
-                            entity_type_opt.unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME),
-                        )
-                        .unwrap();
+                    let mut invalidation_labels =
+                        InvalidationLabels::get_or_create(&request.context);
+                    if let Err(err) = invalidation_labels.merge(hit_labels) {
+                        log_invalidation_label_error(err);
+                    }
+                    if let Err(err) = invalidation_labels.add_subgraph(&name) {
+                        log_invalidation_label_error(err);
+                    }
+                    if let Err(err) = invalidation_labels.add_type(
+                        &name,
+                        entity_type_opt.unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME),
+                    ) {
+                        log_invalidation_label_error(err);
+                    }
 
                     //record_external_cache_tags_to_context(
                     //    &request.context,
@@ -1905,26 +1908,27 @@ async fn cache_lookup_entities(
             .iter()
             .filter_map(|tag| tag.user_value().map(String::from))
             .collect();
-        if !known_tags.is_empty() {
-            // TODO: error handling
-            invalidation_labels.add_tags(known_tags).unwrap();
+        if !known_tags.is_empty()
+            && let Err(err) = invalidation_labels.add_tags(known_tags)
+        {
+            log_invalidation_label_error(err);
         }
 
         if let Some(hit_labels) = entry
             .cache_entry
             .as_ref()
             .and_then(|cache_entry| cache_entry.invalidation_labels.clone())
+            && let Err(err) = invalidation_labels.merge(hit_labels)
         {
-            // TODO: error handling
-            invalidation_labels.merge(hit_labels).unwrap();
+            log_invalidation_label_error(err);
         }
 
-        // TODO: error handling
-        invalidation_labels.add_subgraph(&name).unwrap();
-        // TODO: error handling
-        invalidation_labels
-            .add_type(&name, &entry.typename)
-            .unwrap();
+        if let Err(err) = invalidation_labels.add_subgraph(&name) {
+            log_invalidation_label_error(err);
+        }
+        if let Err(err) = invalidation_labels.add_type(&name, &entry.typename) {
+            log_invalidation_label_error(err);
+        }
     }
 
     if !new_representations.is_empty() {
@@ -2322,11 +2326,11 @@ fn extract_cache_keys(
             cache_tags.extend(invalidation_cache_keys.iter().cloned().map(CacheTag::Tag));
         }
 
-        if cdn_invalidation_enabled {
-            // TODO: error handling
-            InvalidationLabels::get_or_create(context)
+        if cdn_invalidation_enabled
+            && let Err(err) = InvalidationLabels::get_or_create(context)
                 .add_tags(invalidation_cache_keys.into_iter().collect())
-                .unwrap();
+        {
+            log_invalidation_label_error(err);
         }
 
         // Restore the `representation` back whole again
@@ -2921,11 +2925,11 @@ async fn insert_entities_in_result(
                         .collect();
 
                     if !entity_tags.is_empty() {
-                        if cdn_invalidation_enabled {
-                            // TODO: error handling
-                            InvalidationLabels::get_or_create(&context)
+                        if cdn_invalidation_enabled
+                            && let Err(err) = InvalidationLabels::get_or_create(&context)
                                 .add_tags(entity_tags.clone())
-                                .unwrap();
+                        {
+                            log_invalidation_label_error(err);
                         }
 
                         if indexes.is_enabled(IndexMode::CacheTag) {
