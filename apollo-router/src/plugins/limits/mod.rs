@@ -1,5 +1,7 @@
 mod layer;
 mod limited;
+pub(crate) mod operation_limits;
+pub(crate) mod operation_limits_layer;
 
 use std::error::Error;
 
@@ -77,7 +79,7 @@ pub(crate) struct RouterLimitsConfig {
 
     /// If set, requests with operations higher than this maximum
     /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
-    /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
+    /// `"extensions": {"code": "MAX_HEIGHT_LIMIT"}`
     ///
     /// Height is based on simple merging of fields using the same name or alias,
     /// but only within the same selection set.
