@@ -80,7 +80,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn to_redis_key_subgraph_variant() {
         let key = CacheTag::Subgraph.to_redis_key("payments");
