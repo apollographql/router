@@ -462,12 +462,8 @@ fn flat_wrap_nodes(
     let mut nodes = Vec::new();
     for node in [first, second].into_iter().chain(iter) {
         match (kind, node) {
-            (NodeKind::Parallel, PlanNode::Parallel(inner)) => {
-                nodes.extend(inner.nodes.iter().cloned())
-            }
-            (NodeKind::Sequence, PlanNode::Sequence(inner)) => {
-                nodes.extend(inner.nodes.iter().cloned())
-            }
+            (NodeKind::Parallel, PlanNode::Parallel(inner)) => nodes.extend(inner.nodes),
+            (NodeKind::Sequence, PlanNode::Sequence(inner)) => nodes.extend(inner.nodes),
             (_, node) => nodes.push(node),
         }
     }

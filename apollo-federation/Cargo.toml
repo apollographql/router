@@ -22,6 +22,7 @@ correctness = []
 connect-migrate = ["dep:clap", "dep:apollo-parser", "time/formatting"]
 
 [dependencies]
+ahash.workspace = true
 apollo-compiler.workspace = true
 apollo-parser = { workspace = true, optional = true }
 clap = { version = "4", features = ["derive"], optional = true }
@@ -35,10 +36,10 @@ derive_more = { version = "2.0.0", features = [
 ] }
 encoding_rs.workspace = true
 http.workspace = true
-hashbrown = "0.16.0"
+hashbrown = "0.17.0"
 heck.workspace = true
 indexmap = { version = "2.2.6", features = ["serde"] }
-itertools = "0.14.0"
+itertools = "0.15.0"
 line-col = "0.2.1"
 levenshtein = "1"
 multimap = "0.10.0"

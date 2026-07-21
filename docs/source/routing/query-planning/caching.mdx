@@ -182,7 +182,7 @@ or, if configured with multiple URLs:
 
 <Tip>
 
-In your router's YAML config file, **you should specify your Redis URLs via environment variables and [variable expansion](/graphos/routing/configuration/overview#variable-expansion)**. This prevents your Redis URLs from being committed to version control, which is especially dangerous if they include authentication information like a username and/or password.
+In your router's YAML config file, always specify Redis URLs via environment variables and [variable expansion](/graphos/routing/configuration/yaml#variable-expansion). This prevents Redis URLs from being committed to version control, which is especially dangerous if they include authentication information like a username or password.
 
 </Tip>
 
@@ -216,8 +216,8 @@ supergraph:
     cache:
       redis:
         urls: ["redis://..."]
-        username: admin/123 # Optional, can be part of the urls directly, mainly useful if you have special character like '/' in your password that doesn't work in url. This field takes precedence over the username in the URL
-        password: admin # Optional, can be part of the urls directly, mainly useful if you have special character like '/' in your password that doesn't work in url. This field takes precedence over the password in the URL
+        username: "${env.REDIS_USERNAME}" # Recommended: adopt an environment variable or secret. Takes precedence over username in the URL
+        password: "${env.REDIS_PASSWORD}" # Recommended: adopt an environment variable or secret. Takes precedence over password in the URL
         timeout: 2s # Optional, by default: 500ms
         ttl: 24h # Optional
         namespace: "prefix" # Optional
@@ -226,6 +226,12 @@ supergraph:
         reset_ttl: true # Optional, defaults to true
         pool_size: 4 # Optional, defaults to 1
 ```
+
+<Caution>
+Avoid hardcoding `username` and `password` directly in your YAML config file.
+Instead, use [variable expansion](/graphos/routing/configuration/yaml#variable-expansion) to inject credentials via environment variables or a secrets manager (for example, `${env.REDIS_PASSWORD}`).
+This prevents credentials from being committed to version control.
+</Caution>
 
 #### Timeout
 
