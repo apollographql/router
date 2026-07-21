@@ -282,7 +282,7 @@ pub(crate) static CONNECT_VERSIONS: LazyLock<SpecDefinitions<ConnectSpecDefiniti
             Version { major: 0, minor: 5 },
             Version {
                 major: 2,
-                minor: 17,
+                minor: 16,
             },
         ));
         definitions
