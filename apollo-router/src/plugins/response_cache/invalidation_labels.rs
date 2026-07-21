@@ -21,40 +21,56 @@ use crate::plugins::response_cache::metrics::record_cdn_tag_header_untruncated_s
 /// `cdn_invalidation.enabled` is true.
 ///
 /// Stored as a typed `Context` extension; the type itself is the key. Tags pushed through
-/// `add_many` are expected to be filtered through `external_invalidation_keys` first so
-/// internal `__apollo_internal::` prefixed tags do not leak.
-/// TODO: document fields
+/// `add_tags` (and `add_type`/`add_subgraph`'s extension-sourced callers) are expected to
+/// already be filtered through `user_facing_only` upstream, at the point they're read for the
+/// header, so internal `__apollo_internal::`-prefixed tags do not leak.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct InvalidationLabels {
+    /// Finest-grained tier: exact tag values from schema `@cacheTag` directives (interpolated
+    /// per-request) and the `apolloCacheTags`/`apolloEntityCacheTags` subgraph-response
+    /// extensions. Rendered as-is into the header; see `user_facing_only`.
     pub(crate) tags: HashSet<String>,
+    /// Medium tier: `(subgraph, type name)` pairs touched by this request. Rendered as the
+    /// coarser `type-{subgraph}-{type}` fallback label via `format_type_labels`.
     pub(crate) types: HashSet<(String, String)>,
+    /// Coarsest tier: subgraph names touched by this request. Rendered as the
+    /// `subgraph-{name}` fallback label via `format_subgraph_labels`.
     pub(crate) subgraphs: HashSet<String>,
+    /// The `Context` this handle is tied to, so mutators can write back through to the same
+    /// context-stored entry rather than a disconnected local copy. `None` only when an
+    /// `InvalidationLabels` is constructed directly (e.g. `Default::default()`) instead of via
+    /// `get_or_create` — mutators on such a handle return `InvalidationLabelsError::MissingContext`.
     pub(crate) context: Option<Context>,
 }
 
-/// TODO: docs
 impl InvalidationLabels {
-    // TODO: docs on context
+    /// Fetches this context's `InvalidationLabels` entry, creating a default one first if none
+    /// exists yet. Stamps `context` onto the stored entry (mirroring what the mutators below
+    /// also do) so later reads and mutations of this context's entry stay tied to it regardless
+    /// of which method first vivified it.
+    ///
+    /// Returns an owned clone of the stored entry rather than a reference: `with_lock` only
+    /// lends out a `&mut` scoped to its closure, so a clone is the only way to hand a snapshot
+    /// back to the caller. Cloning is cheap — `Context` is reference-counted internally, and the
+    /// tag sets are typically small per request.
     pub(crate) fn get_or_create(context: &Context) -> Self {
         let invalidation_labels = context.extensions().with_lock(|lock| {
             let invalidation_labels = lock.get_or_default_mut::<InvalidationLabels>();
-            // TODO: docs on why cheap to clone (arc, small vals)
             invalidation_labels.context = Some(context.clone());
-            // TODO: explain why the clone matters here; we always want what's from context, but we
-            // need to clone it to get it--more, etc
             invalidation_labels.clone()
         });
         invalidation_labels
     }
 
-    // TODO: docs
+    /// Renders each touched subgraph as its coarsest-tier fallback label (`subgraph-{name}`).
     fn format_subgraph_labels(&self) -> Vec<String> {
         self.subgraphs
             .iter()
             .map(|subgraph| format!("subgraph-{subgraph}"))
             .collect()
     }
-    // TODO: docs
+    /// Renders each touched `(subgraph, type)` pair as its medium-tier fallback label
+    /// (`type-{subgraph}-{type}`).
     fn format_type_labels(&self) -> Vec<String> {
         self.types
             .iter()
@@ -188,22 +204,30 @@ impl InvalidationLabels {
         }
     }
 
-    /// Filters out any key that starts with whatever is represented by `INTERNAL_CACHE_TAG_PREFIX`,
-    /// which denotes internal keys versus external. The difference between the two is that internal
-    /// tags are not exposed to users; external are, and they're used for invalidation
-    /// TODO: docs
-    /// TODO: rename to `user_facing_only`
+    /// Filters out any tag that starts with `INTERNAL_CACHE_TAG_PREFIX`, which denotes internal
+    /// keys versus external. The difference between the two is that internal tags are not
+    /// exposed to users; external are, and they're used for invalidation.
+    ///
+    /// The router's own cache debugger is the only current caller — it surfaces exactly the
+    /// `@cacheTag`/extension values a customer set, not the router-computed `types`/`subgraphs`
+    /// fallback tiers, which aren't user-authored and so have nothing to filter.
+    ///
+    /// Takes `&self`, so `self.tags` can only be read through a shared reference — `.cloned()`
+    /// on the iterator is what produces owned `String`s here; there's no `self` (by value) to
+    /// consume via `.into_iter()` instead.
     pub(crate) fn user_facing_only(&self) -> Vec<String> {
         // TODO: use all labels
         self.tags
             .iter()
-            // TODO: justify as being useful while also retaining tags (no into_iter, ie)
             .cloned()
             .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
             .collect()
     }
 
-    // TODO: docs
+    /// Unions `other_invalidatoin_labels`'s three tiers into this context's stored entry —
+    /// used on a cache hit to merge a previously-stored `CacheEntry`'s `InvalidationLabels`
+    /// (`other_invalidatoin_labels`) into the current request's aggregator, so labels recorded
+    /// when the entry was first written still make it into this response's header.
     pub(crate) fn merge(
         &self,
         other_invalidatoin_labels: InvalidationLabels,
@@ -234,7 +258,8 @@ impl InvalidationLabels {
         })
     }
 
-    // TODO: docs
+    /// Unions `tags` into this context's stored `tags` tier — the finest-grained tier; see
+    /// `InvalidationLabels::tags`.
     pub(crate) fn add_tags(&mut self, tags: Vec<String>) -> Result<Self, InvalidationLabelsError> {
         let context = self
             .context
@@ -251,7 +276,11 @@ impl InvalidationLabels {
         })
     }
 
-    // TODO: docs
+    /// Records that `(subgraph, type)` was touched by this request, adding it to this context's
+    /// stored `types` tier — the medium-coarseness fallback tier; see
+    /// `InvalidationLabels::types`. Called unconditionally on every root-field or entity
+    /// resolution (not gated on any invalidation index), since the type-tier fallback label
+    /// must always be available regardless of indexing configuration.
     pub(crate) fn add_type(
         &mut self,
         subgraph: &str,
@@ -274,7 +303,9 @@ impl InvalidationLabels {
         })
     }
 
-    // TODO: docs
+    /// Records that `subgraph` was touched by this request, adding it to this context's stored
+    /// `subgraphs` tier — the coarsest fallback tier; see `InvalidationLabels::subgraphs`.
+    /// Called unconditionally, same as `add_type`.
     pub(crate) fn add_subgraph(&mut self, subgraph: &str) -> Result<Self, InvalidationLabelsError> {
         let context = self
             .context

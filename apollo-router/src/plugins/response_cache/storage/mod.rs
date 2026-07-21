@@ -57,7 +57,6 @@ pub(super) struct CacheEntry {
     /// cache invalidation through the invalidation endpoint and by CDNs through their CDN-specific
     /// endpoints; for CDNs, they're emitted as a header and separated by a delimiter, which are
     /// both configurable
-    /// TODO: are all invalidationlabels being added properly to cacheentry?
     pub(super) invalidation_labels: Option<InvalidationLabels>,
 }
 
