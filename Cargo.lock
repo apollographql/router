@@ -515,7 +515,7 @@ dependencies = [
  "itoa",
  "jsonpath-rust",
  "jsonpath_lib",
- "jsonschema 0.46.9",
+ "jsonschema 0.48.0",
  "jsonwebtoken",
  "libc",
  "libtest-mimic",
@@ -4321,15 +4321,9 @@ dependencies = [
 
 [[package]]
 name = "jsonschema"
-<<<<<<< HEAD
 version = "0.45.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "257eb0e588b76827bbddc9e73945a9743693dd2adeaee9da26420f93cfedb798"
-=======
-version = "0.48.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aef8d91fd7994744fd927438d8a642528d989c4a0248fb3f6208f47bffcefb0d"
->>>>>>> origin/dev
 dependencies = [
  "ahash",
  "bytecount",
@@ -4340,12 +4334,12 @@ dependencies = [
  "getrandom 0.3.4",
  "idna",
  "itoa",
- "jsonschema-regex",
  "num-cmp",
  "num-traits",
  "percent-encoding",
  "referencing 0.45.1",
  "regex",
+ "regex-syntax",
  "serde",
  "serde_json",
  "unicode-general-category",
@@ -4353,11 +4347,10 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
 name = "jsonschema"
-version = "0.46.9"
+version = "0.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d865ca7ca04445fcaa1d751fda3dc43b0113ba2fcddc65d5a0fcb474a7c3bba"
+checksum = "aef8d91fd7994744fd927438d8a642528d989c4a0248fb3f6208f47bffcefb0d"
 dependencies = [
  "ahash",
  "bytecount",
@@ -4372,7 +4365,7 @@ dependencies = [
  "num-cmp",
  "num-traits",
  "percent-encoding",
- "referencing 0.46.9",
+ "referencing 0.48.0",
  "regex",
  "serde",
  "serde_json",
@@ -4382,15 +4375,9 @@ dependencies = [
 
 [[package]]
 name = "jsonschema-regex"
-version = "0.46.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6dbd1086b01b9349fd4ef9a07433965af64c8ce8159abe633a189e4ff817bd13"
-=======
-name = "jsonschema-regex"
 version = "0.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "794a08daa4c4b0e566fae7f2787090d793082eed95e4b46bfdec9817b533df22"
->>>>>>> origin/dev
 dependencies = [
  "regex-syntax",
 ]
@@ -6329,7 +6316,6 @@ dependencies = [
 
 [[package]]
 name = "referencing"
-<<<<<<< HEAD
 version = "0.45.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2f38748ceca8d0b0013e60f534d94a6e23dfd89fd2a88318fc5a2d04fda1010"
@@ -6345,10 +6331,7 @@ dependencies = [
 
 [[package]]
 name = "referencing"
-version = "0.46.9"
-=======
 version = "0.48.0"
->>>>>>> origin/dev
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4967fa93675ff599754790711e2f19b6a910739784ac357bd10f34e146616f9"
 dependencies = [
@@ -7658,7 +7641,6 @@ dependencies = [
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.0",
-<<<<<<< HEAD
 ]
 
 [[package]]
@@ -7668,9 +7650,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix 1.1.4",
- "windows-sys 0.61.0",
-=======
->>>>>>> origin/dev
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
