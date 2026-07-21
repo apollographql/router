@@ -35,6 +35,13 @@ pub(super) struct Document {
     pub(super) data: serde_json_bytes::Value,
     pub(super) control: CacheControl,
     pub(super) cache_tags: Vec<CacheTag>,
+    /// The fine-grained tag values (schema `@cacheTag` or `apolloCacheTags`/
+    /// `apolloEntityCacheTags` extensions) to persist alongside this document so a later cache
+    /// hit can rebuild the CDN `Cache-Tag` header for it, independent of `cache_tags` above.
+    /// `cache_tags` is pre-filtered by the Redis `IndexMode::CacheTag` index setting — this
+    /// field is populated whenever CDN invalidation wants it too, even if that index is off, so
+    /// enabling CDN invalidation alone never silently changes what gets `ZADD`ed into Redis.
+    pub(super) cdn_invalidation_tags: Vec<String>,
     pub(super) expire: Duration,
 }
 

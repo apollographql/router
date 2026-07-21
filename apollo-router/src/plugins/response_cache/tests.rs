@@ -3605,6 +3605,447 @@ async fn cdn_invalidation_header_for_extension_tags_gates_independently_of_cache
     .await;
 }
 
+/// Like `setup_cdn_invalidation_gating_test`, but performs the request twice against the same
+/// underlying storage: once to populate the cache (miss) and once more to hit it. The second
+/// `TestHarness` has no mock subgraphs wired in at all (mirrors `insert()`'s miss-then-hit
+/// pattern) — if the hit path doesn't actually serve from cache, the request has nothing to
+/// answer it and fails outright, rather than silently emitting a header built from a live
+/// subgraph call.
+///
+/// `cache_tag_index_enabled` is the crux of the regression this covers: fine-grained CDN tags
+/// used to only survive onto a cache-hit response when the Redis `cache_tag` index was *also*
+/// on, because persisting them for a later hit rode on the same gate as Redis's `ZADD` indexing
+/// instead of its own (`cdn_invalidation_enabled`). Passing `false` here exercises exactly the
+/// case that was broken: CDN invalidation on its own, with Redis per-tag indexing left off.
+async fn setup_cdn_invalidation_hit_test(
+    cache_tag_index_enabled: bool,
+    extension_tag: Option<&str>,
+) -> (supergraph::Response, supergraph::Response) {
+    let valid_schema =
+        Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+    let query = "query { currentUser { activeOrganization { ... on Organization { id creatorUser { __typename id } } } } }";
+    let mut orga_entity = serde_json::json!({
+        "__typename": "Organization",
+        "id": "1",
+        "creatorUser": {
+            "__typename": "User",
+            "id": 2
+        }
+    });
+    if let Some(tag) = extension_tag {
+        orga_entity
+            .as_object_mut()
+            .unwrap()
+            .insert("__cacheTags".to_string(), serde_json::json!([tag]));
+    }
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
+                        "__typename": "Organization",
+                        "id": "1",
+                    }
+                }
+            },
+            "headers": {"cache-control": "public"},
+        },
+        "orga": {
+            "entities": [orga_entity],
+            "headers": {"cache-control": "public"},
+        },
+    });
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+    let subgraph_config = || Subgraph {
+        redis: None,
+        private_id: Some("sub".to_string()),
+        enabled: true.into(),
+        ttl: None,
+        invalidation: Some(SubgraphInvalidationConfig {
+            indexes: InvalidationIndexes {
+                cache_tag: cache_tag_index_enabled,
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    };
+    let map = [
+        ("user".to_string(), subgraph_config()),
+        ("orga".to_string(), subgraph_config()),
+    ]
+    .into_iter()
+    .collect();
+    let subgraphs_conf = create_subgraph_conf(map);
+    let response_cache = ResponseCache::for_test_with_cdn_invalidation(
+        storage.clone(),
+        subgraphs_conf,
+        valid_schema.clone(),
+        true,
+        drop_tx,
+        true,
+        CdnInvalidationConfig {
+            enabled: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let build_request = || {
+        supergraph::Request::fake_builder()
+            .query(query)
+            .context(Context::new())
+            .header(
+                HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+                HeaderValue::from_static("true"),
+            )
+            .build()
+            .unwrap()
+    };
+
+    let miss_service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": subgraphs,
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let miss_response = miss_service.oneshot(build_request()).await.unwrap();
+    let cache_keys = get_cache_keys_context(&miss_response).expect("missing cache keys");
+    wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
+
+    // No `experimental_mock_subgraphs` here: if the hit path fell through to a live subgraph
+    // call, there'd be nothing configured to answer it and the request would fail.
+    let hit_service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let hit_response = hit_service.oneshot(build_request()).await.unwrap();
+
+    (miss_response, hit_response)
+}
+
+#[rstest]
+#[case::redis_index_off(false)]
+#[case::redis_index_on(true)]
+#[tokio::test(flavor = "multi_thread")]
+async fn cdn_invalidation_header_persists_schema_tags_across_cache_hit(
+    #[case] cache_tag_index_enabled: bool,
+) {
+    async move {
+        let (miss_response, hit_response) =
+            setup_cdn_invalidation_hit_test(cache_tag_index_enabled, None).await;
+
+        for (label, response) in [("miss", &miss_response), ("hit", &hit_response)] {
+            let header = get_cache_tag_header(response).unwrap_or_else(|| {
+                panic!(
+                    "cache_tag_index_enabled={cache_tag_index_enabled}: expected a Cache-Tag header on the {label} response"
+                )
+            });
+
+            // Root-field tag: recorded by `call_service_for_root_fields_operation`'s
+            // cache-hit branch (`merge`) on the hit response, and `cache_lookup_root`'s miss
+            // branch on the miss response.
+            assert!(
+                header.contains(&"currentUser".to_string()),
+                "cache_tag_index_enabled={cache_tag_index_enabled}: {label} response missing root tag in {header:?}"
+            );
+            // Entity tags: recorded by the `cache_result.iter()` loop's `merge`/`add_tags`
+            // backfill on hit (via `cdn_invalidation_tags`, independent of the Redis
+            // `cache_tag` index), and `extract_cache_keys`'s schema-directive path on miss.
+            assert!(
+                header.contains(&"organization".to_string()),
+                "cache_tag_index_enabled={cache_tag_index_enabled}: {label} response missing entity tag in {header:?}"
+            );
+            assert!(
+                header.contains(&"organizationid-id--1".to_string()),
+                "cache_tag_index_enabled={cache_tag_index_enabled}: {label} response missing interpolated entity tag in {header:?}"
+            );
+        }
+    }
+    .with_metrics()
+    .await;
+}
+
+#[rstest]
+#[case::redis_index_off(false)]
+#[case::redis_index_on(true)]
+#[tokio::test(flavor = "multi_thread")]
+async fn cdn_invalidation_header_persists_extension_tag_across_cache_hit(
+    #[case] cache_tag_index_enabled: bool,
+) {
+    async move {
+        let (miss_response, hit_response) =
+            setup_cdn_invalidation_hit_test(cache_tag_index_enabled, Some("extension-tag")).await;
+
+        for (label, response) in [("miss", &miss_response), ("hit", &hit_response)] {
+            let header = get_cache_tag_header(response).unwrap_or_else(|| {
+                panic!(
+                    "cache_tag_index_enabled={cache_tag_index_enabled}: expected a Cache-Tag header on the {label} response"
+                )
+            });
+            assert!(
+                header.contains(&"extension-tag".to_string()),
+                "cache_tag_index_enabled={cache_tag_index_enabled}: {label} response missing apolloEntityCacheTags-derived tag in {header:?}"
+            );
+        }
+    }
+    .with_metrics()
+    .await;
+}
+
+/// Regression coverage for a single request that mixes a cache hit and a cache miss for
+/// entities of the *same* type: the `cache_result.iter()` loop in `insert_entities_in_result`
+/// runs `merge`/`add_tags` for hits and the schema-directive path for misses, both writing
+/// through the same per-request `InvalidationLabels` handle. Proves the header unions both
+/// rather than one clobbering the other.
+#[tokio::test(flavor = "multi_thread")]
+async fn cdn_invalidation_header_unions_hit_and_miss_entities_in_the_same_request() {
+    async move {
+        let valid_schema =
+            Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+        let query = "query { currentUser { allOrganizations { id name } } }";
+
+        // Shared namespace so the second storage/service can see what the first cached —
+        // mirrors `missing_entities`'s pre-warm-then-partially-miss setup.
+        let namespace = Uuid::new_v4().to_string();
+        let map = || {
+            [
+                (
+                    "user".to_string(),
+                    Subgraph {
+                        redis: None,
+                        private_id: Some("sub".to_string()),
+                        enabled: true.into(),
+                        ttl: None,
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "orga".to_string(),
+                    Subgraph {
+                        redis: None,
+                        private_id: Some("sub".to_string()),
+                        enabled: true.into(),
+                        ttl: None,
+                        ..Default::default()
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect()
+        };
+
+        // First request: warm the cache for orgs 1 and 2 only.
+        {
+            let subgraphs = MockedSubgraphs(
+                [
+                    (
+                        "user",
+                        MockSubgraph::builder()
+                            .with_json(
+                                serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+                                serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
+                                    {"__typename": "Organization", "id": "1"},
+                                    {"__typename": "Organization", "id": "2"}
+                                ] }}}},
+                            )
+                            .with_header(CACHE_CONTROL, HeaderValue::from_static("no-store"))
+                            .build(),
+                    ),
+                    (
+                        "orga",
+                        MockSubgraph::builder()
+                            .with_json(
+                                serde_json::json! {{
+                                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+                                    "variables": {
+                                        "representations": [
+                                            {"id": "1", "__typename": "Organization"},
+                                            {"id": "2", "__typename": "Organization"}
+                                        ]
+                                    }
+                                }},
+                                serde_json::json! {{
+                                    "data": {
+                                        "_entities": [
+                                            {"name": "Organization 1"},
+                                            {"name": "Organization 2"}
+                                        ]
+                                    }
+                                }},
+                            )
+                            .with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600"))
+                            .build(),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            );
+
+            let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+            let storage = Storage::new(&Config::test(false, &namespace), drop_rx)
+                .await
+                .unwrap();
+            let response_cache = ResponseCache::for_test_with_cdn_invalidation(
+                storage.clone(),
+                create_subgraph_conf(map()),
+                valid_schema.clone(),
+                true,
+                drop_tx,
+                true,
+                CdnInvalidationConfig {
+                    enabled: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+            let service = TestHarness::builder()
+                .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+                .unwrap()
+                .schema(SCHEMA)
+                .extra_private_plugin(response_cache)
+                .extra_plugin(subgraphs)
+                .build_supergraph()
+                .await
+                .unwrap();
+
+            let request = supergraph::Request::fake_builder()
+                .query(query)
+                .context(Context::new())
+                .header(
+                    HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+                    HeaderValue::from_static("true"),
+                )
+                .build()
+                .unwrap();
+            let response = service.oneshot(request).await.unwrap();
+            let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
+            wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
+        }
+
+        // Second request: orgs 1, 2, and 3. The `orga` mock below only has a registered response
+        // for representation "3" — if the router doesn't actually serve 1 and 2 from cache, the
+        // mock harness has no matching response for the unexpected extra representations and the
+        // request fails outright, rather than silently succeeding via a live re-fetch.
+        let subgraphs = MockedSubgraphs(
+            [
+                (
+                    "user",
+                    MockSubgraph::builder()
+                        .with_json(
+                            serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+                            serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
+                                {"__typename": "Organization", "id": "1"},
+                                {"__typename": "Organization", "id": "2"},
+                                {"__typename": "Organization", "id": "3"}
+                            ] }}}},
+                        )
+                        .with_header(CACHE_CONTROL, HeaderValue::from_static("no-store"))
+                        .build(),
+                ),
+                (
+                    "orga",
+                    MockSubgraph::builder()
+                        .with_json(
+                            serde_json::json! {{
+                                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+                                "variables": {
+                                    "representations": [
+                                        {"id": "3", "__typename": "Organization"}
+                                    ]
+                                }
+                            }},
+                            serde_json::json! {{
+                                "data": {
+                                    "_entities": [
+                                        {"name": "Organization 3"}
+                                    ]
+                                }
+                            }},
+                        )
+                        .with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600"))
+                        .build(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
+
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false, &namespace), drop_rx)
+            .await
+            .unwrap();
+        let response_cache = ResponseCache::for_test_with_cdn_invalidation(
+            storage.clone(),
+            create_subgraph_conf(map()),
+            valid_schema.clone(),
+            false,
+            drop_tx,
+            true,
+            CdnInvalidationConfig {
+                enabled: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_private_plugin(response_cache)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .context(Context::new())
+            .build()
+            .unwrap();
+        let response = service.oneshot(request).await.unwrap();
+        let header = get_cache_tag_header(&response).expect("expected a Cache-Tag header");
+
+        assert!(
+            header.contains(&"currentUser".to_string()),
+            "missing root tag in {header:?}"
+        );
+        assert!(
+            header.contains(&"organizationid-id--1".to_string()),
+            "missing hit-path entity tag (org 1) in {header:?}"
+        );
+        assert!(
+            header.contains(&"organizationid-id--2".to_string()),
+            "missing hit-path entity tag (org 2) in {header:?}"
+        );
+        assert!(
+            header.contains(&"organizationid-id--3".to_string()),
+            "missing miss-path entity tag (org 3) in {header:?}"
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn invalidate_by_type() {
     async move {
