@@ -538,25 +538,10 @@ telemetry:
         aws_xray: false
         baggage: false
         datadog: false
-        jaeger: false
         request:
           format: hexadecimal
           header_name: example_header_name
         trace_context: false
-        zipkin: false
-      zipkin:
-        batch_processor:
-          max_concurrent_exports: 1
-          max_export_batch_size: 512
-          max_export_timeout:
-            secs: 30
-            nanos: 0
-          max_queue_size: 2048
-          scheduled_delay:
-            secs: 5
-            nanos: 0
-        enabled: false
-        endpoint: example_endpoint
   instrumentation:
     events:
       connector:

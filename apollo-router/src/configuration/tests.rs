@@ -415,12 +415,14 @@ fn validate_project_config_files() {
     let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();
     #[cfg(unix)]
     let filename_matcher = Regex::from_str("((.+[.])?router(_unix)?\\.yaml)|(.+\\.mdx)").unwrap();
+    // Blocks with extra attributes after the title (e.g. `novalidate`) are intentionally
+    // excluded: they contain intentionally-invalid or version-specific config examples.
     #[cfg(not(unix))]
     let embedded_yaml_matcher =
-        Regex::from_str(r#"(?ms)```yaml title="router.yaml"(.+?)```"#).unwrap();
+        Regex::from_str(r#"(?ms)```yaml title="router.yaml"\n(.+?)```"#).unwrap();
     #[cfg(unix)]
     let embedded_yaml_matcher =
-        Regex::from_str(r#"(?ms)```yaml title="router(_unix)?.yaml"(.+?)```"#).unwrap();
+        Regex::from_str(r#"(?ms)```yaml title="router(_unix)?.yaml"\n(.+?)```"#).unwrap();
 
     fn it(path: &str) -> impl Iterator<Item = DirEntry> + use<> {
         WalkDir::new(path).into_iter().filter_map(|e| e.ok())
@@ -466,6 +468,7 @@ fn validate_project_config_files() {
                     .mocked_env_var("JAEGER_HOST", "http://example.com")
                     .mocked_env_var("JAEGER_USERNAME", "username")
                     .mocked_env_var("JAEGER_PASSWORD", "pass")
+                    .mocked_env_var("REDIS_USERNAME", "username")
                     .mocked_env_var("REDIS_PASSWORD", "pass")
                     .mocked_env_var("ZIPKIN_HOST", "http://example.com")
                     .mocked_env_var("TEST_CONFIG_ENDPOINT", "http://example.com")

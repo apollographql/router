@@ -23,7 +23,6 @@ use multimap::MultiMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use tower::BoxError;
-use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
@@ -41,7 +40,8 @@ use crate::axum_factory::CanceledRequest;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::graphql;
-use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::InternalServiceBuilderExt as _;
+use crate::layers::ServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
@@ -707,14 +707,12 @@ impl RouterCreator {
         let config_hash = configuration.hash();
         let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
 
-        let router_service = content_negotiation::RouterContentNegotiationLayer::default().layer(
-            RouterService::new(
-                supergraph_creator.make(),
-                apq_expander,
-                persisted_queries,
-                query_analysis,
-                configuration.batching.clone(),
-            ),
+        let router_service = RouterService::new(
+            supergraph_creator.make(),
+            apq_expander,
+            persisted_queries,
+            query_analysis,
+            configuration.batching.clone(),
         );
 
         // NOTE: This is the start of the router pipeline (router_service).
@@ -723,21 +721,14 @@ impl RouterCreator {
         // before those layers (potentially introduced by traffic-shaping or license-
         // enforcement plugins), Tokio's cooperative scheduling would cause poll_ready to
         // return Pending spuriously and trigger Overloaded responses.
-        let service = UnconstrainedBuffer::new(
-            ServiceBuilder::new()
-                .layer(static_page.clone())
-                .service(
-                    supergraph_creator
-                        .plugins()
-                        .iter()
-                        .rev()
-                        .fold(router_service.boxed_clone(), |acc, (_, e)| {
-                            e.router_service(acc)
-                        }),
-                )
-                .boxed_clone(),
-            DEFAULT_BUFFER_SIZE,
-        );
+        let service = ServiceBuilder::new()
+            .buffered()
+            .layer(static_page.clone())
+            .rust_plugins(supergraph_creator.plugins(), |plugin, service| {
+                plugin.router_service(service)
+            })
+            .layer(content_negotiation::RouterContentNegotiationLayer::default())
+            .service(router_service);
 
         Ok(Self {
             supergraph_creator,

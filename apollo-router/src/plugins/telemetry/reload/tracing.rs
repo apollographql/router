@@ -5,19 +5,19 @@
 //! ## Purpose
 //!
 //! The [`TracingBuilder`] constructs a tracer provider that handles distributed tracing across
-//! multiple backends (OTLP, Datadog, Zipkin, Apollo). It also configures trace propagation to
+//! multiple backends (OTLP, Datadog, Apollo). It also configures trace propagation to
 //! ensure trace context is properly propagated across service boundaries.
 //!
 //! ## Configurator Pattern
 //!
 //! The [`TracingConfigurator`] trait allows different trace exporters to contribute span processors
-//! to the builder. Each exporter (OTLP, Datadog, Zipkin, Apollo) implements this trait to add its
+//! to the builder. Each exporter (OTLP, Datadog, Apollo) implements this trait to add its
 //! specific span processing logic.
 //!
 //! ## Propagation
 //!
 //! The [`create_propagator`] function builds a composite propagator supporting multiple trace
-//! context formats (W3C Trace Context, Jaeger, Zipkin, Datadog, AWS X-Ray). This allows the router
+//! context formats (W3C Trace Context, Datadog, AWS X-Ray). This allows the router
 //! to interoperate with services using different tracing systems.
 
 use opentelemetry::propagation::TextMapCompositePropagator;
@@ -76,22 +76,14 @@ pub(crate) fn create_propagator(
 ) -> TextMapCompositePropagator {
     let mut propagators: Vec<Box<dyn TextMapPropagator + Send + Sync + 'static>> = Vec::new();
 
-    if tracing.is_jaeger_propagation_enabled() {
-        propagators.push(Box::<opentelemetry_jaeger_propagator::Propagator>::default());
-    }
     if tracing.is_baggage_propagation_enabled() {
         propagators.push(Box::<opentelemetry_sdk::propagation::BaggagePropagator>::default());
     }
     if tracing.is_trace_context_propagation_enabled() {
         propagators.push(Box::<opentelemetry_sdk::propagation::TraceContextPropagator>::default());
     }
-    if tracing.is_zipkin_propagation_enabled() {
-        propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
-    }
     if tracing.is_datadog_propagation_enabled() {
-        if tracing.is_jaeger_propagation_enabled()
-            || tracing.is_trace_context_propagation_enabled()
-            || tracing.is_zipkin_propagation_enabled()
+        if tracing.is_trace_context_propagation_enabled()
             || tracing.is_aws_xray_propagation_enabled()
         {
             if tracing.datadog.enabled && propagation.datadog.unwrap_or(false) {
