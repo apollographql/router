@@ -8,6 +8,7 @@ use std::task::Poll;
 
 use futures::FutureExt;
 use futures::future::BoxFuture;
+use futures::future::Either;
 use http::HeaderMap;
 use http::Method;
 use http::StatusCode;
@@ -40,6 +41,7 @@ use crate::services::MULTIPART_DEFER_SPEC_VALUE;
 use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
 use crate::services::MULTIPART_SUBSCRIPTION_SPEC_PARAMETER;
 use crate::services::MULTIPART_SUBSCRIPTION_SPEC_VALUE;
+use crate::services::execution;
 use crate::services::router;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::router::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
@@ -440,6 +442,98 @@ fn parse_accept(headers: &HeaderMap) -> ClientRequestAccepts {
         accepts.json = true
     }
     accepts
+}
+
+/// A layer for the execution service that checks that the query plan's contents are compatible with
+/// the request's `Accept` header.
+#[derive(Clone, Default)]
+pub(crate) struct QueryPlanCheckAcceptLayer {
+    _private: (),
+}
+
+impl QueryPlanCheckAcceptLayer {
+    pub(crate) fn new() -> Self {
+        Self { _private: () }
+    }
+}
+
+impl<S> tower::Layer<S> for QueryPlanCheckAcceptLayer {
+    type Service = QueryPlanCheckAcceptService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        QueryPlanCheckAcceptService::new(inner)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct QueryPlanCheckAcceptService<S> {
+    inner: S,
+}
+
+impl<S> QueryPlanCheckAcceptService<S> {
+    pub(crate) fn new(inner: S) -> Self {
+        Self { inner }
+    }
+}
+
+impl<S> tower::Service<execution::Request> for QueryPlanCheckAcceptService<S>
+where
+    S: tower::Service<execution::Request, Response = execution::Response>,
+    S::Future: Send + 'static,
+{
+    type Response = execution::Response;
+    type Error = S::Error;
+    type Future = Either<S::Future, std::future::Ready<Result<Self::Response, Self::Error>>>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: execution::Request) -> Self::Future {
+        let context = &req.context;
+        let variables = &req.supergraph_request.body().variables;
+
+        let is_deferred = req.query_plan.is_deferred(variables);
+        let is_subscription = req.query_plan.is_subscription();
+
+        let ClientRequestAccepts {
+            multipart_defer: accepts_multipart_defer,
+            multipart_subscription: accepts_multipart_subscription,
+            ..
+        } = context
+            .extensions()
+            .with_lock(|lock| lock.get().cloned())
+            .unwrap_or_default();
+        if (is_deferred && !accepts_multipart_defer)
+            || (is_subscription && !accepts_multipart_subscription)
+        {
+            let (error_message, error_code) = if is_deferred {
+                (
+                    "the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed;deferSpec=20220824'",
+                    "DEFER_BAD_HEADER",
+                )
+            } else {
+                (
+                    "the router received a query with a subscription but the client does not accept multipart/mixed HTTP responses. To enable subscription support, add the HTTP header 'Accept: multipart/mixed;subscriptionSpec=1.0'",
+                    "SUBSCRIPTION_BAD_HEADER",
+                )
+            };
+            let response = execution::Response::error_builder()
+                .status_code(StatusCode::NOT_ACCEPTABLE)
+                .error(
+                    graphql::Error::builder()
+                        .message(error_message)
+                        .extension_code(error_code)
+                        .build(),
+                )
+                .context(req.context)
+                .build()
+                .expect("does not fail");
+            Either::Right(std::future::ready(Ok(response)))
+        } else {
+            Either::Left(self.inner.call(req))
+        }
+    }
 }
 
 #[cfg(test)]

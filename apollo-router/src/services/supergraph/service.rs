@@ -26,7 +26,6 @@ use crate::compute_job::ComputeBackPressureError;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::configuration::mode::Mode;
 use crate::error::CacheResolverError;
-use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::introspection;
 use crate::introspection::IntrospectionService;
@@ -63,11 +62,11 @@ use crate::services::fetch_service::FetchService;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::content_negotiation;
+use crate::services::layers::content_negotiation::QueryPlanCheckAcceptLayer;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::QueryAnalysis;
 use crate::services::query_planner;
-use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
@@ -276,49 +275,7 @@ async fn service_call(
             SupergraphResponse::new_from_graphql_response(*response, context),
         ),
         Some(QueryPlannerContent::Plan { plan }) => {
-            let is_deferred = plan.is_deferred(&variables);
-            let is_subscription = plan.is_subscription();
-
-            let ClientRequestAccepts {
-                multipart_defer: accepts_multipart_defer,
-                multipart_subscription: accepts_multipart_subscription,
-                ..
-            } = context
-                .extensions()
-                .with_lock(|lock| lock.get().cloned())
-                .unwrap_or_default();
-            if (is_deferred && !accepts_multipart_defer)
-                || (is_subscription && !accepts_multipart_subscription)
-            {
-                let (error_message, error_code) = if is_deferred {
-                    (
-                        String::from(
-                            "the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed;deferSpec=20220824'",
-                        ),
-                        "DEFER_BAD_HEADER",
-                    )
-                } else {
-                    (
-                        String::from(
-                            "the router received a query with a subscription but the client does not accept multipart/mixed HTTP responses. To enable subscription support, add the HTTP header 'Accept: multipart/mixed;subscriptionSpec=1.0'",
-                        ),
-                        "SUBSCRIPTION_BAD_HEADER",
-                    )
-                };
-                let mut response = SupergraphResponse::new_from_graphql_response(
-                    graphql::Response::builder()
-                        .errors(vec![
-                            crate::error::Error::builder()
-                                .message(error_message)
-                                .extension_code(error_code)
-                                .build(),
-                        ])
-                        .build(),
-                    context,
-                );
-                *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
-                Ok(response)
-            } else if let Some(err) = plan
+            if let Some(err) = plan
                 .query
                 .validate_variables(body, &schema, strict_variable_validation)
                 .err()
@@ -616,6 +573,7 @@ impl PluggableSupergraphServiceBuilder {
             .map(|t| t.config.apollo.clone());
 
         let execution_service: execution::BoxCloneService = ServiceBuilder::new()
+            .layer(QueryPlanCheckAcceptLayer::new())
             .layer(BatchQueryPlanAnalysisLayer::new())
             .layer(SubscriptionExecutionLayer::new(
                 configuration.notify.clone(),
