@@ -2625,6 +2625,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_path_selection(#[case] spec: ConnectSpec) {
         check_path_selection(
             spec,
@@ -2754,7 +2755,7 @@ mod tests {
             // `LitExpr::String` directly — no `PathList::Expr` wrap, since
             // that node is reserved for source `$(...)`. To look up a field
             // called `my ego`, users write `leggo: $.'my ego'` instead.
-            let leggo_selection = if matches!(spec, ConnectSpec::V0_4) {
+            let leggo_selection = if spec >= ConnectSpec::V0_4 {
                 NamedSelection {
                     prefix: NamingPrefix::Alias(Alias::new("leggo")),
                     path: WithRange::new(LitExpr::String("my ego".to_string()), None),
@@ -2922,6 +2923,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_path_selection_vars(#[case] spec: ConnectSpec) {
         check_path_selection(
             spec,
@@ -3377,6 +3379,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_path_selection_at(#[case] spec: ConnectSpec) {
         check_path_selection(
             spec,
@@ -3436,6 +3439,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_expr_path_selections(#[case] spec: ConnectSpec) {
         fn check_simple_lit_expr(spec: ConnectSpec, input: &str, expected: LitExpr) {
             check_path_selection(
@@ -3548,6 +3552,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_path_methods(#[case] spec: ConnectSpec) {
         check_path_selection(
             spec,

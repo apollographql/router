@@ -1565,6 +1565,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_apply_to_selection(#[case] spec: ConnectSpec) {
         let data = json!({
             "hello": "world",
@@ -1730,6 +1731,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_apply_to_errors(#[case] spec: ConnectSpec) {
         let data = json!({
             "hello": "world",
@@ -1974,6 +1976,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_apply_to_nested_arrays(#[case] spec: ConnectSpec) {
         let data = json!({
             "arrayOfArrays": [
@@ -2208,6 +2211,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_apply_to_variable_expressions(#[case] spec: ConnectSpec) {
         let id_object = selection!("id: $", spec).apply_to(&json!(123));
         assert_eq!(id_object, (Some(json!({"id": 123})), vec![]));
@@ -2529,6 +2533,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_inline_paths_with_subselections(#[case] spec: ConnectSpec) {
         let data = json!({
             "id": 123,
@@ -3178,6 +3183,7 @@ mod tests {
     #[case::latest(ConnectSpec::V0_2)]
     #[case::next(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_left_associative_path_evaluation(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("batch.id->first", spec).apply_to(&json!({
@@ -4159,6 +4165,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_key_access_with_existing_property(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4180,6 +4187,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_key_access_with_null_value(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4197,6 +4205,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_key_access_on_non_object(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4219,6 +4228,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_key_access_with_missing_property(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4243,6 +4253,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_chained_optional_key_access(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4264,6 +4275,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_chained_optional_access_with_null_in_middle(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4283,6 +4295,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_method_on_null(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4300,6 +4313,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_method_with_valid_method(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4317,6 +4331,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_method_with_unknown_method(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4335,6 +4350,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_chaining_with_subselection_on_valid_data(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4364,6 +4380,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_chaining_with_subselection_on_null_data(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4381,6 +4398,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_mixed_regular_and_optional_chaining_working_case(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4407,6 +4425,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_mixed_regular_and_optional_chaining_with_null(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4427,6 +4446,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_selection_set_with_valid_data(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4453,6 +4473,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_selection_set_with_null_data(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4470,6 +4491,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_selection_set_with_missing_property(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4487,6 +4509,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_selection_set_with_non_object(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4653,6 +4676,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_nested_optional_selection_sets(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4696,6 +4720,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_mixed_optional_selection_and_optional_chaining(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4734,6 +4759,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_selection_set_parsing(#[case] spec: ConnectSpec) {
         // Test that the parser correctly handles optional selection sets
         let selection = JSONSelection::parse_with_spec("$.user? { id name }", spec).unwrap();
@@ -4752,6 +4778,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_selection_set_with_arrays(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
