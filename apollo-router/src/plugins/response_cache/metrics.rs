@@ -146,6 +146,63 @@ pub(super) fn record_invalidation_duration(
     );
 }
 
+/// Outcome of building the CDN invalidation labels (`Cache-Tag`) header for one response.
+#[derive(Clone, Copy)]
+pub(super) enum CdnTagHeaderOutcome {
+    /// Nothing to report — no subgraph/type/tag labels were aggregated for this request.
+    Empty,
+    /// Every aggregated label fit within `max_bytes`; nothing was truncated.
+    CompleteWithoutTruncation,
+    /// Some labels didn't fit within `max_bytes` and were truncated, finest-grained first.
+    CompleteWithTruncation,
+    /// Truncation would have occurred, but `experimental_drop_on_overflow` suppressed the header
+    /// entirely rather than sending a partial one.
+    DroppedDueToOverflow,
+}
+
+impl CdnTagHeaderOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Empty => "empty",
+            Self::CompleteWithoutTruncation => "complete_without_truncation",
+            Self::CompleteWithTruncation => "complete_with_truncation",
+            Self::DroppedDueToOverflow => "dropped_due_to_overflow",
+        }
+    }
+}
+
+pub(super) fn record_cdn_tag_header_outcome(outcome: CdnTagHeaderOutcome) {
+    u64_counter_with_unit!(
+        "apollo.router.operations.response_cache.cdn_tag_header.outcome",
+        "Outcome of building the CDN invalidation labels (Cache-Tag) header for a response",
+        "{response}",
+        1,
+        "outcome" = outcome.as_str()
+    );
+}
+
+/// Size in bytes the `Cache-Tag` header would have been had `max_bytes` not been applied —
+/// recorded whenever there's at least one label to report, regardless of whether truncation
+/// actually happened, so the distribution tracks headroom before truncation kicks in.
+pub(super) fn record_cdn_tag_header_untruncated_size(bytes: u64) {
+    u64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.cdn_tag_header.untruncated_size_bytes",
+        "Size the CDN invalidation labels (Cache-Tag) header would have been without max_bytes truncation",
+        "By",
+        bytes
+    );
+}
+
+pub(super) fn record_cdn_tag_header_error(reason: &'static str) {
+    u64_counter_with_unit!(
+        "apollo.router.operations.response_cache.cdn_tag_header.error",
+        "Errors while emitting the CDN invalidation labels (Cache-Tag) header",
+        "{error}",
+        1,
+        "reason" = reason
+    );
+}
+
 /// Restrict `batch_size` cardinality so that it can be used as a metric attribute.
 fn batch_size_str(batch_size: usize) -> &'static str {
     if batch_size == 0 {

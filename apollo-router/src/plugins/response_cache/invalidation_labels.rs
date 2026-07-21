@@ -7,6 +7,10 @@ use itertools::Itertools;
 use std::collections::HashSet;
 
 use crate::plugins::response_cache::INTERNAL_CACHE_TAG_PREFIX;
+use crate::plugins::response_cache::metrics::CdnTagHeaderOutcome;
+use crate::plugins::response_cache::metrics::record_cdn_tag_header_error;
+use crate::plugins::response_cache::metrics::record_cdn_tag_header_outcome;
+use crate::plugins::response_cache::metrics::record_cdn_tag_header_untruncated_size;
 
 /// Per-request aggregator of cache tags surfaced by response_cache.
 ///
@@ -80,8 +84,20 @@ impl InvalidationLabels {
         // gets added and CacheService is the thing getting the subgraphs and types; so, it's more
         // than possible that we won't have subgraphs or types and will need to return None
         if subgraph_types_tags_labels.is_empty() {
+            record_cdn_tag_header_outcome(CdnTagHeaderOutcome::Empty);
+            tracing::debug!(
+                "response_cache has no invalidation labels to emit for this response; skipping Cache-Tag header"
+            );
             return None;
         }
+
+        // Recorded regardless of whether truncation happens below, so the distribution tracks
+        // headroom before truncation kicks in, not just the truncation events themselves.
+        record_cdn_tag_header_untruncated_size(
+            subgraph_types_tags_labels
+                .join(&config.header_delimiter)
+                .len() as u64,
+        );
 
         for label in &subgraph_types_tags_labels {
             let next_len = current_len + header_delimiter_size + label.len();
@@ -107,7 +123,6 @@ impl InvalidationLabels {
             .saturating_sub(included.len());
 
         if dropped > 0 {
-            // TODO: metric here
             tracing::warn!(
                 max_bytes = %config.max_bytes,
                 actual_bytes = %header.len(),
@@ -117,8 +132,14 @@ impl InvalidationLabels {
         }
 
         if dropped > 0 && config.experimental_drop_on_overflow {
+            record_cdn_tag_header_outcome(CdnTagHeaderOutcome::DroppedDueToOverflow);
             None
         } else {
+            record_cdn_tag_header_outcome(if dropped > 0 {
+                CdnTagHeaderOutcome::CompleteWithTruncation
+            } else {
+                CdnTagHeaderOutcome::CompleteWithoutTruncation
+            });
             Some(header)
         }
     }
@@ -131,8 +152,8 @@ impl InvalidationLabels {
         let header = if let Some(labels) = self.build_header(config) {
             labels
         } else {
-            // TODO: add metric for empty invalidation labels header
-            // TODO: add debug-level log for ^
+            // `build_header` already recorded why (empty vs. dropped-due-to-overflow) and logged
+            // accordingly, since it's the only place that knows which of the two applies here.
             return;
         };
 
@@ -145,7 +166,7 @@ impl InvalidationLabels {
                     "response_cache cdn_invalidation.header is not a valid HTTP header name; skipping emission"
                 );
 
-                // TODO: metric for error/skipping ^
+                record_cdn_tag_header_error("invalid_header_name");
                 return;
             }
         };
@@ -161,7 +182,7 @@ impl InvalidationLabels {
                     error = %err,
                     "response_cache aggregated cache-tag header value is not a valid HTTP header value; skipping emission"
                 );
-                // TODO: metric for error/skipping ^
+                record_cdn_tag_header_error("invalid_header_value");
             }
         }
     }
