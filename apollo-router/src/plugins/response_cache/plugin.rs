@@ -237,9 +237,11 @@ pub(crate) struct Config {
 ///
 /// When enabled, the router collects the union of cache tags contributed by each subgraph
 /// (from `apolloCacheTags`, `apolloEntityCacheTags`, and resolved `@cacheTag` directive values)
-/// and emits them as a single configurable header on the supergraph response. The tags are
-/// always available on the request context for coprocessor or rhai consumption regardless of
-/// whether the header is emitted.
+/// and emits them as a single configurable header on the supergraph response. The coarser
+/// `subgraph`/`type` labels are always recorded onto the request context (available to
+/// coprocessors or Rhai regardless of this config), but the fine-grained tag values are only
+/// aggregated when `enabled` is `true` — there's no way to read the full label set from context
+/// without also enabling header emission.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct CdnInvalidationConfig {
@@ -1084,6 +1086,7 @@ impl CacheService {
             let cache_key_context = CacheKeyContext {
                 key: "-".to_string(),
                 invalidation_keys: vec![],
+                has_tags: false,
                 kind,
                 hashed_private_id: None,
                 subgraph_name: self.name.clone(),
@@ -1210,9 +1213,10 @@ impl CacheService {
                     }
                     if let Err(err) = invalidation_labels.add_type(
                         &self.name,
-                        &self
-                            .entity_type
-                            .unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME.to_string()),
+                        self.entity_type
+                            .clone()
+                            .unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME.to_string())
+                            .as_str(),
                     ) {
                         log_invalidation_label_error(err);
                     }
@@ -1263,10 +1267,19 @@ impl CacheService {
                     let cache_key_context = CacheKeyContext {
                         key: root_cache_key.clone(),
                         hashed_private_id: private_id.clone(),
-                        invalidation_keys: cache_tags
-                            .iter()
-                            .filter_map(|t| t.user_value().map(String::from))
-                            .collect(),
+                        invalidation_keys: InvalidationLabels {
+                            tags: cdn_invalidation_tags.iter().cloned().collect(),
+                            types: HashSet::from([(
+                                self.name.clone(),
+                                self.entity_type
+                                    .clone()
+                                    .unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME.to_string()),
+                            )]),
+                            subgraphs: HashSet::from([self.name.clone()]),
+                            ..Default::default()
+                        }
+                        .user_facing_only(),
+                        has_tags: !cdn_invalidation_tags.is_empty(),
                         kind: CacheEntryKind::RootFields {
                             root_fields: root_operation_fields,
                         },
@@ -1354,7 +1367,14 @@ impl CacheService {
                         ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
                             hashed_private_id: private_id.clone(),
                             key: cache_entry.key.clone(),
-                            invalidation_keys: ir.cache_tags.iter().filter_map(|t| t.user_value().map(String::from)).collect(),
+                            invalidation_keys: InvalidationLabels {
+                                tags: ir.cdn_invalidation_tags.iter().cloned().collect(),
+                                types: HashSet::from([(self.name.clone(), ir.typename.clone())]),
+                                subgraphs: HashSet::from([self.name.clone()]),
+                                ..Default::default()
+                            }
+                            .user_facing_only(),
+                            has_tags: !ir.cdn_invalidation_tags.is_empty(),
                             kind: CacheEntryKind::Entity {
                                 typename: ir.typename.clone(),
                                 entity_key: ir.entity_key.clone().unwrap_or_default(),
@@ -1590,13 +1610,33 @@ async fn cache_lookup_root(
                         })
                         .unwrap_or_default();
 
+                    // `debug_value.invalidation_labels` (reconstructed from storage) only ever
+                    // carries the `tags` tier — `types`/`subgraphs` are never persisted, only
+                    // computed live per-request — so union in this entry's own subgraph/type
+                    // label here to show the full set of strings a customer could purge by.
+                    let stored_tags = debug_value
+                        .invalidation_labels
+                        .map(|labels| labels.tags)
+                        .unwrap_or_default();
+                    let has_tags = !stored_tags.is_empty();
+                    let invalidation_keys = InvalidationLabels {
+                        tags: stored_tags,
+                        types: HashSet::from([(
+                            name.clone(),
+                            entity_type_opt
+                                .unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME)
+                                .to_string(),
+                        )]),
+                        subgraphs: HashSet::from([name.clone()]),
+                        ..Default::default()
+                    }
+                    .user_facing_only();
+
                     let cache_key_context = CacheKeyContext {
                         key: debug_value.key,
+                        has_tags,
                         hashed_private_id: private_id.map(ToString::to_string),
-                        invalidation_keys: debug_value
-                            .invalidation_labels
-                            .unwrap_or_default()
-                            .user_facing_only(),
+                        invalidation_keys,
                         kind: CacheEntryKind::RootFields {
                             root_fields: root_operation_fields,
                         },
@@ -1970,14 +2010,29 @@ async fn cache_lookup_entities(
         if debug {
             let debug_cache_keys_ctx = cache_result.iter().filter_map(|ir| {
                 ir.cache_entry.as_ref().map(|cache_entry| {
+                    // `cache_entry.invalidation_labels` (reconstructed from storage) only ever
+                    // carries the `tags` tier — `types`/`subgraphs` are never persisted, only
+                    // computed live per-request — so union in this entry's own subgraph/type
+                    // label here to show the full set of strings a customer could purge by.
+                    let stored_tags = cache_entry
+                        .invalidation_labels
+                        .as_ref()
+                        .map(|labels| labels.tags.clone())
+                        .unwrap_or_default();
+                    let has_tags = !stored_tags.is_empty();
+                    let invalidation_keys = InvalidationLabels {
+                        tags: stored_tags,
+                        types: HashSet::from([(name.clone(), ir.typename.clone())]),
+                        subgraphs: HashSet::from([name.clone()]),
+                        ..Default::default()
+                    }
+                    .user_facing_only();
+
                     CacheKeyContext {
                         key: ir.key.clone(),
+                        has_tags,
                         hashed_private_id: private_id.map(ToString::to_string),
-                        invalidation_keys: cache_entry
-                            .invalidation_labels
-                            .as_ref()
-                            .map(|labels| labels.user_facing_only())
-                            .unwrap_or_default(),
+                        invalidation_keys,
                         kind: CacheEntryKind::Entity {
                             typename: ir.typename.clone(),
                             entity_key: ir.entity_key.clone().unwrap_or_default(),
@@ -2217,10 +2272,12 @@ fn extract_cache_key_root(
     .hash();
     // The by-type tag is only emitted when the Type index is active for this subgraph.
     // Operators who only invalidate by cache tag opt out via `indexes.type: false`.
-    // Redis-only: CacheTag::Type never reaches the CDN header (its user_value() is None), so
-    // gating this behind IndexMode::Type has no effect on Cache-Tag header completeness. Not to
-    // be confused with InvalidationLabels.types/add_type(), the CDN header's own coarse
-    // type-tier, which is unconditional and unrelated to this index.
+    // Redis-only: CacheTag::Type entries only ever feed `cache_tags`, which drives Redis's
+    // `ZADD` indexing — the CDN header's own tag sourcing (`cdn_invalidation_tags` and the live
+    // `InvalidationLabels` aggregator) never reads from `cache_tags`, so gating this behind
+    // IndexMode::Type has no effect on Cache-Tag header completeness. Not to be confused with
+    // InvalidationLabels.types/add_type(), the CDN header's own coarse type-tier, which is
+    // unconditional and unrelated to this index.
     let mut cache_tags: Vec<CacheTag> = Vec::new();
     if indexes.is_enabled(IndexMode::Type) {
         cache_tags.push(CacheTag::Type(entity_type.to_string()));
@@ -2999,10 +3056,17 @@ async fn insert_entities_in_result(
                         CacheKeyContext {
                             key: key.clone(),
                             hashed_private_id: private_id_for_dbg.clone(),
-                            invalidation_keys: cache_tags
-                                .iter()
-                                .filter_map(|t| t.user_value().map(String::from))
-                                .collect(),
+                            invalidation_keys: InvalidationLabels {
+                                tags: cdn_invalidation_tags.iter().cloned().collect(),
+                                types: HashSet::from([(
+                                    subgraph_name.to_string(),
+                                    typename.clone(),
+                                )]),
+                                subgraphs: HashSet::from([subgraph_name.to_string()]),
+                                ..Default::default()
+                            }
+                            .user_facing_only(),
+                            has_tags: !cdn_invalidation_tags.is_empty(),
                             kind: CacheEntryKind::Entity {
                                 typename: typename.clone(),
                                 entity_key: entity_key.clone().unwrap_or_default(),

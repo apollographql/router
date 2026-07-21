@@ -16,6 +16,13 @@ pub(super) type CacheKeysContext = Vec<CacheKeyContext>;
 pub(super) struct CacheKeyContext {
     pub(super) key: String,
     pub(super) invalidation_keys: Vec<String>,
+    /// Whether this entry has any *fine-grained* tags (schema `@cacheTag`/extension values), as
+    /// opposed to only the always-present `subgraph`/`type` fallback labels also rendered into
+    /// `invalidation_keys`. Not serialized — it exists purely so `compute_warnings` can tell
+    /// "no fine-grained tags configured" apart from "no invalidation keys at all", now that
+    /// `invalidation_keys` always includes the fallback labels.
+    #[serde(skip)]
+    pub(super) has_tags: bool,
     /// Invalidation indexes resolved for this entry's subgraph at write time. Surfacing this in
     /// the debugger lets operators see at a glance which indexes are active, which is essential
     /// when interpreting absent invalidation keys (e.g., the entry was written under
@@ -137,7 +144,7 @@ impl CacheKeyContext {
             // No cache tags on root fields. Only fire this when the cache_tag index is enabled
             // for the subgraph; otherwise the operator has intentionally opted out of per-tag
             // indexing and missing @cacheTag directives are the expected, configured state.
-            if self.invalidation_keys.is_empty() && self.indexes.cache_tag {
+            if !self.has_tags && self.indexes.cache_tag {
                 self.warnings.push(Warning {
                     code: "NO_CACHE_TAG_ON_ROOT_FIELD".to_string(),
                     links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods"), title: "Add '@cacheTag' in your schema".to_string() }],

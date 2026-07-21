@@ -208,24 +208,28 @@ impl InvalidationLabels {
         }
     }
 
-    /// Filters out any tag that starts with `INTERNAL_CACHE_TAG_PREFIX`, which denotes internal
-    /// keys versus external. The difference between the two is that internal tags are not
-    /// exposed to users; external are, and they're used for invalidation.
+    /// Returns every label a customer could use to purge or invalidate this entry — the same
+    /// three tiers rendered into the CDN `Cache-Tag` header (`subgraph-{name}`,
+    /// `type-{subgraph}-{type}`, and exact tag values), minus any tag that starts with
+    /// `INTERNAL_CACHE_TAG_PREFIX`. Internal tags are router bookkeeping, never exposed to
+    /// users; only `tags` can carry them, since `types`/`subgraphs` are router-computed rather
+    /// than user-authored and so have nothing to filter.
     ///
-    /// The router's own cache debugger is the only current caller — it surfaces exactly the
-    /// `@cacheTag`/extension values a customer set, not the router-computed `types`/`subgraphs`
-    /// fallback tiers, which aren't user-authored and so have nothing to filter.
-    ///
-    /// Takes `&self`, so `self.tags` can only be read through a shared reference — `.cloned()`
-    /// on the iterator is what produces owned `String`s here; there's no `self` (by value) to
-    /// consume via `.into_iter()` instead.
+    /// The router's own cache debugger is the only current caller: it surfaces these strings
+    /// directly so a customer can see exactly what they'd need to paste into a CDN purge call
+    /// or a Redis `/invalidation` request for a given entry, rather than having to reconstruct
+    /// the label format themselves from the debugger's separate structured subgraph/type
+    /// fields.
     pub(crate) fn user_facing_only(&self) -> Vec<String> {
-        // TODO: use all labels
-        self.tags
-            .iter()
-            .cloned()
-            .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-            .collect()
+        let mut labels = self.format_subgraph_labels();
+        labels.extend(self.format_type_labels());
+        labels.extend(
+            self.tags
+                .iter()
+                .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                .cloned(),
+        );
+        labels
     }
 
     /// Unions `other_invalidatoin_labels`'s three tiers into this context's stored entry —
@@ -593,6 +597,59 @@ mod tests {
         };
 
         assert_eq!(labels.user_facing_only(), expected);
+    }
+
+    #[rstest]
+    #[case::subgraph_tier_only(
+        HashSet::new(),
+        HashSet::new(),
+        HashSet::from(["accounts".to_string()]),
+        HashSet::from(["subgraph-accounts".to_string()]),
+    )]
+    #[case::type_tier_only(
+        HashSet::new(),
+        HashSet::from([("accounts".to_string(), "User".to_string())]),
+        HashSet::new(),
+        HashSet::from(["type-accounts-User".to_string()]),
+    )]
+    #[case::all_three_tiers_together(
+        HashSet::from(["homepage".to_string()]),
+        HashSet::from([("accounts".to_string(), "User".to_string())]),
+        HashSet::from(["accounts".to_string()]),
+        HashSet::from([
+            "homepage".to_string(),
+            "type-accounts-User".to_string(),
+            "subgraph-accounts".to_string(),
+        ]),
+    )]
+    #[case::internal_tag_filtered_but_type_and_subgraph_kept(
+        HashSet::from([
+            format!("{INTERNAL_CACHE_TAG_PREFIX}version:1:subgraph:accounts"),
+            "homepage".to_string(),
+        ]),
+        HashSet::from([("accounts".to_string(), "User".to_string())]),
+        HashSet::from(["accounts".to_string()]),
+        HashSet::from([
+            "homepage".to_string(),
+            "type-accounts-User".to_string(),
+            "subgraph-accounts".to_string(),
+        ]),
+    )]
+    fn user_facing_only_includes_type_and_subgraph_tiers(
+        #[case] tags: HashSet<String>,
+        #[case] types: HashSet<(String, String)>,
+        #[case] subgraphs: HashSet<String>,
+        #[case] expected: HashSet<String>,
+    ) {
+        let labels = InvalidationLabels {
+            tags,
+            types,
+            subgraphs,
+            ..Default::default()
+        };
+
+        let got: HashSet<String> = labels.user_facing_only().into_iter().collect();
+        assert_eq!(got, expected);
     }
 
     #[test]

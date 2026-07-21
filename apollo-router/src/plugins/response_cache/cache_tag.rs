@@ -42,16 +42,6 @@ impl CacheTag {
         }
     }
 
-    /// The user-facing string representation of this tag, used by the cache debugger to show
-    /// which `@cacheTag` or extension-supplied tags a cached entry was indexed under. Returns
-    /// `None` for internal entries.
-    pub(crate) fn user_value(&self) -> Option<&str> {
-        match self {
-            CacheTag::Tag(s) => Some(s),
-            _ => None,
-        }
-    }
-
     /// Render this entry as the Redis ZSET key it indexes into. The format preserves the
     /// pre-existing namespace so existing cache data continues to map correctly across the
     /// transition to the typed representation.
@@ -90,15 +80,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn user_value_returns_inner_string_only_for_tag() {
-        assert_eq!(CacheTag::Subgraph.user_value(), None);
-        assert_eq!(CacheTag::Type("User".into()).user_value(), None);
-        assert_eq!(
-            CacheTag::Tag("homepage".into()).user_value(),
-            Some("homepage"),
-        );
-    }
 
     #[test]
     fn to_redis_key_subgraph_variant() {
