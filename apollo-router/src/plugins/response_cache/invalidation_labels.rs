@@ -116,7 +116,11 @@ impl InvalidationLabels {
             );
         }
 
-        Some(header)
+        if dropped > 0 && config.experimental_drop_on_overflow {
+            None
+        } else {
+            Some(header)
+        }
     }
 
     pub(crate) fn maybe_emit_header(
@@ -790,5 +794,81 @@ mod tests {
             "type count mismatch in {value:?}"
         );
         assert_eq!(tag_count, expected_tags, "tag count mismatch in {value:?}");
+    }
+
+    #[rstest]
+    // Same fixture and byte math as `maybe_emit_header_truncation_protects_coarse_tiers_first`
+    // above (already-verified thresholds). With `experimental_drop_on_overflow` set, ANY
+    // truncation — even just dropping fine-grained tags while every coarse subgraph/type label
+    // still fit — should suppress the header entirely rather than emit the partial content.
+    #[case::only_coarse_tiers_fit_but_tags_dropped(54, true)]
+    #[case::coarse_tiers_plus_some_tags_fit_but_some_dropped(62, true)]
+    #[case::everything_fits_nothing_dropped(100, false)]
+    #[case::not_even_the_first_coarsest_label_fits(10, true)]
+    fn maybe_emit_header_experimental_drop_on_overflow_suppresses_truncated_header(
+        #[case] max_bytes: usize,
+        #[case] expect_suppressed: bool,
+    ) {
+        let labels = InvalidationLabels {
+            subgraphs: HashSet::from(["aaa".to_string(), "bbb".to_string()]),
+            types: HashSet::from([
+                ("ccc".to_string(), "ddd".to_string()),
+                ("eee".to_string(), "fff".to_string()),
+            ]),
+            tags: HashSet::from([
+                "ggg".to_string(),
+                "hhh".to_string(),
+                "iii".to_string(),
+                "jjj".to_string(),
+            ]),
+            ..Default::default()
+        };
+        let mut headers = http::HeaderMap::new();
+
+        labels.maybe_emit_header(
+            &mut headers,
+            &cdn_config(|c| {
+                c.max_bytes = max_bytes;
+                c.experimental_drop_on_overflow = true;
+            }),
+        );
+
+        if expect_suppressed {
+            assert!(
+                headers.is_empty(),
+                "max_bytes={max_bytes}: expected header to be suppressed entirely, got {:?}",
+                headers.get("Cache-Tag")
+            );
+        } else {
+            // Flag should be inert when nothing was actually dropped: full, untruncated content.
+            let value = headers
+                .get("Cache-Tag")
+                .unwrap_or_else(|| {
+                    panic!("max_bytes={max_bytes}: expected header to still be present")
+                })
+                .to_str()
+                .unwrap();
+            let segments: Vec<&str> = value.split(',').collect();
+            assert_eq!(segments.len(), 8, "expected all 8 labels present, got {value:?}");
+        }
+    }
+
+    #[test]
+    fn maybe_emit_header_experimental_drop_on_overflow_does_not_affect_default_false() {
+        // Sanity check the opt-in nature of the flag: left at its default (false), the existing
+        // truncate-and-keep-partial behavior is unaffected, even when truncation occurs.
+        let labels = InvalidationLabels {
+            subgraphs: HashSet::from(["aaa".to_string(), "bbb".to_string()]),
+            tags: HashSet::from(["ggg".to_string(), "hhh".to_string()]),
+            ..Default::default()
+        };
+        let mut headers = http::HeaderMap::new();
+
+        labels.maybe_emit_header(&mut headers, &cdn_config(|c| c.max_bytes = 15));
+
+        assert!(
+            headers.get("Cache-Tag").is_some(),
+            "expected truncated (not suppressed) header when experimental_drop_on_overflow is left at its default"
+        );
     }
 }
