@@ -1,6 +1,9 @@
 # Changelog
 
-All notable changes to `apollo-federation` will be documented in this file.
+All notable changes to Apollo Composition are documented in this file.
+
+> [!NOTE]
+> Query planner changes are documented in the router [CHANGELOG](../CHANGELOG.md).
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
@@ -8,100 +11,97 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 > Important: X breaking changes below, indicated by **BREAKING**
 
-## BREAKING
+## ❗ BREAKING CHANGES ❗
+## 🚀 Features
+## 🐛 Fixes
+## 🛠 Maintenance
+## 📚 Documentation
+-->
 
-## Features
+# [2.16.x](unreleased) - Unreleased
 
-## Fixes
+## 🐛 Fixes
 
-## Maintenance
-## Documentation-->
+### Propagate directives from `@interfaceObject` fields to `@external` implementations ([PR #9831](https://github.com/apollographql/router/pull/9831))
 
-# [0.0.11](https://crates.io/crates/apollo-federation/0.0.11) - 2024-04-12
+When an implementation re-declares a field as `@external` (e.g. to reference it in `@requires`), the field's only resolvable definition lives on the abstracting `@interfaceObject`. Directives like `@tag` applied there were not being propagated to the implementation's copy in the supergraph.
 
-## Fixes
-- Forbid aliases in `@requires(fields:)` / `@key(fields:)` argument, by [duckki] in [pull/251]
+During `add_interface_object_fields`, detect implementation fields where every `@join__field` is `external: true` and the field is provided by an `@interfaceObject`, then copy applicable directives onto the implementation field.
 
-## Features
-- Expose subgraphs schemas to crate consumers, by [SimonSapin] in [pull/257]
+By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/9831
 
-## Maintenance
-- Update `apollo-compiler`, by [goto-bus-stop]
+### Fix composition field merging when subtyping ([PR #9751](https://github.com/apollographql/router/pull/9751))
 
-[duckki]: https://github.com/duckki
-[goto-bus-stop]: https://github.com/goto-bus-stop
-[SimonSapin]: https://github.com/SimonSapin
-[pull/251]: https://github.com/apollographql/federation-next/pull/251
-[pull/257]: https://github.com/apollographql/federation-next/pull/257
+When composition merges fields with different return types, it was previously allowing nullable types to be considered subtypes of non-null supertypes. The resulting supergraph schema could cause query plan execution to error if the subgraph returns null at runtime. This bug has been fixed, and composition will now appropriately error.
 
-# [0.0.10](https://crates.io/crates/apollo-federation/0.0.10) - 2024-04-09
+By [@sachindshinde](https://github.com/sachindshinde) in https://github.com/apollographql/router/pull/9751
 
-## Features
-- Query plan changes for initial router integration, by [SimonSapin] in [pull/240]
-- Mark join/v0.4 spec as supported for non-query planning purpose, by [SimonSapin] in [pull/233], [pull/237]
-- Continued work on core query planning implementation, by [duckki], [SimonSapin], [TylerBloom]
+### Skip `@requires` field set validation during fed v1 schema upgrade ([PR #9722](https://github.com/apollographql/router/pull/9722))
 
-## Maintenance
-- Update `apollo-compiler`, by [goto-bus-stop] in [pull/253]
+Updates `@requires` validation logic to allow type selection conditions in the field selections that are only valid
+against the supergraph. `@requires` is now partially validated against subgraph schema during subgraph upgrade process
+and fully validated against supergraph schema during the merge process.
 
-[duckki]: https://github.com/duckki
-[goto-bus-stop]: https://github.com/goto-bus-stop
-[SimonSapin]: https://github.com/SimonSapin
-[TylerBloom]: https://github.com/TylerBloom
-[pull/233]: https://github.com/apollographql/federation-next/pull/233
-[pull/237]: https://github.com/apollographql/federation-next/pull/237
-[pull/240]: https://github.com/apollographql/federation-next/pull/240
-[pull/253]: https://github.com/apollographql/federation-next/pull/253
+By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/9722
 
-# [0.0.9](https://crates.io/crates/apollo-federation/0.0.9) - 2024-03-20
+# [2.16.0](https://crates.io/crates/apollo-federation/2.16.0) - 2026-06-30
 
-## Features
-- Continued work on core query planning implementation, by [goto-bus-stop] in [pull/229]
+Adds support for Apollo Federation v2.15.
 
-## Maintenance
-- Update `apollo-compiler`, by [goto-bus-stop] in [pull/230]
+Composition is now written in Rust. No new directives or composition behavior were introduced. Your supergraphs are semantically equivalent to those built with the previous version. The main benefits are faster builds and significantly improved error messages.
 
-[goto-bus-stop]: https://github.com/goto-bus-stop
-[pull/229]: https://github.com/apollographql/federation-next/pull/229
-[pull/230]: https://github.com/apollographql/federation-next/pull/230
+Because the Rust implementation is more rigorous, composition now catches several categories of schema problems that were previously inconsistent or missing. If you upgrade and encounter new errors, the following sections explain what to fix.
 
-# [0.0.8](https://crates.io/crates/apollo-federation/0.0.8) - 2024-03-06
+#### New validations
 
-## Features
-- Support legacy `@core` link syntax, by [goto-bus-stop] in [pull/224]  
-  This is not meant to be a long term feature, `@core()` is not intended
-  to be supported in most of the codebase.
-- Continued work on core query planning implementation, by [SimonSapin], [goto-bus-stop] in [pull/172], [pull/175]
+##### Interfaces implementing `@interfaceObject` now fail explicitly
 
-## Maintenance
-- `@link(url: String!)` argument is non-null, by [SimonSapin] in [pull/220]
-- Enable operation normalization tests using `@defer`, by [goto-bus-stop] in [pull/224]
+Federation doesn't support interfaces implementing `@interfaceObject` interfaces. If your schema uses this pattern, composition now reports `INTERFACE_OBJECT_USAGE_ERROR`.
 
-[SimonSapin]: https://github.com/SimonSapin
-[goto-bus-stop]: https://github.com/goto-bus-stop
-[pull/172]: https://github.com/apollographql/federation-next/pull/172
-[pull/175]: https://github.com/apollographql/federation-next/pull/175
-[pull/220]: https://github.com/apollographql/federation-next/pull/220
-[pull/223]: https://github.com/apollographql/federation-next/pull/223
-[pull/224]: https://github.com/apollographql/federation-next/pull/224
+##### Invalid `@override` labels are dropped
 
-# [0.0.7](https://crates.io/crates/apollo-federation/0.0.7) - 2024-02-22
+If an `@override` directive's `label` references a subgraph name that doesn't exist in your graph, composition now drops that label. Review your `@override` usage to ensure all labels are valid subgraph names.
 
-## Features
-- Continued work on core query planning implementation, by [SimonSapin] in [pull/121]
+##### Merged directives on `@external` fields are rejected
 
-## Fixes
-- Fix `@defer` directive definition in API schema generation, by [goto-bus-stop] in [pull/221]
+Applying a merged directive to an `@external` field now produces a `MERGED_DIRECTIVE_APPLICATION_ON_EXTERNAL` error. Review your `@external` field definitions.
 
-[SimonSapin]: https://github.com/SimonSapin
-[goto-bus-stop]: https://github.com/goto-bus-stop
-[pull/121]: https://github.com/apollographql/federation-next/pull/121
-[pull/221]: https://github.com/apollographql/federation-next/pull/221
+##### Custom spec URLs can't use the Apollo domain
 
-# [0.0.3](https://crates.io/crates/apollo-federation/0.0.3) - 2023-11-08
+Custom specifications can no longer import from `https://specs.apollo.dev`. This prevents future conflicts with new Apollo specifications.
 
-## Features
-- Extracting subgraph information from a supergraph for the purposes of query planning by [sachindshinde] in [pull/56]
+##### Invalid input object defaults are removed
 
-[sachindshinde]: https://github.com/sachindshinde
-[pull/56]: https://github.com/apollographql/federation-next/pull/56
+Default values for input objects are now validated at composition time. If a default object value is missing required fields, composition removes it from the supergraph.
+
+##### `@tag` validation runs during composition
+
+`@tag` errors now surface during the main composition process so you can catch tag problems at build time.
+
+##### Root type inference fix
+
+Composition ensures that it only infers default root operation types (e.g. `Mutation`) if they aren't referenced by
+other schema elements.
+
+##### `FieldSet` arguments must be strings
+
+The `_FieldSet` scalar no longer accepts non-string values through automatic coercion. Make sure all `fields` arguments on `@key`, `@requires`, and `@provides` directives use quoted strings.
+
+#### Improved error messages
+
+##### Hints are emitted on composition failure
+
+The composition process now emits hints even when composition fails, giving you more context to diagnose what went wrong.
+
+##### Input object defaults are fully expanded
+
+When an input object has a default value of `{}`, composition now expands it to list all field defaults explicitly — for example, `{}` becomes `{ limit: 100, sort: DESC }`.
+
+##### Default values are normalized to their correct types
+
+If a field's default value is a coercible type (for example, an integer default on a `Float` field), composition normalizes it — for example, `weight: Float = 1` becomes `weight: Float = 1.0`.
+
+##### Errors include line numbers and schema references
+
+Error messages now include line numbers and point to the relevant parts of your schema, making it faster to locate and fix problems.
+
