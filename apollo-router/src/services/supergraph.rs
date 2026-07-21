@@ -27,6 +27,7 @@ use crate::http_ext::header_map;
 use crate::json_ext::Path;
 
 pub(crate) mod service;
+mod telemetry;
 #[cfg(test)]
 mod tests;
 mod variable_validation;

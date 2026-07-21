@@ -5,13 +5,8 @@ use std::task::Poll;
 
 use futures::TryFutureExt;
 use futures::future::BoxFuture;
-use futures::future::ready;
-use futures::stream::StreamExt;
-use futures::stream::once;
 use http::StatusCode;
 use indexmap::IndexMap;
-use opentelemetry::Key;
-use opentelemetry::KeyValue;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -39,15 +34,12 @@ use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionExecutionLayer;
 use crate::plugins::telemetry::Telemetry;
-use crate::plugins::telemetry::config_new::events::log_event;
-use crate::plugins::telemetry::config_new::supergraph::events::SupergraphEventResponse;
 use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryQueryPlanCache;
 use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::warmup;
 use crate::services::ExecutionRequest;
-use crate::services::ExecutionResponse;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerResponse;
 use crate::services::SubgraphServiceFactory;
@@ -68,10 +60,10 @@ use crate::services::layers::query_analysis::QueryAnalysis;
 use crate::services::query_planner;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::services::supergraph::telemetry::LogResponseLayer;
+use crate::services::supergraph::telemetry::PopulateFirstEventContextLayer;
 use crate::services::supergraph::variable_validation::LegacyVariableValidationLayer;
 use crate::spec::Schema;
-
-pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo::supergraph::first_event";
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
@@ -270,7 +262,7 @@ async fn service_call(
             SupergraphResponse::new_from_graphql_response(*response, context),
         ),
         Some(QueryPlannerContent::Plan { plan }) => {
-            let execution_response = execution_service
+            execution_service
                 .call(
                     ExecutionRequest::internal_builder()
                         .supergraph_request(req.supergraph_request)
@@ -279,97 +271,7 @@ async fn service_call(
                         .build()
                         .await,
                 )
-                .await?;
-
-            let ExecutionResponse { response, context } = execution_response;
-
-            let (parts, response_stream) = response.into_parts();
-
-            let supergraph_response_event = context
-                .extensions()
-                .with_lock(|lock| lock.get::<SupergraphEventResponse>().cloned());
-            let mut first_event = true;
-            let mut inserted = false;
-            let ctx = context.clone();
-            let response_stream = response_stream.inspect(move |_| {
-                if first_event {
-                    // Populate FIRST_EVENT_CONTEXT_KEY so downstream telemetry selectors
-                    // (SupergraphSelector::IsPrimaryResponse) can distinguish the primary
-                    // response chunk from deferred/subscription chunks.
-                    ctx.insert_json_value(
-                        FIRST_EVENT_CONTEXT_KEY,
-                        serde_json_bytes::Value::Bool(true),
-                    );
-                    first_event = false;
-                } else if !inserted {
-                    ctx.insert_json_value(
-                        FIRST_EVENT_CONTEXT_KEY,
-                        serde_json_bytes::Value::Bool(false),
-                    );
-                    inserted = true;
-                }
-            });
-
-            // make sure to resolve the first part of the stream - that way we know context
-            // variables (`FIRST_EVENT_CONTEXT_KEY`, `CONTAINS_GRAPHQL_ERROR`) have been set
-            let (first, remaining) = StreamExt::into_future(response_stream).await;
-            let response_stream = once(ready(first.unwrap_or_default()))
-                .chain(remaining)
-                .boxed();
-
-            match supergraph_response_event {
-                Some(supergraph_response_event) => {
-                    let mut attrs = Vec::with_capacity(4);
-                    let header_string = crate::services::header_masking::masked_headers_for_log(
-                        &context,
-                        crate::services::header_masking::Direction::Response,
-                        None,
-                        &parts.headers,
-                    );
-                    attrs.push(KeyValue::new(
-                        Key::from_static_str("http.response.headers"),
-                        opentelemetry::Value::String(header_string.into()),
-                    ));
-                    attrs.push(KeyValue::new(
-                        Key::from_static_str("http.response.status"),
-                        opentelemetry::Value::String(format!("{}", parts.status).into()),
-                    ));
-                    attrs.push(KeyValue::new(
-                        Key::from_static_str("http.response.version"),
-                        opentelemetry::Value::String(format!("{:?}", parts.version).into()),
-                    ));
-                    let ctx = context.clone();
-                    let response_stream = Box::pin(response_stream.inspect(move |resp| {
-                        if !supergraph_response_event
-                            .condition
-                            .evaluate_event_response(resp, &ctx)
-                        {
-                            return;
-                        }
-                        attrs.push(KeyValue::new(
-                            Key::from_static_str("http.response.body"),
-                            opentelemetry::Value::String(
-                                serde_json::to_string(resp).unwrap_or_default().into(),
-                            ),
-                        ));
-                        log_event(
-                            supergraph_response_event.level,
-                            "supergraph.response",
-                            attrs.clone(),
-                            "",
-                        );
-                    }));
-
-                    Ok(SupergraphResponse {
-                        context,
-                        response: http::Response::from_parts(parts, response_stream.boxed()),
-                    })
-                }
-                None => Ok(SupergraphResponse {
-                    context,
-                    response: http::Response::from_parts(parts, response_stream.boxed()),
-                }),
-            }
+                .await
         }
         // This should never happen because if we have an empty query plan we should have error in errors vec
         None => Err(BoxError::from("cannot compute a query plan")),
@@ -604,6 +506,8 @@ impl PluggableSupergraphServiceBuilder {
             .layer(EnforceOperationLimitsLayer::new(
                 &configuration.limits.router,
             ))
+            .layer(LogResponseLayer::new())
+            .layer(PopulateFirstEventContextLayer::new())
             .service(supergraph_service);
 
         // XXX(@goto-bus-stop): this shouldn't really be created here, but it's the one

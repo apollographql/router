@@ -26,8 +26,9 @@ use crate::plugins::telemetry::config_new::selectors::OperationKind;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::Query;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
-use crate::services::FIRST_EVENT_CONTEXT_KEY;
 use crate::services::supergraph;
+
+pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo::supergraph::first_event";
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
@@ -663,9 +664,9 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::OperationKind;
     use crate::plugins::telemetry::config_new::selectors::OperationName;
     use crate::plugins::telemetry::config_new::selectors::Query;
+    use crate::plugins::telemetry::config_new::supergraph::selectors::FIRST_EVENT_CONTEXT_KEY;
     use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
     use crate::plugins::telemetry::otel;
-    use crate::services::FIRST_EVENT_CONTEXT_KEY;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
 
