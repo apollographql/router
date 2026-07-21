@@ -3417,9 +3417,15 @@ async fn complex_cache_tag() {
 /// `"organizationid-id--{$key.id}"`). Both subgraphs share the same `cache_tag` index setting,
 /// since the point here is proving the CDN header doesn't depend on that setting at all, not
 /// exercising per-subgraph config resolution (already covered elsewhere).
+///
+/// `extension_tag`, when `Some`, adds a `__cacheTags` key to the `orga` mock's entity — the mock
+/// harness's special-cased key (`mock_subgraphs/mod.rs:323`) that populates the subgraph
+/// response's `apolloEntityCacheTags` extension, exercising `insert_entities_in_result`'s
+/// extension-tag path rather than `extract_cache_keys`'s schema-directive path.
 async fn setup_cdn_invalidation_gating_test(
     cache_tag_index_enabled: bool,
     cdn_invalidation_enabled: bool,
+    extension_tag: Option<&str>,
 ) -> supergraph::Response {
     let valid_schema =
         Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
@@ -3427,6 +3433,20 @@ async fn setup_cdn_invalidation_gating_test(
     // `_entities` fetch to `orga` — requesting only `id` (a key field) lets `user` answer the
     // whole query itself, with no entity fetch at all.
     let query = "query { currentUser { activeOrganization { ... on Organization { id creatorUser { __typename id } } } } }";
+    let mut orga_entity = serde_json::json!({
+        "__typename": "Organization",
+        "id": "1",
+        "creatorUser": {
+            "__typename": "User",
+            "id": 2
+        }
+    });
+    if let Some(tag) = extension_tag {
+        orga_entity
+            .as_object_mut()
+            .unwrap()
+            .insert("__cacheTags".to_string(), serde_json::json!([tag]));
+    }
     let subgraphs = serde_json::json!({
         "user": {
             "query": {
@@ -3440,16 +3460,7 @@ async fn setup_cdn_invalidation_gating_test(
             "headers": {"cache-control": "public"},
         },
         "orga": {
-            "entities": [
-                {
-                    "__typename": "Organization",
-                    "id": "1",
-                    "creatorUser": {
-                        "__typename": "User",
-                        "id": 2
-                    }
-                }
-            ],
+            "entities": [orga_entity],
             "headers": {"cache-control": "public"},
         },
     });
@@ -3524,9 +3535,12 @@ async fn cdn_invalidation_header_gates_independently_of_cache_tag_index(
     #[case] expect_header_present: bool,
 ) {
     async move {
-        let response =
-            setup_cdn_invalidation_gating_test(cache_tag_index_enabled, cdn_invalidation_enabled)
-                .await;
+        let response = setup_cdn_invalidation_gating_test(
+            cache_tag_index_enabled,
+            cdn_invalidation_enabled,
+            None,
+        )
+        .await;
         let header = get_cache_tag_header(&response);
 
         assert_eq!(
@@ -3546,6 +3560,44 @@ async fn cdn_invalidation_header_gates_independently_of_cache_tag_index(
             assert!(
                 header.contains(&"organization".to_string()),
                 "missing entity tag in {header:?}"
+            );
+        }
+    }
+    .with_metrics()
+    .await;
+}
+
+#[rstest]
+#[case::cdn_only_still_emits_header(false, true, true)]
+#[case::redis_index_alone_does_not_emit_header(true, false, false)]
+#[tokio::test(flavor = "multi_thread")]
+async fn cdn_invalidation_header_for_extension_tags_gates_independently_of_cache_tag_index(
+    #[case] cache_tag_index_enabled: bool,
+    #[case] cdn_invalidation_enabled: bool,
+    #[case] expect_header_present: bool,
+) {
+    async move {
+        // Exercises `insert_entities_in_result`'s `apolloEntityCacheTags`-extension path
+        // specifically, as opposed to `extract_cache_keys`'s schema-directive path covered by
+        // `cdn_invalidation_header_gates_independently_of_cache_tag_index` above.
+        let response = setup_cdn_invalidation_gating_test(
+            cache_tag_index_enabled,
+            cdn_invalidation_enabled,
+            Some("extension-tag"),
+        )
+        .await;
+        let header = get_cache_tag_header(&response);
+
+        assert_eq!(
+            header.is_some(),
+            expect_header_present,
+            "cache_tag_index_enabled={cache_tag_index_enabled}, cdn_invalidation_enabled={cdn_invalidation_enabled}: got header {header:?}"
+        );
+
+        if let Some(header) = header {
+            assert!(
+                header.contains(&"extension-tag".to_string()),
+                "missing apolloEntityCacheTags-derived tag in {header:?}"
             );
         }
     }
