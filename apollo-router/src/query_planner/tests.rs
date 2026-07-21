@@ -199,7 +199,6 @@ async fn fetch_includes_operation_name() {
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
@@ -259,7 +258,6 @@ async fn fetch_makes_post_requests() {
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
@@ -387,7 +385,6 @@ async fn defer() {
         })),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
@@ -508,7 +505,6 @@ async fn defer_if_condition() {
             .unwrap(),
         ),
         formatted_query_plan: None,
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
@@ -663,7 +659,6 @@ async fn dependent_mutations() {
         .unwrap(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
@@ -1881,7 +1876,6 @@ fn broken_plan_does_not_panic() {
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
     let subgraph_schema = apollo_compiler::Schema::parse_and_validate(subgraph_schema, "").unwrap();
@@ -2080,7 +2074,6 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
         })),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 

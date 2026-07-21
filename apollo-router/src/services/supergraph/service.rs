@@ -36,6 +36,7 @@ use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugin::DynPlugin;
 use crate::plugins::connectors::query_plans::store_connectors;
 use crate::plugins::connectors::query_plans::store_connectors_labels;
+use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionExecutionLayer;
@@ -70,7 +71,6 @@ use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
-use crate::spec::operation_limits::OperationLimits;
 
 pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo::supergraph::first_event";
 
@@ -276,11 +276,6 @@ async fn service_call(
             SupergraphResponse::new_from_graphql_response(*response, context),
         ),
         Some(QueryPlannerContent::Plan { plan }) => {
-            let query_metrics = plan.query_metrics;
-            context.extensions().with_lock(|lock| {
-                let _ = lock.insert::<OperationLimits<u32>>(query_metrics);
-            });
-
             let is_deferred = plan.is_deferred(&variables);
             let is_subscription = plan.is_subscription();
 
@@ -660,6 +655,9 @@ impl PluggableSupergraphServiceBuilder {
                 plugin.supergraph_service(service)
             })
             .layer(AllowOnlyHttpPostMutationsLayer::default())
+            .layer(EnforceOperationLimitsLayer::new(
+                &configuration.limits.router,
+            ))
             .service(supergraph_service);
 
         // XXX(@goto-bus-stop): this shouldn't really be created here, but it's the one
@@ -691,7 +689,10 @@ pub(crate) struct SupergraphCreator {
     in_memory_query_plan_cache: InMemoryQueryPlanCache,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
-    sb: UnconstrainedBuffer<supergraph::Request, BoxFuture<'static, supergraph::ServiceResult>>,
+    sb: UnconstrainedBuffer<
+        SupergraphRequest,
+        BoxFuture<'static, Result<SupergraphResponse, BoxError>>,
+    >,
 }
 
 pub(crate) trait HasPlugins {

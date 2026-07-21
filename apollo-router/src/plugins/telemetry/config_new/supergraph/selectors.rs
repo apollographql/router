@@ -11,6 +11,7 @@ use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_jsonpath;
+use crate::plugins::limits::operation_limits::OperationLimits;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Stage;
@@ -27,7 +28,6 @@ use crate::plugins::telemetry::config_new::selectors::Query;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
 use crate::services::FIRST_EVENT_CONTEXT_KEY;
 use crate::services::supergraph;
-use crate::spec::operation_limits::OperationLimits;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
@@ -657,6 +657,7 @@ mod test {
 
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
+    use crate::plugins::limits::operation_limits::OperationLimits;
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::config_new::selectors::OperationKind;
@@ -667,7 +668,6 @@ mod test {
     use crate::services::FIRST_EVENT_CONTEXT_KEY;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
-    use crate::spec::operation_limits::OperationLimits;
 
     #[test]
     fn supergraph_request_header() {
