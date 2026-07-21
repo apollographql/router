@@ -1,5 +1,6 @@
 ---
 source: apollo-federation/src/connectors/expand/tests/mod.rs
+assertion_line: 26
 expression: connectors.by_service_name
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.graphql
 ---
@@ -113,12 +114,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: Some(
-            true,
-        ),
-        output_is_non_null: Some(
-            true,
-        ),
         label: Label(
             "one.json http: GET /users",
         ),
@@ -377,8 +372,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/batch.g
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: None,
-        output_is_non_null: None,
         label: Label(
             "[BATCH] one.json http: POST /users-batch",
         ),

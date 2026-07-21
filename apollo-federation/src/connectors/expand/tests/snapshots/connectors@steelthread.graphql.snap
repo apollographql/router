@@ -1,5 +1,6 @@
 ---
 source: apollo-federation/src/connectors/expand/tests/mod.rs
+assertion_line: 26
 expression: connectors.by_service_name
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelthread.graphql
 ---
@@ -150,12 +151,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: Some(
-            true,
-        ),
-        output_is_non_null: Some(
-            false,
-        ),
         label: Label(
             "connectors.json http: GET /users",
         ),
@@ -398,12 +393,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: Some(
-            false,
-        ),
-        output_is_non_null: Some(
-            false,
-        ),
         label: Label(
             "connectors.json http: GET /users/{$args.id}",
         ),
@@ -583,12 +572,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: Some(
-            false,
-        ),
-        output_is_non_null: Some(
-            false,
-        ),
         label: Label(
             "connectors.json http: GET /users/{$this.c}",
         ),

@@ -77,19 +77,6 @@ pub struct Connector {
 
     pub error_settings: ConnectorErrorsSettings,
 
-    /// Whether the GraphQL schema declares this field's return type as a list.
-    /// `None` when the arrayness is unknown, e.g. for type-level connectors,
-    /// which have no field definition to inspect. Used at runtime to detect
-    /// arrayness mismatches between the connector response and the expected
-    /// field type.
-    pub output_is_list: Option<bool>,
-
-    /// Whether the GraphQL schema declares this field's return type as
-    /// non-null. `None` when unknown (see `output_is_list`). Used at runtime
-    /// to detect a connector response of `null` for a field that the schema
-    /// says can never be null.
-    pub output_is_non_null: Option<bool>,
-
     /// A label for use in debugging and logging. Includes ID, transport method, and path.
     pub label: Label,
 }
@@ -289,10 +276,6 @@ impl Connector {
             transport.as_ref(),
             entity_resolver.as_ref(),
         );
-        let output_field_type = connect.position.field_definition(schema).map(|f| &f.ty);
-        let output_is_list = output_field_type.map(|ty| ty.is_list());
-        let output_is_non_null = output_field_type.map(|ty| ty.is_non_null());
-
         let id = ConnectId {
             subgraph_name: subgraph_name.to_string(),
             source_name,
@@ -315,8 +298,6 @@ impl Connector {
             response_variable_keys,
             batch_settings,
             error_settings,
-            output_is_list,
-            output_is_non_null,
             label,
         })
     }
@@ -773,12 +754,6 @@ mod tests {
                     connect_extensions: None,
                     connect_is_success: None,
                 },
-                output_is_list: Some(
-                    true,
-                ),
-                output_is_non_null: Some(
-                    false,
-                ),
                 label: Label(
                     "connectors.json http: GET /users",
                 ),
@@ -986,12 +961,6 @@ mod tests {
                     connect_extensions: None,
                     connect_is_success: None,
                 },
-                output_is_list: Some(
-                    true,
-                ),
-                output_is_non_null: Some(
-                    false,
-                ),
                 label: Label(
                     "connectors.json http: GET /posts",
                 ),
