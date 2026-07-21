@@ -12,10 +12,9 @@
 //! two. With the typed representation the distinction is structural and the storage layer
 //! has no policy of its own; it is a pure rendering step.
 
-use crate::plugins::response_cache::INTERNAL_CACHE_TAG_PREFIX;
-
 use super::invalidation_endpoint::IndexMode;
 use super::plugin::RESPONSE_CACHE_VERSION;
+use crate::plugins::response_cache::INTERNAL_CACHE_TAG_PREFIX;
 
 /// One logical cache-tag entry a cached document is indexed under.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

@@ -8,12 +8,11 @@ use futures::StreamExt;
 use http::HeaderName;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
+use rstest::rstest;
 use tokio_stream::wrappers::IntervalStream;
 use tower::Service;
 use tower::ServiceExt;
 use uuid::Uuid;
-
-use rstest::rstest;
 
 use super::plugin::CacheSubgraph;
 use super::plugin::ResponseCache;

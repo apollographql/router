@@ -1,17 +1,20 @@
 // TODO: move under invalidation.rs
 // TODO: reconcile with Redis
 
-use crate::{Context, plugins::response_cache::plugin::CdnInvalidationConfig};
-use http::{HeaderName, HeaderValue};
-use itertools::Itertools;
 use std::collections::HashSet;
+
+use http::HeaderName;
+use http::HeaderValue;
+use itertools::Itertools;
 use thiserror::Error;
 
+use crate::Context;
 use crate::plugins::response_cache::INTERNAL_CACHE_TAG_PREFIX;
 use crate::plugins::response_cache::metrics::CdnTagHeaderOutcome;
 use crate::plugins::response_cache::metrics::record_cdn_tag_header_error;
 use crate::plugins::response_cache::metrics::record_cdn_tag_header_outcome;
 use crate::plugins::response_cache::metrics::record_cdn_tag_header_untruncated_size;
+use crate::plugins::response_cache::plugin::CdnInvalidationConfig;
 
 /// Per-request aggregator of cache tags surfaced by response_cache.
 ///
