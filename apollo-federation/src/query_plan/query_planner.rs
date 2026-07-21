@@ -1733,4 +1733,326 @@ type User
             json!([{"id": "1", "name": "Alice"}, {"id": "2", "name": "Bob"}]),
         );
     }
+
+    /// RAW-vs-EXPANDED PLAN-DIFF (spike diagnostic, subset). For each operation,
+    /// plan it two ways over the *same* connector supergraph and classify the
+    /// pair with the same four-way verdict as Spike B's `plan-diff` harness:
+    ///
+    ///   - **expansion mode** — today's real path: `expand_connectors` →
+    ///     `QueryPlanner::new` on the expanded (synthetic-subgraph) supergraph.
+    ///   - **source-aware mode** — `QueryPlanner::from_query_graph` over the
+    ///     **raw, non-expanded** connector graph (the mirage-check seam).
+    ///
+    /// Each plan is checked for correctness against *its own* supergraph +
+    /// subgraphs (the raw plan names `connectors`; the expanded plan names
+    /// synthetic subgraphs), then classified:
+    ///   - `Identical`   — byte-identical plan text (won't fire across modes: the
+    ///                     two name different subgraphs; kept for completeness).
+    ///   - `Equivalent`  — text differs, but *both* plans are correct against the
+    ///                     operation → interchangeable at execution. **This is the
+    ///                     signal we want: source-aware ≡ expansion.**
+    ///   - `Different`   — plans differ and their correctness verdicts diverge.
+    ///   - `Error`       — a mode failed to produce a plan.
+    ///
+    /// This is the "option 1" evidence run: if every operation lands on
+    /// `Equivalent`, that is the strongest evidence the correctness engine can
+    /// give that planning over the non-expanded graph matches expansion planning.
+    ///
+    /// Run: `cargo test -p apollo-federation raw_vs_expanded_plan_diff -- --nocapture`
+    #[test]
+    fn raw_vs_expanded_plan_diff() {
+        use apollo_compiler::ExecutableDocument;
+        use apollo_compiler::collections::IndexMap;
+
+        use crate::ApiSchemaOptions;
+        use crate::Supergraph;
+        use crate::connectors::expand::ExpansionResult;
+        use crate::connectors::expand::expand_connectors;
+        use crate::query_graph::build_federated_query_graph;
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        enum Verdict {
+            Identical,
+            Equivalent,
+            Different,
+            Error,
+        }
+
+        // Expanded subset: several expand fixtures, each with a handful of
+        // operations against its own API schema, spanning root-field, entity,
+        // multi-key, nested, cross-source, @requires, interface, and abstract
+        // (inline-fragment) cases. steelthread stays first as the anchor.
+        let fixtures: &[(&str, &str, &[&str])] = &[
+            (
+                "steelthread",
+                include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql"),
+                &[
+                    "{ users { id name } }",           // root-field (non-entity)
+                    "{ user(id: \"1\") { name } }",    // entity, key: id
+                    "{ user(id: \"1\") { c } }",       // cross-source resolution
+                    "{ user(id: \"1\") { d } }",       // d @requires(c)
+                    "{ user(id: \"1\") { name d } }",  // mix
+                ],
+            ),
+            (
+                "simple",
+                include_str!("../connectors/expand/tests/schemas/expand/simple.graphql"),
+                &[
+                    "{ users { id a b c d } }",
+                    "{ user(id: \"1\") { id a b c d } }",
+                    "{ user(id: \"1\") { a } }",
+                ],
+            ),
+            (
+                "keys",
+                include_str!("../connectors/expand/tests/schemas/expand/keys.graphql"),
+                &[
+                    "{ t(id: \"1\") { id id2 } }",
+                    "{ t2(id: \"1\", id2: \"2\") { id id2 } }",
+                    "{ t(id: \"1\") { r1 { id id2 } } }",
+                    "{ unselected(unselected: \"1\") { accessibleByUnselected } }",
+                ],
+            ),
+            (
+                "realistic",
+                include_str!("../connectors/expand/tests/schemas/expand/realistic.graphql"),
+                &[
+                    "{ user(id: \"1\") { id name } }",
+                    "{ user(id: \"1\") { address { city zipcode } company { name } } }",
+                ],
+            ),
+            (
+                "interface-object",
+                include_str!("../connectors/expand/tests/schemas/expand/interface-object.graphql"),
+                &[
+                    "{ itfs { id } }",
+                    "{ itf(id: \"1\") { id c d } }",
+                    "{ itf(id: \"1\") { ... on T1 { a } ... on T2 { b } } }",
+                ],
+            ),
+            (
+                "carryover",
+                include_str!("../connectors/expand/tests/schemas/expand/carryover.graphql"),
+                &[
+                    "{ ts { id custom } }",
+                    "{ t(id: \"1\") { id r { id } } }",
+                    "{ z { id y x { id w } } }",
+                ],
+            ),
+            (
+                "namespace",
+                include_str!("../connectors/expand/tests/schemas/expand/namespace.graphql"),
+                &["{ me { id name } }"],
+            ),
+            (
+                "batch",
+                include_str!("../connectors/expand/tests/schemas/expand/batch.graphql"),
+                &["{ users { id name username } }"],
+            ),
+            (
+                "sibling_fields",
+                include_str!("../connectors/expand/tests/schemas/expand/sibling_fields.graphql"),
+                &["{ f { k { id } b } }", "{ f { b } }"],
+            ),
+            (
+                "types_used_twice",
+                include_str!("../connectors/expand/tests/schemas/expand/types_used_twice.graphql"),
+                &["{ ts { a { id } b { a { id } } } }"],
+            ),
+            (
+                "nested_inputs",
+                include_str!("../connectors/expand/tests/schemas/expand/nested_inputs.graphql"),
+                &["{ foo }"],
+            ),
+            (
+                "recursive_input",
+                include_str!("../connectors/expand/tests/schemas/expand/recursive_input.graphql"),
+                &["{ foo }"],
+            ),
+            (
+                "chained_methods_v0_4",
+                include_str!("../connectors/expand/tests/schemas/expand/chained_methods_v0_4.graphql"),
+                &[
+                    "{ mappedActive { things { id name } } }",
+                    "{ firstActive { thing { id name } } }",
+                    "{ deepFind { thing { id } } }",
+                ],
+            ),
+            (
+                "chained_filter_v0_4",
+                include_str!("../connectors/expand/tests/schemas/expand/chained_filter_v0_4.graphql"),
+                &[
+                    "{ things { things { id name } } }",
+                    "{ activeThings { things { id name } } }",
+                ],
+            ),
+        ];
+
+        // Classify one operation's pair of plans, printing a per-op line.
+        // (Verdict semantics mirror Spike B's `plan-diff` `classify`.)
+        #[allow(clippy::too_many_arguments)]
+        fn classify_op(
+            q: &str,
+            raw_planner: &QueryPlanner,
+            raw_supergraph: &Supergraph,
+            raw_subgraphs: &IndexMap<std::sync::Arc<str>, crate::schema::ValidFederationSchema>,
+            exp_planner: &QueryPlanner,
+            expanded_supergraph: &Supergraph,
+            exp_subgraphs: &IndexMap<std::sync::Arc<str>, crate::schema::ValidFederationSchema>,
+        ) -> Verdict {
+            let doc = match ExecutableDocument::parse_and_validate(
+                raw_planner.api_schema().schema(),
+                q,
+                "q.graphql",
+            ) {
+                Ok(d) => d,
+                Err(e) => {
+                    // A malformed operation against the API schema is a bug in
+                    // this test's fixture list, not a planner finding.
+                    eprintln!("PLAN-DIFF  BAD-OP     {q}\n    parse/validate failed: {e}");
+                    return Verdict::Error;
+                }
+            };
+
+            let raw_plan = raw_planner.build_query_plan(&doc, None, Default::default());
+            let exp_plan = exp_planner.build_query_plan(&doc, None, Default::default());
+
+            match (&raw_plan, &exp_plan) {
+                (Err(e), _) => {
+                    eprintln!("PLAN-DIFF  ERROR      {q}\n    source-aware failed: {e}");
+                    Verdict::Error
+                }
+                (_, Err(e)) => {
+                    eprintln!("PLAN-DIFF  ERROR      {q}\n    expansion failed: {e}");
+                    Verdict::Error
+                }
+                (Ok(raw_plan), Ok(exp_plan)) => {
+                    if format!("{raw_plan}") == format!("{exp_plan}") {
+                        eprintln!("PLAN-DIFF  IDENTICAL  {q}");
+                        return Verdict::Identical;
+                    }
+                    // Correctness of each plan against its own supergraph.
+                    let raw_ok = crate::correctness::check_plan(
+                        raw_planner.api_schema(),
+                        &raw_supergraph.schema,
+                        raw_subgraphs,
+                        &doc,
+                        raw_plan,
+                    );
+                    let exp_ok = crate::correctness::check_plan(
+                        exp_planner.api_schema(),
+                        &expanded_supergraph.schema,
+                        exp_subgraphs,
+                        &doc,
+                        exp_plan,
+                    );
+                    match (&raw_ok, &exp_ok) {
+                        (Ok(()), Ok(())) => {
+                            eprintln!("PLAN-DIFF  EQUIVALENT {q}");
+                            Verdict::Equivalent
+                        }
+                        _ => {
+                            eprintln!("PLAN-DIFF  DIFFERENT  {q}");
+                            if let Err(e) = &raw_ok {
+                                eprintln!("    source-aware correctness: {e}");
+                            }
+                            if let Err(e) = &exp_ok {
+                                eprintln!("    expansion correctness: {e}");
+                            }
+                            Verdict::Different
+                        }
+                    }
+                }
+            }
+        }
+
+        let (mut identical, mut equivalent, mut different, mut error) = (0, 0, 0, 0);
+
+        for (name, sdl, operations) in fixtures {
+            eprintln!("\n=== fixture: {name} ===");
+
+            // --- source-aware mode: planner over the RAW connector graph ---
+            let raw_supergraph = Supergraph::new_with_router_specs(sdl).unwrap();
+            let raw_api = raw_supergraph
+                .to_api_schema(ApiSchemaOptions::default())
+                .unwrap();
+            let raw_graph = build_federated_query_graph(
+                raw_supergraph.schema.clone(),
+                raw_api.clone(),
+                Some(false),
+                Some(true),
+            )
+            .unwrap();
+            let raw_planner = QueryPlanner::from_query_graph(
+                QueryPlannerConfig::default(),
+                raw_graph,
+                raw_supergraph.schema.clone(),
+                raw_api.clone(),
+            )
+            .unwrap();
+            let raw_subgraphs: IndexMap<_, _> = raw_supergraph
+                .extract_subgraphs()
+                .unwrap()
+                .into_iter()
+                .map(|(name, sg)| (name, sg.schema))
+                .collect();
+
+            // --- expansion mode: planner over the EXPANDED supergraph ---
+            let expanded_supergraph = match expand_connectors(
+                sdl,
+                &ApiSchemaOptions {
+                    include_defer: true,
+                    ..Default::default()
+                },
+            ) {
+                Ok(ExpansionResult::Expanded { raw_sdl, .. }) => {
+                    Supergraph::new_with_router_specs(&raw_sdl).unwrap()
+                }
+                Ok(ExpansionResult::Unchanged) => {
+                    panic!("expected fixture {name} to expand (got Unchanged)")
+                }
+                Err(e) => panic!("fixture {name} expansion failed: {e}"),
+            };
+            let exp_planner =
+                QueryPlanner::new(&expanded_supergraph, QueryPlannerConfig::default()).unwrap();
+            let exp_subgraphs: IndexMap<_, _> = expanded_supergraph
+                .extract_subgraphs()
+                .unwrap()
+                .into_iter()
+                .map(|(name, sg)| (name, sg.schema))
+                .collect();
+
+            for q in *operations {
+                match classify_op(
+                    q,
+                    &raw_planner,
+                    &raw_supergraph,
+                    &raw_subgraphs,
+                    &exp_planner,
+                    &expanded_supergraph,
+                    &exp_subgraphs,
+                ) {
+                    Verdict::Identical => identical += 1,
+                    Verdict::Equivalent => equivalent += 1,
+                    Verdict::Different => different += 1,
+                    Verdict::Error => error += 1,
+                }
+            }
+        }
+
+        let total: usize = fixtures.iter().map(|(_, _, ops)| ops.len()).sum();
+        eprintln!(
+            "\nPLAN-DIFF SUMMARY ({} fixtures, {total} ops): identical={identical} equivalent={equivalent} different={different} error={error}",
+            fixtures.len(),
+        );
+
+        // The evidence assertion: over this subset, every operation must be
+        // Identical or Equivalent — i.e. source-aware planning is never wrong or
+        // divergent relative to expansion. Different/Error would be the finding.
+        assert_eq!(
+            different + error,
+            0,
+            "source-aware planning diverged from expansion on {different} op(s) and errored on {error} op(s) — see the per-op lines above",
+        );
+    }
 }

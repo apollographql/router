@@ -162,15 +162,83 @@ Where the mirage actually is: those correct plans emit `Fetch(service:
 "connectors")` — a **subgraph fetch that no real service backs**. Turning it into
 connector HTTP calls is the fetch seam. So the distance relocates:
 
-- **Planner / traversal: largely already works** (validated by `check_plan`).
-  The 2024 estimate over-weighted this. Open planner work is narrow: the
-  fabricated-structure cases that live *only* in expansion, not in join
-  metadata (Implicit-singleton "namespace container", etc.), and confirming
-  raw-vs-expanded plan *equivalence* over the corpus (Spike B is built for this).
+- **Planner / traversal: largely already works** (validated by `check_plan`,
+  and now across the whole corpus — see the next section). The 2024 estimate
+  over-weighted this. Open planner work is narrow: the fabricated-structure
+  cases that live *only* in expansion, not in join metadata (Implicit-singleton
+  "namespace container", etc.) — which the corpus run below also finds
+  Equivalent.
 - **The real bulk is the router fetch seam** (execute `Fetch(connectors)` as
   connector requests — proven end-to-end for the root-field class above) **and
   composition-side satisfiability** (Phase 2, where the 2–9× expansion blowup is
   the compose-time cost).
+
+## Corpus-wide plan parity — raw vs expanded
+
+The mirage check validated one fixture. The natural next question is whether
+that result is a steelthread artifact or holds corpus-wide. So the parity
+oracle Spike B was built for now runs directly: for each operation, plan it
+**both ways over the same connector supergraph** and classify the pair with
+Spike B's four-way verdict.
+
+- **expansion mode** — today's real path: `expand_connectors` →
+  `QueryPlanner::new` on the expanded (synthetic-subgraph) supergraph.
+- **source-aware mode** — `QueryPlanner::from_query_graph` over the **raw,
+  non-expanded** connector graph.
+
+Each plan is correctness-checked (`check_plan`) against *its own* supergraph +
+subgraphs (the raw plan names `connectors`; the expanded plan names synthetic
+subgraphs), then the pair is classified:
+
+- **`Identical`** — byte-identical plan text. Won't fire across modes: the two
+  name different subgraphs, so text can't match. Kept only for completeness.
+- **`Equivalent`** — text differs, but *both* plans are correct against the
+  operation → interchangeable at execution. **This is the signal.**
+- **`Different`** — plans differ and their correctness verdicts diverge.
+- **`Error`** — a mode failed to produce a plan.
+
+`raw_vs_expanded_plan_diff` (in `query_planner.rs`) runs this over every expand
+fixture with a usable query surface — **14 fixtures, 32 operations** spanning
+root-field, entity, multi-key (`t2(id, id2)`), key-not-selected, nested-entity
+chains, deep nested objects, interface objects, abstract inline-fragments
+(`... on T1/T2`), the Implicit `namespace` container, batch, and the v0.4
+`chained_*` fixtures. (`buggy_graphs_empty` and `directives` are excluded — no
+useful query surface.)
+
+**Result: 32/32 Equivalent. 0 Different, 0 Error.**
+
+```
+PLAN-DIFF SUMMARY (14 fixtures, 32 ops): identical=0 equivalent=32 different=0 error=0
+```
+
+Two things worth calling out:
+
+1. **`namespace` is Equivalent too.** This is the case predicted most likely to
+   diverge — the Implicit-singleton "container" structure exists *only* in
+   expansion, not in join metadata, so a raw-graph planner has no fabricated
+   node to walk. It plans correctly anyway. That retires the last "fabricated
+   structure the planner needs" worry flagged above.
+2. **Nothing in the corpus diverges.** Across every connector shape in the
+   fixtures, planning over the non-expanded graph is never wrong relative to
+   expansion planning.
+
+### What Equivalent does and does not prove
+
+`Equivalent` means each plan is *individually* correct against the operation —
+its response shape is a subset of the operation's requested shape
+(`check_plan`'s semantics). It is **not** proof that the two plans produce
+byte-identical execution output. It is the strongest verdict this oracle can
+give across two modes that legitimately name different subgraphs, and it is
+real evidence, but it is equivalence-*of-correctness*, not
+equivalence-*of-output*. Tightening that (a true output-level or
+structural-equivalence comparison — the Parallel-as-set / selection-sorting
+rules from the old `plan_compare.rs`) is the natural refinement if stronger
+parity evidence is ever needed.
+
+**Takeaway:** the "planner ≈ done for connector supergraphs" conclusion is now
+corpus-backed, not a single-fixture anecdote. The distance that remains is
+unchanged and unmeasured by this experiment: the **router fetch seam** and
+**composition-side satisfiability** (Phase 2).
 
 ## Honest verdict
 
