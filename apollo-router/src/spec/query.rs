@@ -28,7 +28,6 @@ use crate::Configuration;
 use crate::configuration::mode::Mode;
 use crate::error::FetchError;
 use crate::graphql::Error;
-use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
@@ -1183,10 +1182,10 @@ impl Query {
     #[allow(clippy::result_large_err)]
     pub(crate) fn validate_variables(
         &self,
-        request: &Request,
+        variables: &Object,
         schema: &Schema,
         strict_variable_validation: Mode,
-    ) -> Result<(), Response> {
+    ) -> Result<(), Vec<Error>> {
         if LevelFilter::current() >= LevelFilter::DEBUG {
             let known_variables = self
                 .operation
@@ -1194,11 +1193,7 @@ impl Query {
                 .keys()
                 .map(|k| k.as_str())
                 .collect();
-            let provided_variables = request
-                .variables
-                .keys()
-                .map(|k| k.as_str())
-                .collect::<HashSet<_>>();
+            let provided_variables = variables.keys().map(|k| k.as_str()).collect::<HashSet<_>>();
             let unknown_variables = provided_variables
                 .difference(&known_variables)
                 .collect::<Vec<_>>();
@@ -1222,10 +1217,7 @@ impl Query {
                         default_value,
                     },
                 )| {
-                    let value = request
-                        .variables
-                        .get(name.as_str())
-                        .or(default_value.as_ref());
+                    let value = variables.get(name.as_str()).or(default_value.as_ref());
                     let path = super::JsonValuePath::Variable {
                         name: name.as_str(),
                     };
@@ -1245,7 +1237,7 @@ impl Query {
         if errors.is_empty() {
             Ok(())
         } else {
-            Err(Response::builder().errors(errors).build())
+            Err(errors)
         }
     }
 

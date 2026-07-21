@@ -4,6 +4,7 @@ use serde_json_bytes::json;
 use test_log::test;
 
 use super::*;
+use crate::graphql;
 use crate::json_ext::ValueExt;
 
 macro_rules! assert_eq_and_ordered {
@@ -3106,27 +3107,15 @@ fn run_validation(
     query: &str,
     variables: serde_json_bytes::Value,
     mode: Mode,
-) -> Result<(), Response> {
+) -> Result<(), Vec<graphql::Error>> {
     let variables = match variables {
         Value::Object(object) => object,
         _ => unreachable!("variables must be an object"),
     };
     let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
-    let request = Request::builder()
-        .variables(variables)
-        .query(query.to_string())
-        .build();
-    let query = Query::parse(
-        request
-            .query
-            .as_ref()
-            .expect("query has been added right above; qed"),
-        None,
-        &schema,
-        &Default::default(),
-    )
-    .expect("could not parse query");
-    query.validate_variables(&request, &schema, mode)
+    let query =
+        Query::parse(query, None, &schema, &Default::default()).expect("could not parse query");
+    query.validate_variables(&variables, &schema, mode)
 }
 
 fn assert_validation(schema: &str, query: &str, variables: serde_json_bytes::Value) {
@@ -3652,14 +3641,16 @@ fn variable_validation_measure_mode(
 
     match (result, expected_result) {
         (Ok(()), Ok(())) => {}
-        (Err(response), Err(expected_code)) => {
+        (Err(errors), Err(expected_code)) => {
             assert!(
-                response.contains_error_code(expected_code),
-                "response = {response:?}"
+                errors.iter().any(|error| error
+                    .extension_code()
+                    .is_some_and(|code| code == expected_code)),
+                "errors = {errors:?}"
             );
         }
-        (Err(response), Ok(())) => {
-            panic!("expected validation to pass: response = {response:?}");
+        (Err(errors), Ok(())) => {
+            panic!("expected validation to pass: errors = {errors:?}");
         }
         (Ok(()), Err(code)) => {
             panic!("expected validation to fail with code {code}");

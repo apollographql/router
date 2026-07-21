@@ -29,6 +29,7 @@ use crate::json_ext::Path;
 pub(crate) mod service;
 #[cfg(test)]
 mod tests;
+mod variable_validation;
 
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
