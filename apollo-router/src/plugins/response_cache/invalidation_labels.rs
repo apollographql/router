@@ -3,6 +3,7 @@
 
 use crate::{Context, plugins::response_cache::plugin::CdnInvalidationConfig};
 use http::{HeaderName, HeaderValue};
+use itertools::Itertools;
 use std::collections::HashSet;
 
 use crate::plugins::response_cache::INTERNAL_CACHE_TAG_PREFIX;
@@ -41,49 +42,81 @@ impl InvalidationLabels {
         invalidation_labels
     }
 
-    //pub(crate) fn invalidation_labels(&self) -> Self {
-    //    // TODO: consider into()
-    //    InvalidationLabels {
-    //        tags: self.tags.clone(),
-    //        types: self.types.clone(),
-    //        subgraphs: self.subgraphs.clone(),
-    //    }
-    //}
+    // TODO: docs
+    fn format_subgraph_labels(&self) -> Vec<String> {
+        self.subgraphs
+            .iter()
+            .map(|subgraph| format!("subgraph-{subgraph}"))
+            .collect()
+    }
+    // TODO: docs
+    fn format_type_labels(&self) -> Vec<String> {
+        self.types
+            .iter()
+            .map(|(subgraph, r#type)| format!("type-{subgraph}-{type}"))
+            .collect()
+    }
 
     // WARN: this removes the sorting behavior
     // TODO: test this thoroughly
     fn build_header(&self, config: &CdnInvalidationConfig) -> Option<String> {
-        if self.tags.is_empty() {
-            return None;
-        }
-
         let mut included: Vec<&str> = Vec::new();
         let mut current_len = 0usize;
         let header_delimiter_size = config.header_delimiter.len();
 
-        let tags: Vec<&String> = self.tags.iter().collect();
-        for tag in &tags {
-            let next_len = current_len + header_delimiter_size + tag.len();
+        // WARN: ordering here matters; we want coarsest labels first to make sure that we're
+        // always able to invalidate whatever's cached. So, we start with subgraph labels, then
+        // move on to {subgraph}-{type} labels, and then finally the user-set (via schema or
+        // extension) tags labels
+        // NOTE: this order is enforced through tests
+        let subgraphs = self.format_subgraph_labels();
+        let types = self.format_type_labels();
+        let tags = self.tags.iter().cloned().collect_vec();
+        let subgraph_types_tags_labels = vec![subgraphs, types, tags].concat();
+
+        // WARN: don't remove this check; you might think that we always get the subgraph and
+        // types even if we don't have the `@cacheTag` directive in the schema or user-sent
+        // extensions, but for any subgraph where response caching isn't enabled, no CacheService
+        // gets added and CacheService is the thing getting the subgraphs and types; so, it's more
+        // than possible that we won't have subgraphs or types and will need to return None
+        if subgraph_types_tags_labels.is_empty() {
+            return None;
+        }
+
+        for label in &subgraph_types_tags_labels {
+            let next_len = current_len + header_delimiter_size + label.len();
 
             if next_len >= config.max_bytes {
+                tracing::warn!(
+                    "CDN invalidation labels header at capacity. This means you have more labels than can fit into the header."
+                );
                 break;
             }
 
             current_len = next_len;
-            included.push(tag.as_str());
+            included.push(label.as_str());
         }
 
-        let joined = included.join(&config.header_delimiter);
-        let dropped = tags.len() - included.len();
+        let header = included.join(&config.header_delimiter);
 
-        tracing::warn!(
-            max_bytes = %config.max_bytes,
-            actual_bytes = %joined.len(),
-            dropped_count = %dropped,
-            "response_cache cache-tag header exceeds max_bytes; truncated per on_overflow=truncate"
-        );
+        // WARN: don't remove this saturating sub; we're dealing with usizes, and we don't want
+        // underflowing or overflowing-- guarded by tests, so should be safe, but this is where you
+        // should look if you're suddenly dealing with insane numbers for dropped labels
+        let dropped = subgraph_types_tags_labels
+            .len()
+            .saturating_sub(included.len());
 
-        Some(included.join(&config.header_delimiter))
+        if dropped > 0 {
+            // TODO: metric here
+            tracing::warn!(
+                max_bytes = %config.max_bytes,
+                actual_bytes = %header.len(),
+                dropped_count = %dropped,
+                "response_cache cache-tag header exceeds max_bytes; truncated per on_overflow=truncate"
+            );
+        }
+
+        Some(header)
     }
 
     pub(crate) fn maybe_emit_header(
