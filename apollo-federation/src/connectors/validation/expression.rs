@@ -969,7 +969,7 @@ mod tests {
         "$args.string->as($s, @->slice(0, 100))->echo({ full: @, first100: $s })->jsonStringify"
     )]
     fn valid_as_var_bindings(#[case] selection: &str) {
-        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4] {
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
             validate_with_context(selection, scalars(), spec).unwrap();
         }
     }
@@ -984,7 +984,7 @@ mod tests {
     #[case::as_with_wrong_args("$args.object->as(1, 2, 3)")]
     #[case::as_with_reused_var("$([1, 2, 3])->as($o, $o)->echo($o)")]
     fn invalid_expressions_with_as_var_binding(#[case] selection: &str) {
-        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4] {
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
             let err = validate_with_context(selection, scalars(), spec);
             assert!(err.is_err());
             assert!(
@@ -996,7 +996,7 @@ mod tests {
 
     #[test]
     fn coalescing() {
-        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4] {
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
             validate_with_context(
                 r#"$($args.string ?? "unknown error")"#,
                 Shape::string([]),
