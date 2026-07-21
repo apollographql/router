@@ -239,9 +239,9 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
     .await
 }
 
-// Regression test for the Rhai plugin blocking the async executor: a script that runs for
-// longer than 1ms must not stall other work scheduled on the same executor thread, because
-// script evaluation is expected to run on the blocking thread pool via `spawn_blocking`.
+// Regression test for the Rhai plugin blocking the async executor: script evaluation is
+// expected to run on the blocking thread pool via `spawn_blocking`, not inline on the async
+// executor thread that dispatched the request.
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn rhai_script_execution_does_not_block_async_executor() -> Result<(), BoxError> {
     let (mock_service, mut handle) =
@@ -260,53 +260,36 @@ async fn rhai_script_execution_does_not_block_async_executor() -> Result<(), Box
         .find(|factory| factory.name == "apollo.rhai")
         .expect("Plugin not found")
         .create_instance_without_schema(
-            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"slow_request.rhai"}"#)
-                .unwrap(),
+            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"thread_id.rhai"}"#).unwrap(),
         )
         .await
         .unwrap();
     let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed_clone());
 
-    // Yields on the runtime's single worker thread as fast as the scheduler allows, unless that
-    // thread is monopolized by the Rhai script's evaluation. Using `yield_now` instead of racing
-    // a fixed-interval timer against the script means the blocked/unblocked tick counts differ
-    // by orders of magnitude instead of a fragile handful, so the outcome doesn't depend on
-    // precise timer resolution or CI scheduling jitter.
-    let ticks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let ticker_ticks = ticks.clone();
-    let ticker = tokio::spawn(async move {
-        loop {
-            ticker_ticks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            tokio::task::yield_now().await;
-        }
-    });
-    // Wait until the ticker has actually run at least once before measuring
-    while ticks.load(std::sync::atomic::Ordering::Relaxed) == 0 {
-        tokio::task::yield_now().await;
-    }
-
-    let before = ticks.load(std::sync::atomic::Ordering::Relaxed);
-    // Spawned so the request is handled by the runtime's (single) worker thread, the same
-    // thread the ticker task above is scheduled on -- `#[tokio::test]`'s own body runs on the
-    // test-harness thread via `block_on`, which is not a worker thread and wouldn't contend
-    // with the ticker at all.
     let supergraph_req = SupergraphRequest::fake_builder().build()?;
-    tokio::spawn(async move { router_service.ready().await?.call(supergraph_req).await }).await??;
-    let after = ticks.load(std::sync::atomic::Ordering::Relaxed);
+    // Spawned so the request is handled by the runtime's single worker thread. `#[tokio::test]`'s
+    // own body runs on the test-harness thread via `block_on`, which is not a worker thread, so
+    // capturing the thread ID there wouldn't tell us anything about where the script ran.
+    let (executor_thread_id, supergraph_resp) = tokio::spawn(async move {
+        let executor_thread_id = format!("{:?}", std::thread::current().id());
+        let resp = router_service.ready().await?.call(supergraph_req).await?;
+        Ok::<_, BoxError>((executor_thread_id, resp))
+    })
+    .await??;
 
-    ticker.abort();
     crate::plugin::test::await_mock_driver(driver).await;
 
-    // The script busy-loops on the worker thread for ~50ms. If it runs inline on the async
-    // executor, the ticker (sharing that single worker thread) gets no chance to run at all
-    // (observed 0); off the executor, via `spawn_blocking`, the worker thread keeps scheduling
-    // it as fast as `yield_now` allows (observed in the thousands). 100 comfortably separates
-    // the two without relying on any timer's precision.
-    let ticked = after - before;
-    assert!(
-        ticked >= 100,
-        "the async ticker only progressed by {ticked} ticks while the rhai script executed; \
-         the executor thread was blocked"
+    let script_thread_id = supergraph_resp
+        .context
+        .get::<_, String>("thread_id")
+        .unwrap()
+        .expect("script should have recorded the thread it ran on");
+
+    // If the script ran inline on the async executor rather than via `spawn_blocking`, it would
+    // report the same thread ID as the one that dispatched the request.
+    assert_ne!(
+        script_thread_id, executor_thread_id,
+        "the rhai script ran on the async executor thread instead of a spawn_blocking thread"
     );
     Ok(())
 }

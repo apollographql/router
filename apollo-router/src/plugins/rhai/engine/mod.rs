@@ -1294,6 +1294,12 @@ mod router_plugin {
             .map(|x| x.as_millis() as i64)
     }
 
+    // Test-only helper used to prove which thread a script runs on. Not part of the
+    // documented Rhai API.
+    pub(crate) fn current_thread_id() -> String {
+        format!("{:?}", std::thread::current().id())
+    }
+
     // Add query plan getter to execution request
     #[rhai_fn(get = "query_plan")]
     pub(crate) fn execution_request_query_plan_get(
