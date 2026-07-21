@@ -73,8 +73,10 @@ use crate::plugins::response_cache::cache_key::hash_query;
 use crate::plugins::response_cache::debugger::CacheEntryKind;
 use crate::plugins::response_cache::debugger::CacheKeyContext;
 use crate::plugins::response_cache::debugger::CacheKeySource;
+use crate::plugins::response_cache::debugger::CdnInvalidationDebug;
 use crate::plugins::response_cache::debugger::add_cache_key_to_context;
 use crate::plugins::response_cache::debugger::add_cache_keys_to_context;
+use crate::plugins::response_cache::debugger::add_cdn_invalidation_debug_to_context;
 use crate::plugins::response_cache::invalidation_labels::InvalidationLabels;
 use crate::plugins::response_cache::invalidation_labels::log_invalidation_label_error;
 use crate::plugins::response_cache::storage;
@@ -100,6 +102,18 @@ pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo::response_cache::key";
 /// Context key to enable support of debugger
 pub(crate) const CONTEXT_DEBUG_CACHE_KEYS: &str = "apollo::response_cache::debug_cached_keys";
+/// Context key for CDN invalidation header debug info. Only set (once per response) when
+/// `cdn_invalidation.enabled` is true and `debug` is true; see `CdnInvalidationDebug`.
+pub(crate) const CONTEXT_DEBUG_CDN_INVALIDATION: &str =
+    "apollo::response_cache::debug_cdn_invalidation";
+/// Context key stashing whether *this specific request* asked for cache debug info (config-level
+/// `debug` AND the `CACHE_DEBUG_HEADER_NAME` header), set by a `map_request` step in
+/// `supergraph_service` so its `map_response` step can read it. Unlike the per-entry
+/// `CONTEXT_DEBUG_CACHE_KEYS` (which only ever contains data when `CacheService`, deeper in the
+/// stack, already decided per-request whether to populate it), CDN header debug info is built
+/// entirely within `supergraph_service`'s own `map_response`, which has no other way to see the
+/// original request's headers — hence stashing this explicitly.
+pub(crate) const CONTEXT_DEBUG_REQUESTED: &str = "apollo::response_cache::debug_requested";
 pub(crate) const CACHE_DEBUG_HEADER_NAME: &str = "apollo-cache-debugging";
 pub(crate) const CACHE_DEBUG_EXTENSIONS_KEY: &str = "apolloCacheDebugging";
 pub(crate) const CACHE_DEBUGGER_VERSION: &str = "1.0";
@@ -471,6 +485,23 @@ impl PluginPrivate for ResponseCache {
         let cdn_invalidation_config = self.cdn_invalidation.clone();
 
         ServiceBuilder::new()
+            .map_request(move |request: supergraph::Request| {
+                // Stashed so `map_response` below can tell whether *this* request asked for
+                // debug info — unlike the per-entry cache-key debug data (populated deeper in
+                // the stack by `CacheService`, which does see per-request headers directly),
+                // the CDN header debug info is built entirely in this supergraph-level
+                // `map_response`, which otherwise has no access to the original request.
+                let debug_requested = debug
+                    && request
+                        .supergraph_request
+                        .headers()
+                        .get(CACHE_DEBUG_HEADER_NAME)
+                        == Some(&HeaderValue::from_static("true"));
+                let _ = request
+                    .context
+                    .insert(CONTEXT_DEBUG_REQUESTED, debug_requested);
+                request
+            })
             .map_response(move |mut response: supergraph::Response| {
                 if include_cache_control_header_on_router_response
                     && let Some(mut cache_control) = response
@@ -494,10 +525,25 @@ impl PluginPrivate for ResponseCache {
 
                 if cdn_invalidation_config.enabled {
                     let invalidation_labels = InvalidationLabels::get_or_create(&response.context);
-                    invalidation_labels.maybe_emit_header(
+                    let result = invalidation_labels.maybe_emit_header(
                         response.response.headers_mut(),
                         &cdn_invalidation_config,
                     );
+                    let debug_requested = response
+                        .context
+                        .get_json_value(CONTEXT_DEBUG_REQUESTED)
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if debug_requested {
+                        let _ = add_cdn_invalidation_debug_to_context(
+                            &response.context,
+                            CdnInvalidationDebug::new(
+                                cdn_invalidation_config.header_name.clone(),
+                                cdn_invalidation_config.max_bytes,
+                                &result,
+                            ),
+                        );
+                    }
                 }
 
                 if debug
@@ -1087,6 +1133,7 @@ impl CacheService {
                 key: "-".to_string(),
                 invalidation_keys: vec![],
                 has_tags: false,
+                cdn_invalidation_enabled: self.cdn_invalidation_enabled,
                 kind,
                 hashed_private_id: None,
                 subgraph_name: self.name.clone(),
@@ -1280,6 +1327,7 @@ impl CacheService {
                         }
                         .user_facing_only(),
                         has_tags: !cdn_invalidation_tags.is_empty(),
+                        cdn_invalidation_enabled: self.cdn_invalidation_enabled,
                         kind: CacheEntryKind::RootFields {
                             root_fields: root_operation_fields,
                         },
@@ -1375,6 +1423,7 @@ impl CacheService {
                             }
                             .user_facing_only(),
                             has_tags: !ir.cdn_invalidation_tags.is_empty(),
+                            cdn_invalidation_enabled: self.cdn_invalidation_enabled,
                             kind: CacheEntryKind::Entity {
                                 typename: ir.typename.clone(),
                                 entity_key: ir.entity_key.clone().unwrap_or_default(),
@@ -1635,6 +1684,7 @@ async fn cache_lookup_root(
                     let cache_key_context = CacheKeyContext {
                         key: debug_value.key,
                         has_tags,
+                        cdn_invalidation_enabled,
                         hashed_private_id: private_id.map(ToString::to_string),
                         invalidation_keys,
                         kind: CacheEntryKind::RootFields {
@@ -2031,6 +2081,7 @@ async fn cache_lookup_entities(
                     CacheKeyContext {
                         key: ir.key.clone(),
                         has_tags,
+                        cdn_invalidation_enabled,
                         hashed_private_id: private_id.map(ToString::to_string),
                         invalidation_keys,
                         kind: CacheEntryKind::Entity {
@@ -3067,6 +3118,7 @@ async fn insert_entities_in_result(
                             }
                             .user_facing_only(),
                             has_tags: !cdn_invalidation_tags.is_empty(),
+                            cdn_invalidation_enabled,
                             kind: CacheEntryKind::Entity {
                                 typename: typename.clone(),
                                 entity_key: entity_key.clone().unwrap_or_default(),

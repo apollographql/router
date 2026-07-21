@@ -147,7 +147,7 @@ pub(super) fn record_invalidation_duration(
 }
 
 /// Outcome of building the CDN invalidation labels (`Cache-Tag`) header for one response.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum CdnTagHeaderOutcome {
     /// Nothing to report — no subgraph/type/tag labels were aggregated for this request.
     Empty,
@@ -161,7 +161,7 @@ pub(super) enum CdnTagHeaderOutcome {
 }
 
 impl CdnTagHeaderOutcome {
-    fn as_str(self) -> &'static str {
+    pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::Empty => "empty",
             Self::CompleteWithoutTruncation => "complete_without_truncation",

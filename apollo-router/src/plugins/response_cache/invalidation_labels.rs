@@ -46,11 +46,30 @@ pub(crate) struct InvalidationLabels {
     pub(crate) context: Option<Context>,
 }
 
+/// What happened when building (and attempting to emit) the CDN `Cache-Tag` header for one
+/// response. Returned by `maybe_emit_header` so the cache debugger can show *why* a header was,
+/// or wasn't, sent — information the debugger has no other way to see, since it otherwise only
+/// knows about individual cache entries, not the whole-response header-building step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CdnHeaderBuildResult {
+    /// The header value that was built, if any label existed to build one from. `None` for
+    /// `Empty` and `DroppedDueToOverflow` outcomes.
+    pub(super) header: Option<String>,
+    pub(super) outcome: CdnTagHeaderOutcome,
+    /// Size the header would have been without `max_bytes` truncation. `None` only for the
+    /// `Empty` outcome, since there's nothing to measure.
+    pub(super) untruncated_size_bytes: Option<u64>,
+    /// Whether the header was actually inserted into the response. Can be `false` even when
+    /// `header` is `Some`: `config.header_name`/the built value might not be a legal HTTP
+    /// header name/value, which is a separate failure mode from `outcome`.
+    pub(super) emitted: bool,
+}
+
 impl InvalidationLabels {
     /// Fetches this context's `InvalidationLabels` entry, creating a default one first if none
     /// exists yet. Stamps `context` onto the stored entry (mirroring what the mutators below
     /// also do) so later reads and mutations of this context's entry stay tied to it regardless
-    /// of which method first vivified it.
+    /// of which method first created it.
     ///
     /// Returns an owned clone of the stored entry rather than a reference: `with_lock` only
     /// lends out a `&mut` scoped to its closure, so a clone is the only way to hand a snapshot
@@ -82,7 +101,7 @@ impl InvalidationLabels {
     }
 
     // WARN: this removes the sorting behavior
-    fn build_header(&self, config: &CdnInvalidationConfig) -> Option<String> {
+    fn build_header(&self, config: &CdnInvalidationConfig) -> CdnHeaderBuildResult {
         let mut included: Vec<&str> = Vec::new();
         let mut current_len = 0usize;
         let header_delimiter_size = config.header_delimiter.len();
@@ -107,16 +126,20 @@ impl InvalidationLabels {
             tracing::debug!(
                 "response_cache has no invalidation labels to emit for this response; skipping Cache-Tag header"
             );
-            return None;
+            return CdnHeaderBuildResult {
+                header: None,
+                outcome: CdnTagHeaderOutcome::Empty,
+                untruncated_size_bytes: None,
+                emitted: false,
+            };
         }
 
         // Recorded regardless of whether truncation happens below, so the distribution tracks
         // headroom before truncation kicks in, not just the truncation events themselves.
-        record_cdn_tag_header_untruncated_size(
-            subgraph_types_tags_labels
-                .join(&config.header_delimiter)
-                .len() as u64,
-        );
+        let untruncated_size_bytes = subgraph_types_tags_labels
+            .join(&config.header_delimiter)
+            .len() as u64;
+        record_cdn_tag_header_untruncated_size(untruncated_size_bytes);
 
         for label in &subgraph_types_tags_labels {
             let next_len = current_len + header_delimiter_size + label.len();
@@ -152,28 +175,43 @@ impl InvalidationLabels {
 
         if dropped > 0 && config.experimental_drop_on_overflow {
             record_cdn_tag_header_outcome(CdnTagHeaderOutcome::DroppedDueToOverflow);
-            None
+            CdnHeaderBuildResult {
+                header: None,
+                outcome: CdnTagHeaderOutcome::DroppedDueToOverflow,
+                untruncated_size_bytes: Some(untruncated_size_bytes),
+                emitted: false,
+            }
         } else {
-            record_cdn_tag_header_outcome(if dropped > 0 {
+            let outcome = if dropped > 0 {
                 CdnTagHeaderOutcome::CompleteWithTruncation
             } else {
                 CdnTagHeaderOutcome::CompleteWithoutTruncation
-            });
-            Some(header)
+            };
+            record_cdn_tag_header_outcome(outcome);
+            CdnHeaderBuildResult {
+                header: Some(header),
+                outcome,
+                untruncated_size_bytes: Some(untruncated_size_bytes),
+                emitted: false,
+            }
         }
     }
 
-    pub(crate) fn maybe_emit_header(
+    /// Builds the CDN `Cache-Tag` header and inserts it into `headers` if enabled/non-empty,
+    /// returning what happened so callers (namely the cache debugger, in `debug` mode) can show
+    /// why a header was, or wasn't, emitted for a given response — including cases the debugger
+    /// can't otherwise see, like truncation or a config-level emission failure.
+    pub(super) fn maybe_emit_header(
         &self,
         headers: &mut http::HeaderMap,
         config: &CdnInvalidationConfig,
-    ) {
-        let header = if let Some(labels) = self.build_header(config) {
-            labels
-        } else {
+    ) -> CdnHeaderBuildResult {
+        let mut result = self.build_header(config);
+        let header = match &result.header {
             // `build_header` already recorded why (empty vs. dropped-due-to-overflow) and logged
             // accordingly, since it's the only place that knows which of the two applies here.
-            return;
+            None => return result,
+            Some(header) => header.clone(),
         };
 
         let header_name = match HeaderName::from_bytes(config.header_name.as_bytes()) {
@@ -186,7 +224,8 @@ impl InvalidationLabels {
                 );
 
                 record_cdn_tag_header_error("invalid_header_name");
-                return;
+                result.emitted = false;
+                return result;
             }
         };
 
@@ -197,6 +236,7 @@ impl InvalidationLabels {
                 // can be up to `max_bytes` (16kb by default), so logging it at debug level on
                 // every response would be noisy and costly at volume.
                 tracing::debug!("response_cache emitted aggregated cache-tag header");
+                result.emitted = true;
             }
             Err(err) => {
                 tracing::warn!(
@@ -204,8 +244,11 @@ impl InvalidationLabels {
                     "response_cache aggregated cache-tag header value is not a valid HTTP header value; skipping emission"
                 );
                 record_cdn_tag_header_error("invalid_header_value");
+                result.emitted = false;
             }
         }
+
+        result
     }
 
     /// Returns every label a customer could use to purge or invalidate this entry — the same
@@ -361,9 +404,9 @@ mod tests {
         config
     }
 
-    // Constructs an InvalidationLabels handle tied to `context`, without seeding the
-    // context's extensions map — used to exercise the "Missing InvalidationLabels on
-    // Context" error path, distinct from the "Missing Context" path.
+    // Constructs an InvalidationLabels handle tied to `context`, without seeding the context's
+    // extensions map — used to exercise mutators creating that missing entry themselves (see
+    // the tests below), as opposed to `get_or_create`, which seeds the entry itself.
     fn unseeded_handle(context: &Context) -> InvalidationLabels {
         InvalidationLabels {
             context: Some(context.clone()),
@@ -491,9 +534,9 @@ mod tests {
 
     // `unseeded_handle` gives a handle whose context is seeded but whose context's extensions
     // map has no `InvalidationLabels` entry yet (i.e. `get_or_create` was never called first).
-    // Mutators should auto-vivify that missing entry via `get_or_default_mut` rather than
-    // erroring, mirroring `mutator_persists_across_separate_get_or_create_calls` above: mutate
-    // through one handle, then check a SEPARATE `get_or_create` call sees the change.
+    // Mutators should create that missing entry via `get_or_default_mut` rather than erroring,
+    // mirroring `mutator_persists_across_separate_get_or_create_calls` above: mutate through one
+    // handle, then check a SEPARATE `get_or_create` call sees the change.
     #[rstest]
     #[case::add_tags(
         (|labels: &mut InvalidationLabels| labels.add_tags(vec!["a".to_string(), "b".to_string()]).map(|_| ())) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
@@ -553,7 +596,7 @@ mod tests {
         check(&refetched);
     }
 
-    // A mutator, not `get_or_create`, is what first vivifies the entry here (via
+    // A mutator, not `get_or_create`, is what first creates the entry here (via
     // `unseeded_handle`, same as above). If the mutator didn't also stamp `context` onto the
     // stored entry the way `get_or_create` does, a second independently-constructed handle
     // (again bypassing `get_or_create`) would hit `MissingContext` on the stored entry even
@@ -1216,5 +1259,127 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    // `maybe_emit_header`'s return value is what the cache debugger's CDN-invalidation debug
+    // info is built from (see `CdnInvalidationDebug` in debugger.rs) — these pin down that the
+    // returned `CdnHeaderBuildResult` itself (not just the HeaderMap side effect, covered above)
+    // matches each outcome.
+    #[rstest]
+    #[case::empty(
+        InvalidationLabels::default(),
+        16384,
+        false,
+        CdnTagHeaderOutcome::Empty,
+        None,
+        false
+    )]
+    #[case::complete_without_truncation(
+        InvalidationLabels { tags: HashSet::from(["homepage".to_string()]), ..Default::default() },
+        16384,
+        false,
+        CdnTagHeaderOutcome::CompleteWithoutTruncation,
+        Some("homepage"),
+        true,
+    )]
+    #[case::complete_with_truncation(
+        InvalidationLabels {
+            tags: HashSet::from(["aaaaaaaaaa".to_string(), "bbbbbbbbbb".to_string()]),
+            ..Default::default()
+        },
+        15,
+        false,
+        CdnTagHeaderOutcome::CompleteWithTruncation,
+        None, // exactly which tag survives isn't deterministic; checked separately below
+        true,
+    )]
+    #[case::dropped_due_to_overflow(
+        InvalidationLabels {
+            tags: HashSet::from(["aaaaaaaaaa".to_string(), "bbbbbbbbbb".to_string()]),
+            ..Default::default()
+        },
+        15,
+        true,
+        CdnTagHeaderOutcome::DroppedDueToOverflow,
+        None,
+        false,
+    )]
+    fn maybe_emit_header_result_matches_outcome_for_each_branch(
+        #[case] labels: InvalidationLabels,
+        #[case] max_bytes: usize,
+        #[case] drop_on_overflow: bool,
+        #[case] expected_outcome: CdnTagHeaderOutcome,
+        #[case] expected_header: Option<&str>,
+        #[case] expected_emitted: bool,
+    ) {
+        let mut headers = http::HeaderMap::new();
+        let result = labels.maybe_emit_header(
+            &mut headers,
+            &cdn_config(|c| {
+                c.max_bytes = max_bytes;
+                c.experimental_drop_on_overflow = drop_on_overflow;
+            }),
+        );
+
+        assert_eq!(result.outcome, expected_outcome, "{result:?}");
+        assert_eq!(result.emitted, expected_emitted, "{result:?}");
+        if let Some(expected_header) = expected_header {
+            assert_eq!(
+                result.header.as_deref(),
+                Some(expected_header),
+                "{result:?}"
+            );
+        }
+        // `emitted` should always agree with whether a header actually landed in the map.
+        assert_eq!(
+            result.emitted,
+            headers.contains_key(&cdn_config(|_| {}).header_name),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn maybe_emit_header_result_reports_untruncated_size_only_when_nonempty() {
+        let mut headers = http::HeaderMap::new();
+
+        let empty_result =
+            InvalidationLabels::default().maybe_emit_header(&mut headers, &cdn_config(|_| {}));
+        assert_eq!(empty_result.untruncated_size_bytes, None);
+
+        let labels = InvalidationLabels {
+            tags: HashSet::from(["homepage".to_string()]),
+            ..Default::default()
+        };
+        let result = labels.maybe_emit_header(&mut headers, &cdn_config(|_| {}));
+        assert_eq!(result.untruncated_size_bytes, Some(8)); // "homepage" is 8 bytes
+    }
+
+    #[rstest]
+    #[case::invalid_header_name("invalid header", "homepage")]
+    #[case::invalid_header_value("Cache-Tag", "bad\r\ntag")]
+    fn maybe_emit_header_result_reports_not_emitted_on_header_failure(
+        #[case] header_name: &'static str,
+        #[case] tag: &'static str,
+    ) {
+        let labels = InvalidationLabels {
+            tags: HashSet::from([tag.to_string()]),
+            ..Default::default()
+        };
+        let mut headers = http::HeaderMap::new();
+
+        let result = labels.maybe_emit_header(
+            &mut headers,
+            &cdn_config(|c| c.header_name = header_name.to_string()),
+        );
+
+        // The label set itself built fine (there was something to report) — it's only the
+        // header name/value validation, a step after `build_header`, that failed.
+        assert_eq!(
+            result.outcome,
+            CdnTagHeaderOutcome::CompleteWithoutTruncation
+        );
+        assert!(result.header.is_some(), "{result:?}");
+        assert!(!result.emitted, "{result:?}");
+        assert!(headers.is_empty());
     }
 }

@@ -24,12 +24,14 @@ use crate::graphql;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
 use crate::plugins::response_cache::debugger::CacheKeysContext;
+use crate::plugins::response_cache::debugger::CdnInvalidationDebug;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
 use crate::plugins::response_cache::invalidation_endpoint::InvalidationIndexes;
 use crate::plugins::response_cache::invalidation_endpoint::SubgraphInvalidationConfig;
 use crate::plugins::response_cache::metrics::CacheMetricContextKey;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CONTEXT_CACHE_KEY;
+use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CDN_INVALIDATION;
 use crate::plugins::response_cache::plugin::CdnInvalidationConfig;
 use crate::plugins::response_cache::plugin::INVALIDATION_SHARED_KEY;
 use crate::plugins::response_cache::plugin::Subgraph;
@@ -112,6 +114,10 @@ fn get_cache_keys_context(response: &supergraph::Response) -> Option<CacheKeysCo
     });
     cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
     Some(cache_keys)
+}
+
+fn get_cdn_invalidation_debug(response: &supergraph::Response) -> Option<CdnInvalidationDebug> {
+    response.context.get(CONTEXT_DEBUG_CDN_INVALIDATION).ok()?
 }
 
 fn get_cache_control_header(response: &supergraph::Response) -> Option<Vec<String>> {
@@ -3604,6 +3610,194 @@ async fn cdn_invalidation_header_for_extension_tags_gates_independently_of_cache
     .await;
 }
 
+/// Verifies, end to end, that the router threads `maybe_emit_header`'s result into a
+/// `CdnInvalidationDebug` on the request context for the cache debugger to read. This is the
+/// only place truncation info is visible: it depends on the combined label set across every
+/// entry a response touches, not any single one, so no per-entry `CacheKeyContext` could show it.
+#[tokio::test(flavor = "multi_thread")]
+async fn cdn_invalidation_debug_reflects_outcome_and_truncation() {
+    async move {
+        let valid_schema =
+            Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+        let query = "query { currentUser { activeOrganization { ... on Organization { id creatorUser { __typename id } } } } }";
+        let orga_entity = serde_json::json!({
+            "__typename": "Organization",
+            "id": "1",
+            "creatorUser": {
+                "__typename": "User",
+                "id": 2
+            }
+        });
+        let subgraphs = serde_json::json!({
+            "user": {
+                "query": {
+                    "currentUser": {
+                        "activeOrganization": {
+                            "__typename": "Organization",
+                            "id": "1",
+                        }
+                    }
+                },
+                "headers": {"cache-control": "public"},
+            },
+            "orga": {
+                "entities": [orga_entity],
+                "headers": {"cache-control": "public"},
+            },
+        });
+        let map = || {
+            [
+                (
+                    "user".to_string(),
+                    Subgraph {
+                        redis: None,
+                        private_id: Some("sub".to_string()),
+                        enabled: true.into(),
+                        ttl: None,
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "orga".to_string(),
+                    Subgraph {
+                        redis: None,
+                        private_id: Some("sub".to_string()),
+                        enabled: true.into(),
+                        ttl: None,
+                        ..Default::default()
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect()
+        };
+        let build_request = |send_debug_header: bool| {
+            let builder = supergraph::Request::fake_builder()
+                .query(query)
+                .context(Context::new());
+            if send_debug_header {
+                builder
+                    .header(
+                        HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+                        HeaderValue::from_static("true"),
+                    )
+                    .build()
+                    .unwrap()
+            } else {
+                builder.build().unwrap()
+            }
+        };
+        let run = |cdn_invalidation: CdnInvalidationConfig, send_debug_header: bool| {
+            let valid_schema = valid_schema.clone();
+            let subgraphs = subgraphs.clone();
+            async move {
+                let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+                let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+                    .await
+                    .unwrap();
+                let response_cache = ResponseCache::for_test_with_cdn_invalidation(
+                    storage,
+                    create_subgraph_conf(map()),
+                    valid_schema,
+                    true,
+                    drop_tx,
+                    true,
+                    cdn_invalidation,
+                )
+                .await
+                .unwrap();
+                let service = TestHarness::builder()
+                    .configuration_json(serde_json::json!({
+                        "include_subgraph_errors": { "all": true },
+                        "experimental_mock_subgraphs": subgraphs,
+                    }))
+                    .unwrap()
+                    .schema(SCHEMA)
+                    .extra_private_plugin(response_cache)
+                    .build_supergraph()
+                    .await
+                    .unwrap();
+                service.oneshot(build_request(send_debug_header)).await.unwrap()
+            }
+        };
+
+        // Generous max_bytes: nothing truncates.
+        let response = run(
+            CdnInvalidationConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            true,
+        )
+        .await;
+        let debug =
+            get_cdn_invalidation_debug(&response).expect("expected CDN invalidation debug info");
+        assert_eq!(debug.outcome, "complete_without_truncation");
+        assert!(debug.emitted, "{debug:?}");
+        assert!(debug.header_value.is_some(), "{debug:?}");
+        assert!(debug.untruncated_size_bytes.is_some(), "{debug:?}");
+        assert_eq!(debug.header_name, "Cache-Tag");
+
+        // Tiny max_bytes: forces truncation down to nothing fitting, but the response still
+        // touched labels, so this is `complete_with_truncation` (a real, if empty, header),
+        // not `empty` (nothing to report at all) — the debug info should tell those apart.
+        let response = run(
+            CdnInvalidationConfig {
+                enabled: true,
+                max_bytes: 10,
+                ..Default::default()
+            },
+            true,
+        )
+        .await;
+        let debug =
+            get_cdn_invalidation_debug(&response).expect("expected CDN invalidation debug info");
+        assert_eq!(debug.outcome, "complete_with_truncation");
+        assert!(debug.emitted, "{debug:?}");
+        let header_value = debug.header_value.clone().expect("expected a header value");
+        let untruncated = debug
+            .untruncated_size_bytes
+            .expect("expected an untruncated size");
+        assert!(
+            (header_value.len() as u64) < untruncated,
+            "expected truncation to shrink the header below its untruncated size: {debug:?}"
+        );
+        assert_eq!(debug.max_bytes, 10);
+
+        // Disabled entirely: no debug info should be recorded at all.
+        let response = run(
+            CdnInvalidationConfig {
+                enabled: false,
+                ..Default::default()
+            },
+            true,
+        )
+        .await;
+        assert!(
+            get_cdn_invalidation_debug(&response).is_none(),
+            "expected no CDN invalidation debug info when the feature is disabled"
+        );
+
+        // Enabled, but this particular request didn't send the debug header: no debug info,
+        // even though `response_cache.debug` is on at the config level (the test harness always
+        // sets it). Debug info should only ever appear for requests that actually asked for it.
+        let response = run(
+            CdnInvalidationConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            false,
+        )
+        .await;
+        assert!(
+            get_cdn_invalidation_debug(&response).is_none(),
+            "expected no CDN invalidation debug info when the request didn't ask for it"
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
 /// Like `setup_cdn_invalidation_gating_test`, but performs the request twice against the same
 /// underlying storage: once to populate the cache (miss) and once more to hit it. The second
 /// `TestHarness` has no mock subgraphs wired in at all (mirrors `insert()`'s miss-then-hit
@@ -3611,11 +3805,10 @@ async fn cdn_invalidation_header_for_extension_tags_gates_independently_of_cache
 /// answer it and fails outright, rather than silently emitting a header built from a live
 /// subgraph call.
 ///
-/// `cache_tag_index_enabled` is the crux of the regression this covers: fine-grained CDN tags
-/// used to only survive onto a cache-hit response when the Redis `cache_tag` index was *also*
-/// on, because persisting them for a later hit rode on the same gate as Redis's `ZADD` indexing
-/// instead of its own (`cdn_invalidation_enabled`). Passing `false` here exercises exactly the
-/// case that was broken: CDN invalidation on its own, with Redis per-tag indexing left off.
+/// `cache_tag_index_enabled` controls the Redis `cache_tag` index independently of CDN
+/// invalidation. Fine-grained CDN tags are persisted for a later cache hit based on their own
+/// `cdn_invalidation_enabled` gate, not on Redis's `cache_tag` index — so passing `false` here
+/// exercises CDN invalidation running entirely on its own, with Redis per-tag indexing off.
 async fn setup_cdn_invalidation_hit_test(
     cache_tag_index_enabled: bool,
     extension_tag: Option<&str>,

@@ -1,0 +1,160 @@
+---
+title: CDN Invalidation
+subtitle: Propagate invalidation labels to a CDN as a response header
+description: Configure the router to emit a Cache-Tag header so CDN providers like Cloudflare and Fastly can purge cached responses by tag, type, or subgraph.
+minVersion: Router v2.17.0
+---
+
+{/* TODO: confirm the release version this ships in before publishing. */}
+
+If you cache router responses at a CDN or reverse proxy in front of the router (using the `Cache-Control` header the router already sends), the CDN has no way to know *what* to purge when your data changes—`Cache-Control` only governs freshness (TTL), not invalidation. CDN invalidation closes that gap: the router emits a response header carrying the same invalidation labels it already uses for [active invalidation](/router/performance/caching/response-caching/invalidation#active-invalidation) against its own Redis cache, so you can purge the CDN's edge cache using the CDN's own tag-based purge API.
+
+This feature is independent of Redis: you don't need Redis-backed response caching, and you don't need any [Redis invalidation indexes](/router/performance/caching/response-caching/invalidation#tune-which-invalidation-indexes-are-maintained) enabled, for the CDN header to work correctly, including on a cache hit. See [Relationship to Redis invalidation](#relationship-to-redis-invalidation) below.
+
+## Enable it
+
+CDN invalidation is off by default, and it only reports labels for subgraphs that already have response caching enabled—it doesn't cache anything on its own. Enable it under `response_cache.cdn_invalidation`, alongside your existing subgraph caching configuration:
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  cdn_invalidation:
+    enabled: true
+  subgraph:
+    all:
+      enabled: true # required per subgraph for that subgraph's labels to be reported
+      redis:
+        urls: ["redis://..."]
+```
+
+With `cdn_invalidation.enabled: true`, the router emits a `Cache-Tag` header on every supergraph response that has at least one invalidation label to report from an enabled subgraph. A response that touches only subgraphs with caching disabled gets no header.
+
+## What gets sent
+
+The header's value is a delimited list of labels drawn from the same sources you already use to tag data for Redis invalidation—no additional schema changes required if you've already set up [cache tags](/router/performance/caching/response-caching/invalidation#invalidation-methods). Each label is one of three tiers, from finest- to coarsest-grained:
+
+1. **Tag** — the exact tag values from `@cacheTag` directives (interpolated per request) and the `apolloCacheTags`/`apolloEntityCacheTags` response extensions, unchanged from how they're described in [Invalidation methods](/router/performance/caching/response-caching/invalidation#by-cache-tag).
+2. **Type** — one label per distinct `(subgraph, GraphQL type)` pair touched by the response, formatted as `type-{subgraph}-{type}`. Whole-operation (non-entity) cache entries use the placeholder type `Query`, so a cached root-field response from the `accounts` subgraph renders as `type-accounts-Query`.
+3. **Subgraph** — one label per subgraph touched by the response, formatted as `subgraph-{subgraph}`.
+
+Given this schema:
+
+```graphql title="accounts.graphql"
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.12"
+    import: ["@key", "@cacheTag"]
+  )
+
+type Query {
+  user(id: ID!): User @cacheTag(format: "profile")
+}
+
+type User @key(fields: "id") @cacheTag(format: "user-{$key.id}") {
+  id: ID!
+  name: String!
+}
+```
+
+A response that resolves `user(id: "42")` from the `accounts` subgraph emits:
+
+```
+Cache-Tag: subgraph-accounts,type-accounts-User,profile,user-42
+```
+
+Labels from every subgraph and entity touched by the response are unioned into a single header value—if a query fans out across `accounts` and `orders`, the header carries labels for both. Tiers always appear in the coarsest-first order shown above (subgraph, then type, then tag), but the order of labels *within* a tier isn't guaranteed—don't parse the header assuming a fixed position for a specific tag.
+
+## Why three tiers
+
+CDNs purge across many edge locations, and most don't tell you whether a purge request fully succeeded everywhere—confirming that would mean waiting on every data center to finish, and transient network failures make that unreliable regardless. Practically, that means you can't always be sure a purge by your most specific tag actually reached every cached copy.
+
+The tiered labels give you an escalation path. Purge by the finest tag first (`user-42`); if you have reason to believe it didn't take (or you want a stronger guarantee for a critical update), purge by the type label (`type-accounts-User`) to clear all cached `User` data; if that's still not enough, purge by the subgraph label (`subgraph-accounts`) to clear everything the router cached from that subgraph. The router always sends all three tiers together (subject to the size limit described below), so that escalation path is always available—you decide when to use it.
+
+## Using it with your CDN
+
+The header only marks *which* labels a cached response carries—your CDN is what actually purges by them. Configuration details vary by provider; two common examples:
+
+### Cloudflare
+
+Cloudflare's cache-tag purging is designed around a `Cache-Tag` response header, which is why that's this feature's default `header_name`—you shouldn't need to change it for Cloudflare. Once caching is enabled for the routes your router serves, purge specific tags with Cloudflare's purge-by-tag API:
+
+```
+curl --request POST \
+  --url https://api.cloudflare.com/client/v4/zones/{zone_id}/purge_cache \
+  --header 'authorization: Bearer {api_token}' \
+  --header 'content-type: application/json' \
+  --data '{"tags": ["user-42"]}'
+```
+
+If you're unsure the purge fully propagated, or the change is high-stakes, follow up with a purge of the corresponding `type-` or `subgraph-` label instead. Consult [Cloudflare's purge-by-tag documentation](https://developers.cloudflare.com/cache/how-to/purge-cache/purge-by-tags/) for current size limits and plan availability.
+
+### Fastly
+
+Fastly's native convention is a `Surrogate-Key` header rather than `Cache-Tag`. Point `header_name` at it:
+
+```yaml title="router.yaml"
+response_cache:
+  cdn_invalidation:
+    enabled: true
+    header_name: "Surrogate-Key"
+    header_delimiter: " " # Fastly expects space-separated keys, not comma-separated
+```
+
+Then purge with Fastly's surrogate-key purge API using the same label values (`user-42`, `type-accounts-User`, `subgraph-accounts`).
+
+If your CDN or reverse proxy uses a different header name or delimiter convention, configure `header_name`/`header_delimiter` to match—see [Configuration reference](#configuration-reference) below.
+
+## Configuration reference
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  cdn_invalidation:
+    enabled: true
+    header_name: "Cache-Tag"
+    header_delimiter: ","
+    max_bytes: 16384
+    experimental_drop_on_overflow: false
+```
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Whether to emit the header on supergraph responses. |
+| `header_name` | `"Cache-Tag"` | Name of the header the router emits. Match your CDN's expected header (e.g. `Surrogate-Key` for Fastly). |
+| `header_delimiter` | `","` | Delimiter between labels in the header value. Match your CDN's expected format (e.g. `" "` for Fastly). |
+| `max_bytes` | `16384` | Maximum size, in bytes, of the joined header value. Matches Cloudflare's default `Cache-Tag` size limit; adjust to match your provider if different. |
+| `experimental_drop_on_overflow` | `false` | See [Header size limits and truncation](#header-size-limits-and-truncation). Experimental—may change or be removed in a future release. |
+
+## Header size limits and truncation
+
+CDNs cap how large a tag-purge header can be (`max_bytes`, 16 KB by default, matching Cloudflare's limit). When a response's full set of labels would exceed that limit, the router packs the header **coarsest-first**—every `subgraph-` label, then every `type-` label, then as many exact tags as still fit—and drops whatever doesn't fit, finest-grained first. This means an oversized response still gets a usable header: you keep the ability to invalidate broadly (by subgraph or type) even when there wasn't room for every fine-grained tag.
+
+If you'd rather not cache data at all when its tag set couldn't fully fit—rather than caching it with a partial header—set `experimental_drop_on_overflow: true`. When truncation would otherwise occur, the router omits the header entirely instead of sending a partial one. This doesn't affect the `Cache-Control` header on its own, so the response would still be cached at the CDN as-is; the option is only useful paired with a CDN-side rule that inspects the header's absence and forces the response to bypass cache instead. This option is experimental and may change in a future release.
+
+### Wiring the missing-header signal to cache bypass
+
+`experimental_drop_on_overflow` only does half the job—the router omits the header, but something on the CDN side still has to notice that and refuse to cache the response. Without that second piece, this option only suppresses the header; it does not, by itself, stop the CDN from caching data you'd have no way to invalidate.
+
+The rule you need has this general shape, regardless of provider:
+
+- **Condition**: the response does not have a `Cache-Tag` header (match on header *absence*, not a specific value).
+- **Action**: override the `Cache-Control` response header to `no-store` (or otherwise mark the response as bypass-cache) before the CDN makes its own cache-eligibility decision.
+
+Cloudflare and Fastly both support conditioning cache behavior on response headers (Cloudflare's response-header-based cache rules; Fastly via a VCL snippet in `vcl_deliver` checking for the absence of `Surrogate-Key` or your configured `header_name`), but the exact product/rule type and UI change over time and by plan tier. Check your provider's current cache-rules documentation for the specific steps, and scope whatever rule you write to the routes/hosts your router serves so it doesn't affect other origins behind the same zone.
+
+## Relationship to Redis invalidation
+
+CDN invalidation is independent of the router's Redis-backed invalidation indexes (the `subgraph`/`type`/`cache_tag` [indexes](/router/performance/caching/response-caching/invalidation#tune-which-invalidation-indexes-are-maintained)). Specifically:
+
+- The labels the router sources for the CDN header come from the same schema `@cacheTag` directives and `apolloCacheTags`/`apolloEntityCacheTags` extensions used for Redis invalidation, but computing and emitting them doesn't require any Redis invalidation index to be enabled.
+- This holds on a cache **hit** as well as a miss: labels are persisted alongside cached entries specifically so the header stays complete for cached data on later requests, whether or not you've enabled the Redis `cache_tag` index for that subgraph.
+
+In short, you can enable `cdn_invalidation` without touching your `indexes` configuration at all, and vice versa—turn on Redis's `cache_tag`/`type`/`subgraph` indexes for `/invalidation` requests without ever enabling the CDN header. Configure each independently based on which invalidation surfaces (Redis, CDN, or both) you actually use.
+
+## Metrics
+
+Three metrics track header emission; see [Response Cache Observability](/router/performance/caching/response-caching/observability#metrics) for the full metrics reference, including how to interpret `cdn_tag_header.outcome`'s labels and use `cdn_tag_header.untruncated_size_bytes` to see how close you are to `max_bytes` before truncation starts happening.
+
+## Debugging
+
+With `response_cache.debug: true`, the [cache debugger](/router/performance/caching/response-caching/observability#cache-debugger) shows the exact `subgraph-`/`type-`/tag labels for each cache entry, plus response-level info for the actual `Cache-Tag` header sent: its outcome, its value, its untruncated size, and whether it was actually emitted.
