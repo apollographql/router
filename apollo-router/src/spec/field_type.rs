@@ -5,6 +5,7 @@ use serde::Serialize;
 use serde::de::Error as _;
 
 use super::query::parse_hir_value;
+use crate::configuration::mode::Mode;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::spec::Schema;
@@ -123,16 +124,17 @@ fn validate_input_value(
     value: Option<&Value>,
     schema: &Schema,
     path: &JsonValuePath<'_>,
+    strict_variable_validation: Mode,
 ) -> Result<(), InvalidInputValue> {
-    let fmt_path = || match path {
-        JsonValuePath::Variable { .. } => format!("variable `{path}`"),
-        _ => format!("input value at `{path}`"),
+    let fmt_path = |var_path: &JsonValuePath<'_>| match var_path {
+        JsonValuePath::Variable { .. } => format!("variable `{var_path}`"),
+        _ => format!("input value at `{var_path}`"),
     };
     let Some(value) = value else {
         if ty.is_non_null() {
             return Err(InvalidInputValue(format!(
                 "missing {}: for required GraphQL type `{ty}`",
-                fmt_path(),
+                fmt_path(path),
             )));
         } else {
             return Ok(());
@@ -141,7 +143,7 @@ fn validate_input_value(
     let invalid = || {
         InvalidInputValue(format!(
             "invalid {}: found JSON {} for GraphQL type `{ty}`",
-            fmt_path(),
+            fmt_path(path),
             describe_json_value(value)
         ))
     };
@@ -161,12 +163,24 @@ fn validate_input_value(
                         index: i,
                         parent: path,
                     };
-                    validate_input_value(inner_type, Some(x), schema, &path)?
+                    validate_input_value(
+                        inner_type,
+                        Some(x),
+                        schema,
+                        &path,
+                        strict_variable_validation,
+                    )?
                 }
                 return Ok(());
             } else {
                 // For coercion from single value to list
-                return validate_input_value(inner_type, Some(value), schema, path);
+                return validate_input_value(
+                    inner_type,
+                    Some(value),
+                    schema,
+                    path,
+                    strict_variable_validation,
+                );
             }
         }
     };
@@ -190,10 +204,13 @@ fn validate_input_value(
         _ => {}
     }
     let type_def = schema
-        .supergraph_schema()
+        .api_schema()
         .types
         .get(type_name)
-        // Should never happen in a valid schema
+        // Missing from the API schema: either an invalid schema, or the type is
+        // entirely `@inaccessible`. Either way, treat it like any other invalid value
+        // rather than falling back to the supergraph schema, which would leak
+        // `@inaccessible` structure to the client.
         .ok_or_else(invalid)?;
     match (type_def, value) {
         // Custom scalar: accept any JSON value
@@ -205,7 +222,57 @@ fn validate_input_value(
         (schema::ExtendedType::Enum(_), _) => Err(invalid()),
 
         (schema::ExtendedType::InputObject(def), Value::Object(obj)) => {
-            // TODO: check keys in `obj` but not in `def.fields`?
+            // Extract the supergraph type definition so we can distinguish between unknown and inaccessible inputs
+            let supergraph_type_def_fields = schema
+                .supergraph_schema()
+                .types
+                .get(type_name)
+                .ok_or_else(invalid)?
+                .as_input_object()
+                .map(|x| &x.fields);
+
+            // Check for extra/unknown fields in obj vs def
+            let unknown_field = |field_name| {
+                let path_string = JsonValuePath::ObjectKey {
+                    key: field_name,
+                    parent: path,
+                };
+                InvalidInputValue(format!(
+                    "unknown field {} found for GraphQL type `{ty}`",
+                    fmt_path(&path_string),
+                ))
+            };
+
+            let unknown_input_fields_iter = obj
+                .keys()
+                .map(|k| k.as_str())
+                // filter to fields which are not present in the API schema
+                .filter(|&k| !def.fields.contains_key(k));
+
+            let mut unknown_input_fields = Vec::new();
+
+            for input_field in unknown_input_fields_iter {
+                let present_in_supergraph_schema =
+                    supergraph_type_def_fields.is_some_and(|f| f.contains_key(input_field));
+
+                // outright reject fields which are present_in_supergraph_schema and NOT present in API schema - those are @inaccessible
+                if present_in_supergraph_schema {
+                    return Err(unknown_field(input_field));
+                }
+
+                // if not present in supergraph schema, the field is entirely unknown - respect the strict_variable_validation setting
+                match strict_variable_validation {
+                    Mode::Enforce => return Err(unknown_field(input_field)),
+                    Mode::Measure => unknown_input_fields.push(input_field.to_string()),
+                }
+            }
+
+            if !unknown_input_fields.is_empty() {
+                // NB: warning will be attached to the span via trace id, so you can figure out
+                //  operation name from parent span
+                tracing::warn!(variables = ?unknown_input_fields, "encountered unexpected variable(s)");
+            }
+
             def.fields.values().try_for_each(|field| {
                 let path = JsonValuePath::ObjectKey {
                     key: &field.name,
@@ -217,9 +284,21 @@ fn validate_input_value(
                             .default_value
                             .as_ref()
                             .and_then(|v| parse_hir_value(v));
-                        validate_input_value(&field.ty, default.as_ref(), schema, &path)
+                        validate_input_value(
+                            &field.ty,
+                            default.as_ref(),
+                            schema,
+                            &path,
+                            strict_variable_validation,
+                        )
                     }
-                    value => validate_input_value(&field.ty, value, schema, &path),
+                    value => validate_input_value(
+                        &field.ty,
+                        value,
+                        schema,
+                        &path,
+                        strict_variable_validation,
+                    ),
                 }
             })
         }
@@ -239,8 +318,9 @@ impl FieldType {
         value: Option<&Value>,
         schema: &Schema,
         path: &JsonValuePath<'_>,
+        strict_variable_validation: Mode,
     ) -> Result<(), InvalidInputValue> {
-        validate_input_value(&self.0, value, schema, path)
+        validate_input_value(&self.0, value, schema, path, strict_variable_validation)
     }
 
     pub(crate) fn is_non_null(&self) -> bool {

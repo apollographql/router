@@ -2,6 +2,75 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.10.5] - 2026-07-20
+
+## 🐛 Fixes
+
+### Fix input-object and enum variable coercion to respect the API schema
+
+Variable coercion validated input-object fields and enum values against the internal supergraph schema rather than the client-facing API schema, so a variable could reference an `@inaccessible` field or enum value even though the same reference would be rejected in the operation document itself. Variable coercion now validates against the API schema, consistent with how operation documents are already validated.
+
+Separately, an input-object variable with a field that isn't defined on the corresponding input type previously passed validation. The router now rejects such variables by default. This can be relaxed with the `supergraph.strict_variable_validation` option, which logs the unknown field(s) instead of rejecting the request when set to `measure`:
+
+```yaml
+supergraph:
+  strict_variable_validation: measure # default: enforce
+```
+
+By [@carodewig](https://github.com/carodewig)
+
+### Update operation validation to enforce unique `@defer` labels
+
+The query planner now rejects operations that reuse a `@defer` label, so labels are unique within an operation.
+
+By [@duckki](https://github.com/duckki)
+
+### Treat list sizes as non-negative in demand control cost estimation
+
+Demand control now bounds the list sizes it uses when estimating operation cost. Slicing-argument values (for example `first`) provided as negative integers are clamped to zero, and configured `list_size` defaults use a saturating conversion so that very large values cannot wrap. This keeps an operation's estimated cost from being computed lower than the work it represents.
+
+By [@abernix](https://github.com/abernix)
+
+### Enforce `http_max_request_bytes` on GraphQL queries sent via HTTP GET
+
+The router's `limits.http_max_request_bytes` setting previously only limited the size of the HTTP request body, so it had no effect on GraphQL-over-HTTP GET requests, which carry the query in the URL's query string instead of the body. In environments with a strict `http_max_request_bytes` configured, this allowed the limit to be bypassed by sending a GET request instead of a POST.
+
+GET requests are now checked against the same `http_max_request_bytes` limit, measured against the byte length of the URI's query string, and rejected with a 414 (URI Too Long) response if it's exceeded.
+
+Note that this measures the percent-encoded query string, which is larger than the same query's byte count in a compact POST JSON body (URL encoding can expand some characters to 3 bytes each). A query that fits under the limit as a POST body may need a slightly higher limit to also fit as a GET query string.
+
+By [@carodewig](https://github.com/carodewig)
+
+### Reject JWTs that omit the `iss` claim when a JWKS entry configures an `issuers` allowlist
+
+When a JWKS entry is configured with an `issuers` allowlist, the router now rejects a validly-signed JWT that omits its `iss` claim (or sets it to `null`), instead of accepting it. Previously a token could sidestep the allowlist by not carrying an issuer at all, even though a token presenting a non-matching issuer was already rejected.
+
+By [@carodewig](https://github.com/carodewig)
+
+### Enforce a kid-specific JWKS entry's constraints instead of falling through to a less-specific entry
+
+When two JWKS entries shared the same key material — one kid-specific and constrained by `issuer`/`audience`, the other algorithm-only and unconstrained — a token that should have been rejected by the constrained entry could be accepted through the unconstrained one. When searching for a key, a kid match and an algorithm match each scored equally, so a kid-specific entry (matched on kid only) and an alg-only entry (matched on algorithm only) tied and were both returned as candidates. Validation then verified the signature against the constrained entry, failed its issuer/audience check, and fell through to the unconstrained entry, which accepted the token.
+
+When a token's key ID (`kid`) matches one or more JWKS entries, only those matching entries are now considered, and each is validated in turn. A token can no longer be accepted by falling through to an entry whose `kid` it never matched. Entries that share key material under the same `kid` but carry different constraints — for example, the same key duplicated across a multi-tenant identity provider — are all still tried, so legitimate multi-entry setups continue to work.
+
+By [@carodewig](https://github.com/carodewig)
+
+### Reject oversized `sha256Hash` values before hex-decoding in APQ
+
+The Automatic Persisted Queries (APQ) layer decoded the client-supplied `sha256Hash` extension value with `hex::decode` before checking its length. A valid SHA-256 hash is always exactly 64 hex characters; a request with an arbitrarily large `sha256Hash` string (megabytes of valid hex) would still be hex-decoded in full, allocating memory and burning CPU proportional to the attacker-controlled input size before any comparison against the actual query hash occurred.
+
+The router now rejects any `sha256Hash` whose length is not exactly 64 characters immediately, before attempting to decode it. This matches existing behavior for other malformed hashes: the request falls through to the normal `PERSISTED_QUERY_NOT_FOUND` response.
+
+By [@carodewig](https://github.com/carodewig)
+
+### Respect the persisted-query client-name scope in freeform safelist matching
+
+Body-based (freeform) persisted-query safelist matching previously ignored the `clientName` scope declared in the PQ manifest, so an operation registered for one client was accepted for any client. Freeform matching now respects the manifest's client-name scope — trying the request's client name first and falling back to a client-agnostic entry — consistent with how ID-based lookup already behaves. Note that `clientName` is a self-reported, unauthenticated header and is not an authorization boundary.
+
+By [@carodewig](https://github.com/carodewig)
+
+
+
 # [2.10.4] - 2026-06-02
 
 ## 🐛 Fixes

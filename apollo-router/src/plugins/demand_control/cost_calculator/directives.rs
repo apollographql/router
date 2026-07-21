@@ -50,8 +50,11 @@ impl<'schema> ListSizeDirective<'schema> {
             // First, collect the default values for each argument
             for argument in &field.definition.arguments {
                 if slicing_argument_names.contains(argument.name.as_str())
-                    && let Some(numeric_value) =
-                        argument.default_value.as_ref().and_then(|v| v.to_i32())
+                    && let Some(numeric_value) = argument
+                        .default_value
+                        .as_ref()
+                        .and_then(|v| v.to_i32())
+                        .map(|n| n.max(0))
                 {
                     slicing_arguments.insert(&argument.name, numeric_value);
                 }
@@ -59,13 +62,13 @@ impl<'schema> ListSizeDirective<'schema> {
             // Then, overwrite any default values with the actual values passed in the query
             for argument in &field.arguments {
                 if slicing_argument_names.contains(argument.name.as_str()) {
-                    if let Some(numeric_value) = argument.value.to_i32() {
+                    if let Some(numeric_value) = argument.value.to_i32().map(|n| n.max(0)) {
                         slicing_arguments.insert(&argument.name, numeric_value);
                     } else if let Some(numeric_value) = argument
                         .value
                         .as_variable()
                         .and_then(|variable_name| variables.get(variable_name.as_str()))
-                        .and_then(|variable| variable.as_i32())
+                        .and_then(|variable| variable.as_i32().map(|n| n.max(0)))
                     {
                         slicing_arguments.insert(&argument.name, numeric_value);
                     }

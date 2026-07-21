@@ -19,6 +19,7 @@ use reqwest::Client;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -580,30 +581,53 @@ fn authenticate(
             }
         };
 
-        if let Some(configured_issuers) = issuers
-            && let Some(token_issuer) = token_data
-                .claims
-                .as_object()
-                .and_then(|o| o.get("iss"))
-                .and_then(|value| value.as_str())
-            && !configured_issuers.contains(token_issuer)
-        {
-            let mut issuers_for_error: Vec<String> = configured_issuers.into_iter().collect();
-            issuers_for_error.sort(); // done to maintain consistent ordering in error message
-            return failure_message(
-                request,
-                config,
-                AuthenticationError::InvalidIssuer {
-                    expected: issuers_for_error
-                        .iter()
-                        .map(|issuer| issuer.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    token: token_issuer.to_string(),
-                },
-                StatusCode::INTERNAL_SERVER_ERROR,
-                source_of_extracted_jwt,
-            );
+        if let Some(configured_issuers) = issuers {
+            let maybe_token_issuer = token_data.claims.as_object().and_then(|o| o.get("iss"));
+
+            // if the issuer is empty, null, or not a string, reject it
+            let token_issuer = match maybe_token_issuer {
+                Some(Value::String(token_issuer)) => token_issuer,
+                _ => {
+                    let mut issuers_for_error: Vec<String> =
+                        configured_issuers.into_iter().collect();
+                    issuers_for_error.sort(); // done to maintain consistent ordering in error message
+                    return failure_message(
+                        request,
+                        config,
+                        AuthenticationError::InvalidIssuer {
+                            expected: issuers_for_error
+                                .iter()
+                                .map(|issuer| issuer.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            token: maybe_token_issuer
+                                .map(|x| x.to_string())
+                                .unwrap_or_else(|| "<none>".to_string()),
+                        },
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        source_of_extracted_jwt,
+                    );
+                }
+            };
+
+            if !configured_issuers.contains(token_issuer) {
+                let mut issuers_for_error: Vec<String> = configured_issuers.into_iter().collect();
+                issuers_for_error.sort(); // done to maintain consistent ordering in error message
+                return failure_message(
+                    request,
+                    config,
+                    AuthenticationError::InvalidIssuer {
+                        expected: issuers_for_error
+                            .iter()
+                            .map(|issuer| issuer.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        token: token_issuer.to_string(),
+                    },
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    source_of_extracted_jwt,
+                );
+            };
         }
 
         if let Some(configured_audiences) = audiences {
