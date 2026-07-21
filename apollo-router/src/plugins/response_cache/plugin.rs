@@ -1367,6 +1367,7 @@ impl CacheService {
                     private_id,
                     debug_subgraph_request,
                     self.indexes.clone(),
+                    self.cdn_invalidation_enabled,
                 )
                 .await?;
 
@@ -2021,6 +2022,7 @@ async fn cache_store_entities_from_response(
     // Only Some if debug is enabled
     subgraph_request: Option<graphql::Request>,
     indexes: Arc<InvalidationIndexes>,
+    cdn_invalidation_enabled: bool,
 ) -> Result<(), BoxError> {
     let mut data = response.response.body_mut().data.take();
 
@@ -2082,6 +2084,7 @@ async fn cache_store_entities_from_response(
             response.context.clone(),
             subgraph_request,
             indexes,
+            cdn_invalidation_enabled,
         )
         .await?;
 
@@ -2781,6 +2784,7 @@ async fn insert_entities_in_result(
     // Only Some if debug is enabled
     subgraph_request: Option<graphql::Request>,
     indexes: Arc<InvalidationIndexes>,
+    cdn_invalidation_enabled: bool,
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
     let ttl = cache_control
         .ttl()
@@ -2853,9 +2857,9 @@ async fn insert_entities_in_result(
                 }
 
                 // Per-entity cache tags from the subgraph's `apolloEntityCacheTags` extension.
-                // Gated on the CacheTag index being active.
-                // FIXME: shouldn't be gated on indexes?
-                if indexes.is_enabled(IndexMode::CacheTag)
+                // The Redis per-tag index and the CDN header aggregator are independent
+                // consumers; each gates on its own concern below rather than sharing one.
+                if (indexes.is_enabled(IndexMode::CacheTag) || cdn_invalidation_enabled)
                     && let Some(Value::Array(keys)) = specific_surrogate_keys
                 {
                     let entity_tags: Vec<String> = keys
@@ -2865,12 +2869,17 @@ async fn insert_entities_in_result(
                         .collect();
 
                     if !entity_tags.is_empty() {
-                        // TODO: error handling
-                        InvalidationLabels::get_or_create(&context)
-                            .add_tags(entity_tags.clone())
-                            .unwrap();
+                        if cdn_invalidation_enabled {
+                            // TODO: error handling
+                            InvalidationLabels::get_or_create(&context)
+                                .add_tags(entity_tags.clone())
+                                .unwrap();
+                        }
+
+                        if indexes.is_enabled(IndexMode::CacheTag) {
+                            cache_tags.extend(entity_tags.into_iter().map(CacheTag::Tag));
+                        }
                     }
-                    cache_tags.extend(entity_tags.into_iter().map(CacheTag::Tag));
                 }
 
                 // Prepend the whole-subgraph index entry when active. The by-type and per-tag
