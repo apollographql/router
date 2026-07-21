@@ -1203,8 +1203,9 @@ impl CacheService {
                         )
                         .unwrap();
 
-                    // TODO: figure out why we're doing this? are we keeping two sets of tags in
-                    // two different locations? why not just reuse the invalidationlabels?
+                    // `cache_tags` feeds the intermediate result on cache misses which gets ZADDed for redis;
+                    // it's not part of the CDN-invalidation path; each sink below applies its own gate
+                    // independently rather than sharing one.
                     cache_tags.extend(extension_tag_strings.into_iter().map(CacheTag::Tag));
                 }
                 save_original_cache_control(
@@ -1496,12 +1497,12 @@ async fn cache_lookup_root(
     // consumers can want them (the Redis per-tag index, gated on `IndexMode::CacheTag`; the CDN
     // `Cache-Tag` header aggregator, gated on `cdn_invalidation_enabled`) — only skip the work
     // when neither does.
-    let invalidation_cache_keys = if indexes.is_enabled(IndexMode::CacheTag) || cdn_invalidation_enabled
-    {
-        get_invalidation_root_keys_from_schema(&request, subgraph_enums, supergraph_schema)?
-    } else {
-        HashSet::new()
-    };
+    let invalidation_cache_keys =
+        if indexes.is_enabled(IndexMode::CacheTag) || cdn_invalidation_enabled {
+            get_invalidation_root_keys_from_schema(&request, subgraph_enums, supergraph_schema)?
+        } else {
+            HashSet::new()
+        };
     let body = request.subgraph_request.body_mut();
     body.variables.sort_keys();
 
@@ -1606,11 +1607,9 @@ async fn cache_lookup_root(
                 // Surface the cache tags persisted with the entry so the supergraph response
                 // aggregator can reflect this hit. Done before the response builder consumes
                 // the request context.
-                // TODO: Figure out if this is necessary; do we have two distinct ways of tracking
-                // invalidation labels? why not just one on context, why cacheentry at all?
                 if let Some(invalidation_labels) = value.invalidation_labels {
-                    // TODO: determine if the value.invalidation_labels has all the necessary
-                    // fields
+                    // backfill the subgraph and type--the CacheEntry doesn't store those, just the
+                    // previous invalidation labels
                     // TODO: error handling
                     InvalidationLabels::get_or_create(&request.context)
                         // TODO: error handling
@@ -1952,10 +1951,9 @@ async fn cache_lookup_entities(
                         hashed_private_id: private_id.map(ToString::to_string),
                         invalidation_keys: cache_entry
                             .invalidation_labels
-                            // TODO: necessary?
-                            .clone()
-                            .unwrap_or_default()
-                            .user_facing_only(),
+                            .as_ref()
+                            .map(|labels| labels.user_facing_only())
+                            .unwrap_or_default(),
                         kind: CacheEntryKind::Entity {
                             typename: ir.typename.clone(),
                             entity_key: ir.entity_key.clone().unwrap_or_default(),
@@ -2300,10 +2298,6 @@ fn extract_cache_keys(
             cache_tags.push(CacheTag::Type(typename.to_string()));
         }
 
-        // TODO: are these tags? types? what? document and make sure that we're saving them
-        // properly to the right HashSet in InvalidationLabels
-        // TODO: bettername to represent what this actually is
-        //
         // Skip the schema traversal entirely when nothing would consume its result: the Redis
         // per-tag index (`IndexMode::CacheTag`) and the CDN `Cache-Tag` header aggregator
         // (`cdn_invalidation_enabled`) are independent consumers — mirrors the same gate in
