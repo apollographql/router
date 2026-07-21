@@ -2092,7 +2092,7 @@ mod issuer_validation {
     // asserts it is rejected when an issuers allowlist is configured.
     #[test]
     fn it_rejects_jwt_with_absent_iss_claim() {
-        let signing_key = SigningKey::random(&mut OsRng);
+        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let manager = make_manager(&jwk(&signing_key), Some(["hello".to_string()].into()), None);
 
         let token_claims = serde_json::json!({
