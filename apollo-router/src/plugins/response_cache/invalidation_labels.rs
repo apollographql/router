@@ -79,7 +79,6 @@ impl InvalidationLabels {
     }
 
     // WARN: this removes the sorting behavior
-    // TODO: test this thoroughly
     fn build_header(&self, config: &CdnInvalidationConfig) -> Option<String> {
         let mut included: Vec<&str> = Vec::new();
         let mut current_len = 0usize;
@@ -191,8 +190,10 @@ impl InvalidationLabels {
         match HeaderValue::from_str(&header) {
             Ok(invalidation_labels) => {
                 headers.insert(header_name, invalidation_labels);
+                // Deliberately doesn't log the header value itself: it's built per response and
+                // can be up to `max_bytes` (16kb by default), so logging it at debug level on
+                // every response would be noisy and costly at volume.
                 tracing::debug!("response_cache emitted aggregated cache-tag header");
-                // TODO: decide on whether to emit the full header (might be large--per req)
             }
             Err(err) => {
                 tracing::warn!(
@@ -345,6 +346,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::metrics::FutureMetricsExt;
 
     fn cdn_config(overrides: impl FnOnce(&mut CdnInvalidationConfig)) -> CdnInvalidationConfig {
         let mut config = CdnInvalidationConfig::default();
@@ -690,6 +692,24 @@ mod tests {
         assert!(headers.is_empty());
     }
 
+    #[test]
+    fn maybe_emit_header_skips_on_invalid_header_value() {
+        // A CR/LF pair is not legal inside an HTTP header value, so the joined header string
+        // fails `HeaderValue::from_str` even though every individual tag is a well-formed
+        // `String` — this is the `invalid_header_value` sibling of
+        // `maybe_emit_header_skips_on_invalid_header_name` above, which covers the header *name*
+        // side of the same fallibility.
+        let labels = InvalidationLabels {
+            tags: HashSet::from(["bad\r\ntag".to_string()]),
+            ..Default::default()
+        };
+        let mut headers = http::HeaderMap::new();
+
+        labels.maybe_emit_header(&mut headers, &cdn_config(|_| {}));
+
+        assert!(headers.is_empty());
+    }
+
     #[rstest]
     #[case::empty(HashSet::new(), HashSet::new())]
     #[case::one_subgraph(
@@ -979,5 +999,162 @@ mod tests {
                 );
             }
         }
+    }
+
+    // Every `maybe_emit_header`/`build_header` test above asserts on the resulting HTTP header;
+    // none of them checks the telemetry `build_header` also records on every branch. These pin
+    // down that the `cdn_tag_header.outcome` counter fires with the right label for each
+    // possible outcome — the observable an SRE would actually alert on, distinct from (and
+    // untested by) the header content itself.
+    #[rstest]
+    #[case::empty(InvalidationLabels::default(), 16384, false, "empty")]
+    #[case::complete_without_truncation(
+        InvalidationLabels { tags: HashSet::from(["homepage".to_string()]), ..Default::default() },
+        16384,
+        false,
+        "complete_without_truncation",
+    )]
+    #[case::complete_with_truncation(
+        InvalidationLabels {
+            subgraphs: HashSet::from(["aaa".to_string(), "bbb".to_string()]),
+            types: HashSet::from([("ccc".to_string(), "ddd".to_string()), ("eee".to_string(), "fff".to_string())]),
+            tags: HashSet::from(["ggg".to_string(), "hhh".to_string(), "iii".to_string(), "jjj".to_string()]),
+            ..Default::default()
+        },
+        54,
+        false,
+        "complete_with_truncation",
+    )]
+    #[case::dropped_due_to_overflow(
+        InvalidationLabels {
+            subgraphs: HashSet::from(["aaa".to_string(), "bbb".to_string()]),
+            types: HashSet::from([("ccc".to_string(), "ddd".to_string()), ("eee".to_string(), "fff".to_string())]),
+            tags: HashSet::from(["ggg".to_string(), "hhh".to_string(), "iii".to_string(), "jjj".to_string()]),
+            ..Default::default()
+        },
+        54,
+        true,
+        "dropped_due_to_overflow",
+    )]
+    #[tokio::test]
+    async fn maybe_emit_header_records_outcome_metric_per_branch(
+        #[case] labels: InvalidationLabels,
+        #[case] max_bytes: usize,
+        #[case] drop_on_overflow: bool,
+        #[case] expected_outcome: &'static str,
+    ) {
+        async move {
+            let mut headers = http::HeaderMap::new();
+            labels.maybe_emit_header(
+                &mut headers,
+                &cdn_config(|c| {
+                    c.max_bytes = max_bytes;
+                    c.experimental_drop_on_overflow = drop_on_overflow;
+                }),
+            );
+
+            assert_counter!(
+                "apollo.router.operations.response_cache.cdn_tag_header.outcome",
+                1u64,
+                "outcome" = expected_outcome
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    // The `Empty` outcome returns before `record_cdn_tag_header_untruncated_size` is ever
+    // called, so it's the one case that must NOT record this histogram at all — covered as the
+    // `None` case below alongside the two truncating/non-truncating cases that must.
+    #[rstest]
+    #[case::empty(InvalidationLabels::default(), None)]
+    #[case::single_tag_no_truncation(
+        InvalidationLabels { tags: HashSet::from(["homepage".to_string()]), ..Default::default() },
+        // "homepage" is 8 bytes; join() with a single element adds no delimiter.
+        Some(8u64),
+    )]
+    #[tokio::test]
+    async fn maybe_emit_header_records_untruncated_size_histogram_iff_any_labels(
+        #[case] labels: InvalidationLabels,
+        #[case] expected_bytes: Option<u64>,
+    ) {
+        async move {
+            let mut headers = http::HeaderMap::new();
+            labels.maybe_emit_header(&mut headers, &cdn_config(|_| {}));
+
+            match expected_bytes {
+                Some(bytes) => {
+                    assert_histogram_sum!(
+                        "apollo.router.operations.response_cache.cdn_tag_header.untruncated_size_bytes",
+                        bytes
+                    );
+                }
+                None => {
+                    assert_histogram_not_exists!(
+                        "apollo.router.operations.response_cache.cdn_tag_header.untruncated_size_bytes",
+                        u64
+                    );
+                }
+            }
+        }
+        .with_metrics()
+        .await;
+    }
+
+    // Records the untruncated size even when the header ends up truncated — this is what lets
+    // the histogram answer "how much headroom do we have before truncation kicks in," not just
+    // "how big was the final header."
+    #[tokio::test]
+    async fn maybe_emit_header_records_untruncated_size_even_when_truncated() {
+        async move {
+            let labels = InvalidationLabels {
+                tags: HashSet::from(["aaaaaaaaaa".to_string(), "bbbbbbbbbb".to_string()]),
+                ..Default::default()
+            };
+            let mut headers = http::HeaderMap::new();
+
+            // Both 10-byte tags plus a 1-byte delimiter = 21 bytes untruncated; max_bytes=15
+            // forces the second to be dropped.
+            labels.maybe_emit_header(&mut headers, &cdn_config(|c| c.max_bytes = 15));
+
+            assert_histogram_sum!(
+                "apollo.router.operations.response_cache.cdn_tag_header.untruncated_size_bytes",
+                21u64
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[rstest]
+    #[case::invalid_header_name("invalid header", "homepage", "invalid_header_name")]
+    #[case::invalid_header_value("Cache-Tag", "bad\r\ntag", "invalid_header_value")]
+    #[tokio::test]
+    async fn maybe_emit_header_records_error_metric_on_failure(
+        #[case] header_name: &'static str,
+        #[case] tag: &'static str,
+        #[case] expected_reason: &'static str,
+    ) {
+        async move {
+            let labels = InvalidationLabels {
+                tags: HashSet::from([tag.to_string()]),
+                ..Default::default()
+            };
+            let mut headers = http::HeaderMap::new();
+
+            labels.maybe_emit_header(
+                &mut headers,
+                &cdn_config(|c| c.header_name = header_name.to_string()),
+            );
+
+            assert!(headers.is_empty());
+            assert_counter!(
+                "apollo.router.operations.response_cache.cdn_tag_header.error",
+                1u64,
+                "reason" = expected_reason
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }
