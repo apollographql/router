@@ -309,6 +309,40 @@ key-fields are both already validated); its distance is the descriptor-threading
 plumbing through the executor. That is a real, higher-blast-radius chunk, but a
 *known* one — not a research risk.
 
+#### 3a / 3b landed — entity dispatch proven at the `make_requests` level
+
+Two increments make the above concrete in real router code:
+
+- **3a — `entities_from_source_aware`** (`make_requests.rs`): builds entity
+  `ResponseKey`s from a **plain supergraph entity selection** (the shape a
+  source-aware fetch node carries) plus representations, with **no synthetic
+  `_entities` operation**. The representation→`RequestInputs` mapping is
+  byte-identical to `entities_from_request`; only the selection's *source*
+  shifts. Tested on `{ user(id:"1") { field } }`.
+- **3b — end-to-end through the real request path**: those keys run through the
+  production `request_params_to_requests`/`make_request` and produce the
+  connector's actual HTTP requests — `GET /users/1`, `GET /users/2` — with each
+  representation's key substituted into the `/users/{$this.id}` template. This
+  is the entity-class analogue of the root-field Slice 2.
+
+So **both connector classes now dispatch end-to-end through real router
+execution code**, source-aware, with no expansion and no synthetic operation.
+
+3b also surfaced a concrete detail: URL-template variable resolution requires
+`request_variable_keys` to declare the referenced namespace/keys (`This → {id}`)
+— the request merger only surfaces *declared* references. In production that is
+derived from the connector's variable references, which is exactly what the
+descriptor's Spike-A `inputs` classification already captures — the planner-side
+classification and the executor-side merge close the loop.
+
+**What is still unbuilt** (the genuinely large, core-execution chunk): the
+*execution-flow* wiring *above* `make_requests` — a source-aware fetch node that
+carries the descriptor, and the query-plan executor building `representations`
+from parent data via the entering-edge condition (the Flatten step) before
+calling the source-aware entity path. 3a/3b prove the `make_requests` layer;
+this is the layer above it, and it touches core query-plan execution across the
+crate boundary.
+
 ## Honest verdict
 
 The spike answers "how far off": **the graph-*data* problems are largely solved
@@ -317,13 +351,15 @@ supergraph is already most of a query graph, and connector conditions derive
 cleanly.** The distance that remains is the same distance that has always been
 the hard part: **planner traversal + the router fetch executor over a
 non-expanded topology**. Planner traversal turned out largely already-working
-(corpus-backed above). The fetch executor is no longer entirely untouched: the
-**root-field class now dispatches through real router code** (Slice 2), and
-probing the **entity class** showed its remaining distance is descriptor-
-threading *plumbing* through the executor, not unproven algorithm (Slice 3
-analysis) — a known, higher-blast-radius chunk rather than a research risk.
-What is still genuinely unbuilt and multi-quarter: that entity-path executor
-plumbing end-to-end, and **composition-side satisfiability** (Phase 2), which
-this spike has not touched at all. The parity harness (Spike B, corpus-ready)
+(corpus-backed above). The fetch executor is no longer untouched: **both connector classes —
+root-field (Slice 2) and entity (Slices 3a/3b) — now dispatch end-to-end
+through real router execution code**, source-aware, producing the connectors'
+actual HTTP requests with no expansion and no synthetic `_entities` operation.
+That proves the `make_requests` layer. What is still genuinely unbuilt and
+multi-quarter: the *execution-flow* wiring above it — a source-aware fetch node
+carrying the descriptor, and the query-plan executor building representations
+from parent data via the entering-edge condition (the Flatten step) — and
+**composition-side satisfiability** (Phase 2), which this spike has not touched
+at all. The parity harness (Spike B, corpus-ready)
 remains in place to measure progress the moment a full source-aware plan
 executes.

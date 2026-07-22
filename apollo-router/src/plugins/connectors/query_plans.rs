@@ -158,12 +158,12 @@ mod tests {
     use apollo_compiler::Name;
     use apollo_compiler::Schema;
     use apollo_compiler::name;
-    use indexmap::IndexMap;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use indexmap::IndexMap;
 
     use super::*;
 

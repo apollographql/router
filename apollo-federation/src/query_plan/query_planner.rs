@@ -1633,6 +1633,92 @@ type User
         }
     }
 
+    /// RECEIPT for the "(A) raw-graph plans already carry standard `_entities`
+    /// operations" claim. Plans a cross-source entity query over the raw,
+    /// non-expanded steelthread graph and prints the full plan text so the
+    /// connector entity fetch's operation is visible. If it contains
+    /// `_entities(representations:` then the existing router `entities_from_request`
+    /// path handles raw-graph entity fetches as-is — no source-aware entity-key
+    /// rework is needed for the raw-graph architecture.
+    ///
+    /// Run: `cargo test -p apollo-federation dump_raw_graph_entity_plan -- --nocapture`
+    #[test]
+    fn dump_raw_graph_entity_plan() {
+        use apollo_compiler::ExecutableDocument;
+
+        use crate::ApiSchemaOptions;
+        use crate::Supergraph;
+        use crate::query_graph::build_federated_query_graph;
+
+        let sdl = include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
+        let supergraph = Supergraph::new_with_router_specs(sdl).unwrap();
+        let api = supergraph.to_api_schema(ApiSchemaOptions::default()).unwrap();
+        let graph = build_federated_query_graph(
+            supergraph.schema.clone(),
+            api.clone(),
+            Some(false),
+            Some(true),
+        )
+        .unwrap();
+        let planner = QueryPlanner::from_query_graph(
+            QueryPlannerConfig::default(),
+            graph,
+            supergraph.schema.clone(),
+            api.clone(),
+        )
+        .unwrap();
+
+        // The plan's own Display renders entity fetches as `{inputs} => {outputs}`,
+        // not the literal `_entities(...)` string — so inspect each fetch's actual
+        // `operation_document` instead, which is what the router parses.
+        use crate::query_plan::PlanNode;
+        use crate::query_plan::TopLevelPlanNode;
+        fn collect(node: &PlanNode, out: &mut Vec<(String, String)>) {
+            match node {
+                PlanNode::Fetch(f) => {
+                    out.push((f.subgraph_name.to_string(), f.operation_document.to_string()))
+                }
+                PlanNode::Sequence(s) => s.nodes.iter().for_each(|n| collect(n, out)),
+                PlanNode::Parallel(p) => p.nodes.iter().for_each(|n| collect(n, out)),
+                PlanNode::Flatten(fl) => collect(&fl.node, out),
+                PlanNode::Defer(_) | PlanNode::Condition(_) => {}
+            }
+        }
+
+        for q in [
+            "{ user(id: \"1\") { c } }",      // cross-source: needs an _entities re-entry
+            "{ user(id: \"1\") { name d } }", // d @requires(c): another _entities re-entry
+        ] {
+            let doc =
+                ExecutableDocument::parse_and_validate(planner.api_schema().schema(), q, "q.graphql")
+                    .unwrap();
+            let plan = planner.build_query_plan(&doc, None, Default::default()).unwrap();
+            eprintln!("\n===== RAW-GRAPH PLAN for {q} =====\n{plan}");
+
+            let mut fetches = Vec::new();
+            match &plan.node {
+                Some(TopLevelPlanNode::Fetch(f)) => {
+                    fetches.push((f.subgraph_name.to_string(), f.operation_document.to_string()))
+                }
+                Some(TopLevelPlanNode::Sequence(s)) => {
+                    s.nodes.iter().for_each(|n| collect(n, &mut fetches))
+                }
+                Some(TopLevelPlanNode::Parallel(p)) => {
+                    p.nodes.iter().for_each(|n| collect(n, &mut fetches))
+                }
+                Some(TopLevelPlanNode::Flatten(fl)) => collect(&fl.node, &mut fetches),
+                _ => {}
+            }
+            for (service, op) in &fetches {
+                let is_entities = op.contains("_entities(representations");
+                eprintln!(
+                    "  fetch service={service:<12} entity_fetch={is_entities}  op={}",
+                    op.replace('\n', " ")
+                );
+            }
+        }
+    }
+
     /// STEEL THREAD (narrow, but end-to-end). For the root-field connector class
     /// `{ users { id name } }`, run the whole pipeline with **no expansion**:
     ///   (1) PLAN over the raw connector graph → a fetch to the connector,

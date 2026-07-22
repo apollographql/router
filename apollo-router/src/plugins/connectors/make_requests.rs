@@ -2197,7 +2197,14 @@ mod tests {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
-            id: ConnectId::new("connectors".into(), None, name!(Query), name!(users), None, 0),
+            id: ConnectId::new(
+                "connectors".into(),
+                None,
+                name!(Query),
+                name!(users),
+                None,
+                0,
+            ),
             transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/users".parse().unwrap(),
@@ -2339,6 +2346,117 @@ mod tests {
                 inputs.this,
                 representations[i].as_object().unwrap().clone(),
                 "representation flows through as `this` inputs"
+            );
+        }
+    }
+
+    /// SOURCE-AWARE ENTITY DISPATCH, END-TO-END (increment 3b). Take the entity
+    /// `ResponseKey`s built source-aware (3a) and run them through the *real*
+    /// `request_params_to_requests`/`make_request` path, asserting each yields
+    /// the connector's actual HTTP request with the representation's key
+    /// substituted into the URL template (`/users/{$this.id}` → `/users/1`,
+    /// `/users/2`). This is the entity-class analogue of
+    /// `source_aware_root_field_dispatch`: supergraph selection → entity keys →
+    /// real per-entity requests, with no synthetic `_entities` operation.
+    #[test]
+    fn source_aware_entity_dispatch_end_to_end() {
+        use apollo_compiler::collections::IndexMap;
+        use apollo_compiler::collections::IndexSet;
+        use apollo_compiler::executable::Selection;
+        use apollo_federation::connectors::Namespace;
+
+        let schema = Schema::parse_and_validate(
+            "type Query { user(id: ID!): User } type User { field: String }",
+            "./",
+        )
+        .unwrap();
+        let operation = ExecutableDocument::parse_and_validate(
+            &schema,
+            r#"{ user(id: "1") { field } }"#.to_string(),
+            "./",
+        )
+        .unwrap();
+        let op = operation.operations.get(None).unwrap();
+        let Selection::Field(user_field) = &op.selection_set.selections[0] else {
+            panic!("expected the `user` field");
+        };
+        let entity_selection_set = &user_field.selection_set;
+
+        let representations = vec![
+            serde_json_bytes::json!({ "__typename": "User", "id": "1" }),
+            serde_json_bytes::json!({ "__typename": "User", "id": "2" }),
+        ];
+
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
+            id: ConnectId::new_on_object("connectors".into(), None, name!(User), None, 0),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: StringTemplate::parse_with_spec(
+                    "/users/{$this.id}",
+                    ConnectSpec::V0_1,
+                )
+                .unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("field").unwrap(),
+            entity_resolver: Some(super::EntityResolver::TypeSingle),
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            // Declare the `$this.id` reference the URL template reads, so the
+            // request merger surfaces it (real connectors derive this from the
+            // connector's variable references; hand-built here).
+            request_variable_keys: IndexMap::from_iter([(
+                Namespace::This,
+                IndexSet::from_iter(["id".to_string()]),
+            )]),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            label: "test".into(),
+        });
+
+        let keys = super::entities_from_source_aware(
+            connector.clone(),
+            &operation,
+            entity_selection_set,
+            &representations,
+        )
+        .unwrap();
+
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+        let requests = super::request_params_to_requests(
+            &Context::new(),
+            connector,
+            keys,
+            supergraph_request,
+            &None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            requests.len(),
+            2,
+            "one HTTP request per entity representation"
+        );
+        for (i, req) in requests.into_iter().enumerate() {
+            let TransportRequest::Http(http_request) = req.transport_request else {
+                panic!("expected an HTTP transport request");
+            };
+            assert_eq!(http_request.inner.method(), "GET");
+            let expected = format!("/users/{}", i + 1);
+            assert!(
+                http_request.inner.uri().to_string().ends_with(&expected),
+                "expected GET …{expected}, got {}",
+                http_request.inner.uri()
             );
         }
     }
