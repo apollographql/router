@@ -1547,6 +1547,42 @@ mod tests {
             assert_eq!(estimated_cost(SCHEMA, query, variables), 120.0);
             assert_eq!(actual_cost(SCHEMA, query, variables, response), 120.0);
         }
+
+        #[test]
+        fn nested_list_with_default_weight_scales_by_both_list_sizes() {
+            // topProductsWithExpensiveChild's own field-level cost (40) is charged once, but a
+            // nested list field with no cost of its own (variants) still gets its default
+            // per-instance weight scaled by *both* the outer and inner list sizes: 3 products *
+            // 3 variants each * 1 (default Variant weight) = 9.
+            let query = "query { topProductsWithExpensiveChild { variants { id } } }";
+            let variables = "{}";
+            let response = br#"{"data": {"topProductsWithExpensiveChild": [
+                {"variants": [{"id": "1"}, {"id": "2"}, {"id": "3"}]},
+                {"variants": [{"id": "1"}, {"id": "2"}, {"id": "3"}]},
+                {"variants": [{"id": "1"}, {"id": "2"}, {"id": "3"}]}
+            ]}}"#;
+
+            assert_eq!(estimated_cost(SCHEMA, query, variables), 49.0);
+            assert_eq!(actual_cost(SCHEMA, query, variables, response), 49.0);
+        }
+
+        #[test]
+        fn nested_field_level_cost_scales_by_outer_list_size_only() {
+            // variantsWithCost is a nested list field with its own field-level @cost(weight: 5).
+            // Its resolver is invoked once per product, not once globally, so its per-call cost
+            // is charged once per product (3 products * 5 = 15) rather than once overall (5) or
+            // once per variant item (3 products * 3 variants * 5 = 45).
+            let query = "query { topProductsWithExpensiveChild { variantsWithCost { id } } }";
+            let variables = "{}";
+            let response = br#"{"data": {"topProductsWithExpensiveChild": [
+                {"variantsWithCost": [{"id": "1"}, {"id": "2"}, {"id": "3"}]},
+                {"variantsWithCost": [{"id": "1"}, {"id": "2"}, {"id": "3"}]},
+                {"variantsWithCost": [{"id": "1"}, {"id": "2"}, {"id": "3"}]}
+            ]}}"#;
+
+            assert_eq!(estimated_cost(SCHEMA, query, variables), 55.0);
+            assert_eq!(actual_cost(SCHEMA, query, variables, response), 55.0);
+        }
     }
 
     /// Tests for array-based slicing arguments in @listSize directive
