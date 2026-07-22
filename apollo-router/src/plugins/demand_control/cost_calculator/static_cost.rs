@@ -149,13 +149,13 @@ fn score_variable(
     }
 }
 
-/// The weight to charge for one occurrence of a response field's value. An explicit `@cost`
-/// declared directly on the field (`CostDirectiveOrigin::Field`) is a per-call cost: when we're
-/// scoring one item of a list (`is_list_item`), that cost was already charged once for the whole
-/// list, so it must not be charged again per item. A weight inherited from the field's return
-/// type (`CostDirectiveOrigin::Type`), or the default weight for the value's shape, is a
-/// per-instance cost and applies to every item.
-fn per_instance_weight(
+/// The weight to add for this specific occurrence of a response field's value. An explicit
+/// `@cost` declared directly on the field (`CostDirectiveOrigin::Field`) is a per-call cost: when
+/// we're scoring one item of a list (`is_list_item`), that cost was already charged once for the
+/// whole list, so it contributes nothing here. A weight inherited from the field's return type
+/// (`CostDirectiveOrigin::Type`), or the default weight for the value's shape, is a per-instance
+/// cost and is added for every occurrence, list item or not.
+fn occurrence_weight(
     cost_directive: Option<&CostDirective>,
     is_list_item: bool,
     default_weight: f64,
@@ -718,7 +718,7 @@ impl<'schema> ResponseCostCalculator<'schema> {
 
         match value {
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
-                self.cost += per_instance_weight(cost_directive, is_list_item, 0.0);
+                self.cost += occurrence_weight(cost_directive, is_list_item, 0.0);
             }
             Value::Array(items) => {
                 // A field-level `@cost` is a per-call cost, so it's charged once for the whole
@@ -734,7 +734,7 @@ impl<'schema> ResponseCostCalculator<'schema> {
                 }
             }
             Value::Object(children) => {
-                self.cost += per_instance_weight(cost_directive, is_list_item, 1.0);
+                self.cost += occurrence_weight(cost_directive, is_list_item, 1.0);
                 self.visit_selections(request, variables, &field.selection_set, children);
             }
         }
