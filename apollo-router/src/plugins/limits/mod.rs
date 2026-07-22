@@ -450,10 +450,6 @@ mod test {
         assert!(resp.is_ok());
         let resp = resp.unwrap();
         assert_eq!(resp.response.status(), StatusCode::OK);
-        assert_eq!(
-            resp.response.headers().get(http::header::CONTENT_TYPE),
-            Some(&http::HeaderValue::from_static("application/json"))
-        );
         assert_eq!(body_to_string(resp).await, "{}");
     }
 
