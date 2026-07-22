@@ -4,4 +4,4 @@ Under `connect/v0.4`, when a `@key` entity had **both** a type-level reference-r
 
 `connect/v0.3` was never affected, so bumping only the `@link` from `v0.3` to `v0.4` could break a previously working schema. Expansion now only copies keys for `@interfaceObject` types, and always as `resolvable: false`, matching the `v0.3` behavior.
 
-By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/PR_NUMBER
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9853
