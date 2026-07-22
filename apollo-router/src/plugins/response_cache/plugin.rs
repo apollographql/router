@@ -1268,13 +1268,15 @@ impl CacheService {
                         log_invalidation_label_error(err);
                     }
 
-                    // Persisted independently of `cache_tags` below (and thus of
+                    // Recorded whenever either consumer got us into this block (the outer `if`
+                    // above), not just when `cdn_invalidation_enabled` — this also feeds the
+                    // cache debugger's per-entry tag display, which should show these tags
+                    // whenever the Redis `cache_tag` index is on, independent of CDN
+                    // invalidation. Persisted independently of `cache_tags` below (and thus of
                     // `IndexMode::CacheTag`) so a later cache hit can rebuild the CDN header
                     // even when Redis per-tag indexing is off. See
                     // `CacheMetadata::cdn_invalidation_tags`.
-                    if self.cdn_invalidation_enabled {
-                        cdn_invalidation_tags.extend(extension_tag_strings.iter().cloned());
-                    }
+                    cdn_invalidation_tags.extend(extension_tag_strings.iter().cloned());
 
                     // `cache_tags` feeds the intermediate result on cache misses which gets ZADDed for redis;
                     // it's not part of the CDN-invalidation path; each sink below applies its own gate
@@ -3076,16 +3078,19 @@ async fn insert_entities_in_result(
                         .collect();
 
                     if !entity_tags.is_empty() {
-                        if cdn_invalidation_enabled {
-                            // See `CacheMetadata::cdn_invalidation_tags` — persisted
-                            // independently of `cache_tags`/`IndexMode::CacheTag` below.
-                            cdn_invalidation_tags.extend(entity_tags.iter().cloned());
+                        // Recorded whenever either consumer got us into this block (the outer
+                        // `if` above), not just when `cdn_invalidation_enabled` — this also
+                        // feeds the cache debugger's per-entry tag display, which should show
+                        // these tags whenever the Redis `cache_tag` index is on, independent of
+                        // CDN invalidation. See `CacheMetadata::cdn_invalidation_tags` —
+                        // persisted independently of `cache_tags`/`IndexMode::CacheTag` below.
+                        cdn_invalidation_tags.extend(entity_tags.iter().cloned());
 
-                            if let Err(err) = InvalidationLabels::get_or_create(&context)
+                        if cdn_invalidation_enabled
+                            && let Err(err) = InvalidationLabels::get_or_create(&context)
                                 .add_tags(entity_tags.clone())
-                            {
-                                log_invalidation_label_error(err);
-                            }
+                        {
+                            log_invalidation_label_error(err);
                         }
 
                         if indexes.is_enabled(IndexMode::CacheTag) {

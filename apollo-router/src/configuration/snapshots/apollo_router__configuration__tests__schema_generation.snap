@@ -952,7 +952,7 @@ expression: "&schema"
     },
     "CdnInvalidationConfig": {
       "additionalProperties": false,
-      "description": "Configuration for surfacing invalidation labels to a CDN as a header (for example, Cloudflare)\nseparated by a delimiting character (by default, \",\")\n\nWhen enabled, the router collects the union of cache tags contributed by each subgraph\n(from `apolloCacheTags`, `apolloEntityCacheTags`, and resolved `@cacheTag` directive values)\nand emits them as a single configurable header on the supergraph response. The tags are\nalways available on the request context for coprocessor or rhai consumption regardless of\nwhether the header is emitted.",
+      "description": "Configuration for surfacing invalidation labels to a CDN as a header (for example, Cloudflare)\nseparated by a delimiting character (by default, \",\")\n\nWhen enabled, the router collects the union of cache tags contributed by each subgraph\n(from `apolloCacheTags`, `apolloEntityCacheTags`, and resolved `@cacheTag` directive values)\nand emits them as a single configurable header on the supergraph response. The coarser\n`subgraph`/`type` labels are always recorded onto the request context (available to\ncoprocessors or Rhai regardless of this config), but the fine-grained tag values are only\naggregated when `enabled` is `true` — there's no way to read the full label set from context\nwithout also enabling header emission.",
       "properties": {
         "enabled": {
           "default": false,
@@ -961,7 +961,7 @@ expression: "&schema"
         },
         "experimental_drop_on_overflow": {
           "default": false,
-          "description": "Whether to drop the invalidation labels header when its size is greater than the maximum\nbytes allowed. Note: this does not drop the `Cache-Control` header so data will still be\ncached. This drops the invalidation labels header, which is useful as a signal to CDNs for\nfurther business logic at the CDN level\n\nCDNs (eg, Cloudflare) have ways of setting rules (eg, Cloudflare's response rules) for handling caching\nand the absence of the invalidation labels header can be used to set `no-store` for the\n`Cache-Control` header to prevent CDN caching of responses or entities that don't have\nfine-grained invalidation labels\n\nThis is an experimental configuration option that might be removed in future releases,\nplease use caution when deciding to use it\nTODO: document defaults",
+          "description": "Whether to drop the invalidation labels header when its size is greater than the maximum\nbytes allowed. Note: this does not drop the `Cache-Control` header so data will still be\ncached. This drops the invalidation labels header, which is useful as a signal to CDNs for\nfurther business logic at the CDN level\n\nCDNs (eg, Cloudflare) have ways of setting rules (eg, Cloudflare's response rules) for handling caching\nand the absence of the invalidation labels header can be used to set `no-store` for the\n`Cache-Control` header to prevent CDN caching of responses or entities that don't have\nfine-grained invalidation labels\n\nThis is an experimental configuration option that might be removed in future releases,\nplease use caution when deciding to use it. Defaults to `false`.",
           "type": "boolean"
         },
         "header_delimiter": {
@@ -2089,7 +2089,7 @@ expression: "&schema"
             "header_name": "Cache-Tag",
             "max_bytes": 16384
           },
-          "description": "Propagation of aggregated response_cache cache tags to the supergraph response.\nOff by default; opt in to surface cache tags to a CDN for tag-based purging.\nTODO: docs"
+          "description": "Propagation of aggregated response_cache cache tags to the supergraph response.\nOff by default; opt in to surface cache tags to a CDN for tag-based purging. See\n`CdnInvalidationConfig` for the individual fields."
         },
         "debug": {
           "default": false,

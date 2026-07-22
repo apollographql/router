@@ -76,12 +76,11 @@ impl InvalidationLabels {
     /// back to the caller. Cloning is cheap — `Context` is reference-counted internally, and the
     /// tag sets are typically small per request.
     pub(crate) fn get_or_create(context: &Context) -> Self {
-        let invalidation_labels = context.extensions().with_lock(|lock| {
+        context.extensions().with_lock(|lock| {
             let invalidation_labels = lock.get_or_default_mut::<InvalidationLabels>();
             invalidation_labels.context = Some(context.clone());
             invalidation_labels.clone()
-        });
-        invalidation_labels
+        })
     }
 
     /// Renders each touched subgraph as its coarsest-tier fallback label (`subgraph-{name}`).
@@ -114,7 +113,7 @@ impl InvalidationLabels {
         let subgraphs = self.format_subgraph_labels();
         let types = self.format_type_labels();
         let tags = self.tags.iter().cloned().collect_vec();
-        let subgraph_types_tags_labels = vec![subgraphs, types, tags].concat();
+        let subgraph_types_tags_labels = [subgraphs, types, tags].concat();
 
         // WARN: don't remove this check; you might think that we always get the subgraph and
         // types even if we don't have the `@cacheTag` directive in the schema or user-sent

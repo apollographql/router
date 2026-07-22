@@ -63,11 +63,9 @@ impl From<(&str, CacheValue)> for CacheEntry {
             // cache tags are used to populate the initial set of invalidation labels; they get
             // expanded from the schema, too, for capturing subgraphs and types to have a broader
             // set of invalidation labels
-            invalidation_labels: cache_value.cache_tags.and_then(|tags| {
-                Some(InvalidationLabels {
-                    tags,
-                    ..Default::default()
-                })
+            invalidation_labels: cache_value.cache_tags.map(|tags| InvalidationLabels {
+                tags,
+                ..Default::default()
             }),
         }
     }

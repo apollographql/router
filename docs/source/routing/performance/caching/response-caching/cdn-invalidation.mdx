@@ -94,10 +94,16 @@ Fastly's native convention is a `Surrogate-Key` header rather than `Cache-Tag`. 
 
 ```yaml title="router.yaml"
 response_cache:
+  enabled: true
   cdn_invalidation:
     enabled: true
     header_name: "Surrogate-Key"
     header_delimiter: " " # Fastly expects space-separated keys, not comma-separated
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
 ```
 
 Then purge with Fastly's surrogate-key purge API using the same label values (`user-42`, `type-accounts-User`, `subgraph-accounts`).
@@ -115,6 +121,11 @@ response_cache:
     header_delimiter: ","
     max_bytes: 16384
     experimental_drop_on_overflow: false
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
 ```
 
 | Field | Default | Description |

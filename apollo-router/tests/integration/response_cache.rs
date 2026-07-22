@@ -621,9 +621,21 @@ async fn check_cache_tags_from_debugger_data() {
     check_cache_tags(
         &body,
         vec![
-            vec!["topProducts".to_string()],
-            vec!["product-1".to_string()],
-            vec!["product-2".to_string()],
+            vec![
+                "subgraph-products".to_string(),
+                "type-products-Query".to_string(),
+                "topProducts".to_string(),
+            ],
+            vec![
+                "subgraph-reviews".to_string(),
+                "type-reviews-Product".to_string(),
+                "product-1".to_string(),
+            ],
+            vec![
+                "subgraph-reviews".to_string(),
+                "type-reviews-Product".to_string(),
+                "product-2".to_string(),
+            ],
         ],
     );
     insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
@@ -651,9 +663,21 @@ async fn check_cache_tags_from_debugger_data() {
     check_cache_tags(
         &body,
         vec![
-            vec!["topProducts".to_string()],
-            vec!["product-1".to_string()],
-            vec!["product-2".to_string()],
+            vec![
+                "subgraph-products".to_string(),
+                "type-products-Query".to_string(),
+                "topProducts".to_string(),
+            ],
+            vec![
+                "subgraph-reviews".to_string(),
+                "type-reviews-Product".to_string(),
+                "product-1".to_string(),
+            ],
+            vec![
+                "subgraph-reviews".to_string(),
+                "type-reviews-Product".to_string(),
+                "product-2".to_string(),
+            ],
         ],
     );
     // Unchanged, everything is in cache so we don’t need to make more subgraph requests:
