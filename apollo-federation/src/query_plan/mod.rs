@@ -16,6 +16,7 @@ pub(crate) mod fetch_dependency_graph_processor;
 pub mod generate;
 pub mod query_planner;
 pub(crate) mod query_planning_traversal;
+pub mod source_aware;
 pub mod requires_selection;
 pub mod serializable_document;
 
