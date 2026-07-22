@@ -13494,6 +13494,11 @@ expression: "&schema"
       },
       "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don’t want this in production!"
     },
+    "experimental_connectors_source_aware": {
+      "default": false,
+      "description": "Plan connector supergraphs source-aware: instead of expanding each\n`@connect` into a synthetic subgraph, keep the raw supergraph for\nplanning and carry each connector's identity as a coordinate on the\nfetch node. Experimental and off by default; the expansion path is\nunchanged when disabled.",
+      "type": "boolean"
+    },
     "experimental_diagnostics": {
       "$ref": "#/definitions/Config5"
     },

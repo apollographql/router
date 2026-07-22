@@ -164,6 +164,64 @@ pub fn expand_connectors(
     })
 }
 
+/// Build the connector set for a supergraph **without expanding** it into
+/// synthetic per-connector subgraphs — the source-aware path (the counterpart to
+/// [`expand_connectors`], which rewrites for the subgraph-based planner). The
+/// raw SDL is kept as-is for planning; connectors are extracted directly from
+/// the raw subgraphs and indexed:
+///
+/// * `by_coordinate` — `ConnectId::coordinate()` → connector, **1:1** and
+///   authoritative; this is the key the source-aware dispatch path resolves.
+/// * `by_service_name` — the connector's **original** subgraph name → connector.
+///   This is intentionally **many-to-one**: several connectors can live in one
+///   subgraph (e.g. all under `connectors`), so this map only supports the
+///   is-connector membership test (`spec/schema.rs` decides a subgraph is
+///   connector-served, giving it the `http://unused` URL) and service-name
+///   fallback — never authoritative per-fetch dispatch.
+///
+/// Returns `Ok(None)` when the supergraph has no connectors (mirroring
+/// [`ExpansionResult::Unchanged`]).
+pub fn unexpanded_connectors(
+    supergraph_str: &str,
+) -> Result<Option<Connectors>, FederationError> {
+    // Same cheap short-circuit `expand_connectors` uses to skip non-connector
+    // supergraphs before the expensive parse.
+    let connect_url = ConnectSpec::identity();
+    let connect_url = format!("{}/{}/v", connect_url.domain, connect_url.name);
+    if !supergraph_str.contains(&connect_url) {
+        return Ok(None);
+    }
+
+    let supergraph = Supergraph::new_with_router_specs(supergraph_str)?;
+    let subgraphs = supergraph.extract_subgraphs()?;
+
+    let mut by_coordinate: IndexMap<String, Connector> = IndexMap::new();
+    let mut by_service_name: IndexMap<Arc<str>, Connector> = IndexMap::new();
+    let mut labels_by_service_name: IndexMap<Arc<str>, String> = IndexMap::new();
+    let mut source_config_keys: HashSet<String> = HashSet::new();
+
+    for sub in subgraphs.subgraphs.values() {
+        for connector in Connector::from_schema(sub.schema.schema(), &sub.name)? {
+            let service_name: Arc<str> = connector.id.subgraph_name.as_str().into();
+            by_coordinate.insert(connector.id.coordinate(), connector.clone());
+            labels_by_service_name.insert(service_name.clone(), connector.label.0.clone());
+            source_config_keys.insert(connector.source_config_key());
+            by_service_name.insert(service_name, connector);
+        }
+    }
+
+    if by_coordinate.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(Connectors {
+        by_service_name: Arc::new(by_service_name),
+        by_coordinate: Arc::new(by_coordinate),
+        labels_by_service_name: Arc::new(labels_by_service_name),
+        source_config_keys: Arc::new(source_config_keys),
+    }))
+}
+
 fn contains_connectors(link: &ConnectLink, subgraph: &ValidFederationSubgraph) -> bool {
     subgraph
         .schema

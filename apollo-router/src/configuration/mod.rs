@@ -230,6 +230,14 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_type_conditioned_fetching: bool,
 
+    /// Plan connector supergraphs source-aware: instead of expanding each
+    /// `@connect` into a synthetic subgraph, keep the raw supergraph for
+    /// planning and carry each connector's identity as a coordinate on the
+    /// fetch node. Experimental and off by default; the expansion path is
+    /// unchanged when disabled.
+    #[serde(default)]
+    pub(crate) experimental_connectors_source_aware: bool,
+
     /// When enabled for specific subgraphs, orphan errors (those without a valid
     /// `_entities` path) are assigned to the nearest non-array ancestor in the
     /// response path, preventing them from being duplicated across every array
@@ -271,6 +279,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: chaos::Config,
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
+            experimental_connectors_source_aware: bool,
             experimental_hoist_orphan_errors: SubgraphConfiguration<HoistOrphanErrors>,
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
@@ -304,6 +313,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: ad_hoc.limits,
             experimental_chaos: ad_hoc.experimental_chaos,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
+            experimental_connectors_source_aware: ad_hoc.experimental_connectors_source_aware,
             experimental_hoist_orphan_errors: ad_hoc.experimental_hoist_orphan_errors,
             plugins: ad_hoc.plugins,
             apollo_plugins: ad_hoc.apollo_plugins,
@@ -376,6 +386,7 @@ impl Configuration {
             batching: batching.unwrap_or_default(),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
+            experimental_connectors_source_aware: Default::default(),
             experimental_hoist_orphan_errors: experimental_hoist_orphan_errors.unwrap_or_default(),
             notify,
         };
@@ -522,6 +533,7 @@ impl Configuration {
             uplink,
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
+            experimental_connectors_source_aware: Default::default(),
             experimental_hoist_orphan_errors: Default::default(),
             batching: batching.unwrap_or_default(),
             raw_yaml: None,

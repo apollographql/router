@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::CustomConfiguration;
 use apollo_federation::connectors::SourceName;
 use apollo_federation::connectors::expand::Connectors;
@@ -12,7 +13,6 @@ use serde::Serialize;
 use super::incompatible::warn_incompatible_plugins;
 use crate::Configuration;
 use crate::plugins::connectors::plugin::PLUGIN_NAME;
-use crate::plugins::connectors::query_plans::connectors_by_coordinate;
 use crate::services::connector_service::ConnectorSourceRef;
 
 /// Configuration for Apollo Connectors.
@@ -140,7 +140,8 @@ pub(crate) fn apply_config(
         return connectors;
     };
 
-    for connector in Arc::make_mut(&mut connectors.by_service_name).values_mut() {
+    // Apply source/subgraph config to a single connector.
+    let apply_to = |connector: &mut Connector| {
         if let Ok(source_ref) = ConnectorSourceRef::try_from(&mut *connector)
             && let Some(source_config) = config.sources.get(&source_ref.to_string())
         {
@@ -160,7 +161,7 @@ pub(crate) fn apply_config(
         // TODO: remove this after deprecation period
         #[allow(deprecated)]
         let Some(subgraph_config) = config.subgraphs.get(&connector.id.subgraph_name) else {
-            continue;
+            return;
         };
         if let Some(source_config) = connector
             .id
@@ -180,13 +181,21 @@ pub(crate) fn apply_config(
             }
         }
         connector.config = Some(subgraph_config.custom.clone());
-    }
+    };
 
-    // `by_service_name` was just mutated in place (override URLs, max-requests,
-    // per-source config). The coordinate index carries clones of the same
-    // connectors, so rebuild it from the mutated set to keep the two in sync —
-    // otherwise the source-aware dispatch path (`resolve_connector`, B-3) would
-    // resolve against stale, pre-config connectors.
-    connectors.by_coordinate = connectors_by_coordinate(&connectors.by_service_name);
+    // Apply to *both* indices in place. `by_service_name` and `by_coordinate`
+    // carry independent clones of the connector set, so each must be mutated
+    // directly — reindexing one from the other would be wrong under source-aware
+    // planning, where `by_service_name` is intentionally many-to-one (collapsed
+    // by subgraph name) while `by_coordinate` is the 1:1 authoritative index the
+    // dispatch path (`resolve_connector`, B-3) resolves against. `by_coordinate`
+    // is complete (one entry per connector) in both the expansion and
+    // source-aware paths, so mutating its values reaches every connector.
+    Arc::make_mut(&mut connectors.by_service_name)
+        .values_mut()
+        .for_each(&apply_to);
+    Arc::make_mut(&mut connectors.by_coordinate)
+        .values_mut()
+        .for_each(&apply_to);
     connectors
 }

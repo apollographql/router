@@ -15,6 +15,7 @@ use apollo_federation::compat::coerce_and_validate_schema_values;
 use apollo_federation::connectors::expand::Connectors;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
+use apollo_federation::connectors::expand::unexpanded_connectors;
 use apollo_federation::link::metadata::LinksMetadata;
 use apollo_federation::link::spec::Identity;
 use apollo_federation::router_supported_supergraph_specs;
@@ -68,23 +69,39 @@ impl Schema {
             ..Default::default()
         };
 
-        let expansion =
-            expand_connectors(&raw_sdl.sdl, &api_schema_options).map_err(SchemaError::Connector)?;
-        let preserved_launch_id = raw_sdl.launch_id.clone();
-        let (raw_sdl, api_schema, connectors) = match expansion {
-            ExpansionResult::Expanded {
-                raw_sdl,
-                api_schema: api,
-                connectors,
-            } => (
-                Arc::new(SchemaState {
-                    sdl: raw_sdl,
-                    launch_id: preserved_launch_id,
-                }),
-                Some(ValidFederationSchema::new(*api).map_err(SchemaError::Connector)?),
-                Some(apply_config(config, connectors)),
-            ),
-            ExpansionResult::Unchanged => (raw_sdl, None, None),
+        let (raw_sdl, api_schema, connectors) = if config.experimental_connectors_source_aware {
+            // Source-aware: do NOT expand connectors into synthetic subgraphs.
+            // Keep the original raw SDL as the schema to parse and plan over, and
+            // build the connector set (coordinate-indexed) directly from the raw
+            // subgraphs. The API schema is derived from the raw supergraph below
+            // (as in the no-connectors path), since we skipped expansion.
+            match unexpanded_connectors(&raw_sdl.sdl).map_err(SchemaError::Connector)? {
+                Some(connectors) => (raw_sdl, None, Some(apply_config(config, connectors))),
+                // Flag on but no connectors: identical to a plain supergraph.
+                None => (raw_sdl, None, None),
+            }
+        } else {
+            // Expansion path (default): rewrite each connector into a synthetic
+            // subgraph so the subgraph-based planner can plan it. Byte-identical
+            // to prior behavior.
+            let expansion = expand_connectors(&raw_sdl.sdl, &api_schema_options)
+                .map_err(SchemaError::Connector)?;
+            let preserved_launch_id = raw_sdl.launch_id.clone();
+            match expansion {
+                ExpansionResult::Expanded {
+                    raw_sdl,
+                    api_schema: api,
+                    connectors,
+                } => (
+                    Arc::new(SchemaState {
+                        sdl: raw_sdl,
+                        launch_id: preserved_launch_id,
+                    }),
+                    Some(ValidFederationSchema::new(*api).map_err(SchemaError::Connector)?),
+                    Some(apply_config(config, connectors)),
+                ),
+                ExpansionResult::Unchanged => (raw_sdl, None, None),
+            }
         };
 
         let mut parser = apollo_compiler::parser::Parser::new();
@@ -606,6 +623,61 @@ mod tests {
         assert!(schema.is_subtype("Foo", "InterfaceType2"));
         assert!(schema.is_subtype("Bar", "InterfaceType2"));
         assert!(schema.is_subtype("Baz", "InterfaceType2"));
+    }
+
+    #[test]
+    fn source_aware_flag_gates_connector_expansion() {
+        use std::str::FromStr;
+
+        let sdl = include_str!("../plugins/connectors/testdata/steelthread.graphql");
+
+        // Flag off (default): connectors are expanded into synthetic subgraphs,
+        // so the parsed raw SDL is the *rewritten* one, not the input.
+        let expanded = Schema::parse(sdl, &Default::default()).unwrap();
+        let expanded_connectors = expanded.connectors.as_ref().expect("connectors present");
+        assert_ne!(
+            expanded.raw_sdl.as_str(),
+            sdl,
+            "expansion rewrites the SDL into synthetic subgraphs"
+        );
+
+        // Flag on: expansion is skipped.
+        let config =
+            Configuration::from_str("experimental_connectors_source_aware: true").unwrap();
+        let source_aware = Schema::parse(sdl, &config).unwrap();
+        let sa_connectors = source_aware.connectors.as_ref().expect("connectors present");
+
+        // The raw SDL is preserved verbatim — the source-aware planner plans
+        // over the original, non-expanded supergraph.
+        assert_eq!(
+            source_aware.raw_sdl.as_str(),
+            sdl,
+            "source-aware keeps the original raw SDL"
+        );
+        // The coordinate index is populated and carries the raw `connectors`
+        // subgraph name; by_service_name is keyed by that name for the
+        // is-connector membership test in `parse_arc`.
+        assert!(!sa_connectors.by_coordinate.is_empty());
+        assert!(
+            sa_connectors
+                .by_coordinate
+                .keys()
+                .all(|c| c.starts_with("connectors:")),
+            "coordinates carry the raw subgraph name: {:?}",
+            sa_connectors.by_coordinate.keys().collect::<Vec<_>>()
+        );
+        assert!(sa_connectors.by_service_name.contains_key("connectors"));
+
+        // Both paths discover the same connector set (same coordinates) — only
+        // the SDL representation and service-name keying differ.
+        let expanded_coords: std::collections::BTreeSet<_> =
+            expanded_connectors.by_coordinate.keys().cloned().collect();
+        let sa_coords: std::collections::BTreeSet<_> =
+            sa_connectors.by_coordinate.keys().cloned().collect();
+        assert_eq!(
+            expanded_coords, sa_coords,
+            "the same connectors are discovered with or without expansion"
+        );
     }
 
     #[test]
