@@ -794,6 +794,8 @@ pub enum SingleFederationError {
     InterfaceKeyMissingImplementationType { message: String },
     #[error("@defer is not supported on subscriptions")]
     DeferredSubscriptionUnsupported,
+    #[error("Duplicate @defer label {label:?}: labels must be unique within an operation")]
+    DuplicateDeferLabel { label: String },
     #[error("{message}")]
     QueryPlanComplexityExceeded { message: String },
     #[error("the caller requested cancellation")]
@@ -1014,6 +1016,7 @@ impl SingleFederationError {
                 ErrorCode::InterfaceKeyMissingImplementationType
             }
             SingleFederationError::DeferredSubscriptionUnsupported => ErrorCode::Internal,
+            SingleFederationError::DuplicateDeferLabel { .. } => ErrorCode::InvalidGraphQL,
             SingleFederationError::QueryPlanComplexityExceeded { .. } => {
                 ErrorCode::QueryPlanComplexityExceededError
             }

@@ -1240,16 +1240,20 @@ async fn issuer_check() {
     });
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
-            panic!("unexpected response: {res:?}");
+            let response: graphql::Response = serde_json::from_slice(
+                &router::body::into_bytes(res.response.into_body())
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_response_eq_ignoring_error_id!(response, graphql::Response::builder()
+            .errors(vec![graphql::Error::builder()
+                .extension_code("AUTH_ERROR")
+                .message("Invalid issuer: the token's `iss` was 'null', but signed with a key from JWKS configured to only accept from 'goodbye, hello'")
+                .build()]).build());
         }
-        ControlFlow::Continue(req) => {
-            println!("got req with issuer check");
-            let claims: serde_json::Value = req
-                .context
-                .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
-                .unwrap()
-                .unwrap();
-            println!("claims: {claims:?}");
+        ControlFlow::Continue(_) => {
+            panic!("issuer check should have failed")
         }
     }
 
@@ -1776,4 +1780,403 @@ async fn jwks_send_headers() {
     .unwrap();
 
     assert!(got_header.load(Ordering::Acquire));
+}
+
+mod common {
+    use base64::Engine as _;
+    use base64::prelude::BASE64_URL_SAFE_NO_PAD;
+    use jsonwebtoken::Algorithm;
+    use jsonwebtoken::EncodingKey;
+    use jsonwebtoken::encode;
+    use jsonwebtoken::jwk::AlgorithmParameters;
+    use jsonwebtoken::jwk::CommonParameters;
+    use jsonwebtoken::jwk::EllipticCurve;
+    use jsonwebtoken::jwk::EllipticCurveKeyParameters;
+    use jsonwebtoken::jwk::EllipticCurveKeyType;
+    use jsonwebtoken::jwk::Jwk;
+    use jsonwebtoken::jwk::KeyAlgorithm;
+    use jsonwebtoken::jwk::KeyOperations;
+    use jsonwebtoken::jwk::PublicKeyUse;
+    use p256::ecdsa::SigningKey;
+    use p256::pkcs8::EncodePrivateKey;
+
+    use crate::plugins::authentication::JWTConf;
+    use crate::plugins::authentication::Source;
+    use crate::plugins::authentication::default_header_name;
+    use crate::plugins::authentication::default_header_value_prefix;
+    use crate::services::router;
+    use crate::services::supergraph;
+
+    pub(super) fn jwk(signing_key: &SigningKey) -> Jwk {
+        jwk_with_kid(signing_key, "hello")
+    }
+
+    pub(super) fn jwk_with_kid(signing_key: &SigningKey, kid: &str) -> Jwk {
+        jwk_with_kid_and_alg(signing_key, Some(kid), Some(KeyAlgorithm::ES256))
+    }
+
+    /// Build an EC (P-256) JWK for `signing_key` with a caller-chosen `kid` and
+    /// `key_algorithm`. Omitting either lets tests reproduce JWKS entries that share
+    /// key material but differ in match specificity (a kid without a declared alg, or a
+    /// declared alg without a kid).
+    pub(super) fn jwk_with_kid_and_alg(
+        signing_key: &SigningKey,
+        kid: Option<&str>,
+        key_algorithm: Option<KeyAlgorithm>,
+    ) -> Jwk {
+        let verifying_key = signing_key.verifying_key();
+        let point = verifying_key.to_encoded_point(false);
+        Jwk {
+            common: CommonParameters {
+                public_key_use: Some(PublicKeyUse::Signature),
+                key_operations: Some(vec![KeyOperations::Verify]),
+                key_algorithm,
+                key_id: kid.map(str::to_string),
+                ..Default::default()
+            },
+            algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
+                key_type: EllipticCurveKeyType::EC,
+                curve: EllipticCurve::P256,
+                x: BASE64_URL_SAFE_NO_PAD.encode(point.x().unwrap()),
+                y: BASE64_URL_SAFE_NO_PAD.encode(point.y().unwrap()),
+            }),
+        }
+    }
+
+    fn encoding_key(signing_key: &SigningKey) -> EncodingKey {
+        EncodingKey::from_ec_der(&signing_key.to_pkcs8_der().unwrap().to_bytes())
+    }
+
+    pub(super) fn jwt_conf_with_header_source() -> JWTConf {
+        let mut config = JWTConf::default();
+        config.sources.push(Source::Header {
+            name: default_header_name(),
+            value_prefix: default_header_value_prefix(),
+        });
+        config
+    }
+
+    pub(super) fn build_request_with_header_token(
+        signing_key: SigningKey,
+        token_claims: serde_json::Value,
+    ) -> router::Request {
+        let token = encode(
+            &jsonwebtoken::Header::new(Algorithm::ES256),
+            &token_claims,
+            &encoding_key(&signing_key),
+        )
+        .unwrap();
+
+        supergraph::Request::canned_builder()
+            .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+            .build()
+            .unwrap()
+            .try_into()
+            .unwrap()
+    }
+
+    pub(super) fn build_request_with_header_token_kid(
+        signing_key: SigningKey,
+        token_claims: serde_json::Value,
+        kid: &str,
+    ) -> router::Request {
+        let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
+        header.kid = Some(kid.to_string());
+        let token = encode(&header, &token_claims, &encoding_key(&signing_key)).unwrap();
+
+        supergraph::Request::canned_builder()
+            .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+            .build()
+            .unwrap()
+            .try_into()
+            .unwrap()
+    }
+}
+
+// Tests for the case where two JWKS entries share identical key material but have different
+// configured issuers or audiences (e.g., Azure AD B2C multi-policy tenants). The retry loop
+// in decode_jwt must continue to the next candidate when signature passes but issuer/audience
+// validation fails.
+mod duplicate_key_retry {
+    use std::collections::HashMap;
+    use std::ops::ControlFlow;
+    use std::str::FromStr;
+    use std::time::Duration;
+
+    use http::StatusCode;
+    use jsonwebtoken::get_current_timestamp;
+    use jsonwebtoken::jwk::JwkSet;
+    use jsonwebtoken::jwk::KeyAlgorithm;
+    use p256::ecdsa::SigningKey;
+    use p256::ecdsa::signature::rand_core::OsRng;
+    use url::Url;
+
+    use super::common::build_request_with_header_token;
+    use super::common::build_request_with_header_token_kid;
+    use super::common::jwk;
+    use super::common::jwk_with_kid_and_alg;
+    use super::common::jwt_conf_with_header_source;
+    use crate::plugins::authentication::authenticate;
+    use crate::plugins::authentication::jwks::JwksConfig;
+    use crate::plugins::authentication::jwks::JwksManager;
+
+    #[test]
+    fn it_fails_when_no_jwks_entry_issuer_matches() {
+        // Both entries have specific issuers, neither matches the token issuer.
+        let signing_key = SigningKey::random(&mut OsRng);
+        let shared_jwk = JwkSet {
+            keys: vec![jwk(&signing_key)],
+        };
+
+        let url_a = Url::from_str("file:///jwks-a.json").unwrap();
+        let url_b = Url::from_str("file:///jwks-b.json").unwrap();
+
+        let list = vec![
+            JwksConfig {
+                url: url_a.clone(),
+                issuers: Some(["https://tenant-a.example.com".to_string()].into()),
+                audiences: None,
+                algorithms: None,
+                poll_interval: Duration::from_secs(60),
+                headers: Vec::new(),
+            },
+            JwksConfig {
+                url: url_b.clone(),
+                issuers: Some(["https://tenant-b.example.com".to_string()].into()),
+                audiences: None,
+                algorithms: None,
+                poll_interval: Duration::from_secs(60),
+                headers: Vec::new(),
+            },
+        ];
+
+        let map = HashMap::from([(url_a, shared_jwk.clone()), (url_b, shared_jwk)]);
+        let manager = JwksManager::new_test(list, map);
+
+        let token_claims = serde_json::json!({
+            "sub": "test",
+            "exp": get_current_timestamp(),
+            "iss": "https://attacker.example.com"
+        });
+        let request = build_request_with_header_token(signing_key, token_claims);
+
+        match authenticate(&jwt_conf_with_header_source(), &manager, request) {
+            ControlFlow::Break(response) => {
+                assert_eq!(
+                    response.response.status(),
+                    StatusCode::INTERNAL_SERVER_ERROR
+                );
+            }
+            ControlFlow::Continue(_) => {
+                panic!("should have been rejected when no entry's issuer matches");
+            }
+        }
+    }
+
+    // Build two JWKS entries that share the same key material but differ in match
+    // specificity. Entry A is kid-specific and issuer-constrained; entry B is alg-only and
+    // unconstrained. `list_order_reversed` swaps the config order so the test proves the
+    // outcome is independent of iter_jwks' pop() ordering.
+    fn manager_with_kid_specific_and_unconstrained_entries(
+        signing_key: &SigningKey,
+        kid: &str,
+        constrained_issuer: &str,
+        list_order_reversed: bool,
+    ) -> JwksManager {
+        // Entry A: kid present, no declared algorithm -> matches on kid only.
+        let entry_a_jwk = JwkSet {
+            keys: vec![jwk_with_kid_and_alg(signing_key, Some(kid), None)],
+        };
+        // Entry B: no kid, declared ES256 -> matches on algorithm only.
+        let entry_b_jwk = JwkSet {
+            keys: vec![jwk_with_kid_and_alg(
+                signing_key,
+                None,
+                Some(KeyAlgorithm::ES256),
+            )],
+        };
+
+        let url_a = Url::from_str("file:///jwks-kid-specific.json").unwrap();
+        let url_b = Url::from_str("file:///jwks-unconstrained.json").unwrap();
+
+        let config_a = JwksConfig {
+            url: url_a.clone(),
+            issuers: Some([constrained_issuer.to_string()].into()),
+            audiences: None,
+            algorithms: None,
+            poll_interval: Duration::from_secs(60),
+            headers: Vec::new(),
+        };
+        let config_b = JwksConfig {
+            url: url_b.clone(),
+            issuers: None,
+            audiences: None,
+            algorithms: None,
+            poll_interval: Duration::from_secs(60),
+            headers: Vec::new(),
+        };
+
+        let list = if list_order_reversed {
+            vec![config_b, config_a]
+        } else {
+            vec![config_a, config_b]
+        };
+        let map = HashMap::from([(url_a, entry_a_jwk), (url_b, entry_b_jwk)]);
+        JwksManager::new_test(list, map)
+    }
+
+    // ROUTER-1990: a token whose kid matches the kid-specific, issuer-constrained entry must
+    // not be accepted by falling through to the less-specific unconstrained entry that shares
+    // the same key material. The constrained entry is the most specific match, so it is
+    // selected authoritatively and its issuer check rejects the token.
+    #[test]
+    fn it_rejects_kid_specific_entry_via_unconstrained_fallthrough() {
+        let signing_key = SigningKey::random(&mut OsRng);
+
+        for list_order_reversed in [false, true] {
+            let manager = manager_with_kid_specific_and_unconstrained_entries(
+                &signing_key,
+                "tenant-a-key",
+                "https://tenant-a.example.com",
+                list_order_reversed,
+            );
+
+            let token_claims = serde_json::json!({
+                "sub": "test",
+                "exp": get_current_timestamp(),
+                "iss": "https://attacker.example.com"
+            });
+            let request = build_request_with_header_token_kid(
+                signing_key.clone(),
+                token_claims,
+                "tenant-a-key",
+            );
+
+            match authenticate(&jwt_conf_with_header_source(), &manager, request) {
+                ControlFlow::Break(response) => {
+                    assert_eq!(
+                        response.response.status(),
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "list_order_reversed = {list_order_reversed}"
+                    );
+                }
+                ControlFlow::Continue(_) => {
+                    panic!(
+                        "token should be rejected by the kid-specific entry's issuer constraint, \
+                         not accepted via the unconstrained entry (list_order_reversed = {list_order_reversed})"
+                    );
+                }
+            }
+        }
+    }
+
+    // Companion to the test above: when the token's issuer matches the kid-specific entry, it
+    // is accepted via that entry.
+    #[test]
+    fn it_accepts_kid_specific_entry_when_issuer_matches() {
+        let signing_key = SigningKey::random(&mut OsRng);
+
+        for list_order_reversed in [false, true] {
+            let manager = manager_with_kid_specific_and_unconstrained_entries(
+                &signing_key,
+                "tenant-a-key",
+                "https://tenant-a.example.com",
+                list_order_reversed,
+            );
+
+            let token_claims = serde_json::json!({
+                "sub": "test",
+                "exp": get_current_timestamp(),
+                "iss": "https://tenant-a.example.com"
+            });
+            let request = build_request_with_header_token_kid(
+                signing_key.clone(),
+                token_claims,
+                "tenant-a-key",
+            );
+
+            match authenticate(&jwt_conf_with_header_source(), &manager, request) {
+                ControlFlow::Continue(_) => {}
+                ControlFlow::Break(response) => {
+                    panic!(
+                        "token should be accepted via the kid-specific entry \
+                         (list_order_reversed = {list_order_reversed}): {response:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    // The ROUTER-1990 fix must not over-filter: when several entries all match the token's kid
+    // but carry different issuer/audience constraints (the same key duplicated across tenants),
+    // decode_jwt must still retry each kid-matched entry (ROUTER-1691). Here one entry declares
+    // its algorithm (a more specific match) and the other does not; both remain candidates, so
+    // a token whose issuer matches only the less-specific (kid-only) entry is still accepted.
+    #[test]
+    fn it_retries_kid_matched_entries_with_differing_alg_specificity() {
+        let signing_key = SigningKey::random(&mut OsRng);
+        let kid = "shared-kid";
+
+        for list_order_reversed in [false, true] {
+            // Entry A: kid + explicit ES256, constrained to tenant-a.
+            let entry_a_jwk = JwkSet {
+                keys: vec![jwk_with_kid_and_alg(
+                    &signing_key,
+                    Some(kid),
+                    Some(KeyAlgorithm::ES256),
+                )],
+            };
+            // Entry B: same key + same kid but no declared algorithm, constrained to tenant-b.
+            let entry_b_jwk = JwkSet {
+                keys: vec![jwk_with_kid_and_alg(&signing_key, Some(kid), None)],
+            };
+
+            let url_a = Url::from_str("file:///jwks-a.json").unwrap();
+            let url_b = Url::from_str("file:///jwks-b.json").unwrap();
+
+            let config_a = JwksConfig {
+                url: url_a.clone(),
+                issuers: Some(["https://tenant-a.example.com".to_string()].into()),
+                audiences: None,
+                algorithms: None,
+                poll_interval: Duration::from_secs(60),
+                headers: Vec::new(),
+            };
+            let config_b = JwksConfig {
+                url: url_b.clone(),
+                issuers: Some(["https://tenant-b.example.com".to_string()].into()),
+                audiences: None,
+                algorithms: None,
+                poll_interval: Duration::from_secs(60),
+                headers: Vec::new(),
+            };
+
+            let list = if list_order_reversed {
+                vec![config_b, config_a]
+            } else {
+                vec![config_a, config_b]
+            };
+            let map = HashMap::from([(url_a, entry_a_jwk), (url_b, entry_b_jwk)]);
+            let manager = JwksManager::new_test(list, map);
+
+            // The token's issuer matches only entry B (the kid-only, lower-scored entry).
+            let token_claims = serde_json::json!({
+                "sub": "test",
+                "exp": get_current_timestamp(),
+                "iss": "https://tenant-b.example.com"
+            });
+            let request =
+                build_request_with_header_token_kid(signing_key.clone(), token_claims, kid);
+
+            match authenticate(&jwt_conf_with_header_source(), &manager, request) {
+                ControlFlow::Continue(_) => {}
+                ControlFlow::Break(response) => {
+                    panic!(
+                        "kid-matched entry B should have been retried and accepted \
+                         (list_order_reversed = {list_order_reversed}): {response:?}"
+                    );
+                }
+            }
+        }
+    }
 }

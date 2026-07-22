@@ -2516,7 +2516,7 @@ fn reformat_response_unknown_typename() {
 }
 
 macro_rules! run_validation {
-    ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
+    ($schema:expr, $query:expr, $mode:expr, $variables:expr $(,)?) => {{
         let variables = match $variables {
             Value::Object(object) => object,
             _ => unreachable!("variables must be an object"),
@@ -2536,7 +2536,7 @@ macro_rules! run_validation {
             &Default::default(),
         )
         .expect("could not parse query");
-        query.validate_variables(&request, &schema)
+        query.validate_variables(&request, &schema, $mode)
     }};
 }
 
@@ -2545,6 +2545,7 @@ macro_rules! assert_validation {
         let res = run_validation!(
             with_supergraph_boilerplate($schema, "Query"),
             $query,
+            Mode::Enforce,
             $variables
         );
         assert!(res.is_ok(), "validation should have succeeded: {:?}", res);
@@ -2556,6 +2557,7 @@ macro_rules! assert_validation_error {
         let res = run_validation!(
             with_supergraph_boilerplate($schema, "Query"),
             $query,
+            Mode::Enforce,
             $variables
         );
         assert!(res.is_err(), "validation should have failed");
@@ -2964,6 +2966,7 @@ fn variable_validation() {
             foo (input: $input) {
             __typename
         }}",
+        Mode::Enforce,
         json!({"input":{}})
     );
     assert!(res.is_ok(), "validation should have succeeded: {res:?}");

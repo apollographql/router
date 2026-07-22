@@ -1,6 +1,6 @@
 ---
 title: Request Limits
-subtitle: Protect your router from requests exceeding network, parser, and operation-based limits 
+subtitle: Protect your router from requests exceeding network, parser, and operation-based limits
 redirectFrom:
   - /router/configuration/operation-limits/
 ---
@@ -273,6 +273,10 @@ Limits the amount of data read from the network for the body of HTTP requests,
 to protect against unbounded memory consumption.
 This limit is checked before JSON parsing.
 Both the GraphQL document and associated variables count toward it.
+
+`GET` requests encode the query, variables, and other parameters in the URL's query string instead of a request body. For these requests, the limit applies to the byte length of the encoded query string.
+
+Requests over the limit are rejected with a `413 Payload Too Large` response for `POST` requests, or a `414 URI Too Long` response for `GET` requests.
 
 The default value is `2000000` bytes, 2 MB.
 
