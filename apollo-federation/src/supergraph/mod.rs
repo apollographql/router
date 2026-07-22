@@ -44,6 +44,7 @@ pub use self::subgraph::ValidFederationSubgraph;
 pub use self::subgraph::ValidFederationSubgraphs;
 use crate::ApiSchemaOptions;
 use crate::api_schema;
+use crate::compat::coerce_and_validate_schema_values;
 use crate::error::FederationError;
 use crate::error::Locations;
 use crate::error::MultipleFederationErrors;
@@ -101,7 +102,9 @@ impl Supergraph<Merged> {
     }
 
     pub fn parse(schema_str: &str) -> Result<Self, FederationError> {
-        let schema = Schema::parse_and_validate(schema_str, "schema.graphql")?;
+        let mut schema = Schema::parse(schema_str, "schema.graphql")?;
+        coerce_and_validate_schema_values(&mut schema)?;
+        let schema = schema.validate()?;
         Ok(Self {
             state: Merged {
                 schema: ValidFederationSchema::new(schema)?,
@@ -358,7 +361,6 @@ pub(crate) fn extract_subgraphs_from_supergraph(
 
     let mut valid_subgraphs = ValidFederationSubgraphs::new();
     for (_, mut subgraph) in subgraphs {
-        crate::compat::coerce_schema_values(subgraph.schema.schema_mut());
         let valid_subgraph_schema = if validate_extracted_subgraphs {
             match subgraph.schema.validate_or_return_self() {
                 Ok(schema) => schema,
@@ -385,6 +387,10 @@ pub(crate) fn extract_subgraphs_from_supergraph(
                 }
             }
         } else {
+            // We ignore the result here, since we're just looking to coerce here (note that
+            // `validate_or_return_self()` will call `coerce_and_validate_schema_values()` and not
+            // ignore the result).
+            let _ = coerce_and_validate_schema_values(subgraph.schema.schema_mut());
             subgraph.schema.assume_valid()?
         };
         valid_subgraphs.add(ValidFederationSubgraph {
