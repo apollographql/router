@@ -1519,9 +1519,9 @@ mod tests {
 
         #[test]
         fn field_level_cost_with_weighted_child_scales_only_the_child() {
-            let query = "query { topProductsWithExpensiveChild { id expensiveField } }";
+            let query = "query { topProducts { id expensiveField } }";
             let variables = "{}";
-            let response = br#"{"data": {"topProductsWithExpensiveChild": [
+            let response = br#"{"data": {"topProducts": [
                 {"id": "1", "expensiveField": 1},
                 {"id": "2", "expensiveField": 2},
                 {"id": "3", "expensiveField": 3}
@@ -1550,13 +1550,13 @@ mod tests {
 
         #[test]
         fn nested_list_with_default_weight_scales_by_both_list_sizes() {
-            // topProductsWithExpensiveChild's own field-level cost (40) is charged once, but a
+            // topProducts' own field-level cost (40) is charged once, but a
             // nested list field with no cost of its own (variants) still gets its default
             // per-instance weight scaled by *both* the outer and inner list sizes: 3 products *
             // 3 variants each * 1 (default Variant weight) = 9.
-            let query = "query { topProductsWithExpensiveChild { variants { id } } }";
+            let query = "query { topProducts { variants { id } } }";
             let variables = "{}";
-            let response = br#"{"data": {"topProductsWithExpensiveChild": [
+            let response = br#"{"data": {"topProducts": [
                 {"variants": [{"id": "1"}, {"id": "2"}, {"id": "3"}]},
                 {"variants": [{"id": "1"}, {"id": "2"}, {"id": "3"}]},
                 {"variants": [{"id": "1"}, {"id": "2"}, {"id": "3"}]}
@@ -1572,9 +1572,9 @@ mod tests {
             // Its resolver is invoked once per product, not once globally, so its per-call cost
             // is charged once per product (3 products * 5 = 15) rather than once overall (5) or
             // once per variant item (3 products * 3 variants * 5 = 45).
-            let query = "query { topProductsWithExpensiveChild { variantsWithCost { id } } }";
+            let query = "query { topProducts { variantsWithCost { id } } }";
             let variables = "{}";
-            let response = br#"{"data": {"topProductsWithExpensiveChild": [
+            let response = br#"{"data": {"topProducts": [
                 {"variantsWithCost": [{"id": "1"}, {"id": "2"}, {"id": "3"}]},
                 {"variantsWithCost": [{"id": "1"}, {"id": "2"}, {"id": "3"}]},
                 {"variantsWithCost": [{"id": "1"}, {"id": "2"}, {"id": "3"}]}

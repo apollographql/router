@@ -197,10 +197,6 @@ type Query
     @join__field(graph: SUBGRAPHWITHLISTSIZE)
     @cost(weight: 40)
     @listSize(assumedSize: 3)
-  topProductsWithExpensiveChild: [Product]
-    @join__field(graph: SUBGRAPHWITHLISTSIZE)
-    @cost(weight: 40)
-    @listSize(assumedSize: 3)
   expensiveObjectList: [ExpensiveObject]
     @join__field(graph: SUBGRAPHWITHLISTSIZE)
     @listSize(assumedSize: 3)
