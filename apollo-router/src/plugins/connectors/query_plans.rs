@@ -57,6 +57,29 @@ pub(crate) fn connectors_by_coordinate(
     )
 }
 
+/// Source-aware dispatch (B-3): resolve the connector a fetch dispatches to.
+///
+/// Prefer the **carried coordinate** — the `FetchNode.connector` identity
+/// stamped at plan time (B-1/B-2a) — looked up in the coordinate index. This is
+/// the source-aware path: one shared `connectors` subgraph, so `service_name`
+/// no longer disambiguates. Fall back to the synthetic `service_name` when no
+/// coordinate is carried, preserving the expansion path exactly. The identity is
+/// thus *used* where it was determined authoritatively, not recovered.
+// Reads the source-aware fetch identity; the routing call site that passes it in
+// is the remaining wiring (gated on a source-aware router pipeline).
+#[allow(dead_code)]
+pub(crate) fn resolve_connector<'a>(
+    fetch_connector: Option<&str>,
+    service_name: &str,
+    by_coordinate: &'a ConnectorsByCoordinate,
+    by_service_name: &'a ConnectorsByServiceName,
+) -> Option<&'a Connector> {
+    match fetch_connector {
+        Some(coordinate) => by_coordinate.get(coordinate),
+        None => by_service_name.get(service_name),
+    }
+}
+
 type ConnectorLabels = Arc<IndexMap<Arc<str>, String>>;
 
 pub(crate) fn store_connectors_labels(context: &Context, labels_by_service_name: ConnectorLabels) {
@@ -232,5 +255,60 @@ mod tests {
             .expect("users connector resolvable by coordinate");
         assert_eq!(resolved.id.coordinate(), users_coord);
         assert!(by_coordinate.contains_key(&posts_coord));
+    }
+
+    /// B-3 dispatch: `resolve_connector` prefers the carried coordinate (the
+    /// stamped source-aware identity), and falls back to the synthetic service
+    /// name when no coordinate is carried (expansion path).
+    #[test]
+    fn resolve_connector_prefers_carried_coordinate() {
+        let users = root_field_connector("users");
+        let posts = root_field_connector("posts");
+        let users_coord = users.id.coordinate();
+        let posts_coord = posts.id.coordinate();
+
+        let by_service_name: ConnectorsByServiceName = Arc::new(IndexMap::from_iter([
+            (Arc::from("connectors_Query_users_0"), users),
+            (Arc::from("connectors_Query_posts_0"), posts),
+        ]));
+        let by_coordinate = connectors_by_coordinate(&by_service_name);
+
+        // Source-aware: a fetch stamped with the users coordinate resolves to the
+        // users connector — even though under source-aware every fetch's
+        // service_name would be the shared "connectors".
+        let resolved = resolve_connector(
+            Some(&users_coord),
+            "connectors",
+            &by_coordinate,
+            &by_service_name,
+        )
+        .expect("resolves by carried coordinate");
+        assert_eq!(resolved.id.coordinate(), users_coord);
+
+        // Distinct coordinate → distinct connector (no collapse/over-merge).
+        let resolved_posts = resolve_connector(
+            Some(&posts_coord),
+            "connectors",
+            &by_coordinate,
+            &by_service_name,
+        )
+        .expect("resolves posts by coordinate");
+        assert_eq!(resolved_posts.id.coordinate(), posts_coord);
+
+        // Expansion path: no carried coordinate → fall back to service name.
+        let fallback = resolve_connector(
+            None,
+            "connectors_Query_users_0",
+            &by_coordinate,
+            &by_service_name,
+        )
+        .expect("falls back to synthetic service name");
+        assert_eq!(fallback.id.coordinate(), users_coord);
+
+        // Unknown coordinate → no connector (no silent mis-dispatch).
+        assert!(
+            resolve_connector(Some("connectors:Query.missing[0]"), "connectors", &by_coordinate, &by_service_name)
+                .is_none()
+        );
     }
 }

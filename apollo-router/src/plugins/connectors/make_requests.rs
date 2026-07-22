@@ -2461,6 +2461,107 @@ mod tests {
         }
     }
 
+    /// B-3 DISPATCH-BY-CARRIED-COORDINATE (the (B) vertical, end to end in the
+    /// router). Simulate a source-aware fetch stamped with a connector
+    /// coordinate (B-2a): index the connectors by coordinate, `resolve_connector`
+    /// by that carried coordinate (not by a synthetic service name), then drive
+    /// the resolved connector through the real `make_requests` path and assert
+    /// the actual `GET …/users` request. Proves the identity determined at plan
+    /// time and carried on the fetch is what selects the connector for dispatch.
+    #[test]
+    fn source_aware_dispatch_by_carried_coordinate() {
+        use indexmap::IndexMap as CIndexMap;
+
+        use crate::plugins::connectors::query_plans::connectors_by_coordinate;
+        use crate::plugins::connectors::query_plans::resolve_connector;
+
+        let schema = Schema::parse_and_validate(
+            "type Query { users: [User] } type User { id: ID name: String }",
+            "./",
+        )
+        .unwrap();
+
+        // A root-field connector on Query.users, as expansion/composition would
+        // index it by a synthetic service name.
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
+            id: ConnectId::new("connectors".into(), None, name!(Query), name!(users), None, 0),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/users".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("id name").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            label: "test".into(),
+        };
+        let coordinate = connector.id.coordinate();
+        let by_service_name = Arc::new(CIndexMap::from_iter([(
+            Arc::from("connectors_Query_users_0"),
+            connector,
+        )]));
+        let by_coordinate = connectors_by_coordinate(&by_service_name);
+
+        // Dispatch as source-aware would: the fetch carries the coordinate
+        // (service_name is the shared "connectors" and does NOT disambiguate).
+        let resolved = resolve_connector(
+            Some(&coordinate),
+            "connectors",
+            &by_coordinate,
+            &by_service_name,
+        )
+        .expect("resolved by carried coordinate");
+
+        let operation = ExecutableDocument::parse_and_validate(
+            &schema,
+            "{ users { id name } }".to_string(),
+            "./",
+        )
+        .unwrap();
+        let variables = Variables {
+            variables: Default::default(),
+            inverted_paths: Default::default(),
+            contextual_arguments: Default::default(),
+        };
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        let requests = super::make_requests(
+            &operation,
+            &variables,
+            None,
+            &Context::new(),
+            supergraph_request,
+            Arc::new(resolved.clone()),
+            &None,
+        )
+        .unwrap();
+
+        assert_eq!(requests.len(), 1);
+        let req = requests.into_iter().next().unwrap();
+        let TransportRequest::Http(http_request) = req.transport_request else {
+            panic!("expected an HTTP transport request");
+        };
+        assert_eq!(http_request.inner.method(), "GET");
+        assert!(
+            http_request.inner.uri().to_string().ends_with("/users"),
+            "carried-coordinate dispatch built GET .../users, got {}",
+            http_request.inner.uri()
+        );
+    }
+
     /// Helper function for full pipeline: parse query → `root_fields()` → apply connector
     /// selection → `apply_operation()`. Returns the final response data.
     fn run_pipeline(query: &str) -> Value {

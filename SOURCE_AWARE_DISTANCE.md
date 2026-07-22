@@ -374,15 +374,21 @@ The (B) implementation lands as a spine:
   not recovered at execution. Tested over raw-graph steelthread plans
   (`Query.users`, `Query.user`, `User.d`; the graphql fetch for `c` correctly
   left unstamped). Purely additive.
-- **B-3 — dispatch on the carried coordinate (remaining).** `ConnectorService`
-  and `fetch_service::fetch_with_connector_service` today resolve the connector
-  via `schema.connectors.by_service_name.get(service_name)`
-  (`fetch_service.rs:143`). B-3 = when `fetch_node.connector` is `Some`, resolve
-  by **coordinate** instead (the router already has `connectors_by_coordinate`,
-  `query_plans.rs`), falling back to `service_name` otherwise. This needs a
-  by-coordinate index on the connector set the executor sees and a small routing
-  tweak, and is gated on a source-aware router pipeline (raw-graph planning +
-  connector registration) that does not yet exist to run it end-to-end.
+- **B-3 — dispatch on the carried coordinate (landed).** `resolve_connector`
+  (`query_plans.rs`) picks the connector by the carried `FetchNode.connector`
+  coordinate when present — the source-aware path, where one shared `connectors`
+  subgraph means `service_name` no longer disambiguates — falling back to
+  `service_name` otherwise (expansion path, unchanged); unknown coordinate →
+  `None`. Tested, plus `source_aware_dispatch_by_carried_coordinate` stitches the
+  whole vertical in the router: index by coordinate → resolve by the carried
+  coordinate → real `make_requests` → actual `GET …/users`. **So the (B) vertical
+  is proven piecewise end to end:** B-2a stamps (fed) → B-1 carries → B-3
+  resolves by coordinate → `make_requests` → real request. The one piece that
+  remains is the *routing call site* handing `fetch.connector` to `resolve_connector`
+  (`fetch_service::fetch_with_connector_service`, `fetch_service.rs:143`, +
+  a by-coordinate index on the connector set the executor sees) — gated on a
+  source-aware router pipeline (raw-graph planning + connector registration) that
+  does not yet exist to run a live request through.
 
 The (A) full-graph alternative — **B-2b**, grafting typed-`SourceId`
 source-entering edges into the live `QueryGraph` so identity flows through
@@ -404,11 +410,13 @@ root-field (Slice 2) and entity (Slices 3a/3b) — now dispatch end-to-end
 through real router execution code**, source-aware, producing the connectors'
 actual HTTP requests with no expansion and no synthetic `_entities` operation.
 That proves the `make_requests` layer, and the **(B) identity spine** (B-1
-channel + B-2a authoritative stamping) now carries *which* connector each fetch
-targets, plan → carried, determined once from `@connect` metadata. What is still
-genuinely unbuilt: **B-3** — the executor resolving the connector by that carried
-coordinate (a by-coordinate index + routing tweak, gated on a source-aware
-router pipeline that does not yet exist) — the optional **B-2b** typed-`SourceId`
+channel + B-2a authoritative stamping + B-3 dispatch-by-coordinate) now carries
+*which* connector each fetch targets — plan → carried → dispatched — determined
+once from `@connect` metadata and proven piecewise end to end in the router
+(`source_aware_dispatch_by_carried_coordinate`). What is still genuinely unbuilt:
+the **source-aware router pipeline** that would make it run on a live request
+(raw-graph planning + connector registration + the routing call site handing
+`fetch.connector` to `resolve_connector`), the optional **B-2b** typed-`SourceId`
 graph model (the multi-quarter, plan-reshaping production ideal), and
 **composition-side satisfiability** (Phase 2), untouched. The parity harness
 (Spike B, corpus-ready) remains in place to measure progress the moment a full
