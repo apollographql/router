@@ -1425,31 +1425,31 @@ mod tests {
         const SCHEMA: &str = include_str!("./fixtures/custom_cost_schema.graphql");
 
         #[rstest::rstest]
-        #[case::no_directive("query { enumWithCost }", "{}", 15.0)]
+        #[case::no_directive("query { enumWithCost }", "{}", 15.0)] // AorB enum has @cost(weight: 15)
         #[case::single_slicing_argument_with_array(
             r#"query { itemsByIds(ids: ["a", "b"]) { id } }"#,
             "{}",
-            2.0
+            2.0  // list size = 2 (inline array length)
         )]
         #[case::slicing_argument_with_variable(
             r#"query Q($ids: [ID!]!) { itemsByIds(ids: $ids) { id } }"#,
             r#"{"ids": ["x", "y", "z"]}"#,
-            3.0
+            3.0  // list size = 3 (variable array length)
         )]
         #[case::nested_sized_fields(
             r#"query { containerWithNestedList(first: 5) { page { id } } }"#,
             "{}",
-            6.0
+            6.0  // ResultContainer: 1, page: 5 * 1 = 5
         )]
         #[case::assumed_size_fallback(
             r#"query Q($ids: [ID!]) { itemsByIdsWithAssumedSize(ids: $ids) { id } }"#,
             r#"{"ids": null}"#,
-            50.0
+            50.0  // assumedSize is 50 in the schema
         )]
         #[case::sized_fields_propagate_to_nested_lists(
             r#"query { fieldWithDynamicListSize { items { id } } }"#,
             "{}",
-            11.0
+            11.0  // SizedField: 1, items: 10 * 1 = 10 (from default first: 10)
         )]
         fn vec_based_implementation_maintains_backward_compatibility(
             #[case] query: &str,
@@ -1470,18 +1470,18 @@ mod tests {
         #[case::inline_array_of_3(
             r#"query { itemsByIds(ids: ["a", "b", "c"]) { id } }"#,
             "{}",
-            3.0
+            3.0  // list size = 3 (inline array length)
         )]
-        #[case::empty_inline_array(r#"query { itemsByIds(ids: []) { id } }"#, "{}", 0.0)]
+        #[case::empty_inline_array(r#"query { itemsByIds(ids: []) { id } }"#, "{}", 0.0)] // list size = 0 (empty array)
         #[case::variable_array_of_5(
             r#"query Q($ids: [ID!]!) { itemsByIds(ids: $ids) { id } }"#,
             r#"{"ids": ["a", "b", "c", "d", "e"]}"#,
-            5.0
+            5.0  // list size = 5 (variable array length)
         )]
         #[case::variable_empty_array(
             r#"query Q($ids: [ID!]!) { itemsByIds(ids: $ids) { id } }"#,
             r#"{"ids": []}"#,
-            0.0
+            0.0  // list size = 0 (empty variable array)
         )]
         fn array_length_determines_list_size(
             #[case] query: &str,
@@ -1496,6 +1496,7 @@ mod tests {
         #[case::missing_variable("{}")]
         fn null_or_missing_array_falls_back_to_assumed_size(#[case] variables: &str) {
             let query = r#"query Q($ids: [ID!]) { itemsByIdsWithAssumedSize(ids: $ids) { id } }"#;
+            // assumedSize is 50 in the schema
             assert_eq!(estimated_cost(SCHEMA, query, variables), 50.0);
         }
     }
@@ -1519,22 +1520,22 @@ mod tests {
         #[case::inline_nested_first_10(
             r#"query { search(input: {pagination: {first: 10}}) { id } }"#,
             "{}",
-            12.0
+            12.0  // 10 (list size) + 2 (input objects: SearchInput + PaginationInput)
         )]
         #[case::inline_nested_first_5(
             r#"query { search(input: {pagination: {first: 5}, query: "test"}) { id } }"#,
             "{}",
-            7.0
+            7.0  // 5 (list size) + 2 (input objects)
         )]
         #[case::variable_nested_object(
             r#"query Q($input: SearchInput!) { search(input: $input) { id } }"#,
             r#"{"input": {"pagination": {"first": 7}, "query": "test"}}"#,
-            9.0
+            9.0  // 7 (list size) + 2 (input objects)
         )]
         #[case::variable_nested_first_only(
             r#"query Q($input: SearchInput!) { search(input: $input) { id } }"#,
             r#"{"input": {"pagination": {"first": 3}}}"#,
-            5.0
+            5.0  // 3 (list size) + 2 (input objects)
         )]
         fn nested_path_determines_list_size(
             #[case] query: &str,
@@ -1550,9 +1551,18 @@ mod tests {
         // When path not found, falls back to assumedSize (25)
 
         #[rstest::rstest]
-        #[case::missing_nested_value(r#"{"input": {"pagination": {}}}"#, 27.0)]
-        #[case::missing_pagination(r#"{"input": {}}"#, 26.0)]
-        #[case::null_input(r#"{"input": null}"#, 25.0)]
+        #[case::missing_nested_value(
+            r#"{"input": {"pagination": {}}}"#,
+            27.0  // 25 (assumed size) + 2 (SearchInput + PaginationInput)
+        )]
+        #[case::missing_pagination(
+            r#"{"input": {}}"#,
+            26.0  // 25 (assumed size) + 1 (SearchInput only)
+        )]
+        #[case::null_input(
+            r#"{"input": null}"#,
+            25.0  // 25 (assumed size) + 0 (null is not scored)
+        )]
         fn missing_nested_path_falls_back_to_assumed_size(
             #[case] variables: &str,
             #[case] expected_cost: f64,
@@ -1567,6 +1577,7 @@ mod tests {
         #[test]
         fn deeply_nested_path_inline() {
             let query = r#"query { deeplyNested(input: {level1: {level2: {count: 15}}}) { id } }"#;
+            // 15 (list size) + 3 (input objects: DeeplyNestedInput + NestedLevel1Input + NestedLevel2Input)
             assert_eq!(estimated_cost(SCHEMA, query, "{}"), 18.0);
         }
 
@@ -1575,6 +1586,7 @@ mod tests {
             let query =
                 r#"query Q($input: DeeplyNestedInput!) { deeplyNested(input: $input) { id } }"#;
             let variables = r#"{"input": {"level1": {"level2": {"count": 12}}}}"#;
+            // 12 (list size) + 3 (input objects)
             assert_eq!(estimated_cost(SCHEMA, query, variables), 15.0);
         }
 
@@ -1582,6 +1594,7 @@ mod tests {
         fn inline_nested_object_with_other_fields() {
             // Ensure other fields in the nested object don't affect the size resolution
             let query = r#"query { search(input: {pagination: {first: 8, after: "cursor"}, query: "search term"}) { id } }"#;
+            // 8 (list size) + 2 (input objects: SearchInput + PaginationInput)
             assert_eq!(estimated_cost(SCHEMA, query, "{}"), 10.0);
         }
     }
@@ -1596,32 +1609,32 @@ mod tests {
         #[case::simple_sized_fields_on_nested_type(
             r#"query { containerWithNestedList(first: 5) { page { id } metadata } }"#,
             "{}",
-            6.0
+            6.0  // ResultContainer: 1, page: 5 * 1 = 5, metadata: 0
         )]
         #[case::nested_sized_fields_two_levels(
             r#"query { deepContainerWithNestedList(first: 7) { results { page { id } } } }"#,
             "{}",
-            9.0
+            9.0  // DeepContainer: 1, results: 1, page: 7 * 1 = 7
         )]
         #[case::nested_sized_fields_with_variable(
             r#"query Q($n: Int!) { deepContainerWithNestedList(first: $n) { results { page { id } } } }"#,
             r#"{"n": 3}"#,
-            5.0
+            5.0  // DeepContainer: 1, results: 1, page: 3 * 1 = 3
         )]
         #[case::nested_sized_fields_with_default_value(
             r#"query { deepContainerWithNestedList { results { page { id } } } }"#,
             "{}",
-            12.0
+            12.0  // default first: 10 → DeepContainer: 1, results: 1, page: 10 * 1 = 10
         )]
         #[case::nested_sized_fields_not_selected(
             r#"query { deepContainerWithNestedList(first: 100) { total } }"#,
             "{}",
-            1.0
+            1.0  // DeepContainer: 1 (sized field `results.page` not selected, so list size unused)
         )]
         #[case::intermediate_container_without_sized_field(
             r#"query { deepContainerWithNestedList(first: 100) { results { metadata } } }"#,
             "{}",
-            2.0
+            2.0  // DeepContainer: 1, results: 1 (metadata: 0, sized field `page` not selected)
         )]
         #[case::mixed_sized_fields_single_and_nested(
             r#"query {
@@ -1631,7 +1644,7 @@ mod tests {
                 }
             }"#,
             "{}",
-            12.0
+            12.0  // DeepContainer: 1, page: 5 * 1 = 5, results: 1, page: 5 * 1 = 5
         )]
         fn nested_sized_fields_cases(
             #[case] query: &str,
