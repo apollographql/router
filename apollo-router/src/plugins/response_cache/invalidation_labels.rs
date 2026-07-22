@@ -67,20 +67,27 @@ pub(super) struct CdnHeaderBuildResult {
 
 impl InvalidationLabels {
     /// Fetches this context's `InvalidationLabels` entry, creating a default one first if none
-    /// exists yet. Stamps `context` onto the stored entry (mirroring what the mutators below
-    /// also do) so later reads and mutations of this context's entry stay tied to it regardless
-    /// of which method first created it.
+    /// exists yet, and stamps `context` onto the *returned* handle so later mutator calls on it
+    /// don't need another `get_or_create` first.
+    ///
+    /// Deliberately never writes `context` onto the copy stored in the extensions map: `Context`
+    /// holds a strong `Arc` to the very extensions map its entries live in, so an
+    /// `InvalidationLabels` stored *inside* that map with its own `context` field pointing back
+    /// to the same `Context` would be a self-referential `Arc` cycle — the map's strong count
+    /// would never reach zero, leaking the whole per-request extensions map (every plugin's
+    /// entries in it, not just this one) for the life of the process. Only ever stamping the
+    /// value handed back to the caller (which drops like any other owned value) avoids that.
     ///
     /// Returns an owned clone of the stored entry rather than a reference: `with_lock` only
     /// lends out a `&mut` scoped to its closure, so a clone is the only way to hand a snapshot
     /// back to the caller. Cloning is cheap — `Context` is reference-counted internally, and the
     /// tag sets are typically small per request.
     pub(crate) fn get_or_create(context: &Context) -> Self {
-        context.extensions().with_lock(|lock| {
-            let invalidation_labels = lock.get_or_default_mut::<InvalidationLabels>();
-            invalidation_labels.context = Some(context.clone());
-            invalidation_labels.clone()
-        })
+        let mut invalidation_labels = context
+            .extensions()
+            .with_lock(|lock| lock.get_or_default_mut::<InvalidationLabels>().clone());
+        invalidation_labels.context = Some(context.clone());
+        invalidation_labels
     }
 
     /// Renders each touched subgraph as its coarsest-tier fallback label (`subgraph-{name}`),
@@ -332,9 +339,8 @@ impl InvalidationLabels {
             ))?;
         context.extensions().with_lock(|lock| {
             let invalidation_labels = lock.get_or_default_mut::<InvalidationLabels>();
-            // make sure we don't lose context; it connects request/responses together
-            invalidation_labels.context = Some(context.clone());
-
+            // Deliberately never set `.context` on the stored entry here — see
+            // `get_or_create`'s doc comment for why that would leak the extensions map.
             invalidation_labels
                 .tags
                 .extend(other_invalidatoin_labels.tags);
@@ -359,8 +365,8 @@ impl InvalidationLabels {
             ))?;
         context.extensions().with_lock(|lock| {
             let invalidation_labels = lock.get_or_default_mut::<InvalidationLabels>();
-            // make sure we don't lose context; it connects request/responses together
-            invalidation_labels.context = Some(context.clone());
+            // Deliberately never set `.context` on the stored entry here — see
+            // `get_or_create`'s doc comment for why that would leak the extensions map.
             invalidation_labels.tags.extend(tags);
         });
         Ok(())
@@ -384,8 +390,8 @@ impl InvalidationLabels {
             ))?;
         context.extensions().with_lock(|lock| {
             let invalidation_labels = lock.get_or_default_mut::<InvalidationLabels>();
-            // make sure we don't lose context; it connects request/responses together
-            invalidation_labels.context = Some(context.clone());
+            // Deliberately never set `.context` on the stored entry here — see
+            // `get_or_create`'s doc comment for why that would leak the extensions map.
             invalidation_labels
                 .types
                 .insert((subgraph.to_string(), r#type.to_string()));
@@ -405,8 +411,8 @@ impl InvalidationLabels {
             ))?;
         context.extensions().with_lock(|lock| {
             let invalidation_labels = lock.get_or_default_mut::<InvalidationLabels>();
-            // make sure we don't lose context; it connects request/responses together
-            invalidation_labels.context = Some(context.clone());
+            // Deliberately never set `.context` on the stored entry here — see
+            // `get_or_create`'s doc comment for why that would leak the extensions map.
             invalidation_labels.subgraphs.insert(subgraph.to_string());
         });
         Ok(())
@@ -460,6 +466,56 @@ mod tests {
         assert!(labels.tags.is_empty());
         assert!(labels.types.is_empty());
         assert!(labels.subgraphs.is_empty());
+    }
+
+    /// Regression test: `get_or_create`/the mutators used to stamp `context: Some(context.clone())`
+    /// onto the *stored* `InvalidationLabels` entry, not just the handle returned to the caller.
+    /// Since `Context` holds a strong `Arc` to the very extensions map its entries live in, that
+    /// created a self-referential `Arc` cycle — the map's strong count would never reach zero, so
+    /// nothing stored in it (from this or any other plugin) was ever freed. This inserts a
+    /// drop-flagging marker into the same extensions map `InvalidationLabels` lives in, exercises
+    /// every mutator, then drops every external handle and asserts the whole map actually got
+    /// freed — which only happens if `InvalidationLabels` isn't holding a `Context` back-reference
+    /// inside the map itself.
+    #[test]
+    fn context_extensions_do_not_leak_via_self_referential_invalidation_labels() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
+
+        struct DropFlag(Arc<AtomicBool>);
+        impl Drop for DropFlag {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let dropped = Arc::new(AtomicBool::new(false));
+        let context = Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(DropFlag(dropped.clone()));
+        });
+
+        let mut labels = InvalidationLabels::get_or_create(&context);
+        labels.add_tags(vec!["a".to_string()]).unwrap();
+        labels.add_subgraph("accounts").unwrap();
+        labels.add_type("accounts", "User").unwrap();
+        labels
+            .merge(InvalidationLabels {
+                tags: HashSet::from(["b".to_string()]),
+                ..Default::default()
+            })
+            .unwrap();
+
+        drop(labels);
+        drop(context);
+
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "extensions map (and everything stored in it) should be freed once every external \
+             Context handle drops; if this fails, InvalidationLabels is holding a self-referential \
+             Context that leaks the whole map"
+        );
     }
 
     // `add_tags`/`add_type`/`add_subgraph` are meant to write through to the context-stored
