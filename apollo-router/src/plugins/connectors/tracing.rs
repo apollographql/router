@@ -101,6 +101,7 @@ mod tests {
                 ]
                 .into(),
             ),
+            by_coordinate: Default::default(),
             labels_by_service_name: Default::default(),
             source_config_keys: Default::default(),
         };

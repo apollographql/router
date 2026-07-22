@@ -29,6 +29,15 @@ use crate::connectors::spec::ConnectLink;
 
 pub struct Connectors {
     pub by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
+    /// The same connector set re-indexed by `ConnectId::coordinate()` (e.g.
+    /// `connectors:Query.users[0]`). Under source-aware planning a single
+    /// `connectors` subgraph hosts every connector, so the synthetic service
+    /// name no longer disambiguates a fetch's target — the carried coordinate
+    /// (B-1/B-2a) does. This is the index the source-aware dispatch path
+    /// (`resolve_connector`, B-3) resolves against. Coordinates are unique per
+    /// connector (the coordinate includes the connect-directive index), so the
+    /// re-index is lossless — one entry per connector.
+    pub by_coordinate: Arc<IndexMap<String, Connector>>,
     pub labels_by_service_name: Arc<IndexMap<Arc<str>, String>>,
     pub source_config_keys: Arc<HashSet<String>>,
 }
@@ -128,6 +137,11 @@ pub fn expand_connectors(
         .map(|(connector, sub)| (sub.name.into(), connector))
         .collect();
 
+    let connectors_by_coordinate = connectors_by_service_name
+        .values()
+        .map(|connector| (connector.id.coordinate(), connector.clone()))
+        .collect();
+
     let labels_by_service_name = connectors_by_service_name
         .iter()
         .map(|(service_name, connector)| (service_name.clone(), connector.label.0.clone()))
@@ -143,6 +157,7 @@ pub fn expand_connectors(
         api_schema: Box::new(api_schema.schema().clone()),
         connectors: Connectors {
             by_service_name: Arc::new(connectors_by_service_name),
+            by_coordinate: Arc::new(connectors_by_coordinate),
             labels_by_service_name: Arc::new(labels_by_service_name),
             source_config_keys: Arc::new(source_config_keys),
         },

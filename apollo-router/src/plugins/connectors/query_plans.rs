@@ -43,9 +43,10 @@ type ConnectorsByCoordinate = Arc<IndexMap<String, Connector>>;
 /// Re-index a connector set by coordinate. Coordinates are unique per connector
 /// (`ConnectId::coordinate` includes the connect-directive index), so the
 /// re-index is lossless — one entry per connector.
-// Not yet wired into a production caller (only the source-aware dispatch path,
-// which does not exist in the router yet, will read it); exercised by tests.
-#[allow(dead_code)]
+///
+/// Used by `apply_config` to rebuild `Connectors.by_coordinate` after the
+/// connector set is mutated in place, keeping the coordinate index in sync with
+/// `by_service_name`.
 pub(crate) fn connectors_by_coordinate(
     connectors_by_service_name: &ConnectorsByServiceName,
 ) -> ConnectorsByCoordinate {

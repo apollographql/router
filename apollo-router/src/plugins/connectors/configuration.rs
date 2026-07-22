@@ -12,6 +12,7 @@ use serde::Serialize;
 use super::incompatible::warn_incompatible_plugins;
 use crate::Configuration;
 use crate::plugins::connectors::plugin::PLUGIN_NAME;
+use crate::plugins::connectors::query_plans::connectors_by_coordinate;
 use crate::services::connector_service::ConnectorSourceRef;
 
 /// Configuration for Apollo Connectors.
@@ -180,5 +181,12 @@ pub(crate) fn apply_config(
         }
         connector.config = Some(subgraph_config.custom.clone());
     }
+
+    // `by_service_name` was just mutated in place (override URLs, max-requests,
+    // per-source config). The coordinate index carries clones of the same
+    // connectors, so rebuild it from the mutated set to keep the two in sync —
+    // otherwise the source-aware dispatch path (`resolve_connector`, B-3) would
+    // resolve against stale, pre-config connectors.
+    connectors.by_coordinate = connectors_by_coordinate(&connectors.by_service_name);
     connectors
 }
