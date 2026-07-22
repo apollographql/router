@@ -48,7 +48,10 @@ const CACHE_TAG_CHANNEL_SIZE: usize = 1000;
 struct CacheValue {
     data: serde_json_bytes::Value,
     cache_control: CacheControl,
-    // Only set in debug mode. These are the `@cacheTag`s, tags set by extensions
+    // The `@cacheTag`/extension-derived tag values for this entry — always present once
+    // computed (not gated by debug mode), since a later cache hit needs them both for the
+    // cache debugger and to rebuild the CDN `Cache-Tag` header without a Redis `cache_tag`
+    // index being enabled. See `internal_insert_in_batch`'s `cdn_invalidation_tags_per_doc`.
     cache_tags: Option<HashSet<String>>,
 }
 
@@ -309,7 +312,7 @@ impl CacheStorage for Storage {
         // pre-filtered by `IndexMode::CacheTag` (it drives phase 1/2's `ZADD`s below), while
         // `cdn_invalidation_tags` is populated whenever CDN invalidation wants it too, even if
         // that index is off. Internal tags (Subgraph and Type) never appear in either.
-        let debug_user_tags: Vec<Vec<String>> = batch_docs
+        let cdn_invalidation_tags_per_doc: Vec<Vec<String>> = batch_docs
             .iter()
             .map(|document| document.cdn_invalidation_tags.clone())
             .collect();
@@ -398,11 +401,13 @@ impl CacheStorage for Storage {
 
         // phase 3
         let pipeline = self.storage.pipeline().await?.with_options(&options);
-        for (document, debug_tags) in batch_docs.into_iter().zip(debug_user_tags) {
+        for (document, cdn_invalidation_tags) in
+            batch_docs.into_iter().zip(cdn_invalidation_tags_per_doc)
+        {
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.control,
-                cache_tags: Some(debug_tags.into_iter().collect()),
+                cache_tags: Some(cdn_invalidation_tags.into_iter().collect()),
             };
             let _: () = pipeline
                 .set::<(), _, _>(

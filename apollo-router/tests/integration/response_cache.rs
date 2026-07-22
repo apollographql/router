@@ -576,17 +576,21 @@ fn check_cache_tags(response: &graphql::Response, cache_tags: Vec<Vec<String>>) 
         .unwrap()
         .iter();
 
-    for debug_cache_tags in cache_tags {
+    for mut expected_cache_tags in cache_tags {
         let entry = debugger_entries.next().unwrap().as_object().unwrap();
-        assert_eq!(
-            entry.get("invalidationKeys"),
-            Some(&serde_json_bytes::Value::Array(
-                debug_cache_tags
-                    .into_iter()
-                    .map(|cache_tag| serde_json_bytes::Value::String(cache_tag.into()))
-                    .collect()
-            ))
-        );
+        // `invalidationKeys` is rendered from `HashSet`-backed tiers, so its element order isn't
+        // guaranteed; sort both sides before comparing rather than asserting on a specific order.
+        let mut actual_cache_tags: Vec<String> = entry
+            .get("invalidationKeys")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|cache_tag| cache_tag.as_str().unwrap().to_string())
+            .collect();
+        actual_cache_tags.sort();
+        expected_cache_tags.sort();
+        assert_eq!(actual_cache_tags, expected_cache_tags);
     }
 }
 

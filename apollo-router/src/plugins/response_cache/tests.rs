@@ -28,10 +28,10 @@ use crate::plugins::response_cache::debugger::CdnInvalidationDebug;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
 use crate::plugins::response_cache::invalidation_endpoint::InvalidationIndexes;
 use crate::plugins::response_cache::invalidation_endpoint::SubgraphInvalidationConfig;
+use crate::plugins::response_cache::invalidation_labels::InvalidationLabels;
 use crate::plugins::response_cache::metrics::CacheMetricContextKey;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CONTEXT_CACHE_KEY;
-use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CDN_INVALIDATION;
 use crate::plugins::response_cache::plugin::CdnInvalidationConfig;
 use crate::plugins::response_cache::plugin::INVALIDATION_SHARED_KEY;
 use crate::plugins::response_cache::plugin::Subgraph;
@@ -116,8 +116,18 @@ fn get_cache_keys_context(response: &supergraph::Response) -> Option<CacheKeysCo
     Some(cache_keys)
 }
 
-fn get_cdn_invalidation_debug(response: &supergraph::Response) -> Option<CdnInvalidationDebug> {
-    response.context.get(CONTEXT_DEBUG_CDN_INVALIDATION).ok()?
+/// Reads the CDN invalidation debug info from the *actual response body extension* a real
+/// client receives (`apolloCacheDebugging.cdnInvalidation`), not just from context, so this
+/// exercises the same serialization path as production. Consumes `response`'s body stream.
+async fn get_cdn_invalidation_debug(
+    mut response: supergraph::Response,
+) -> Option<CdnInvalidationDebug> {
+    let body = response.next_response().await?;
+    let debugging = body
+        .extensions
+        .get(super::plugin::CACHE_DEBUG_EXTENSIONS_KEY)?;
+    let cdn_invalidation = debugging.get("cdnInvalidation")?;
+    serde_json_bytes::from_value(cdn_invalidation.clone()).ok()
 }
 
 fn get_cache_control_header(response: &supergraph::Response) -> Option<Vec<String>> {
@@ -3610,6 +3620,31 @@ async fn cdn_invalidation_header_for_extension_tags_gates_independently_of_cache
     .await;
 }
 
+/// Regression test: fine-grained tags used to leak onto the live `InvalidationLabels` context
+/// aggregator whenever the Redis `cache_tag` index was on, even with `cdn_invalidation.enabled:
+/// false` — contradicting `CdnInvalidationConfig`'s documented contract that fine-grained tag
+/// values only ever aggregate onto context when `cdn_invalidation.enabled` is `true`. Exercises
+/// both the schema-directive path (root field, entity) and the extension-tag path.
+#[tokio::test(flavor = "multi_thread")]
+async fn fine_grained_tags_stay_off_context_when_cdn_invalidation_disabled() {
+    async move {
+        let response = setup_cdn_invalidation_gating_test(true, false, Some("extension-tag")).await;
+
+        let invalidation_labels = InvalidationLabels::get_or_create(&response.context);
+        assert!(
+            invalidation_labels.tags.is_empty(),
+            "expected no fine-grained tags on context when cdn_invalidation is disabled, got {:?}",
+            invalidation_labels.tags
+        );
+        // The coarse subgraph/type fallback tiers are unconditional, regardless of
+        // `cdn_invalidation.enabled` — only the fine-grained `tags` tier is gated.
+        assert!(!invalidation_labels.subgraphs.is_empty());
+        assert!(!invalidation_labels.types.is_empty());
+    }
+    .with_metrics()
+    .await;
+}
+
 /// Verifies, end to end, that the router threads `maybe_emit_header`'s result into a
 /// `CdnInvalidationDebug` on the request context for the cache debugger to read. This is the
 /// only place truncation info is visible: it depends on the combined label set across every
@@ -3730,8 +3765,9 @@ async fn cdn_invalidation_debug_reflects_outcome_and_truncation() {
             true,
         )
         .await;
-        let debug =
-            get_cdn_invalidation_debug(&response).expect("expected CDN invalidation debug info");
+        let debug = get_cdn_invalidation_debug(response)
+            .await
+            .expect("expected CDN invalidation debug info");
         assert_eq!(debug.outcome, "complete_without_truncation");
         assert!(debug.emitted, "{debug:?}");
         assert!(debug.header_value.is_some(), "{debug:?}");
@@ -3750,8 +3786,9 @@ async fn cdn_invalidation_debug_reflects_outcome_and_truncation() {
             true,
         )
         .await;
-        let debug =
-            get_cdn_invalidation_debug(&response).expect("expected CDN invalidation debug info");
+        let debug = get_cdn_invalidation_debug(response)
+            .await
+            .expect("expected CDN invalidation debug info");
         assert_eq!(debug.outcome, "complete_with_truncation");
         assert!(debug.emitted, "{debug:?}");
         let header_value = debug.header_value.clone().expect("expected a header value");
@@ -3774,7 +3811,7 @@ async fn cdn_invalidation_debug_reflects_outcome_and_truncation() {
         )
         .await;
         assert!(
-            get_cdn_invalidation_debug(&response).is_none(),
+            get_cdn_invalidation_debug(response).await.is_none(),
             "expected no CDN invalidation debug info when the feature is disabled"
         );
 
@@ -3790,12 +3827,150 @@ async fn cdn_invalidation_debug_reflects_outcome_and_truncation() {
         )
         .await;
         assert!(
-            get_cdn_invalidation_debug(&response).is_none(),
+            get_cdn_invalidation_debug(response).await.is_none(),
             "expected no CDN invalidation debug info when the request didn't ask for it"
         );
     }
     .with_metrics()
     .await;
+}
+
+/// Characterizes a documented limitation: the `Cache-Tag` header is built from whatever's
+/// resolved by the time the router is ready to send the initial HTTP response, without waiting
+/// on `@defer`-deferred payloads. `activeOrganization` is deferred here specifically because it
+/// reads `currentUser`'s resolved reference to build its entity representation — that data
+/// dependency is what reliably serializes the `orga` subgraph fetch behind the primary payload
+/// finishing, which is why this test's outcome (the deferred `organization`/
+/// `organizationid-id--*` tags absent from the header) isn't just incidental mock-latency luck.
+/// A deferred fragment with no such dependency on the primary payload isn't covered by this test
+/// and has no such ordering guarantee.
+#[tokio::test(flavor = "multi_thread")]
+async fn cdn_invalidation_header_excludes_deferred_payload_tags() {
+    async move {
+        let valid_schema =
+            Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+        let query = "query { currentUser { id ... @defer { activeOrganization { ... on Organization { id creatorUser { __typename id } } } } } }";
+        let subgraphs = serde_json::json!({
+            "user": {
+                "query": {
+                    "currentUser": {
+                        "id": "1",
+                        "activeOrganization": {
+                            "__typename": "Organization",
+                            "id": "1",
+                        }
+                    }
+                },
+                "headers": {"cache-control": "public"},
+            },
+            "orga": {
+                "entities": [serde_json::json!({
+                    "__typename": "Organization",
+                    "id": "1",
+                    "creatorUser": {
+                        "__typename": "User",
+                        "id": 2
+                    }
+                })],
+                "headers": {"cache-control": "public"},
+            },
+        });
+
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+            .await
+            .unwrap();
+        let subgraph_config = || Subgraph {
+            redis: None,
+            private_id: Some("sub".to_string()),
+            enabled: true.into(),
+            ttl: None,
+            invalidation: None,
+        };
+        let map = [
+            ("user".to_string(), subgraph_config()),
+            ("orga".to_string(), subgraph_config()),
+        ]
+        .into_iter()
+        .collect();
+        let response_cache = ResponseCache::for_test_with_cdn_invalidation(
+            storage,
+            create_subgraph_conf(map),
+            valid_schema,
+            true,
+            drop_tx,
+            false,
+            CdnInvalidationConfig {
+                enabled: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({
+                "include_subgraph_errors": { "all": true },
+                "experimental_mock_subgraphs": subgraphs,
+            }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_private_plugin(response_cache)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .context(defer_context())
+            .build()
+            .unwrap();
+
+        let mut response = service.oneshot(request).await.unwrap();
+        let header = get_cache_tag_header(&response).expect("expected a Cache-Tag header");
+
+        // The deferred fragment's own tags must never appear on the primary response's header.
+        assert!(
+            !header.contains(&"organization".to_string()),
+            "deferred-only tag leaked into the primary response's header: {header:?}"
+        );
+
+        // Confirm the query really did defer: a second chunk with the deferred data follows.
+        let primary = response.next_response().await.unwrap();
+        assert_eq!(
+            primary.has_next,
+            Some(true),
+            "expected the primary chunk to signal more chunks are coming"
+        );
+        let deferred = response
+            .next_response()
+            .await
+            .expect("expected a second, deferred chunk");
+        assert!(
+            !deferred.incremental.is_empty(),
+            "expected the deferred chunk to carry incremental data"
+        );
+
+        // The primary chunk's own tag (from `currentUser`'s root-field `@cacheTag`) should still
+        // be present — only the deferred fragment's tags are excluded.
+        assert!(
+            header.contains(&"currentUser".to_string()),
+            "missing primary-payload tag in {header:?}"
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+fn defer_context() -> Context {
+    let context = Context::new();
+    context.extensions().with_lock(|lock| {
+        lock.insert(crate::services::router::ClientRequestAccepts {
+            multipart_defer: true,
+            ..Default::default()
+        })
+    });
+    context
 }
 
 /// Like `setup_cdn_invalidation_gating_test`, but performs the request twice against the same

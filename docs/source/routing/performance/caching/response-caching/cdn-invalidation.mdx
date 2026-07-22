@@ -155,6 +155,12 @@ The rule you need has this general shape, regardless of provider:
 
 Cloudflare and Fastly both support conditioning cache behavior on response headers (Cloudflare's response-header-based cache rules; Fastly via a VCL snippet in `vcl_deliver` checking for the absence of `Surrogate-Key` or your configured `header_name`), but the exact product/rule type and UI change over time and by plan tier. Check your provider's current cache-rules documentation for the specific steps, and scope whatever rule you write to the routes/hosts your router serves so it doesn't affect other origins behind the same zone.
 
+## `@defer` and subscriptions
+
+The router builds the `Cache-Tag` header from whatever labels have been resolved by the time it's ready to send the initial HTTP response—it doesn't wait on `@defer`-deferred payloads or subscription events, since HTTP headers can't be amended once the response has started streaming. In practice, this means a deferred fragment's own labels are unlikely to make it into the header for that response, because the deferred portion of a query is deliberately resolved after (and typically depends on data resolved by) the initial payload.
+
+Don't rely on a deferred fragment's tag reliably appearing in the `Cache-Tag` header—if you cache `@defer` responses at your CDN, plan your purge strategy assuming it won't be there.
+
 ## Relationship to Redis invalidation
 
 CDN invalidation is independent of the router's Redis-backed invalidation indexes (the `subgraph`/`type`/`cache_tag` [indexes](/router/performance/caching/response-caching/invalidation#tune-which-invalidation-indexes-are-maintained)). Specifically:
