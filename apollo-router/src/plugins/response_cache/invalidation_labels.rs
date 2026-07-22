@@ -83,36 +83,67 @@ impl InvalidationLabels {
         })
     }
 
-    /// Renders each touched subgraph as its coarsest-tier fallback label (`subgraph-{name}`).
+    /// Renders each touched subgraph as its coarsest-tier fallback label (`subgraph-{name}`),
+    /// sorted so which labels get dropped under truncation is deterministic across replicas
+    /// instead of depending on `HashSet`'s per-process iteration order.
     fn format_subgraph_labels(&self) -> Vec<String> {
-        self.subgraphs
+        let mut labels: Vec<String> = self
+            .subgraphs
             .iter()
             .map(|subgraph| format!("subgraph-{subgraph}"))
-            .collect()
+            .collect();
+        labels.sort_unstable();
+        labels
     }
     /// Renders each touched `(subgraph, type)` pair as its medium-tier fallback label
-    /// (`type-{subgraph}-{type}`).
+    /// (`type-{subgraph}-{type}`), sorted for the same reason as `format_subgraph_labels`.
     fn format_type_labels(&self) -> Vec<String> {
-        self.types
+        let mut labels: Vec<String> = self
+            .types
             .iter()
             .map(|(subgraph, r#type)| format!("type-{subgraph}-{type}"))
-            .collect()
+            .collect();
+        labels.sort_unstable();
+        labels
     }
 
-    // WARN: this removes the sorting behavior
     fn build_header(&self, config: &CdnInvalidationConfig) -> CdnHeaderBuildResult {
         let mut included: Vec<&str> = Vec::new();
         let mut current_len = 0usize;
         let header_delimiter_size = config.header_delimiter.len();
 
-        // WARN: ordering here matters; we want coarsest labels first to make sure that we're
+        // Ordering here matters; we want coarsest labels first to make sure that we're
         // always able to invalidate whatever's cached. So, we start with subgraph labels, then
         // move on to {subgraph}-{type} labels, and then finally the user-set (via schema or
         // extension) tags labels
         // NOTE: this order is enforced through tests
-        let subgraphs = self.format_subgraph_labels();
-        let types = self.format_type_labels();
-        let tags = self.tags.iter().cloned().collect_vec();
+        let mut subgraphs = self.format_subgraph_labels();
+        let mut types = self.format_type_labels();
+        let mut tags = self.tags.iter().cloned().collect_vec();
+        tags.sort_unstable();
+
+        // A label containing the configured delimiter would be indistinguishable, once joined,
+        // from two separate labels — ambiguous for any CDN splitting the header on that
+        // delimiter. Drop such labels rather than emit a header that silently means something
+        // different than what it looks like. `subgraph-`/`type-` labels are router-computed and
+        // can't contain arbitrary bytes, so in practice this only ever affects user-authored
+        // `@cacheTag`/extension tag values.
+        let delimiter = config.header_delimiter.as_str();
+        let mut dropped_for_delimiter_collision = 0usize;
+        for labels in [&mut subgraphs, &mut types, &mut tags] {
+            let before = labels.len();
+            labels.retain(|label| delimiter.is_empty() || !label.contains(delimiter));
+            dropped_for_delimiter_collision += before - labels.len();
+        }
+        if dropped_for_delimiter_collision > 0 {
+            tracing::warn!(
+                count = dropped_for_delimiter_collision,
+                "response_cache: dropped cache-tag label(s) containing the configured \
+                 header_delimiter; they can't be safely represented in the Cache-Tag header"
+            );
+            record_cdn_tag_header_error("label_contains_delimiter");
+        }
+
         let subgraph_types_tags_labels = [subgraphs, types, tags].concat();
 
         // WARN: don't remove this check; you might think that we always get the subgraph and
@@ -141,7 +172,16 @@ impl InvalidationLabels {
         record_cdn_tag_header_untruncated_size(untruncated_size_bytes);
 
         for label in &subgraph_types_tags_labels {
-            let next_len = current_len + header_delimiter_size + label.len();
+            // A delimiter is only needed before this label if something's already been
+            // included — `included.join(delimiter)` has one fewer delimiter than label, and
+            // this accounting has to match that or it overcounts the real joined length by one
+            // delimiter's worth per response, truncating labels that would actually have fit.
+            let delimiter_cost = if included.is_empty() {
+                0
+            } else {
+                header_delimiter_size
+            };
+            let next_len = current_len + delimiter_cost + label.len();
 
             if next_len >= config.max_bytes {
                 tracing::warn!(
@@ -265,12 +305,14 @@ impl InvalidationLabels {
     pub(crate) fn user_facing_only(&self) -> Vec<String> {
         let mut labels = self.format_subgraph_labels();
         labels.extend(self.format_type_labels());
-        labels.extend(
-            self.tags
-                .iter()
-                .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                .cloned(),
-        );
+        let mut tags: Vec<String> = self
+            .tags
+            .iter()
+            .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+            .cloned()
+            .collect();
+        tags.sort_unstable();
+        labels.extend(tags);
         labels
     }
 
@@ -281,7 +323,7 @@ impl InvalidationLabels {
     pub(crate) fn merge(
         &self,
         other_invalidatoin_labels: InvalidationLabels,
-    ) -> Result<Self, InvalidationLabelsError> {
+    ) -> Result<(), InvalidationLabelsError> {
         let context = self
             .context
             .clone()
@@ -302,15 +344,13 @@ impl InvalidationLabels {
             invalidation_labels
                 .subgraphs
                 .extend(other_invalidatoin_labels.subgraphs);
-
-            // fresh view of InvalidationLabels after writing to context
-            Ok(invalidation_labels.clone())
-        })
+        });
+        Ok(())
     }
 
     /// Unions `tags` into this context's stored `tags` tier — the finest-grained tier; see
     /// `InvalidationLabels::tags`.
-    pub(crate) fn add_tags(&mut self, tags: Vec<String>) -> Result<Self, InvalidationLabelsError> {
+    pub(crate) fn add_tags(&mut self, tags: Vec<String>) -> Result<(), InvalidationLabelsError> {
         let context = self
             .context
             .clone()
@@ -322,8 +362,8 @@ impl InvalidationLabels {
             // make sure we don't lose context; it connects request/responses together
             invalidation_labels.context = Some(context.clone());
             invalidation_labels.tags.extend(tags);
-            Ok(invalidation_labels.clone())
-        })
+        });
+        Ok(())
     }
 
     /// Records that `(subgraph, type)` was touched by this request, adding it to this context's
@@ -335,7 +375,7 @@ impl InvalidationLabels {
         &mut self,
         subgraph: &str,
         r#type: &str,
-    ) -> Result<Self, InvalidationLabelsError> {
+    ) -> Result<(), InvalidationLabelsError> {
         let context = self
             .context
             .clone()
@@ -349,14 +389,14 @@ impl InvalidationLabels {
             invalidation_labels
                 .types
                 .insert((subgraph.to_string(), r#type.to_string()));
-            Ok(invalidation_labels.clone())
-        })
+        });
+        Ok(())
     }
 
     /// Records that `subgraph` was touched by this request, adding it to this context's stored
     /// `subgraphs` tier — the coarsest fallback tier; see `InvalidationLabels::subgraphs`.
     /// Called unconditionally, same as `add_type`.
-    pub(crate) fn add_subgraph(&mut self, subgraph: &str) -> Result<Self, InvalidationLabelsError> {
+    pub(crate) fn add_subgraph(&mut self, subgraph: &str) -> Result<(), InvalidationLabelsError> {
         let context = self
             .context
             .clone()
@@ -368,8 +408,8 @@ impl InvalidationLabels {
             // make sure we don't lose context; it connects request/responses together
             invalidation_labels.context = Some(context.clone());
             invalidation_labels.subgraphs.insert(subgraph.to_string());
-            Ok(invalidation_labels.clone())
-        })
+        });
+        Ok(())
     }
 }
 
@@ -428,13 +468,13 @@ mod tests {
     // call sees the change (proving the write reached the context, not just a local copy).
     #[rstest]
     #[case::add_tags(
-        (|labels: &mut InvalidationLabels| labels.add_tags(vec!["a".to_string(), "b".to_string()]).map(|_| ())) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
+        (|labels: &mut InvalidationLabels| labels.add_tags(vec!["a".to_string(), "b".to_string()])) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
         (|refetched: &InvalidationLabels| {
             assert_eq!(refetched.tags, HashSet::from(["a".to_string(), "b".to_string()]));
         }) as fn(&InvalidationLabels),
     )]
     #[case::add_type(
-        (|labels: &mut InvalidationLabels| labels.add_type("accounts", "User").map(|_| ())) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
+        (|labels: &mut InvalidationLabels| labels.add_type("accounts", "User")) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
         (|refetched: &InvalidationLabels| {
             assert_eq!(
                 refetched.types,
@@ -444,7 +484,7 @@ mod tests {
         }) as fn(&InvalidationLabels),
     )]
     #[case::add_subgraph(
-        (|labels: &mut InvalidationLabels| labels.add_subgraph("accounts").map(|_| ())) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
+        (|labels: &mut InvalidationLabels| labels.add_subgraph("accounts")) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
         (|refetched: &InvalidationLabels| {
             assert_eq!(
                 refetched.subgraphs,
@@ -538,13 +578,13 @@ mod tests {
     // handle, then check a SEPARATE `get_or_create` call sees the change.
     #[rstest]
     #[case::add_tags(
-        (|labels: &mut InvalidationLabels| labels.add_tags(vec!["a".to_string(), "b".to_string()]).map(|_| ())) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
+        (|labels: &mut InvalidationLabels| labels.add_tags(vec!["a".to_string(), "b".to_string()])) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
         (|refetched: &InvalidationLabels| {
             assert_eq!(refetched.tags, HashSet::from(["a".to_string(), "b".to_string()]));
         }) as fn(&InvalidationLabels),
     )]
     #[case::add_type(
-        (|labels: &mut InvalidationLabels| labels.add_type("accounts", "User").map(|_| ())) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
+        (|labels: &mut InvalidationLabels| labels.add_type("accounts", "User")) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
         (|refetched: &InvalidationLabels| {
             assert_eq!(
                 refetched.types,
@@ -553,7 +593,7 @@ mod tests {
         }) as fn(&InvalidationLabels),
     )]
     #[case::add_subgraph(
-        (|labels: &mut InvalidationLabels| labels.add_subgraph("accounts").map(|_| ())) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
+        (|labels: &mut InvalidationLabels| labels.add_subgraph("accounts")) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
         (|refetched: &InvalidationLabels| {
             assert_eq!(
                 refetched.subgraphs,
@@ -569,7 +609,7 @@ mod tests {
                 subgraphs: HashSet::from(["accounts".to_string()]),
                 context: None,
             };
-            labels.merge(other).map(|_| ())
+            labels.merge(other)
         }) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
         (|refetched: &InvalidationLabels| {
             assert_eq!(refetched.tags, HashSet::from(["homepage".to_string()]));
@@ -741,13 +781,52 @@ mod tests {
         assert_eq!(got, vec!["aaa", "bbb", "ccc"]);
     }
 
+    #[tokio::test]
+    async fn maybe_emit_header_drops_tags_containing_the_delimiter() {
+        // A tag value containing the configured delimiter would be indistinguishable, once
+        // joined, from two separate tags — it must be dropped rather than corrupt the header.
+        async move {
+            let labels = InvalidationLabels {
+                tags: HashSet::from(["region,west".to_string(), "safe-tag".to_string()]),
+                ..Default::default()
+            };
+            let mut headers = http::HeaderMap::new();
+
+            labels.maybe_emit_header(&mut headers, &cdn_config(|_| {}));
+
+            let value = headers.get("Cache-Tag").unwrap().to_str().unwrap();
+            assert_eq!(value, "safe-tag");
+            assert_counter!(
+                "apollo.router.operations.response_cache.cdn_tag_header.error",
+                1u64,
+                "reason" = "label_contains_delimiter"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[test]
+    fn maybe_emit_header_reports_empty_when_every_label_collides_with_the_delimiter() {
+        let labels = InvalidationLabels {
+            tags: HashSet::from(["a,b".to_string()]),
+            ..Default::default()
+        };
+        let mut headers = http::HeaderMap::new();
+
+        let result = labels.maybe_emit_header(&mut headers, &cdn_config(|_| {}));
+
+        assert_eq!(result.outcome, CdnTagHeaderOutcome::Empty);
+        assert!(headers.is_empty());
+    }
+
     #[test]
     fn maybe_emit_header_truncates_when_over_max_bytes() {
-        // Four equal-length tags at 3 bytes + 1-byte delimiter each: the running total
-        // after 1 tag is 4, after 2 is 8, after 3 is 12. With max_bytes=10, the loop
-        // includes tags while next_len < 10 and breaks once it isn't, so exactly 2 fit
-        // regardless of the HashSet's arbitrary iteration order (each tag costs the
-        // same either way), while which two are chosen is not deterministic.
+        // Four equal-length 3-byte tags, joined with a 1-byte delimiter: the running total
+        // (matching real join() length) is 3 after 1 tag, 7 after 2, 11 after 3. With
+        // max_bytes=10, the loop includes tags while next_len < 10 and breaks once it isn't,
+        // so exactly 2 fit regardless of the HashSet's arbitrary iteration order (each tag
+        // costs the same either way), while which two are chosen is not deterministic.
         let all: HashSet<String> = HashSet::from([
             "aaa".to_string(),
             "bbb".to_string(),
@@ -775,6 +854,76 @@ mod tests {
                 "unexpected tag {tag} in truncated header"
             );
         }
+    }
+
+    #[test]
+    fn maybe_emit_header_orders_labels_within_a_tier_deterministically() {
+        // Regression test: labels within a tier used to come from unsorted `HashSet` iteration,
+        // so which labels a truncated header kept was non-deterministic across processes/
+        // replicas for identical content. Building the same header repeatedly must always
+        // produce the exact same string now that each tier is sorted before joining.
+        let labels = InvalidationLabels {
+            tags: HashSet::from([
+                "zzz".to_string(),
+                "aaa".to_string(),
+                "mmm".to_string(),
+                "ccc".to_string(),
+            ]),
+            types: HashSet::from([
+                ("zsub".to_string(), "ZType".to_string()),
+                ("asub".to_string(), "AType".to_string()),
+            ]),
+            subgraphs: HashSet::from(["zzz-subgraph".to_string(), "aaa-subgraph".to_string()]),
+            ..Default::default()
+        };
+        let mut headers = http::HeaderMap::new();
+        labels.maybe_emit_header(&mut headers, &cdn_config(|c| c.max_bytes = 1000));
+        let first = headers
+            .get("Cache-Tag")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        for _ in 0..5 {
+            let mut headers = http::HeaderMap::new();
+            labels.maybe_emit_header(&mut headers, &cdn_config(|c| c.max_bytes = 1000));
+            let value = headers.get("Cache-Tag").unwrap().to_str().unwrap();
+            assert_eq!(value, first, "header ordering must be deterministic");
+        }
+
+        assert_eq!(
+            first,
+            "subgraph-aaa-subgraph,subgraph-zzz-subgraph,type-asub-AType,type-zsub-ZType,aaa,ccc,mmm,zzz"
+        );
+    }
+
+    #[test]
+    fn maybe_emit_header_fits_labels_up_to_the_real_joined_length() {
+        // "aa,bb" is exactly 5 bytes; with max_bytes=6 both tags should fit. A regression test
+        // for an earlier bug where the truncation loop counted a delimiter before every label
+        // (including the first) instead of only between labels, overcounting the true joined
+        // length by one delimiter and truncating labels that actually fit.
+        let labels = InvalidationLabels {
+            tags: HashSet::from(["aa".to_string(), "bb".to_string()]),
+            ..Default::default()
+        };
+        let mut headers = http::HeaderMap::new();
+
+        let result = labels.maybe_emit_header(&mut headers, &cdn_config(|c| c.max_bytes = 6));
+
+        assert_eq!(
+            result.outcome,
+            CdnTagHeaderOutcome::CompleteWithoutTruncation
+        );
+        let value = headers.get("Cache-Tag").unwrap().to_str().unwrap();
+        let mut got: Vec<&str> = value.split(',').collect();
+        got.sort_unstable();
+        assert_eq!(
+            got,
+            vec!["aa", "bb"],
+            "expected both tags to fit in 6 bytes"
+        );
     }
 
     #[test]
@@ -970,7 +1119,8 @@ mod tests {
     // All labels within a tier are deliberately the same rendered length (12 bytes for both
     // subgraph and type labels, 3 bytes for tags) so the number that fits at a given max_bytes
     // is exactly predictable regardless of the HashSet's arbitrary iteration order. Cumulative
-    // next_len after each of the 8 items, in tier order, is: 13, 26, 39, 52, 56, 60, 64, 68.
+    // next_len (matching real join() length) after each of the 8 items, in tier order, is:
+    // 12, 25, 38, 51, 55, 59, 63, 67.
     #[case::only_coarse_tiers_fit(54, 2, 2, 0)]
     #[case::coarse_tiers_plus_some_tags_fit(62, 2, 2, 2)]
     #[case::everything_fits(100, 2, 2, 4)]

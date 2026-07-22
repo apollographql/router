@@ -62,7 +62,9 @@ A response that resolves `user(id: "42")` from the `accounts` subgraph emits:
 Cache-Tag: subgraph-accounts,type-accounts-User,profile,user-42
 ```
 
-Labels from every subgraph and entity touched by the response are unioned into a single header value—if a query fans out across `accounts` and `orders`, the header carries labels for both. Tiers always appear in the coarsest-first order shown above (subgraph, then type, then tag), but the order of labels *within* a tier isn't guaranteed—don't parse the header assuming a fixed position for a specific tag.
+Labels from every subgraph and entity touched by the response are unioned into a single header value—if a query fans out across `accounts` and `orders`, the header carries labels for both. Tiers always appear in the coarsest-first order shown above (subgraph, then type, then tag), and labels within a tier are sorted lexicographically—don't parse the header assuming a fixed position for a specific tag, since a schema or data change can shift where a given label falls.
+
+If a tag value itself contains your configured `header_delimiter` (for example, a comma in a tag when using the default `,` delimiter), the router drops that label rather than emit an ambiguous header, and records it under the `label_contains_delimiter` reason on the `cdn_tag_header.error` metric (see [Metrics](#metrics)). Avoid using the delimiter character inside `@cacheTag` format strings or extension-supplied tag values.
 
 ## Why three tiers
 
