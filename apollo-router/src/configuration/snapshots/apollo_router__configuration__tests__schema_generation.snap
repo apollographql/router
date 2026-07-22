@@ -204,29 +204,6 @@ expression: "&schema"
           "description": "Enable field metrics that are generated without FTV1 to be sent to Apollo Studio.",
           "type": "boolean"
         },
-        "experimental_otlp_endpoint": {
-          "default": "https://usage-reporting.api.apollographql.com/",
-          "description": "The Apollo Studio endpoint for exporting traces and metrics.",
-          "type": "string"
-        },
-        "experimental_otlp_metrics_protocol": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/Protocol"
-            }
-          ],
-          "default": "grpc",
-          "description": "OTLP protocol used for OTel metrics.\nNote this is only intended for use in tests."
-        },
-        "experimental_otlp_tracing_protocol": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/Protocol"
-            }
-          ],
-          "default": "grpc",
-          "description": "OTLP protocol used for OTel traces.\nNote this only applies if OTel traces are enabled and is only intended for use in tests."
-        },
         "field_level_instrumentation_sampler": {
           "allOf": [
             {
@@ -266,6 +243,29 @@ expression: "&schema"
             }
           ],
           "description": "Set the Apollo usage report reference reporting mode to use."
+        },
+        "otlp_endpoint": {
+          "default": "https://usage-reporting.api.apollographql.com/",
+          "description": "The Apollo Studio endpoint for exporting traces and metrics.",
+          "type": "string"
+        },
+        "otlp_metrics_protocol": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Protocol"
+            }
+          ],
+          "default": "grpc",
+          "description": "OTLP protocol used for OTel metrics.\nNote this is only intended for use in tests."
+        },
+        "otlp_tracing_protocol": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Protocol"
+            }
+          ],
+          "default": "grpc",
+          "description": "OTLP protocol used for OTel traces.\nNote this only applies if OTel traces are enabled and is only intended for use in tests."
         },
         "otlp_tracing_sampler": {
           "allOf": [
