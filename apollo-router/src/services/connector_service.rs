@@ -23,6 +23,7 @@ use super::connect::BoxService;
 use super::new_service::ServiceFactory;
 use crate::plugins::connectors::handle_responses::aggregate_responses;
 use crate::plugins::connectors::make_requests::make_requests;
+use crate::plugins::connectors::query_plans::resolve_connector;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -55,6 +56,9 @@ pub(crate) struct ConnectorService {
     pub(crate) _subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
+    /// Source-aware dispatch index: coordinate → connector (1:1). Preferred over
+    /// `connectors_by_service_name` when the request carries a coordinate.
+    pub(crate) connectors_by_coordinate: Arc<IndexMap<String, Connector>>,
     pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
 }
 
@@ -128,10 +132,16 @@ impl tower::Service<ConnectRequest> for ConnectorService {
     }
 
     fn call(&mut self, request: ConnectRequest) -> Self::Future {
-        let connector = self
-            .connectors_by_service_name
-            .get(&request.service_name)
-            .cloned();
+        // Source-aware: resolve by the carried coordinate when present (one
+        // shared `connectors` subgraph, so service_name no longer
+        // disambiguates); otherwise fall back to service_name (expansion path).
+        let connector = resolve_connector(
+            request.connector.as_deref(),
+            &request.service_name,
+            &self.connectors_by_coordinate,
+            &self.connectors_by_service_name,
+        )
+        .cloned();
 
         let connector_request_service_factory = self.connector_request_service_factory.clone();
 
@@ -238,6 +248,9 @@ pub(crate) struct ConnectorServiceFactory {
     pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
+    /// Source-aware dispatch index (coordinate → connector), derived from the
+    /// schema's connector set. Empty on non-connector schemas.
+    pub(crate) connectors_by_coordinate: Arc<IndexMap<String, Connector>>,
     _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
     pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
 }
@@ -250,11 +263,20 @@ impl ConnectorServiceFactory {
         connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
         connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
     ) -> Self {
+        // Source-aware dispatch index, derived from the schema's connector set
+        // (symmetric with how `connectors_by_service_name` is passed in from
+        // `schema.connectors` at the call site).
+        let connectors_by_coordinate = schema
+            .connectors
+            .as_ref()
+            .map(|c| c.by_coordinate.clone())
+            .unwrap_or_default();
         Self {
             subgraph_schemas,
             schema: schema.clone(),
             subscription_config,
             connectors_by_service_name,
+            connectors_by_coordinate,
             _connect_spec_version_instrument: connect_spec_version_instrument(
                 schema.connectors.as_ref(),
             ),
@@ -287,6 +309,7 @@ impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
             _subgraph_schemas: self.subgraph_schemas.clone(),
             _subscription_config: self.subscription_config.clone(),
             connectors_by_service_name: self.connectors_by_service_name.clone(),
+            connectors_by_coordinate: self.connectors_by_coordinate.clone(),
             connector_request_service_factory: self.connector_request_service_factory.clone(),
         }
         .boxed()

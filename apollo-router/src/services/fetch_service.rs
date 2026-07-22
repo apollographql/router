@@ -21,6 +21,7 @@ use crate::configuration::HoistOrphanErrors;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
+use crate::plugins::connectors::query_plans::resolve_connector;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::fetch_service_handle_subscription;
 use crate::query_planner::FETCH_SPAN_NAME;
@@ -140,7 +141,18 @@ impl FetchService {
             let connector = schema
                 .connectors
                 .as_ref()
-                .and_then(|c| c.by_service_name.get(&fetch_node.service_name))
+                .and_then(|c| {
+                    // Source-aware: prefer the carried coordinate (service_name
+                    // is the shared `connectors` subgraph and no longer
+                    // disambiguates); fall back to service_name on the expansion
+                    // path.
+                    resolve_connector(
+                        fetch_node.connector.as_deref(),
+                        &fetch_node.service_name,
+                        &c.by_coordinate,
+                        &c.by_service_name,
+                    )
+                })
                 .ok_or("no connector found for service")?;
 
             let keys = connector.resolvable_key(schema.supergraph_schema())?;
@@ -150,6 +162,7 @@ impl FetchService {
                 .oneshot(
                     ConnectRequest::builder()
                         .service_name(fetch_node.service_name.clone())
+                        .and_connector(fetch_node.connector.clone())
                         .context(context)
                         .operation(operation?.clone())
                         .supergraph_request(supergraph_request)

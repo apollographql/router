@@ -19,6 +19,12 @@ pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError
 #[non_exhaustive]
 pub(crate) struct Request {
     pub(crate) service_name: Arc<str>,
+    /// Source-aware connector identity (the `FetchNode.connector` coordinate,
+    /// stamped at plan time). When present, dispatch resolves the connector by
+    /// this coordinate rather than by `service_name`, which no longer
+    /// disambiguates connectors that share the one `connectors` subgraph. `None`
+    /// on the expansion path, where `service_name` is unique per connector.
+    pub(crate) connector: Option<String>,
     pub(crate) context: Context,
     pub(crate) operation: Arc<Valid<ExecutableDocument>>,
     pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
@@ -53,6 +59,7 @@ impl Request {
     #[builder(visibility = "pub")]
     fn new(
         service_name: Arc<str>,
+        connector: Option<String>,
         context: Context,
         operation: Arc<Valid<ExecutableDocument>>,
         supergraph_request: Arc<http::Request<GraphQLRequest>>,
@@ -61,6 +68,7 @@ impl Request {
     ) -> Self {
         Self {
             service_name,
+            connector,
             context,
             operation,
             supergraph_request,

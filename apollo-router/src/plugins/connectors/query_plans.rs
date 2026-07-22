@@ -66,9 +66,6 @@ pub(crate) fn connectors_by_coordinate(
 /// no longer disambiguates. Fall back to the synthetic `service_name` when no
 /// coordinate is carried, preserving the expansion path exactly. The identity is
 /// thus *used* where it was determined authoritatively, not recovered.
-// Reads the source-aware fetch identity; the routing call site that passes it in
-// is the remaining wiring (gated on a source-aware router pipeline).
-#[allow(dead_code)]
 pub(crate) fn resolve_connector<'a>(
     fetch_connector: Option<&str>,
     service_name: &str,
