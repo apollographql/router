@@ -326,7 +326,7 @@ dependencies = [
  "diff",
  "displaydoc",
  "docker_credential",
- "ecdsa 0.16.9",
+ "ecdsa 0.17.0",
  "encoding_rs",
  "flate2",
  "fred",
