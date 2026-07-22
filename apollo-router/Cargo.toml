@@ -306,7 +306,7 @@ tikv-jemalloc-sys = { version = "0.7.0", features = ["profiling"] }
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 ctor = "1.0.0"
-ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
+ecdsa = { version = "0.17.0", features = ["signing", "pem", "pkcs8"] }
 encoding_rs.workspace = true
 fred = { version = "10.1.0", features = [
     "enable-rustls-ring",
