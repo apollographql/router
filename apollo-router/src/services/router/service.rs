@@ -604,6 +604,9 @@ where
         parts: &Parts,
         body: Body,
     ) -> Result<Result<graphql::Request, TranslateError>, BoxError> {
+        // NB: `plugins::limits::layer::RequestBodyLimit::call` re-derives this same "is this a
+        // GraphQL-over-HTTP GET" check to decide whether to size-limit the query string instead
+        // of the body. If this convention ever changes, update that check too.
         let graphql_request = if parts.method == Method::GET {
             Self::translate_query_request(parts)
         } else {

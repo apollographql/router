@@ -12,10 +12,12 @@ use tokio::sync::OwnedSemaphorePermit;
 use tower::Layer;
 use tower_service::Service;
 
-#[derive(thiserror::Error, Debug, Display)]
-pub(super) enum BodyLimitError {
+#[derive(thiserror::Error, Debug, Clone, Copy, Display)]
+pub(super) enum RequestSizeLimitError {
     /// Request body payload too large
-    PayloadTooLarge,
+    BodyTooLarge,
+    /// Request query payload too large
+    QueryTooLarge,
 }
 
 struct BodyLimitControlInner {
@@ -133,7 +135,7 @@ where
         >,
     ReqBody: http_body::Body,
     RespBody: http_body::Body,
-    S::Error: From<BodyLimitError>,
+    S::Error: From<RequestSizeLimitError>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -145,13 +147,35 @@ where
 
     fn call(&mut self, mut req: http::Request<ReqBody>) -> Self::Future {
         let control = BodyLimitControl::new(self.initial_limit);
+
+        // GraphQL-over-HTTP GET requests carry the query in the URI's query string rather than
+        // the body, so the content-length/body checks below never see it. Enforce the same limit
+        // here to prevent bypassing it by sending a GET instead of a POST.
+        //
+        // NB: this re-derives the same "is this a GraphQL-over-HTTP GET" check that
+        // `services::router::service::RouterToSupergraphRequestService::get_graphql_request` uses
+        // to decide whether to parse the query from the URI vs. the body. If that convention ever
+        // changes, update this check too.
+        if req.method() == http::Method::GET {
+            let query_len = req.uri().query().map(str::len).unwrap_or(0);
+            if query_len > control.limit() {
+                return ResponseFuture::Reject {
+                    error: RequestSizeLimitError::QueryTooLarge,
+                };
+            }
+        }
+
         let content_length = req
             .headers()
             .get(http::header::CONTENT_LENGTH)
             .and_then(|value| value.to_str().ok()?.parse::<usize>().ok());
 
         let _body_limit = match content_length {
-            Some(len) if len > control.limit() => return ResponseFuture::Reject,
+            Some(len) if len > control.limit() => {
+                return ResponseFuture::Reject {
+                    error: RequestSizeLimitError::BodyTooLarge,
+                };
+            }
             Some(len) => control.limit().min(len),
             None => control.limit(),
         };
@@ -186,7 +210,9 @@ where
 pin_project! {
     #[project = ResponseFutureProj]
     pub (crate) enum ResponseFuture<F> {
-        Reject,
+        Reject {
+            error: RequestSizeLimitError,
+        },
         Continue {
             #[pin]
             inner: F,
@@ -201,15 +227,15 @@ impl<Inner, Body, Error> Future for ResponseFuture<Inner>
 where
     Inner: Future<Output = Result<http::response::Response<Body>, Error>>,
     Body: http_body::Body,
-    Error: From<BodyLimitError>,
+    Error: From<RequestSizeLimitError>,
 {
     type Output = Result<http::response::Response<Body>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let project = self.project();
         match project {
-            // Content-length header exceeded, eager reject
-            ResponseFutureProj::Reject => Poll::Ready(Err(BodyLimitError::PayloadTooLarge.into())),
+            // Eager reject: either the content-length header or the GET query string exceeded the limit
+            ResponseFutureProj::Reject { error } => Poll::Ready(Err((*error).into())),
             // Continue processing the request
             ResponseFutureProj::Continue { inner, abort, .. } => {
                 match inner.poll(cx) {
@@ -218,7 +244,7 @@ where
                         // Check to see if the stream limit has been hit
                         match abort.poll(cx) {
                             Poll::Ready(_) => {
-                                Poll::Ready(Err(BodyLimitError::PayloadTooLarge.into()))
+                                Poll::Ready(Err(RequestSizeLimitError::BodyTooLarge.into()))
                             }
                             Poll::Pending => Poll::Pending,
                         }
@@ -231,6 +257,8 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::future::Future;
+
     use futures::stream::StreamExt;
     use http::StatusCode;
     use http_body_util::BodyStream;
@@ -241,178 +269,220 @@ mod test {
 
     use crate::plugins::limits::layer::BodyLimitControl;
     use crate::plugins::limits::layer::RequestBodyLimitLayer;
+    use crate::plugins::limits::limited::Limited;
+
+    /// Builds a `RequestBodyLimitLayer`-wrapped service with the given `limit` and inner handler.
+    fn service_with_limit<F, Fut>(
+        limit: usize,
+        inner: F,
+    ) -> impl Service<http::Request<String>, Response = http::Response<String>, Error = BoxError>
+    where
+        F: FnMut(http::Request<Limited<String>>) -> Fut,
+        Fut: Future<Output = Result<http::Response<String>, BoxError>>,
+    {
+        ServiceBuilder::new()
+            .layer(RequestBodyLimitLayer::new(limit))
+            .service_fn(inner)
+    }
+
+    /// The inner service should never complete: either it's never called at all (eager rejection
+    /// on method/header) or the body stream stalls once the limit is hit while reading.
+    async fn unreachable_after_reading_body(
+        r: http::Request<Limited<String>>,
+    ) -> Result<http::Response<String>, BoxError> {
+        BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
+        panic!("inner service should not have completed");
+    }
+
+    async fn ok_after_reading_body(
+        r: http::Request<Limited<String>>,
+    ) -> Result<http::Response<String>, BoxError> {
+        BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
+        Ok(http::Response::builder()
+            .status(StatusCode::OK)
+            .body("This is a test".to_string())
+            .unwrap())
+    }
+
+    fn assert_ok(resp: Result<http::Response<String>, BoxError>) {
+        assert!(resp.is_ok());
+        let resp = resp.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.into_body(), "This is a test");
+    }
+
+    /// Readies `service` and calls it with `req`, panicking if the service is never ready.
+    async fn call<S>(
+        service: &mut S,
+        req: http::Request<String>,
+    ) -> Result<http::Response<String>, BoxError>
+    where
+        S: Service<http::Request<String>, Response = http::Response<String>, Error = BoxError>,
+    {
+        service.ready().await.unwrap().call(req).await
+    }
 
     #[tokio::test]
     async fn test_body_content_length_limit_exceeded() {
-        let mut service = ServiceBuilder::new()
-            .layer(RequestBodyLimitLayer::new(10))
-            .service_fn(|r: http::Request<_>| async move {
-                BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
-                panic!("should have rejected request");
-            });
-        let resp: Result<http::Response<String>, BoxError> = service
-            .ready()
-            .await
-            .unwrap()
-            .call(http::Request::new("This is a test".to_string()))
-            .await;
+        let mut service = service_with_limit(10, unreachable_after_reading_body);
+        let request = http::Request::new("This is a test".to_string());
+        let resp = call(&mut service, request).await;
         assert!(resp.is_err());
     }
 
     #[tokio::test]
     async fn test_body_content_length_limit_ok() {
-        let mut service = ServiceBuilder::new()
-            .layer(RequestBodyLimitLayer::new(10))
-            .service_fn(|r: http::Request<_>| async move {
-                BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
-                Ok(http::Response::builder()
-                    .status(StatusCode::OK)
-                    .body("This is a test".to_string())
-                    .unwrap())
-            });
-        let resp: Result<_, BoxError> = service
-            .ready()
-            .await
-            .unwrap()
-            .call(http::Request::new("OK".to_string()))
-            .await;
-
-        assert!(resp.is_ok());
-        let resp = resp.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(resp.into_body(), "This is a test");
+        let mut service = service_with_limit(10, ok_after_reading_body);
+        let resp = call(&mut service, http::Request::new("OK".to_string())).await;
+        assert_ok(resp);
     }
 
     #[tokio::test]
     async fn test_header_content_length_limit_exceeded() {
-        let mut service = ServiceBuilder::new()
-            .layer(RequestBodyLimitLayer::new(10))
-            .service_fn(|r: http::Request<_>| async move {
-                BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
-                panic!("should have rejected request");
-            });
-        let resp: Result<http::Response<String>, BoxError> = service
-            .ready()
-            .await
-            .unwrap()
-            .call(
-                http::Request::builder()
-                    .header("Content-Length", "100")
-                    .body("This is a test".to_string())
-                    .unwrap(),
-            )
-            .await;
+        let mut service = service_with_limit(10, unreachable_after_reading_body);
+        let request = http::Request::builder()
+            .header("Content-Length", "100")
+            .body("This is a test".to_string())
+            .unwrap();
+        let resp = call(&mut service, request).await;
         assert!(resp.is_err());
     }
 
     #[tokio::test]
     async fn test_header_content_length_limit_ok() {
-        let mut service = ServiceBuilder::new()
-            .layer(RequestBodyLimitLayer::new(10))
-            .service_fn(|r: http::Request<_>| async move {
+        let mut service = service_with_limit(10, ok_after_reading_body);
+        let request = http::Request::builder()
+            .header("Content-Length", "5")
+            .body("OK".to_string())
+            .unwrap();
+        let resp = call(&mut service, request).await;
+        assert_ok(resp);
+    }
+
+    #[tokio::test]
+    async fn test_get_query_length_limit_exceeded() {
+        let mut service = service_with_limit(10, unreachable_after_reading_body);
+        let request = http::Request::builder()
+            .method(http::Method::GET)
+            .uri("/graphql?query=this-query-string-is-way-longer-than-the-limit")
+            .body(String::new())
+            .unwrap();
+        let err = call(&mut service, request).await.unwrap_err();
+        assert!(matches!(
+            err.downcast_ref::<super::RequestSizeLimitError>(),
+            Some(super::RequestSizeLimitError::QueryTooLarge)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_get_query_length_limit_ok() {
+        let mut service = service_with_limit(10, ok_after_reading_body);
+        let request = http::Request::builder()
+            .method(http::Method::GET)
+            .uri("/graphql?query=ok")
+            .body(String::new())
+            .unwrap();
+        let resp = call(&mut service, request).await;
+        assert_ok(resp);
+    }
+
+    #[tokio::test]
+    async fn test_get_query_length_exactly_at_limit_ok() {
+        let mut service = service_with_limit(10, ok_after_reading_body);
+        // "query=1234" is exactly 10 bytes, matching the configured limit.
+        let request = http::Request::builder()
+            .method(http::Method::GET)
+            .uri("/graphql?query=1234")
+            .body(String::new())
+            .unwrap();
+        let resp = call(&mut service, request).await;
+        assert_ok(resp);
+    }
+
+    #[tokio::test]
+    async fn test_get_query_length_one_byte_over_limit_exceeded() {
+        let mut service = service_with_limit(10, unreachable_after_reading_body);
+        // "query=12345" is exactly 11 bytes, one over the configured limit of 10.
+        let request = http::Request::builder()
+            .method(http::Method::GET)
+            .uri("/graphql?query=12345")
+            .body(String::new())
+            .unwrap();
+        let err = call(&mut service, request).await.unwrap_err();
+        assert!(matches!(
+            err.downcast_ref::<super::RequestSizeLimitError>(),
+            Some(super::RequestSizeLimitError::QueryTooLarge)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_get_request_without_query_string_not_rejected() {
+        // `req.uri().query()` is `None` for a bare GET (e.g. a health-check route), exercising
+        // the `unwrap_or(0)` fallback rather than a GET request that always supplies `?query=...`.
+        let mut service = service_with_limit(10, ok_after_reading_body);
+        let request = http::Request::builder()
+            .method(http::Method::GET)
+            .uri("/health")
+            .body(String::new())
+            .unwrap();
+        let resp = call(&mut service, request).await;
+        assert_ok(resp);
+    }
+
+    #[tokio::test]
+    async fn test_post_request_query_string_not_checked() {
+        // The GET query-length check must not affect POST requests, even if their (unused)
+        // query string would exceed the limit; only the body/content-length matters for POST.
+        let mut service = service_with_limit(10, ok_after_reading_body);
+        let request = http::Request::builder()
+            .method(http::Method::POST)
+            .uri("/graphql?query=this-query-string-is-way-longer-than-the-limit")
+            .body("OK".to_string())
+            .unwrap();
+        let resp = call(&mut service, request).await;
+        assert_ok(resp);
+    }
+
+    #[tokio::test]
+    async fn test_limits_dynamic_update() {
+        let mut service = service_with_limit(10, move |r: http::Request<Limited<String>>| {
+            //Update the limit before we start reading the stream
+            r.extensions()
+                .get::<BodyLimitControl>()
+                .expect("cody limit must have been added to extensions")
+                .update_limit(100);
+            async move {
                 BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
                 Ok(http::Response::builder()
                     .status(StatusCode::OK)
                     .body("This is a test".to_string())
                     .unwrap())
-            });
-        let resp: Result<_, BoxError> = service
-            .ready()
-            .await
-            .unwrap()
-            .call(
-                http::Request::builder()
-                    .header("Content-Length", "5")
-                    .body("OK".to_string())
-                    .unwrap(),
-            )
-            .await;
-        assert!(resp.is_ok());
-        let resp = resp.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(resp.into_body(), "This is a test");
-    }
-
-    #[tokio::test]
-    async fn test_limits_dynamic_update() {
-        let mut service = ServiceBuilder::new()
-            .layer(RequestBodyLimitLayer::new(10))
-            .service_fn(move |r: http::Request<_>| {
-                //Update the limit before we start reading the stream
-                r.extensions()
-                    .get::<BodyLimitControl>()
-                    .expect("cody limit must have been added to extensions")
-                    .update_limit(100);
-                async move {
-                    BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
-                    Ok(http::Response::builder()
-                        .status(StatusCode::OK)
-                        .body("This is a test".to_string())
-                        .unwrap())
-                }
-            });
-        let resp: Result<_, BoxError> = service
-            .ready()
-            .await
-            .unwrap()
-            .call(http::Request::new("This is a test".to_string()))
-            .await;
+            }
+        });
+        let request = http::Request::new("This is a test".to_string());
+        let resp = call(&mut service, request).await;
         assert!(resp.is_ok());
     }
 
     #[tokio::test]
     async fn test_body_length_exceeds_content_length() {
-        let mut service = ServiceBuilder::new()
-            .layer(RequestBodyLimitLayer::new(10))
-            .service_fn(|r: http::Request<_>| async move {
-                BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
-                Ok(http::Response::builder()
-                    .status(StatusCode::OK)
-                    .body("This is a test".to_string())
-                    .unwrap())
-            });
-        let resp: Result<_, BoxError> = service
-            .ready()
-            .await
-            .unwrap()
-            .call(
-                http::Request::builder()
-                    .header("Content-Length", "5")
-                    .body("Exceeded".to_string())
-                    .unwrap(),
-            )
-            .await;
-        assert!(resp.is_ok());
+        let mut service = service_with_limit(10, ok_after_reading_body);
+        let request = http::Request::builder()
+            .header("Content-Length", "5")
+            .body("Exceeded".to_string())
+            .unwrap();
+        let resp = call(&mut service, request).await;
         //TODO this needs to to fail once the limit layer is moved before decompression.
-        let resp = resp.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(resp.into_body(), "This is a test");
+        assert_ok(resp);
     }
 
     #[tokio::test]
     async fn test_body_content_length_service_reuse() {
-        let mut service = ServiceBuilder::new()
-            .layer(RequestBodyLimitLayer::new(10))
-            .service_fn(|r: http::Request<_>| async move {
-                BodyStream::new(r.into_body()).collect::<Vec<_>>().await;
-                Ok(http::Response::builder()
-                    .status(StatusCode::OK)
-                    .body("This is a test".to_string())
-                    .unwrap())
-            });
+        let mut service = service_with_limit(10, ok_after_reading_body);
 
         for _ in 0..10 {
-            let resp: Result<_, BoxError> = service
-                .ready()
-                .await
-                .unwrap()
-                .call(http::Request::new("OK".to_string()))
-                .await;
-
-            assert!(resp.is_ok());
-            let resp = resp.unwrap();
-            assert_eq!(resp.status(), StatusCode::OK);
-            assert_eq!(resp.into_body(), "This is a test");
+            let resp = call(&mut service, http::Request::new("OK".to_string())).await;
+            assert_ok(resp);
         }
     }
 }
