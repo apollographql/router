@@ -343,6 +343,54 @@ calling the source-aware entity path. 3a/3b prove the `make_requests` layer;
 this is the layer above it, and it touches core query-plan execution across the
 crate boundary.
 
+### (B) carrying connector identity — the right execution model
+
+An architectural correction (from the operator) reframed the executor work.
+`make_requests`-layer dispatch needs to know *which* connector a `connectors`
+fetch targets. Two ways to get that:
+
+- **(A) discard + recover:** collapse all connectors into one `connectors`
+  subgraph (as the raw-graph planner does), then recover the connector at
+  execution by matching the operation — *heuristic recovery of knowledge we
+  discarded.* Rejected.
+- **(B) carry it:** expansion's synthetic-subgraph split was really an
+  *identity-carrying* mechanism (one subgraph per connector ⇒ unique
+  `service_name`). The spike showed that split is unnecessary for *planning*,
+  but the *identity* is still needed for execution. So carry a lightweight
+  identity (the connector **coordinate**) on the fetch instead of minting a
+  whole synthetic subgraph or recovering it later.
+
+The (B) implementation lands as a spine:
+
+- **B-1 — identity channel.** `FetchNode.connector: Option<String>` (coordinate)
+  on both the federation and router `FetchNode`, threaded through the router's
+  plan conversion. `None` default, serde-skipped, not shown in Display ⇒ every
+  existing plan is byte-identical (36 federation + full router `query_planner`
+  snapshots green).
+- **B-2a — authoritative stamping.** `query_plan::connector_stamp::
+  stamp_connector_coordinates` walks a finished plan and sets each connector
+  fetch's coordinate by matching its target `(type, field)` to the ground-truth
+  `Connector` set — determined **once, at plan time, from `@connect` metadata**,
+  not recovered at execution. Tested over raw-graph steelthread plans
+  (`Query.users`, `Query.user`, `User.d`; the graphql fetch for `c` correctly
+  left unstamped). Purely additive.
+- **B-3 — dispatch on the carried coordinate (remaining).** `ConnectorService`
+  and `fetch_service::fetch_with_connector_service` today resolve the connector
+  via `schema.connectors.by_service_name.get(service_name)`
+  (`fetch_service.rs:143`). B-3 = when `fetch_node.connector` is `Some`, resolve
+  by **coordinate** instead (the router already has `connectors_by_coordinate`,
+  `query_plans.rs`), falling back to `service_name` otherwise. This needs a
+  by-coordinate index on the connector set the executor sees and a small routing
+  tweak, and is gated on a source-aware router pipeline (raw-graph planning +
+  connector registration) that does not yet exist to run it end-to-end.
+
+The (A) full-graph alternative — **B-2b**, grafting typed-`SourceId`
+source-entering edges into the live `QueryGraph` so identity flows through
+traversal — is the production-correct graph model but the highest-blast-radius,
+plan-reshaping, multi-quarter change (it resumes the connect-graph integration
+the earlier session was told to hold on). B-2a deliberately gets the identity
+carried without that risk.
+
 ## Honest verdict
 
 The spike answers "how far off": **the graph-*data* problems are largely solved
@@ -355,11 +403,13 @@ non-expanded topology**. Planner traversal turned out largely already-working
 root-field (Slice 2) and entity (Slices 3a/3b) — now dispatch end-to-end
 through real router execution code**, source-aware, producing the connectors'
 actual HTTP requests with no expansion and no synthetic `_entities` operation.
-That proves the `make_requests` layer. What is still genuinely unbuilt and
-multi-quarter: the *execution-flow* wiring above it — a source-aware fetch node
-carrying the descriptor, and the query-plan executor building representations
-from parent data via the entering-edge condition (the Flatten step) — and
-**composition-side satisfiability** (Phase 2), which this spike has not touched
-at all. The parity harness (Spike B, corpus-ready)
-remains in place to measure progress the moment a full source-aware plan
-executes.
+That proves the `make_requests` layer, and the **(B) identity spine** (B-1
+channel + B-2a authoritative stamping) now carries *which* connector each fetch
+targets, plan → carried, determined once from `@connect` metadata. What is still
+genuinely unbuilt: **B-3** — the executor resolving the connector by that carried
+coordinate (a by-coordinate index + routing tweak, gated on a source-aware
+router pipeline that does not yet exist) — the optional **B-2b** typed-`SourceId`
+graph model (the multi-quarter, plan-reshaping production ideal), and
+**composition-side satisfiability** (Phase 2), untouched. The parity harness
+(Spike B, corpus-ready) remains in place to measure progress the moment a full
+source-aware plan executes end-to-end.
