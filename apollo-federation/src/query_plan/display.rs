@@ -88,6 +88,8 @@ impl FetchNode {
             input_rewrites: _,
             output_rewrites: _,
             context_rewrites: _,
+            // Not shown in Display, so existing plan snapshots stay byte-identical.
+            connector: _,
         } = self;
         state.write(format_args!("Fetch(service: {subgraph_name:?}"))?;
         if let Some(id) = id {

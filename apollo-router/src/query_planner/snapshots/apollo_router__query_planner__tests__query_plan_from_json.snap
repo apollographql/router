@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/query_planner/tests.rs
+assertion_line: 180
 expression: query_plan
 ---
 Sequence {
@@ -26,6 +27,7 @@ Sequence {
                     scopes: [],
                     policies: [],
                 },
+                connector: None,
             },
         ),
         Parallel {
@@ -91,6 +93,7 @@ Sequence {
                                             scopes: [],
                                             policies: [],
                                         },
+                                        connector: None,
                                     },
                                 ),
                             },
@@ -166,6 +169,7 @@ Sequence {
                                             scopes: [],
                                             policies: [],
                                         },
+                                        connector: None,
                                     },
                                 ),
                             },
@@ -228,6 +232,7 @@ Sequence {
                                             scopes: [],
                                             policies: [],
                                         },
+                                        connector: None,
                                     },
                                 ),
                             },
@@ -300,6 +305,7 @@ Sequence {
                                             scopes: [],
                                             policies: [],
                                         },
+                                        connector: None,
                                     },
                                 ),
                             },

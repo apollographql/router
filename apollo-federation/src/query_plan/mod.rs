@@ -88,6 +88,15 @@ pub struct FetchNode {
     /// an argument to a resolver. Note value setters are currently unused here, but may be used in
     /// the future.
     pub context_rewrites: Vec<Arc<FetchDataRewrite>>,
+    /// Source-aware: the stable coordinate of the connector this fetch dispatches
+    /// to, when the fetch targets a connector source. `None` for ordinary
+    /// subgraph fetches — so existing plans are byte-identical (skipped in both
+    /// serialization and Display when absent). This carries the connector
+    /// identity that connector expansion used to encode as a distinct synthetic
+    /// subgraph name, so the executor can dispatch by coordinate rather than
+    /// recovering it from the operation.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub connector: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -159,6 +159,12 @@ pub(crate) struct FetchNode {
     // authorization metadata for the subgraph query
     #[serde(default)]
     pub(crate) authorization: Arc<CacheKeyMetadata>,
+
+    /// Source-aware: coordinate of the connector this fetch dispatches to (see
+    /// the federation `FetchNode`). `None` for ordinary subgraph fetches, so
+    /// existing plans are byte-identical.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub(crate) connector: Option<String>,
 }
 
 #[derive(Default)]
@@ -611,6 +617,7 @@ mod tests {
             context_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
+            connector: None,
         }
     }
 

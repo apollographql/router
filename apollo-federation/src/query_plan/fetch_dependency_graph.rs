@@ -3026,6 +3026,10 @@ impl FetchDependencyGraphNode {
                 .cloned()
                 .map(|r| Arc::new(r.into()))
                 .collect(),
+            // Source-aware connector identity is not populated by the current
+            // (connector-agnostic) planner; B-2 populates it once the query
+            // graph carries connector source identity.
+            connector: None,
         }));
 
         Ok(Some(if let Some(path) = self.merge_at.clone() {

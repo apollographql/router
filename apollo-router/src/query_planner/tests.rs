@@ -334,6 +334,7 @@ async fn defer() {
                         context_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
+            connector: None,
                     }))),
                 },
                 deferred: vec![DeferredNode {
@@ -380,6 +381,7 @@ async fn defer() {
                             context_rewrites: None,
                             schema_aware_hash: Default::default(),
                             authorization: Default::default(),
+            connector: None,
                         })),
                     }))),
                 }],
@@ -1891,6 +1893,7 @@ fn broken_plan_does_not_panic() {
             context_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
+            connector: None,
         })
         .into(),
         formatted_query_plan: Default::default(),
@@ -1963,6 +1966,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                             context_rewrites: None,
                             schema_aware_hash: Default::default(),
                             authorization: Default::default(),
+            connector: None,
                         }),
                         // Dependency fetch: gets sub.data (the deferred node depends on this)
                         PlanNode::Flatten(FlattenNode {
@@ -2008,6 +2012,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                                 context_rewrites: None,
                                 schema_aware_hash: Default::default(),
                                 authorization: Default::default(),
+            connector: None,
                             })),
                         }),
                     ],
@@ -2092,6 +2097,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                         context_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
+            connector: None,
                     })),
                 }))),
             }],

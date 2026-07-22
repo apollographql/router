@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/query_planner/query_planner_service.rs
+assertion_line: 683
 expression: plan.root
 ---
 Fetch(
@@ -22,5 +23,6 @@ Fetch(
             scopes: [],
             policies: [],
         },
+        connector: None,
     },
 )
