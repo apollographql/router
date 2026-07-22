@@ -103,6 +103,73 @@ async fn value_from_config() {
     );
 }
 
+/// Slice 5 — the capstone. A live request flows end-to-end through the
+/// **source-aware** pipeline: the flag skips expansion (the router plans over
+/// the raw supergraph and stamps each connector fetch with its coordinate), and
+/// dispatch resolves the connector by that carried coordinate rather than a
+/// synthetic service name — reaching the real connector HTTP endpoint. The
+/// result must match the expansion path byte-for-byte.
+#[tokio::test]
+async fn source_aware_root_field_end_to_end() {
+    let query = "query { users { id name } }";
+
+    // Baseline: expansion path (flag off).
+    let expanded_server = MockServer::start().await;
+    mock_api::users().mount(&expanded_server).await;
+    let expanded = execute(
+        STEEL_THREAD_SCHEMA,
+        &expanded_server.uri(),
+        query,
+        Default::default(),
+        None,
+        |_| {},
+        None,
+    )
+    .await;
+
+    // Source-aware path (flag on).
+    let sa_server = MockServer::start().await;
+    mock_api::users().mount(&sa_server).await;
+    let source_aware = execute(
+        STEEL_THREAD_SCHEMA,
+        &sa_server.uri(),
+        query,
+        Default::default(),
+        Some(json!({ "experimental_connectors_source_aware": true })),
+        |_| {},
+        None,
+    )
+    .await;
+
+    // Same response either way — source-aware is behavior-preserving end to end.
+    assert_eq!(
+        source_aware, expanded,
+        "source-aware response must match the expansion path"
+    );
+    insta::assert_json_snapshot!(source_aware, @r###"
+    {
+      "data": {
+        "users": [
+          {
+            "id": 1,
+            "name": "Leanne Graham"
+          },
+          {
+            "id": 2,
+            "name": "Ervin Howell"
+          }
+        ]
+      }
+    }
+    "###);
+
+    // The source-aware path really dispatched to the connector endpoint.
+    req_asserts::matches(
+        &sa_server.received_requests().await.unwrap(),
+        vec![Matcher::new().method("GET").path("/users")],
+    );
+}
+
 #[tokio::test]
 async fn max_requests() {
     let mock_server = MockServer::start().await;

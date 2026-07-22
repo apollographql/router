@@ -1,5 +1,32 @@
 # Phase 1 next-slice handoff — the source-aware router pipeline
 
+> **STATUS — pipeline COMPLETE (all 5 slices landed, signed).** A live request
+> now flows end-to-end through the source-aware path behind
+> `experimental_connectors_source_aware` (default off). Commits on
+> `benjamn/source-aware-phase0`:
+> - **Slice 1** `6176c39e2` — `Connectors.by_coordinate` index (+ apply_config
+>   dual-mutation drift guard).
+> - **Slice 2** `a89dc86f6` — federation `SourceAwareQueryPlanner` entry point
+>   (raw-graph plan + stamp); `from_query_graph`/`extract_subgraphs` stayed
+>   `pub(crate)`.
+> - **Slice 3** `14a80affd` — gated `spec/schema.rs` branch + federation
+>   `unexpanded_connectors`; flag-off byte-identical.
+> - **Slice 4a** `4f2702cb8` — source-aware planner wired into
+>   `QueryPlannerService` (`into_parts` + `plan_inner` stamping).
+> - **Slice 4b** `0c21a69eb` — dispatch by carried coordinate (`ConnectRequest`
+>   + `ConnectorService`/factory `by_coordinate` + `resolve_connector`).
+> - **Slice 5** `bb25e4417` — live end-to-end test: `{ users { id name } }`
+>   through the real router matches the expansion path and hits `GET /users`.
+>
+> **Key simplification found:** B-2a needs no special graph — the only
+> difference from `QueryPlanner::new` is the `validate_extracted_subgraphs`
+> toggle, so source-aware planning = raw-SDL planner (validation off) + stamp.
+> **Not yet done** (see "Open questions"): multi-connector merged fetch,
+> type-level entity-resolver connectors, source-aware cost model, and B-2b
+> (typed `SourceId` in the graph). The live entity path (`_entities` over a
+> connector, `@requires`) works via the existing `entities_from_request` but
+> only root-field is covered by a live test so far.
+
 *Self-contained brief for a fresh agent. The connector **dispatch** logic is
 built and tested piecewise (the "(B) identity spine", below); what remains is
 wiring a **source-aware router pipeline** so a live request actually flows
