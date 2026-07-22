@@ -15,7 +15,6 @@ use self::map_first_graphql_response::MapFirstGraphqlResponseService;
 use crate::Context;
 use crate::graphql;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
-use crate::layers::boxed_clone::BoxCloneLayer;
 use crate::layers::instrument::InstrumentLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataService;
@@ -26,7 +25,6 @@ use crate::services::Plugins;
 use crate::services::supergraph;
 
 pub mod async_checkpoint;
-pub(crate) mod boxed_clone;
 pub mod instrument;
 pub mod map_first_graphql_response;
 pub mod map_future_with_request_data;
@@ -432,37 +430,30 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
     ///     .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
     ///     .service(router_service.boxed_clone());
     /// ```
-    fn rust_plugins<F, S>(
+    fn rust_plugins<F, R, Resp, Err>(
         self,
         plugins: Arc<Plugins>,
         apply: F,
-    ) -> ServiceBuilder<Stack<RustPluginsLayer<F>, L>>
+    ) -> ServiceBuilder<Stack<RustPluginsLayer<F, R>, L>>
     where
-        F: Fn(&dyn DynPlugin, S) -> S;
-
-    /// Box the inner service.
-    ///
-    /// The resulting service type is a [`BoxCloneService`][tower::util::BoxCloneService].
-    ///
-    /// This has the same effect as [`ServiceBuilder::boxed_clone`], but it uses a named concrete
-    /// layer that is kinder to type inference. Prefer this over using `.boxed_clone()` in a
-    /// service builder.
-    fn concrete_boxed_clone<R>(self) -> ServiceBuilder<Stack<BoxCloneLayer<R>, L>>;
+        F: Fn(
+            &dyn DynPlugin,
+            tower::util::BoxCloneService<R, Resp, Err>,
+        ) -> tower::util::BoxCloneService<R, Resp, Err>;
 }
 
 impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
-    fn rust_plugins<F, S>(
+    fn rust_plugins<F, R, Resp, Err>(
         self,
         plugins: Arc<Plugins>,
         apply: F,
-    ) -> ServiceBuilder<Stack<RustPluginsLayer<F>, L>>
+    ) -> ServiceBuilder<Stack<RustPluginsLayer<F, R>, L>>
     where
-        F: Fn(&dyn DynPlugin, S) -> S,
+        F: Fn(
+            &dyn DynPlugin,
+            tower::util::BoxCloneService<R, Resp, Err>,
+        ) -> tower::util::BoxCloneService<R, Resp, Err>,
     {
         self.layer(RustPluginsLayer::new(plugins, apply))
-    }
-
-    fn concrete_boxed_clone<R>(self) -> ServiceBuilder<Stack<BoxCloneLayer<R>, L>> {
-        self.layer(BoxCloneLayer::new())
     }
 }
