@@ -96,6 +96,15 @@ impl SourceAwareQueryPlanner {
         self.planner.api_schema()
     }
 
+    /// Decompose into the underlying planner and the connector set. Use this
+    /// when the caller needs to drive `build_query_plan` with its own options
+    /// (cancellation, limits) and then stamp the result with
+    /// [`stamp_connector_coordinates`] itself — e.g. the router's planner
+    /// service, which cannot call the `pub(crate)` `from_query_graph` directly.
+    pub fn into_parts(self) -> (QueryPlanner, Vec<Connector>) {
+        (self.planner, self.connectors)
+    }
+
     /// The ground-truth connector set used for stamping.
     pub fn connectors(&self) -> &[Connector] {
         &self.connectors

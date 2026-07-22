@@ -9,10 +9,13 @@ use std::time::Instant;
 
 use apollo_compiler::Name;
 use apollo_compiler::ast;
+use apollo_federation::connectors::Connector;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
+use apollo_federation::query_plan::connector_stamp::stamp_connector_coordinates;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
+use apollo_federation::query_plan::source_aware::SourceAwareQueryPlanner;
 use futures::future::BoxFuture;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider as _;
@@ -87,6 +90,11 @@ pub(crate) fn non_local_selections_check_enabled() -> bool {
 #[derive(Clone)]
 pub(crate) struct QueryPlannerService {
     planner: Arc<QueryPlanner>,
+    /// When source-aware connector planning is enabled, the ground-truth
+    /// connector set to stamp onto each plan (B-2a). `None` on the default
+    /// (expansion) path, where connector identity travels via synthetic
+    /// subgraph names instead.
+    connectors_to_stamp: Option<Arc<Vec<Connector>>>,
     schema: Arc<Schema>,
     subgraph_schemas: Arc<SubgraphSchemas>,
     configuration: Arc<Configuration>,
@@ -115,11 +123,27 @@ fn federation_version_instrument(federation_version: Option<i64>) -> ObservableG
 }
 
 impl QueryPlannerService {
+    /// Build the federation query planner, plus (source-aware only) the
+    /// connector set to stamp onto plans.
     fn create_planner(
         schema: &Schema,
         configuration: &Configuration,
-    ) -> Result<Arc<QueryPlanner>, ServiceBuildError> {
+    ) -> Result<(Arc<QueryPlanner>, Option<Arc<Vec<Connector>>>), ServiceBuildError> {
         let config = configuration.rust_query_planner_config();
+
+        // Source-aware: the stored SDL is the *raw* (non-expanded) supergraph
+        // (see spec/schema.rs). Build a planner over it via the federation
+        // source-aware entry point — this is the only way the router can reach
+        // the raw-graph build, since `from_query_graph` is `pub(crate)` — and
+        // carry the connector set so `plan_inner` can stamp coordinates.
+        if configuration.experimental_connectors_source_aware && schema.connectors.is_some() {
+            let source_aware = SourceAwareQueryPlanner::new(&schema.raw_sdl, config)
+                .map_err(ServiceBuildError::QpInitError)?;
+            let (planner, connectors) = source_aware.into_parts();
+            metric_rust_qp_init(None);
+            return Ok((Arc::new(planner), Some(Arc::new(connectors))));
+        }
+
         let result = QueryPlanner::new(schema.federation_supergraph(), config);
 
         match &result {
@@ -139,7 +163,10 @@ impl QueryPlannerService {
             Ok(_) => metric_rust_qp_init(None),
         }
 
-        Ok(Arc::new(result.map_err(ServiceBuildError::QpInitError)?))
+        Ok((
+            Arc::new(result.map_err(ServiceBuildError::QpInitError)?),
+            None,
+        ))
     }
 
     async fn plan_inner(
@@ -155,6 +182,7 @@ impl QueryPlannerService {
     ) -> Result<QueryPlanResult, MaybeBackPressureError<QueryPlannerError>> {
         let doc = doc.clone();
         let rust_planner = self.planner.clone();
+        let connectors_to_stamp = self.connectors_to_stamp.clone();
         let job = move |status: compute_job::JobStatus<'_, _>| -> Result<_, QueryPlannerError> {
             let start = Instant::now();
 
@@ -192,7 +220,13 @@ impl QueryPlannerService {
             };
             metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, outcome, compute_job_type);
 
-            let plan = result?;
+            let mut plan = result?;
+            // Source-aware: stamp each connector fetch with its coordinate
+            // (B-2a) so dispatch can resolve the connector by carried identity
+            // rather than synthetic service name. No-op on the expansion path.
+            if let Some(connectors) = &connectors_to_stamp {
+                stamp_connector_coordinates(&mut plan, connectors);
+            }
             let root_node = convert_root_query_plan_node(&plan);
             Ok((plan, root_node))
         };
@@ -216,7 +250,7 @@ impl QueryPlannerService {
         configuration: Arc<Configuration>,
     ) -> Result<Self, ServiceBuildError> {
         let introspection = Arc::new(IntrospectionCache::new(&configuration));
-        let planner = Self::create_planner(&schema, &configuration)?;
+        let (planner, connectors_to_stamp) = Self::create_planner(&schema, &configuration)?;
 
         let subgraph_schemas = Arc::new(
             planner
@@ -239,6 +273,7 @@ impl QueryPlannerService {
 
         Ok(Self {
             planner,
+            connectors_to_stamp,
             schema,
             subgraph_schemas,
             enable_authorization_directives,
@@ -689,6 +724,7 @@ pub(crate) fn metric_rust_qp_init(init_error_kind: Option<&'static str>) {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::str::FromStr;
 
     use test_log::test;
     use tower::ServiceExt;
@@ -1162,6 +1198,101 @@ mod tests {
         } else {
             panic!()
         }
+    }
+
+    /// Collect `(service_name, connector_coordinate)` for every fetch in a
+    /// router plan tree, in traversal order.
+    fn collect_fetch_stamps(node: &PlanNode, out: &mut Vec<(String, Option<String>)>) {
+        match node {
+            PlanNode::Fetch(f) => out.push((f.service_name().to_string(), f.connector.clone())),
+            PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
+                nodes.iter().for_each(|n| collect_fetch_stamps(n, out))
+            }
+            PlanNode::Flatten(flatten) => collect_fetch_stamps(&flatten.node, out),
+            PlanNode::Condition {
+                if_clause,
+                else_clause,
+                ..
+            } => {
+                if let Some(n) = if_clause {
+                    collect_fetch_stamps(n, out);
+                }
+                if let Some(n) = else_clause {
+                    collect_fetch_stamps(n, out);
+                }
+            }
+            PlanNode::Defer { primary, deferred } => {
+                if let Some(n) = &primary.node {
+                    collect_fetch_stamps(n, out);
+                }
+                for d in deferred {
+                    if let Some(n) = &d.node {
+                        collect_fetch_stamps(n, out);
+                    }
+                }
+            }
+            PlanNode::Subscription { rest, .. } => {
+                if let Some(n) = rest {
+                    collect_fetch_stamps(n, out);
+                }
+            }
+        }
+    }
+
+    /// Slice 4a: a source-aware `QueryPlannerService` plans over the raw
+    /// (non-expanded) connector supergraph and stamps each connector fetch with
+    /// its coordinate — proving `create_planner`'s source-aware branch and
+    /// `plan_inner`'s stamping are wired through the real planner service.
+    #[test(tokio::test)]
+    async fn source_aware_planner_service_stamps_connector_fetches() {
+        let sdl = include_str!("../plugins/connectors/testdata/steelthread.graphql");
+        let mut configuration = Configuration::from_str(
+            "experimental_connectors_source_aware: true",
+        )
+        .unwrap();
+        configuration.supergraph.introspection = true;
+        let configuration = Arc::new(configuration);
+
+        let schema = Arc::new(Schema::parse(sdl, &configuration).unwrap());
+        // Sanity: the schema was built source-aware (raw SDL kept, connectors present).
+        assert!(schema.connectors.is_some());
+        assert_eq!(schema.raw_sdl.as_str(), sdl);
+
+        let planner = QueryPlannerService::new(schema.clone(), configuration.clone())
+            .await
+            .unwrap();
+
+        let query = "{ users { id name } }";
+        let doc = Query::parse_document(query, None, &planner.schema(), &configuration).unwrap();
+        let result = planner
+            .get(
+                QueryKey {
+                    original_query: query.to_string(),
+                    filtered_query: query.to_string(),
+                    operation_name: None,
+                    metadata: CacheKeyMetadata::default(),
+                    plan_options: PlanOptions::default(),
+                },
+                doc,
+                ComputeJobType::QueryPlanning,
+                Default::default(),
+            )
+            .await
+            .unwrap();
+
+        let QueryPlannerContent::Plan { plan } = result else {
+            panic!("expected a query plan");
+        };
+        let mut stamps = Vec::new();
+        collect_fetch_stamps(&plan.root, &mut stamps);
+
+        // The connectors fetch carries the Query.users coordinate (stamped at
+        // plan time), rather than relying on a synthetic service name.
+        assert!(
+            stamps.iter().any(|(svc, coord)| svc == "connectors"
+                && coord.as_deref().is_some_and(|c| c.contains("Query.users"))),
+            "expected a stamped connectors fetch, got {stamps:?}"
+        );
     }
 
     async fn plan(
