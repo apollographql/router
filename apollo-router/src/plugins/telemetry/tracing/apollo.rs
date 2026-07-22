@@ -10,6 +10,7 @@ use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::NamedSpanExporter;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::apollo_telemetry;
+use crate::plugins::telemetry::tracing::apollo_trace_throttle::ApolloTraceThrottle;
 
 impl TracingConfigurator for Config {
     fn config(conf: &Conf) -> &Self {
@@ -39,6 +40,7 @@ impl TracingConfigurator for Config {
             .buffer_size(self.buffer_size)
             .batch_processor_config(&self.tracing.batch_processor)
             .errors_configuration(&self.errors)
+            .trace_throttle(ApolloTraceThrottle::new(self.tracing.throttle))
             .build()?;
         let named_exporter = NamedSpanExporter::new(exporter, "apollo");
         let batch_span_processor = BatchSpanProcessor::builder(
@@ -48,6 +50,11 @@ impl TracingConfigurator for Config {
         .with_batch_config(self.tracing.batch_processor.clone().into())
         .build();
 
+        // Two layers of volume reduction apply to the Apollo pipeline:
+        // 1. The optional per-exporter head sampler (`self.sampler`), a trace-ID ratio applied here
+        //    as a span processor, consistent with the OTLP and Datadog pipelines.
+        // 2. The `ApolloTraceThrottle` back-stop (`self.tracing.throttle`), applied inside the
+        //    exporter on whole reassembled traces — see `apollo_telemetry::Exporter::export`.
         if let Some(sampler) = &self.sampler {
             let common = builder.tracing_common();
             let sampled_batch_span_processor = batch_span_processor.with_sampler(

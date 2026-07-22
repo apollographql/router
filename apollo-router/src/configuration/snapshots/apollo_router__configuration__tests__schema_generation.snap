@@ -276,7 +276,7 @@ expression: "&schema"
               "type": "null"
             }
           ],
-          "description": "Per-exporter sampler for traces sent to Apollo Studio.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`."
+          "description": "Per-exporter sampler for traces sent to Apollo Studio.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`.\n\nWhatever this sampler lets through is then subject to `tracing.throttle`, which acts as a\nback-stop that further reduces trace volume sent to Apollo Studio."
         },
         "send_headers": {
           "allOf": [
@@ -318,6 +318,21 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "ApolloTraceThrottleConfig": {
+      "description": "The back-stop strategy used to throttle the volume of traces exported to Apollo Studio, after\nhead sampling.",
+      "oneOf": [
+        {
+          "const": "representative_traces",
+          "description": "Send at most one representative trace per minute for each distinct combination of dimensions\n(operation, client, latency bucket, error status, operation type). Duplicate traces sharing\na combination already seen within the current minute are dropped. This mirrors the\nrepresentative-trace filtering used by Apollo's engine reports pipeline.",
+          "type": "string"
+        },
+        {
+          "const": "rate_limited",
+          "description": "Send every trace, but cap the export rate at a fixed maximum of 100 traces per second (per\nrouter instance). Cheaper than `representative_traces` in CPU and memory, at the cost of a\nless even sample. The rate is not configurable.",
+          "type": "string"
+        }
+      ]
     },
     "ApolloUsageReportsBatchProcessorConfiguration": {
       "properties": {
@@ -12542,6 +12557,14 @@ expression: "&schema"
             }
           ],
           "description": "Configuration for tracing batch processor."
+        },
+        "throttle": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ApolloTraceThrottleConfig"
+            }
+          ],
+          "description": "Back-stop that throttles the volume of traces sent to Apollo Studio, applied *after* the\n`telemetry.apollo.sampler` and `telemetry.exporters.tracing.common.sampler` head samplers.\nIt can only further reduce the traces that already passed those samplers, and it acts as a\nsafeguard against sending too many traces to Apollo even when a high sample rate is\nconfigured. This only affects the Apollo Studio trace pipeline; the customer OTLP and\nDatadog pipelines are unaffected."
         }
       },
       "type": "object"

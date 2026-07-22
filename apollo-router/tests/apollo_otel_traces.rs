@@ -112,6 +112,13 @@ async fn config(
         Some(serde_json::Value::String("always_on".to_string()))
     })
     .expect("Could not sub in apollo sampler");
+    // Override the trace-volume back-stop to `rate_limited` (100 traces/sec), which keeps every
+    // trace at test volumes and gives the deterministic full export these snapshot assertions
+    // expect. The default `representative_traces` would drop duplicate operations.
+    config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.tracing.throttle", &mut |_| {
+        Some(serde_json::Value::String("rate_limited".to_string()))
+    })
+    .expect("Could not sub in apollo tracing throttle");
     (task, config)
 }
 

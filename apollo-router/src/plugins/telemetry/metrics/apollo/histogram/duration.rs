@@ -12,6 +12,14 @@ use crate::plugins::telemetry::metrics::apollo::histogram::HistogramConfig;
 use crate::plugins::telemetry::metrics::apollo::histogram::MAXIMUM_SIZE;
 
 pub(crate) type DurationHistogram<Type = u64> = Histogram<DurationConfig<Type>>;
+
+/// Quantize a duration into the same log-scale bucket index used by the Apollo usage-report
+/// duration histogram. Reused for representative-trace filtering so the router groups traces into
+/// exactly the same latency buckets as the engine-reports pipeline.
+pub(crate) fn duration_bucket(value: Duration) -> usize {
+    DurationConfig::<u64>::bucket(value)
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct DurationConfig<Type>
 where

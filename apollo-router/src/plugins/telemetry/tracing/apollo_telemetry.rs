@@ -46,6 +46,7 @@ use crate::plugins::telemetry::consts::EVENT_ATTRIBUTE_OMIT_LOG;
 use crate::plugins::telemetry::consts::FIELD_EXCEPTION_MESSAGE;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::tracing::apollo_trace_throttle::ApolloTraceThrottle;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::services::connector_service::APOLLO_CONNECTOR_DETAIL;
 use crate::services::connector_service::APOLLO_CONNECTOR_FIELD_ALIAS;
@@ -79,7 +80,7 @@ const DEPENDS: Key = Key::from_static_str("graphql.depends");
 const LABEL: Key = Key::from_static_str("graphql.label");
 const CONDITION: Key = Key::from_static_str("graphql.condition");
 const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
-const OPERATION_TYPE: Key = Key::from_static_str("graphql.operation.type");
+pub(crate) const OPERATION_TYPE: Key = Key::from_static_str("graphql.operation.type");
 pub(crate) const OPERATION_SUBTYPE: Key = Key::from_static_str("apollo_private.operation.subtype");
 const EXT_TRACE_ID: Key = Key::from_static_str("trace_id");
 pub(crate) const GRAPHQL_ERROR_EXT_CODE: &str = "graphql.error.extensions.code";
@@ -260,6 +261,9 @@ pub(crate) struct Exporter {
     otlp_exporter: ApolloOtlpExporter,
     include_attr_names: HashSet<Key>,
     include_attr_event_names: HashSet<Key>,
+    /// Back-stop that throttles the volume of traces exported to Apollo (representative-traces or
+    /// rate-limited).
+    trace_throttle: ApolloTraceThrottle,
 }
 
 #[buildstructor::buildstructor]
@@ -274,6 +278,7 @@ impl Exporter {
         buffer_size: NonZeroUsize,
         errors_configuration: &'a ErrorsConfiguration,
         batch_processor_config: &'a BatchProcessorConfig,
+        trace_throttle: ApolloTraceThrottle,
     ) -> Result<Self, BoxError> {
         tracing::info!("configuring Apollo tracing: {}", batch_processor_config);
 
@@ -300,6 +305,7 @@ impl Exporter {
                 [&REPORTS_INCLUDE_ATTRS[..], &OTLP_EXT_INCLUDE_ATTRS[..]].concat(),
             ),
             include_attr_event_names: HashSet::from(OTLP_EXT_INCLUDE_EVENT_ATTRS),
+            trace_throttle,
         })
     }
 }
@@ -311,6 +317,10 @@ impl SpanExporter for Exporter {
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         let mut grouped_traces: Vec<Vec<LightSpanData>> = Vec::new();
+        // Number of complete traces seen this export, and how many the sampler kept. Mirrors the
+        // engine-reports `traceFilter.totalKeys`/`keptKeys` counters.
+        let mut total_traces: u64 = 0;
+        let mut kept_traces: u64 = 0;
 
         {
             let mut span_cache = self.span_cache.lock();
@@ -326,7 +336,14 @@ impl SpanExporter for Exporter {
                         &self.include_attr_names,
                         &self.include_attr_event_names,
                     );
-                    grouped_traces.push(span_cache.pop_spans_for_tree(root_span));
+                    let trace = span_cache.pop_spans_for_tree(root_span);
+                    // Apply the Apollo-pipeline throttle on the complete trace. Dropped traces
+                    // never reach `prepare_for_export`, so their CPU-heavy FTV1 re-encode is skipped.
+                    total_traces += 1;
+                    if self.trace_throttle.should_keep(&trace) {
+                        kept_traces += 1;
+                        grouped_traces.push(trace);
+                    }
                 } else if span.parent_span_id != SpanId::INVALID {
                     // Not a root span, we may need it later so stash it.
                     span_cache.insert(LightSpanData::from_span_data(
@@ -341,6 +358,22 @@ impl SpanExporter for Exporter {
             // to affect the size of the cache.
             self.span_lru_size_instrument
                 .update(span_cache.len() as u64);
+        }
+
+        if total_traces > 0 {
+            let throttle = self.trace_throttle.mode_name();
+            u64_counter!(
+                "apollo.router.telemetry.apollo.trace_filter.total",
+                "Complete traces considered for export to Apollo Studio",
+                total_traces,
+                throttle = throttle
+            );
+            u64_counter!(
+                "apollo.router.telemetry.apollo.trace_filter.kept",
+                "Traces kept for export to Apollo Studio after throttling",
+                kept_traces,
+                throttle = throttle
+            );
         }
 
         // ftv1 decode/re-encode is CPU-heavy, so run it after releasing the span_cache lock.

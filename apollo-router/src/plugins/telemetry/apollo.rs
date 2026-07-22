@@ -150,6 +150,9 @@ pub(crate) struct Config {
     /// When `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`
     /// header already marked as sampled by the calling service will be passed through to this
     /// exporter regardless of this sampler's value — including when set to `always_off`.
+    ///
+    /// Whatever this sampler lets through is then subject to `tracing.throttle`, which acts as a
+    /// back-stop that further reduces trace volume sent to Apollo Studio.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) sampler: Option<SamplerOption>,
 }
@@ -159,6 +162,32 @@ pub(crate) struct Config {
 pub(crate) struct TracingConfiguration {
     /// Configuration for tracing batch processor.
     pub(crate) batch_processor: BatchProcessorConfig,
+
+    /// Back-stop that throttles the volume of traces sent to Apollo Studio, applied *after* the
+    /// `telemetry.apollo.sampler` and `telemetry.exporters.tracing.common.sampler` head samplers.
+    /// It can only further reduce the traces that already passed those samplers, and it acts as a
+    /// safeguard against sending too many traces to Apollo even when a high sample rate is
+    /// configured. This only affects the Apollo Studio trace pipeline; the customer OTLP and
+    /// Datadog pipelines are unaffected.
+    pub(crate) throttle: ApolloTraceThrottleConfig,
+}
+
+/// The back-stop strategy used to throttle the volume of traces exported to Apollo Studio, after
+/// head sampling.
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum ApolloTraceThrottleConfig {
+    /// Send at most one representative trace per minute for each distinct combination of dimensions
+    /// (operation, client, latency bucket, error status, operation type). Duplicate traces sharing
+    /// a combination already seen within the current minute are dropped. This mirrors the
+    /// representative-trace filtering used by Apollo's engine reports pipeline.
+    #[default]
+    RepresentativeTraces,
+
+    /// Send every trace, but cap the export rate at a fixed maximum of 100 traces per second (per
+    /// router instance). Cheaper than `representative_traces` in CPU and memory, at the cost of a
+    /// less even sample. The rate is not configurable.
+    RateLimited,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
