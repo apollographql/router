@@ -25,7 +25,6 @@ use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::util::BoxCloneService;
 
 use self::engine::RhaiService;
 use self::engine::SharedMut;
@@ -246,7 +245,8 @@ macro_rules! gen_map_request {
                     async move {
                         let shared_request = Shared::new(Mutex::new(Some(request)));
                         let result: Result<Dynamic, Box<EvalAltResult>> =
-                            execute(&rhai_service, $stage, &callback, (shared_request.clone(),));
+                            execute(&rhai_service, $stage, &callback, (shared_request.clone(),))
+                                .await;
                         if let Err(error) = result {
                             let error_details = process_error(error);
                             if error_details.body.is_none() {
@@ -303,7 +303,7 @@ macro_rules! gen_map_router_deferred_request {
                             ),
                         };
                         let shared_request = Shared::new(Mutex::new(Some(request)));
-                        let result = execute(&rhai_service, $stage, &callback, (shared_request.clone(),));
+                        let result = execute(&rhai_service, $stage, &callback, (shared_request.clone(),)).await;
 
                         if let Err(error) = result {
                             let error_details = process_error(error);
@@ -391,14 +391,15 @@ macro_rules! gen_map_response {
     ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $stage: expr) => {
         $borrow.replace(|service| {
             service
-                .map_response(move |response: $base::Response| {
+                .and_then(move |response: $base::Response| async move {
                     let shared_response = Shared::new(Mutex::new(Some(response)));
                     let result: Result<Dynamic, Box<EvalAltResult>> = execute(
                         &$rhai_service,
                         $stage,
                         &$callback,
                         (shared_response.clone(),),
-                    );
+                    )
+                    .await;
 
                     if let Err(error) = result {
                         let error_details = process_error(error);
@@ -407,14 +408,14 @@ macro_rules! gen_map_response {
                         }
                         let mut guard = shared_response.lock();
                         let response_opt = guard.take();
-                        return $base::response_failure(
+                        return Ok($base::response_failure(
                             response_opt.unwrap().context,
                             error_details,
-                        );
+                        ));
                     }
                     let mut guard = shared_response.lock();
                     let response_opt = guard.take();
-                    response_opt.unwrap()
+                    Ok(response_opt.unwrap())
                 })
                 .boxed_clone()
         })
@@ -429,7 +430,7 @@ macro_rules! gen_map_response {
 macro_rules! gen_map_router_deferred_response {
     ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $stage: expr) => {
         $borrow.replace(|service| {
-            BoxCloneService::new(service.and_then(
+            service.and_then(
                 |mapped_response: $base::Response| async move {
                     // we split the response stream into headers+first response, then a stream of deferred responses
                     // for which we will implement mapping later
@@ -452,7 +453,8 @@ macro_rules! gen_map_router_deferred_response {
 
                         &$callback,
                         (shared_response.clone(),),
-                    );
+                    )
+                    .await;
                     if let Err(error) = result {
                         let error_details = process_error(error);
                         if error_details.body.is_none() {
@@ -532,7 +534,7 @@ macro_rules! gen_map_router_deferred_response {
                         response: http::Response::from_parts(parts, hyper::Body::wrap_stream(final_stream)),
                     })*/
                 },
-            ))
+            ).boxed_clone()
         })
     };
 }
@@ -540,7 +542,7 @@ macro_rules! gen_map_router_deferred_response {
 macro_rules! gen_map_deferred_response {
     ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $stage: expr) => {
         $borrow.replace(|service| {
-            BoxCloneService::new(service.and_then(
+            service.and_then(
                 |mapped_response: $base::Response| async move {
                     // we split the response stream into headers+first response, then a stream of deferred responses
                     // for which we will implement mapping later
@@ -577,7 +579,8 @@ macro_rules! gen_map_deferred_response {
 
                         &$callback,
                         (shared_response.clone(),),
-                    );
+                    )
+                    .await;
                     if let Err(error) = result {
                         let error_details = process_error(error);
                         if error_details.body.is_none() {
@@ -615,7 +618,8 @@ macro_rules! gen_map_deferred_response {
                                 $stage,
                                 &callback,
                                 (shared_response.clone(),),
-                            );
+                            )
+                            .await;
                             if let Err(error) = result {
                                 let error_details = process_error(error);
                                 if error_details.body.is_none() {
@@ -649,7 +653,7 @@ macro_rules! gen_map_deferred_response {
                         response,
                     })
                 },
-            ))
+            ).boxed_clone()
         })
     };
 }
@@ -804,25 +808,43 @@ fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
 
 /// Execute a Rhai callback for a pipeline service stage.
 ///
+/// The script runs on Tokio's blocking thread pool via `spawn_blocking`, so it never occupies
+/// an async executor thread for the duration of its evaluation.
+///
 /// Emits a metric recording the time spent executing the Rhai script.
-fn execute(
+async fn execute(
     rhai_service: &RhaiService,
     stage: PipelineStep,
     callback: &FnPtr,
-    args: impl FuncArgs,
+    args: impl FuncArgs + Send + 'static,
 ) -> Result<Dynamic, Box<EvalAltResult>> {
+    let rhai_service = rhai_service.clone();
+    let callback = callback.clone();
     let start = Instant::now();
 
-    let result = if callback.is_curried() {
-        callback.call(&rhai_service.engine, &rhai_service.ast, args)
-    } else {
-        let mut guard = rhai_service.scope.lock();
-        rhai_service
-            .engine
-            .call_fn(&mut guard, &rhai_service.ast, callback.fn_name(), args)
-    };
+    let (result, duration) = match tokio::task::spawn_blocking(move || {
+        let result = if callback.is_curried() {
+            callback.call(&rhai_service.engine, &rhai_service.ast, args)
+        } else {
+            let mut guard = rhai_service.scope.lock();
+            rhai_service
+                .engine
+                .call_fn(&mut guard, &rhai_service.ast, callback.fn_name(), args)
+        };
 
-    let duration = start.elapsed();
+        (result, start.elapsed())
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(join_error) => (
+            Err(Box::new(EvalAltResult::ErrorSystem(
+                "rhai script execution task did not complete".to_string(),
+                Box::new(join_error),
+            ))),
+            Duration::default(),
+        ),
+    };
 
     record_rhai_execution(stage, duration, result.is_ok());
 
