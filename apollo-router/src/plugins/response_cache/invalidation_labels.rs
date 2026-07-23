@@ -248,6 +248,17 @@ impl InvalidationLabels {
             Some(header) => header.clone(),
         };
 
+        // An empty-*value* header (every label was too large to fit, even the single coarsest
+        // one) is functionally identical to no header at all from the CDN's perspective — there's
+        // nothing to purge by either way — so don't put a meaningless `Cache-Tag: ` on the wire.
+        // `result.outcome` still distinguishes this from `CdnTagHeaderOutcome::Empty` (no labels
+        // to consider at all), which is useful for the router's own observability even though
+        // nothing is actually emitted in either case.
+        if header.is_empty() {
+            result.emitted = false;
+            return result;
+        }
+
         let header_name = match HeaderName::from_bytes(config.header_name.as_bytes()) {
             Ok(name) => name,
             Err(err) => {
@@ -681,6 +692,34 @@ mod tests {
     }
 
     #[test]
+    fn maybe_emit_header_suppresses_an_empty_value_header_even_though_truncation_completed() {
+        // Regression test: when even the single coarsest label doesn't fit in max_bytes, the
+        // truncation loop includes nothing, and the joined `included.join(delimiter)` is `""`.
+        // An empty-*value* `Cache-Tag` header is indistinguishable from no header at all to any
+        // CDN — there's nothing to purge by either way — so no header should be inserted, and
+        // `emitted` should report `false`, even though the outcome is `CompleteWithTruncation`
+        // (there *were* labels; none of them fit) rather than `Empty` (nothing to consider).
+        let labels = InvalidationLabels {
+            subgraphs: HashSet::from(["a-subgraph-name-longer-than-the-budget".to_string()]),
+            ..Default::default()
+        };
+        let mut headers = http::HeaderMap::new();
+
+        let result = labels.maybe_emit_header(&mut headers, &cdn_config(|c| c.max_bytes = 5));
+
+        assert_eq!(result.outcome, CdnTagHeaderOutcome::CompleteWithTruncation);
+        assert_eq!(result.header.as_deref(), Some(""));
+        assert!(
+            !result.emitted,
+            "an empty-value header carries no purge capability and shouldn't be reported as emitted: {result:?}"
+        );
+        assert!(
+            headers.get("Cache-Tag").is_none(),
+            "an empty-value Cache-Tag header shouldn't actually be inserted"
+        );
+    }
+
+    #[test]
     fn maybe_emit_header_truncates_when_over_max_bytes() {
         // Four equal-length 3-byte tags, joined with a 1-byte delimiter: the running total
         // (matching real join() length) is 3 after 1 tag, 7 after 2, 11 after 3. With
@@ -1036,11 +1075,13 @@ mod tests {
 
         let total_expected = expected_subgraphs + expected_types + expected_tags;
         if total_expected == 0 {
-            // Budget too small even for the single coarsest label: the pre-truncation label set
-            // wasn't empty, so this is an empty-*value* header, not a suppressed one — the
-            // `None` path (see `maybe_emit_header_present_iff_any_tier_nonempty`) only fires
-            // when there's nothing to consider at all, which isn't the case here.
-            assert_eq!(headers.get("Cache-Tag").unwrap(), "");
+            // Budget too small even for the single coarsest label: nothing survives truncation,
+            // so no header is inserted at all — an empty-*value* `Cache-Tag` header would be
+            // indistinguishable from no header to any CDN, so it's suppressed the same as the
+            // `None` case (see `maybe_emit_header_present_iff_any_tier_nonempty`), even though
+            // the outcome/telemetry still distinguishes "had labels, all truncated away" from
+            // "nothing to consider at all".
+            assert!(headers.get("Cache-Tag").is_none());
             return;
         }
 

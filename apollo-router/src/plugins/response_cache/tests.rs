@@ -3774,9 +3774,12 @@ async fn cdn_invalidation_debug_reflects_outcome_and_truncation() {
         assert!(debug.untruncated_size_bytes.is_some(), "{debug:?}");
         assert_eq!(debug.header_name, "Cache-Tag");
 
-        // Tiny max_bytes: forces truncation down to nothing fitting, but the response still
-        // touched labels, so this is `complete_with_truncation` (a real, if empty, header),
-        // not `empty` (nothing to report at all) — the debug info should tell those apart.
+        // Tiny max_bytes: forces truncation down to nothing fitting, so the header is
+        // suppressed even though the response touched real labels — outcome is
+        // `complete_with_truncation` (not `empty`, since there was something to report), but
+        // `emitted` is false since an empty-value header carries no purge capability and would
+        // be indistinguishable from no header at all. The debug info still shows what the
+        // (unsent) header value would have been, for troubleshooting.
         let response = run(
             CdnInvalidationConfig {
                 enabled: true,
@@ -3790,14 +3793,21 @@ async fn cdn_invalidation_debug_reflects_outcome_and_truncation() {
             .await
             .expect("expected CDN invalidation debug info");
         assert_eq!(debug.outcome, "complete_with_truncation");
-        assert!(debug.emitted, "{debug:?}");
+        assert!(
+            !debug.emitted,
+            "an empty-value header shouldn't be reported as emitted: {debug:?}"
+        );
         let header_value = debug.header_value.clone().expect("expected a header value");
+        assert_eq!(
+            header_value, "",
+            "expected nothing to have survived truncation at max_bytes=10: {debug:?}"
+        );
         let untruncated = debug
             .untruncated_size_bytes
             .expect("expected an untruncated size");
         assert!(
-            (header_value.len() as u64) < untruncated,
-            "expected truncation to shrink the header below its untruncated size: {debug:?}"
+            untruncated > 0,
+            "expected a nonzero untruncated size: {debug:?}"
         );
         assert_eq!(debug.max_bytes, 10);
 
