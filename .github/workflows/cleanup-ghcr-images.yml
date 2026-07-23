@@ -16,7 +16,7 @@ on:
       dry_run:
         description: 'List what would be deleted without deleting anything'
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: read
@@ -44,11 +44,10 @@ jobs:
           GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
           PACKAGE: ${{ matrix.package }}
           RETENTION_DAYS: ${{ matrix.retention_days }}
-          # Defaults to dry-run on every scheduled run and on a plain
-          # "Run workflow". Trigger manually with dry_run=false once a
-          # dry run's output has been reviewed and looks correct, then flip
-          # this default.
-          DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+          # Deletes for real on every scheduled run and on a plain
+          # "Run workflow". Pass dry_run=true on a manual dispatch to preview
+          # without deleting anything.
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: |
           set -euo pipefail
 
