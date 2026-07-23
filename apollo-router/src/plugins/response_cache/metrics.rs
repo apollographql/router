@@ -186,7 +186,7 @@ pub(super) fn record_cdn_tag_header_outcome(outcome: CdnTagHeaderOutcome) {
 /// actually happened, so the distribution tracks headroom before truncation kicks in.
 pub(super) fn record_cdn_tag_header_untruncated_size(bytes: u64) {
     u64_histogram_with_unit!(
-        "apollo.router.operations.response_cache.cdn_tag_header.untruncated_size_bytes",
+        "apollo.router.operations.response_cache.cdn_tag_header.untruncated_size",
         "Size the CDN invalidation labels (Cache-Tag) header would have been without max_bytes truncation",
         "By",
         bytes

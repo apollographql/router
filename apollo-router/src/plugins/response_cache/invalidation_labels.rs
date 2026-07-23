@@ -1185,13 +1185,13 @@ mod tests {
             match expected_bytes {
                 Some(bytes) => {
                     assert_histogram_sum!(
-                        "apollo.router.operations.response_cache.cdn_tag_header.untruncated_size_bytes",
+                        "apollo.router.operations.response_cache.cdn_tag_header.untruncated_size",
                         bytes
                     );
                 }
                 None => {
                     assert_histogram_not_exists!(
-                        "apollo.router.operations.response_cache.cdn_tag_header.untruncated_size_bytes",
+                        "apollo.router.operations.response_cache.cdn_tag_header.untruncated_size",
                         u64
                     );
                 }
@@ -1218,7 +1218,7 @@ mod tests {
             labels.maybe_emit_header(&mut headers, &cdn_config(|c| c.max_bytes = 15));
 
             assert_histogram_sum!(
-                "apollo.router.operations.response_cache.cdn_tag_header.untruncated_size_bytes",
+                "apollo.router.operations.response_cache.cdn_tag_header.untruncated_size",
                 21u64
             );
         }
