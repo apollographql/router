@@ -6,7 +6,6 @@ use std::collections::HashSet;
 use http::HeaderName;
 use http::HeaderValue;
 use itertools::Itertools;
-use thiserror::Error;
 
 use crate::Context;
 use crate::plugins::response_cache::INTERNAL_CACHE_TAG_PREFIX;
@@ -23,7 +22,9 @@ use crate::plugins::response_cache::plugin::CdnInvalidationConfig;
 /// `map_response` consumes the union to emit the configured cache-tag header when
 /// `cdn_invalidation.enabled` is true.
 ///
-/// Stored as a typed `Context` extension; the type itself is the key. Tags pushed through
+/// Stored as a typed `Context` extension; the type itself is the key. Pure data — it never holds
+/// a reference back to the `Context` it's stored in, so every mutator below takes `context: &Context`
+/// explicitly instead of being a method on `self`; see `add_tags` for why. Tags pushed through
 /// `add_tags` (and `add_type`/`add_subgraph`'s extension-sourced callers) are expected to
 /// already be filtered through `user_facing_only` upstream, at the point they're read for the
 /// header, so internal `__apollo_internal::`-prefixed tags do not leak.
@@ -39,11 +40,6 @@ pub(crate) struct InvalidationLabels {
     /// Coarsest tier: subgraph names touched by this request. Rendered as the
     /// `subgraph-{name}` fallback label via `format_subgraph_labels`.
     pub(crate) subgraphs: HashSet<String>,
-    /// The `Context` this handle is tied to, so mutators can write back through to the same
-    /// context-stored entry rather than a disconnected local copy. `None` only when an
-    /// `InvalidationLabels` is constructed directly (e.g. `Default::default()`) instead of via
-    /// `get_or_create` — mutators on such a handle return `InvalidationLabelsError::MissingContext`.
-    pub(crate) context: Option<Context>,
 }
 
 /// What happened when building (and attempting to emit) the CDN `Cache-Tag` header for one
@@ -67,27 +63,14 @@ pub(super) struct CdnHeaderBuildResult {
 
 impl InvalidationLabels {
     /// Fetches this context's `InvalidationLabels` entry, creating a default one first if none
-    /// exists yet, and stamps `context` onto the *returned* handle so later mutator calls on it
-    /// don't need another `get_or_create` first.
-    ///
-    /// Deliberately never writes `context` onto the copy stored in the extensions map: `Context`
-    /// holds a strong `Arc` to the very extensions map its entries live in, so an
-    /// `InvalidationLabels` stored *inside* that map with its own `context` field pointing back
-    /// to the same `Context` would be a self-referential `Arc` cycle — the map's strong count
-    /// would never reach zero, leaking the whole per-request extensions map (every plugin's
-    /// entries in it, not just this one) for the life of the process. Only ever stamping the
-    /// value handed back to the caller (which drops like any other owned value) avoids that.
-    ///
-    /// Returns an owned clone of the stored entry rather than a reference: `with_lock` only
-    /// lends out a `&mut` scoped to its closure, so a clone is the only way to hand a snapshot
-    /// back to the caller. Cloning is cheap — `Context` is reference-counted internally, and the
-    /// tag sets are typically small per request.
+    /// exists yet. Returns an owned clone of the stored entry rather than a reference: `with_lock`
+    /// only lends out a `&mut` scoped to its closure, so a clone is the only way to hand a
+    /// snapshot back to the caller. Cloning is cheap — the tag sets are typically small per
+    /// request.
     pub(crate) fn get_or_create(context: &Context) -> Self {
-        let mut invalidation_labels = context
+        context
             .extensions()
-            .with_lock(|lock| lock.get_or_default_mut::<InvalidationLabels>().clone());
-        invalidation_labels.context = Some(context.clone());
-        invalidation_labels
+            .with_lock(|lock| lock.get_or_default_mut::<InvalidationLabels>().clone())
     }
 
     /// Renders each touched subgraph as its coarsest-tier fallback label (`subgraph-{name}`),
@@ -323,117 +306,52 @@ impl InvalidationLabels {
         labels
     }
 
-    /// Unions `other_invalidatoin_labels`'s three tiers into this context's stored entry —
-    /// used on a cache hit to merge a previously-stored `CacheEntry`'s `InvalidationLabels`
-    /// (`other_invalidatoin_labels`) into the current request's aggregator, so labels recorded
-    /// when the entry was first written still make it into this response's header.
-    pub(crate) fn merge(
-        &self,
-        other_invalidatoin_labels: InvalidationLabels,
-    ) -> Result<(), InvalidationLabelsError> {
-        let context = self
-            .context
-            .clone()
-            .ok_or(InvalidationLabelsError::MissingContext(
-                "Missing Context".to_string(),
-            ))?;
+    /// Unions `other`'s three tiers into `context`'s stored entry — used on a cache hit to merge
+    /// a previously-stored `CacheEntry`'s `InvalidationLabels` (`other`) into the current
+    /// request's aggregator, so labels recorded when the entry was first written still make it
+    /// into this response's header.
+    pub(crate) fn merge(context: &Context, other: InvalidationLabels) {
         context.extensions().with_lock(|lock| {
             let invalidation_labels = lock.get_or_default_mut::<InvalidationLabels>();
-            // Deliberately never set `.context` on the stored entry here — see
-            // `get_or_create`'s doc comment for why that would leak the extensions map.
-            invalidation_labels
-                .tags
-                .extend(other_invalidatoin_labels.tags);
-            invalidation_labels
-                .types
-                .extend(other_invalidatoin_labels.types);
-            invalidation_labels
-                .subgraphs
-                .extend(other_invalidatoin_labels.subgraphs);
+            invalidation_labels.tags.extend(other.tags);
+            invalidation_labels.types.extend(other.types);
+            invalidation_labels.subgraphs.extend(other.subgraphs);
         });
-        Ok(())
     }
 
-    /// Unions `tags` into this context's stored `tags` tier — the finest-grained tier; see
+    /// Unions `tags` into `context`'s stored `tags` tier — the finest-grained tier; see
     /// `InvalidationLabels::tags`.
-    pub(crate) fn add_tags(&mut self, tags: Vec<String>) -> Result<(), InvalidationLabelsError> {
-        let context = self
-            .context
-            .clone()
-            .ok_or(InvalidationLabelsError::MissingContext(
-                "Missing Context".to_string(),
-            ))?;
+    pub(crate) fn add_tags(context: &Context, tags: Vec<String>) {
         context.extensions().with_lock(|lock| {
-            let invalidation_labels = lock.get_or_default_mut::<InvalidationLabels>();
-            // Deliberately never set `.context` on the stored entry here — see
-            // `get_or_create`'s doc comment for why that would leak the extensions map.
-            invalidation_labels.tags.extend(tags);
+            lock.get_or_default_mut::<InvalidationLabels>()
+                .tags
+                .extend(tags);
         });
-        Ok(())
     }
 
-    /// Records that `(subgraph, type)` was touched by this request, adding it to this context's
+    /// Records that `(subgraph, type)` was touched by this request, adding it to `context`'s
     /// stored `types` tier — the medium-coarseness fallback tier; see
     /// `InvalidationLabels::types`. Called unconditionally on every root-field or entity
     /// resolution (not gated on any invalidation index), since the type-tier fallback label
     /// must always be available regardless of indexing configuration.
-    pub(crate) fn add_type(
-        &mut self,
-        subgraph: &str,
-        r#type: &str,
-    ) -> Result<(), InvalidationLabelsError> {
-        let context = self
-            .context
-            .clone()
-            .ok_or(InvalidationLabelsError::MissingContext(
-                "Missing Context".to_string(),
-            ))?;
+    pub(crate) fn add_type(context: &Context, subgraph: &str, r#type: &str) {
         context.extensions().with_lock(|lock| {
-            let invalidation_labels = lock.get_or_default_mut::<InvalidationLabels>();
-            // Deliberately never set `.context` on the stored entry here — see
-            // `get_or_create`'s doc comment for why that would leak the extensions map.
-            invalidation_labels
+            lock.get_or_default_mut::<InvalidationLabels>()
                 .types
                 .insert((subgraph.to_string(), r#type.to_string()));
         });
-        Ok(())
     }
 
-    /// Records that `subgraph` was touched by this request, adding it to this context's stored
+    /// Records that `subgraph` was touched by this request, adding it to `context`'s stored
     /// `subgraphs` tier — the coarsest fallback tier; see `InvalidationLabels::subgraphs`.
     /// Called unconditionally, same as `add_type`.
-    pub(crate) fn add_subgraph(&mut self, subgraph: &str) -> Result<(), InvalidationLabelsError> {
-        let context = self
-            .context
-            .clone()
-            .ok_or(InvalidationLabelsError::MissingContext(
-                "Missing Context".to_string(),
-            ))?;
+    pub(crate) fn add_subgraph(context: &Context, subgraph: &str) {
         context.extensions().with_lock(|lock| {
-            let invalidation_labels = lock.get_or_default_mut::<InvalidationLabels>();
-            // Deliberately never set `.context` on the stored entry here — see
-            // `get_or_create`'s doc comment for why that would leak the extensions map.
-            invalidation_labels.subgraphs.insert(subgraph.to_string());
+            lock.get_or_default_mut::<InvalidationLabels>()
+                .subgraphs
+                .insert(subgraph.to_string());
         });
-        Ok(())
     }
-}
-
-#[derive(Debug, Error)]
-pub(crate) enum InvalidationLabelsError {
-    #[error("failed to record invalidation labels on context: {0}")]
-    MissingContext(String),
-}
-
-/// Logs a failed invalidation-label write without panicking. Every call site is expected to go
-/// through `get_or_create` first, which always populates `context`, so `MissingContext` should be
-/// unreachable in practice — but invalidation-label bookkeeping is best-effort and must never
-/// crash a request in flight, so failures are logged and swallowed rather than unwrapped.
-pub(crate) fn log_invalidation_label_error(err: InvalidationLabelsError) {
-    tracing::error!(
-        error = %err,
-        "response_cache failed to record an invalidation label on context; CDN/Redis invalidation may be incomplete for this response"
-    );
 }
 
 #[cfg(test)]
@@ -449,16 +367,6 @@ mod tests {
         config
     }
 
-    // Constructs an InvalidationLabels handle tied to `context`, without seeding the context's
-    // extensions map — used to exercise mutators creating that missing entry themselves (see
-    // the tests below), as opposed to `get_or_create`, which seeds the entry itself.
-    fn unseeded_handle(context: &Context) -> InvalidationLabels {
-        InvalidationLabels {
-            context: Some(context.clone()),
-            ..Default::default()
-        }
-    }
-
     #[test]
     fn get_or_create_returns_default_when_absent() {
         let context = Context::new();
@@ -472,13 +380,12 @@ mod tests {
     /// onto the *stored* `InvalidationLabels` entry, not just the handle returned to the caller.
     /// Since `Context` holds a strong `Arc` to the very extensions map its entries live in, that
     /// created a self-referential `Arc` cycle — the map's strong count would never reach zero, so
-    /// nothing stored in it (from this or any other plugin) was ever freed. This inserts a
-    /// drop-flagging marker into the same extensions map `InvalidationLabels` lives in, exercises
-    /// every mutator, then drops every external handle and asserts the whole map actually got
-    /// freed — which only happens if `InvalidationLabels` isn't holding a `Context` back-reference
-    /// inside the map itself.
+    /// nothing stored in it (from this or any other plugin) was ever freed. `InvalidationLabels`
+    /// no longer has a `context` field at all, so this is now structurally impossible, but this
+    /// inserts a drop-flagging marker into the same extensions map, exercises every mutator, then
+    /// drops the context and asserts the whole map actually got freed.
     #[test]
-    fn context_extensions_do_not_leak_via_self_referential_invalidation_labels() {
+    fn context_extensions_do_not_leak_via_invalidation_labels() {
         use std::sync::Arc;
         use std::sync::atomic::AtomicBool;
         use std::sync::atomic::Ordering;
@@ -496,151 +403,40 @@ mod tests {
             lock.insert(DropFlag(dropped.clone()));
         });
 
-        let mut labels = InvalidationLabels::get_or_create(&context);
-        labels.add_tags(vec!["a".to_string()]).unwrap();
-        labels.add_subgraph("accounts").unwrap();
-        labels.add_type("accounts", "User").unwrap();
-        labels
-            .merge(InvalidationLabels {
+        InvalidationLabels::add_tags(&context, vec!["a".to_string()]);
+        InvalidationLabels::add_subgraph(&context, "accounts");
+        InvalidationLabels::add_type(&context, "accounts", "User");
+        InvalidationLabels::merge(
+            &context,
+            InvalidationLabels {
                 tags: HashSet::from(["b".to_string()]),
                 ..Default::default()
-            })
-            .unwrap();
+            },
+        );
 
-        drop(labels);
         drop(context);
 
         assert!(
             dropped.load(Ordering::SeqCst),
             "extensions map (and everything stored in it) should be freed once every external \
-             Context handle drops; if this fails, InvalidationLabels is holding a self-referential \
-             Context that leaks the whole map"
+             Context handle drops"
         );
     }
 
-    // `add_tags`/`add_type`/`add_subgraph` are meant to write through to the context-stored
-    // value the same way, so their "does it persist" tests are the same shape three times
-    // over: seed a context, mutate through one handle, and check a SEPARATE `get_or_create`
-    // call sees the change (proving the write reached the context, not just a local copy).
+    // Each mutator writes through to the context-stored value the same way, and does so even
+    // when no prior `get_or_create` call has seeded the entry — `get_or_default_mut` creates it
+    // from scratch. Their "does it persist" tests are the same shape: mutate against a fresh
+    // `Context`, then check a SEPARATE `get_or_create` call sees the change (proving the write
+    // reached the context, not just a local copy).
     #[rstest]
     #[case::add_tags(
-        (|labels: &mut InvalidationLabels| labels.add_tags(vec!["a".to_string(), "b".to_string()])) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
+        (|context: &Context| InvalidationLabels::add_tags(context, vec!["a".to_string(), "b".to_string()])) as fn(&Context),
         (|refetched: &InvalidationLabels| {
             assert_eq!(refetched.tags, HashSet::from(["a".to_string(), "b".to_string()]));
         }) as fn(&InvalidationLabels),
     )]
     #[case::add_type(
-        (|labels: &mut InvalidationLabels| labels.add_type("accounts", "User")) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
-        (|refetched: &InvalidationLabels| {
-            assert_eq!(
-                refetched.types,
-                HashSet::from([("accounts".to_string(), "User".to_string())]),
-                "add_type should write through to the context-stored value, the same way add_tags does"
-            );
-        }) as fn(&InvalidationLabels),
-    )]
-    #[case::add_subgraph(
-        (|labels: &mut InvalidationLabels| labels.add_subgraph("accounts")) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
-        (|refetched: &InvalidationLabels| {
-            assert_eq!(
-                refetched.subgraphs,
-                HashSet::from(["accounts".to_string()]),
-                "add_subgraph should write through to the context-stored value, the same way add_tags does"
-            );
-        }) as fn(&InvalidationLabels),
-    )]
-    fn mutator_persists_across_separate_get_or_create_calls(
-        #[case] mutate: fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
-        #[case] check: fn(&InvalidationLabels),
-    ) {
-        let context = Context::new();
-        let mut labels = InvalidationLabels::get_or_create(&context);
-
-        mutate(&mut labels).expect("mutator should succeed against a seeded context");
-
-        let refetched = InvalidationLabels::get_or_create(&context);
-        check(&refetched);
-    }
-
-    #[test]
-    fn add_tags_deduplicates_via_hashset_union() {
-        let context = Context::new();
-        let mut labels = InvalidationLabels::get_or_create(&context);
-
-        labels.add_tags(vec!["a".to_string()]).unwrap();
-        labels
-            .add_tags(vec!["a".to_string(), "b".to_string()])
-            .unwrap();
-
-        let refetched = InvalidationLabels::get_or_create(&context);
-        assert_eq!(
-            refetched.tags,
-            HashSet::from(["a".to_string(), "b".to_string()])
-        );
-    }
-
-    #[test]
-    fn merge_unions_all_three_fields_into_context() {
-        let context = Context::new();
-        let labels = InvalidationLabels::get_or_create(&context);
-
-        let other = InvalidationLabels {
-            tags: HashSet::from(["homepage".to_string()]),
-            types: HashSet::from([("accounts".to_string(), "User".to_string())]),
-            subgraphs: HashSet::from(["accounts".to_string()]),
-            context: None,
-        };
-
-        labels
-            .merge(other)
-            .expect("merge should succeed against a seeded context");
-
-        let refetched = InvalidationLabels::get_or_create(&context);
-        assert_eq!(refetched.tags, HashSet::from(["homepage".to_string()]));
-        assert_eq!(
-            refetched.types,
-            HashSet::from([("accounts".to_string(), "User".to_string())])
-        );
-        assert_eq!(refetched.subgraphs, HashSet::from(["accounts".to_string()]));
-    }
-
-    #[test]
-    fn mutators_without_context_return_missing_context_error() {
-        let mut labels = InvalidationLabels::default();
-        assert!(labels.context.is_none());
-
-        assert!(matches!(
-            labels.add_tags(vec!["a".to_string()]),
-            Err(InvalidationLabelsError::MissingContext(_))
-        ));
-        assert!(matches!(
-            labels.add_type("accounts", "User"),
-            Err(InvalidationLabelsError::MissingContext(_))
-        ));
-        assert!(matches!(
-            labels.add_subgraph("accounts"),
-            Err(InvalidationLabelsError::MissingContext(_))
-        ));
-        assert!(matches!(
-            labels.merge(InvalidationLabels::default()),
-            Err(InvalidationLabelsError::MissingContext(_))
-        ));
-    }
-
-    // `unseeded_handle` gives a handle whose context is seeded but whose context's extensions
-    // map has no `InvalidationLabels` entry yet (i.e. `get_or_create` was never called first).
-    // Mutators should create that missing entry via `get_or_default_mut` rather than erroring,
-    // mirroring `mutator_persists_across_separate_get_or_create_calls` above: mutate through one
-    // handle, then check a SEPARATE `get_or_create` call sees the change.
-    #[rstest]
-    #[case::add_tags(
-        (|labels: &mut InvalidationLabels| labels.add_tags(vec!["a".to_string(), "b".to_string()])) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
-        (|refetched: &InvalidationLabels| {
-            assert_eq!(refetched.tags, HashSet::from(["a".to_string(), "b".to_string()]));
-        }) as fn(&InvalidationLabels),
-    )]
-    #[case::add_type(
-        (|labels: &mut InvalidationLabels| labels.add_type("accounts", "User")) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
+        (|context: &Context| InvalidationLabels::add_type(context, "accounts", "User")) as fn(&Context),
         (|refetched: &InvalidationLabels| {
             assert_eq!(
                 refetched.types,
@@ -649,24 +445,22 @@ mod tests {
         }) as fn(&InvalidationLabels),
     )]
     #[case::add_subgraph(
-        (|labels: &mut InvalidationLabels| labels.add_subgraph("accounts")) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
+        (|context: &Context| InvalidationLabels::add_subgraph(context, "accounts")) as fn(&Context),
         (|refetched: &InvalidationLabels| {
-            assert_eq!(
-                refetched.subgraphs,
-                HashSet::from(["accounts".to_string()]),
-            );
+            assert_eq!(refetched.subgraphs, HashSet::from(["accounts".to_string()]));
         }) as fn(&InvalidationLabels),
     )]
     #[case::merge(
-        (|labels: &mut InvalidationLabels| {
-            let other = InvalidationLabels {
-                tags: HashSet::from(["homepage".to_string()]),
-                types: HashSet::from([("accounts".to_string(), "User".to_string())]),
-                subgraphs: HashSet::from(["accounts".to_string()]),
-                context: None,
-            };
-            labels.merge(other)
-        }) as fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
+        (|context: &Context| {
+            InvalidationLabels::merge(
+                context,
+                InvalidationLabels {
+                    tags: HashSet::from(["homepage".to_string()]),
+                    types: HashSet::from([("accounts".to_string(), "User".to_string())]),
+                    subgraphs: HashSet::from(["accounts".to_string()]),
+                },
+            )
+        }) as fn(&Context),
         (|refetched: &InvalidationLabels| {
             assert_eq!(refetched.tags, HashSet::from(["homepage".to_string()]));
             assert_eq!(
@@ -676,41 +470,47 @@ mod tests {
             assert_eq!(refetched.subgraphs, HashSet::from(["accounts".to_string()]));
         }) as fn(&InvalidationLabels),
     )]
-    fn mutators_auto_create_missing_context_entry(
-        #[case] mutate: fn(&mut InvalidationLabels) -> Result<(), InvalidationLabelsError>,
+    fn mutator_persists_and_auto_creates_missing_entry(
+        #[case] mutate: fn(&Context),
         #[case] check: fn(&InvalidationLabels),
     ) {
         let context = Context::new();
-        let mut labels = unseeded_handle(&context);
 
-        mutate(&mut labels).expect(
-            "mutator should auto-create the missing InvalidationLabels entry instead of erroring",
-        );
+        mutate(&context);
 
         let refetched = InvalidationLabels::get_or_create(&context);
         check(&refetched);
     }
 
-    // A mutator, not `get_or_create`, is what first creates the entry here (via
-    // `unseeded_handle`, same as above). If the mutator didn't also stamp `context` onto the
-    // stored entry the way `get_or_create` does, a second independently-constructed handle
-    // (again bypassing `get_or_create`) would hit `MissingContext` on the stored entry even
-    // though the first call already proved the context was valid.
     #[test]
-    fn mutator_stamps_context_so_a_later_mutator_call_does_not_need_get_or_create_first() {
+    fn add_tags_deduplicates_via_hashset_union() {
         let context = Context::new();
 
-        unseeded_handle(&context)
-            .add_tags(vec!["a".to_string()])
-            .expect("first mutator call should auto-create the entry");
+        InvalidationLabels::add_tags(&context, vec!["a".to_string()]);
+        InvalidationLabels::add_tags(&context, vec!["a".to_string(), "b".to_string()]);
 
-        unseeded_handle(&context).add_subgraph("accounts").expect(
-            "second mutator call should see the context stamped by the first, not MissingContext",
+        let refetched = InvalidationLabels::get_or_create(&context);
+        assert_eq!(
+            refetched.tags,
+            HashSet::from(["a".to_string(), "b".to_string()])
         );
+    }
+
+    #[test]
+    fn multiple_mutator_calls_against_the_same_context_accumulate_into_one_entry() {
+        let context = Context::new();
+
+        InvalidationLabels::add_tags(&context, vec!["a".to_string()]);
+        InvalidationLabels::add_subgraph(&context, "accounts");
+        InvalidationLabels::add_type(&context, "accounts", "User");
 
         let refetched = InvalidationLabels::get_or_create(&context);
         assert_eq!(refetched.tags, HashSet::from(["a".to_string()]));
         assert_eq!(refetched.subgraphs, HashSet::from(["accounts".to_string()]));
+        assert_eq!(
+            refetched.types,
+            HashSet::from([("accounts".to_string(), "User".to_string())])
+        );
     }
 
     #[rstest]
@@ -783,7 +583,6 @@ mod tests {
             tags,
             types,
             subgraphs,
-            ..Default::default()
         };
 
         let got: HashSet<String> = labels.user_facing_only().into_iter().collect();
@@ -930,7 +729,6 @@ mod tests {
                 ("asub".to_string(), "AType".to_string()),
             ]),
             subgraphs: HashSet::from(["zzz-subgraph".to_string(), "aaa-subgraph".to_string()]),
-            ..Default::default()
         };
         let mut headers = http::HeaderMap::new();
         labels.maybe_emit_header(&mut headers, &cdn_config(|c| c.max_bytes = 1000));
@@ -1109,7 +907,6 @@ mod tests {
             tags,
             types,
             subgraphs,
-            ..Default::default()
         };
         let mut headers = http::HeaderMap::new();
 
@@ -1135,7 +932,6 @@ mod tests {
                 ("products".to_string(), "Product".to_string()),
             ]),
             subgraphs: HashSet::from(["products".to_string(), "reviews".to_string()]),
-            ..Default::default()
         };
         let mut headers = http::HeaderMap::new();
 
@@ -1199,7 +995,6 @@ mod tests {
                 "iii".to_string(),
                 "jjj".to_string(),
             ]),
-            ..Default::default()
         };
         let mut headers = http::HeaderMap::new();
 
@@ -1271,7 +1066,6 @@ mod tests {
                 "iii".to_string(),
                 "jjj".to_string(),
             ]),
-            ..Default::default()
         };
         let mut headers = http::HeaderMap::new();
 
@@ -1327,7 +1121,6 @@ mod tests {
             subgraphs: HashSet::from(["aaa".to_string(), "bbb".to_string()]),
             types: HashSet::from([("ccc".to_string(), "ddd".to_string()), ("eee".to_string(), "fff".to_string())]),
             tags: HashSet::from(["ggg".to_string(), "hhh".to_string(), "iii".to_string(), "jjj".to_string()]),
-            ..Default::default()
         },
         54,
         false,
@@ -1338,7 +1131,6 @@ mod tests {
             subgraphs: HashSet::from(["aaa".to_string(), "bbb".to_string()]),
             types: HashSet::from([("ccc".to_string(), "ddd".to_string()), ("eee".to_string(), "fff".to_string())]),
             tags: HashSet::from(["ggg".to_string(), "hhh".to_string(), "iii".to_string(), "jjj".to_string()]),
-            ..Default::default()
         },
         54,
         true,
