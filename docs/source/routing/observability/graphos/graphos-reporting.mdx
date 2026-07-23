@@ -44,7 +44,7 @@ The router always exports traces to GraphOS via OTLP.
 
 In router v1.x and v2.x, traces could also be sent via the legacy Apollo Usage Reporting protocol, with the split between the two transports controlled by the `otlp_tracing_sampler` option (`experimental_otlp_tracing_sampler` in v1.49-1.60). In router v3.x, the legacy trace transport and the `otlp_tracing_sampler` option have been removed.
 
-To control how many traces are sent to GraphOS, use the common tracing sampler (which applies to every exporter) and the GraphOS exporter sampler (which applies only to traces sent to GraphOS):
+To control trace volume, use the common tracing sampler for all exporters and the GraphOS exporter sampler for GraphOS-specific traces:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -56,11 +56,11 @@ telemetry:
   exporters:
     tracing:
       common:
-        # Trace 50% of all requests globally, across every exporter
+        # Trace `50%` of all requests globally, across every exporter
         sampler: 0.5
 ```
 
-Whatever these samplers let through is then subject to a back-stop that further reduces GraphOS trace volume — see [Reducing the volume of traces sent to GraphOS](#reducing-the-volume-of-traces-sent-to-graphos) below.
+Whatever these samplers let through is then subject to a safeguard that further reduces GraphOS trace volume — see [Configuring the Apollo Studio sampling rate](#configuring-the-apollo-studio-sampling-rate).
 
 <OTelEnvVarsCaution />
 
@@ -79,11 +79,25 @@ telemetry:
 
 Use HTTP when your network or proxy infrastructure handles HTTP traffic but not gRPC. For proxy routing, see [HTTP proxy support](#http-proxy-support).
 
-#### Reducing the volume of traces sent to GraphOS
+#### Configuring the Apollo Studio sampling rate
 
-To keep trace volume manageable for high-traffic graphs, the router applies a back-stop that further reduces the number of traces it sends to GraphOS. This runs *after* the `telemetry.apollo.sampler` and `telemetry.exporters.tracing.common.sampler` head samplers, so it only ever further reduces the traces those samplers already selected. It acts as a safeguard against sending too many traces to GraphOS even when a high sample rate is configured, and it affects only the GraphOS pipeline — traces sent to your own OTLP collector or to Datadog are unaffected.
+You can set an independent sampling rate for traces sent to Apollo Studio using `telemetry.apollo.sampler`. This lets you send a different fraction of traces to Studio than to other exporters:
 
-Choose the strategy with `telemetry.apollo.tracing.throttle`:
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        sampler: 0.1   # 10% of requests are traced globally
+  apollo:
+    sampler: 0.05      # only 5% of requests reach Apollo Studio
+```
+
+The value uses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`, so it's an absolute fraction of all requests. It must not exceed `telemetry.exporters.tracing.common.sampler`; the router returns an error at startup if it does.
+
+To keep trace volume manageable for high-traffic graphs, the router then applies a throttle that further reduces the number of traces it sends to GraphOS. This runs after the `telemetry.apollo.sampler` and `telemetry.exporters.tracing.common.sampler` head samplers, so it only ever affects the traces those samplers already selected. This helps to avoid the processing and transfer of traces that would be dropped by GraphOS at ingestion time anyway, and it affects only the GraphOS pipeline — traces sent to your own OTLP collector or to Datadog are unaffected.
+
+The strategy of the throttle can be configured with `telemetry.apollo.tracing.throttle`:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -92,14 +106,8 @@ telemetry:
       throttle: representative_traces   # representative_traces (default) | rate_limited
 ```
 
-- **`representative_traces`** (default): Sends at most one *representative* trace per minute for each distinct combination of operation, client, latency bucket, error status, and operation type. Traces that duplicate a combination already seen within the current minute are dropped. Error traces are sampled at a higher rate so that failures remain visible. This gives broad coverage of distinct behaviors while dramatically reducing volume for repetitive traffic.
-- **`rate_limited`**: Sends every trace but caps the export rate at a fixed maximum of 100 traces per second, per router instance. This is cheaper in CPU and memory than `representative_traces` and is a good fallback if representative sampling is too resource-intensive for your workload. The rate is not configurable.
-
-<Note>
-
-This back-stop always applies to GraphOS traces. To reduce trace volume upstream of it, lower `telemetry.apollo.sampler` (GraphOS only) or `telemetry.exporters.tracing.common.sampler` (all exporters). To stop sending traces to GraphOS altogether, set `telemetry.apollo.sampler: always_off`.
-
-</Note>
+- `representative_traces` (default): Sends at most one representative trace per minute for each distinct combination of operation, client, latency bucket, error status, and operation type. Tre router drops traces that duplicate a combination already seen within the current minute. Error traces are sampled at a higher rate so that failures remain visible. This gives broad coverage of distinct behaviors while significantly reducing volume for repetitive traffic.
+- `rate_limited`: Sends every trace but caps the export rate at a fixed maximum of 100 traces per second, per router instance. This is cheaper in CPU and memory than `representative_traces` and is a good fallback if you find that representative sampling is too resource-intensive for your workload. The rate is not configurable.
 
 ## Reporting field-level traces
 

@@ -261,8 +261,7 @@ pub(crate) struct Exporter {
     otlp_exporter: ApolloOtlpExporter,
     include_attr_names: HashSet<Key>,
     include_attr_event_names: HashSet<Key>,
-    /// Back-stop that throttles the volume of traces exported to Apollo (representative-traces or
-    /// rate-limited).
+    /// Back-stop that throttles the volume of traces exported to Apollo
     trace_throttle: ApolloTraceThrottle,
 }
 
@@ -317,8 +316,7 @@ impl SpanExporter for Exporter {
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         let mut grouped_traces: Vec<Vec<LightSpanData>> = Vec::new();
-        // Number of complete traces seen this export, and how many the sampler kept. Mirrors the
-        // engine-reports `traceFilter.totalKeys`/`keptKeys` counters.
+        // Number of complete traces seen this export, and how many the sampler kept
         let mut total_traces: u64 = 0;
         let mut kept_traces: u64 = 0;
 

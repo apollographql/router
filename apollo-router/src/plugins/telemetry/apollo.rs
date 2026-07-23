@@ -165,10 +165,6 @@ pub(crate) struct TracingConfiguration {
 
     /// Back-stop that throttles the volume of traces sent to Apollo Studio, applied *after* the
     /// `telemetry.apollo.sampler` and `telemetry.exporters.tracing.common.sampler` head samplers.
-    /// It can only further reduce the traces that already passed those samplers, and it acts as a
-    /// safeguard against sending too many traces to Apollo even when a high sample rate is
-    /// configured. This only affects the Apollo Studio trace pipeline; the customer OTLP and
-    /// Datadog pipelines are unaffected.
     pub(crate) throttle: ApolloTraceThrottleConfig,
 }
 
@@ -179,8 +175,8 @@ pub(crate) struct TracingConfiguration {
 pub(crate) enum ApolloTraceThrottleConfig {
     /// Send at most one representative trace per minute for each distinct combination of dimensions
     /// (operation, client, latency bucket, error status, operation type). Duplicate traces sharing
-    /// a combination already seen within the current minute are dropped. This mirrors the
-    /// representative-trace filtering used by Apollo's engine reports pipeline.
+    /// a combination already seen within the current minute are dropped. These traces would end up
+    /// being dropped by Apollo at ingestion time anyway.
     #[default]
     RepresentativeTraces,
 

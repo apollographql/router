@@ -50,12 +50,8 @@ impl TracingConfigurator for Config {
         .with_batch_config(self.tracing.batch_processor.clone().into())
         .build();
 
-        // Two layers of volume reduction apply to the Apollo pipeline:
-        // 1. The optional per-exporter head sampler (`self.sampler`), a trace-ID ratio applied here
-        //    as a span processor, consistent with the OTLP and Datadog pipelines.
-        // 2. The `ApolloTraceThrottle` back-stop (`self.tracing.throttle`), applied inside the
-        //    exporter on whole reassembled traces — see `apollo_telemetry::Exporter::export`.
         if let Some(sampler) = &self.sampler {
+            // Note that after sampling, traces can be throttled further via ApolloTraceThrottle
             let common = builder.tracing_common();
             let sampled_batch_span_processor = batch_span_processor.with_sampler(
                 sampler,

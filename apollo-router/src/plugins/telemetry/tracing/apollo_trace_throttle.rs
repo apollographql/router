@@ -2,7 +2,7 @@
 //!
 //! These only affect the Apollo trace pipeline (see [`super::apollo`]); the customer OTLP and
 //! Datadog pipelines and the global head sampler are untouched. Both strategies make a keep/drop
-//! decision on a *complete, reassembled* trace, so they run inside
+//! decision on a complete, reassembled trace, so they run inside
 //! [`super::apollo_telemetry::Exporter::export`] rather than as a span processor (a per-span
 //! `on_end` hook cannot see the operation/client/latency of the whole trace).
 
@@ -35,11 +35,12 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::OPERATION_TYPE;
 /// Maximum number of distinct dimension combinations remembered by the representative-traces
 /// filter. Because the trace's end-minute is part of every key, entries for elapsed minutes can
 /// never match again and are evicted under LRU pressure, so this only needs to be large enough to
-/// hold one minute's worth of distinct combinations for a busy graph.
-const REPRESENTATIVE_CACHE_CAPACITY: usize = 100_000;
+/// hold one minute's worth of distinct combinations for a busy graph. 50k entries equates to
+/// about 2.5mb of memory usage.
+const REPRESENTATIVE_CACHE_CAPACITY: usize = 50_000;
 
 /// Fixed per-instance cap on traces exported per second in `rate_limited` mode. Deliberately not
-/// user-configurable (see INS-1975).
+/// user-configurable.
 const MAX_TRACES_PER_SECOND: u32 = 100;
 
 /// Runtime trace throttle for the Apollo export pipeline, built from [`ApolloTraceThrottleConfig`].
@@ -80,9 +81,9 @@ impl ApolloTraceThrottle {
     }
 }
 
-/// Keeps at most one representative trace per minute for each distinct combination of dimensions,
-/// mirroring the engine-reports `CacheBasedTraceFilter`. The first trace seen for a key is kept and
-/// the key is remembered; later traces sharing that key (within the same minute) are dropped.
+/// Keeps at most one representative trace per minute for each distinct combination of dimensions.
+/// The first trace seen for a key is kept and the key is remembered so later traces sharing that
+/// key (within the same minute) are dropped.
 #[derive(Debug)]
 pub(crate) struct RepresentativeTraceFilter {
     seen: Mutex<LruCache<u64, ()>>,
@@ -114,9 +115,7 @@ impl RepresentativeTraceFilter {
         }
     }
 
-    /// Hash of the dimension combination that identifies a "representative" trace. Mirrors the
-    /// `EngineTracesKafkaKey` used by engine reports, minus dimensions that are constant for a
-    /// single router instance (graph id/variant, trace format).
+    /// Hash of the dimension combination that identifies a "representative" trace.
     fn trace_key(root: &LightSpanData, has_errors: bool) -> u64 {
         let end_secs = root
             .end_time

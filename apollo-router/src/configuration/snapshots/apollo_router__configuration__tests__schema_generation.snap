@@ -324,7 +324,7 @@ expression: "&schema"
       "oneOf": [
         {
           "const": "representative_traces",
-          "description": "Send at most one representative trace per minute for each distinct combination of dimensions\n(operation, client, latency bucket, error status, operation type). Duplicate traces sharing\na combination already seen within the current minute are dropped. This mirrors the\nrepresentative-trace filtering used by Apollo's engine reports pipeline.",
+          "description": "Send at most one representative trace per minute for each distinct combination of dimensions\n(operation, client, latency bucket, error status, operation type). Duplicate traces sharing\na combination already seen within the current minute are dropped. These traces would end up\nbeing dropped by Apollo at ingestion time anyway.",
           "type": "string"
         },
         {
@@ -12564,7 +12564,7 @@ expression: "&schema"
               "$ref": "#/definitions/ApolloTraceThrottleConfig"
             }
           ],
-          "description": "Back-stop that throttles the volume of traces sent to Apollo Studio, applied *after* the\n`telemetry.apollo.sampler` and `telemetry.exporters.tracing.common.sampler` head samplers.\nIt can only further reduce the traces that already passed those samplers, and it acts as a\nsafeguard against sending too many traces to Apollo even when a high sample rate is\nconfigured. This only affects the Apollo Studio trace pipeline; the customer OTLP and\nDatadog pipelines are unaffected."
+          "description": "Back-stop that throttles the volume of traces sent to Apollo Studio, applied *after* the\n`telemetry.apollo.sampler` and `telemetry.exporters.tracing.common.sampler` head samplers."
         }
       },
       "type": "object"

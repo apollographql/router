@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/metrics.rs
-assertion_line: 698
 expression: "& metrics.non_zero()"
 ---
 - name: apollo.router.config.apollo_telemetry_options
@@ -22,6 +21,7 @@ expression: "& metrics.non_zero()"
           opt.tracing.batch_processor.max_export_timeout: false
           opt.tracing.batch_processor.max_queue_size: false
           opt.tracing.batch_processor.scheduled_delay: false
+          opt.tracing.throttle: false
 - name: apollo.router.config.experimental_chaos
   data:
     datapoints:
