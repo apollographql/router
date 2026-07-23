@@ -395,9 +395,8 @@ impl<'a> TestHarness<'a> {
 
     /// Builds the router service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
-        let (config, _schema, query_analysis, supergraph_creator) = self.build_common().await?;
+        let (config, _schema, _query_analysis, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
-            query_analysis,
             Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
             config.clone(),
@@ -423,9 +422,8 @@ impl<'a> TestHarness<'a> {
         use crate::axum_factory::ListenAddrAndRouter;
         use crate::axum_factory::axum_http_server_factory::make_axum_router;
 
-        let (config, _schema, query_analysis, supergraph_creator) = self.build_common().await?;
+        let (config, _schema, _query_analysis, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
-            query_analysis,
             Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
             config.clone(),

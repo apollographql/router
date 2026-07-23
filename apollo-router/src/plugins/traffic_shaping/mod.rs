@@ -830,7 +830,6 @@ mod test {
         let (supergraph_creator, _warmup) = builder.build().await.expect("should build");
 
         RouterCreator::new(
-            query_analysis,
             Arc::new(
                 PersistedQueryExpander::new(&Default::default())
                     .await

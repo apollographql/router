@@ -43,6 +43,7 @@ pub(crate) mod header_masking;
 pub(crate) mod hickory_dns_connector;
 pub(crate) mod http;
 pub(crate) mod layers;
+pub(crate) mod query_parsing;
 pub(crate) mod query_planner;
 pub mod router;
 pub mod subgraph;

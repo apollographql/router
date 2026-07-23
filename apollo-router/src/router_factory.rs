@@ -295,7 +295,6 @@ impl YamlRouterFactory {
         .await;
 
         RouterCreator::new(
-            query_analysis,
             persisted_queries,
             Arc::new(supergraph_creator),
             configuration,

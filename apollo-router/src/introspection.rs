@@ -263,7 +263,6 @@ impl<S> IntrospectionCacheService<S> {
     }
 }
 
-///
 /// A stopgap solution until Apollo Platform provides apollo-cache-memory!
 struct IntrospectionCacheLayer {
     cache: IntrospectionCache,

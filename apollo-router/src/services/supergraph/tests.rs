@@ -3857,6 +3857,10 @@ async fn test_cache_warmup() {
     // We have to do a bunch of setup here...
     let query_analysis =
         Arc::new(QueryAnalysis::new(schema.clone(), Arc::new(configuration.clone())).await);
+    let query_parsing_service = crate::services::query_parsing::query_parsing_service(
+        schema.clone(),
+        Arc::new(configuration.clone()),
+    );
     let pq_layer = PersistedQueryExpander::new(&configuration).await.unwrap();
 
     /// Return an empty plan that doesn't require any subgraph requests to fulfill.
@@ -3918,8 +3922,12 @@ async fn test_cache_warmup() {
 
     let supergraph_service = ServiceBuilder::new()
         .load_shed()
-        .layer(crate::services::router::tower_compat::ParseQueryLayer::new(
-            query_analysis.clone(),
+        .layer(crate::services::router::parse_query::ParseQueryLayer::new(
+            query_parsing_service.clone(),
+            schema.clone(),
+            configuration.supergraph.redact_query_validation_errors,
+            false,
+            Default::default(),
         ))
         .service(supergraph_creator.make());
 
@@ -3976,8 +3984,12 @@ async fn test_cache_warmup() {
     // still be resolved because it hits the cache.
     let supergraph_service = ServiceBuilder::new()
         .load_shed()
-        .layer(crate::services::router::tower_compat::ParseQueryLayer::new(
-            query_analysis.clone(),
+        .layer(crate::services::router::parse_query::ParseQueryLayer::new(
+            query_parsing_service.clone(),
+            schema.clone(),
+            configuration.supergraph.redact_query_validation_errors,
+            false,
+            Default::default(),
         ))
         .service(supergraph_creator.make());
 
