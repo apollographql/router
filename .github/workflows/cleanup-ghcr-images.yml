@@ -63,6 +63,7 @@ jobs:
             count=$(echo "${versions}" | jq 'length')
             [ "${count}" -eq 0 ] && break
 
+            deleted_this_page=false
             while IFS= read -r v; do
               id=$(echo "${v}" | jq -r '.id')
               created_at=$(echo "${v}" | jq -r '.created_at')
@@ -75,10 +76,21 @@ jobs:
                 else
                   echo "deleting ${PACKAGE} version ${id} (tags: ${tags:-<untagged>}, created ${created_at})"
                   gh api --method DELETE "/orgs/${ORG}/packages/container/${ENCODED_PACKAGE}/versions/${id}"
+                  deleted_this_page=true
                 fi
               fi
             done < <(echo "${versions}" | jq -c '.[]')
 
-            [ "${count}" -lt 100 ] && break
-            page=$((page + 1))
+            # The list endpoint is offset-paginated against the live
+            # collection. Deleting from this page shifts later, not-yet-seen
+            # versions into it, so re-fetch the same page instead of
+            # advancing -- otherwise those shifted-in versions are skipped.
+            # Once a page comes back short, it's the final page: nothing
+            # exists beyond it to shift in, so it's safe to stop even if we
+            # just deleted from it.
+            if [ "${count}" -lt 100 ]; then
+              break
+            elif [ "${deleted_this_page}" = "false" ]; then
+              page=$((page + 1))
+            fi
           done
