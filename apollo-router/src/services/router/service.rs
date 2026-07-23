@@ -689,8 +689,10 @@ impl RouterCreator {
         configuration: Arc<Configuration>,
     ) -> Result<Self, BoxError> {
         let static_page = StaticPageLayer::new(&configuration);
-        let query_parsing_service =
-            query_parsing::query_parsing_service(supergraph_creator.schema(), configuration.clone());
+        let query_parsing_service = query_parsing::query_parsing_service(
+            supergraph_creator.schema(),
+            configuration.clone(),
+        );
         let apq_expander = if configuration.apq.enabled {
             APQExpander::with_cache(
                 DeduplicatingCache::from_configuration(&configuration.apq.router.cache, "APQ")

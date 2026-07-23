@@ -210,8 +210,16 @@ mod tests {
 
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
+    use futures::future::BoxFuture;
+    use tower::Service as _;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt as _;
 
-    use super::count_recursive_selections;
+    use super::*;
+    use crate::Configuration;
+    use crate::compute_job::ComputeBackPressureError;
+
+    const SUPERGRAPH_SCHEMA: &str = include_str!("../../../testing_schema.graphql");
 
     fn parse(
         schema_sdl: &str,
@@ -303,5 +311,149 @@ mod tests {
         let op = doc.operations.get(None).unwrap();
         let count = count_recursive_selections(&doc, &mut HashMap::new(), &op.selection_set, 0, 0);
         assert_eq!(count, None);
+    }
+
+    /// Wrap a tower-test mock so it can be used as a query parsing service.
+    ///
+    /// In this case a tower-test error indicates a compute job backpressure error, and an Err
+    /// response indicates an error inside the inner service.
+    #[derive(Clone)]
+    struct MockQueryParsing(tower_test::mock::Mock<Request, Result<ParsedDocument, SpecError>>);
+
+    impl tower::Service<Request> for MockQueryParsing {
+        type Response = ParsedDocument;
+        type Error = ServiceError;
+        type Future = BoxFuture<'static, Result<ParsedDocument, ServiceError>>;
+
+        fn poll_ready(
+            &mut self,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            self.0
+                .poll_ready(cx)
+                .map_err(|_| MaybeBackPressureError::TemporaryError(ComputeBackPressureError))
+        }
+
+        fn call(&mut self, req: Request) -> Self::Future {
+            let inner = self.0.clone();
+            let mut inner = std::mem::replace(&mut self.0, inner);
+            Box::pin(async move {
+                match inner.call(req).await {
+                    Ok(Ok(doc)) => Ok(doc),
+                    Ok(Err(spec_error)) => Err(MaybeBackPressureError::PermanentError(spec_error)),
+                    Err(_boxed) => Err(MaybeBackPressureError::TemporaryError(
+                        ComputeBackPressureError,
+                    )),
+                }
+            })
+        }
+    }
+
+    fn mock_pair() -> (
+        MockQueryParsing,
+        tower_test::mock::Handle<Request, Result<ParsedDocument, SpecError>>,
+    ) {
+        let (mock, handle) = tower_test::mock::pair();
+        (MockQueryParsing(mock), handle)
+    }
+
+    // This query has 3 selections
+    const QUERY: &str = "query { me { id name } }";
+
+    #[tokio::test]
+    async fn passes_through_when_within_limit() {
+        let config = Configuration::default();
+        let schema = crate::spec::Schema::parse(SUPERGRAPH_SCHEMA, &config).unwrap();
+
+        let (mock, mut handle) = mock_pair();
+        let mut service = ServiceBuilder::new()
+            .layer(LimitRecursiveSelectionLayer::new(10, false))
+            .service(mock);
+
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(crate::spec::Query::parse_document(
+                &req.query, None, &schema, &config,
+            ));
+        });
+
+        let _res = service
+            .ready()
+            .await
+            .unwrap()
+            .call(Request {
+                query: QUERY.to_string(),
+                operation_name: None,
+            })
+            .await
+            .unwrap();
+
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test]
+    async fn errors_when_limit_exceeded() {
+        let config = Configuration::default();
+        let schema = crate::spec::Schema::parse(SUPERGRAPH_SCHEMA, &config).unwrap();
+
+        let (mock, mut handle) = mock_pair();
+        // 3 selections in the query exceed a limit of 2.
+        let mut service = ServiceBuilder::new()
+            .layer(LimitRecursiveSelectionLayer::new(2, false))
+            .service(mock);
+
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(crate::spec::Query::parse_document(
+                &req.query, None, &schema, &config,
+            ));
+        });
+
+        let err = service
+            .ready()
+            .await
+            .unwrap()
+            .call(Request {
+                query: QUERY.to_string(),
+                operation_name: None,
+            })
+            .await
+            .expect_err("should exceed the recursive selections limit");
+        assert!(matches!(
+            err,
+            MaybeBackPressureError::PermanentError(SpecError::ValidationError(_))
+        ));
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test]
+    async fn warn_only_lets_it_through_when_limit_exceeded() {
+        let config = Configuration::default();
+        let schema = crate::spec::Schema::parse(SUPERGRAPH_SCHEMA, &config).unwrap();
+
+        let (mock, mut handle) = mock_pair();
+        let mut service = ServiceBuilder::new()
+            .layer(LimitRecursiveSelectionLayer::new(2, true))
+            .service(mock);
+
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(crate::spec::Query::parse_document(
+                &req.query, None, &schema, &config,
+            ));
+        });
+
+        let _res = service
+            .ready()
+            .await
+            .unwrap()
+            .call(Request {
+                query: QUERY.to_string(),
+                operation_name: None,
+            })
+            .await
+            .unwrap();
+
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 }
