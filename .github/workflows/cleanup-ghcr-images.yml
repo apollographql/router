@@ -1,0 +1,85 @@
+name: Cleanup old GHCR test-build and nightly images
+
+# Prunes GHCR package versions by age. Retention:
+#   - router-test-builds:         7 days  (ad hoc test builds, see build-test-image in .circleci/config.yml)
+#   - nightly/router:            14 days  (scheduled + one-off nightly builds)
+#   - helm-charts-nightly/router: 14 days (nightly Helm chart)
+#
+# Age is based on each version's `created_at` from the GitHub Packages API,
+# not on tag contents, so it applies uniformly regardless of tagging scheme.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'List what would be deleted without deleting anything'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: router-test-builds
+            retention_days: 7
+          - package: nightly/router
+            retention_days: 14
+          - package: helm-charts-nightly/router
+            retention_days: 14
+    steps:
+      - name: Delete ${{ matrix.package }} versions older than ${{ matrix.retention_days }} days
+        env:
+          # Requires packages:delete scope (classic PAT) or "Packages: read
+          # and write" (fine-grained PAT). Same identity used elsewhere in
+          # this repo's GitHub Actions (forward-port-dev-to-dev-v3.yml) --
+          # its scope may need to be extended to cover package deletion.
+          GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
+          PACKAGE: ${{ matrix.package }}
+          RETENTION_DAYS: ${{ matrix.retention_days }}
+          # Defaults to dry-run on every scheduled run and on a plain
+          # "Run workflow". Trigger manually with dry_run=false once a
+          # dry run's output has been reviewed and looks correct, then flip
+          # this default.
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+        run: |
+          set -euo pipefail
+
+          ORG="apollographql"
+          ENCODED_PACKAGE="${PACKAGE//\//%2F}"
+          CUTOFF_EPOCH=$(date -u -d "-${RETENTION_DAYS} days" +%s)
+
+          echo "package=${PACKAGE} retention_days=${RETENTION_DAYS} dry_run=${DRY_RUN}"
+
+          page=1
+          while : ; do
+            versions=$(gh api "/orgs/${ORG}/packages/container/${ENCODED_PACKAGE}/versions?per_page=100&page=${page}")
+            count=$(echo "${versions}" | jq 'length')
+            [ "${count}" -eq 0 ] && break
+
+            while IFS= read -r v; do
+              id=$(echo "${v}" | jq -r '.id')
+              created_at=$(echo "${v}" | jq -r '.created_at')
+              created_epoch=$(date -u -d "${created_at}" +%s)
+              tags=$(echo "${v}" | jq -r '(.metadata.container.tags // []) | join(",")')
+
+              if [ "${created_epoch}" -lt "${CUTOFF_EPOCH}" ]; then
+                if [ "${DRY_RUN}" = "true" ]; then
+                  echo "[dry-run] would delete ${PACKAGE} version ${id} (tags: ${tags:-<untagged>}, created ${created_at})"
+                else
+                  echo "deleting ${PACKAGE} version ${id} (tags: ${tags:-<untagged>}, created ${created_at})"
+                  gh api --method DELETE "/orgs/${ORG}/packages/container/${ENCODED_PACKAGE}/versions/${id}"
+                fi
+              fi
+            done < <(echo "${versions}" | jq -c '.[]')
+
+            [ "${count}" -lt 100 ] && break
+            page=$((page + 1))
+          done
