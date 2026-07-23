@@ -174,7 +174,10 @@ impl InvalidationLabels {
             };
             let next_len = current_len + delimiter_cost + label.len();
 
-            if next_len >= config.max_bytes {
+            // `max_bytes` is the maximum size the joined value is allowed to *be* — a label
+            // that lands the joined header at exactly `max_bytes` still fits, so only exclude
+            // a label that would push the header strictly over budget.
+            if next_len > config.max_bytes {
                 tracing::warn!(
                     "CDN invalidation labels header at capacity. This means you have more labels than can fit into the header."
                 );
@@ -779,6 +782,35 @@ mod tests {
             got,
             vec!["aa", "bb"],
             "expected both tags to fit in 6 bytes"
+        );
+    }
+
+    #[test]
+    fn maybe_emit_header_permits_a_label_landing_at_exactly_max_bytes() {
+        // "aa,bb" is exactly 5 bytes. max_bytes is documented as "maximum number of bytes for
+        // the joined header value" — an inclusive ceiling — so a joined value of exactly
+        // max_bytes should still fit, not be treated as overflow. Regression test for an
+        // earlier `next_len >= config.max_bytes` off-by-one that excluded exact-fit labels.
+        let labels = InvalidationLabels {
+            tags: HashSet::from(["aa".to_string(), "bb".to_string()]),
+            ..Default::default()
+        };
+        let mut headers = http::HeaderMap::new();
+
+        let result = labels.maybe_emit_header(&mut headers, &cdn_config(|c| c.max_bytes = 5));
+
+        assert_eq!(
+            result.outcome,
+            CdnTagHeaderOutcome::CompleteWithoutTruncation,
+            "a label landing at exactly max_bytes should fit, not be dropped: {result:?}"
+        );
+        let value = headers.get("Cache-Tag").unwrap().to_str().unwrap();
+        let mut got: Vec<&str> = value.split(',').collect();
+        got.sort_unstable();
+        assert_eq!(
+            got,
+            vec!["aa", "bb"],
+            "expected both tags to fit in exactly 5 bytes"
         );
     }
 
