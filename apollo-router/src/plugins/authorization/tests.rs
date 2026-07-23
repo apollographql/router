@@ -773,6 +773,89 @@ async fn scopes_directive() {
 }
 
 #[tokio::test]
+async fn scopes_directive_with_literal_include_false_on_protected_field() {
+    // RH-1400: `phone` is annotated with `@requiresScopes(scopes: [["pii"]])`. When the
+    // client's own operation excludes it with a literal `@include(if: false)`, the field is
+    // never sent to a subgraph (confirmed here by the mocked subgraph only ever being asked
+    // for `id creatorUser{id name}`, never `phone`), so no `UNAUTHORIZED_FIELD_OR_TYPE` error
+    // must be reported even though the request's scopes don't include `pii`.
+    let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().build()),
+        (
+            "orga",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{"query":"{ orga(id: 1) { id creatorUser { id name phone @include(if: false) } } }"}},
+                    serde_json::json! {{"data": {"orga": { "id": 1, "creatorUser": { "id": 0, "name":"Ada", "phone": "1234" } }}}},
+                )
+                .build(),
+        ),
+    ]
+    .into_iter()
+    .collect());
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+        "include_subgraph_errors": {
+            "all": true
+        },
+        "authorization": {
+            "directives": {
+                "enabled": true
+            }
+        }}))
+        .unwrap()
+        .schema(SCOPES_SCHEMA)
+        .extra_plugin(subgraphs)
+        .build_router()
+        .await
+        .unwrap();
+
+    let req = graphql::Request {
+        query: Some(
+            "query { orga(id: 1) { id creatorUser { id name phone @include(if: false) } } }"
+                .to_string(),
+        ),
+        ..Default::default()
+    };
+
+    let context = Context::new();
+    context
+        .insert(
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
+            json! {{ "scope": "user:read" }},
+        )
+        .unwrap();
+    let request = router::Request {
+        context,
+        router_request: http::Request::builder()
+            .method("POST")
+            .header(CONTENT_TYPE, "application/json")
+            .header(ACCEPT, "application/json")
+            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+            .unwrap(),
+    };
+
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await
+        .next()
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(
+        response.errors.is_empty(),
+        "expected no authorization errors, got: {:?}",
+        response.errors
+    );
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
 async fn scopes_directive_reject_unauthorized() {
     let _guard = tracing_test::dispatcher_guard();
 

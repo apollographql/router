@@ -915,6 +915,14 @@ query {
 
 The response would include an `"UNAUTHORIZED_FIELD_OR_TYPE"` error at the `/posts/... on PrivateBlog` path.
 
+## `@include`, `@skip`, and authorization directives
+
+GraphQL's built-in `@include` and `@skip` directives let a client conditionally request a field. When the condition is a literal `true` or `false` value, for example `@include(if: false)`, the router excludes that field from the query plan entirely, so it never reaches a subgraph.
+
+**A field the router excludes this way doesn't produce an authorization error**, even if it's protected by `@requiresScopes`, `@authenticated`, or `@policy` and the request doesn't meet that requirement. Because the field is never resolved, there's nothing to authorize.
+
+This only applies to a literal `true` or `false` value. When `@include` or `@skip` uses a variable, for example `@include(if: $showDetails)`, the router can't know its value until execution, so the field is still checked against your authorization directives and can still produce a `UNAUTHORIZED_FIELD_OR_TYPE` error.
+
 ## Query deduplication
 
 You can enable [query deduplication](/router/configuration/traffic-shaping/#query-deduplication) in the router to reduce redundant requests to a subgraph. The router does this by buffering similar queries and reusing the result.

@@ -14,6 +14,7 @@ use tower::BoxError;
 
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
+use crate::spec::IncludeSkip;
 use crate::spec::Schema;
 use crate::spec::TYPENAME;
 use crate::spec::query::transform;
@@ -186,6 +187,10 @@ pub(crate) struct AuthenticatedVisitor<'a> {
     current_path: Path,
     authenticated_directive_name: String,
     dry_run: bool,
+    // set while visiting a subtree rooted at a field/fragment that is statically excluded by a
+    // literal `@include(if: false)`/`@skip(if: true)`: such a subtree can never be sent to a
+    // subgraph, so authorization requirements within it must not be enforced.
+    bypass_authorization: bool,
 }
 
 impl<'a> AuthenticatedVisitor<'a> {
@@ -203,6 +208,7 @@ impl<'a> AuthenticatedVisitor<'a> {
             unauthorized_paths: Vec::new(),
             fragments_unauthorized_paths: HashMap::new(),
             current_path: Path::default(),
+            bypass_authorization: false,
             authenticated_directive_name: Schema::directive_name(
                 schema,
                 &Identity::authenticated_identity(),
@@ -334,39 +340,50 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
 
         let is_field_list = field_def.ty.is_list();
 
-        let field_requires_authentication = self.is_field_authenticated(field_def);
+        let previously_bypassed = self.bypass_authorization;
+        let bypass_authorization =
+            previously_bypassed || IncludeSkip::parse(&node.directives).statically_skipped();
+        self.bypass_authorization = bypass_authorization;
+
         self.current_path
             .push(PathElement::Key(field_name.as_str().into(), None));
         if is_field_list {
             self.current_path.push(PathElement::Flatten(None));
         }
 
-        let implementors_with_authenticated_requirements =
-            self.implementors_with_authenticated_requirements(field_def, node);
-
-        let implementors_with_authenticated_field_requirements =
-            self.implementors_with_authenticated_field_requirements(parent_type, node);
-
-        let res = if field_requires_authentication
-            || implementors_with_authenticated_requirements
-            || implementors_with_authenticated_field_requirements
-        {
-            self.unauthorized_paths.push(self.current_path.clone());
-            self.query_requires_authentication = true;
-
-            if self.dry_run {
-                transform::field(self, field_def, node)
-            } else {
-                Ok(None)
-            }
-        } else {
+        let res = if bypass_authorization {
             transform::field(self, field_def, node)
+        } else {
+            let field_requires_authentication = self.is_field_authenticated(field_def);
+
+            let implementors_with_authenticated_requirements =
+                self.implementors_with_authenticated_requirements(field_def, node);
+
+            let implementors_with_authenticated_field_requirements =
+                self.implementors_with_authenticated_field_requirements(parent_type, node);
+
+            if field_requires_authentication
+                || implementors_with_authenticated_requirements
+                || implementors_with_authenticated_field_requirements
+            {
+                self.unauthorized_paths.push(self.current_path.clone());
+                self.query_requires_authentication = true;
+
+                if self.dry_run {
+                    transform::field(self, field_def, node)
+                } else {
+                    Ok(None)
+                }
+            } else {
+                transform::field(self, field_def, node)
+            }
         };
 
         if is_field_list {
             self.current_path.pop();
         }
         self.current_path.pop();
+        self.bypass_authorization = previously_bypassed;
 
         res
     }
@@ -404,14 +421,21 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
         &mut self,
         node: &ast::FragmentSpread,
     ) -> Result<Option<ast::FragmentSpread>, BoxError> {
-        // record the fragment errors at the point of application
-        if let Some(paths) = self
-            .fragments_unauthorized_paths
-            .get(node.fragment_name.as_str())
-        {
-            for path in paths {
-                let path = self.current_path.join(path);
-                self.unauthorized_paths.push(path);
+        let previously_bypassed = self.bypass_authorization;
+        let bypass_authorization =
+            previously_bypassed || IncludeSkip::parse(&node.directives).statically_skipped();
+        self.bypass_authorization = bypass_authorization;
+
+        if !bypass_authorization {
+            // record the fragment errors at the point of application
+            if let Some(paths) = self
+                .fragments_unauthorized_paths
+                .get(node.fragment_name.as_str())
+            {
+                for path in paths {
+                    let path = self.current_path.join(path);
+                    self.unauthorized_paths.push(path);
+                }
             }
         }
 
@@ -422,14 +446,18 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
             .map(|fragment| fragment.fragment.type_condition.clone())
         {
             Some(condition) => condition,
-            None => return Ok(None),
+            None => {
+                self.bypass_authorization = previously_bypassed;
+                return Ok(None);
+            }
         };
 
-        let fragment_requires_authentication = self
-            .schema
-            .types
-            .get(condition.as_str())
-            .is_some_and(|type_definition| self.is_type_authenticated(type_definition));
+        let fragment_requires_authentication = !bypass_authorization
+            && self
+                .schema
+                .types
+                .get(condition.as_str())
+                .is_some_and(|type_definition| self.is_type_authenticated(type_definition));
 
         self.current_path
             .push(PathElement::Fragment(condition.as_str().into()));
@@ -448,6 +476,7 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
         };
 
         self.current_path.pop();
+        self.bypass_authorization = previously_bypassed;
         res
     }
 
@@ -456,7 +485,12 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
         parent_type: &str,
         node: &ast::InlineFragment,
     ) -> Result<Option<ast::InlineFragment>, BoxError> {
-        match &node.type_condition {
+        let previously_bypassed = self.bypass_authorization;
+        let bypass_authorization =
+            previously_bypassed || IncludeSkip::parse(&node.directives).statically_skipped();
+        self.bypass_authorization = bypass_authorization;
+
+        let res = match &node.type_condition {
             None => {
                 self.current_path.push(PathElement::Fragment(String::new()));
                 let res = transform::inline_fragment(self, parent_type, node);
@@ -467,11 +501,11 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
                 self.current_path
                     .push(PathElement::Fragment(name.as_str().into()));
 
-                let fragment_requires_authentication = self
-                    .schema
-                    .types
-                    .get(name)
-                    .is_some_and(|type_definition| self.is_type_authenticated(type_definition));
+                let fragment_requires_authentication =
+                    !bypass_authorization
+                        && self.schema.types.get(name).is_some_and(|type_definition| {
+                            self.is_type_authenticated(type_definition)
+                        });
 
                 let res = if fragment_requires_authentication {
                     self.query_requires_authentication = true;
@@ -490,7 +524,10 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
 
                 res
             }
-        }
+        };
+
+        self.bypass_authorization = previously_bypassed;
+        res
     }
 
     fn schema(&self) -> &apollo_compiler::Schema {
@@ -619,6 +656,147 @@ mod tests {
                 self.paths.iter().map(|p| p.to_string()).collect::<Vec<_>>()
             )
         }
+    }
+
+    #[test]
+    fn include_false_on_protected_field_is_not_unauthorized() {
+        // RH-1400: `internal` will never be sent to a subgraph because of the literal
+        // `@include(if: false)` on it, so it must not be reported as unauthorized.
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+                internal @include(if: false)
+            }
+        }
+        "#;
+
+        let (_doc, paths) = filter(BASIC_SCHEMA, QUERY);
+        assert!(
+            paths.is_empty(),
+            "statically excluded field must not be unauthorized, got: {:?}",
+            paths.iter().map(|p| p.to_string()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn skip_true_on_protected_field_is_not_unauthorized() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+                internal @skip(if: true)
+            }
+        }
+        "#;
+
+        let (_doc, paths) = filter(BASIC_SCHEMA, QUERY);
+        assert!(
+            paths.is_empty(),
+            "statically excluded field must not be unauthorized, got: {:?}",
+            paths.iter().map(|p| p.to_string()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn include_false_on_sibling_field_does_not_protect_unrelated_field() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type @include(if: false)
+                internal
+            }
+        }
+        "#;
+
+        let (_doc, paths) = filter(BASIC_SCHEMA, QUERY);
+        assert!(
+            !paths.is_empty(),
+            "protected field without its own @include/@skip must still be unauthorized"
+        );
+    }
+
+    #[test]
+    fn include_false_on_parent_field_protects_nested_field() {
+        static QUERY: &str = r#"
+        query {
+            topProducts @include(if: false) {
+                internal
+            }
+        }
+        "#;
+
+        let (_doc, paths) = filter(BASIC_SCHEMA, QUERY);
+        assert!(
+            paths.is_empty(),
+            "field nested under a statically excluded field must not be unauthorized, got: {:?}",
+            paths.iter().map(|p| p.to_string()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn include_false_on_fragment_spread_protects_fragment_fields() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+                ...F @include(if: false)
+            }
+        }
+
+        fragment F on Product {
+            internal
+        }
+        "#;
+
+        let (_doc, paths) = filter(BASIC_SCHEMA, QUERY);
+        assert!(
+            paths.is_empty(),
+            "fragment spread excluded by @include must not be unauthorized, got: {:?}",
+            paths.iter().map(|p| p.to_string()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn skip_true_on_inline_fragment_protects_nested_field() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+                ... @skip(if: true) {
+                    internal
+                }
+            }
+        }
+        "#;
+
+        let (_doc, paths) = filter(BASIC_SCHEMA, QUERY);
+        assert!(
+            paths.is_empty(),
+            "inline fragment excluded by @skip must not be unauthorized, got: {:?}",
+            paths.iter().map(|p| p.to_string()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn variable_include_on_protected_field_is_still_unauthorized() {
+        // Scope boundary: a *variable*-conditioned `@include`/`@skip` is not evaluated here
+        // (the query planner doesn't evaluate it either - the field may still be sent to a
+        // subgraph depending on the variable's runtime value), so it must still be unauthorized.
+        static QUERY: &str = r#"
+        query($shouldInclude: Boolean!) {
+            topProducts {
+                type
+                internal @include(if: $shouldInclude)
+            }
+        }
+        "#;
+
+        let (_doc, paths) = filter(BASIC_SCHEMA, QUERY);
+        assert!(
+            !paths.is_empty(),
+            "variable-conditioned @include must not bypass authorization"
+        );
     }
 
     #[test]
