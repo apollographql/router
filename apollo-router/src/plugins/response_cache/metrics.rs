@@ -155,8 +155,8 @@ pub(super) enum CdnTagHeaderOutcome {
     CompleteWithoutTruncation,
     /// Some labels didn't fit within `max_bytes` and were truncated, finest-grained first.
     CompleteWithTruncation,
-    /// Truncation would have occurred, but `experimental_drop_on_overflow` suppressed the header
-    /// entirely rather than sending a partial one.
+    /// Truncation would have occurred, but `experimental_on_overflow: drop` suppressed the
+    /// header entirely rather than sending a partial one.
     DroppedDueToOverflow,
 }
 

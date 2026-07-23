@@ -302,7 +302,7 @@ response_cache:
 
 When [CDN invalidation](/router/performance/caching/response-caching/cdn-invalidation) is enabled, the debugger also shows CDN invalidation info for the response as a whole (distinct from the per-entry cache tags above, since header truncation depends on the combined label set across every entry the response touched):
 
-- **Outcome**: whether the `Cache-Tag` header was empty (nothing to report), sent complete, truncated to fit `max_bytes`, or dropped entirely due to `experimental_drop_on_overflow`
+- **Outcome**: whether the `Cache-Tag` header was empty (nothing to report), sent complete, truncated to fit `max_bytes`, or dropped entirely due to `experimental_on_overflow: drop`
 - **Header value**: the actual header value sent, including truncated content
 - **Untruncated size**: how large the header would have been without the `max_bytes` limit
 - **Emitted**: whether the header actually made it onto the response

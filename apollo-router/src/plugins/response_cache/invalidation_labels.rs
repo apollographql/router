@@ -14,6 +14,7 @@ use crate::plugins::response_cache::metrics::record_cdn_tag_header_error;
 use crate::plugins::response_cache::metrics::record_cdn_tag_header_outcome;
 use crate::plugins::response_cache::metrics::record_cdn_tag_header_untruncated_size;
 use crate::plugins::response_cache::plugin::CdnInvalidationConfig;
+use crate::plugins::response_cache::plugin::OverflowBehavior;
 
 /// Per-request aggregator of cache tags surfaced by response_cache.
 ///
@@ -198,11 +199,12 @@ impl InvalidationLabels {
                 max_bytes = %config.max_bytes,
                 actual_bytes = %header.len(),
                 dropped_count = %dropped,
-                "response_cache cache-tag header exceeds max_bytes; truncated per on_overflow=truncate"
+                on_overflow = ?config.experimental_on_overflow,
+                "response_cache cache-tag header exceeds max_bytes"
             );
         }
 
-        if dropped > 0 && config.experimental_drop_on_overflow {
+        if dropped > 0 && config.experimental_on_overflow == OverflowBehavior::Drop {
             record_cdn_tag_header_outcome(CdnTagHeaderOutcome::DroppedDueToOverflow);
             CdnHeaderBuildResult {
                 header: None,
@@ -1038,20 +1040,36 @@ mod tests {
 
     #[rstest]
     // Same fixture and byte math as `maybe_emit_header_truncation_protects_coarse_tiers_first`
-    // above (already-verified thresholds). With `experimental_drop_on_overflow` set, ANY
+    // above (already-verified thresholds). With `experimental_on_overflow: Drop`, ANY
     // truncation — even just dropping fine-grained tags while every coarse subgraph/type label
     // still fit — should suppress the header entirely rather than emit the partial content. With
-    // the flag left off, truncation behaves as before: a partial, non-suppressed header — the
-    // last case cross-checks that against `only_coarse_tiers_fit` in the table above, which hits
-    // the same max_bytes/fixture combination with the flag at its default.
-    #[case::coarse_tiers_fit_but_tags_dropped_with_flag_on(54, true, None)]
-    #[case::coarse_tiers_plus_some_tags_fit_but_some_dropped_with_flag_on(62, true, None)]
-    #[case::everything_fits_nothing_dropped_with_flag_on(100, true, Some(8))]
-    #[case::not_even_the_first_coarsest_label_fits_with_flag_on(10, true, None)]
-    #[case::truncation_with_flag_off_stays_partial_not_suppressed(54, false, Some(4))]
-    fn maybe_emit_header_experimental_drop_on_overflow_suppresses_truncated_header(
+    // `Truncate` (the default), truncation behaves as before: a partial, non-suppressed header —
+    // the last case cross-checks that against `only_coarse_tiers_fit` in the table above, which
+    // hits the same max_bytes/fixture combination with the default behavior.
+    #[case::coarse_tiers_fit_but_tags_dropped_with_drop_behavior(54, OverflowBehavior::Drop, None)]
+    #[case::coarse_tiers_plus_some_tags_fit_but_some_dropped_with_drop_behavior(
+        62,
+        OverflowBehavior::Drop,
+        None
+    )]
+    #[case::everything_fits_nothing_dropped_with_drop_behavior(
+        100,
+        OverflowBehavior::Drop,
+        Some(8)
+    )]
+    #[case::not_even_the_first_coarsest_label_fits_with_drop_behavior(
+        10,
+        OverflowBehavior::Drop,
+        None
+    )]
+    #[case::truncation_with_truncate_behavior_stays_partial_not_suppressed(
+        54,
+        OverflowBehavior::Truncate,
+        Some(4)
+    )]
+    fn maybe_emit_header_experimental_on_overflow_drop_suppresses_truncated_header(
         #[case] max_bytes: usize,
-        #[case] drop_on_overflow: bool,
+        #[case] on_overflow: OverflowBehavior,
         #[case] expected_segment_count: Option<usize>,
     ) {
         let labels = InvalidationLabels {
@@ -1073,14 +1091,14 @@ mod tests {
             &mut headers,
             &cdn_config(|c| {
                 c.max_bytes = max_bytes;
-                c.experimental_drop_on_overflow = drop_on_overflow;
+                c.experimental_on_overflow = on_overflow;
             }),
         );
 
         match expected_segment_count {
             None => assert!(
                 headers.is_empty(),
-                "max_bytes={max_bytes}, drop_on_overflow={drop_on_overflow}: expected header to be suppressed entirely, got {:?}",
+                "max_bytes={max_bytes}, on_overflow={on_overflow:?}: expected header to be suppressed entirely, got {:?}",
                 headers.get("Cache-Tag")
             ),
             Some(expected) => {
@@ -1088,7 +1106,7 @@ mod tests {
                     .get("Cache-Tag")
                     .unwrap_or_else(|| {
                         panic!(
-                            "max_bytes={max_bytes}, drop_on_overflow={drop_on_overflow}: expected header to still be present"
+                            "max_bytes={max_bytes}, on_overflow={on_overflow:?}: expected header to still be present"
                         )
                     })
                     .to_str()
@@ -1109,11 +1127,16 @@ mod tests {
     // possible outcome — the observable an SRE would actually alert on, distinct from (and
     // untested by) the header content itself.
     #[rstest]
-    #[case::empty(InvalidationLabels::default(), 16384, false, "empty")]
+    #[case::empty(
+        InvalidationLabels::default(),
+        16384,
+        OverflowBehavior::Truncate,
+        "empty"
+    )]
     #[case::complete_without_truncation(
         InvalidationLabels { tags: HashSet::from(["homepage".to_string()]), ..Default::default() },
         16384,
-        false,
+        OverflowBehavior::Truncate,
         "complete_without_truncation",
     )]
     #[case::complete_with_truncation(
@@ -1123,7 +1146,7 @@ mod tests {
             tags: HashSet::from(["ggg".to_string(), "hhh".to_string(), "iii".to_string(), "jjj".to_string()]),
         },
         54,
-        false,
+        OverflowBehavior::Truncate,
         "complete_with_truncation",
     )]
     #[case::dropped_due_to_overflow(
@@ -1133,14 +1156,14 @@ mod tests {
             tags: HashSet::from(["ggg".to_string(), "hhh".to_string(), "iii".to_string(), "jjj".to_string()]),
         },
         54,
-        true,
+        OverflowBehavior::Drop,
         "dropped_due_to_overflow",
     )]
     #[tokio::test]
     async fn maybe_emit_header_records_outcome_metric_per_branch(
         #[case] labels: InvalidationLabels,
         #[case] max_bytes: usize,
-        #[case] drop_on_overflow: bool,
+        #[case] on_overflow: OverflowBehavior,
         #[case] expected_outcome: &'static str,
     ) {
         async move {
@@ -1149,7 +1172,7 @@ mod tests {
                 &mut headers,
                 &cdn_config(|c| {
                     c.max_bytes = max_bytes;
-                    c.experimental_drop_on_overflow = drop_on_overflow;
+                    c.experimental_on_overflow = on_overflow;
                 }),
             );
 
@@ -1266,7 +1289,7 @@ mod tests {
     #[case::empty(
         InvalidationLabels::default(),
         16384,
-        false,
+        OverflowBehavior::Truncate,
         CdnTagHeaderOutcome::Empty,
         None,
         false
@@ -1274,7 +1297,7 @@ mod tests {
     #[case::complete_without_truncation(
         InvalidationLabels { tags: HashSet::from(["homepage".to_string()]), ..Default::default() },
         16384,
-        false,
+        OverflowBehavior::Truncate,
         CdnTagHeaderOutcome::CompleteWithoutTruncation,
         Some("homepage"),
         true,
@@ -1285,7 +1308,7 @@ mod tests {
             ..Default::default()
         },
         15,
-        false,
+        OverflowBehavior::Truncate,
         CdnTagHeaderOutcome::CompleteWithTruncation,
         None, // exactly which tag survives isn't deterministic; checked separately below
         true,
@@ -1296,7 +1319,7 @@ mod tests {
             ..Default::default()
         },
         15,
-        true,
+        OverflowBehavior::Drop,
         CdnTagHeaderOutcome::DroppedDueToOverflow,
         None,
         false,
@@ -1304,7 +1327,7 @@ mod tests {
     fn maybe_emit_header_result_matches_outcome_for_each_branch(
         #[case] labels: InvalidationLabels,
         #[case] max_bytes: usize,
-        #[case] drop_on_overflow: bool,
+        #[case] on_overflow: OverflowBehavior,
         #[case] expected_outcome: CdnTagHeaderOutcome,
         #[case] expected_header: Option<&str>,
         #[case] expected_emitted: bool,
@@ -1314,7 +1337,7 @@ mod tests {
             &mut headers,
             &cdn_config(|c| {
                 c.max_bytes = max_bytes;
-                c.experimental_drop_on_overflow = drop_on_overflow;
+                c.experimental_on_overflow = on_overflow;
             }),
         );
 

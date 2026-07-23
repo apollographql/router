@@ -16,7 +16,7 @@ response_cache:
     header_name: Cache-Tag
     header_delimiter: ','
     max_bytes: 16384
-    experimental_drop_on_overflow: false
+    experimental_on_overflow: truncate
   subgraph:
     all:
       enabled: true

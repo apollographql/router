@@ -268,22 +268,32 @@ pub(crate) struct CdnInvalidationConfig {
     pub(crate) header_delimiter: String,
 
     /// Maximum number of bytes for the joined header value. When the joined value would exceed
-    /// this size, `on_overflow` decides what to do. Defaults to 16kb.
+    /// this size, `experimental_on_overflow` decides what to do. Defaults to 16kb.
     pub(crate) max_bytes: usize,
 
-    /// Whether to drop the invalidation labels header when its size is greater than the maximum
-    /// bytes allowed. Note: this does not drop the `Cache-Control` header so data will still be
-    /// cached. This drops the invalidation labels header, which is useful as a signal to CDNs for
-    /// further business logic at the CDN level
-    ///
-    /// CDNs (eg, Cloudflare) have ways of setting rules (eg, Cloudflare's response rules) for handling caching
-    /// and the absence of the invalidation labels header can be used to set `no-store` for the
-    /// `Cache-Control` header to prevent CDN caching of responses or entities that don't have
-    /// fine-grained invalidation labels
+    /// What to do when the joined header value would exceed `max_bytes`.
     ///
     /// This is an experimental configuration option that might be removed in future releases,
-    /// please use caution when deciding to use it. Defaults to `false`.
-    pub(crate) experimental_drop_on_overflow: bool,
+    /// please use caution when deciding to use it. Defaults to `truncate`.
+    pub(crate) experimental_on_overflow: OverflowBehavior,
+}
+
+/// What the router does when the joined `Cache-Tag`/invalidation-labels header value would
+/// exceed `max_bytes`. See `CdnInvalidationConfig::experimental_on_overflow`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum OverflowBehavior {
+    /// Pack the header coarsest-first (subgraph, then type, then tag) and drop whatever doesn't
+    /// fit, finest-grained first, so an oversized response still gets a usable, if partial,
+    /// header.
+    #[default]
+    Truncate,
+    /// Omit the header entirely rather than send a partial one. Note: this does not drop the
+    /// `Cache-Control` header, so the response is still cached — this option is only useful
+    /// paired with a CDN-side rule that treats a missing invalidation-labels header as a signal
+    /// to bypass caching for that response (e.g. Cloudflare response rules setting `no-store`
+    /// when the header is absent).
+    Drop,
 }
 
 impl Default for CdnInvalidationConfig {
@@ -293,7 +303,7 @@ impl Default for CdnInvalidationConfig {
             header_name: "Cache-Tag".to_string(),
             header_delimiter: ",".to_string(),
             max_bytes: 16384,
-            experimental_drop_on_overflow: false,
+            experimental_on_overflow: OverflowBehavior::default(),
         }
     }
 }

@@ -122,7 +122,7 @@ response_cache:
     header_name: "Cache-Tag"
     header_delimiter: ","
     max_bytes: 16384
-    experimental_drop_on_overflow: false
+    experimental_on_overflow: truncate
   subgraph:
     all:
       enabled: true
@@ -136,17 +136,17 @@ response_cache:
 | `header_name` | `"Cache-Tag"` | Name of the header the router emits. Match your CDN's expected header (e.g. `Surrogate-Key` for Fastly). |
 | `header_delimiter` | `","` | Delimiter between labels in the header value. Match your CDN's expected format (e.g. `" "` for Fastly). |
 | `max_bytes` | `16384` | Maximum size, in bytes, of the joined header value. Matches Cloudflare's default `Cache-Tag` size limit; adjust to match your provider if different. |
-| `experimental_drop_on_overflow` | `false` | See [Header size limits and truncation](#header-size-limits-and-truncation). Experimental—may change or be removed in a future release. |
+| `experimental_on_overflow` | `truncate` | `truncate` or `drop`. See [Header size limits and truncation](#header-size-limits-and-truncation). Experimental—may change or be removed in a future release. |
 
 ## Header size limits and truncation
 
 CDNs cap how large a tag-purge header can be (`max_bytes`, 16 KB by default, matching Cloudflare's limit). When a response's full set of labels would exceed that limit, the router packs the header **coarsest-first**—every `subgraph-` label, then every `type-` label, then as many exact tags as still fit—and drops whatever doesn't fit, finest-grained first. This means an oversized response still gets a usable header: you keep the ability to invalidate broadly (by subgraph or type) even when there wasn't room for every fine-grained tag.
 
-If you'd rather not cache data at all when its tag set couldn't fully fit—rather than caching it with a partial header—set `experimental_drop_on_overflow: true`. When truncation would otherwise occur, the router omits the header entirely instead of sending a partial one. This doesn't affect the `Cache-Control` header on its own, so the response would still be cached at the CDN as-is; the option is only useful paired with a CDN-side rule that inspects the header's absence and forces the response to bypass cache instead. This option is experimental and may change in a future release.
+If you'd rather not cache data at all when its tag set couldn't fully fit—rather than caching it with a partial header—set `experimental_on_overflow: drop`. When truncation would otherwise occur, the router omits the header entirely instead of sending a partial one. This doesn't affect the `Cache-Control` header on its own, so the response would still be cached at the CDN as-is; the option is only useful paired with a CDN-side rule that inspects the header's absence and forces the response to bypass cache instead. This option is experimental and may change in a future release.
 
 ### Wiring the missing-header signal to cache bypass
 
-`experimental_drop_on_overflow` only does half the job—the router omits the header, but something on the CDN side still has to notice that and refuse to cache the response. Without that second piece, this option only suppresses the header; it does not, by itself, stop the CDN from caching data you'd have no way to invalidate.
+`experimental_on_overflow: drop` only does half the job—the router omits the header, but something on the CDN side still has to notice that and refuse to cache the response. Without that second piece, this option only suppresses the header; it does not, by itself, stop the CDN from caching data you'd have no way to invalidate.
 
 The rule you need has this general shape, regardless of provider:
 
