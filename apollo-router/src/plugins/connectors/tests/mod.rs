@@ -170,6 +170,209 @@ async fn source_aware_root_field_end_to_end() {
     );
 }
 
+/// Phase-1 coverage, step 1 — the **entity + `@requires`** analogue of the
+/// Slice-5 capstone (`source_aware_root_field_end_to_end`). The root-field
+/// class was already proven live; this proves the *entity* path flows
+/// end-to-end through the source-aware pipeline rather than only piecewise.
+///
+/// `User.d @requires(c)` drives the entity/`@requires` path:
+///   1. `GET /users` — the root connector fetch (`Query.users`), yielding
+///      `id`/`name` from its selection.
+///   2. `POST /graphql` — `c`, which lives on the graphql subgraph and is what
+///      `d` requires.
+///   3. in parallel: `GET /users/{$this.c}` — `d`, the field connector
+///      (`User.d`), now that `c` is known.
+///
+/// The same query runs on the expansion path and with
+/// `experimental_connectors_source_aware` on; the two must agree byte-for-byte
+/// and dispatch the same set of requests.
+///
+/// Scope note: this deliberately selects only fields served by the **root** and
+/// **field** connectors (`Query.users`, `User.d`), which plan-time stamping
+/// (B-2a) covers. The **entity-resolver** connector class (`Query.user`,
+/// `entity: true`) is *not* yet stamped under source-aware and mis-dispatches
+/// via the many-to-one `by_service_name` fallback — captured as the ignored
+/// `source_aware_entity_resolver_connector_gap` below (step 3).
+#[tokio::test]
+async fn source_aware_entity_plus_requires_end_to_end() {
+    let query = "query { users { id name d } }";
+
+    // Mount identical mocks on a server: the root `/users` list, the per-entity
+    // `/users/{id}` connector, and the graphql `_entities` that resolves `c`
+    // (which `d` @requires).
+    async fn mount_all(server: &MockServer) {
+        mock_api::users().mount(server).await;
+        mock_api::user_1().mount(server).await;
+        mock_api::user_2().mount(server).await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_json(json!({
+              "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { c } } }",
+              "variables": {"representations":[{"__typename":"User","id":1},{"__typename":"User","id":2}]}
+            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .set_body_json(json!({
+                      "data": {
+                        "_entities": [
+                          {"__typename": "User", "c": "1"},
+                          {"__typename": "User", "c": "2"}
+                        ]
+                      }
+                    })),
+            )
+            .mount(server)
+            .await;
+    }
+
+    // Baseline: expansion path (flag off).
+    let expanded_server = MockServer::start().await;
+    mount_all(&expanded_server).await;
+    let expanded = execute(
+        STEEL_THREAD_SCHEMA,
+        &expanded_server.uri(),
+        query,
+        Default::default(),
+        None,
+        |_| {},
+        None,
+    )
+    .await;
+
+    // Source-aware path (flag on).
+    let sa_server = MockServer::start().await;
+    mount_all(&sa_server).await;
+    let source_aware = execute(
+        STEEL_THREAD_SCHEMA,
+        &sa_server.uri(),
+        query,
+        Default::default(),
+        Some(json!({ "experimental_connectors_source_aware": true })),
+        |_| {},
+        None,
+    )
+    .await;
+
+    // Same response either way — source-aware is behavior-preserving end to end.
+    assert_eq!(
+        source_aware, expanded,
+        "source-aware entity/@requires response must match the expansion path"
+    );
+    insta::assert_json_snapshot!(source_aware, @r###"
+    {
+      "data": {
+        "users": [
+          {
+            "id": 1,
+            "name": "Leanne Graham",
+            "d": "1-770-736-8031 x56442"
+          },
+          {
+            "id": 2,
+            "name": "Ervin Howell",
+            "d": "1-770-736-8031 x56442"
+          }
+        ]
+      }
+    }
+    "###);
+
+    // The source-aware run really dispatched the entity plan: same request set
+    // as the expansion path (root `/users`, graphql `_entities` for `c`, and the
+    // `d` field-connector fetches). Compared order-independently since the
+    // parallel fetches have no guaranteed wire ordering.
+    let request_keys = |reqs: &[wiremock::Request]| {
+        let mut keys: Vec<(String, String)> = reqs
+            .iter()
+            .map(|r| (r.method.to_string(), r.url.path().to_string()))
+            .collect();
+        keys.sort();
+        keys
+    };
+    let sa_reqs = sa_server.received_requests().await.unwrap();
+    let expanded_reqs = expanded_server.received_requests().await.unwrap();
+    assert_eq!(
+        request_keys(&sa_reqs),
+        request_keys(&expanded_reqs),
+        "source-aware must dispatch the same requests as the expansion path"
+    );
+}
+
+/// Step-3 repro (ignored): the **entity-resolver** connector class
+/// (`Query.user`, `entity: true`) does not yet dispatch under source-aware.
+///
+/// `username` is served by resolving the `User` entity through `Query.user`.
+/// Plan-time stamping (B-2a) covers root and field connectors but not this
+/// entity-resolver class, so under source-aware the fetch falls through to the
+/// many-to-one `by_service_name` fallback, mis-dispatches, and `username`
+/// comes back `null` while the expansion path returns the real value. When step
+/// 3 stamps/dispatches this class, un-`ignore` this test.
+#[tokio::test]
+#[ignore = "step 3: Query.user entity-resolver connector not yet stamped/dispatched under source-aware (username -> null)"]
+async fn source_aware_entity_resolver_connector_gap() {
+    let query = "query { users { __typename id name username d } }";
+
+    async fn mount_all(server: &MockServer) {
+        mock_api::users().mount(server).await;
+        mock_api::user_1().mount(server).await;
+        mock_api::user_2().mount(server).await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_json(json!({
+              "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { c } } }",
+              "variables": {"representations":[{"__typename":"User","id":1},{"__typename":"User","id":2}]}
+            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .set_body_json(json!({
+                      "data": {
+                        "_entities": [
+                          {"__typename": "User", "c": "1"},
+                          {"__typename": "User", "c": "2"}
+                        ]
+                      }
+                    })),
+            )
+            .mount(server)
+            .await;
+    }
+
+    let expanded_server = MockServer::start().await;
+    mount_all(&expanded_server).await;
+    let expanded = execute(
+        STEEL_THREAD_SCHEMA,
+        &expanded_server.uri(),
+        query,
+        Default::default(),
+        None,
+        |_| {},
+        None,
+    )
+    .await;
+
+    let sa_server = MockServer::start().await;
+    mount_all(&sa_server).await;
+    let source_aware = execute(
+        STEEL_THREAD_SCHEMA,
+        &sa_server.uri(),
+        query,
+        Default::default(),
+        Some(json!({ "experimental_connectors_source_aware": true })),
+        |_| {},
+        None,
+    )
+    .await;
+
+    // Currently fails: source-aware returns username=null. This is the assertion
+    // step 3 must make pass.
+    assert_eq!(
+        source_aware, expanded,
+        "source-aware entity-resolver dispatch must match the expansion path"
+    );
+}
+
 #[tokio::test]
 async fn max_requests() {
     let mock_server = MockServer::start().await;
