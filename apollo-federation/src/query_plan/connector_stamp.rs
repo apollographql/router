@@ -13,47 +13,112 @@
 //! * an entity fetch `{ _entities … { … on User { d } } }` → the connector on
 //!   `User.d`.
 //!
-//! **Scope of this increment:** root-field connectors and single field-connector
-//! entity fetches (the steelthread shapes). Not yet handled, left `None`:
+//! **Multi-connector merged fetches (source-aware Phase 1, step 2A).** Because
+//! the raw-graph planner sees connectors as one subgraph, it merges root fields
+//! backed by *different* connectors into a single `connectors` fetch (under
+//! expansion these were distinct synthetic subgraphs → distinct fetches). Such a
+//! fetch has no single connector identity, so instead of leaving it unstamped
+//! (which mis-dispatches), [`stamp_connector_coordinates`] **splits** it into a
+//! `Parallel` of per-connector fetches, each with its own sub-operation and
+//! stamped coordinate — reconstructing, in the plan, the fetch decomposition
+//! expansion used to get structurally. The unchanged Parallel/Sequence executor
+//! then fans them out. See [`split_root_field_fetch`] for the (deliberately
+//! bounded) shapes handled.
+//!
+//! **Scope.** Handled: root-field connectors, single field-connector entity
+//! fetches, and multi-connector *root-field* merges (the split above). Not yet
+//! handled, left `None`:
 //! * type-level entity-resolver connectors (`@connect` on the type itself);
-//! * a single `connectors` fetch that merges fields from *multiple* connectors
-//!   (the fetch-merge-keys-on-subgraph-name case) — such a fetch resolves to >1
-//!   connector and is deliberately left unstamped rather than guessed.
+//! * multi-connector merges involving *entity* fields (shared representations)
+//!   or bound variables — left unsplit rather than split incorrectly;
 //! * `Defer`/`Condition`/`Subscription` plan nodes.
 
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
+use apollo_compiler::executable::OperationType;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::validation::Valid;
 
 use crate::connectors::Connector;
+use crate::query_plan::FetchDataPathElement;
+use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::FetchNode;
+use crate::query_plan::ParallelNode;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
 use crate::query_plan::TopLevelPlanNode;
+use crate::query_plan::serializable_document::SerializableDocument;
 
 /// Stamp every connector fetch in `plan` with its connector coordinate, resolved
 /// authoritatively from `connectors`. Fetches to non-connector subgraphs, and
 /// connector fetches that resolve ambiguously (see module scope), are left with
 /// `connector == None`.
 pub fn stamp_connector_coordinates(plan: &mut QueryPlan, connectors: &[Connector]) {
-    match plan.node.as_mut() {
-        Some(TopLevelPlanNode::Fetch(fetch)) => stamp_fetch(fetch, connectors),
-        Some(TopLevelPlanNode::Sequence(seq)) => {
-            seq.nodes.iter_mut().for_each(|n| stamp_node(n, connectors))
+    match plan.node.take() {
+        Some(TopLevelPlanNode::Fetch(fetch)) => {
+            let fetch = *fetch;
+            plan.node = Some(match split_root_field_fetch(&fetch, connectors) {
+                Some(split) => TopLevelPlanNode::Parallel(ParallelNode {
+                    nodes: split
+                        .into_iter()
+                        .map(|f| PlanNode::Fetch(Box::new(f)))
+                        .collect(),
+                }),
+                None => {
+                    let mut fetch = fetch;
+                    stamp_fetch(&mut fetch, connectors);
+                    TopLevelPlanNode::Fetch(Box::new(fetch))
+                }
+            });
         }
-        Some(TopLevelPlanNode::Parallel(par)) => {
-            par.nodes.iter_mut().for_each(|n| stamp_node(n, connectors))
+        Some(mut other) => {
+            match &mut other {
+                TopLevelPlanNode::Sequence(seq) => {
+                    seq.nodes.iter_mut().for_each(|n| stamp_node(n, connectors))
+                }
+                TopLevelPlanNode::Parallel(par) => {
+                    par.nodes.iter_mut().for_each(|n| stamp_node(n, connectors))
+                }
+                TopLevelPlanNode::Flatten(flatten) => stamp_node(&mut flatten.node, connectors),
+                TopLevelPlanNode::Fetch(_) => unreachable!("handled above"),
+                TopLevelPlanNode::Defer(_)
+                | TopLevelPlanNode::Condition(_)
+                | TopLevelPlanNode::Subscription(_) => {}
+            }
+            plan.node = Some(other);
         }
-        Some(TopLevelPlanNode::Flatten(flatten)) => stamp_node(&mut flatten.node, connectors),
-        Some(TopLevelPlanNode::Defer(_))
-        | Some(TopLevelPlanNode::Condition(_))
-        | Some(TopLevelPlanNode::Subscription(_))
-        | None => {}
+        None => {}
     }
 }
 
 fn stamp_node(node: &mut PlanNode, connectors: &[Connector]) {
     match node {
-        PlanNode::Fetch(fetch) => stamp_fetch(fetch, connectors),
+        PlanNode::Fetch(_) => {
+            // Take the fetch out so we can either stamp it in place or replace
+            // the whole node with a split `Parallel` (avoids a borrow conflict).
+            let placeholder = PlanNode::Parallel(ParallelNode { nodes: Vec::new() });
+            let PlanNode::Fetch(fetch) = std::mem::replace(node, placeholder) else {
+                unreachable!()
+            };
+            let fetch = *fetch;
+            *node = match split_root_field_fetch(&fetch, connectors) {
+                Some(split) => PlanNode::Parallel(ParallelNode {
+                    nodes: split
+                        .into_iter()
+                        .map(|f| PlanNode::Fetch(Box::new(f)))
+                        .collect(),
+                }),
+                None => {
+                    let mut fetch = fetch;
+                    stamp_fetch(&mut fetch, connectors);
+                    PlanNode::Fetch(Box::new(fetch))
+                }
+            };
+        }
         PlanNode::Sequence(seq) => seq.nodes.iter_mut().for_each(|n| stamp_node(n, connectors)),
         PlanNode::Parallel(par) => par.nodes.iter_mut().for_each(|n| stamp_node(n, connectors)),
         PlanNode::Flatten(flatten) => stamp_node(&mut flatten.node, connectors),
@@ -89,10 +154,134 @@ fn stamp_fetch(fetch: &mut FetchNode, connectors: &[Connector]) {
     }
 
     // Exactly one connector → carry its identity. Zero (non-connector subgraph)
-    // or many (merged multi-connector fetch, out of scope) → leave None.
+    // → leave None. The many-connector case is handled earlier by
+    // `split_root_field_fetch`, so a fetch reaching here with >1 match is one we
+    // deliberately don't split (see that function's guards) and is left None.
     if let [connector] = matched.as_slice() {
         fetch.connector = Some(connector.id.coordinate());
     }
+}
+
+/// The connector on `{parent_type}.{field}` within `subgraph`, if any.
+fn connector_for<'a>(
+    parent_type: &str,
+    field: &str,
+    subgraph: &str,
+    connectors: &'a [Connector],
+) -> Option<&'a Connector> {
+    let simple = format!("{parent_type}.{field}");
+    connectors.iter().find(|c| {
+        c.id.subgraph_name.as_str() == subgraph && c.id.directive.simple_name() == simple
+    })
+}
+
+/// If `fetch` is a **multi-connector root-field merge**, return one single-
+/// connector [`FetchNode`] per connector (each with its own sub-operation,
+/// stamped coordinate, and partitioned rewrites). Otherwise return `None` and
+/// let [`stamp_fetch`] handle it in place.
+///
+/// Deliberately bounded (see module docs): only a plain root-field `Query` fetch
+/// with no defer `id`, no `requires`, and no `variable_usages`, whose every
+/// top-level selection is a connector-backed field, and which spans >1 distinct
+/// connector. Anything else is left for `stamp_fetch` (0/1 connector) or left
+/// `None` (genuinely unsupported), never split incorrectly.
+fn split_root_field_fetch(fetch: &FetchNode, connectors: &[Connector]) -> Option<Vec<FetchNode>> {
+    // Guards: only the simple, side-channel-free root-field shape is safe to split.
+    if fetch.id.is_some()
+        || !fetch.requires.is_empty()
+        || !fetch.variable_usages.is_empty()
+        || fetch.operation_kind != OperationType::Query
+    {
+        return None;
+    }
+
+    let parsed = fetch.operation_document.as_parsed().ok()?;
+    let op = parsed.operations.get(None).ok()?;
+    let root_type = op.selection_set.ty.as_str();
+    let subgraph = fetch.subgraph_name.as_ref();
+
+    // Map every top-level selection to a connector; bail unless all are
+    // connector-backed plain fields. Group field names by connector coordinate,
+    // preserving first-seen order.
+    let mut groups: Vec<(String, Vec<Name>)> = Vec::new();
+    for selection in &op.selection_set.selections {
+        let Selection::Field(field) = selection else {
+            return None;
+        };
+        let name = field.name.as_str();
+        if name == "_entities" || name == "__typename" {
+            return None;
+        }
+        let connector = connector_for(root_type, name, subgraph, connectors)?;
+        let coordinate = connector.id.coordinate();
+        match groups.iter_mut().find(|(c, _)| *c == coordinate) {
+            Some((_, fields)) => fields.push(field.name.clone()),
+            None => groups.push((coordinate, vec![field.name.clone()])),
+        }
+    }
+
+    // Only a genuine merge (>1 connector) is split; a single connector is
+    // ordinary stamping.
+    if groups.len() < 2 {
+        return None;
+    }
+
+    let base: ExecutableDocument = (***parsed).clone();
+    let mut out = Vec::with_capacity(groups.len());
+    for (coordinate, field_names) in &groups {
+        let keep: HashSet<Name> = field_names.iter().cloned().collect();
+
+        // Sub-operation: the merged operation with only this connector's fields.
+        let mut doc = base.clone();
+        let op_node = doc.operations.anonymous.as_mut()?;
+        op_node.make_mut().selection_set.selections.retain(|s| {
+            matches!(s, Selection::Field(f) if keep.contains(&f.name))
+        });
+        // A subset of an already-valid operation is still valid; keep both the
+        // parsed and serialized forms so the plan's `Display` (which reads the
+        // parsed doc) and the router's later re-parse both work.
+        let doc = SerializableDocument::from_parsed(Valid::assume_valid(doc));
+
+        let mut split = fetch.clone();
+        split.operation_document = doc;
+        split.connector = Some(coordinate.clone());
+        split.output_rewrites = filter_rewrites(&fetch.output_rewrites, &keep);
+        split.context_rewrites = filter_rewrites(&fetch.context_rewrites, &keep);
+        split.input_rewrites = Arc::new(filter_rewrites(&fetch.input_rewrites, &keep));
+        out.push(split);
+    }
+    Some(out)
+}
+
+/// Keep the rewrites whose path targets one of `keep`'s top-level fields. A
+/// rewrite whose path has no leading `Key` (e.g. starts at `Parent`) is
+/// ambiguous, so it's kept on every partition (conservative).
+fn filter_rewrites(
+    rewrites: &[Arc<FetchDataRewrite>],
+    keep: &HashSet<Name>,
+) -> Vec<Arc<FetchDataRewrite>> {
+    rewrites
+        .iter()
+        .filter(|rw| rewrite_targets_kept_field(rw, keep))
+        .cloned()
+        .collect()
+}
+
+fn rewrite_targets_kept_field(rewrite: &FetchDataRewrite, keep: &HashSet<Name>) -> bool {
+    let path = match rewrite {
+        FetchDataRewrite::ValueSetter(v) => &v.path,
+        FetchDataRewrite::KeyRenamer(k) => &k.path,
+    };
+    for element in path {
+        match element {
+            FetchDataPathElement::Key(name, _) => return keep.contains(name),
+            // Skip a leading type-condition; it doesn't select a field.
+            FetchDataPathElement::TypenameEquals(_) => continue,
+            // No leading field key to key on — keep it everywhere.
+            FetchDataPathElement::AnyIndex(_) | FetchDataPathElement::Parent => return true,
+        }
+    }
+    true
 }
 
 /// Collect the `(parent_type, field)` pairs a fetch operation targets. Root

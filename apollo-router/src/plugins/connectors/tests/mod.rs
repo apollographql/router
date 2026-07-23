@@ -373,22 +373,22 @@ async fn source_aware_entity_resolver_connector_gap() {
     );
 }
 
-/// Step-2 repro (ignored): multi-connector **merged fetch**. `Query.users` and
-/// `Query.posts` are both on the single `CONNECTORS` subgraph but backed by
-/// *different* connectors. Under expansion they land in separate synthetic
-/// subgraphs (two fetches); under source-aware the planner merges them into one
-/// fetch to `connectors` whose fields span two connectors.
+/// Step 2 (2A) — multi-connector **merged fetch**, now split per connector.
+/// `Query.users` and `Query.posts` are both on the single `CONNECTORS` subgraph
+/// but backed by *different* connectors. Under expansion they land in separate
+/// synthetic subgraphs (two fetches); under source-aware the planner merges them
+/// into one fetch to `connectors` whose fields span two connectors.
 ///
-/// Probe receipt (why this is ignored): the merged fetch has no single
-/// connector identity, so plan-time stamping (B-2a) leaves it `None`, dispatch
-/// falls to the many-to-one `by_service_name` fallback, resolves an arbitrary
-/// (entity-resolver) connector, and `make_requests` rejects the plain
-/// root-field operation with "missing entities root field" — **zero requests
-/// dispatched, whole-query `null`**. The fix (split the merged fetch per
-/// connector) makes this pass; un-`ignore` it then.
+/// Before 2A that merged fetch had no single connector identity, so it fell to
+/// the many-to-one `by_service_name` fallback, mis-dispatched, and failed with
+/// "missing entities root field" (0 requests, whole-query null). The 2A plan-
+/// time split (`stamp_connector_coordinates` -> `split_root_field_fetch`)
+/// replaces the merged fetch with a `Parallel` of per-connector fetches, each
+/// stamped with its coordinate — reconstructing the fetch decomposition
+/// expansion got structurally. This asserts the source-aware run now matches the
+/// expansion path byte-for-byte and dispatches the same requests.
 #[tokio::test]
-#[ignore = "step 2: multi-connector merged fetch not yet split per connector under source-aware (0 requests, 'missing entities root field')"]
-async fn source_aware_multi_connector_merged_fetch_gap() {
+async fn source_aware_multi_connector_merged_fetch_end_to_end() {
     let query = "query { users { id name } posts { id title } }";
 
     async fn mount_all(server: &MockServer) {

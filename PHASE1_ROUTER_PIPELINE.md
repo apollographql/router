@@ -27,6 +27,51 @@
 > connector, `@requires`) works via the existing `entities_from_request` but
 > only root-field is covered by a live test so far.
 
+> **STATUS UPDATE — Phase-1 coverage (branch `benjamn/source-aware-phase1-coverage`,
+> off `benjamn/source-aware-phase0` @ `254564009`).** Widening the steel thread
+> from the single root-field class to the real query shapes. Commits (signed):
+> - **Step 1** `47c9af376` — live **entity + `@requires`** end-to-end
+>   (`source_aware_entity_plus_requires_end_to_end`, `{ users { id name d } }`):
+>   root connector + graphql `_entities` (`c`) + `User.d` field-connector fetch,
+>   matches expansion byte-for-byte.
+> - **Step 2 repro** `6149eea61` — documented the multi-connector merged-fetch gap.
+> - **Step 2A** `e1684d6e6` — **split the merged fetch per connector.**
+>   `stamp_connector_coordinates` → `split_root_field_fetch`: when a `connectors`
+>   fetch's top-level fields span >1 connector, replace the single `Fetch` with a
+>   `Parallel` of per-connector fetches (filtered sub-operation via
+>   `from_parsed(Valid::assume_valid)`, stamped coordinate, partitioned rewrites).
+>   Reconstructs, in the plan, the fetch decomposition expansion got structurally.
+>   `source_aware_multi_connector_merged_fetch_end_to_end` passes; full connectors
+>   suite green (116 passed, 1 ignored), no flag-off regression.
+>
+> **Two framing insights (operator, this session):** (1) source-aware makes us
+> responsible for reconstructing the **fetch decomposition/fan-out** expansion
+> got for free from the O(#`@connect`) subgraph explosion — we reuse the existing
+> Parallel/Sequence executor, we just re-establish the *boundaries* (that's 2A).
+> (2) Per-connector **observability granularity** was another free side-effect of
+> that explosion (subgraph-keyed metrics/spans); under one `connectors` subgraph
+> it must be re-attached via the carried **coordinate** — a "source-aware
+> observability parity" slice (survey pending: does connector telemetry key on
+> coordinate/source or on the shared service name?).
+>
+> **Remaining, each with an executable repro or clear scope:**
+> - **Step 3 — entity-resolver connectors** (`Query.user`, `entity: true`).
+>   Ignored repro `source_aware_entity_resolver_connector_gap`: `username` →
+>   `null` today because that class isn't stamped, so dispatch mis-resolves via
+>   the many-to-one `by_service_name` fallback. Likely the same stamping
+>   mechanism extended to the entity-resolver coordinate.
+> - **Observability parity** (above).
+> - **Step 4 — source-aware cost model**, with a demo requirement: prove to a
+>   non-technical audience the plan gets *better* (fewer backend calls / fewer
+>   round-trips) via a flag-off-vs-on A/B on an identical query. **Load-bearing
+>   risk:** needs a query shape where source-aware cost yields a strictly cheaper
+>   plan than expansion — a *divergence fixture* to find or construct (de-risk
+>   early). Capture a countable request/round-trip metric in the harness from now
+>   on so the before/after is a recorded diff.
+> - **2A follow-ons:** entity-field merges (shared representations) and
+>   variable-bearing merges — `split_root_field_fetch` deliberately leaves these
+>   unsplit today.
+
 *Self-contained brief for a fresh agent. The connector **dispatch** logic is
 built and tested piecewise (the "(B) identity spine", below); what remains is
 wiring a **source-aware router pipeline** so a live request actually flows
