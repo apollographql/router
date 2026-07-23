@@ -1,3 +1,6 @@
+use apollo_compiler::ExecutableDocument;
+use apollo_federation::error::FederationError;
+use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 fn config_with_defer() -> QueryPlannerConfig {
@@ -4078,5 +4081,124 @@ fn defer_deferred_depends_on_source_with_shared_merge_at_prefix() {
       },
     }
     "###
+    );
+}
+
+#[track_caller]
+fn assert_duplicate_defer_label<T: std::fmt::Debug>(
+    result: Result<T, FederationError>,
+    expected_label: &str,
+) {
+    match result {
+        Err(FederationError::SingleFederationError(
+            SingleFederationError::DuplicateDeferLabel { label },
+        )) if label == expected_label => {}
+        Err(e) => panic!("expected DuplicateDeferLabel({expected_label:?}), got: {e}"),
+        Ok(plan) => panic!("expected DuplicateDeferLabel({expected_label:?}), got plan: {plan:?}"),
+    }
+}
+
+/// Regression guard for a stack overflow in
+/// `FetchDependencyGraph::process_root_nodes`. An operation with two nested
+/// `@defer` inline fragments sharing the same `label` used to make the outer
+/// defer its own descendant in the deferred-info graph, and the recursive
+/// processing then never terminated.
+///
+/// Minimum repro:
+/// ```graphql
+/// { t { ... @defer(label: "dup") { ... @defer(label: "dup") { id } } } }
+/// ```
+#[test]
+fn defer_test_nested_duplicate_label_must_not_stack_overflow() {
+    let planner = planner!(
+        config = config_with_defer(),
+        Subgraph1: r#"
+        type Query {
+            t: T
+        }
+
+        type T @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        Subgraph2: r#"
+        type T @key(fields: "id") {
+            id: ID!
+            v: Int
+        }
+        "#,
+    );
+
+    let operation = r#"
+        {
+          t {
+            ... @defer(label: "dup") {
+              ... @defer(label: "dup") {
+                id
+              }
+            }
+          }
+        }
+    "#;
+
+    let api_schema = planner.api_schema();
+    let document =
+        ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "operation.graphql")
+            .expect("operation parses+validates against the api schema");
+
+    assert_duplicate_defer_label(
+        planner.build_query_plan(&document, None, Default::default()),
+        "dup",
+    );
+}
+
+/// Companion to `defer_test_nested_duplicate_label_must_not_stack_overflow`:
+/// when two `@defer` inline fragments are *siblings* (same parent) and share a
+/// `label`, the planner used to silently deduplicate them into a single
+/// deferred block — a spec violation (GraphQL Defer & Stream §3.2) that would
+/// produce ambiguous data for any client demultiplexing the streaming
+/// response by label.
+///
+/// The same `DeferNormalizer::new` check that fixes the nested-defer crash
+/// also rejects sibling duplicates.
+#[test]
+fn defer_test_sibling_duplicate_label_must_be_rejected() {
+    let planner = planner!(
+        config = config_with_defer(),
+        Subgraph1: r#"
+        type Query {
+            t: T
+        }
+
+        type T @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        Subgraph2: r#"
+        type T @key(fields: "id") {
+            id: ID!
+            v: Int
+            w: Int
+        }
+        "#,
+    );
+
+    let operation = r#"
+        {
+          t {
+            ... @defer(label: "dup") { v }
+            ... @defer(label: "dup") { w }
+          }
+        }
+    "#;
+
+    let api_schema = planner.api_schema();
+    let document =
+        ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "operation.graphql")
+            .expect("operation parses+validates against the api schema");
+
+    assert_duplicate_defer_label(
+        planner.build_query_plan(&document, None, Default::default()),
+        "dup",
     );
 }
