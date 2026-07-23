@@ -601,6 +601,10 @@ If an `/invalidation` request targets a subgraph whose `indexes` does not enable
 
 > **Indexes are additive only.** Enabling a previously-disabled index does not retroactively index existing cache entries. If you change a subgraph from `{ cache_tag: true }` to `{ cache_tag: true, subgraph: true }`, the by-subgraph index is populated only for entries written after the change; earlier entries remain invisible to by-subgraph invalidation until they expire by TTL. To bring a newly enabled index online across the full cache set, flush Redis before enabling it.
 
+## CDN invalidation
+
+Everything above invalidates data in the router's own Redis-backed cache. If you also cache responses at a CDN or reverse proxy in front of the router, the CDN needs its own way to know what to purge—the same `@cacheTag`/`apolloCacheTags`/`apolloEntityCacheTags` labels described above can be propagated to the CDN as a response header for that purpose. See [CDN Invalidation](/router/performance/caching/response-caching/cdn-invalidation) for how to enable and use it.
+
 ## Combining both approaches
 
 You can use both `@cacheControl` (for TTL-based passive invalidation) and `@cacheTag` (for active invalidation) together on the same types and fields. This gives you the flexibility to set reasonable TTLs as a safety net while also having the ability to invalidate data immediately when needed.
