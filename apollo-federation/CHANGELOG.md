@@ -36,6 +36,14 @@ Federation 2 pattern.
 
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9832>
 
+### Propagate directives from `@interfaceObject` fields to `@external` implementations ([PR #9831](https://github.com/apollographql/router/pull/9831))
+
+When an implementation re-declares a field as `@external` (e.g. to reference it in `@requires`), the field's only resolvable definition lives on the abstracting `@interfaceObject`. Directives like `@tag` applied there were not being propagated to the implementation's copy in the supergraph.
+
+During `add_interface_object_fields`, detect implementation fields where every `@join__field` is `external: true` and the field is provided by an `@interfaceObject`, then copy applicable directives onto the implementation field.
+
+By [@dariuszkuc](https://github.com/dariuszkuc) in <https://github.com/apollographql/router/pull/9831>
+
 ### Fix composition field merging when subtyping ([PR #9751](https://github.com/apollographql/router/pull/9751))
 
 When composition merges fields with different return types, it was previously allowing nullable types to be considered subtypes of non-null supertypes. The resulting supergraph schema could cause query plan execution to error if the subgraph returns null at runtime. This bug has been fixed, and composition will now appropriately error.

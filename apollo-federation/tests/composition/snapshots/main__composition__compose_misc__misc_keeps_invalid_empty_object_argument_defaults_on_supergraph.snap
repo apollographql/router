@@ -1,6 +1,5 @@
 ---
 source: apollo-federation/tests/composition/compose_misc.rs
-assertion_line: 37
 expression: supergraph.schema().schema()
 ---
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) {
@@ -54,7 +53,7 @@ input join__ContextArgument {
 }
 
 type Query @join__type(graph: SUBGRAPH) {
-  fieldA(filter: InputWithRequired): String
+  fieldA(filter: InputWithRequired = {}): String
   fieldB(filter: InputAllOptional = {}): String
 }
 

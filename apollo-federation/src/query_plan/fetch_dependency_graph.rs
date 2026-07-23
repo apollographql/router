@@ -20,11 +20,17 @@ use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
 use itertools::Itertools;
 use multimap::MultiMap;
+use petgraph::adj::List as AdjList;
+use petgraph::algo::tred::dag_transitive_reduction_closure;
+use petgraph::graph::IndexType;
 use petgraph::stable_graph::EdgeIndex;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::stable_graph::StableDiGraph;
 use petgraph::visit::EdgeRef;
+use petgraph::visit::IntoEdgeReferences;
+use petgraph::visit::IntoNeighbors;
 use petgraph::visit::IntoNodeReferences;
+use petgraph::visit::NodeIndexable;
 use serde::Serialize;
 
 use super::FetchDataKeyRenamer;
@@ -1214,31 +1220,49 @@ impl FetchDependencyGraph {
     }
 
     /// Do a transitive reduction (https://en.wikipedia.org/wiki/Transitive_reduction) of the graph
-    /// We keep it simple and do a DFS from each vertex. The complexity is not amazing, but dependency
-    /// graphs between fetch nodes will almost surely never be huge and query planning performance
-    /// is not paramount so this is almost surely "good enough".
+    /// using petgraph's Habib-Morvan-Rampon algorithm.
+    ///
+    /// `StableDiGraph` does not implement `NodeCompactIndexable`, so we build
+    /// the toposorted adjacency list manually using a `Vec` to map stable
+    /// `NodeIndex` values to dense toposort ranks.
     fn reduce(&mut self) {
         if self.is_reduced {
             return;
         }
 
-        // Two phases for mutability reasons: first all redundant edges coming out of all nodes are
-        // collected and then they are all removed.
-        let mut redundant_edges = IndexSet::default();
-        for node_index in self.graph.node_indices() {
-            self.collect_redundant_edges(node_index, &mut redundant_edges);
-        }
+        let Some((adj, tred_index_of)) = to_toposorted_adjacency_list(&self.graph) else {
+            return;
+        };
+        let (tred, _) = dag_transitive_reduction_closure(&adj);
+
+        let edge_in_reduction = |source: NodeIndex, target: NodeIndex| {
+            let src_tred_idx = tred_index_of[source.index()];
+            let tgt_tred_idx = tred_index_of[target.index()];
+            tred.neighbors(petgraph::adj::NodeIndex::new(src_tred_idx))
+                .any(|n| n.index() == tgt_tred_idx)
+        };
 
         // Remember defer-crossing edges before they're removed, so we can
         // restore them as defer dependencies later.
-        self.record_reduced_defer_edges(&redundant_edges);
+        let mut modified = false;
+        for edge in self.graph.edge_references() {
+            if !edge_in_reduction(edge.source(), edge.target()) {
+                if self.graph[edge.source()].defer_ref != self.graph[edge.target()].defer_ref {
+                    self.reduced_defer_edges
+                        .push((edge.source(), edge.target()));
+                }
+                modified = true;
+            }
+        }
 
         // PORT_NOTE: JS version calls `FetchGroup.removeChild`, which calls onModification.
-        if !redundant_edges.is_empty() {
+        if modified {
             self.on_modification();
-        }
-        for edge in redundant_edges {
-            self.graph.remove_edge(edge);
+            self.graph
+                .retain_edges(|graph, edge_idx| match graph.edge_endpoints(edge_idx) {
+                    Some((source, target)) => edge_in_reduction(source, target),
+                    None => false,
+                });
         }
 
         self.is_reduced = true;
@@ -3258,6 +3282,43 @@ impl FetchDependencyGraphNode {
         }
         Ok(())
     }
+}
+
+/// Toposort a `StableDiGraph` and convert it into a dense `petgraph::adj::List`
+/// suitable for `dag_transitive_reduction_closure`.
+///
+/// Returns `None` if the graph contains a cycle. Otherwise returns the
+/// adjacency list and a rank-of lookup (`tred_index_of[node.index()] → toposort
+/// rank`) so the caller can map results back to `NodeIndex` values.
+fn to_toposorted_adjacency_list<N, E>(
+    graph: &StableDiGraph<N, E>,
+) -> Option<(AdjList<(), u32>, Vec<usize>)> {
+    let sorted = petgraph::algo::toposort(graph, None).ok()?;
+    let node_count = sorted.len();
+    let node_bound = graph.node_bound();
+
+    let mut tred_index_of: Vec<usize> = vec![usize::MAX; node_bound];
+    for (rank, &node) in sorted.iter().enumerate() {
+        tred_index_of[node.index()] = rank;
+    }
+
+    let mut adj: AdjList<(), u32> = AdjList::with_capacity(node_count);
+    for _ in 0..node_count {
+        adj.add_node();
+    }
+    for &node in &sorted {
+        let node_tred_idx = tred_index_of[node.index()];
+        for parent in graph.neighbors_directed(node, petgraph::Direction::Incoming) {
+            let parent_tred_idx = tred_index_of[parent.index()];
+            adj.add_edge(
+                petgraph::adj::NodeIndex::new(parent_tred_idx),
+                petgraph::adj::NodeIndex::new(node_tred_idx),
+                (),
+            );
+        }
+    }
+
+    Some((adj, tred_index_of))
 }
 
 fn operation_for_entities_fetch(

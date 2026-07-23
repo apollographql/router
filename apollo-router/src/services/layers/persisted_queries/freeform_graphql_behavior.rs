@@ -41,6 +41,7 @@ impl FreeformGraphQLBehavior {
     pub(super) fn action_for_freeform_graphql(
         &self,
         ast: Result<&ast::Document, &str>,
+        client_name: Option<String>,
     ) -> FreeformGraphQLAction {
         match self {
             FreeformGraphQLBehavior::AllowAll { .. } => FreeformGraphQLAction {
@@ -60,7 +61,7 @@ impl FreeformGraphQLBehavior {
                 log_unknown,
                 ..
             } => {
-                let pq_id = safelist.get_pq_id_for_body(ast);
+                let pq_id = safelist.get_pq_id_for_body(ast, client_name);
                 if pq_id.is_some() {
                     FreeformGraphQLAction {
                         should_allow: true,
@@ -76,7 +77,7 @@ impl FreeformGraphQLBehavior {
                 }
             }
             FreeformGraphQLBehavior::LogUnlessInSafelist { safelist, .. } => {
-                let pq_id = safelist.get_pq_id_for_body(ast);
+                let pq_id = safelist.get_pq_id_for_body(ast, client_name);
                 FreeformGraphQLAction {
                     should_allow: true,
                     should_log: pq_id.is_none(),
@@ -87,8 +88,21 @@ impl FreeformGraphQLBehavior {
     }
 }
 
-/// The normalized bodies of all operations in the PQ manifest. This is a map of
-/// normalized body string to PQ operation ID (usually a hash of the operation body).
+/// A key into the freeform safelist: a normalized operation body scoped to an
+/// optional client name. A `None` client name matches any client, mirroring the
+/// client-name scoping of ID-based lookup in
+/// [`super::manifest_poller::PersistedQueryManifestPoller::get_operation_body`].
+#[derive(Debug, Eq, Hash, PartialEq)]
+struct NormalizedBodyKey {
+    /// The normalized operation body (see [`FreeformGraphQLSafelist`]).
+    normalized_body: String,
+    /// The client name the body is registered under; if `None`, matches any client.
+    client_name: Option<String>,
+}
+
+/// The normalized bodies of all operations in the PQ manifest, mapping each
+/// (normalized body, client name) pair to its PQ operation ID (usually a hash of
+/// the operation body).
 ///
 /// Normalization currently consists of:
 /// - Sorting the top-level definitions (operation and fragment definitions)
@@ -108,7 +122,7 @@ impl FreeformGraphQLBehavior {
 /// formatting.
 #[derive(Debug)]
 pub(crate) struct FreeformGraphQLSafelist {
-    normalized_bodies: HashMap<String, String>,
+    normalized_bodies: HashMap<NormalizedBodyKey, String>,
 }
 
 impl FreeformGraphQLSafelist {
@@ -118,28 +132,65 @@ impl FreeformGraphQLSafelist {
         };
 
         for (key, body) in manifest.iter() {
-            safelist.insert_from_manifest(body, &key.operation_id);
+            safelist.insert_from_manifest(body, &key.operation_id, key.client_name.clone());
         }
 
         safelist
     }
 
-    fn insert_from_manifest(&mut self, body_from_manifest: &str, operation_id: &str) {
+    fn insert_from_manifest(
+        &mut self,
+        body_from_manifest: &str,
+        operation_id: &str,
+        client_name: Option<String>,
+    ) {
         let normalized_body = self.normalize_body(
             ast::Document::parse(body_from_manifest, "from_manifest")
                 .as_ref()
                 .map_err(|_| body_from_manifest),
         );
-        self.normalized_bodies
-            .insert(normalized_body, operation_id.to_string());
+        self.normalized_bodies.insert(
+            NormalizedBodyKey {
+                normalized_body,
+                client_name,
+            },
+            operation_id.to_string(),
+        );
     }
 
-    pub(super) fn get_pq_id_for_body(&self, ast: Result<&ast::Document, &str>) -> Option<String> {
+    pub(super) fn get_pq_id_for_body(
+        &self,
+        ast: Result<&ast::Document, &str>,
+        client_name: Option<String>,
+    ) -> Option<String> {
         // Note: consider adding an LRU cache that caches this function's return
         // value based solely on body_from_request without needing to normalize
         // the body.
+        let normalized_body = self.normalize_body(ast);
+        // Prefer an exact client-name match, then fall back to a client-agnostic
+        // (`None`) entry, which matches any client. This mirrors the scoping of
+        // ID-based lookup in `PersistedQueryManifestPoller::get_operation_body`.
+        if client_name.is_some()
+            && let Some(operation_id) =
+                self.get_pq_id_for_normalized_body(&normalized_body, client_name)
+        {
+            return Some(operation_id);
+        }
+        self.get_pq_id_for_normalized_body(&normalized_body, None)
+    }
+
+    /// Looks up the operation ID for an already-normalized body registered under
+    /// exactly the given client name (`None` is the client-agnostic entry).
+    fn get_pq_id_for_normalized_body(
+        &self,
+        normalized_body: &str,
+        client_name: Option<String>,
+    ) -> Option<String> {
         self.normalized_bodies
-            .get(&self.normalize_body(ast))
+            .get(&NormalizedBodyKey {
+                normalized_body: normalized_body.to_owned(),
+                client_name,
+            })
             .cloned()
     }
 
@@ -241,7 +292,10 @@ mod tests {
 
         let is_allowed = |body: &str| -> bool {
             safelist
-                .get_pq_id_for_body(ast::Document::parse(body, "").as_ref().map_err(|_| body))
+                .get_pq_id_for_body(
+                    ast::Document::parse(body, "").as_ref().map_err(|_| body),
+                    None,
+                )
                 .is_some()
         };
 
@@ -268,6 +322,80 @@ mod tests {
 
         // ... unless they precisely match a safelisted document that also has invalid syntax.
         assert!(is_allowed("}}}"));
+    }
+
+    #[test]
+    fn safelist_respects_client_name() {
+        let safelist = FreeformGraphQLSafelist::new(&PersistedQueryManifest::from(vec![
+            // Registered for any client.
+            ManifestOperation {
+                id: "any-client".to_string(),
+                body: "query AnyClient { a }".to_string(),
+                client_name: None,
+            },
+            // Registered for the "web" client only.
+            ManifestOperation {
+                id: "web-only".to_string(),
+                body: "query WebOnly { b }".to_string(),
+                client_name: Some("web".to_string()),
+            },
+            // Same body registered under two different scopes.
+            ManifestOperation {
+                id: "shared-web".to_string(),
+                body: "query Shared { c }".to_string(),
+                client_name: Some("web".to_string()),
+            },
+            ManifestOperation {
+                id: "shared-any".to_string(),
+                body: "query Shared { c }".to_string(),
+                client_name: None,
+            },
+        ]));
+
+        let pq_id_for = |body: &str, client_name: Option<&str>| -> Option<String> {
+            safelist.get_pq_id_for_body(
+                ast::Document::parse(body, "").as_ref().map_err(|_| body),
+                client_name.map(|c| c.to_string()),
+            )
+        };
+
+        // A client-agnostic entry matches any client (or no client).
+        assert_eq!(
+            pq_id_for("query AnyClient { a }", None).as_deref(),
+            Some("any-client")
+        );
+        assert_eq!(
+            pq_id_for("query AnyClient { a }", Some("web")).as_deref(),
+            Some("any-client")
+        );
+        assert_eq!(
+            pq_id_for("query AnyClient { a }", Some("ios")).as_deref(),
+            Some("any-client")
+        );
+
+        // A client-scoped entry only matches its registered client.
+        assert_eq!(
+            pq_id_for("query WebOnly { b }", Some("web")).as_deref(),
+            Some("web-only")
+        );
+        assert_eq!(pq_id_for("query WebOnly { b }", Some("ios")), None);
+        assert_eq!(pq_id_for("query WebOnly { b }", None), None);
+
+        // When a body is registered under both a specific client and no client,
+        // the exact client match wins and other clients fall back to the
+        // client-agnostic entry.
+        assert_eq!(
+            pq_id_for("query Shared { c }", Some("web")).as_deref(),
+            Some("shared-web")
+        );
+        assert_eq!(
+            pq_id_for("query Shared { c }", Some("ios")).as_deref(),
+            Some("shared-any")
+        );
+        assert_eq!(
+            pq_id_for("query Shared { c }", None).as_deref(),
+            Some("shared-any")
+        );
     }
 
     fn freeform_behavior_from_pq_options(
