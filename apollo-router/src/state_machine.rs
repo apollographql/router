@@ -409,7 +409,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     &mut listen_addresses_guard,
                     vec![],
                 )
-                .map_ok_or_else(Errored, |f| f.0)
+                .map_ok_or_else(|err| Errored(ApolloRouterError::from(err)), |f| f.0)
                 .await
             }
 
@@ -472,11 +472,20 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         new_state
                     }
                     Err(e) if server_handle.is_some() => {
-                        // Decrement the retry budget (saturating so it stops at 0, not wrapping).
-                        let retries_remaining = retries_remaining.map(|n| n.saturating_sub(1));
+                        // Decrement the retry budget (saturating so it stops at 0, not
+                        // wrapping). A permanent error will fail identically on every
+                        // retry, so pin the budget at 0 to stop the retry timer.
+                        let is_transient = e.is_transient();
+                        let retries_remaining = if is_transient {
+                            retries_remaining.map(|n| n.saturating_sub(1))
+                        } else {
+                            Some(0)
+                        };
+                        let e: ApolloRouterError = e.into();
 
                         tracing::error!(
                             error = %e,
+                            transient_error = is_transient,
                             retries_remaining = retries_remaining
                                 .map_or("unlimited".to_string(), |n| n.to_string()),
                             event = STATE_CHANGE,
@@ -504,6 +513,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     // The point of no return was passed — server handle consumed
                     // before the failure. Fatal.
                     Err(e) => {
+                        let e: ApolloRouterError = e.into();
                         tracing::error!(
                             error = %e,
                             event = STATE_CHANGE,
@@ -561,14 +571,16 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         license: Arc<LicenseState>,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
         mut all_connections_stopped_signals: Vec<mpsc::Receiver<()>>,
-    ) -> Result<(State<FA>, Arc<Schema>), ApolloRouterError>
+    ) -> Result<(State<FA>, Arc<Schema>), ReloadError>
     where
         S: HttpServerFactory,
         FA: RouterSuperServiceFactory,
     {
         let schema = Arc::new(
-            Schema::parse_arc(schema_state.clone(), &configuration)
-                .map_err(|e| ServiceCreationError(e.to_string().into()))?,
+            Schema::parse_arc(schema_state.clone(), &configuration).map_err(|e| {
+                // A schema that fails to parse will fail identically on every retry.
+                ReloadError::Permanent(ServiceCreationError(e.to_string().into()))
+            })?,
         );
         // Check the license
         let report = LicenseEnforcementReport::build(&configuration, &schema, &license);
@@ -582,7 +594,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     );
                     return Err(ApolloRouterError::LicenseViolation(
                         report.restricted_features_in_use(),
-                    ));
+                    ))?;
                 } else {
                     tracing::debug!("A valid Apollo license has been detected.");
                     limits
@@ -596,7 +608,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     );
                     return Err(ApolloRouterError::LicenseViolation(
                         report.restricted_features_in_use(),
-                    ));
+                    ))?;
                 } else {
                     tracing::warn!(
                         "License warning period has started. The Router will stop serving requests after the license expires. In order to continue using these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{:?}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
@@ -643,7 +655,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 }
                 return Err(ApolloRouterError::LicenseViolation(
                     report.restricted_features_in_use(),
-                ));
+                ))?;
             }
             _ => {
                 tracing::debug!(
@@ -670,7 +682,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 "The schema contains preview features not enabled in configuration.\n\n{}",
                 feature_gate_violations.iter().join("\n")
             );
-            return Err(ApolloRouterError::FeatureGateViolation);
+            return Err(ApolloRouterError::FeatureGateViolation)?;
         }
 
         let router_service_factory = state_machine
@@ -748,6 +760,44 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             },
             schema,
         ))
+    }
+}
+
+/// A `try_start` failure, classified by whether retrying the same inputs could
+/// succeed. Drives the retry decision in `attempt_reload`.
+enum ReloadError {
+    /// A transient failure (e.g. a resource or network blip during creation) that
+    /// a later retry of the same inputs might resolve.
+    Transient(ApolloRouterError),
+    /// A permanent failure (bad schema/config/license) that will fail identically
+    /// on every retry; the caller should stop retrying these inputs.
+    Permanent(ApolloRouterError),
+}
+
+impl ReloadError {
+    fn is_transient(&self) -> bool {
+        matches!(self, ReloadError::Transient(_))
+    }
+}
+
+impl From<ApolloRouterError> for ReloadError {
+    fn from(err: ApolloRouterError) -> Self {
+        match err {
+            ApolloRouterError::FeatureGateViolation | ApolloRouterError::LicenseViolation(_) => {
+                ReloadError::Permanent(err)
+            }
+            // Default to treating failures as transient (this also covers any newly
+            // added error variants) so we retry rather than give up prematurely.
+            err => ReloadError::Transient(err),
+        }
+    }
+}
+
+impl From<ReloadError> for ApolloRouterError {
+    fn from(err: ReloadError) -> Self {
+        match err {
+            ReloadError::Transient(err) | ReloadError::Permanent(err) => err,
+        }
     }
 }
 
