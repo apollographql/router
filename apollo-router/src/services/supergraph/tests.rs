@@ -3924,10 +3924,7 @@ async fn test_cache_warmup() {
         .load_shed()
         .layer(crate::services::router::parse_query::ParseQueryLayer::new(
             query_parsing_service.clone(),
-            schema.clone(),
             configuration.supergraph.redact_query_validation_errors,
-            false,
-            Default::default(),
         ))
         .service(supergraph_creator.make());
 
@@ -3986,10 +3983,7 @@ async fn test_cache_warmup() {
         .load_shed()
         .layer(crate::services::router::parse_query::ParseQueryLayer::new(
             query_parsing_service.clone(),
-            schema.clone(),
             configuration.supergraph.redact_query_validation_errors,
-            false,
-            Default::default(),
         ))
         .service(supergraph_creator.make());
 

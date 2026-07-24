@@ -11,56 +11,40 @@ use tower::BoxError;
 use tower::Service;
 
 use crate::Context;
-use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::UsageReporting;
-use crate::apollo_studio_interop::generate_extended_references;
 use crate::compute_job::MaybeBackPressureError;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::error::Error as RouterError;
 use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
-use crate::plugins::authorization::AuthorizationPlugin;
-use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::query_planner::OperationKind;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::query_parsing;
 use crate::services::supergraph;
-use crate::spec::Schema;
 use crate::spec::SpecError;
 
-/// Parses the GraphQL in the supergraph request and computes Apollo usage references.
+/// Parses the GraphQL in the supergraph request.
 ///
 /// # Context
 /// This stores values in the request context:
 /// - [`ParsedDocument`]
-/// - [`ExtendedReferenceStats`]
 /// - "operation_name" and "operation_kind"
-/// - authorization details (required scopes, policies), if any
 /// - [`Arc`]`<`[`UsageReporting`]`>` if there was an error; normally, this would be populated
 ///   by the caching query planner, but we do not reach that code if we fail early here.
 pub(crate) struct ParseQueryLayer {
     query_parsing_service: query_parsing::BoxCloneService,
-    schema: Arc<Schema>,
     redact_query_validation_errors: bool,
-    enable_authorization_directives: bool,
-    metrics_reference_mode: ApolloMetricsReferenceMode,
 }
 
 impl ParseQueryLayer {
     pub(crate) fn new(
         query_parsing_service: query_parsing::BoxCloneService,
-        schema: Arc<Schema>,
         redact_query_validation_errors: bool,
-        enable_authorization_directives: bool,
-        metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Self {
         Self {
             query_parsing_service,
-            schema,
             redact_query_validation_errors,
-            enable_authorization_directives,
-            metrics_reference_mode,
         }
     }
 }
@@ -72,10 +56,7 @@ impl<S> tower::Layer<S> for ParseQueryLayer {
         ParseQueryService {
             inner,
             query_parsing_service: self.query_parsing_service.clone(),
-            schema: self.schema.clone(),
             redact_query_validation_errors: self.redact_query_validation_errors,
-            enable_authorization_directives: self.enable_authorization_directives,
-            metrics_reference_mode: self.metrics_reference_mode,
         }
     }
 }
@@ -84,10 +65,7 @@ impl<S> tower::Layer<S> for ParseQueryLayer {
 pub(crate) struct ParseQueryService<S> {
     inner: S,
     query_parsing_service: query_parsing::BoxCloneService,
-    schema: Arc<Schema>,
     redact_query_validation_errors: bool,
-    enable_authorization_directives: bool,
-    metrics_reference_mode: ApolloMetricsReferenceMode,
 }
 
 impl<S> Service<supergraph::Request> for ParseQueryService<S>
@@ -113,10 +91,7 @@ where
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
         let mut query_parsing_service = self.query_parsing_service.clone();
-        let schema = self.schema.clone();
         let redact_query_validation_errors = self.redact_query_validation_errors;
-        let enable_authorization_directives = self.enable_authorization_directives;
-        let metrics_reference_mode = self.metrics_reference_mode;
 
         Box::pin(async move {
             let query = req.supergraph_request.body().query.as_ref();
@@ -153,15 +128,6 @@ where
                 Ok(doc) => {
                     let context = Context::new();
 
-                    if enable_authorization_directives {
-                        AuthorizationPlugin::query_analysis(
-                            &doc,
-                            operation_name.as_deref(),
-                            &schema,
-                            &context,
-                        );
-                    }
-
                     context
                         .insert(OPERATION_NAME, doc.operation.name.clone())
                         .expect("cannot insert operation name into context; this is a bug");
@@ -171,25 +137,9 @@ where
                         .expect("cannot insert operation kind in the context; this is a bug");
 
                     req.context.extend(&context);
-
-                    let extended_ref_stats =
-                        if matches!(metrics_reference_mode, ApolloMetricsReferenceMode::Extended) {
-                            Some(generate_extended_references(
-                                doc.executable.clone(),
-                                operation_name,
-                                schema.api_schema(),
-                                &req.supergraph_request.body().variables,
-                            ))
-                        } else {
-                            None
-                        };
-
-                    req.context.extensions().with_lock(|lock| {
-                        lock.insert::<ParsedDocument>(doc);
-                        if let Some(stats) = extended_ref_stats {
-                            lock.insert::<ExtendedReferenceStats>(stats);
-                        }
-                    });
+                    req.context
+                        .extensions()
+                        .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
 
                     inner
                         .call(supergraph::Request {

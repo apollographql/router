@@ -46,6 +46,7 @@ use crate::spec::query::transform;
 use crate::spec::query::traverse;
 
 pub(crate) mod authenticated;
+pub(crate) mod extract_authorization_checks_layer;
 pub(crate) mod policy;
 pub(crate) mod scopes;
 

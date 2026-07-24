@@ -36,6 +36,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
+use crate::apollo_studio_interop::extended_references_layer::ExtendedReferencesLayer;
 use crate::axum_factory::CanceledRequest;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
@@ -44,6 +45,8 @@ use crate::layers::InternalServiceBuilderExt as _;
 use crate::layers::ServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
+use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
+use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
@@ -113,7 +116,10 @@ impl RouterService {
         let apq_expander = Arc::new(apq_expander);
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
-        let metrics_reference_mode = TelemetryConfig::metrics_reference_mode(configuration);
+        let extended_references = matches!(
+            TelemetryConfig::metrics_reference_mode(configuration),
+            ApolloMetricsReferenceMode::Extended
+        );
 
         let service = ServiceBuilder::new()
             .layer(DisplayRouterRequestLayer)
@@ -123,11 +129,13 @@ impl RouterService {
             .layer(APQCachingLayer::new(apq_expander))
             .layer(ParseQueryLayer::new(
                 query_parsing_service,
-                schema,
                 configuration.supergraph.redact_query_validation_errors,
-                enable_authorization_directives,
-                metrics_reference_mode,
             ))
+            .option_layer(
+                enable_authorization_directives
+                    .then(|| ExtractAuthorizationChecksLayer::new(schema.clone())),
+            )
+            .option_layer(extended_references.then(|| ExtendedReferencesLayer::new(schema)))
             .layer(EnforceSafelistLayer::new(persisted_queries))
             .service(supergraph_service)
             .boxed_clone();
