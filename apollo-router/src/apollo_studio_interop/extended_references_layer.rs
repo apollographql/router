@@ -11,7 +11,7 @@ use tower::Service;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::generate_extended_references;
 use crate::graphql::Error;
-use crate::services::layers::query_analysis::ParsedDocument;
+use crate::services::query_parsing::ParsedDocument;
 use crate::services::supergraph;
 use crate::spec::Schema;
 

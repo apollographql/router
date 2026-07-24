@@ -169,7 +169,7 @@ pub(crate) async fn from_supergraph_mock_with_configuration(
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
 + Clone {
-    let (_, _, _query_analysis, supergraph_creator) = crate::TestHarness::builder()
+    let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(configuration.clone())
         .supergraph_hook(move |_| mock.clone().boxed_clone())
         .build_common()
@@ -217,7 +217,7 @@ pub(crate) async fn empty() -> impl Service<
     let (mock, _handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
     let configuration = Arc::new(Configuration::default());
-    let (_, _, _query_analysis, supergraph_creator) = crate::TestHarness::builder()
+    let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(configuration.clone())
         .supergraph_hook(move |_| mock.clone().boxed_clone())
         .build_common()

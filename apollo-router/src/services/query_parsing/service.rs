@@ -7,7 +7,7 @@ use crate::Configuration;
 use crate::compute_job;
 use crate::compute_job::MaybeBackPressureError;
 use crate::plugins::telemetry::consts::QUERY_PARSING_SPAN_NAME;
-use crate::services::layers::query_analysis::ParsedDocument;
+use crate::services::query_parsing::ParsedDocument;
 use crate::services::query_parsing::Request;
 use crate::services::query_parsing::ServiceError;
 use crate::spec::Query;

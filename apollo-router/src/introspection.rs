@@ -18,7 +18,7 @@ use crate::compute_job;
 use crate::compute_job::ComputeJobType;
 use crate::graphql;
 use crate::json_ext::Object;
-use crate::services::layers::query_analysis::ParsedDocument;
+use crate::services::query_parsing::ParsedDocument;
 use crate::spec;
 use crate::spec::QueryHash;
 

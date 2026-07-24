@@ -252,8 +252,8 @@ mod tests {
     use crate::query_planner::warmup::WarmupRequest;
     use crate::services::CachingRequest;
     use crate::services::QueryPlannerContent;
-    use crate::services::layers::query_analysis::ParsedDocument;
     use crate::services::query_parsing;
+    use crate::services::query_parsing::ParsedDocument;
     use crate::spec::Schema;
     use crate::spec::SchemaHash;
 

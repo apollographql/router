@@ -37,7 +37,7 @@ use crate::query_planner::SubgraphSchemas;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
-use crate::services::layers::query_analysis::ParsedDocument;
+use crate::services::query_parsing::ParsedDocument;
 use crate::services::query_planner;
 use crate::services::query_planner::PlanOptions;
 use crate::spec::QueryHash;

@@ -20,13 +20,13 @@ pub(crate) use manifest_poller::PersistedQueryManifestPoller;
 use tower::BoxError;
 pub(crate) use tower_compat::*;
 
-use super::query_analysis::ParsedDocument;
 use crate::Configuration;
 use crate::context::PERSISTED_QUERY_ID;
 use crate::graphql::Error as GraphQLError;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::services::query_parsing::ParsedDocument;
 
 const DONT_CACHE_RESPONSE_VALUE: &str = "private, no-cache, must-revalidate";
 const PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY: &str = "apollo_persisted_queries::client_name";

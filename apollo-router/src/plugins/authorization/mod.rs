@@ -1,6 +1,5 @@
 //! Authorization plugin
 
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::ControlFlow;
 
@@ -38,7 +37,6 @@ use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::query_planner::FilteredQuery;
 use crate::query_planner::QueryKey;
 use crate::services::execution;
-use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::supergraph;
 use crate::spec::Schema;
 use crate::spec::SpecError;
@@ -224,37 +222,6 @@ impl AuthorizationPlugin {
             .get("authorization")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default()
-    }
-
-    pub(crate) fn query_analysis(
-        doc: &ParsedDocumentInner,
-        operation_name: Option<&str>,
-        schema: &Schema,
-        context: &Context,
-    ) {
-        let CacheKeyMetadata {
-            is_authenticated,
-            scopes,
-            policies,
-        } = Self::generate_cache_metadata(
-            &doc.executable,
-            operation_name,
-            schema.supergraph_schema(),
-            false,
-        );
-        if is_authenticated {
-            context.insert(AUTHENTICATION_REQUIRED_KEY, true).unwrap();
-        }
-
-        if !scopes.is_empty() {
-            context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
-        }
-
-        if !policies.is_empty() {
-            let policies: HashMap<String, Option<bool>> =
-                policies.into_iter().map(|policy| (policy, None)).collect();
-            context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
-        }
     }
 
     pub(crate) fn generate_cache_metadata(

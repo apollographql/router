@@ -18,8 +18,8 @@ use crate::error::Error as RouterError;
 use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
 use crate::query_planner::OperationKind;
-use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::query_parsing;
+use crate::services::query_parsing::ParsedDocument;
 use crate::services::supergraph;
 use crate::spec::SpecError;
 

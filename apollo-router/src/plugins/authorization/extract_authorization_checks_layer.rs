@@ -15,7 +15,7 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::REQUIRED_POLICIES_KEY;
 use crate::plugins::authorization::REQUIRED_SCOPES_KEY;
-use crate::services::layers::query_analysis::ParsedDocument;
+use crate::services::query_parsing::ParsedDocument;
 use crate::services::supergraph;
 use crate::spec::Schema;
 

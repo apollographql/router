@@ -15,7 +15,7 @@ use tower::Service;
 
 use crate::compute_job::MaybeBackPressureError;
 use crate::error::ValidationErrors;
-use crate::services::layers::query_analysis::ParsedDocument;
+use crate::services::query_parsing::ParsedDocument;
 use crate::services::query_parsing::Request;
 use crate::services::query_parsing::ServiceError;
 use crate::spec::SpecError;
