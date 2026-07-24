@@ -32,6 +32,7 @@ use crate::cache::storage::KeyType;
 use crate::cache::storage::ValueType;
 use crate::metrics::FutureMetricsExt;
 use crate::plugins::response_cache::cache_control::CacheControl;
+use crate::plugins::response_cache::invalidation_labels::InvalidationLabels;
 use crate::plugins::response_cache::metrics::record_maintenance_commands;
 use crate::plugins::response_cache::metrics::record_maintenance_duration;
 use crate::plugins::response_cache::metrics::record_maintenance_error;
@@ -47,7 +48,10 @@ const CACHE_TAG_CHANNEL_SIZE: usize = 1000;
 struct CacheValue {
     data: serde_json_bytes::Value,
     cache_control: CacheControl,
-    // Only set in debug mode
+    // The `@cacheTag`/extension-derived tag values for this entry — always present once
+    // computed (not gated by debug mode), since a later cache hit needs them both for the
+    // cache debugger and to rebuild the CDN `Cache-Tag` header without a Redis `cache_tag`
+    // index being enabled. See `internal_insert_in_batch`'s `cdn_invalidation_tags_per_doc`.
     cache_tags: Option<HashSet<String>>,
 }
 
@@ -59,7 +63,13 @@ impl From<(&str, CacheValue)> for CacheEntry {
             key: cache_key.to_string(),
             data: cache_value.data,
             control: cache_value.cache_control,
-            cache_tags: cache_value.cache_tags,
+            // cache tags are used to populate the initial set of invalidation labels; they get
+            // expanded from the schema, too, for capturing subgraphs and types to have a broader
+            // set of invalidation labels
+            invalidation_labels: cache_value.cache_tags.map(|tags| InvalidationLabels {
+                tags,
+                ..Default::default()
+            }),
         }
     }
 }
@@ -296,21 +306,15 @@ impl CacheStorage for Storage {
 
         let now = now();
 
-        // For the cache debugger: snapshot the user-facing tag values (CacheTag::Tag) per
-        // document. Internal tags (Subgraph and Type) are not surfaced to operators.
-        let debug_user_tags: Vec<Vec<String>> = batch_docs
+        // For the cache debugger and the supergraph response cache-tag propagation
+        // (router#9481): snapshot the user-facing tag values per document. Sourced from
+        // `cdn_invalidation_tags` rather than filtering `cache_tags` — the latter is
+        // pre-filtered by `IndexMode::CacheTag` (it drives phase 1/2's `ZADD`s below), while
+        // `cdn_invalidation_tags` is populated whenever CDN invalidation wants it too, even if
+        // that index is off. Internal tags (Subgraph and Type) never appear in either.
+        let cdn_invalidation_tags_per_doc: Vec<Vec<String>> = batch_docs
             .iter()
-            .map(|document| {
-                if document.debug {
-                    document
-                        .cache_tags
-                        .iter()
-                        .filter_map(|t| t.user_value().map(String::from))
-                        .collect()
-                } else {
-                    Vec::new()
-                }
-            })
+            .map(|document| document.cdn_invalidation_tags.clone())
             .collect();
 
         // phase 1: render every document's tag list to its Redis ZSET keys.
@@ -397,11 +401,13 @@ impl CacheStorage for Storage {
 
         // phase 3
         let pipeline = self.storage.pipeline().await?.with_options(&options);
-        for (document, debug_tags) in batch_docs.into_iter().zip(debug_user_tags) {
+        for (document, cdn_invalidation_tags) in
+            batch_docs.into_iter().zip(cdn_invalidation_tags_per_doc)
+        {
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.control,
-                cache_tags: document.debug.then(|| debug_tags.into_iter().collect()),
+                cache_tags: Some(cdn_invalidation_tags.into_iter().collect()),
             };
             let _: () = pipeline
                 .set::<(), _, _>(
@@ -627,6 +633,7 @@ impl Storage {
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -678,8 +685,8 @@ mod tests {
             data: Default::default(),
             control: Default::default(),
             cache_tags: vec![CacheTag::Subgraph, CacheTag::Tag("invalidate".to_string())],
+            cdn_invalidation_tags: vec!["invalidate".to_string()],
             expire: Duration::from_secs(60),
-            debug: true,
         }
     }
 
@@ -789,6 +796,55 @@ mod tests {
                 let document_score = storage.zscore(cache_tag_key, &document_key).await?;
                 assert_eq!(document_expire_time, document_score);
             }
+
+            Ok(())
+        }
+
+        /// `cdn_invalidation_tags` and `cache_tags` are populated independently by the plugin
+        /// layer (the former whenever CDN invalidation wants a tag persisted, the latter only
+        /// when the Redis `cache_tag` index is on) precisely so that enabling CDN invalidation
+        /// alone never changes what gets indexed in Redis. Pins that at the storage layer: a
+        /// document with tags in `cdn_invalidation_tags` but *not* in `cache_tags` must not grow
+        /// any extra `ZADD`ed keys, and a later fetch must reconstruct
+        /// `CacheEntry.invalidation_labels` from `cdn_invalidation_tags`, not from `cache_tags`.
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn cdn_invalidation_tags_persist_independently_of_cache_tags(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
+            storage.truncate_namespace().await?;
+
+            let document = Document {
+                // No `CacheTag::Tag` entries here — simulates `IndexMode::CacheTag` being off.
+                cache_tags: vec![CacheTag::Subgraph],
+                // But CDN invalidation still wants this tag persisted for a later hit.
+                cdn_invalidation_tags: vec!["cdn-only-tag".to_string()],
+                ..common_document()
+            };
+            let document_key = document.key.clone();
+            storage.insert(document.clone(), SUBGRAPH_NAME).await?;
+
+            // Only `cache_tags`-derived keys (plus the document itself) should exist — proves
+            // `cdn_invalidation_tags` never reaches Redis's `ZADD` indexing.
+            let keys = storage.all_keys_in_namespace().await?;
+            assert_eq!(
+                keys.len(),
+                2,
+                "expected only the document key and the Subgraph tag key, got {keys:?}"
+            );
+            for expected in render_doc_keys(&document, SUBGRAPH_NAME) {
+                assert!(keys.contains(&expected), "missing {expected} in {keys:?}");
+            }
+
+            // But the fetched entry's invalidation labels come from `cdn_invalidation_tags`.
+            let stored = storage.fetch(&document_key, SUBGRAPH_NAME).await?;
+            let tags = stored
+                .invalidation_labels
+                .expect("expected invalidation labels to be reconstructed")
+                .tags;
+            assert_eq!(tags, HashSet::from(["cdn-only-tag".to_string()]));
 
             Ok(())
         }
