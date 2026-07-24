@@ -218,17 +218,20 @@ impl<'a> AuthenticatedVisitor<'a> {
         })
     }
 
-    /// Runs `f` with `bypass_authorization` set to `new_value`, unconditionally restoring the
-    /// previous value afterward. Centralizing the set/restore here (rather than hand-rolling it
-    /// at each call site) means an early return added inside `f` in the future can't skip the
-    /// restore and leave authorization silently bypassed for the rest of the traversal.
+    /// Runs `f` with `bypass_authorization` extended to also be true if `additional_bypass` is
+    /// true - callers only need to say whether *this* node triggers a bypass; inheriting the
+    /// enclosing field/fragment's bypass state is handled here, not by the caller. Unconditionally
+    /// restores the previous value afterward: centralizing the set/restore here (rather than
+    /// hand-rolling it at each call site) means an early return added inside `f` in the future
+    /// can't skip the restore and leave authorization silently bypassed for the rest of the
+    /// traversal.
     fn with_bypass_authorization<T>(
         &mut self,
-        new_value: bool,
+        additional_bypass: bool,
         f: impl FnOnce(&mut Self) -> T,
     ) -> T {
         let previous = self.bypass_authorization;
-        self.bypass_authorization = new_value;
+        self.bypass_authorization = previous || additional_bypass;
         let result = f(self);
         self.bypass_authorization = previous;
         result
@@ -352,10 +355,9 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
         field_def: &ast::FieldDefinition,
         node: &ast::Field,
     ) -> Result<Option<ast::Field>, BoxError> {
-        let bypass_authorization =
-            self.bypass_authorization || IncludeSkip::parse(&node.directives).statically_skipped();
+        let statically_skipped = IncludeSkip::parse(&node.directives).statically_skipped();
 
-        self.with_bypass_authorization(bypass_authorization, |this| {
+        self.with_bypass_authorization(statically_skipped, |this| {
             let field_name = &node.name;
             let is_field_list = field_def.ty.is_list();
 
@@ -365,7 +367,7 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
                 this.current_path.push(PathElement::Flatten(None));
             }
 
-            let res = if bypass_authorization {
+            let res = if this.bypass_authorization {
                 transform::field(this, field_def, node)
             } else {
                 let field_requires_authentication = this.is_field_authenticated(field_def);
@@ -435,11 +437,10 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
         &mut self,
         node: &ast::FragmentSpread,
     ) -> Result<Option<ast::FragmentSpread>, BoxError> {
-        let bypass_authorization =
-            self.bypass_authorization || IncludeSkip::parse(&node.directives).statically_skipped();
+        let statically_skipped = IncludeSkip::parse(&node.directives).statically_skipped();
 
-        self.with_bypass_authorization(bypass_authorization, |this| {
-            if !bypass_authorization {
+        self.with_bypass_authorization(statically_skipped, |this| {
+            if !this.bypass_authorization {
                 // record the fragment errors at the point of application
                 if let Some(paths) = this
                     .fragments_unauthorized_paths
@@ -462,7 +463,7 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
                 None => return Ok(None),
             };
 
-            let fragment_requires_authentication = !bypass_authorization
+            let fragment_requires_authentication = !this.bypass_authorization
                 && this
                     .schema
                     .types
@@ -495,10 +496,9 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
         parent_type: &str,
         node: &ast::InlineFragment,
     ) -> Result<Option<ast::InlineFragment>, BoxError> {
-        let bypass_authorization =
-            self.bypass_authorization || IncludeSkip::parse(&node.directives).statically_skipped();
+        let statically_skipped = IncludeSkip::parse(&node.directives).statically_skipped();
 
-        self.with_bypass_authorization(bypass_authorization, |this| match &node.type_condition {
+        self.with_bypass_authorization(statically_skipped, |this| match &node.type_condition {
             None => {
                 this.current_path.push(PathElement::Fragment(String::new()));
                 let res = transform::inline_fragment(this, parent_type, node);
@@ -510,7 +510,7 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
                     .push(PathElement::Fragment(name.as_str().into()));
 
                 let fragment_requires_authentication =
-                    !bypass_authorization
+                    !this.bypass_authorization
                         && this.schema.types.get(name).is_some_and(|type_definition| {
                             this.is_type_authenticated(type_definition)
                         });
