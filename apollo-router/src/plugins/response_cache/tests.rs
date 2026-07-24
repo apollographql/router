@@ -8,6 +8,7 @@ use futures::StreamExt;
 use http::HeaderName;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
+use rstest::rstest;
 use tokio_stream::wrappers::IntervalStream;
 use tower::Service;
 use tower::ServiceExt;
@@ -24,11 +25,15 @@ use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
 use crate::plugins::response_cache::debugger::CacheKeysContext;
+use crate::plugins::response_cache::debugger::CdnInvalidationDebug;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
+use crate::plugins::response_cache::invalidation_endpoint::InvalidationIndexes;
 use crate::plugins::response_cache::invalidation_endpoint::SubgraphInvalidationConfig;
+use crate::plugins::response_cache::invalidation_labels::InvalidationLabels;
 use crate::plugins::response_cache::metrics::CacheMetricContextKey;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CONTEXT_CACHE_KEY;
+use crate::plugins::response_cache::plugin::CdnInvalidationConfig;
 use crate::plugins::response_cache::plugin::INVALIDATION_SHARED_KEY;
 use crate::plugins::response_cache::plugin::Subgraph;
 use crate::plugins::response_cache::storage::CacheStorage;
@@ -112,6 +117,20 @@ fn get_cache_keys_context(response: &supergraph::Response) -> Option<CacheKeysCo
     Some(cache_keys)
 }
 
+/// Reads the CDN invalidation debug info from the *actual response body extension* a real
+/// client receives (`apolloCacheDebugging.cdnInvalidation`), not just from context, so this
+/// exercises the same serialization path as production. Consumes `response`'s body stream.
+async fn get_cdn_invalidation_debug(
+    mut response: supergraph::Response,
+) -> Option<CdnInvalidationDebug> {
+    let body = response.next_response().await?;
+    let debugging = body
+        .extensions
+        .get(super::plugin::CACHE_DEBUG_EXTENSIONS_KEY)?;
+    let cdn_invalidation = debugging.get("cdnInvalidation")?;
+    serde_json_bytes::from_value(cdn_invalidation.clone()).ok()
+}
+
 fn get_cache_control_header(response: &supergraph::Response) -> Option<Vec<String>> {
     let cache_control_headers: Vec<String> = response
         .response
@@ -127,6 +146,18 @@ fn get_cache_control_header(response: &supergraph::Response) -> Option<Vec<Strin
     }
 
     Some(cache_control_headers)
+}
+
+fn get_cache_tag_header(response: &supergraph::Response) -> Option<Vec<String>> {
+    let header = response.response.headers().get("Cache-Tag")?;
+    Some(
+        header
+            .to_str()
+            .unwrap()
+            .split(',')
+            .map(ToString::to_string)
+            .collect(),
+    )
 }
 
 fn cache_control_contains_no_store(cache_control_header: &[String]) -> bool {
@@ -3379,6 +3410,1004 @@ async fn complex_cache_tag() {
         }
         "#);
     }.with_metrics().await;
+}
+
+/// Shared setup for the `cdn_invalidation_enabled` vs. `IndexMode::CacheTag` decoupling tests:
+/// one query that touches both a root field with a schema-derived `@cacheTag` (`currentUser` on
+/// the `user` subgraph, format `"currentUser"`) and an entity type with schema-derived
+/// `@cacheTag`s (`Organization` on the `orga` subgraph, formats `"organization"` and
+/// `"organizationid-id--{$key.id}"`). Both subgraphs share the same `cache_tag` index setting,
+/// since the point here is proving the CDN header doesn't depend on that setting at all, not
+/// exercising per-subgraph config resolution (already covered elsewhere).
+///
+/// `extension_tag`, when `Some`, adds a `__cacheTags` key to the `orga` mock's entity — the mock
+/// harness's special-cased key (`mock_subgraphs/mod.rs:323`) that populates the subgraph
+/// response's `apolloEntityCacheTags` extension, exercising `insert_entities_in_result`'s
+/// extension-tag path rather than `extract_cache_keys`'s schema-directive path.
+async fn setup_cdn_invalidation_gating_test(
+    cache_tag_index_enabled: bool,
+    cdn_invalidation_enabled: bool,
+    extension_tag: Option<&str>,
+) -> supergraph::Response {
+    let valid_schema =
+        Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+    // `creatorUser` is `@join__field(graph: ORGA)` only, so requesting it forces an actual
+    // `_entities` fetch to `orga` — requesting only `id` (a key field) lets `user` answer the
+    // whole query itself, with no entity fetch at all.
+    let query = "query { currentUser { activeOrganization { ... on Organization { id creatorUser { __typename id } } } } }";
+    let mut orga_entity = serde_json::json!({
+        "__typename": "Organization",
+        "id": "1",
+        "creatorUser": {
+            "__typename": "User",
+            "id": 2
+        }
+    });
+    if let Some(tag) = extension_tag {
+        orga_entity
+            .as_object_mut()
+            .unwrap()
+            .insert("__cacheTags".to_string(), serde_json::json!([tag]));
+    }
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
+                        "__typename": "Organization",
+                        "id": "1",
+                    }
+                }
+            },
+            "headers": {"cache-control": "public"},
+        },
+        "orga": {
+            "entities": [orga_entity],
+            "headers": {"cache-control": "public"},
+        },
+    });
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+    let subgraph_config = || Subgraph {
+        redis: None,
+        private_id: Some("sub".to_string()),
+        enabled: true.into(),
+        ttl: None,
+        invalidation: Some(SubgraphInvalidationConfig {
+            indexes: InvalidationIndexes {
+                cache_tag: cache_tag_index_enabled,
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    };
+    let map = [
+        ("user".to_string(), subgraph_config()),
+        ("orga".to_string(), subgraph_config()),
+    ]
+    .into_iter()
+    .collect();
+    let subgraphs_conf = create_subgraph_conf(map);
+    let response_cache = ResponseCache::for_test_with_cdn_invalidation(
+        storage.clone(),
+        subgraphs_conf,
+        valid_schema.clone(),
+        true,
+        drop_tx,
+        true,
+        CdnInvalidationConfig {
+            enabled: cdn_invalidation_enabled,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": subgraphs,
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    service.oneshot(request).await.unwrap()
+}
+
+#[rstest]
+#[case::cdn_only_still_emits_header(false, true, true)]
+#[case::redis_index_alone_does_not_emit_header(true, false, false)]
+#[case::both_enabled(true, true, true)]
+#[tokio::test(flavor = "multi_thread")]
+async fn cdn_invalidation_header_gates_independently_of_cache_tag_index(
+    #[case] cache_tag_index_enabled: bool,
+    #[case] cdn_invalidation_enabled: bool,
+    #[case] expect_header_present: bool,
+) {
+    async move {
+        let response = setup_cdn_invalidation_gating_test(
+            cache_tag_index_enabled,
+            cdn_invalidation_enabled,
+            None,
+        )
+        .await;
+        let header = get_cache_tag_header(&response);
+
+        assert_eq!(
+            header.is_some(),
+            expect_header_present,
+            "cache_tag_index_enabled={cache_tag_index_enabled}, cdn_invalidation_enabled={cdn_invalidation_enabled}: got header {header:?}"
+        );
+
+        if let Some(header) = header {
+            // Root's schema-derived tag (`user` subgraph) and the entity's schema-derived tags
+            // (`orga` subgraph) should both be present regardless of `cache_tag_index_enabled` —
+            // the CDN header only depends on `cdn_invalidation_enabled`.
+            assert!(
+                header.contains(&"currentUser".to_string()),
+                "missing root tag in {header:?}"
+            );
+            assert!(
+                header.contains(&"organization".to_string()),
+                "missing entity tag in {header:?}"
+            );
+        }
+    }
+    .with_metrics()
+    .await;
+}
+
+#[rstest]
+#[case::cdn_only_still_emits_header(false, true, true)]
+#[case::redis_index_alone_does_not_emit_header(true, false, false)]
+#[tokio::test(flavor = "multi_thread")]
+async fn cdn_invalidation_header_for_extension_tags_gates_independently_of_cache_tag_index(
+    #[case] cache_tag_index_enabled: bool,
+    #[case] cdn_invalidation_enabled: bool,
+    #[case] expect_header_present: bool,
+) {
+    async move {
+        // Exercises `insert_entities_in_result`'s `apolloEntityCacheTags`-extension path
+        // specifically, as opposed to `extract_cache_keys`'s schema-directive path covered by
+        // `cdn_invalidation_header_gates_independently_of_cache_tag_index` above.
+        let response = setup_cdn_invalidation_gating_test(
+            cache_tag_index_enabled,
+            cdn_invalidation_enabled,
+            Some("extension-tag"),
+        )
+        .await;
+        let header = get_cache_tag_header(&response);
+
+        assert_eq!(
+            header.is_some(),
+            expect_header_present,
+            "cache_tag_index_enabled={cache_tag_index_enabled}, cdn_invalidation_enabled={cdn_invalidation_enabled}: got header {header:?}"
+        );
+
+        if let Some(header) = header {
+            assert!(
+                header.contains(&"extension-tag".to_string()),
+                "missing apolloEntityCacheTags-derived tag in {header:?}"
+            );
+        }
+    }
+    .with_metrics()
+    .await;
+}
+
+/// Regression test: fine-grained tags used to leak onto the live `InvalidationLabels` context
+/// aggregator whenever the Redis `cache_tag` index was on, even with `cdn_invalidation.enabled:
+/// false` — contradicting `CdnInvalidationConfig`'s documented contract that fine-grained tag
+/// values only ever aggregate onto context when `cdn_invalidation.enabled` is `true`. Exercises
+/// both the schema-directive path (root field, entity) and the extension-tag path.
+#[tokio::test(flavor = "multi_thread")]
+async fn fine_grained_tags_stay_off_context_when_cdn_invalidation_disabled() {
+    async move {
+        let response = setup_cdn_invalidation_gating_test(true, false, Some("extension-tag")).await;
+
+        let invalidation_labels = InvalidationLabels::get_or_create(&response.context);
+        assert!(
+            invalidation_labels.tags.is_empty(),
+            "expected no fine-grained tags on context when cdn_invalidation is disabled, got {:?}",
+            invalidation_labels.tags
+        );
+        // The coarse subgraph/type fallback tiers are unconditional, regardless of
+        // `cdn_invalidation.enabled` — only the fine-grained `tags` tier is gated.
+        assert!(!invalidation_labels.subgraphs.is_empty());
+        assert!(!invalidation_labels.types.is_empty());
+    }
+    .with_metrics()
+    .await;
+}
+
+/// Verifies, end to end, that the router threads `maybe_emit_header`'s result into a
+/// `CdnInvalidationDebug` on the request context for the cache debugger to read. This is the
+/// only place truncation info is visible: it depends on the combined label set across every
+/// entry a response touches, not any single one, so no per-entry `CacheKeyContext` could show it.
+#[tokio::test(flavor = "multi_thread")]
+async fn cdn_invalidation_debug_reflects_outcome_and_truncation() {
+    async move {
+        let valid_schema =
+            Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+        let query = "query { currentUser { activeOrganization { ... on Organization { id creatorUser { __typename id } } } } }";
+        let orga_entity = serde_json::json!({
+            "__typename": "Organization",
+            "id": "1",
+            "creatorUser": {
+                "__typename": "User",
+                "id": 2
+            }
+        });
+        let subgraphs = serde_json::json!({
+            "user": {
+                "query": {
+                    "currentUser": {
+                        "activeOrganization": {
+                            "__typename": "Organization",
+                            "id": "1",
+                        }
+                    }
+                },
+                "headers": {"cache-control": "public"},
+            },
+            "orga": {
+                "entities": [orga_entity],
+                "headers": {"cache-control": "public"},
+            },
+        });
+        let map = || {
+            [
+                (
+                    "user".to_string(),
+                    Subgraph {
+                        redis: None,
+                        private_id: Some("sub".to_string()),
+                        enabled: true.into(),
+                        ttl: None,
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "orga".to_string(),
+                    Subgraph {
+                        redis: None,
+                        private_id: Some("sub".to_string()),
+                        enabled: true.into(),
+                        ttl: None,
+                        ..Default::default()
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect()
+        };
+        let build_request = |send_debug_header: bool| {
+            let builder = supergraph::Request::fake_builder()
+                .query(query)
+                .context(Context::new());
+            if send_debug_header {
+                builder
+                    .header(
+                        HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+                        HeaderValue::from_static("true"),
+                    )
+                    .build()
+                    .unwrap()
+            } else {
+                builder.build().unwrap()
+            }
+        };
+        let run = |cdn_invalidation: CdnInvalidationConfig, send_debug_header: bool| {
+            let valid_schema = valid_schema.clone();
+            let subgraphs = subgraphs.clone();
+            async move {
+                let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+                let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+                    .await
+                    .unwrap();
+                let response_cache = ResponseCache::for_test_with_cdn_invalidation(
+                    storage,
+                    create_subgraph_conf(map()),
+                    valid_schema,
+                    true,
+                    drop_tx,
+                    true,
+                    cdn_invalidation,
+                )
+                .await
+                .unwrap();
+                let service = TestHarness::builder()
+                    .configuration_json(serde_json::json!({
+                        "include_subgraph_errors": { "all": true },
+                        "experimental_mock_subgraphs": subgraphs,
+                    }))
+                    .unwrap()
+                    .schema(SCHEMA)
+                    .extra_private_plugin(response_cache)
+                    .build_supergraph()
+                    .await
+                    .unwrap();
+                service.oneshot(build_request(send_debug_header)).await.unwrap()
+            }
+        };
+
+        // Generous max_bytes: nothing truncates.
+        let response = run(
+            CdnInvalidationConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            true,
+        )
+        .await;
+        let debug = get_cdn_invalidation_debug(response)
+            .await
+            .expect("expected CDN invalidation debug info");
+        assert_eq!(debug.outcome, "complete_without_truncation");
+        assert!(debug.emitted, "{debug:?}");
+        assert!(debug.header_value.is_some(), "{debug:?}");
+        assert!(debug.untruncated_size_bytes.is_some(), "{debug:?}");
+        assert_eq!(debug.header_name, "Cache-Tag");
+
+        // Tiny max_bytes: forces truncation down to nothing fitting, so the header is
+        // suppressed even though the response touched real labels — outcome is
+        // `complete_with_truncation` (not `empty`, since there was something to report), but
+        // `emitted` is false since an empty-value header carries no purge capability and would
+        // be indistinguishable from no header at all. The debug info still shows what the
+        // (unsent) header value would have been, for troubleshooting.
+        let response = run(
+            CdnInvalidationConfig {
+                enabled: true,
+                max_bytes: 10,
+                ..Default::default()
+            },
+            true,
+        )
+        .await;
+        let debug = get_cdn_invalidation_debug(response)
+            .await
+            .expect("expected CDN invalidation debug info");
+        assert_eq!(debug.outcome, "complete_with_truncation");
+        assert!(
+            !debug.emitted,
+            "an empty-value header shouldn't be reported as emitted: {debug:?}"
+        );
+        let header_value = debug.header_value.clone().expect("expected a header value");
+        assert_eq!(
+            header_value, "",
+            "expected nothing to have survived truncation at max_bytes=10: {debug:?}"
+        );
+        let untruncated = debug
+            .untruncated_size_bytes
+            .expect("expected an untruncated size");
+        assert!(
+            untruncated > 0,
+            "expected a nonzero untruncated size: {debug:?}"
+        );
+        assert_eq!(debug.max_bytes, 10);
+
+        // Disabled entirely: no debug info should be recorded at all.
+        let response = run(
+            CdnInvalidationConfig {
+                enabled: false,
+                ..Default::default()
+            },
+            true,
+        )
+        .await;
+        assert!(
+            get_cdn_invalidation_debug(response).await.is_none(),
+            "expected no CDN invalidation debug info when the feature is disabled"
+        );
+
+        // Enabled, but this particular request didn't send the debug header: no debug info,
+        // even though `response_cache.debug` is on at the config level (the test harness always
+        // sets it). Debug info should only ever appear for requests that actually asked for it.
+        let response = run(
+            CdnInvalidationConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            false,
+        )
+        .await;
+        assert!(
+            get_cdn_invalidation_debug(response).await.is_none(),
+            "expected no CDN invalidation debug info when the request didn't ask for it"
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+/// Characterizes a documented limitation: the `Cache-Tag` header is built from whatever's
+/// resolved by the time the router is ready to send the initial HTTP response, without waiting
+/// on `@defer`-deferred payloads. `activeOrganization` is deferred here specifically because it
+/// reads `currentUser`'s resolved reference to build its entity representation — that data
+/// dependency is what reliably serializes the `orga` subgraph fetch behind the primary payload
+/// finishing, which is why this test's outcome (the deferred `organization`/
+/// `organizationid-id--*` tags absent from the header) isn't just incidental mock-latency luck.
+/// A deferred fragment with no such dependency on the primary payload isn't covered by this test
+/// and has no such ordering guarantee.
+#[tokio::test(flavor = "multi_thread")]
+async fn cdn_invalidation_header_excludes_deferred_payload_tags() {
+    async move {
+        let valid_schema =
+            Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+        let query = "query { currentUser { id ... @defer { activeOrganization { ... on Organization { id creatorUser { __typename id } } } } } }";
+        let subgraphs = serde_json::json!({
+            "user": {
+                "query": {
+                    "currentUser": {
+                        "id": "1",
+                        "activeOrganization": {
+                            "__typename": "Organization",
+                            "id": "1",
+                        }
+                    }
+                },
+                "headers": {"cache-control": "public"},
+            },
+            "orga": {
+                "entities": [serde_json::json!({
+                    "__typename": "Organization",
+                    "id": "1",
+                    "creatorUser": {
+                        "__typename": "User",
+                        "id": 2
+                    }
+                })],
+                "headers": {"cache-control": "public"},
+            },
+        });
+
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+            .await
+            .unwrap();
+        let subgraph_config = || Subgraph {
+            redis: None,
+            private_id: Some("sub".to_string()),
+            enabled: true.into(),
+            ttl: None,
+            invalidation: None,
+        };
+        let map = [
+            ("user".to_string(), subgraph_config()),
+            ("orga".to_string(), subgraph_config()),
+        ]
+        .into_iter()
+        .collect();
+        let response_cache = ResponseCache::for_test_with_cdn_invalidation(
+            storage,
+            create_subgraph_conf(map),
+            valid_schema,
+            true,
+            drop_tx,
+            false,
+            CdnInvalidationConfig {
+                enabled: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({
+                "include_subgraph_errors": { "all": true },
+                "experimental_mock_subgraphs": subgraphs,
+            }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_private_plugin(response_cache)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .context(defer_context())
+            .build()
+            .unwrap();
+
+        let mut response = service.oneshot(request).await.unwrap();
+        let header = get_cache_tag_header(&response).expect("expected a Cache-Tag header");
+
+        // The deferred fragment's own tags must never appear on the primary response's header.
+        assert!(
+            !header.contains(&"organization".to_string()),
+            "deferred-only tag leaked into the primary response's header: {header:?}"
+        );
+
+        // Confirm the query really did defer: a second chunk with the deferred data follows.
+        let primary = response.next_response().await.unwrap();
+        assert_eq!(
+            primary.has_next,
+            Some(true),
+            "expected the primary chunk to signal more chunks are coming"
+        );
+        let deferred = response
+            .next_response()
+            .await
+            .expect("expected a second, deferred chunk");
+        assert!(
+            !deferred.incremental.is_empty(),
+            "expected the deferred chunk to carry incremental data"
+        );
+
+        // The primary chunk's own tag (from `currentUser`'s root-field `@cacheTag`) should still
+        // be present — only the deferred fragment's tags are excluded.
+        assert!(
+            header.contains(&"currentUser".to_string()),
+            "missing primary-payload tag in {header:?}"
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+fn defer_context() -> Context {
+    let context = Context::new();
+    context.extensions().with_lock(|lock| {
+        lock.insert(crate::services::router::ClientRequestAccepts {
+            multipart_defer: true,
+            ..Default::default()
+        })
+    });
+    context
+}
+
+/// Like `setup_cdn_invalidation_gating_test`, but performs the request twice against the same
+/// underlying storage: once to populate the cache (miss) and once more to hit it. The second
+/// `TestHarness` has no mock subgraphs wired in at all (mirrors `insert()`'s miss-then-hit
+/// pattern) — if the hit path doesn't actually serve from cache, the request has nothing to
+/// answer it and fails outright, rather than silently emitting a header built from a live
+/// subgraph call.
+///
+/// `cache_tag_index_enabled` controls the Redis `cache_tag` index independently of CDN
+/// invalidation. Fine-grained CDN tags are persisted for a later cache hit based on their own
+/// `cdn_invalidation_enabled` gate, not on Redis's `cache_tag` index — so passing `false` here
+/// exercises CDN invalidation running entirely on its own, with Redis per-tag indexing off.
+async fn setup_cdn_invalidation_hit_test(
+    cache_tag_index_enabled: bool,
+    extension_tag: Option<&str>,
+) -> (supergraph::Response, supergraph::Response) {
+    let valid_schema =
+        Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+    let query = "query { currentUser { activeOrganization { ... on Organization { id creatorUser { __typename id } } } } }";
+    let mut orga_entity = serde_json::json!({
+        "__typename": "Organization",
+        "id": "1",
+        "creatorUser": {
+            "__typename": "User",
+            "id": 2
+        }
+    });
+    if let Some(tag) = extension_tag {
+        orga_entity
+            .as_object_mut()
+            .unwrap()
+            .insert("__cacheTags".to_string(), serde_json::json!([tag]));
+    }
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
+                        "__typename": "Organization",
+                        "id": "1",
+                    }
+                }
+            },
+            "headers": {"cache-control": "public"},
+        },
+        "orga": {
+            "entities": [orga_entity],
+            "headers": {"cache-control": "public"},
+        },
+    });
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+    let subgraph_config = || Subgraph {
+        redis: None,
+        private_id: Some("sub".to_string()),
+        enabled: true.into(),
+        ttl: None,
+        invalidation: Some(SubgraphInvalidationConfig {
+            indexes: InvalidationIndexes {
+                cache_tag: cache_tag_index_enabled,
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    };
+    let map = [
+        ("user".to_string(), subgraph_config()),
+        ("orga".to_string(), subgraph_config()),
+    ]
+    .into_iter()
+    .collect();
+    let subgraphs_conf = create_subgraph_conf(map);
+    let response_cache = ResponseCache::for_test_with_cdn_invalidation(
+        storage.clone(),
+        subgraphs_conf,
+        valid_schema.clone(),
+        true,
+        drop_tx,
+        true,
+        CdnInvalidationConfig {
+            enabled: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let build_request = || {
+        supergraph::Request::fake_builder()
+            .query(query)
+            .context(Context::new())
+            .header(
+                HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+                HeaderValue::from_static("true"),
+            )
+            .build()
+            .unwrap()
+    };
+
+    let miss_service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": subgraphs,
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let miss_response = miss_service.oneshot(build_request()).await.unwrap();
+    let cache_keys = get_cache_keys_context(&miss_response).expect("missing cache keys");
+    wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
+
+    // No `experimental_mock_subgraphs` here: if the hit path fell through to a live subgraph
+    // call, there'd be nothing configured to answer it and the request would fail.
+    let hit_service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let hit_response = hit_service.oneshot(build_request()).await.unwrap();
+
+    (miss_response, hit_response)
+}
+
+#[rstest]
+#[case::redis_index_off(false)]
+#[case::redis_index_on(true)]
+#[tokio::test(flavor = "multi_thread")]
+async fn cdn_invalidation_header_persists_schema_tags_across_cache_hit(
+    #[case] cache_tag_index_enabled: bool,
+) {
+    async move {
+        let (miss_response, hit_response) =
+            setup_cdn_invalidation_hit_test(cache_tag_index_enabled, None).await;
+
+        for (label, response) in [("miss", &miss_response), ("hit", &hit_response)] {
+            let header = get_cache_tag_header(response).unwrap_or_else(|| {
+                panic!(
+                    "cache_tag_index_enabled={cache_tag_index_enabled}: expected a Cache-Tag header on the {label} response"
+                )
+            });
+
+            // Root-field tag: recorded by `call_service_for_root_fields_operation`'s
+            // cache-hit branch (`merge`) on the hit response, and `cache_lookup_root`'s miss
+            // branch on the miss response.
+            assert!(
+                header.contains(&"currentUser".to_string()),
+                "cache_tag_index_enabled={cache_tag_index_enabled}: {label} response missing root tag in {header:?}"
+            );
+            // Entity tags: recorded by the `cache_result.iter()` loop's `merge`/`add_tags`
+            // backfill on hit (via `cdn_invalidation_tags`, independent of the Redis
+            // `cache_tag` index), and `extract_cache_keys`'s schema-directive path on miss.
+            assert!(
+                header.contains(&"organization".to_string()),
+                "cache_tag_index_enabled={cache_tag_index_enabled}: {label} response missing entity tag in {header:?}"
+            );
+            assert!(
+                header.contains(&"organizationid-id--1".to_string()),
+                "cache_tag_index_enabled={cache_tag_index_enabled}: {label} response missing interpolated entity tag in {header:?}"
+            );
+        }
+    }
+    .with_metrics()
+    .await;
+}
+
+#[rstest]
+#[case::redis_index_off(false)]
+#[case::redis_index_on(true)]
+#[tokio::test(flavor = "multi_thread")]
+async fn cdn_invalidation_header_persists_extension_tag_across_cache_hit(
+    #[case] cache_tag_index_enabled: bool,
+) {
+    async move {
+        let (miss_response, hit_response) =
+            setup_cdn_invalidation_hit_test(cache_tag_index_enabled, Some("extension-tag")).await;
+
+        for (label, response) in [("miss", &miss_response), ("hit", &hit_response)] {
+            let header = get_cache_tag_header(response).unwrap_or_else(|| {
+                panic!(
+                    "cache_tag_index_enabled={cache_tag_index_enabled}: expected a Cache-Tag header on the {label} response"
+                )
+            });
+            assert!(
+                header.contains(&"extension-tag".to_string()),
+                "cache_tag_index_enabled={cache_tag_index_enabled}: {label} response missing apolloEntityCacheTags-derived tag in {header:?}"
+            );
+        }
+    }
+    .with_metrics()
+    .await;
+}
+
+/// Regression coverage for a single request that mixes a cache hit and a cache miss for
+/// entities of the *same* type: the `cache_result.iter()` loop in `insert_entities_in_result`
+/// runs `merge`/`add_tags` for hits and the schema-directive path for misses, both writing
+/// through the same per-request `InvalidationLabels` handle. Proves the header unions both
+/// rather than one clobbering the other.
+#[tokio::test(flavor = "multi_thread")]
+async fn cdn_invalidation_header_unions_hit_and_miss_entities_in_the_same_request() {
+    async move {
+        let valid_schema =
+            Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+        let query = "query { currentUser { allOrganizations { id name } } }";
+
+        // Shared namespace so the second storage/service can see what the first cached —
+        // mirrors `missing_entities`'s pre-warm-then-partially-miss setup.
+        let namespace = Uuid::new_v4().to_string();
+        let map = || {
+            [
+                (
+                    "user".to_string(),
+                    Subgraph {
+                        redis: None,
+                        private_id: Some("sub".to_string()),
+                        enabled: true.into(),
+                        ttl: None,
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "orga".to_string(),
+                    Subgraph {
+                        redis: None,
+                        private_id: Some("sub".to_string()),
+                        enabled: true.into(),
+                        ttl: None,
+                        ..Default::default()
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect()
+        };
+
+        // First request: warm the cache for orgs 1 and 2 only.
+        {
+            let subgraphs = MockedSubgraphs(
+                [
+                    (
+                        "user",
+                        MockSubgraph::builder()
+                            .with_json(
+                                serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+                                serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
+                                    {"__typename": "Organization", "id": "1"},
+                                    {"__typename": "Organization", "id": "2"}
+                                ] }}}},
+                            )
+                            .with_header(CACHE_CONTROL, HeaderValue::from_static("no-store"))
+                            .build(),
+                    ),
+                    (
+                        "orga",
+                        MockSubgraph::builder()
+                            .with_json(
+                                serde_json::json! {{
+                                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+                                    "variables": {
+                                        "representations": [
+                                            {"id": "1", "__typename": "Organization"},
+                                            {"id": "2", "__typename": "Organization"}
+                                        ]
+                                    }
+                                }},
+                                serde_json::json! {{
+                                    "data": {
+                                        "_entities": [
+                                            {"name": "Organization 1"},
+                                            {"name": "Organization 2"}
+                                        ]
+                                    }
+                                }},
+                            )
+                            .with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600"))
+                            .build(),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            );
+
+            let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+            let storage = Storage::new(&Config::test(false, &namespace), drop_rx)
+                .await
+                .unwrap();
+            let response_cache = ResponseCache::for_test_with_cdn_invalidation(
+                storage.clone(),
+                create_subgraph_conf(map()),
+                valid_schema.clone(),
+                true,
+                drop_tx,
+                true,
+                CdnInvalidationConfig {
+                    enabled: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+            let service = TestHarness::builder()
+                .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+                .unwrap()
+                .schema(SCHEMA)
+                .extra_private_plugin(response_cache)
+                .extra_plugin(subgraphs)
+                .build_supergraph()
+                .await
+                .unwrap();
+
+            let request = supergraph::Request::fake_builder()
+                .query(query)
+                .context(Context::new())
+                .header(
+                    HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+                    HeaderValue::from_static("true"),
+                )
+                .build()
+                .unwrap();
+            let response = service.oneshot(request).await.unwrap();
+            let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
+            wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
+        }
+
+        // Second request: orgs 1, 2, and 3. The `orga` mock below only has a registered response
+        // for representation "3" — if the router doesn't actually serve 1 and 2 from cache, the
+        // mock harness has no matching response for the unexpected extra representations and the
+        // request fails outright, rather than silently succeeding via a live re-fetch.
+        let subgraphs = MockedSubgraphs(
+            [
+                (
+                    "user",
+                    MockSubgraph::builder()
+                        .with_json(
+                            serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+                            serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
+                                {"__typename": "Organization", "id": "1"},
+                                {"__typename": "Organization", "id": "2"},
+                                {"__typename": "Organization", "id": "3"}
+                            ] }}}},
+                        )
+                        .with_header(CACHE_CONTROL, HeaderValue::from_static("no-store"))
+                        .build(),
+                ),
+                (
+                    "orga",
+                    MockSubgraph::builder()
+                        .with_json(
+                            serde_json::json! {{
+                                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+                                "variables": {
+                                    "representations": [
+                                        {"id": "3", "__typename": "Organization"}
+                                    ]
+                                }
+                            }},
+                            serde_json::json! {{
+                                "data": {
+                                    "_entities": [
+                                        {"name": "Organization 3"}
+                                    ]
+                                }
+                            }},
+                        )
+                        .with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600"))
+                        .build(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
+
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false, &namespace), drop_rx)
+            .await
+            .unwrap();
+        let response_cache = ResponseCache::for_test_with_cdn_invalidation(
+            storage.clone(),
+            create_subgraph_conf(map()),
+            valid_schema.clone(),
+            false,
+            drop_tx,
+            true,
+            CdnInvalidationConfig {
+                enabled: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_private_plugin(response_cache)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .context(Context::new())
+            .build()
+            .unwrap();
+        let response = service.oneshot(request).await.unwrap();
+        let header = get_cache_tag_header(&response).expect("expected a Cache-Tag header");
+
+        assert!(
+            header.contains(&"currentUser".to_string()),
+            "missing root tag in {header:?}"
+        );
+        assert!(
+            header.contains(&"organizationid-id--1".to_string()),
+            "missing hit-path entity tag (org 1) in {header:?}"
+        );
+        assert!(
+            header.contains(&"organizationid-id--2".to_string()),
+            "missing hit-path entity tag (org 2) in {header:?}"
+        );
+        assert!(
+            header.contains(&"organizationid-id--3".to_string()),
+            "missing miss-path entity tag (org 3) in {header:?}"
+        );
+    }
+    .with_metrics()
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
