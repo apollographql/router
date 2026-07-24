@@ -875,6 +875,28 @@ where
         }
     }
 
+    /// Record a single state transition: fire the test signal, emit the tracing
+    /// span, and bump the `apollo.router.state.change.total` counter.
+    fn record_transition(&self, event_name: String, previous_state: String, state: &State<FA>) {
+        #[cfg(test)]
+        self.notify_updated.notify_one();
+
+        tracing::info!(
+            event = event_name,
+            state = ?state,
+            previous_state,
+            "state machine transitioned"
+        );
+        u64_counter!(
+            "apollo.router.state.change.total",
+            "Router state changes",
+            1,
+            event = event_name,
+            state = format!("{state:?}"),
+            previous_state = previous_state
+        );
+    }
+
     pub(crate) async fn process_events(
         mut self,
         mut messages: impl Stream<Item = Event> + Unpin,
@@ -902,64 +924,96 @@ where
                 futures::future::Either::Right(std::future::pending())
             };
 
-            let (event_name, previous_state) = tokio::select! {
+            tokio::select! {
                 biased;
 
                 event = messages.next() => {
                     let Some(event) = event else { break };
-                    let event_name = event.to_string();
-                    let previous_state = format!("{state:?}");
+                    // Drain any events already queued in the channel so a burst of
+                    // publishes coalesces into a single reload of the newest merged
+                    // target, instead of building each obsolete intermediate.
+                    let mut batch = vec![event];
+                    let mut stream_ended = false;
+                    loop {
+                        match messages.next().now_or_never() {
+                            Some(Some(event)) => batch.push(event),
+                            // Stream closed: finish this batch, then exit the loop.
+                            Some(None) => {
+                                stream_ended = true;
+                                break;
+                            }
+                            // Nothing more ready right now.
+                            None => break,
+                        }
+                    }
 
-                    state = match event {
-                        UpdateConfiguration(configuration) => {
-                            state.accumulate_inputs(None, Some(configuration), None, false)
+                    let is_input: Vec<bool> = batch.iter().map(is_input_event).collect();
+                    let mut coalesced: u64 = 0;
+                    let mut terminal = false;
+                    for (i, event) in batch.into_iter().enumerate() {
+                        // Coalesce only runs of consecutive input events; a control
+                        // event (Shutdown / NoMore*) is always a reload boundary.
+                        let coalesce_with_next =
+                            is_input[i] && is_input.get(i + 1).copied().unwrap_or(false);
+                        let event_name = event.to_string();
+                        let previous_state = format!("{state:?}");
+
+                        state = match event {
+                            UpdateConfiguration(configuration) => {
+                                state.accumulate_inputs(None, Some(configuration), None, false)
+                            }
+                            NoMoreConfiguration => state.no_more_configuration().await,
+                            UpdateSchema(schema) => {
+                                state.accumulate_inputs(Some(Arc::new(schema)), None, None, false)
+                            }
+                            NoMoreSchema => state.no_more_schema().await,
+                            UpdateLicense(license) => {
+                                state.accumulate_inputs(None, None, Some(license), false)
+                            }
+                            Reload => state.accumulate_inputs(None, None, None, false),
+                            RhaiReload => state.accumulate_inputs(None, None, None, true),
+                            NoMoreLicense => state.no_more_license().await,
+                            Shutdown => state.shutdown().await,
+                        };
+
+                        if coalesce_with_next {
+                            // A later input supersedes this one; skip building it.
+                            coalesced += 1;
+                        } else {
+                            state = state.attempt_reload(&mut self).await;
                         }
-                        NoMoreConfiguration => state.no_more_configuration().await,
-                        UpdateSchema(schema) => {
-                            state.accumulate_inputs(Some(Arc::new(schema)), None, None, false)
+
+                        self.record_transition(event_name, previous_state, &state);
+
+                        // If we've errored then exit even if there are more messages.
+                        if matches!(&state, Stopped | Errored(_)) {
+                            terminal = true;
+                            break;
                         }
-                        NoMoreSchema => state.no_more_schema().await,
-                        UpdateLicense(license) => {
-                            state.accumulate_inputs(None, None, Some(license), false)
-                        }
-                        Reload => state.accumulate_inputs(None, None, None, false),
-                        RhaiReload => state.accumulate_inputs(None, None, None, true),
-                        NoMoreLicense => state.no_more_license().await,
-                        Shutdown => state.shutdown().await,
-                    };
-                    state = state.attempt_reload(&mut self).await;
-                    (event_name, previous_state)
+                    }
+
+                    if coalesced > 0 {
+                        u64_counter_with_unit!(
+                            "apollo.router.state.reload.coalesced",
+                            "Number of intermediate reload targets skipped by coalescing a queued burst of updates",
+                            "{update}",
+                            coalesced
+                        );
+                    }
+
+                    if terminal || stream_ended {
+                        break;
+                    }
                 }
                 _ = retry_future => {
                     let previous_state = format!("{state:?}");
                     state = state.attempt_reload(&mut self).await;
-                    (String::from("retry"), previous_state)
+                    self.record_transition("retry".to_string(), previous_state, &state);
+                    if matches!(&state, Stopped | Errored(_)) {
+                        break;
+                    }
                 }
             };
-
-            // Update the shared state
-            #[cfg(test)]
-            self.notify_updated.notify_one();
-
-            tracing::info!(
-                event = event_name,
-                state = ?state,
-                previous_state,
-                "state machine transitioned"
-            );
-            u64_counter!(
-                "apollo.router.state.change.total",
-                "Router state changes",
-                1,
-                event = event_name,
-                state = format!("{state:?}"),
-                previous_state = previous_state
-            );
-
-            // If we've errored then exit even if there are potentially more messages
-            if matches!(&state, Stopped | Errored(_)) {
-                break;
-            }
         }
         tracing::info!("stopped");
 
@@ -971,6 +1025,16 @@ where
             }
         }
     }
+}
+
+/// Whether an event is an "input" update (as opposed to a control event like
+/// `Shutdown` or `NoMore*`). Only consecutive input events are coalesced into a
+/// single reload; control events are always reload boundaries.
+fn is_input_event(event: &Event) -> bool {
+    matches!(
+        event,
+        UpdateConfiguration(_) | UpdateSchema(_) | UpdateLicense(_) | Reload | RhaiReload
+    )
 }
 
 /// Computes the retry delay: base delay plus up to 25% random positive jitter.
@@ -2263,6 +2327,46 @@ mod tests {
         assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }
 
+    // A burst of input events already queued in the channel collapses into a
+    // single build of the newest merged target; the superseded intermediates are
+    // skipped and counted by the coalesced metric.
+    #[test(tokio::test)]
+    async fn coalesces_queued_burst_into_single_reload() {
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
+        let router_factory = create_mock_router_configurator(1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+        async move {
+            assert_matches!(
+                execute_burst(
+                    server_factory,
+                    router_factory,
+                    stream::iter(vec![
+                        UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
+                        UpdateLicense(Default::default()),
+                        UpdateSchema(SchemaState {
+                            sdl: minimal_schema.to_owned(),
+                            launch_id: None,
+                        }),
+                        UpdateSchema(example_schema()),
+                        UpdateSchema(SchemaState {
+                            sdl: minimal_schema.to_owned(),
+                            launch_id: None,
+                        }),
+                        Shutdown,
+                    ])
+                )
+                .await,
+                Ok(())
+            );
+            // Only the newest target is built (one server start); the four earlier
+            // inputs were coalesced away.
+            assert_eq!(shutdown_receivers.0.lock().len(), 1);
+            assert_counter!("apollo.router.state.reload.coalesced", 4);
+        }
+        .with_metrics()
+        .await;
+    }
+
     #[test(tokio::test)]
     async fn state_change_metrics() {
         let router_factory = create_mock_router_configurator(2);
@@ -2440,6 +2544,25 @@ mod tests {
         let is_telemetry_disabled = false;
         let state_machine =
             StateMachine::new(is_telemetry_disabled, server_factory, router_factory);
+        // Space the events apart so the coalescing drain in `process_events` sees an
+        // empty queue between them — mirroring production, where schema/config/
+        // license updates arrive spread out rather than all at once. Tests that
+        // specifically exercise coalescing feed a genuine burst via `execute_burst`.
+        let events = Box::pin(events.then(|event| async move {
+            tokio::task::yield_now().await;
+            event
+        }));
+        state_machine.process_events(events).await
+    }
+
+    /// Like `execute`, but feeds every event at once so `process_events` sees them
+    /// all already queued and coalesces the burst. Used to test coalescing.
+    async fn execute_burst(
+        server_factory: MockMyHttpServerFactory,
+        router_factory: MockMyRouterConfigurator,
+        events: impl Stream<Item = Event> + Unpin,
+    ) -> Result<(), ApolloRouterError> {
+        let state_machine = StateMachine::new(false, server_factory, router_factory);
         state_machine.process_events(events).await
     }
 
