@@ -252,6 +252,22 @@ impl<'a> PolicyFilteringVisitor<'a> {
         })
     }
 
+    /// Runs `f` with `bypass_authorization` set to `new_value`, unconditionally restoring the
+    /// previous value afterward. Centralizing the set/restore here (rather than hand-rolling it
+    /// at each call site) means an early return added inside `f` in the future can't skip the
+    /// restore and leave authorization silently bypassed for the rest of the traversal.
+    fn with_bypass_authorization<T>(
+        &mut self,
+        new_value: bool,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let previous = self.bypass_authorization;
+        self.bypass_authorization = new_value;
+        let result = f(self);
+        self.bypass_authorization = previous;
+        result
+    }
+
     fn is_field_authorized(&self, field: &schema::FieldDefinition) -> bool {
         if let Some(directive) = field.directives.get(&self.policy_directive_name) {
             let mut field_policies_sets = policies_sets_argument(directive);
@@ -425,55 +441,54 @@ impl transform::Visitor for PolicyFilteringVisitor<'_> {
         field_def: &ast::FieldDefinition,
         node: &ast::Field,
     ) -> Result<Option<ast::Field>, BoxError> {
-        let field_name = &node.name;
-        let is_field_list = field_def.ty.is_list();
-
-        let previously_bypassed = self.bypass_authorization;
         let bypass_authorization =
-            previously_bypassed || IncludeSkip::parse(&node.directives).statically_skipped();
-        self.bypass_authorization = bypass_authorization;
+            self.bypass_authorization || IncludeSkip::parse(&node.directives).statically_skipped();
 
-        self.current_path
-            .push(PathElement::Key(field_name.as_str().into(), None));
-        if is_field_list {
-            self.current_path.push(PathElement::Flatten(None));
-        }
+        self.with_bypass_authorization(bypass_authorization, |this| {
+            let field_name = &node.name;
+            let is_field_list = field_def.ty.is_list();
 
-        let res = if bypass_authorization {
-            transform::field(self, field_def, node)
-        } else {
-            let is_authorized = self.is_field_authorized(field_def);
-
-            let implementors_with_missing_requirements =
-                self.implementors_with_missing_requirements(field_def, node);
-
-            let implementors_with_missing_field_requirements =
-                self.implementors_with_missing_field_requirements(parent_type, node);
-
-            if !is_authorized
-                || implementors_with_missing_requirements
-                || implementors_with_missing_field_requirements
-            {
-                self.unauthorized_paths.push(self.current_path.clone());
-                self.query_requires_policies = true;
-
-                if self.dry_run {
-                    transform::field(self, field_def, node)
-                } else {
-                    Ok(None)
-                }
-            } else {
-                transform::field(self, field_def, node)
+            this.current_path
+                .push(PathElement::Key(field_name.as_str().into(), None));
+            if is_field_list {
+                this.current_path.push(PathElement::Flatten(None));
             }
-        };
 
-        if is_field_list {
-            self.current_path.pop();
-        }
-        self.current_path.pop();
-        self.bypass_authorization = previously_bypassed;
+            let res = if bypass_authorization {
+                transform::field(this, field_def, node)
+            } else {
+                let is_authorized = this.is_field_authorized(field_def);
 
-        res
+                let implementors_with_missing_requirements =
+                    this.implementors_with_missing_requirements(field_def, node);
+
+                let implementors_with_missing_field_requirements =
+                    this.implementors_with_missing_field_requirements(parent_type, node);
+
+                if !is_authorized
+                    || implementors_with_missing_requirements
+                    || implementors_with_missing_field_requirements
+                {
+                    this.unauthorized_paths.push(this.current_path.clone());
+                    this.query_requires_policies = true;
+
+                    if this.dry_run {
+                        transform::field(this, field_def, node)
+                    } else {
+                        Ok(None)
+                    }
+                } else {
+                    transform::field(this, field_def, node)
+                }
+            };
+
+            if is_field_list {
+                this.current_path.pop();
+            }
+            this.current_path.pop();
+
+            res
+        })
     }
 
     fn fragment_definition(
@@ -510,63 +525,59 @@ impl transform::Visitor for PolicyFilteringVisitor<'_> {
         &mut self,
         node: &ast::FragmentSpread,
     ) -> Result<Option<ast::FragmentSpread>, BoxError> {
-        let previously_bypassed = self.bypass_authorization;
         let bypass_authorization =
-            previously_bypassed || IncludeSkip::parse(&node.directives).statically_skipped();
-        self.bypass_authorization = bypass_authorization;
+            self.bypass_authorization || IncludeSkip::parse(&node.directives).statically_skipped();
 
-        if !bypass_authorization {
-            // record the fragment errors at the point of application
-            if let Some(paths) = self
-                .fragments_unauthorized_paths
-                .get(node.fragment_name.as_str())
-            {
-                for path in paths {
-                    let path = self.current_path.join(path);
-                    self.unauthorized_paths.push(path);
+        self.with_bypass_authorization(bypass_authorization, |this| {
+            if !bypass_authorization {
+                // record the fragment errors at the point of application
+                if let Some(paths) = this
+                    .fragments_unauthorized_paths
+                    .get(node.fragment_name.as_str())
+                {
+                    for path in paths {
+                        let path = this.current_path.join(path);
+                        this.unauthorized_paths.push(path);
+                    }
                 }
             }
-        }
 
-        let condition = match self
-            .state()
-            .fragments()
-            .get(node.fragment_name.as_str())
-            .map(|fragment| fragment.fragment.type_condition.clone())
-        {
-            Some(condition) => condition,
-            None => {
-                self.bypass_authorization = previously_bypassed;
-                return Ok(None);
-            }
-        };
+            let condition = match this
+                .state()
+                .fragments()
+                .get(node.fragment_name.as_str())
+                .map(|fragment| fragment.fragment.type_condition.clone())
+            {
+                Some(condition) => condition,
+                None => return Ok(None),
+            };
 
-        let fragment_is_authorized = bypass_authorization
-            || self
-                .schema
-                .types
-                .get(condition.as_str())
-                .is_some_and(|ty| self.is_type_authorized(ty));
+            let fragment_is_authorized = bypass_authorization
+                || this
+                    .schema
+                    .types
+                    .get(condition.as_str())
+                    .is_some_and(|ty| this.is_type_authorized(ty));
 
-        self.current_path
-            .push(PathElement::Fragment(condition.as_str().into()));
+            this.current_path
+                .push(PathElement::Fragment(condition.as_str().into()));
 
-        let res = if !fragment_is_authorized {
-            self.query_requires_policies = true;
-            self.unauthorized_paths.push(self.current_path.clone());
+            let res = if !fragment_is_authorized {
+                this.query_requires_policies = true;
+                this.unauthorized_paths.push(this.current_path.clone());
 
-            if self.dry_run {
-                transform::fragment_spread(self, node)
+                if this.dry_run {
+                    transform::fragment_spread(this, node)
+                } else {
+                    Ok(None)
+                }
             } else {
-                Ok(None)
-            }
-        } else {
-            transform::fragment_spread(self, node)
-        };
+                transform::fragment_spread(this, node)
+            };
 
-        self.current_path.pop();
-        self.bypass_authorization = previously_bypassed;
-        res
+            this.current_path.pop();
+            res
+        })
     }
 
     fn inline_fragment(
@@ -574,50 +585,45 @@ impl transform::Visitor for PolicyFilteringVisitor<'_> {
         parent_type: &str,
         node: &ast::InlineFragment,
     ) -> Result<Option<ast::InlineFragment>, BoxError> {
-        let previously_bypassed = self.bypass_authorization;
         let bypass_authorization =
-            previously_bypassed || IncludeSkip::parse(&node.directives).statically_skipped();
-        self.bypass_authorization = bypass_authorization;
+            self.bypass_authorization || IncludeSkip::parse(&node.directives).statically_skipped();
 
-        let res = match &node.type_condition {
+        self.with_bypass_authorization(bypass_authorization, |this| match &node.type_condition {
             None => {
-                self.current_path.push(PathElement::Fragment(String::new()));
-                let res = transform::inline_fragment(self, parent_type, node);
-                self.current_path.pop();
+                this.current_path.push(PathElement::Fragment(String::new()));
+                let res = transform::inline_fragment(this, parent_type, node);
+                this.current_path.pop();
                 res
             }
             Some(name) => {
-                self.current_path
+                this.current_path
                     .push(PathElement::Fragment(name.as_str().into()));
 
                 let fragment_is_authorized = bypass_authorization
-                    || self
+                    || this
                         .schema
                         .types
                         .get(name)
-                        .is_some_and(|ty| self.is_type_authorized(ty));
+                        .is_some_and(|ty| this.is_type_authorized(ty));
 
                 let res = if !fragment_is_authorized {
-                    self.query_requires_policies = true;
-                    self.unauthorized_paths.push(self.current_path.clone());
+                    this.query_requires_policies = true;
+                    this.unauthorized_paths.push(this.current_path.clone());
 
-                    if self.dry_run {
-                        transform::inline_fragment(self, parent_type, node)
+                    if this.dry_run {
+                        transform::inline_fragment(this, parent_type, node)
                     } else {
                         Ok(None)
                     }
                 } else {
-                    transform::inline_fragment(self, parent_type, node)
+                    transform::inline_fragment(this, parent_type, node)
                 };
 
-                self.current_path.pop();
+                this.current_path.pop();
 
                 res
             }
-        };
-
-        self.bypass_authorization = previously_bypassed;
-        res
+        })
     }
 
     fn schema(&self) -> &apollo_compiler::Schema {
