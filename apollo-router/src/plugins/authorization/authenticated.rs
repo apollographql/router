@@ -687,7 +687,7 @@ mod tests {
 
     #[test]
     fn include_false_on_protected_field_is_not_unauthorized() {
-        // RH-1400: `internal` will never be sent to a subgraph because of the literal
+        // `internal` will never be sent to a subgraph because of the literal
         // `@include(if: false)` on it, so it must not be reported as unauthorized.
         static QUERY: &str = r#"
         query {

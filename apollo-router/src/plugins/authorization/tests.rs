@@ -774,7 +774,7 @@ async fn scopes_directive() {
 
 #[tokio::test]
 async fn scopes_directive_with_literal_include_false_on_protected_field() {
-    // RH-1400: `phone` is annotated with `@requiresScopes(scopes: [["pii"]])`. When the
+    // `phone` is annotated with `@requiresScopes(scopes: [["pii"]])`. When the
     // client's own operation excludes it with a literal `@include(if: false)`, the field is
     // never sent to a subgraph (confirmed here by the mocked subgraph only ever being asked
     // for `id creatorUser{id name}`, never `phone`), so no `UNAUTHORIZED_FIELD_OR_TYPE` error
