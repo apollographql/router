@@ -168,9 +168,8 @@ async fn service_call(
         body.operation_name.clone(),
         context.clone(),
         // We cannot assume that the query is present as it may have been modified by coprocessors or plugins.
-        // There is a deeper issue here in that query analysis is doing a bunch of stuff that it should not and
-        // places the results in context. Therefore plugins that have modified the query won't actually take effect.
-        // However, this can't be resolved before looking at the pipeline again.
+        // If it was modified, CachingQueryPlanner::plan() re-parses it instead of reusing the
+        // (now stale) ParsedDocument that query analysis stashed in context before plugins ran.
         req.supergraph_request
             .body()
             .query

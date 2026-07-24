@@ -51,6 +51,7 @@ use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::query_planner;
 use crate::services::query_planner::PlanOptions;
+use crate::spec::Query;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SchemaHash;
@@ -128,6 +129,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     config_mode_hash: Arc<ConfigModeHash>,
     cooperative_cancellation: CooperativeCancellation,
     config_limits: limits::RouterLimitsConfig,
+    configuration: Arc<Configuration>,
 }
 
 fn init_query_plan_from_redis(
@@ -191,6 +193,7 @@ where
             cooperative_cancellation,
             config_mode_hash,
             config_limits: configuration.limits.router.clone(),
+            configuration: Arc::new(configuration.clone()),
         })
     }
 
@@ -544,6 +547,35 @@ where
                 )));
             }
             Some(d) => d.clone(),
+        };
+
+        // The ParsedDocument in context was produced by query analysis before coprocessors/plugins
+        // ran, so it can be stale if they modified the query string. Re-parse when the query no
+        // longer matches what was analyzed, so planning uses the actual (possibly modified) query.
+        // If re-parsing fails, fall back to the original document rather than failing the request:
+        // that matches prior behavior from when staleness wasn't detected at all.
+        let doc = if self
+            .schema
+            .schema_id
+            .operation_hash(&request.query, request.operation_name.as_deref())
+            == *doc.hash
+        {
+            doc
+        } else {
+            Query::parse_document(
+                &request.query,
+                request.operation_name.as_deref(),
+                &self.schema,
+                &self.configuration,
+            )
+            .unwrap_or_else(|e| {
+                tracing::debug!(
+                    error = %e,
+                    "failed to re-parse query that differs from the cached parsed document; \
+                     using the cached document instead",
+                );
+                doc
+            })
         };
 
         let metadata = request
@@ -1287,6 +1319,68 @@ mod tests {
                 ))
                 .await
                 .is_err()
+        );
+    }
+
+    /// Regression test: query analysis parses the query into a `ParsedDocument` and stashes it
+    /// in context *before* coprocessors/plugins run, so that document goes stale if a
+    /// coprocessor/plugin rewrites the query string afterwards. Planning must detect the
+    /// mismatch and re-parse, so it operates on the actual (possibly modified) query rather than
+    /// silently ignoring the modification.
+    #[test(tokio::test)]
+    async fn test_plan_reparses_when_query_differs_from_stale_context_document() {
+        let configuration = Arc::new(Configuration::default());
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+
+        // Simulate query analysis having parsed the *original* query before a coprocessor
+        // rewrote it to the "modified" query below.
+        let stale_doc = Query::parse_document(
+            "query Me { me { username } }",
+            None,
+            &schema,
+            &configuration,
+        )
+        .unwrap();
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(stale_doc));
+
+        let modified_query = "query Me { me { name { first } } }".to_string();
+
+        let mut delegate = MockMyQueryPlanner::new();
+        delegate.expect_clone().times(1).returning(move || {
+            let mut planner = MockMyQueryPlanner::new();
+            planner
+                .expect_sync_call()
+                .times(1)
+                // The document handed to the inner query planner must reflect the modified
+                // query (which selects `first`), not the stale one query analysis parsed into
+                // context (which selected `username`).
+                .withf(|req: &QueryPlannerRequest| {
+                    let ast = req.document.ast.to_string();
+                    ast.contains("first") && !ast.contains("username")
+                })
+                .returning(|_| ok_plan_response());
+            planner
+        });
+
+        let mut planner = new_caching_planner(delegate, schema, &configuration).await;
+
+        let result = planner
+            .call(query_planner::CachingRequest::new(
+                modified_query,
+                None,
+                context,
+                Default::default(),
+            ))
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "expected planning to succeed using the modified query, got error: {:?}",
+            result.err()
         );
     }
 
