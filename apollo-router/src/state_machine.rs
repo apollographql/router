@@ -899,7 +899,7 @@ where
 
     pub(crate) async fn process_events(
         mut self,
-        mut messages: impl Stream<Item = Event> + Unpin,
+        messages: impl Stream<Item = Event> + Unpin,
     ) -> Result<(), ApolloRouterError> {
         tracing::debug!("starting");
         // The listen address guard is transferred to the startup state. It will get consumed when moving to running.
@@ -912,6 +912,11 @@ where
                 .take()
                 .expect("must have listen address guard"),
         };
+
+        // `peek` lets us inspect the next already-queued event without consuming
+        // it, so a run of input events can be coalesced without buffering them —
+        // only the single peeked event is ever held.
+        let mut messages = messages.peekable();
 
         // Process events and retry-timer ticks until we reach a terminal state or
         // run out of events.
@@ -929,79 +934,54 @@ where
 
                 event = messages.next() => {
                     let Some(event) = event else { break };
-                    // Drain any events already queued in the channel so a burst of
-                    // publishes coalesces into a single reload of the newest merged
-                    // target, instead of building each obsolete intermediate.
-                    let mut batch = vec![event];
-                    let mut stream_ended = false;
-                    loop {
-                        match messages.next().now_or_never() {
-                            Some(Some(event)) => batch.push(event),
-                            // Stream closed: finish this batch, then exit the loop.
-                            Some(None) => {
-                                stream_ended = true;
-                                break;
-                            }
-                            // Nothing more ready right now.
-                            None => break,
+                    let current_is_input = is_input_event(&event);
+                    let event_name = event.to_string();
+                    let previous_state = format!("{state:?}");
+
+                    state = match event {
+                        UpdateConfiguration(configuration) => {
+                            state.accumulate_inputs(None, Some(configuration), None, false)
                         }
-                    }
-
-                    let is_input: Vec<bool> = batch.iter().map(is_input_event).collect();
-                    let mut coalesced: u64 = 0;
-                    let mut terminal = false;
-                    for (i, event) in batch.into_iter().enumerate() {
-                        // Coalesce only runs of consecutive input events; a control
-                        // event (Shutdown / NoMore*) is always a reload boundary.
-                        let coalesce_with_next =
-                            is_input[i] && is_input.get(i + 1).copied().unwrap_or(false);
-                        let event_name = event.to_string();
-                        let previous_state = format!("{state:?}");
-
-                        state = match event {
-                            UpdateConfiguration(configuration) => {
-                                state.accumulate_inputs(None, Some(configuration), None, false)
-                            }
-                            NoMoreConfiguration => state.no_more_configuration().await,
-                            UpdateSchema(schema) => {
-                                state.accumulate_inputs(Some(Arc::new(schema)), None, None, false)
-                            }
-                            NoMoreSchema => state.no_more_schema().await,
-                            UpdateLicense(license) => {
-                                state.accumulate_inputs(None, None, Some(license), false)
-                            }
-                            Reload => state.accumulate_inputs(None, None, None, false),
-                            RhaiReload => state.accumulate_inputs(None, None, None, true),
-                            NoMoreLicense => state.no_more_license().await,
-                            Shutdown => state.shutdown().await,
-                        };
-
-                        if coalesce_with_next {
-                            // A later input supersedes this one; skip building it.
-                            coalesced += 1;
-                        } else {
-                            state = state.attempt_reload(&mut self).await;
+                        NoMoreConfiguration => state.no_more_configuration().await,
+                        UpdateSchema(schema) => {
+                            state.accumulate_inputs(Some(Arc::new(schema)), None, None, false)
                         }
-
-                        self.record_transition(event_name, previous_state, &state);
-
-                        // If we've errored then exit even if there are more messages.
-                        if matches!(&state, Stopped | Errored(_)) {
-                            terminal = true;
-                            break;
+                        NoMoreSchema => state.no_more_schema().await,
+                        UpdateLicense(license) => {
+                            state.accumulate_inputs(None, None, Some(license), false)
                         }
-                    }
+                        Reload => state.accumulate_inputs(None, None, None, false),
+                        RhaiReload => state.accumulate_inputs(None, None, None, true),
+                        NoMoreLicense => state.no_more_license().await,
+                        Shutdown => state.shutdown().await,
+                    };
 
-                    if coalesced > 0 {
+                    // Coalesce: if this was an input event and another input event is
+                    // already queued right behind it, skip the reload — the next event
+                    // will supersede this target. A control event (Shutdown / NoMore*)
+                    // or an empty queue is always a reload boundary.
+                    let coalesce_with_next = current_is_input
+                        && matches!(
+                            std::pin::Pin::new(&mut messages).peek().now_or_never(),
+                            Some(Some(next)) if is_input_event(next)
+                        );
+
+                    if coalesce_with_next {
+                        // A queued input supersedes this target; skip building it.
                         u64_counter_with_unit!(
                             "apollo.router.state.reload.coalesced",
-                            "Number of intermediate reload targets skipped by coalescing a queued burst of updates",
+                            "Number of intermediate reload targets skipped by coalescing queued updates",
                             "{update}",
-                            coalesced
+                            1u64
                         );
+                    } else {
+                        state = state.attempt_reload(&mut self).await;
                     }
 
-                    if terminal || stream_ended {
+                    self.record_transition(event_name, previous_state, &state);
+
+                    // If we've errored then exit even if there are more messages.
+                    if matches!(&state, Stopped | Errored(_)) {
                         break;
                     }
                 }
