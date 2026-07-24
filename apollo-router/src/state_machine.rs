@@ -2367,6 +2367,47 @@ mod tests {
         .await;
     }
 
+    // Coalescing must apply the NEWEST value of each input, not an intermediate.
+    // Two configs are queued; only the newest (homepage enabled) may reach create().
+    #[test(tokio::test)]
+    async fn coalesced_burst_applies_newest_input() {
+        let mut router_factory = MockMyRouterConfigurator::new();
+        router_factory
+            .expect_create()
+            .times(1)
+            .withf(|_, configuration, _, _, _, _| configuration.homepage.enabled)
+            .returning(|_, _, _, _, _, _| {
+                let mut router = MockMyRouterFactory::new();
+                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_web_endpoints().returning(MultiMap::new);
+                Ok(router)
+            });
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+        assert_matches!(
+            execute_burst(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    // Intermediate config (homepage disabled) — coalesced away.
+                    UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
+                    UpdateSchema(example_schema()),
+                    UpdateLicense(Default::default()),
+                    // Newest config (homepage enabled) — the one that must be built.
+                    UpdateConfiguration(Arc::new(
+                        Configuration::builder()
+                            .homepage(Homepage::builder().enabled(true).build())
+                            .build()
+                            .unwrap()
+                    )),
+                    Shutdown,
+                ])
+            )
+            .await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 1);
+    }
+
     #[test(tokio::test)]
     async fn state_change_metrics() {
         let router_factory = create_mock_router_configurator(2);
