@@ -381,10 +381,7 @@ mod tests {
             .ready()
             .await
             .unwrap()
-            .call(Request {
-                query: QUERY.to_string(),
-                operation_name: None,
-            })
+            .call(Request::new(QUERY.to_string(), None))
             .await
             .unwrap();
 
@@ -413,10 +410,7 @@ mod tests {
             .ready()
             .await
             .unwrap()
-            .call(Request {
-                query: QUERY.to_string(),
-                operation_name: None,
-            })
+            .call(Request::new(QUERY.to_string(), None))
             .await
             .expect_err("should exceed the recursive selections limit");
         assert!(matches!(
@@ -447,10 +441,7 @@ mod tests {
             .ready()
             .await
             .unwrap()
-            .call(Request {
-                query: QUERY.to_string(),
-                operation_name: None,
-            })
+            .call(Request::new(QUERY.to_string(), None))
             .await
             .unwrap();
 

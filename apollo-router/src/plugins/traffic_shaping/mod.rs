@@ -700,7 +700,6 @@ mod test {
     use crate::services::SupergraphRequest;
     use crate::services::connector::request_service::Request as ConnectorRequest;
     use crate::services::layers::persisted_queries::PersistedQueryExpander;
-    use crate::services::layers::query_analysis::QueryAnalysis;
     use crate::services::router;
     use crate::services::router::service::RouterCreator;
     use crate::spec::Schema;
@@ -791,19 +790,21 @@ mod test {
 
         let config = Arc::new(config);
         let schema = Arc::new(Schema::parse(schema, &config).unwrap());
-        let query_analysis = Arc::new(QueryAnalysis::new(schema.clone(), config.clone()).await);
 
         let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
         let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
-        let planner = QueryPlannerService::new(schema.clone(), config.clone(), qp_arc)
-            .unwrap()
-            .boxed_clone();
+        let query_planner_service =
+            QueryPlannerService::new(schema.clone(), config.clone(), qp_arc)
+                .unwrap()
+                .boxed_clone();
+
+        let query_parser_service =
+            crate::services::query_parsing::query_parsing_service(schema.clone(), config.clone());
 
         let mut builder = PluggableSupergraphServiceBuilder::new(
-            planner,
+            query_planner_service,
             schema.clone(),
             subgraph_schemas.clone(),
-            query_analysis.clone(),
         )
         .with_configuration(config.clone());
 
@@ -827,16 +828,13 @@ mod test {
             .with_subgraph_service("reviews", review_service.boxed_clone())
             .with_subgraph_service("products", product_service.boxed_clone());
 
-        let (supergraph_creator, _warmup) = builder.build().await.expect("should build");
+        let (supergraph_creator, _planner) = builder.build().await.expect("should build");
 
         RouterCreator::new(
-            Arc::new(
-                PersistedQueryExpander::new(&Default::default())
-                    .await
-                    .unwrap(),
-            ),
+            Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
-            Arc::new(Configuration::default()),
+            query_parser_service,
+            config,
         )
         .await
         .unwrap()

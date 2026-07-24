@@ -128,10 +128,7 @@ where
                 .expect("query presence was already checked");
 
             match query_parsing_service
-                .call(query_parsing::Request {
-                    query,
-                    operation_name: operation_name.clone(),
-                })
+                .call(query_parsing::Request::new(query, operation_name.clone()))
                 .await
             {
                 Ok(doc) => {

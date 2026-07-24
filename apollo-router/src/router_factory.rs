@@ -13,6 +13,7 @@ use rustls::pki_types::CertificateDer;
 use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::service_fn;
 use tracing::Instrument;
@@ -41,7 +42,8 @@ use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
-use crate::services::layers::query_analysis::QueryAnalysis;
+use crate::services::query_parsing;
+use crate::services::query_planner;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::router::service::RouterCreator;
@@ -266,16 +268,14 @@ impl YamlRouterFactory {
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: Arc<LicenseState>,
     ) -> Result<RouterCreator, BoxError> {
-        // Instantiate the parser here so we can use it to warm up the planner below
-        let query_analysis =
-            Arc::new(QueryAnalysis::new(schema.clone(), configuration.clone()).await);
         let persisted_queries = Arc::new(PersistedQueryExpander::new(&configuration).await?);
+        let query_parsing_service =
+            query_parsing::query_parsing_service(schema.clone(), configuration.clone());
 
-        let (supergraph_creator, warmup) = self
+        let (supergraph_creator, query_planner_service) = self
             .inner_create_supergraph(
                 configuration.clone(),
                 schema,
-                query_analysis.clone(),
                 initial_telemetry_plugin,
                 extra_plugins,
                 license,
@@ -283,8 +283,17 @@ impl YamlRouterFactory {
             )
             .await?;
 
+        let warmup_query_planner_service = ServiceBuilder::new()
+            .layer(warmup::WarmupParseQueryLayer::new(
+                query_parsing_service.clone(),
+            ))
+            .map_response(drop) // Ignore response
+            .service(query_planner_service)
+            .boxed_clone();
+
+        // TODO(@goto-bus-stop): this can now probably just be inlined here
         SupergraphCreator::warm_up_query_planner(
-            warmup,
+            warmup_query_planner_service,
             &persisted_queries,
             previous_router.map(|previous| previous.previous_cache()),
             configuration.supergraph.query_planning.warmed_up_queries,
@@ -297,6 +306,7 @@ impl YamlRouterFactory {
         RouterCreator::new(
             persisted_queries,
             Arc::new(supergraph_creator),
+            query_parsing_service,
             configuration,
         )
         .await
@@ -307,12 +317,11 @@ impl YamlRouterFactory {
         &mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        query_analysis: Arc<QueryAnalysis>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: Arc<LicenseState>,
         previous_router: Option<&crate::services::router::service::RouterCreator>,
-    ) -> Result<(SupergraphCreator, warmup::BoxCloneService), BoxError> {
+    ) -> Result<(SupergraphCreator, query_planner::CacheBoxCloneService), BoxError> {
         let (query_planner_service, subgraph_schemas) = {
             let _span = tracing::info_span!("query_planner_creation").entered();
 
@@ -348,7 +357,6 @@ impl YamlRouterFactory {
                 query_planner_service,
                 schema.clone(),
                 subgraph_schemas,
-                query_analysis,
             );
             builder = builder.with_configuration(configuration.clone());
             let (http_service_factory, connector_http_service_factory) =

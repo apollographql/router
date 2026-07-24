@@ -5,7 +5,6 @@ use tracing::Instrument as _;
 
 use crate::Configuration;
 use crate::compute_job;
-use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
 use crate::plugins::telemetry::consts::QUERY_PARSING_SPAN_NAME;
 use crate::services::layers::query_analysis::ParsedDocument;
@@ -50,7 +49,7 @@ impl tower::Service<Request> for QueryParsingService {
             // Must be created *outside* of the compute_job or the span is not connected to the parent
             let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
             let compute_job_future = span.in_scope(|| {
-                compute_job::execute(ComputeJobType::QueryParsing, move |_| {
+                compute_job::execute(req.compute_job_type, move |_| {
                     Query::parse_document(
                         &req.query,
                         req.operation_name.as_deref(),

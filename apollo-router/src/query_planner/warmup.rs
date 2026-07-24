@@ -6,6 +6,7 @@ use tower::ServiceExt as _;
 
 use crate::Context;
 use crate::compute_job::ComputeJobType;
+use crate::compute_job::MaybeBackPressureError;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::error::CacheResolverError;
 use crate::plugins::authorization;
@@ -14,7 +15,7 @@ use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::InMemoryQueryPlanCache;
 use crate::services::CachingRequest;
 use crate::services::PlanOptions;
-use crate::services::layers::query_analysis::QueryAnalysis;
+use crate::services::query_parsing;
 
 pub(crate) type BoxCloneService =
     tower::util::BoxCloneService<WarmupRequest, (), CacheResolverError>;
@@ -39,12 +40,14 @@ pub(crate) struct WarmupRequest {
 /// different request/response type.
 #[derive(Clone)]
 pub(crate) struct WarmupParseQueryLayer {
-    query_analysis: Arc<QueryAnalysis>,
+    query_parsing_service: query_parsing::BoxCloneService,
 }
 
 impl WarmupParseQueryLayer {
-    pub(crate) fn new(query_analysis: Arc<QueryAnalysis>) -> Self {
-        Self { query_analysis }
+    pub(crate) fn new(query_parsing_service: query_parsing::BoxCloneService) -> Self {
+        Self {
+            query_parsing_service,
+        }
     }
 }
 
@@ -53,7 +56,7 @@ impl<S> tower::Layer<S> for WarmupParseQueryLayer {
 
     fn layer(&self, inner: S) -> Self::Service {
         WarmupParseQueryService {
-            query_analysis: self.query_analysis.clone(),
+            query_parsing_service: self.query_parsing_service.clone(),
             inner,
         }
     }
@@ -61,7 +64,7 @@ impl<S> tower::Layer<S> for WarmupParseQueryLayer {
 
 #[derive(Clone)]
 pub(crate) struct WarmupParseQueryService<S> {
-    query_analysis: Arc<QueryAnalysis>,
+    query_parsing_service: query_parsing::BoxCloneService,
     inner: S,
 }
 
@@ -78,31 +81,36 @@ where
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::ready!(self.query_parsing_service.poll_ready(cx)).map_err(|err| match err {
+            MaybeBackPressureError::PermanentError(err) => {
+                CacheResolverError::RetrievalError(Arc::new(err.into()))
+            }
+            MaybeBackPressureError::TemporaryError(err) => CacheResolverError::Backpressure(err),
+        })?;
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, req: WarmupRequest) -> Self::Future {
-        let query_analysis = self.query_analysis.clone();
+        let query_parsing_service = self.query_parsing_service.clone();
+        let mut query_parsing_service =
+            std::mem::replace(&mut self.query_parsing_service, query_parsing_service);
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
 
         Box::pin(async move {
-            // XXX(@goto-bus-stop): we don't cache query parsing,
-            // which would be a nice to have
-            let result = query_analysis
-                .parse_document(
-                    &req.query,
-                    req.operation_name.as_deref(),
-                    ComputeJobType::QueryParsingWarmup,
-                )
+            let result = query_parsing_service
+                .call(query_parsing::Request::new_warmup(
+                    req.query.clone(),
+                    req.operation_name.clone(),
+                ))
                 .await;
 
             let document = match result {
                 Ok(document) => document,
-                Err(crate::compute_job::MaybeBackPressureError::PermanentError(err)) => {
+                Err(MaybeBackPressureError::PermanentError(err)) => {
                     return Err(CacheResolverError::RetrievalError(Arc::new(err.into())));
                 }
-                Err(crate::compute_job::MaybeBackPressureError::TemporaryError(err)) => {
+                Err(MaybeBackPressureError::TemporaryError(err)) => {
                     return Err(CacheResolverError::Backpressure(err));
                 }
             };
@@ -245,7 +253,7 @@ mod tests {
     use crate::services::CachingRequest;
     use crate::services::QueryPlannerContent;
     use crate::services::layers::query_analysis::ParsedDocument;
-    use crate::services::layers::query_analysis::QueryAnalysis;
+    use crate::services::query_parsing;
     use crate::spec::Schema;
     use crate::spec::SchemaHash;
 
@@ -412,10 +420,10 @@ mod tests {
             Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
         );
 
-        let query_analysis = Arc::new(QueryAnalysis::new(schema, configuration).await);
+        let query_parsing_service = query_parsing::query_parsing_service(schema, configuration);
 
         let mut service = ServiceBuilder::new()
-            .layer(WarmupParseQueryLayer::new(query_analysis))
+            .layer(WarmupParseQueryLayer::new(query_parsing_service))
             .map_err(|err| {
                 panic!(
                     "we have to cast the error because these services do not use BoxError: {err}"

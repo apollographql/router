@@ -33,6 +33,7 @@ use crate::services::SupergraphCreator;
 use crate::services::execution;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::layers::query_analysis::QueryAnalysis;
+use crate::services::query_parsing;
 use crate::services::router;
 use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
@@ -345,7 +346,6 @@ impl<'a> TestHarness<'a> {
             .inner_create_supergraph(
                 config.clone(),
                 schema.clone(),
-                query_analysis.clone(),
                 None,
                 Some(self.extra_plugins),
                 license,
@@ -395,10 +395,14 @@ impl<'a> TestHarness<'a> {
 
     /// Builds the router service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
-        let (config, _schema, _query_analysis, supergraph_creator) = self.build_common().await?;
+        let (config, schema, _query_analysis, supergraph_creator) = self.build_common().await?;
+
+        let query_parsing_service = query_parsing::query_parsing_service(schema, config.clone());
+
         let router_creator = RouterCreator::new(
             Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
+            query_parsing_service,
             config.clone(),
         )
         .await
@@ -422,10 +426,14 @@ impl<'a> TestHarness<'a> {
         use crate::axum_factory::ListenAddrAndRouter;
         use crate::axum_factory::axum_http_server_factory::make_axum_router;
 
-        let (config, _schema, _query_analysis, supergraph_creator) = self.build_common().await?;
+        let (config, schema, _query_analysis, supergraph_creator) = self.build_common().await?;
+
+        let query_parsing_service = query_parsing::query_parsing_service(schema, config.clone());
+
         let router_creator = RouterCreator::new(
             Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
+            query_parsing_service,
             config.clone(),
         )
         .await?;

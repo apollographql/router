@@ -3841,7 +3841,6 @@ async fn test_cache_warmup() {
     use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerResponse;
     use crate::services::layers::persisted_queries::PersistedQueryExpander;
-    use crate::services::layers::query_analysis::QueryAnalysis;
     use crate::services::query_planner;
     use crate::services::supergraph::service::SupergraphCreator;
 
@@ -3855,8 +3854,7 @@ async fn test_cache_warmup() {
     );
 
     // We have to do a bunch of setup here...
-    let query_analysis =
-        Arc::new(QueryAnalysis::new(schema.clone(), Arc::new(configuration.clone())).await);
+    // XXX(@goto-bus-stop): we should probably just use the RouterService at this point?
     let query_parsing_service = crate::services::query_parsing::query_parsing_service(
         schema.clone(),
         Arc::new(configuration.clone()),
@@ -3914,7 +3912,6 @@ async fn test_cache_warmup() {
             .boxed_clone(),
         schema.clone(),
         Arc::new(Default::default()),
-        query_analysis.clone(),
     )
     .build()
     .await
@@ -3952,16 +3949,23 @@ async fn test_cache_warmup() {
         did_plan_2.store(true, std::sync::atomic::Ordering::Relaxed);
     });
 
-    let (supergraph_creator, warmup_service) = PluggableSupergraphServiceBuilder::new(
+    let (supergraph_creator, query_planner_service) = PluggableSupergraphServiceBuilder::new(
         mock.map_err(|err| panic!("mock driver failed: {err}"))
             .boxed_clone(),
         schema.clone(),
         Arc::new(Default::default()),
-        query_analysis.clone(),
     )
     .build()
     .await
     .unwrap();
+
+    let warmup_service = ServiceBuilder::new()
+        .layer(crate::query_planner::warmup::WarmupParseQueryLayer::new(
+            query_parsing_service.clone(),
+        ))
+        .map_response(drop) // Ignore response
+        .service(query_planner_service)
+        .boxed_clone();
 
     SupergraphCreator::warm_up_query_planner(
         warmup_service,

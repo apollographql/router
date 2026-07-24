@@ -176,9 +176,15 @@ pub(crate) async fn from_supergraph_mock_with_configuration(
         .await
         .unwrap();
 
+    let query_parsing_service = crate::services::query_parsing::query_parsing_service(
+        supergraph_creator.schema(),
+        configuration.clone(),
+    );
+
     RouterCreator::new(
         Arc::new(PersistedQueryExpander::new(&configuration).await.unwrap()),
         Arc::new(supergraph_creator),
+        query_parsing_service,
         configuration,
     )
     .await
@@ -210,21 +216,24 @@ pub(crate) async fn empty() -> impl Service<
     // to be called. Any call would block indefinitely.
     let (mock, _handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
+    let configuration = Arc::new(Configuration::default());
     let (_, _, _query_analysis, supergraph_creator) = crate::TestHarness::builder()
-        .configuration(Default::default())
+        .configuration(configuration.clone())
         .supergraph_hook(move |_| mock.clone().boxed_clone())
         .build_common()
         .await
         .unwrap();
 
+    let query_parsing_service = crate::services::query_parsing::query_parsing_service(
+        supergraph_creator.schema(),
+        configuration.clone(),
+    );
+
     RouterCreator::new(
-        Arc::new(
-            PersistedQueryExpander::new(&Default::default())
-                .await
-                .unwrap(),
-        ),
+        Arc::new(PersistedQueryExpander::new(&configuration).await.unwrap()),
         Arc::new(supergraph_creator),
-        Arc::new(Configuration::default()),
+        query_parsing_service,
+        configuration,
     )
     .await
     .unwrap()
@@ -694,13 +703,10 @@ impl RouterCreator {
     pub(crate) async fn new(
         persisted_queries: Arc<PersistedQueryExpander>,
         supergraph_creator: Arc<SupergraphCreator>,
+        query_parsing_service: query_parsing::BoxCloneService,
         configuration: Arc<Configuration>,
     ) -> Result<Self, BoxError> {
         let static_page = StaticPageLayer::new(&configuration);
-        let query_parsing_service = query_parsing::query_parsing_service(
-            supergraph_creator.schema(),
-            configuration.clone(),
-        );
         let apq_expander = if configuration.apq.enabled {
             APQExpander::with_cache(
                 DeduplicatingCache::from_configuration(&configuration.apq.router.cache, "APQ")

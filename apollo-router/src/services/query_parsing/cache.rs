@@ -158,10 +158,7 @@ mod tests {
             .layer(QueryParsingCacheLayer::new(NonZeroUsize::new(10).unwrap()))
             .service(mock);
 
-        let req = Request {
-            query: "query { me { id } }".to_string(),
-            operation_name: None,
-        };
+        let req = Request::new("query { me { id } }".to_string(), None);
 
         let driver = tokio::spawn(async move {
             let (req, responder) = handle.next_request().await.unwrap();
@@ -211,20 +208,17 @@ mod tests {
             .ready()
             .await
             .unwrap()
-            .call(Request {
-                query: "query { me { id } }".to_string(),
-                operation_name: None,
-            })
+            .call(Request::new("query { me { id } }".to_string(), None))
             .await
             .unwrap();
         let b = service
             .ready()
             .await
             .unwrap()
-            .call(Request {
-                query: "query { topProducts { name } }".to_string(),
-                operation_name: None,
-            })
+            .call(Request::new(
+                "query { topProducts { name } }".to_string(),
+                None,
+            ))
             .await
             .unwrap();
 
@@ -238,10 +232,7 @@ mod tests {
         let mut service = ServiceBuilder::new()
             .layer(QueryParsingCacheLayer::new(NonZeroUsize::new(10).unwrap()))
             .service(mock);
-        let req = Request {
-            query: "query { me { id } }".to_string(),
-            operation_name: None,
-        };
+        let req = Request::new("query { me { id } }".to_string(), None);
 
         let driver = tokio::spawn(async move {
             let (_req, responder) = handle.next_request().await.unwrap();
@@ -282,10 +273,7 @@ mod tests {
         let mut service = ServiceBuilder::new()
             .layer(QueryParsingCacheLayer::new(NonZeroUsize::new(10).unwrap()))
             .service(mock);
-        let req = Request {
-            query: "query { me { id } }".to_string(),
-            operation_name: None,
-        };
+        let req = Request::new("query { me { id } }".to_string(), None);
 
         let driver = tokio::spawn(async move {
             let (_req, responder) = handle.next_request().await.unwrap();
