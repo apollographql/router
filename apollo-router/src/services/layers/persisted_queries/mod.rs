@@ -496,6 +496,9 @@ mod tests {
     use std::time::Duration;
 
     use serde_json::json;
+    use tower::Service as _;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt as _;
     use tracing::instrument::WithSubscriber;
 
     use super::manifest::ManifestOperation;
@@ -510,7 +513,9 @@ mod tests {
     use crate::graphql;
     use crate::metrics::FutureMetricsExt;
     use crate::services::layers::persisted_queries::freeform_graphql_behavior::FreeformGraphQLBehavior;
-    use crate::services::layers::query_analysis::QueryAnalysis;
+    use crate::services::query_parsing;
+    use crate::services::router::parse_query::ParseQueryLayer;
+    use crate::services::supergraph;
     use crate::spec::Schema;
     use crate::test_harness::mocks::persisted_queries::*;
 
@@ -846,57 +851,45 @@ mod tests {
         ))
     }
 
-    async fn run_first_two_layers(
-        pq_layer: &PersistedQueryExpander,
-        query_analysis: &QueryAnalysis,
-        body: &str,
-        skip_enforcement: bool,
-    ) -> SupergraphRequest {
-        let context = Context::new();
-        if skip_enforcement {
-            context
-                .insert(
-                    PERSISTED_QUERIES_SAFELIST_SKIP_ENFORCEMENT_CONTEXT_KEY,
-                    true,
-                )
-                .unwrap();
-        }
-
-        let incoming_request = SupergraphRequest::fake_builder()
-            .query(body)
-            .context(context)
-            .build()
-            .unwrap();
-
-        assert!(incoming_request.supergraph_request.body().query.is_some());
-
-        // The initial hook won't block us --- that waits until after we've parsed
-        // the operation.
-        let updated_request = pq_layer
-            .supergraph_request(incoming_request)
-            .expect("pq layer returned error response instead of returning a request");
-        query_analysis
-            .supergraph_request(updated_request)
-            .await
-            .expect("QA layer returned error response instead of returning a request")
+    /// Set up a tower-test mock with PQ layers around it.
+    fn pq_safelist_mock(
+        pq_layer: Arc<PersistedQueryExpander>,
+        query_parsing_service: query_parsing::BoxCloneService,
+    ) -> (
+        supergraph::BoxCloneService,
+        tower_test::mock::Handle<SupergraphRequest, SupergraphResponse>,
+    ) {
+        let (mock, handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+        let service = ServiceBuilder::new()
+            .layer(ExpandIdsLayer::new(pq_layer.clone()))
+            .layer(ParseQueryLayer::new(query_parsing_service, false))
+            .layer(EnforceSafelistLayer::new(pq_layer))
+            .service(mock)
+            .boxed_clone();
+        (service, handle)
     }
 
     async fn denied_by_safelist(
-        pq_layer: &PersistedQueryExpander,
-        query_analysis: &QueryAnalysis,
+        pq_layer: Arc<PersistedQueryExpander>,
+        query_parsing_service: query_parsing::BoxCloneService,
         body: &str,
         log_unknown: bool,
         counter_value: u64,
     ) {
-        let request_with_analyzed_query =
-            run_first_two_layers(pq_layer, query_analysis, body, false).await;
+        let (mut service, handle) = pq_safelist_mock(pq_layer, query_parsing_service);
 
-        let mut supergraph_response = pq_layer
-            .supergraph_request_with_analyzed_query(request_with_analyzed_query)
+        let incoming_request = SupergraphRequest::fake_builder()
+            .query(body)
+            .build()
+            .unwrap();
+
+        let mut supergraph_response = service
+            .ready()
             .await
-            .expect_err(
-                "pq layer second hook returned request instead of returning an error response",
-            );
+            .unwrap()
+            .call(incoming_request)
+            .await
+            .expect("pq service should not return an error");
         assert_eq!(supergraph_response.response.status(), 403);
         let response = supergraph_response
             .next_response()
@@ -918,23 +911,49 @@ mod tests {
             counter_value,
             &metric_attributes
         );
+
+        // The safelist layer should reject the request before the mock is ever reached.
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     async fn allowed_by_safelist(
-        pq_layer: &PersistedQueryExpander,
-        query_analysis: &QueryAnalysis,
+        pq_layer: Arc<PersistedQueryExpander>,
+        query_parsing_service: query_parsing::BoxCloneService,
         body: &str,
         log_unknown: bool,
         skip_enforcement: bool,
         counter_value: u64,
     ) {
-        let request_with_analyzed_query =
-            run_first_two_layers(pq_layer, query_analysis, body, skip_enforcement).await;
+        let (mut service, mut handle) = pq_safelist_mock(pq_layer, query_parsing_service);
 
-        pq_layer
-            .supergraph_request_with_analyzed_query(request_with_analyzed_query)
+        let context = Context::new();
+        if skip_enforcement {
+            context
+                .insert(
+                    PERSISTED_QUERIES_SAFELIST_SKIP_ENFORCEMENT_CONTEXT_KEY,
+                    true,
+                )
+                .unwrap();
+        }
+        let incoming_request = SupergraphRequest::fake_builder()
+            .query(body)
+            .context(context)
+            .build()
+            .unwrap();
+
+        let driver = tokio::spawn(async move {
+            let (_req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(SupergraphResponse::fake_builder().build().unwrap());
+        });
+
+        service
+            .ready()
             .await
-            .expect("pq layer second hook returned error response instead of returning a request");
+            .unwrap()
+            .call(incoming_request)
+            .await
+            .expect("pq service should not return an error");
+        crate::plugin::test::await_mock_driver(driver).await;
 
         let mut metric_attributes = vec![];
         if skip_enforcement {
@@ -988,16 +1007,16 @@ mod tests {
                 .build()
                 .unwrap();
 
-            let pq_layer = PersistedQueryExpander::new(&config).await.unwrap();
+            let pq_layer = Arc::new(PersistedQueryExpander::new(&config).await.unwrap());
 
             let schema = Arc::new(Schema::parse(include_str!("../../../testdata/supergraph.graphql"), &Default::default()).unwrap());
 
-            let query_analysis = QueryAnalysis::new(schema, Arc::new(config)).await;
+            let query_parsing_service = query_parsing::query_parsing_service(schema, Arc::new(config));
 
             // A random query is blocked.
             denied_by_safelist(
-                &pq_layer,
-                &query_analysis,
+                pq_layer.clone(),
+                query_parsing_service.clone(),
                 "query SomeQuery { me { id } }",
                 log_unknown,
                 1,
@@ -1005,8 +1024,8 @@ mod tests {
 
             // But it is allowed with skip_enforcement set.
             allowed_by_safelist(
-                &pq_layer,
-                &query_analysis,
+                pq_layer.clone(),
+                query_parsing_service.clone(),
                 "query SomeQuery { me { id } }",
                 log_unknown,
                 true,
@@ -1015,8 +1034,8 @@ mod tests {
 
             // The exact string from the manifest is allowed.
             allowed_by_safelist(
-                &pq_layer,
-                &query_analysis,
+                pq_layer.clone(),
+                query_parsing_service.clone(),
                 "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{name,username}  } # yeah",
                 log_unknown,
                 false,
@@ -1026,8 +1045,8 @@ mod tests {
 
             // Reordering definitions and reformatting a bit matches.
             allowed_by_safelist(
-                &pq_layer,
-                &query_analysis,
+                pq_layer.clone(),
+                query_parsing_service.clone(),
                 "#comment\n  fragment, B on Query  , { me{name    username} }    query SomeOp {  ...A ...B }  fragment    \nA on Query { me{ id} }",
                 log_unknown,
                 false,
@@ -1037,8 +1056,8 @@ mod tests {
 
             // Reordering fields does not match!
             denied_by_safelist(
-                &pq_layer,
-                &query_analysis,
+                pq_layer.clone(),
+                query_parsing_service.clone(),
                 "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{username,name}  } # yeah",
                 log_unknown,
                 2,
@@ -1048,8 +1067,8 @@ mod tests {
             // Introspection queries are allowed (even using fragments and aliases), because
             // introspection is enabled.
             allowed_by_safelist(
-                &pq_layer,
-                &query_analysis,
+                pq_layer.clone(),
+                query_parsing_service.clone(),
                 r#"fragment F on Query { __typename foo: __schema { __typename } } query Q { __type(name: "foo") { name } ...F }"#,
                 log_unknown,
                 false,
@@ -1062,8 +1081,8 @@ mod tests {
             // Multiple spreads of the same fragment are also allowed
             // (https://github.com/apollographql/apollo-rs/issues/613)
             allowed_by_safelist(
-                &pq_layer,
-                &query_analysis,
+                pq_layer.clone(),
+                query_parsing_service.clone(),
                 r#"fragment F on Query { __typename foo: __schema { __typename } } query Q { __type(name: "foo") { name } ...F ...F }"#,
                 log_unknown,
                 false,
@@ -1075,8 +1094,8 @@ mod tests {
 
             // But adding any top-level non-introspection field is enough to make it not count as introspection.
             denied_by_safelist(
-                &pq_layer,
-                &query_analysis,
+                pq_layer.clone(),
+                query_parsing_service.clone(),
                 r#"fragment F on Query { __typename foo: __schema { __typename } me { id } } query Q { __type(name: "foo") { name } ...F }"#,
                 log_unknown,
                 3,
