@@ -705,11 +705,11 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::atomic::AtomicUsize;
     use std::time::Duration;
 
     #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     use bytesize::ByteSize;
-    use mockall::mock;
     use parking_lot::Mutex;
     use test_log::test;
     use tower::Service;
@@ -855,25 +855,23 @@ mod tests {
         }
     }
 
-    mock! {
-        #[derive(Debug)]
-        MyQueryPlanner {
-            fn sync_call(
-                &self,
-                key: QueryPlannerRequest,
-            ) -> Result<QueryPlannerResponse, MaybeBackPressureError<QueryPlannerError>>;
-        }
-
-        impl Clone for MyQueryPlanner {
-            fn clone(&self) -> MockMyQueryPlanner;
-        }
+    // Records the current allocator stats at the moment `call` is invoked. Unlike
+    // tower_test::mock::pair, this runs synchronously within the caller's poll (matching how a
+    // real query planner service does its work directly inside `call`), which is required for
+    // `crate::allocator::current()` to observe the memory-tracked planning task's stats: those
+    // stats live in a thread-local that's only set for the duration of a single poll of the
+    // wrapping `with_memory_tracking` future, and wouldn't be visible from a separately spawned
+    // mock driver task.
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+    #[derive(Clone)]
+    struct AllocationStatsQueryPlanner {
+        recorded_stats: Arc<Mutex<Option<Arc<crate::allocator::AllocationStats>>>>,
     }
 
-    impl Service<QueryPlannerRequest> for MockMyQueryPlanner {
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+    impl Service<QueryPlannerRequest> for AllocationStatsQueryPlanner {
         type Response = QueryPlannerResponse;
-
         type Error = MaybeBackPressureError<QueryPlannerError>;
-
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
         fn poll_ready(
@@ -883,22 +881,37 @@ mod tests {
             task::Poll::Ready(Ok(()))
         }
 
-        fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
-            let res = self.sync_call(req);
-            Box::pin(async move { res })
+        fn call(&mut self, _req: QueryPlannerRequest) -> Self::Future {
+            *self.recorded_stats.lock() = crate::allocator::current();
+            Box::pin(async move {
+                let plan = Arc::new(QueryPlan::fake_new(None, None));
+                Ok(QueryPlannerResponse::builder()
+                    .content(QueryPlannerContent::Plan { plan })
+                    .build())
+            })
         }
+    }
+
+    /// Adapts a `tower_test::mock::Mock`'s boxed error back into the concrete
+    /// `MaybeBackPressureError<QueryPlannerError>` that `CachingQueryPlanner` requires.
+    fn downcast_mock_error(err: BoxError) -> MaybeBackPressureError<QueryPlannerError> {
+        *err.downcast::<MaybeBackPressureError<QueryPlannerError>>()
+            .expect("mock should only ever send MaybeBackPressureError<QueryPlannerError>")
     }
 
     #[test(tokio::test)]
     async fn test_plan() {
-        let mut delegate = MockMyQueryPlanner::new();
-        delegate.expect_clone().returning(|| {
-            let mut planner = MockMyQueryPlanner::new();
-            planner
-                .expect_sync_call()
-                .times(0..2)
-                .returning(|_| Err(QueryPlannerError::UnhandledPlannerResult.into()));
-            planner
+        let (mock, mut handle) =
+            tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let call_count_clone = call_count.clone();
+        let driver = tokio::task::spawn(async move {
+            while let Some((_request, responder)) = handle.next_request().await {
+                call_count_clone.fetch_add(1, Ordering::SeqCst);
+                responder.send_error(MaybeBackPressureError::PermanentError(
+                    QueryPlannerError::UnhandledPlannerResult,
+                ));
+            }
         });
 
         let configuration = Arc::new(crate::Configuration::default());
@@ -906,7 +919,7 @@ mod tests {
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
         let mut planner = CachingQueryPlanner::for_test(
-            delegate,
+            mock.map_err(downcast_mock_error),
             schema.clone(),
             Default::default(),
             &configuration,
@@ -929,18 +942,46 @@ mod tests {
             .extensions()
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc1));
 
-        for _ in 0..5 {
+        let query1 = "query Me { me { username } }".to_string();
+        assert!(
+            planner
+                .call(query_planner::CachingRequest::new(
+                    query1.clone(),
+                    Some("".into()),
+                    context.clone()
+                ))
+                .await
+                .is_err()
+        );
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+
+        // Cache insertion is spawned asynchronously; wait until a follow-up call is
+        // served from cache (delegate call count stops increasing).
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        let mut last_count = call_count.load(Ordering::SeqCst);
+        loop {
             assert!(
                 planner
                     .call(query_planner::CachingRequest::new(
-                        "query Me { me { username } }".to_string(),
+                        query1.clone(),
                         Some("".into()),
                         context.clone()
                     ))
                     .await
                     .is_err()
             );
+            let count = call_count.load(Ordering::SeqCst);
+            if count == last_count {
+                break;
+            }
+            last_count = count;
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "permanent error was not cached (delegate kept being invoked)"
+            );
+            tokio::task::yield_now().await;
         }
+
         let doc2 = Query::parse_document(
             "query Me { me { name { first } } }",
             None,
@@ -954,6 +995,7 @@ mod tests {
             .extensions()
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc2));
 
+        let cached_count = call_count.load(Ordering::SeqCst);
         assert!(
             planner
                 .call(query_planner::CachingRequest::new(
@@ -964,6 +1006,14 @@ mod tests {
                 .await
                 .is_err()
         );
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            cached_count + 1,
+            "a different query must miss the cache and invoke the delegate"
+        );
+
+        drop(planner);
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[test(tokio::test)]
@@ -1706,23 +1756,9 @@ mod tests {
             let planning_task_stats: Arc<Mutex<Option<Arc<AllocationStats>>>> =
                 Arc::new(Mutex::new(None));
 
-            let planning_task_stats_delegate = planning_task_stats.clone();
-
-            let mut delegate = MockMyQueryPlanner::new();
-            delegate.expect_clone().returning(move || {
-                let mut planner = MockMyQueryPlanner::new();
-                let planning_task_stats_clone = planning_task_stats_delegate.clone();
-
-                planner.expect_sync_call().times(0..2).returning(move |_| {
-                    let plan = Arc::new(QueryPlan::fake_new(None, None));
-                    *planning_task_stats_clone.lock() = crate::allocator::current();
-
-                    Ok(QueryPlannerResponse::builder()
-                        .content(QueryPlannerContent::Plan { plan })
-                        .build())
-                });
-                planner
-            });
+            let delegate = AllocationStatsQueryPlanner {
+                recorded_stats: planning_task_stats.clone(),
+            };
 
             let mut planner = CachingQueryPlanner::for_test(
                 delegate,
@@ -1773,25 +1809,24 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_usage_reporting() {
-        let mut delegate = MockMyQueryPlanner::new();
-        delegate.expect_clone().returning(|| {
-            let mut planner = MockMyQueryPlanner::new();
-            planner.expect_sync_call().times(0..2).returning(|_| {
-                let query_plan: QueryPlan = QueryPlan {
-                    formatted_query_plan: Default::default(),
-                    root: serde_json::from_str(test_query_plan!()).unwrap(),
-                    usage_reporting: UsageReporting::Error("this is a test report key".to_string())
-                        .into(),
-                    query: Arc::new(Query::empty_for_tests()),
-                    estimated_size: Default::default(),
-                };
-                let qp_content = QueryPlannerContent::Plan {
-                    plan: Arc::new(query_plan),
-                };
+        let (mock, mut handle) =
+            tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
+        let driver = tokio::task::spawn(async move {
+            let query_plan: QueryPlan = QueryPlan {
+                formatted_query_plan: Default::default(),
+                root: serde_json::from_str(test_query_plan!()).unwrap(),
+                usage_reporting: UsageReporting::Error("this is a test report key".to_string())
+                    .into(),
+                query: Arc::new(Query::empty_for_tests()),
+                estimated_size: Default::default(),
+            };
+            let plan = Arc::new(query_plan);
 
-                Ok(QueryPlannerResponse::builder().content(qp_content).build())
-            });
-            planner
+            while let Some((_request, responder)) = handle.next_request().await {
+                let qp_content = QueryPlannerContent::Plan { plan: plan.clone() };
+                responder
+                    .send_response(QueryPlannerResponse::builder().content(qp_content).build());
+            }
         });
 
         let configuration = Configuration::default();
@@ -1808,7 +1843,7 @@ mod tests {
         .unwrap();
 
         let mut planner = CachingQueryPlanner::for_test(
-            delegate,
+            mock.map_err(downcast_mock_error),
             Arc::new(schema),
             Default::default(),
             &configuration,
@@ -1836,6 +1871,9 @@ mod tests {
                     .with_lock(|lock| lock.contains_key::<Arc<UsageReporting>>())
             );
         }
+
+        drop(planner);
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     // Expect that if we call the CQP twice, the second call will return cached data
@@ -1906,28 +1944,22 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_temporary_errors_arent_cached() {
-        let mut delegate = MockMyQueryPlanner::new();
-        delegate
-            .expect_clone()
-            // We're calling the caching QP twice, so we expect the delegate to be cloned twice
-            .times(2)
-            .returning(|| {
-                // Expect each clone to be called once since the return value isn't cached
-                let mut planner = MockMyQueryPlanner::new();
-                planner.expect_sync_call().times(1).returning(|_| {
-                    Err(MaybeBackPressureError::TemporaryError(
-                        ComputeBackPressureError,
-                    ))
-                });
-                planner
-            });
+        let (mock, mut handle) =
+            tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
+        let driver = tokio::task::spawn(async move {
+            while let Some((_request, responder)) = handle.next_request().await {
+                responder.send_error(MaybeBackPressureError::<QueryPlannerError>::TemporaryError(
+                    ComputeBackPressureError,
+                ));
+            }
+        });
 
         let configuration = Default::default();
         let schema = include_str!("../testdata/starstuff@current.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
         let mut planner = CachingQueryPlanner::for_test(
-            delegate,
+            mock.map_err(downcast_mock_error),
             schema.clone(),
             Default::default(),
             &configuration,
@@ -1985,5 +2017,8 @@ mod tests {
         } else {
             panic!("Expected both calls to return same error");
         }
+
+        drop(planner);
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 }
