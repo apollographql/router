@@ -19,6 +19,7 @@ use crate::spec::Schema;
 use crate::spec::TYPENAME;
 use crate::spec::query::transform;
 use crate::spec::query::transform::TransformState;
+use crate::spec::query::transform::Visitor as _;
 use crate::spec::query::traverse;
 
 pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: Name = name!("authenticated");
@@ -323,6 +324,153 @@ impl<'a> AuthenticatedVisitor<'a> {
         }
         false
     }
+
+    fn field_impl(
+        &mut self,
+        parent_type: &str,
+        field_def: &ast::FieldDefinition,
+        node: &ast::Field,
+    ) -> Result<Option<ast::Field>, BoxError> {
+        let field_name = &node.name;
+        let is_field_list = field_def.ty.is_list();
+
+        self.current_path
+            .push(PathElement::Key(field_name.as_str().into(), None));
+        if is_field_list {
+            self.current_path.push(PathElement::Flatten(None));
+        }
+
+        let res = if self.bypass_authorization {
+            transform::field(self, field_def, node)
+        } else {
+            let field_requires_authentication = self.is_field_authenticated(field_def);
+
+            let implementors_with_authenticated_requirements =
+                self.implementors_with_authenticated_requirements(field_def, node);
+
+            let implementors_with_authenticated_field_requirements =
+                self.implementors_with_authenticated_field_requirements(parent_type, node);
+
+            if field_requires_authentication
+                || implementors_with_authenticated_requirements
+                || implementors_with_authenticated_field_requirements
+            {
+                self.unauthorized_paths.push(self.current_path.clone());
+                self.query_requires_authentication = true;
+
+                if self.dry_run {
+                    transform::field(self, field_def, node)
+                } else {
+                    Ok(None)
+                }
+            } else {
+                transform::field(self, field_def, node)
+            }
+        };
+
+        if is_field_list {
+            self.current_path.pop();
+        }
+        self.current_path.pop();
+
+        res
+    }
+
+    fn fragment_spread_impl(
+        &mut self,
+        node: &ast::FragmentSpread,
+    ) -> Result<Option<ast::FragmentSpread>, BoxError> {
+        if !self.bypass_authorization {
+            // record the fragment errors at the point of application
+            if let Some(paths) = self
+                .fragments_unauthorized_paths
+                .get(node.fragment_name.as_str())
+            {
+                for path in paths {
+                    let path = self.current_path.join(path);
+                    self.unauthorized_paths.push(path);
+                }
+            }
+        }
+
+        let condition = match self
+            .state()
+            .fragments()
+            .get(node.fragment_name.as_str())
+            .map(|fragment| fragment.fragment.type_condition.clone())
+        {
+            Some(condition) => condition,
+            None => return Ok(None),
+        };
+
+        let fragment_requires_authentication = !self.bypass_authorization
+            && self
+                .schema
+                .types
+                .get(condition.as_str())
+                .is_some_and(|type_definition| self.is_type_authenticated(type_definition));
+
+        self.current_path
+            .push(PathElement::Fragment(condition.as_str().into()));
+
+        let res = if fragment_requires_authentication {
+            self.query_requires_authentication = true;
+            self.unauthorized_paths.push(self.current_path.clone());
+
+            if self.dry_run {
+                transform::fragment_spread(self, node)
+            } else {
+                Ok(None)
+            }
+        } else {
+            transform::fragment_spread(self, node)
+        };
+
+        self.current_path.pop();
+        res
+    }
+
+    fn inline_fragment_impl(
+        &mut self,
+        parent_type: &str,
+        node: &ast::InlineFragment,
+    ) -> Result<Option<ast::InlineFragment>, BoxError> {
+        match &node.type_condition {
+            None => {
+                self.current_path.push(PathElement::Fragment(String::new()));
+                let res = transform::inline_fragment(self, parent_type, node);
+                self.current_path.pop();
+                res
+            }
+            Some(name) => {
+                self.current_path
+                    .push(PathElement::Fragment(name.as_str().into()));
+
+                let fragment_requires_authentication =
+                    !self.bypass_authorization
+                        && self.schema.types.get(name).is_some_and(|type_definition| {
+                            self.is_type_authenticated(type_definition)
+                        });
+
+                let res = if fragment_requires_authentication {
+                    self.query_requires_authentication = true;
+                    self.unauthorized_paths.push(self.current_path.clone());
+
+                    if self.dry_run {
+                        transform::inline_fragment(self, parent_type, node)
+                    } else {
+                        Ok(None)
+                    }
+                } else {
+                    transform::inline_fragment(self, parent_type, node)
+                };
+
+                self.current_path.pop();
+
+                res
+            }
+        }
+    }
 }
 
 impl transform::Visitor for AuthenticatedVisitor<'_> {
@@ -356,51 +504,8 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
         node: &ast::Field,
     ) -> Result<Option<ast::Field>, BoxError> {
         let statically_skipped = IncludeSkip::parse(&node.directives).statically_skipped();
-
         self.with_bypass_authorization(statically_skipped, |this| {
-            let field_name = &node.name;
-            let is_field_list = field_def.ty.is_list();
-
-            this.current_path
-                .push(PathElement::Key(field_name.as_str().into(), None));
-            if is_field_list {
-                this.current_path.push(PathElement::Flatten(None));
-            }
-
-            let res = if this.bypass_authorization {
-                transform::field(this, field_def, node)
-            } else {
-                let field_requires_authentication = this.is_field_authenticated(field_def);
-
-                let implementors_with_authenticated_requirements =
-                    this.implementors_with_authenticated_requirements(field_def, node);
-
-                let implementors_with_authenticated_field_requirements =
-                    this.implementors_with_authenticated_field_requirements(parent_type, node);
-
-                if field_requires_authentication
-                    || implementors_with_authenticated_requirements
-                    || implementors_with_authenticated_field_requirements
-                {
-                    this.unauthorized_paths.push(this.current_path.clone());
-                    this.query_requires_authentication = true;
-
-                    if this.dry_run {
-                        transform::field(this, field_def, node)
-                    } else {
-                        Ok(None)
-                    }
-                } else {
-                    transform::field(this, field_def, node)
-                }
-            };
-
-            if is_field_list {
-                this.current_path.pop();
-            }
-            this.current_path.pop();
-
-            res
+            this.field_impl(parent_type, field_def, node)
         })
     }
 
@@ -438,57 +543,7 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
         node: &ast::FragmentSpread,
     ) -> Result<Option<ast::FragmentSpread>, BoxError> {
         let statically_skipped = IncludeSkip::parse(&node.directives).statically_skipped();
-
-        self.with_bypass_authorization(statically_skipped, |this| {
-            if !this.bypass_authorization {
-                // record the fragment errors at the point of application
-                if let Some(paths) = this
-                    .fragments_unauthorized_paths
-                    .get(node.fragment_name.as_str())
-                {
-                    for path in paths {
-                        let path = this.current_path.join(path);
-                        this.unauthorized_paths.push(path);
-                    }
-                }
-            }
-
-            let condition = match this
-                .state()
-                .fragments()
-                .get(node.fragment_name.as_str())
-                .map(|fragment| fragment.fragment.type_condition.clone())
-            {
-                Some(condition) => condition,
-                None => return Ok(None),
-            };
-
-            let fragment_requires_authentication = !this.bypass_authorization
-                && this
-                    .schema
-                    .types
-                    .get(condition.as_str())
-                    .is_some_and(|type_definition| this.is_type_authenticated(type_definition));
-
-            this.current_path
-                .push(PathElement::Fragment(condition.as_str().into()));
-
-            let res = if fragment_requires_authentication {
-                this.query_requires_authentication = true;
-                this.unauthorized_paths.push(this.current_path.clone());
-
-                if this.dry_run {
-                    transform::fragment_spread(this, node)
-                } else {
-                    Ok(None)
-                }
-            } else {
-                transform::fragment_spread(this, node)
-            };
-
-            this.current_path.pop();
-            res
-        })
+        self.with_bypass_authorization(statically_skipped, |this| this.fragment_spread_impl(node))
     }
 
     fn inline_fragment(
@@ -497,41 +552,8 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
         node: &ast::InlineFragment,
     ) -> Result<Option<ast::InlineFragment>, BoxError> {
         let statically_skipped = IncludeSkip::parse(&node.directives).statically_skipped();
-
-        self.with_bypass_authorization(statically_skipped, |this| match &node.type_condition {
-            None => {
-                this.current_path.push(PathElement::Fragment(String::new()));
-                let res = transform::inline_fragment(this, parent_type, node);
-                this.current_path.pop();
-                res
-            }
-            Some(name) => {
-                this.current_path
-                    .push(PathElement::Fragment(name.as_str().into()));
-
-                let fragment_requires_authentication =
-                    !this.bypass_authorization
-                        && this.schema.types.get(name).is_some_and(|type_definition| {
-                            this.is_type_authenticated(type_definition)
-                        });
-
-                let res = if fragment_requires_authentication {
-                    this.query_requires_authentication = true;
-                    this.unauthorized_paths.push(this.current_path.clone());
-
-                    if this.dry_run {
-                        transform::inline_fragment(this, parent_type, node)
-                    } else {
-                        Ok(None)
-                    }
-                } else {
-                    transform::inline_fragment(this, parent_type, node)
-                };
-
-                this.current_path.pop();
-
-                res
-            }
+        self.with_bypass_authorization(statically_skipped, |this| {
+            this.inline_fragment_impl(parent_type, node)
         })
     }
 
