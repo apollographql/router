@@ -1028,7 +1028,7 @@ jobs:
 
             # Tag by branch + short commit sha -- NOT a release/nightly version.
             # This pipeline has nothing to do with release or nightly versioning.
-            SANITIZED_BRANCH=$(echo "${CIRCLE_BRANCH}" | tr -c 'a-zA-Z0-9' '-')
+            SANITIZED_BRANCH=$(printf '%s' "${CIRCLE_BRANCH}" | tr -c 'a-zA-Z0-9' '-')
             SHORT_SHA=$(git rev-parse --short=8 HEAD)
             TAG="${SANITIZED_BRANCH}-${SHORT_SHA}"
 
