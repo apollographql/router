@@ -2219,6 +2219,50 @@ mod tests {
         assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
 
+    // The transient/permanent classification decides whether attempt_reload keeps
+    // retrying the same inputs (transient) or gives up on them (permanent).
+    #[test]
+    fn reload_error_classification() {
+        // Bad config/license/schema won't build on retry → permanent.
+        assert!(!ReloadError::from(ApolloRouterError::FeatureGateViolation).is_transient());
+        assert!(!ReloadError::from(ApolloRouterError::LicenseViolation(vec![])).is_transient());
+        // Anything else (e.g. a service-creation blip) defaults to transient → retried.
+        assert!(
+            ReloadError::from(ApolloRouterError::ServiceCreationError(BoxError::from(
+                "boom"
+            )))
+            .is_transient()
+        );
+    }
+
+    // A schema that fails to parse must not take down the running router: it stays
+    // on the previously committed schema and shuts down cleanly. The unparseable
+    // schema fails before create(), so only the startup build happens.
+    #[test(tokio::test)]
+    async fn reload_with_unparseable_schema_keeps_running() {
+        let router_factory = create_mock_router_configurator(1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
+                    UpdateSchema(example_schema()),
+                    UpdateLicense(Default::default()),
+                    UpdateSchema(SchemaState {
+                        sdl: "this is not valid graphql".to_owned(),
+                        launch_id: None,
+                    }),
+                    Shutdown,
+                ])
+            )
+            .await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 1);
+    }
+
     #[test(tokio::test)]
     async fn state_change_metrics() {
         let router_factory = create_mock_router_configurator(2);
