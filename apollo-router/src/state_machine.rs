@@ -50,6 +50,14 @@ use crate::uplink::schema::SchemaState;
 
 const STATE_CHANGE: &str = "state change";
 
+/// Upper bound on how many reloads may be coalesced (skipped) in a row before a
+/// build is forced. Coalescing collapses a burst of queued updates into one
+/// reload, but without a cap a relentless stream of ready events could defer the
+/// reload indefinitely and starve the router of any new state. Hitting the cap
+/// forces a build of the newest-merged-so-far target and resets the count, so we
+/// always make forward progress. Realistic bursts are far smaller than this.
+const MAX_COALESCED_RELOADS: usize = 100;
+
 #[derive(Default, Clone)]
 pub(crate) struct ListenAddresses {
     pub(crate) graphql_listen_address: Option<ListenAddr>,
@@ -918,6 +926,10 @@ where
         // only the single peeked event is ever held.
         let mut messages = messages.peekable();
 
+        // How many reloads we've coalesced (skipped) in a row. Capped at
+        // MAX_COALESCED_RELOADS so a relentless burst can't defer a build forever.
+        let mut consecutive_coalesced: usize = 0;
+
         // Process events and retry-timer ticks until we reach a terminal state or
         // run out of events.
         loop {
@@ -959,8 +971,11 @@ where
                     // Coalesce: if this was an input event and another input event is
                     // already queued right behind it, skip the reload — the next event
                     // will supersede this target. A control event (Shutdown / NoMore*)
-                    // or an empty queue is always a reload boundary.
+                    // or an empty queue is always a reload boundary, and we force a
+                    // build once we've skipped MAX_COALESCED_RELOADS in a row so a
+                    // relentless burst can't defer the reload forever.
                     let coalesce_with_next = current_is_input
+                        && consecutive_coalesced < MAX_COALESCED_RELOADS
                         && matches!(
                             std::pin::Pin::new(&mut messages).peek().now_or_never(),
                             Some(Some(next)) if is_input_event(next)
@@ -968,6 +983,7 @@ where
 
                     if coalesce_with_next {
                         // A queued input supersedes this target; skip building it.
+                        consecutive_coalesced += 1;
                         u64_counter_with_unit!(
                             "apollo.router.state.reload.coalesced",
                             "Number of intermediate reload targets skipped by coalescing queued updates",
@@ -976,6 +992,7 @@ where
                         );
                     } else {
                         state = state.attempt_reload(&mut self).await;
+                        consecutive_coalesced = 0;
                     }
 
                     self.record_transition(event_name, previous_state, &state);
@@ -988,6 +1005,7 @@ where
                 _ = retry_future => {
                     let previous_state = format!("{state:?}");
                     state = state.attempt_reload(&mut self).await;
+                    consecutive_coalesced = 0;
                     self.record_transition("retry".to_string(), previous_state, &state);
                     if matches!(&state, Stopped | Errored(_)) {
                         break;
@@ -2386,6 +2404,34 @@ mod tests {
             Ok(())
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 1);
+    }
+
+    // Coalescing is capped: a burst larger than MAX_COALESCED_RELOADS forces an
+    // intermediate build so a relentless stream can't defer the reload forever.
+    // Without the cap this whole burst would collapse into a single build; the cap
+    // makes it two (one forced mid-burst, one for the final update).
+    #[test(tokio::test)]
+    async fn coalescing_is_capped() {
+        let mut events = vec![
+            UpdateSchema(example_schema()),
+            UpdateLicense(Default::default()),
+        ];
+        // Configuration has no equality check, so each fresh config is a distinct
+        // reload target. Queue more than the cap so it trips exactly once.
+        for _ in 0..(MAX_COALESCED_RELOADS + 5) {
+            events.push(UpdateConfiguration(Arc::new(
+                Configuration::builder().build().unwrap(),
+            )));
+        }
+        events.push(Shutdown);
+
+        let router_factory = create_mock_router_configurator(2);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+        assert_matches!(
+            execute_burst(server_factory, router_factory, stream::iter(events)).await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
 
     #[test(tokio::test)]
