@@ -99,13 +99,12 @@ fn correctness_enabled() -> bool {
 ///    discover the root types — without it, `operation_definition()` returns
 ///    `Ok(None)` for every input. We synthesize one from `schema_definition`.
 ///
-/// 2. **Standard `@skip` / `@include` declarations.** apollo-smith 0.15.2 picks
-///    `num_directives` for each location from `0..=(directive_defs.len() - 1)`
-///    (see `directive.rs:146`). If only `@defer` is declared, that range is
-///    `0..=0` and smith *always* picks zero — so `@defer` would never appear.
-///    apollo-compiler omits `@skip` / `@include` from `serialize()` since they
-///    are built-in, so we add them back here. With three directives declared,
-///    smith samples `@defer` on roughly one in three eligible locations.
+/// 2. **Standard `@skip` / `@include` declarations.** apollo-compiler omits the
+///    built-in `@skip` / `@include` from `serialize()`, so the serialized API
+///    schema declares only `@defer`. We add them back so apollo-smith also
+///    generates `@skip` / `@include` on selections — that directive coverage is
+///    what lets the fuzzer reach conditional-selection planner paths (for
+///    example the statically-skipped `@requires` field class in FED-707).
 fn api_schema_sdl() -> &'static str {
     static SDL: OnceLock<String> = OnceLock::new();
     SDL.get_or_init(|| {
@@ -122,8 +121,8 @@ fn api_schema_sdl() -> &'static str {
             sdl.push_str(&format!("  subscription: {}\n", s.name));
         }
         sdl.push_str("}\n\n");
-        // Built-in selection-set directives, restored so smith picks more than zero
-        // directives per location (see doc comment for the off-by-one explanation).
+        // Built-in selection-set directives, restored so smith also generates them
+        // (see doc comment).
         sdl.push_str(
             "directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT\n\
              directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT\n\n",

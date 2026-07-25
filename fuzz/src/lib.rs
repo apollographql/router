@@ -57,7 +57,7 @@ pub fn generate_valid_operation_from_schema(
         .operation_definition()?
         .ok_or(Error::NotEnoughData)?
         .into();
-    let doc: String = gql_doc.finish().into();
+    let doc: String = gql_doc.build()?.into();
 
     Ok((operation_def, doc))
 }
