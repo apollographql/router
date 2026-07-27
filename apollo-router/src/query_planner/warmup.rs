@@ -199,13 +199,7 @@ where
 
             match &result {
                 Ok(_) => {
-                    // `CachingQueryPlanner::plan` marks the context when it served this
-                    // operation from the cache instead of planning it fresh.
-                    let outcome = context
-                        .extensions()
-                        .with_lock(|lock| lock.get::<QueryPlanningOutcome>().copied())
-                        .unwrap_or(QueryPlanningOutcome::Success);
-                    record_warmup_outcome(source, outcome);
+                    record_warmup_outcome(source, QueryPlanningOutcome::Success);
                 }
                 Err(CacheResolverError::RetrievalError(e)) => {
                     record_warmup_outcome(source, QueryPlanningOutcome::from(e.as_ref()));
@@ -568,11 +562,11 @@ mod tests {
             "source" = "cache"
         );
 
-        super::record_warmup_outcome(WarmUpSource::PersistedQuery, QueryPlanningOutcome::Reused);
+        super::record_warmup_outcome(WarmUpSource::PersistedQuery, QueryPlanningOutcome::Success);
         assert_counter!(
             "apollo.router.query_planning.warmup.operations",
             1,
-            "outcome" = "reused",
+            "outcome" = "success",
             "source" = "persisted_query"
         );
     }
@@ -597,16 +591,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn warmup_records_reused_outcome_when_cache_marks_context() {
+    async fn warmup_records_success_outcome_when_cache_marks_context() {
         async {
             // Simulates what `CachingQueryPlanner::plan` does when it serves a warm-up
             // operation from the cache instead of planning it fresh.
             let (mock, mut handle) = tower_test::mock::pair::<CachingRequest, ()>();
             let driver = tokio::task::spawn(async move {
-                let (request, responder) = handle.next_request().await.unwrap();
-                request.context.extensions().with_lock(|lock| {
-                    lock.insert(QueryPlanningOutcome::Reused);
-                });
+                let (_request, responder) = handle.next_request().await.unwrap();
                 responder.send_response(());
             });
 
@@ -645,7 +636,7 @@ mod tests {
             assert_counter!(
                 "apollo.router.query_planning.warmup.operations",
                 1,
-                "outcome" = "reused",
+                "outcome" = "success",
                 "source" = "persisted_query"
             );
         }

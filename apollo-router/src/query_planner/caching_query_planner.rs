@@ -33,7 +33,6 @@ use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
-use crate::query_planner::QueryPlanningOutcome;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
@@ -598,14 +597,6 @@ where
             })
             .map_err(convert_join_error)?
         } else {
-            // Another caller (a concurrent request, or query-planner warm-up finding this
-            // operation already planned) is getting or already got this plan, so we don't plan
-            // it again. Mark the context so warm-up can attribute this as reused rather than
-            // freshly planned; real requests don't read this marker.
-            context.extensions().with_lock(|lock| {
-                lock.insert(QueryPlanningOutcome::Reused);
-            });
-
             let res = entry.get().await.map_err(|e| match e {
                 EntryError::IsFirst | // IsFirst should be unreachable
                 EntryError::RecvError => QueryPlannerError::UnhandledPlannerResult.into(),
