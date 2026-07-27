@@ -944,6 +944,44 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "CdnInvalidationConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for surfacing invalidation labels to a CDN as a header (for example, Cloudflare)\nseparated by a delimiting character (by default, \",\")\n\nWhen enabled, the router collects the union of cache tags contributed by each subgraph\n(from `apolloCacheTags`, `apolloEntityCacheTags`, and resolved `@cacheTag` directive values)\nand emits them as a single configurable header on the supergraph response. The coarser\n`subgraph`/`type` labels are always recorded onto the request context (available to\ncoprocessors or Rhai regardless of this config), but the fine-grained tag values are only\naggregated when `enabled` is `true` — there's no way to read the full label set from context\nwithout also enabling header emission.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Whether to emit the configured header on the supergraph response. Defaults to false.",
+          "type": "boolean"
+        },
+        "experimental_on_overflow": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/OverflowBehavior"
+            }
+          ],
+          "default": "truncate",
+          "description": "What to do when the joined header value would exceed `max_bytes`.\n\nThis is an experimental configuration option that might be removed in future releases,\nplease use caution when deciding to use it. Defaults to `truncate`."
+        },
+        "header_delimiter": {
+          "default": ",",
+          "description": "The delimiter used by the invalidation labels header (eg, `\" \"`, `\",\"`). Defaults to `\",\"`.",
+          "type": "string"
+        },
+        "header_name": {
+          "default": "Cache-Tag",
+          "description": "Name of the invalidation labels header used by CDNs",
+          "type": "string"
+        },
+        "max_bytes": {
+          "default": 16384,
+          "description": "Maximum number of bytes for the joined header value. When the joined value would exceed\nthis size, `experimental_on_overflow` decides what to do. Defaults to 16kb.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "Client": {
       "additionalProperties": false,
       "description": "HTTP client configuration",
@@ -1989,6 +2027,21 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
+        "cdn_invalidation": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CdnInvalidationConfig"
+            }
+          ],
+          "default": {
+            "enabled": false,
+            "experimental_on_overflow": "truncate",
+            "header_delimiter": ",",
+            "header_name": "Cache-Tag",
+            "max_bytes": 16384
+          },
+          "description": "Propagation of aggregated response_cache cache tags to the supergraph response.\nOff by default; opt in to surface cache tags to a CDN for tag-based purging. See\n`CdnInvalidationConfig` for the individual fields."
+        },
         "debug": {
           "default": false,
           "description": "Enable debug mode for the debugger",
@@ -7595,6 +7648,21 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "OverflowBehavior": {
+      "description": "What the router does when the joined `Cache-Tag`/invalidation-labels header value would\nexceed `max_bytes`. See `CdnInvalidationConfig::experimental_on_overflow`.",
+      "oneOf": [
+        {
+          "const": "truncate",
+          "description": "Pack the header coarsest-first (subgraph, then type, then tag) and drop whatever doesn't\nfit, finest-grained first, so an oversized response still gets a usable, if partial,\nheader.",
+          "type": "string"
+        },
+        {
+          "const": "drop",
+          "description": "Omit the header entirely rather than send a partial one. Note: this does not drop the\n`Cache-Control` header, so the response is still cached — this option is only useful\npaired with a CDN-side rule that treats a missing invalidation-labels header as a signal\nto bypass caching for that response (e.g. Cloudflare response rules setting `no-store`\nwhen the header is absent).",
+          "type": "string"
+        }
+      ]
     },
     "PersistedQueries": {
       "additionalProperties": false,

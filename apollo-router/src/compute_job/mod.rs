@@ -141,12 +141,7 @@ impl From<ComputeJobType> for Priority {
     }
 }
 
-impl From<ComputeJobType> for opentelemetry::Value {
-    fn from(compute_job_type: ComputeJobType) -> Self {
-        let s: &'static str = compute_job_type.into();
-        s.into()
-    }
-}
+impl_otel_value_from_static_str!(ComputeJobType);
 
 pub(crate) struct Job {
     subscriber: Dispatch,

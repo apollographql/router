@@ -237,10 +237,16 @@ impl StaticCostCalculator {
         } else if let Some(expected_size) = effective_expected_size {
             expected_size
         } else if let Some(subgraph_list_size) = self.subgraph_list_size(subgraph) {
-            subgraph_list_size as i32
+            // Saturate rather than cast: a configured list size above `i32::MAX` must read as
+            // very large (expensive), never wrap to a negative value.
+            i32::try_from(subgraph_list_size).unwrap_or(i32::MAX)
         } else {
-            self.list_size as i32
+            i32::try_from(self.list_size).unwrap_or(i32::MAX)
         };
+        // A list's instance count can never be negative. Guard the invariant at the point of
+        // use so no source — client slicing arguments, upstream propagation, or configured
+        // defaults — can drive the estimated cost below zero.
+        let instance_count = instance_count.max(0);
 
         // Determine the cost for this particular field. Scalars are free, non-scalars are not.
         // For fields with selections, add in the cost of the selections as well.
@@ -1282,6 +1288,73 @@ mod tests {
         assert_eq!(planned_cost_js(schema, query, variables).await, 127.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 127.0);
         assert_eq!(actual_cost(schema, query, variables, response), 125.0);
+    }
+
+    #[test]
+    fn negative_slicing_argument_is_clamped_and_never_reduces_cost() {
+        let schema = include_str!("./fixtures/custom_cost_schema.graphql");
+        let query =
+            include_str!("./fixtures/custom_cost_query_with_variable_slicing_argument.graphql");
+
+        // A negative client-supplied slicing value must be treated as zero, not as negative
+        // cost that would deflate the estimate below what the operation actually costs.
+        let negative = estimated_cost(
+            schema,
+            query,
+            r#"{"costlyInput": {"somethingWithCost": 10}, "fieldCountVar": -10}"#,
+        );
+        let zero = estimated_cost(
+            schema,
+            query,
+            r#"{"costlyInput": {"somethingWithCost": 10}, "fieldCountVar": 0}"#,
+        );
+
+        assert!(
+            negative >= 0.0,
+            "estimated cost must never be negative, got {negative}"
+        );
+        assert_eq!(
+            negative, zero,
+            "a negative slicing value must be clamped to zero"
+        );
+    }
+
+    #[test]
+    fn oversized_configured_list_size_does_not_wrap_negative() {
+        // A configured default list size above `i32::MAX` must saturate to a large (expensive)
+        // value, never wrap to a negative one that would invert the estimate.
+        let schema_str = include_str!("./fixtures/basic_schema.graphql");
+        let query_str = include_str!("./fixtures/basic_object_list_query.graphql");
+        let schema =
+            apollo_compiler::Schema::parse_and_validate(schema_str, "schema.graphqls").unwrap();
+        let query = apollo_compiler::ExecutableDocument::parse_and_validate(
+            &schema,
+            query_str,
+            "query.graphql",
+        )
+        .unwrap();
+        let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
+        let calculator = StaticCostCalculator::new(
+            Arc::new(schema),
+            Default::default(),
+            Default::default(),
+            u32::MAX,
+        );
+
+        let cost = calculator
+            .estimated(
+                &query,
+                &calculator.supergraph_schema,
+                &Default::default(),
+                true,
+                "",
+            )
+            .unwrap();
+
+        assert!(
+            cost >= 0.0,
+            "estimated cost must never be negative for an oversized configured list size, got {cost}"
+        );
     }
 
     #[test]

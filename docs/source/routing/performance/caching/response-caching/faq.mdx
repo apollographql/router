@@ -9,7 +9,9 @@ minVersion: Router v2.10.0
 
 ### Are cache tags compatible with CDN surrogate keys?
 
-Yes. Cache tags work like CDN surrogate key systems (used by Fastly, Cloudflare, and other CDN providers). Both approaches let you tag cached content and invalidate it by tag name. In the router, cache tags are set via the `@cacheTag` directive. In CDNs, surrogate keys are typically set via response headers like `Surrogate-Key` or `Cache-Tag`.
+Yes. Cache tags work like CDN surrogate key systems (used by Fastly, Cloudflare, and other CDN providers). Both approaches let you tag cached content and invalidate it by tag name. In the router, cache tags are set via the `@cacheTag` directive, and surrogate keys are typically set via response headers like `Surrogate-Key` or `Cache-Tag`.
+
+You don't need to wire this up yourself: enable [CDN invalidation](/router/performance/caching/response-caching/cdn-invalidation) to have the router emit your existing cache tags as a response header your CDN can purge by directly.
 
 ### Why cache in the router when CDN, client, or subgraph caching already exists?
 

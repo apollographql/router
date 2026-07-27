@@ -19,7 +19,7 @@ use tracing::trace;
 use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
 use crate::bail;
-use crate::compat::coerce_schema_values;
+use crate::compat::coerce_and_validate_schema_values;
 use crate::ensure;
 use crate::error::FederationError;
 use crate::error::Locations;
@@ -233,8 +233,20 @@ impl Subgraph<Initial> {
         // Simulate graphql-js behavior accepting duplicate argument definitions.
         parser_backward_compatibility::remove_duplicate_arguments(&mut schema);
 
-        // Coerce directive argument values based on directive definitions.
-        coerce_schema_values(&mut schema);
+        // NOTE: We try to coerce and validate here, but because the schema may be missing some
+        // definitions for types/directives, validation won't necessarily succeed, and coercion may
+        // skip some string-to-enum-value coercions (because the enum type is missing). The JS logic
+        // avoids this issue because the representation itself doesn't distinguish between enum
+        // values and strings, but it's unavoidable in Rust here because we try to instead keep the
+        // distinction in the representation and autocorrect when we determine from the type there's
+        // a distinction (meaning the type has to be available). You could technically try to make
+        // any code until the schema is expanded be able to accept both enum values and strings
+        // interchangeably, but this is too much work for a backward compatibility edge case, and
+        // at some point we're going to remove this anyway. So ultimately, we may error if e.g. the
+        // user had strings for enums in their @link without a definition, though this is a backward
+        // incompatibility with JS logic that we're willing to accept. Also, keep in mind link
+        // expansion will do this coerce-and-validate again after the schema is expanded.
+        let _ = coerce_and_validate_schema_values(&mut schema);
 
         Self::new(name, url, schema, orphan_extension_types)
     }
