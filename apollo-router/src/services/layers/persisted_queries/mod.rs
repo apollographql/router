@@ -21,6 +21,7 @@ use tower::BoxError;
 pub(crate) use tower_compat::*;
 
 use crate::Configuration;
+use crate::Context;
 use crate::context::PERSISTED_QUERY_ID;
 use crate::graphql::Error as GraphQLError;
 use crate::plugins::telemetry::CLIENT_NAME;
@@ -169,18 +170,7 @@ impl PersistedQueryExpander {
             // and put the body on the `supergraph_request`
             if let Some(persisted_query_body) = manifest_poller.get_operation_body(
                 persisted_query_id,
-                // Use the first one of these that exists:
-                // - The PQL-specific context name entry
-                //   `apollo_persisted_queries::client_name` (which can be set
-                //   by router_service plugins)
-                // - The same name used by telemetry (ie, the value of the
-                //   header named by `telemetry.apollo.client_name_header`,
-                //   which defaults to `apollographql-client-name` by default)
-                request
-                    .context
-                    .get(PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY)
-                    .unwrap_or_default()
-                    .or_else(|| request.context.get(CLIENT_NAME).unwrap_or_default()),
+                client_name_from_context(&request.context),
             ) {
                 let body = request.supergraph_request.body_mut();
                 body.query = Some(persisted_query_body);
@@ -300,7 +290,8 @@ impl PersistedQueryExpander {
         }
 
         let mut metric_attributes = vec![];
-        let freeform_graphql_action = manifest_poller.action_for_freeform_graphql(Ok(&doc.ast));
+        let freeform_graphql_action = manifest_poller
+            .action_for_freeform_graphql(Ok(&doc.ast), client_name_from_context(&request.context));
         let skip_enforcement = skip_enforcement(&request);
         let allow = skip_enforcement || freeform_graphql_action.should_allow;
         if !allow {
@@ -352,6 +343,23 @@ impl PersistedQueryExpander {
             .as_ref()
             .map(|poller| poller.get_all_operations())
     }
+}
+
+/// Resolve the client name for a request from its context, used to scope
+/// persisted-query matching (both ID-based lookup and freeform safelisting) to
+/// the client name registered in the manifest.
+///
+/// Uses the first of these that exists:
+/// - The PQ-specific context entry `apollo_persisted_queries::client_name`
+///   (which can be set by router_service plugins).
+/// - The same name used by telemetry (ie, the value of the header named by
+///   `telemetry.apollo.client_name_header`, which defaults to
+///   `apollographql-client-name`).
+fn client_name_from_context(context: &Context) -> Option<String> {
+    context
+        .get(PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY)
+        .unwrap_or_default()
+        .or_else(|| context.get(CLIENT_NAME).unwrap_or_default())
 }
 
 fn log_unknown_operation(operation_body: &str, enforcement_skipped: bool) {
@@ -503,7 +511,6 @@ mod tests {
 
     use super::manifest::ManifestOperation;
     use super::*;
-    use crate::Context;
     use crate::assert_errors_eq_ignoring_id;
     use crate::assert_snapshot_subscriber;
     use crate::configuration::Apq;
@@ -1118,6 +1125,169 @@ mod tests {
         }
         .with_subscriber(assert_snapshot_subscriber!())
         .await
+    }
+
+    /// Given a query and a client name, assert whether it should be allowed by the PQ expander's safelist.
+    async fn assert_allowed_for_client(
+        pq_layer: Arc<PersistedQueryExpander>,
+        query_parsing_service: query_parsing::BoxCloneService,
+        query: &str,
+        client_name: Option<&str>,
+        expect_allowed: bool,
+    ) {
+        let (mut service, mut handle) = pq_safelist_mock(pq_layer, query_parsing_service);
+
+        let context = Context::new();
+        if let Some(client_name) = client_name {
+            context
+                .insert(
+                    PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY,
+                    client_name.to_string(),
+                )
+                .unwrap();
+        }
+        let request = SupergraphRequest::fake_builder()
+            .query(query)
+            .context(context)
+            .build()
+            .unwrap();
+
+        if expect_allowed {
+            let driver = tokio::spawn(async move {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(SupergraphResponse::fake_builder().build().unwrap());
+            });
+
+            let response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(request)
+                .await
+                .expect("pq service should not return an error");
+            crate::plugin::test::await_mock_driver(driver).await;
+
+            assert_eq!(
+                response.response.status(),
+                200,
+                "expected the request to be allowed"
+            );
+        } else {
+            let response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(request)
+                .await
+                .expect("pq service should not return an error");
+
+            assert_eq!(
+                response.response.status(),
+                403,
+                "expected the request to be rejected"
+            );
+
+            crate::plugin::test::assert_no_mock_calls(handle).await;
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pq_layer_freeform_graphql_safelist_respects_client_name() {
+        // A body registered under a specific client name in the manifest must
+        // only be accepted via freeform matching for that client, consistent
+        // with ID-based lookup. A body registered with no client name matches
+        // any client.
+        let web_only_body = "query WebOnly { me { id } }";
+        let any_client_body = "query AnyClient { me { name } }";
+        let manifest = PersistedQueryManifest::from(vec![
+            ManifestOperation {
+                id: "web-only".to_string(),
+                body: web_only_body.to_string(),
+                client_name: Some("web".to_string()),
+            },
+            ManifestOperation {
+                id: "any-client".to_string(),
+                body: any_client_body.to_string(),
+                client_name: None,
+            },
+        ]);
+
+        let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
+
+        let config = Configuration::fake_builder()
+            .persisted_query(
+                PersistedQueries::builder()
+                    .enabled(true)
+                    .safelist(PersistedQueriesSafelist::builder().enabled(true).build())
+                    .build(),
+            )
+            .uplink(uplink_config)
+            .apq(Apq::fake_builder().enabled(false).build())
+            .build()
+            .unwrap();
+
+        let pq_layer = Arc::new(PersistedQueryExpander::new(&config).await.unwrap());
+
+        let schema = Arc::new(
+            Schema::parse(
+                include_str!("../../../testdata/supergraph.graphql"),
+                &Default::default(),
+            )
+            .unwrap(),
+        );
+        let query_parsing_service = query_parsing::query_parsing_service(schema, Arc::new(config));
+
+        // The client-scoped body is only accepted for its registered client.
+        assert_allowed_for_client(
+            pq_layer.clone(),
+            query_parsing_service.clone(),
+            web_only_body,
+            Some("web"),
+            true,
+        )
+        .await;
+        assert_allowed_for_client(
+            pq_layer.clone(),
+            query_parsing_service.clone(),
+            web_only_body,
+            Some("ios"),
+            false,
+        )
+        .await;
+        assert_allowed_for_client(
+            pq_layer.clone(),
+            query_parsing_service.clone(),
+            web_only_body,
+            None,
+            false,
+        )
+        .await;
+
+        // The client-agnostic body is accepted regardless of client name.
+        assert_allowed_for_client(
+            pq_layer.clone(),
+            query_parsing_service.clone(),
+            any_client_body,
+            None,
+            true,
+        )
+        .await;
+        assert_allowed_for_client(
+            pq_layer.clone(),
+            query_parsing_service.clone(),
+            any_client_body,
+            Some("web"),
+            true,
+        )
+        .await;
+        assert_allowed_for_client(
+            pq_layer.clone(),
+            query_parsing_service.clone(),
+            any_client_body,
+            Some("ios"),
+            true,
+        )
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]

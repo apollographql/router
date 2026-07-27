@@ -26,7 +26,7 @@
 )]
 
 mod api_schema;
-mod compat;
+pub mod compat;
 pub mod composition;
 pub mod connectors;
 #[cfg(feature = "correctness")]
@@ -56,6 +56,7 @@ use schema::FederationSchema;
 use strum::IntoEnumIterator;
 
 pub use crate::api_schema::ApiSchemaOptions;
+use crate::compat::coerce_and_validate_schema_values;
 use crate::connectors::ConnectSpec;
 use crate::error::FederationError;
 use crate::error::MultiTryAll;
@@ -233,7 +234,9 @@ impl Supergraph {
         schema_str: &str,
         supported_specs: &[Url],
     ) -> Result<Self, FederationError> {
-        let schema = Schema::parse_and_validate(schema_str, "schema.graphql")?;
+        let mut schema = Schema::parse(schema_str, "schema.graphql")?;
+        coerce_and_validate_schema_values(&mut schema)?;
+        let schema = schema.validate()?;
         Self::from_schema(schema, Some(supported_specs))
     }
 

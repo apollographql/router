@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/metrics.rs
-assertion_line: 698
 expression: "& metrics.non_zero()"
 ---
 - name: apollo.router.config.apollo_telemetry_options
@@ -72,21 +71,6 @@ expression: "& metrics.non_zero()"
     datapoints:
       - value: 1
         attributes: {}
-- name: apollo.router.config.experimental_otlp_endpoint
-  data:
-    datapoints:
-      - value: 1
-        attributes: {}
-- name: apollo.router.config.experimental_otlp_metrics_protocol
-  data:
-    datapoints:
-      - value: 1
-        attributes: {}
-- name: apollo.router.config.experimental_otlp_tracing_protocol
-  data:
-    datapoints:
-      - value: 1
-        attributes: {}
 - name: apollo.router.config.experimental_paths_limit
   data:
     datapoints:
@@ -108,6 +92,21 @@ expression: "& metrics.non_zero()"
       - value: 1
         attributes: {}
 - name: apollo.router.config.experimental_type_conditioned_fetching
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.otlp_endpoint
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.otlp_metrics_protocol
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.otlp_tracing_protocol
   data:
     datapoints:
       - value: 1

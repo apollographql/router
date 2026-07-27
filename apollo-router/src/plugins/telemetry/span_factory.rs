@@ -24,6 +24,24 @@ pub(crate) fn create_router<B>(_request: &http::Request<B>) -> ::tracing::span::
     )
 }
 
+/// Create a router span for a request that was rejected by hyper before reaching the axum
+/// service layer (e.g. 431 / 414). No `http::Request` is available in that case, so this
+/// variant omits request-derived fields and records only what we know at rejection time.
+pub(crate) fn create_router_rejection() -> ::tracing::span::Span {
+    info_span!(
+        ROUTER_SPAN_NAME,
+        "otel.name" = ::tracing::field::Empty,
+        "otel.kind" = "SERVER",
+        "otel.status_code" = ::tracing::field::Empty,
+        "http.response.status_code" = ::tracing::field::Empty,
+        "apollo_router.license" = ::tracing::field::Empty,
+        "apollo_private.duration_ns" = ::tracing::field::Empty,
+        "apollo_private.http.request_headers" = ::tracing::field::Empty,
+        "apollo_private.http.response_headers" = ::tracing::field::Empty,
+        "apollo_private.request" = true,
+    )
+}
+
 pub(crate) fn create_supergraph(
     config: &crate::plugins::telemetry::apollo::Config,
     request: &SupergraphRequest,
