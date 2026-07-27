@@ -127,7 +127,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let pipeline_handle = service_factory.pipeline_handle();
             // Built once here and invoked once per accepted connection (see listeners.rs),
             // rather than once per request.
-            let router_service_factory: Arc<dyn Fn() -> router::BoxCloneSyncService + Send + Sync> = {
+            let router_service_factory: Arc<dyn Fn() -> router::BoxCloneService + Send + Sync> = {
                 let service_factory = service_factory.clone();
                 Arc::new(move || service_factory.create())
             };
@@ -599,7 +599,7 @@ mod tests {
     #[tokio::test]
     async fn overloaded_router_service_returns_503() {
         let connection_service = crate::axum_factory::utils::connection_router_service(
-            router::BoxCloneSyncService::new(NeverReady),
+            router::BoxCloneService::new(NeverReady),
         );
         let options = HandlerOptions {
             early_cancel: true,

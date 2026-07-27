@@ -9,6 +9,8 @@ use tower::ServiceBuilder;
 use tower_http::trace::MakeSpan;
 use tracing::Span;
 
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::span_factory;
@@ -63,29 +65,36 @@ pub(crate) struct ConnectionInfo {
 /// The router pipeline created for a single connection (or, in tests, a single in-process
 /// session), shared across all requests on that connection/session.
 ///
-/// `RouterFactory::create()` returns `router::BoxCloneSyncService` rather than the plain
-/// (`Send`-only) `router::BoxCloneService` used internally by the pipeline, specifically so it
-/// can be stored directly as an axum `Extension` (which requires `Send + Sync`) and cheaply
-/// `.clone()`-d per request with no `Arc`/`Mutex` wrapper needed.
-pub(crate) type ConnectionRouterService = router::BoxCloneSyncService;
+/// Stored as an axum `Extension`, which requires `Send + Sync`. The `Send`-only
+/// `router::BoxCloneService` returned by `RouterFactory::create()` gains `Sync` when wrapped in
+/// `UnconstrainedBuffer` inside [`connection_router_service`], because `Buffer` is backed by
+/// channel handles that are `Send + Sync` regardless of the wrapped service's `Sync`-ness.
+pub(crate) type ConnectionRouterService =
+    tower::util::BoxCloneSyncService<router::Request, router::Response, tower::BoxError>;
 
-/// Wraps a freshly created router service (`RouterFactory::create()`) for use across a single
-/// connection.
+/// Wraps a freshly created router service for use across a single connection.
 ///
-/// Adds a bare `tower::load_shed()` with no preceding `Buffer`: if the pipeline's `poll_ready`
-/// stays `Pending`, new requests on this connection are shed immediately (`Overloaded`) instead
-/// of piling up until the transport's concurrency limit (e.g. HTTP/2 max concurrent streams) is
-/// hit. This differs from `plugins/traffic_shaping/mod.rs`'s `buffered().load_shed()` pairing,
-/// which exists because layers whose `poll_ready` polls an `mpsc`-backed resource (`Buffer`,
-/// `RateLimit`) can otherwise return a spurious `Pending` due to Tokio's cooperative-scheduling
-/// budget, producing a false `Overloaded`. By default every `poll_ready` in the
-/// router/supergraph/execution/subgraph chain is a trivial `Poll::Ready(Ok(()))` passthrough with
-/// no such resource to poll, so that failure mode doesn't apply at this outermost boundary; when
-/// `traffic_shaping` is configured with real backpressure, it already guards its own internals.
+/// Builds the stack `UnconstrainedBuffer(load_shed(service))`:
+///
+/// - The `load_shed` directly observes the service's `poll_ready`: if the pipeline signals
+///   `Poll::Pending`, new requests on this connection are immediately shed with `Overloaded`
+///   (→ 503) rather than piling up indefinitely.
+/// - The `UnconstrainedBuffer` sits outside the `load_shed` so that:
+///   1. Requests are queued and dispatched to the `load_shed` worker without holding up the
+///      caller's `poll_ready` path.
+///   2. Polling is unconstrained, preventing Tokio's cooperative-scheduling budget from
+///      producing spurious `Poll::Pending` returns that would cause false `Overloaded` errors
+///      (see [`crate::layers::unconstrained_buffer`]).
+///   3. `Buffer` is backed by channel handles that are `Send + Sync` regardless of the wrapped
+///      service's `Sync`-ness, converting the `Send`-only `router::BoxCloneService` into a type
+///      suitable for storage as an axum `Extension`.
 pub(crate) fn connection_router_service(
-    service: router::BoxCloneSyncService,
+    service: router::BoxCloneService,
 ) -> ConnectionRouterService {
-    router::BoxCloneSyncService::new(ServiceBuilder::new().load_shed().service(service))
+    ConnectionRouterService::new(UnconstrainedBuffer::new(
+        ServiceBuilder::new().load_shed().service(service),
+        DEFAULT_BUFFER_SIZE,
+    ))
 }
 
 #[cfg(test)]
@@ -120,7 +129,7 @@ mod tests {
     #[tokio::test]
     async fn connection_router_service_sheds_load_instead_of_blocking() {
         let connection_service =
-            connection_router_service(router::BoxCloneSyncService::new(NeverReady));
+            connection_router_service(router::BoxCloneService::new(NeverReady));
 
         let request = router::Request::fake_builder()
             .build()

@@ -144,8 +144,8 @@ struct TestRouterFactory {
 }
 
 impl RouterFactory for TestRouterFactory {
-    fn create(&self) -> router::BoxCloneSyncService {
-        router::BoxCloneSyncService::new(self.inner.clone())
+    fn create(&self) -> router::BoxCloneService {
+        router::BoxCloneService::new(self.inner.clone())
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
@@ -170,9 +170,9 @@ struct CountingRouterFactory {
 }
 
 impl RouterFactory for CountingRouterFactory {
-    fn create(&self) -> router::BoxCloneSyncService {
+    fn create(&self) -> router::BoxCloneService {
         self.create_calls.fetch_add(1, Ordering::SeqCst);
-        router::BoxCloneSyncService::new(self.inner.clone())
+        router::BoxCloneService::new(self.inner.clone())
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
