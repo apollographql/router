@@ -54,6 +54,7 @@ pub(crate) fn create_subgraph(
     )
 }
 
+<<<<<<< HEAD
 pub(crate) fn create_connector(_source_name: &str) -> ::tracing::span::Span {
     info_span!(
         CONNECT_REQUEST_SPAN_NAME,
@@ -61,6 +62,163 @@ pub(crate) fn create_connector(_source_name: &str) -> ::tracing::span::Span {
         "otel.status_code" = ::tracing::field::Empty,
         "apollo.connector.response.aborted" = ::tracing::field::Empty,
     )
+=======
+    /// Create a router span for a request that was rejected by hyper before reaching the axum
+    /// service layer (e.g. 431 / 414). No `http::Request` is available in that case, so this
+    /// variant omits request-derived fields and records only what we know at rejection time.
+    pub(crate) fn create_router_rejection(&self) -> ::tracing::span::Span {
+        match self {
+            SpanMode::Deprecated => {
+                let trace_id = TraceId::maybe_new()
+                    .map(|t| t.to_string())
+                    .unwrap_or_default();
+                info_span!(
+                    ROUTER_SPAN_NAME,
+                    "trace_id" = %trace_id,
+                    "client.name" = ::tracing::field::Empty,
+                    "client.version" = ::tracing::field::Empty,
+                    "otel.kind" = "INTERNAL",
+                    "otel.status_code" = ::tracing::field::Empty,
+                    "http.response.status_code" = ::tracing::field::Empty,
+                    "apollo_private.duration_ns" = ::tracing::field::Empty,
+                    "apollo_private.http.request_headers" = ::tracing::field::Empty,
+                    "apollo_private.http.response_headers" = ::tracing::field::Empty,
+                )
+            }
+            SpanMode::SpecCompliant => {
+                info_span!(
+                    ROUTER_SPAN_NAME,
+                    "otel.name" = ::tracing::field::Empty,
+                    "otel.kind" = "SERVER",
+                    "otel.status_code" = ::tracing::field::Empty,
+                    "http.response.status_code" = ::tracing::field::Empty,
+                    "apollo_router.license" = ::tracing::field::Empty,
+                    "apollo_private.duration_ns" = ::tracing::field::Empty,
+                    "apollo_private.http.request_headers" = ::tracing::field::Empty,
+                    "apollo_private.http.response_headers" = ::tracing::field::Empty,
+                    "apollo_private.request" = true,
+                )
+            }
+        }
+    }
+
+    pub(crate) fn create_supergraph(
+        &self,
+        config: &crate::plugins::telemetry::apollo::Config,
+        request: &SupergraphRequest,
+        field_level_instrumentation_ratio: f64,
+    ) -> ::tracing::span::Span {
+        match self {
+            SpanMode::Deprecated => {
+                let send_variable_values = config.send_variable_values.clone();
+                let span = info_span!(
+                    SUPERGRAPH_SPAN_NAME,
+                    otel.kind = "INTERNAL",
+                    graphql.operation.name = ::tracing::field::Empty,
+                    graphql.document = request
+                        .supergraph_request
+                        .body()
+                        .query
+                        .as_deref()
+                        .unwrap_or_default(),
+                    apollo_private.field_level_instrumentation_ratio =
+                        field_level_instrumentation_ratio,
+                    apollo_private.operation_signature = ::tracing::field::Empty,
+                    apollo_private.graphql.variables = Telemetry::filter_variables_values(
+                        &request.supergraph_request.body().variables,
+                        &send_variable_values,
+                    ),
+                );
+
+                if let Some(operation_name) = request
+                    .context
+                    .get::<_, String>(OPERATION_NAME)
+                    .unwrap_or_default()
+                {
+                    span.record("graphql.operation.name", operation_name);
+                }
+                span
+            }
+            SpanMode::SpecCompliant => {
+                let send_variable_values = config.send_variable_values.clone();
+                info_span!(
+                    SUPERGRAPH_SPAN_NAME,
+                    "otel.kind" = "INTERNAL",
+                    apollo_private.field_level_instrumentation_ratio =
+                        field_level_instrumentation_ratio,
+                    apollo_private.operation_signature = ::tracing::field::Empty,
+                    apollo_private.graphql.variables = Telemetry::filter_variables_values(
+                        &request.supergraph_request.body().variables,
+                        &send_variable_values,
+                    ),
+                )
+            }
+        }
+    }
+
+    pub(crate) fn create_subgraph(
+        &self,
+        subgraph_name: &str,
+        req: &SubgraphRequest,
+    ) -> ::tracing::span::Span {
+        match self {
+            SpanMode::Deprecated => {
+                let query = req
+                    .subgraph_request
+                    .body()
+                    .query
+                    .as_deref()
+                    .unwrap_or_default();
+                let operation_name = req
+                    .subgraph_request
+                    .body()
+                    .operation_name
+                    .as_deref()
+                    .unwrap_or_default();
+
+                info_span!(
+                    SUBGRAPH_SPAN_NAME,
+                    "apollo.subgraph.name" = subgraph_name,
+                    graphql.document = query,
+                    graphql.operation.name = operation_name,
+                    "otel.kind" = "INTERNAL",
+                    "apollo_private.ftv1" = ::tracing::field::Empty,
+                    "otel.status_code" = ::tracing::field::Empty,
+                )
+            }
+            SpanMode::SpecCompliant => {
+                info_span!(
+                    SUBGRAPH_SPAN_NAME,
+                    "otel.kind" = "INTERNAL",
+                    "apollo_private.ftv1" = ::tracing::field::Empty,
+                    "otel.status_code" = ::tracing::field::Empty,
+                )
+            }
+        }
+    }
+
+    pub(crate) fn create_connector(&self, source_name: &str) -> ::tracing::span::Span {
+        match self {
+            SpanMode::Deprecated => {
+                info_span!(
+                    CONNECT_REQUEST_SPAN_NAME,
+                    "apollo.source.name" = source_name,
+                    "otel.kind" = "INTERNAL",
+                    "otel.status_code" = ::tracing::field::Empty,
+                    "apollo.connector.response.aborted" = ::tracing::field::Empty,
+                )
+            }
+            SpanMode::SpecCompliant => {
+                info_span!(
+                    CONNECT_REQUEST_SPAN_NAME,
+                    "otel.kind" = "INTERNAL",
+                    "otel.status_code" = ::tracing::field::Empty,
+                    "apollo.connector.response.aborted" = ::tracing::field::Empty,
+                )
+            }
+        }
+    }
+>>>>>>> origin/dev
 }
 
 #[cfg(test)]
