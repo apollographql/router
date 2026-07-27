@@ -152,10 +152,6 @@ where
         Box::pin(async move {
             // XXX(@goto-bus-stop): we don't cache query parsing,
             // which would be a nice to have
-            //
-            // Router 3.0 doesn't retry warm-up under backpressure (see the "Remove retries in
-            // query plan warmup" changelog entry): if the compute pool has no room, we skip the
-            // operation instead of queueing more work onto an already-overloaded pool.
             let result = query_analysis
                 .parse_document(
                     &req.query,
@@ -170,6 +166,8 @@ where
                     return Err(CacheResolverError::RetrievalError(Arc::new(err.into())));
                 }
                 Err(crate::compute_job::MaybeBackPressureError::TemporaryError(err)) => {
+                    // if the compute pool has no room, we skip the
+                    // operation instead of queueing more work onto an already-overloaded pool.
                     record_warmup_backpressure(source, WarmUpPhase::Parse);
                     return Err(CacheResolverError::Backpressure(err));
                 }
