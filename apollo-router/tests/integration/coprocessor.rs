@@ -353,6 +353,72 @@ async fn test_full_pipeline(
         .await;
 }
 
+/// A coprocessor that rewrites `body.query` at the `SupergraphRequest` stage must have that
+/// rewrite reflected in query planning, not just in what gets logged/observed. Query analysis
+/// parses the original query into a `ParsedDocument` cached in request context *before* this
+/// coprocessor stage runs; planning previously kept reusing that stale, pre-rewrite document
+/// regardless of the coprocessor's changes to `body.query`.
+///
+/// This rewrites the default query's valid selection into one referencing a field that doesn't
+/// exist in the schema. If planning still (incorrectly) used the original, valid query, the
+/// request would succeed; since it must use the rewritten query, the request instead fails
+/// GraphQL validation against the nonexistent field.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_supergraph_request_query_modification_affects_planning()
+-> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(move |req: &wiremock::Request| {
+            let mut body = req.body_json::<serde_json::Value>().expect("body");
+            if body.get("stage").and_then(|s| s.as_str()) == Some("SupergraphRequest") {
+                body["body"]["query"] = json!(
+                    "query ExampleQuery { topProducts { thisFieldDoesNotExistInTheSchema } }"
+                );
+            }
+            ResponseTemplate::new(200).set_body_json(body)
+        })
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .reqwest_client(no_keepalive_reqwest_client())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(
+        response.status(),
+        400,
+        "expected the coprocessor-rewritten query to fail validation, proving planning used it \
+         instead of the stale pre-coprocessor document"
+    );
+    let body: serde_json::Value = response.json().await?;
+    let message = body["errors"][0]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("thisFieldDoesNotExistInTheSchema"),
+        "expected a validation error referencing the rewritten query's invalid field, got: {body}"
+    );
+
+    router
+        .graceful_shutdown_with_deadline(Duration::from_secs(30))
+        .await;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_coprocessor_demand_control_access() -> Result<(), BoxError> {
     if !graph_os_enabled() {
