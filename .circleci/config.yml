@@ -992,8 +992,7 @@ jobs:
   # tag scheme, no helm chart, no security scan, no notifications. Builds a
   # single linux/amd64 image from whatever branch/commit triggered the
   # pipeline and pushes it to a dedicated, non-release image repository for
-  # consumption by the internal testing framework (RTF). See
-  # AD_HOC_TEST_BUILD_PLAN.md for the design rationale.
+  # consumption by the internal testing framework (RTF).
   build_test_image:
     environment:
       <<: *common_job_environment
@@ -1029,7 +1028,7 @@ jobs:
 
             # Tag by branch + short commit sha -- NOT a release/nightly version.
             # This pipeline has nothing to do with release or nightly versioning.
-            SANITIZED_BRANCH=$(echo "${CIRCLE_BRANCH}" | tr -c 'a-zA-Z0-9' '-')
+            SANITIZED_BRANCH=$(printf '%s' "${CIRCLE_BRANCH}" | tr -c 'a-zA-Z0-9' '-')
             SHORT_SHA=$(git rev-parse --short=8 HEAD)
             TAG="${SANITIZED_BRANCH}-${SHORT_SHA}"
 
@@ -1281,7 +1280,7 @@ workflows:
 
   # Ad hoc test build: trigger manually via CircleCI's "Trigger Pipeline" UI
   # on any branch, setting the `test_build` boolean parameter to true. Not
-  # part of releases or nightlies -- see AD_HOC_TEST_BUILD_PLAN.md.
+  # part of releases or nightlies.
   build-test-image:
     when: << pipeline.parameters.test_build >>
     jobs:
