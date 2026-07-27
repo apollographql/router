@@ -278,9 +278,6 @@ pub(crate) struct Config {
     subgraphs: HashMap<String, SubgraphShaping>,
     /// Applied on specific subgraphs
     connector: ConnectorsShapingConfig,
-
-    /// DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
-    deduplicate_variables: Option<bool>,
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
@@ -780,8 +777,6 @@ mod test {
 
         let config: Configuration = serde_yaml::from_str(
             r#"
-        traffic_shaping:
-            deduplicate_variables: true
         supergraph:
             # TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
             generate_query_fragments: false
@@ -921,12 +916,9 @@ mod test {
 
     #[tokio::test]
     async fn it_returns_valid_response_for_deduplicated_variables() {
-        let config = serde_yaml::from_str::<serde_json::Value>(
-            r#"
-        deduplicate_variables: true
-        "#,
-        )
-        .unwrap();
+        // Variable deduplication is now unconditionally enabled, so an empty
+        // traffic shaping config is sufficient.
+        let config = serde_yaml::from_str::<serde_json::Value>("{}").unwrap();
         // Build a traffic shaping plugin
         let plugin = get_traffic_shaping_plugin(&config).await;
         let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
