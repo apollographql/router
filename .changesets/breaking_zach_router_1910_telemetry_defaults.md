@@ -21,4 +21,4 @@ telemetry:
       extended_error_metrics: disabled
 ```
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/ROUTER-1910
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9879
