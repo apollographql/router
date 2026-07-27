@@ -589,10 +589,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn warmup_records_success_outcome_when_cache_marks_context() {
+    async fn warmup_records_success_outcome() {
         async {
-            // Simulates what `CachingQueryPlanner::plan` does when it serves a warm-up
-            // operation from the cache instead of planning it fresh.
             let (mock, mut handle) = tower_test::mock::pair::<CachingRequest, ()>();
             let driver = tokio::task::spawn(async move {
                 let (_request, responder) = handle.next_request().await.unwrap();
