@@ -283,7 +283,7 @@ pub(crate) struct ErrorsConfiguration {
     pub(crate) subgraph: SubgraphErrorConfig,
 
     /// Send error metrics via OTLP with additional dimensions [`extensions.service`, `extensions.code`]
-    pub(crate) preview_extended_error_metrics: ExtendedErrorMetricsMode,
+    pub(crate) extended_error_metrics: ExtendedErrorMetricsMode,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
@@ -332,10 +332,10 @@ impl SubgraphErrorConfig {
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub(crate) enum ExtendedErrorMetricsMode {
     /// Do not send extended OTLP error metrics
-    #[default]
     Disabled,
     /// Send extended OTLP error metrics to Apollo Studio with additional dimensions [`extensions.service`, `extensions.code`].
     /// If enabled, it's also recommended to enable `redaction_policy: extended` on subgraphs to send the `extensions.code` for subgraph errors.
+    #[default]
     Enabled,
 }
 
@@ -427,7 +427,7 @@ impl Default for Config {
             signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm::default(),
             experimental_local_field_metrics: false,
             metrics_reference_mode: ApolloMetricsReferenceMode::default(),
-            subgraph_metrics: false,
+            subgraph_metrics: true,
             sampler: None,
         }
     }

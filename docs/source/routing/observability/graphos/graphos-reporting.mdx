@@ -440,16 +440,15 @@ telemetry:
 
 <div className="flex flex-row items-start gap-2 mt-2">
   <MinVersionBadge version="Router v2.1.2" />
-  <PreviewFeatureBadge />
 </div>
 
-Enable richer error reporting via `preview_extended_error_metrics` and `redaction_policy` router configurations.
+Enable richer error reporting via `extended_error_metrics` and `redaction_policy` router configurations. Extended error metrics are enabled by default; set `extended_error_metrics: disabled` to opt out.
 
 ```yaml title="router.yaml"
 telemetry:
   apollo:
     errors:
-      preview_extended_error_metrics: enabled # (default: disabled)
+      extended_error_metrics: enabled # (default: enabled)
       subgraph:
         all:
           # By default, subgraphs should report errors to GraphOS

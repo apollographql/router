@@ -312,7 +312,7 @@ expression: "&schema"
           "description": "Set the signature normalization algorithm to use when sending Apollo usage reports."
         },
         "subgraph_metrics": {
-          "default": false,
+          "default": true,
           "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
           "type": "boolean"
         },
@@ -3598,7 +3598,7 @@ expression: "&schema"
     "ErrorsConfiguration": {
       "additionalProperties": false,
       "properties": {
-        "preview_extended_error_metrics": {
+        "extended_error_metrics": {
           "allOf": [
             {
               "$ref": "#/definitions/ExtendedErrorMetricsMode"

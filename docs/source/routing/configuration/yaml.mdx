@@ -804,13 +804,13 @@ The router supports extended error reporting in the following versions:
 You can configure the router to report extended error information for improved diagnostics.
 Apollo's legacy error reporting doesn't include the service or error code, meaning you can't easily attribute errors to their root cause in GraphOS Studio.
 
-Configure extended reference reporting in `router.yaml` with the `telemetry.apollo.errors.preview_extended_error_metrics` option like so:
+Configure extended reference reporting in `router.yaml` with the `telemetry.apollo.errors.extended_error_metrics` option. It is enabled by default; to opt out, set it to `disabled`:
 
 ```yaml title="router.yaml"
 telemetry:
   apollo:
     errors:
-      preview_extended_error_metrics: enabled # Default is disabled
+      extended_error_metrics: enabled # Default is enabled
 ```
 
 [Learn more.](/graphos/routing/graphos-reporting#errors)

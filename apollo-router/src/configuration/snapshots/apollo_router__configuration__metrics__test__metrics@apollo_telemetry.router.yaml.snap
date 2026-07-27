@@ -7,7 +7,7 @@ expression: "& metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          opt.errors.preview_extended_error_metrics: enabled
+          opt.errors.extended_error_metrics: enabled
           opt.field_level_instrumentation_sampler: 1
           opt.metrics.otlp.batch_processor.max_export_timeout: 103s
           opt.metrics.otlp.batch_processor.scheduled_delay: 5s
