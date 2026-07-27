@@ -10,4 +10,4 @@ traffic_shaping:
 
 Configurations that still set the field are migrated automatically at startup with a warning.
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/PR_NUMBER
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9877
