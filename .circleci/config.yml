@@ -110,8 +110,6 @@ parameters:
   quick_nightly:
     type: boolean
     default: false
-<<<<<<< HEAD
-=======
   # test_build triggers the standalone `build-test-image` workflow: a single
   # linux/amd64 Docker image built from whatever branch/commit triggered the
   # pipeline, tagged by branch+commit (not a release/nightly version), and
@@ -121,7 +119,6 @@ parameters:
   test_build:
     type: boolean
     default: false
->>>>>>> origin/dev
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -1084,10 +1081,7 @@ workflows:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
-<<<<<<< HEAD
-=======
           - << pipeline.parameters.test_build >>
->>>>>>> origin/dev
     jobs:
       - fmt_check:
           matrix:
@@ -1191,10 +1185,7 @@ workflows:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
-<<<<<<< HEAD
-=======
           - << pipeline.parameters.test_build >>
->>>>>>> origin/dev
     jobs:
       - pre_verify_release:
           matrix:
@@ -1272,10 +1263,7 @@ workflows:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
-<<<<<<< HEAD
-=======
           - << pipeline.parameters.test_build >>
->>>>>>> origin/dev
     jobs:
       - secops/gitleaks:
           context:

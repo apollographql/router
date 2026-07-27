@@ -424,7 +424,7 @@ dependencies = [
  "bytes",
  "governor",
  "http 1.4.0",
- "http-body 1.0.1",
+ "http-body 1.1.0",
  "opentelemetry",
  "pin-project-lite",
  "thiserror 2.0.18",
@@ -479,11 +479,7 @@ dependencies = [
  "console",
  "cookie",
  "crossbeam-channel",
-<<<<<<< HEAD
- "ctor 1.0.8",
-=======
  "ctor 1.0.9",
->>>>>>> origin/dev
  "dashmap",
  "derivative",
  "derive_more",
@@ -519,7 +515,7 @@ dependencies = [
  "itoa",
  "jsonpath-rust",
  "jsonpath_lib",
- "jsonschema 0.48.0",
+ "jsonschema 0.48.1",
  "jsonwebtoken",
  "libc",
  "libtest-mimic",
@@ -989,7 +985,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
 name = "aws-lc-rs"
 version = "1.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1016,11 +1011,6 @@ dependencies = [
 name = "aws-runtime"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-=======
-name = "aws-runtime"
-version = "1.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
->>>>>>> origin/dev
 checksum = "7816e98ee912159f45d307e5ee6bfea4a335a55aee15f7f3e32f81a6f3000f1d"
 dependencies = [
  "aws-credential-types",
@@ -2202,15 +2192,9 @@ dependencies = [
 
 [[package]]
 name = "ctor"
-<<<<<<< HEAD
-version = "1.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb22e947478ccf9dc44d8922042c677a63fbb88f2cb468521d1145816e5087cb"
-=======
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a394189d59f9befacce833f337f7b1eca5e9a91221bcdd4d28e0114d96e597b3"
->>>>>>> origin/dev
 dependencies = [
  "link-section",
  "linktime-proc-macro",
@@ -4337,15 +4321,9 @@ dependencies = [
 
 [[package]]
 name = "jsonschema"
-<<<<<<< HEAD
 version = "0.45.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "257eb0e588b76827bbddc9e73945a9743693dd2adeaee9da26420f93cfedb798"
-=======
-version = "0.48.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9baf521a926fd1e6f94af6922be9686b61c8a89a5fb7e14d6a1e21b79738d4cc"
->>>>>>> origin/dev
 dependencies = [
  "ahash",
  "bytecount",
@@ -4356,12 +4334,12 @@ dependencies = [
  "getrandom 0.3.4",
  "idna",
  "itoa",
- "jsonschema-regex",
  "num-cmp",
  "num-traits",
  "percent-encoding",
  "referencing 0.45.1",
  "regex",
+ "regex-syntax",
  "serde",
  "serde_json",
  "unicode-general-category",
@@ -4369,11 +4347,10 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
 name = "jsonschema"
-version = "0.48.0"
+version = "0.48.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aef8d91fd7994744fd927438d8a642528d989c4a0248fb3f6208f47bffcefb0d"
+checksum = "9baf521a926fd1e6f94af6922be9686b61c8a89a5fb7e14d6a1e21b79738d4cc"
 dependencies = [
  "ahash",
  "bytecount",
@@ -4388,7 +4365,7 @@ dependencies = [
  "num-cmp",
  "num-traits",
  "percent-encoding",
- "referencing 0.48.0",
+ "referencing 0.48.5",
  "regex",
  "serde",
  "serde_json",
@@ -4398,15 +4375,9 @@ dependencies = [
 
 [[package]]
 name = "jsonschema-regex"
-version = "0.48.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "794a08daa4c4b0e566fae7f2787090d793082eed95e4b46bfdec9817b533df22"
-=======
-name = "jsonschema-regex"
 version = "0.48.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "84708dd3f6c5327478a96f37378adb27deed6a626cf84d19de780d9e8ae84b17"
->>>>>>> origin/dev
 dependencies = [
  "regex-syntax",
 ]
@@ -6339,20 +6310,13 @@ dependencies = [
 
 [[package]]
 name = "referencing"
-<<<<<<< HEAD
 version = "0.45.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2f38748ceca8d0b0013e60f534d94a6e23dfd89fd2a88318fc5a2d04fda1010"
-=======
-version = "0.48.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "980e77f5cfffc592c0e7dfb6d20770a0b96a6ab94d403de7454ed9799505e4ba"
->>>>>>> origin/dev
 dependencies = [
  "ahash",
  "fluent-uri",
  "getrandom 0.3.4",
-<<<<<<< HEAD
  "hashbrown 0.16.1",
  "parking_lot",
  "percent-encoding",
@@ -6361,15 +6325,13 @@ dependencies = [
 
 [[package]]
 name = "referencing"
-version = "0.48.0"
+version = "0.48.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4967fa93675ff599754790711e2f19b6a910739784ac357bd10f34e146616f9"
+checksum = "980e77f5cfffc592c0e7dfb6d20770a0b96a6ab94d403de7454ed9799505e4ba"
 dependencies = [
  "ahash",
  "fluent-uri",
  "getrandom 0.3.4",
-=======
->>>>>>> origin/dev
  "hashbrown 0.17.1",
  "itoa",
  "micromap",
@@ -6380,15 +6342,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-<<<<<<< HEAD
-version = "1.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a0e75113e14dc5acb068cd0786884f214f1312650a3d36d269f5c4f3cdee8a2"
-=======
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f020237b6c8eed93db2e2cb53c00c60a8e1bc73da7d073199a1180401450218d"
->>>>>>> origin/dev
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -6793,13 +6749,8 @@ dependencies = [
  "bitflags 2.11.0",
  "errno",
  "libc",
-<<<<<<< HEAD
- "linux-raw-sys 0.12.1",
- "windows-sys 0.61.0",
-=======
  "linux-raw-sys",
- "windows-sys 0.52.0",
->>>>>>> origin/dev
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -7691,8 +7642,7 @@ dependencies = [
  "fastrand",
  "getrandom 0.4.2",
  "once_cell",
-<<<<<<< HEAD
- "rustix 1.1.4",
+ "rustix",
  "windows-sys 0.61.0",
 ]
 
@@ -7702,12 +7652,8 @@ version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
- "rustix 1.1.4",
- "windows-sys 0.59.0",
-=======
  "rustix",
- "windows-sys 0.52.0",
->>>>>>> origin/dev
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8184,12 +8130,8 @@ dependencies = [
  "futures-core",
  "futures-util",
  "http 1.4.0",
-<<<<<<< HEAD
- "http-body 1.0.1",
- "http-body-util",
-=======
  "http-body 1.1.0",
->>>>>>> origin/dev
+ "http-body-util",
  "pin-project-lite",
  "tokio",
  "tokio-util",
@@ -8637,15 +8579,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-<<<<<<< HEAD
-version = "1.23.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf80a72845275afea99e7f2b434723d3bc7e38470fcd1c7ed39a599c73319a53"
-=======
 version = "1.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
->>>>>>> origin/dev
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",

@@ -12,12 +12,72 @@ use crate::plugins::authorization;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::InMemoryQueryPlanCache;
+use crate::query_planner::QueryPlanningOutcome;
 use crate::services::CachingRequest;
 use crate::services::PlanOptions;
 use crate::services::layers::query_analysis::QueryAnalysis;
 
 pub(crate) type BoxCloneService =
     tower::util::BoxCloneService<WarmupRequest, (), CacheResolverError>;
+
+/// Where an operation being warmed up came from. Used to attribute warm-up metrics.
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+pub(crate) enum WarmUpSource {
+    /// An operation from the persisted-query manifest.
+    PersistedQuery,
+    /// A "hot" operation carried over from the previous in-memory cache.
+    Cache,
+}
+
+/// The phase of warm-up at which a temporary/backpressure error occurred. Used to attribute the
+/// warm-up backpressure metric.
+#[derive(Copy, Clone, Debug, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+enum WarmUpPhase {
+    Parse,
+    Plan,
+}
+
+impl_otel_value_from_static_str!(WarmUpSource, WarmUpPhase);
+
+/// Record the terminal outcome of warming up a single operation, attributed by source.
+fn record_warmup_outcome(source: WarmUpSource, outcome: QueryPlanningOutcome) {
+    u64_counter_with_unit!(
+        "apollo.router.query_planning.warmup.operations",
+        "Number of operations processed during query planner warm-up, by outcome and source",
+        "{operation}",
+        1,
+        outcome = outcome,
+        source = source
+    );
+}
+
+/// Record that warm-up skipped an operation after hitting a temporary/backpressure error,
+/// attributed by source and the phase (parse vs. plan) at which it occurred. Router 3.0 doesn't
+/// retry warm-up under backpressure, so this is a terminal, not a transient, event.
+fn record_warmup_backpressure(source: WarmUpSource, phase: WarmUpPhase) {
+    u64_counter_with_unit!(
+        "apollo.router.query_planning.warmup.backpressure",
+        "Number of operations query planner warm-up skipped after a temporary/backpressure error",
+        "{event}",
+        1,
+        source = source,
+        phase = phase
+    );
+}
+
+/// Record how many operations warm-up intends to plan for a given source. Emitted even when
+/// `expected` is zero so the series always exists and coverage can be computed per source.
+fn record_warmup_expected(expected: usize, source: WarmUpSource) {
+    u64_counter_with_unit!(
+        "apollo.router.query_planning.warmup.operations.expected",
+        "Number of operations the query planner warm-up intended to plan",
+        "{operation}",
+        expected as u64,
+        source = source
+    );
+}
 
 #[derive(Debug)]
 pub(crate) struct WarmupRequest {
@@ -30,6 +90,8 @@ pub(crate) struct WarmupRequest {
     pub(crate) metadata: Option<authorization::CacheKeyMetadata>,
     /// Query plan options, only use for re-warming queries from in-memory cache.
     pub(crate) plan_options: Option<PlanOptions>,
+    /// Where this operation came from. Used to attribute warm-up metrics.
+    pub(crate) source: WarmUpSource,
 }
 
 /// Query parsing specifically for cache warmup.
@@ -85,10 +147,15 @@ where
         let query_analysis = self.query_analysis.clone();
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
+        let source = req.source;
 
         Box::pin(async move {
             // XXX(@goto-bus-stop): we don't cache query parsing,
             // which would be a nice to have
+            //
+            // Router 3.0 doesn't retry warm-up under backpressure (see the "Remove retries in
+            // query plan warmup" changelog entry): if the compute pool has no room, we skip the
+            // operation instead of queueing more work onto an already-overloaded pool.
             let result = query_analysis
                 .parse_document(
                     &req.query,
@@ -103,6 +170,7 @@ where
                     return Err(CacheResolverError::RetrievalError(Arc::new(err.into())));
                 }
                 Err(crate::compute_job::MaybeBackPressureError::TemporaryError(err)) => {
+                    record_warmup_backpressure(source, WarmUpPhase::Parse);
                     return Err(CacheResolverError::Backpressure(err));
                 }
             };
@@ -121,13 +189,34 @@ where
                 lock.insert(ComputeJobType::QueryPlanningWarmup);
             });
 
-            inner
+            let result = inner
                 .call(CachingRequest {
                     query: req.query,
                     operation_name: req.operation_name,
-                    context,
+                    context: context.clone(),
                 })
-                .await
+                .await;
+
+            match &result {
+                Ok(_) => {
+                    // `CachingQueryPlanner::plan` marks the context when it served this
+                    // operation from the cache instead of planning it fresh.
+                    let outcome = context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<QueryPlanningOutcome>().copied())
+                        .unwrap_or(QueryPlanningOutcome::Success);
+                    record_warmup_outcome(source, outcome);
+                }
+                Err(CacheResolverError::RetrievalError(e)) => {
+                    record_warmup_outcome(source, QueryPlanningOutcome::from(e.as_ref()));
+                }
+                Err(CacheResolverError::Backpressure(_)) => {
+                    record_warmup_backpressure(source, WarmUpPhase::Plan);
+                }
+                Err(_) => {}
+            }
+
+            result
         })
     }
 }
@@ -153,6 +242,7 @@ pub(crate) async fn queries_to_warm_up(
                     operation_name: key.operation.clone(),
                     metadata: Some(key.metadata.clone()),
                     plan_options: Some(key.plan_options.clone()),
+                    source: WarmUpSource::Cache,
                 })
                 .take(max_cached_queries)
                 .collect::<Vec<_>>()
@@ -172,11 +262,18 @@ pub(crate) async fn queries_to_warm_up(
                 operation_name: None,
                 metadata: None,
                 plan_options: None,
+                source: WarmUpSource::PersistedQuery,
             })
             .collect(),
         _ => Vec::new(),
     };
     persisted_query_keys.shuffle(&mut rand::rng());
+
+    // Record how many operations warm-up intends to plan, per source, so coverage
+    // (planned / expected) can be computed from the warm-up outcome metric. Emitted even
+    // when zero: "nothing expected from this source" is itself a meaningful signal.
+    record_warmup_expected(cache_keys.len(), WarmUpSource::Cache);
+    record_warmup_expected(persisted_query_keys.len(), WarmUpSource::PersistedQuery);
 
     // persisted queries are added first because they should get a lower priority in the LRU cache,
     // since a lot of them may be there to support old clients
@@ -236,10 +333,13 @@ mod tests {
     use crate::cache::storage::CacheStorage;
     use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
     use crate::error::QueryPlannerError;
+    use crate::metrics::FutureMetricsExt as _;
     use crate::query_planner::CachingQueryKey;
     use crate::query_planner::ConfigModeHash;
     use crate::query_planner::InMemoryQueryPlanCache;
     use crate::query_planner::QueryPlan;
+    use crate::query_planner::QueryPlanningOutcome;
+    use crate::query_planner::warmup::WarmUpSource;
     use crate::query_planner::warmup::WarmupParseQueryLayer;
     use crate::query_planner::warmup::WarmupRequest;
     use crate::services::CachingRequest;
@@ -432,10 +532,124 @@ mod tests {
                 operation_name: None,
                 metadata: None,
                 plan_options: None,
+                source: WarmUpSource::Cache,
             })
             .await
             .unwrap();
 
         crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[test]
+    fn test_record_warmup_expected() {
+        super::record_warmup_expected(5, WarmUpSource::Cache);
+        assert_counter!(
+            "apollo.router.query_planning.warmup.operations.expected",
+            5,
+            "source" = "cache"
+        );
+
+        // Emitted even when zero, so the series always exists.
+        super::record_warmup_expected(0, WarmUpSource::PersistedQuery);
+        assert_counter!(
+            "apollo.router.query_planning.warmup.operations.expected",
+            0,
+            "source" = "persisted_query"
+        );
+    }
+
+    #[test]
+    fn test_record_warmup_outcome() {
+        super::record_warmup_outcome(WarmUpSource::Cache, QueryPlanningOutcome::Success);
+        assert_counter!(
+            "apollo.router.query_planning.warmup.operations",
+            1,
+            "outcome" = "success",
+            "source" = "cache"
+        );
+
+        super::record_warmup_outcome(WarmUpSource::PersistedQuery, QueryPlanningOutcome::Reused);
+        assert_counter!(
+            "apollo.router.query_planning.warmup.operations",
+            1,
+            "outcome" = "reused",
+            "source" = "persisted_query"
+        );
+    }
+
+    #[test]
+    fn test_record_warmup_backpressure() {
+        super::record_warmup_backpressure(WarmUpSource::Cache, super::WarmUpPhase::Parse);
+        assert_counter!(
+            "apollo.router.query_planning.warmup.backpressure",
+            1,
+            "source" = "cache",
+            "phase" = "parse"
+        );
+
+        super::record_warmup_backpressure(WarmUpSource::PersistedQuery, super::WarmUpPhase::Plan);
+        assert_counter!(
+            "apollo.router.query_planning.warmup.backpressure",
+            1,
+            "source" = "persisted_query",
+            "phase" = "plan"
+        );
+    }
+
+    #[tokio::test]
+    async fn warmup_records_reused_outcome_when_cache_marks_context() {
+        async {
+            // Simulates what `CachingQueryPlanner::plan` does when it serves a warm-up
+            // operation from the cache instead of planning it fresh.
+            let (mock, mut handle) = tower_test::mock::pair::<CachingRequest, ()>();
+            let driver = tokio::task::spawn(async move {
+                let (request, responder) = handle.next_request().await.unwrap();
+                request.context.extensions().with_lock(|lock| {
+                    lock.insert(QueryPlanningOutcome::Reused);
+                });
+                responder.send_response(());
+            });
+
+            let configuration = Arc::new(Configuration::default());
+            let schema = Arc::new(
+                Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
+            );
+
+            let query_analysis = Arc::new(QueryAnalysis::new(schema, configuration).await);
+
+            let mut service = ServiceBuilder::new()
+                .layer(WarmupParseQueryLayer::new(query_analysis))
+                .map_err(|err| {
+                    panic!(
+                        "we have to cast the error because these services do not use BoxError: {err}"
+                    )
+                })
+                .service(mock);
+
+            let _response: () = service
+                .ready()
+                .await
+                .unwrap()
+                .call(WarmupRequest {
+                    query: "{ me { username } }".to_string(),
+                    operation_name: None,
+                    metadata: None,
+                    plan_options: None,
+                    source: WarmUpSource::PersistedQuery,
+                })
+                .await
+                .unwrap();
+
+            crate::plugin::test::await_mock_driver(driver).await;
+
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations",
+                1,
+                "outcome" = "reused",
+                "source" = "persisted_query"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }

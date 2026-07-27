@@ -905,11 +905,7 @@ mod tests {
         counter_value: u64,
     ) {
         let request_with_analyzed_query =
-<<<<<<< HEAD
-            run_first_two_layers(pq_layer, query_analysis, body, false).await;
-=======
-            run_first_two_layers(pq_layer, query_analysis_layer, body, None, false).await;
->>>>>>> origin/dev
+            run_first_two_layers(pq_layer, query_analysis, body, None, false).await;
 
         let mut supergraph_response = pq_layer
             .supergraph_request_with_analyzed_query(request_with_analyzed_query)
@@ -949,12 +945,7 @@ mod tests {
         counter_value: u64,
     ) {
         let request_with_analyzed_query =
-<<<<<<< HEAD
-            run_first_two_layers(pq_layer, query_analysis, body, skip_enforcement).await;
-=======
-            run_first_two_layers(pq_layer, query_analysis_layer, body, None, skip_enforcement)
-                .await;
->>>>>>> origin/dev
+            run_first_two_layers(pq_layer, query_analysis, body, None, skip_enforcement).await;
 
         pq_layer
             .supergraph_request_with_analyzed_query(request_with_analyzed_query)
@@ -1161,7 +1152,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let pq_layer = PersistedQueryLayer::new(&config).await.unwrap();
+        let pq_layer = PersistedQueryExpander::new(&config).await.unwrap();
 
         let schema = Arc::new(
             Schema::parse(
@@ -1170,7 +1161,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let query_analysis_layer = QueryAnalysisLayer::new(schema, Arc::new(config)).await;
+        let query_analysis_layer = QueryAnalysis::new(schema, Arc::new(config)).await;
 
         let is_allowed = |body: &'static str, client_name: Option<&'static str>| {
             let pq_layer = &pq_layer;

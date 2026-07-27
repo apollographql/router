@@ -50,12 +50,8 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
-<<<<<<< HEAD
-use crate::plugins::license_enforcement::layer::LicenseLayer;
-=======
 use crate::metrics::FutureMetricsExt;
-use crate::plugins::telemetry::SpanMode;
->>>>>>> origin/dev
+use crate::plugins::license_enforcement::layer::LicenseLayer;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecording;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecordingStream;
 use crate::router::ApolloRouterError;
@@ -190,7 +186,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .local_addr()
                 .map_err(ApolloRouterError::ServerCreationError)?;
 
-            let sm = span_mode(&configuration);
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
                 all_routers.main.1,
                 pipeline_ref.clone(),
@@ -198,7 +193,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 main_listener,
                 configuration.clone(),
                 all_connections_stopped_sender.clone(),
-                sm,
             );
 
             tracing::info!(
@@ -239,7 +233,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             listener,
                             configuration.clone(),
                             all_connections_stopped_sender.clone(),
-                            sm,
                         );
                         (
                             server.map(|listener| (listen_addr, listener)),

@@ -979,7 +979,7 @@ async fn invalid_input_object_inaccessible_field(
                     )
                 }
             })
-            .boxed()
+            .boxed_clone()
         })
         .build_router()
         .await?;

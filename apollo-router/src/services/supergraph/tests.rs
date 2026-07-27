@@ -3830,7 +3830,6 @@ async fn invalid_input_enum() {
     insta::assert_json_snapshot!(response);
 }
 
-<<<<<<< HEAD
 #[tokio::test]
 async fn test_cache_warmup() {
     use std::fmt::Debug;
@@ -3987,7 +3986,8 @@ async fn test_cache_warmup() {
     assert!(response.errors.is_empty());
 
     crate::plugin::test::await_mock_driver(driver).await;
-=======
+}
+
 const INPUT_OBJECT_SCHEMA: &str = r#"schema
     @link(url: "https://specs.apollo.dev/link/v1.0")
     @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
@@ -4127,7 +4127,7 @@ async fn invalid_input_object_inaccessible_field(
                     )
                 }
             })
-            .boxed()
+            .boxed_clone()
         })
         .build_supergraph()
         .await?;
@@ -4174,7 +4174,7 @@ async fn invalid_input_enum_inaccessible_value() -> Result<(), BoxError> {
                     )
                 }
             })
-            .boxed()
+            .boxed_clone()
         })
         .build_supergraph()
         .await?;
@@ -4194,5 +4194,4 @@ async fn invalid_input_enum_inaccessible_value() -> Result<(), BoxError> {
 
     insta::assert_json_snapshot!(response);
     Ok(())
->>>>>>> origin/dev
 }

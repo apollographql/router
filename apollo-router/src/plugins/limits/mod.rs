@@ -364,24 +364,8 @@ impl RequestSizeLimitError {
     /// part of the request-target, not the content, so `Payload Too Large` doesn't apply to it).
     fn status_code(&self) -> StatusCode {
         match self {
-<<<<<<< HEAD
-            BodyLimitError::PayloadTooLarge => router::Response::error_builder()
-                .error(
-                    graphql::Error::builder()
-                        .message(self.to_string())
-                        .extension_code("INVALID_GRAPHQL_REQUEST")
-                        .extension("details", self.to_string())
-                        .build(),
-                )
-                .status_code(StatusCode::PAYLOAD_TOO_LARGE)
-                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                .context(ctx)
-                .build()
-                .unwrap(),
-=======
             RequestSizeLimitError::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             RequestSizeLimitError::QueryTooLarge => StatusCode::URI_TOO_LONG,
->>>>>>> origin/dev
         }
     }
 
@@ -490,32 +474,12 @@ mod test {
                     .unwrap(),
             )
             .await;
-<<<<<<< HEAD
-        assert!(resp.is_ok());
-        let resp = resp.unwrap();
-        assert_eq!(resp.response.status(), StatusCode::PAYLOAD_TOO_LARGE);
-        assert_eq!(
-            resp.response.headers().get(http::header::CONTENT_TYPE),
-            Some(&http::HeaderValue::from_static("application/json"))
-        );
-        assert_eq!(
-            String::from_utf8(
-                router::body::into_bytes(resp.response.into_body())
-                    .await
-                    .unwrap()
-                    .to_vec()
-            )
-            .unwrap(),
-            "{\"errors\":[{\"message\":\"Request body payload too large\",\"extensions\":{\"details\":\"Request body payload too large\",\"code\":\"INVALID_GRAPHQL_REQUEST\"}}]}"
-        );
-=======
         assert_rejected(
             resp,
             StatusCode::PAYLOAD_TOO_LARGE,
             "Request body payload too large",
         )
         .await;
->>>>>>> origin/dev
     }
 
     #[tokio::test]
@@ -551,32 +515,12 @@ mod test {
                     .unwrap(),
             )
             .await;
-<<<<<<< HEAD
-        assert!(resp.is_ok());
-        let resp = resp.unwrap();
-        assert_eq!(resp.response.status(), StatusCode::PAYLOAD_TOO_LARGE);
-        assert_eq!(
-            resp.response.headers().get(http::header::CONTENT_TYPE),
-            Some(&http::HeaderValue::from_static("application/json"))
-        );
-        assert_eq!(
-            String::from_utf8(
-                router::body::into_bytes(resp.response.into_body())
-                    .await
-                    .unwrap()
-                    .to_vec()
-            )
-            .unwrap(),
-            "{\"errors\":[{\"message\":\"Request body payload too large\",\"extensions\":{\"details\":\"Request body payload too large\",\"code\":\"INVALID_GRAPHQL_REQUEST\"}}]}"
-        );
-=======
         assert_rejected(
             resp,
             StatusCode::PAYLOAD_TOO_LARGE,
             "Request body payload too large",
         )
         .await;
->>>>>>> origin/dev
     }
 
     #[tokio::test]

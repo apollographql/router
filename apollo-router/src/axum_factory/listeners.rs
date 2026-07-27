@@ -38,7 +38,7 @@ use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::metrics::FutureMetricsExt;
-use crate::plugins::telemetry::SpanMode;
+use crate::plugins::telemetry::span_factory;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::services::router::pipeline_handle::PipelineRef;
@@ -211,7 +211,6 @@ async fn handle_connection<C, E: AsRef<dyn std::error::Error + Send + Sync>>(
     connection_shutdown: CancellationToken,
     connection_shutdown_timeout: Duration,
     received_first_request: Arc<AtomicBool>,
-    span_mode: SpanMode,
 ) where
     C: Future<Output = Result<(), E>>,
     C: GracefulConnection<Error = E>,
@@ -227,7 +226,7 @@ async fn handle_connection<C, E: AsRef<dyn std::error::Error + Send + Sync>>(
             // emit metrics manually so they remain observable.
             if let Err(ref err) = res &&
                  let Some(status_code) = classify_hyper_rejection(err.as_ref()) {
-                    emit_connection_rejection_metrics(status_code, connection_start, span_mode);
+                    emit_connection_rejection_metrics(status_code, connection_start);
                 }
         }
         // the shutdown receiver was triggered first,
@@ -331,7 +330,6 @@ pub(super) fn serve_router_on_listen_addr(
     mut listener: Listener,
     configuration: Arc<Configuration>,
     all_connections_stopped_sender: mpsc::Sender<()>,
-    span_mode: SpanMode,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let opt_max_http1_headers = configuration.limits.router.http1_max_request_headers;
     let opt_max_http1_buf_size = configuration.limits.router.http1_max_request_buf_size;
@@ -417,7 +415,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
                                         let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
-                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request, span_mode).await;
+                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request).await;
                                     }
                                     #[cfg(unix)]
                                     NetworkStream::Unix(stream) => {
@@ -430,7 +428,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
                                         let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
-                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request, span_mode).await;
+                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request).await;
                                     },
                                     NetworkStream::Tls { stream, acceptor } => {
                                         // Perform TLS handshake with a timeout to prevent DoS attacks.
@@ -474,7 +472,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let connection = config
                                             .serve_connection_with_upgrades(tokio_stream, hyper_service);
 
-                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request, span_mode).await;
+                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request).await;
                                     }
                                 }
                             }.with_current_meter_provider());
@@ -575,7 +573,7 @@ fn classify_hyper_rejection(err: &(dyn std::error::Error + Send + Sync + 'static
 /// called. Because it is per-connection rather than per-request, the recorded duration will be
 /// inflated on keep-alive connections that served prior valid requests. In practice these
 /// rejections almost always occur on the first request of a connection.
-fn emit_connection_rejection_metrics(status_code: u16, start: Instant, span_mode: SpanMode) {
+fn emit_connection_rejection_metrics(status_code: u16, start: Instant) {
     let elapsed = start.elapsed();
     let elapsed_s = elapsed.as_secs_f64();
     let elapsed_ns = elapsed.as_nanos() as i64;
@@ -597,7 +595,7 @@ fn emit_connection_rejection_metrics(status_code: u16, start: Instant, span_mode
     // Enter the span before recording so that OTel-layer exporters (Datadog, OTLP, Zipkin, …)
     // derive a non-zero wall-clock duration from on_enter/on_close. The entered guard is held
     // until end of function, then dropped implicitly, which closes the span.
-    let entered = span_mode.create_router_rejection().entered();
+    let entered = span_factory::create_router_rejection().entered();
     entered.record("http.response.status_code", status_code as i64);
     entered.record("apollo_private.duration_ns", elapsed_ns);
 }
@@ -846,7 +844,7 @@ mod tests {
     #[tokio::test]
     async fn emit_connection_rejection_metrics_records_431() {
         async {
-            emit_connection_rejection_metrics(431, Instant::now(), SpanMode::default());
+            emit_connection_rejection_metrics(431, Instant::now());
             assert_histogram_count!(
                 "http.server.request.duration",
                 1,
@@ -860,7 +858,7 @@ mod tests {
     #[tokio::test]
     async fn emit_connection_rejection_metrics_records_414() {
         async {
-            emit_connection_rejection_metrics(414, Instant::now(), SpanMode::default());
+            emit_connection_rejection_metrics(414, Instant::now());
             assert_histogram_count!(
                 "http.server.request.duration",
                 1,
