@@ -20,8 +20,8 @@ telemetry:
         batch_processor:
           scheduled_delay: 10ms
     experimental_local_field_metrics: false
-    experimental_otlp_endpoint: "http://127.0.0.1"
-    experimental_otlp_tracing_protocol: http
+    otlp_endpoint: "http://127.0.0.1"
+    otlp_tracing_protocol: http
     # Off by default so the usage-reporting tests avoid exporting traces to an unmocked OTLP
     # endpoint (replaces the removed otlp_tracing_sampler). The OTLP trace tests override to always_on.
     sampler: always_off

@@ -75,8 +75,8 @@ impl MetricsConfigurator for Config {
         static ENABLED: AtomicBool = AtomicBool::new(false);
         if let Config {
             endpoint,
-            experimental_otlp_endpoint: otlp_endpoint,
-            experimental_otlp_metrics_protocol: otlp_metrics_protocol,
+            otlp_endpoint,
+            otlp_metrics_protocol,
             apollo_key: Some(key),
             apollo_graph_ref: Some(reference),
             schema_id,

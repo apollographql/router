@@ -61,7 +61,7 @@ pub(crate) struct Config {
 
     /// The Apollo Studio endpoint for exporting traces and metrics.
     #[schemars(with = "String", default = "otlp_endpoint_default")]
-    pub(crate) experimental_otlp_endpoint: Url,
+    pub(crate) otlp_endpoint: Url,
 
     /// The Apollo Studio API key.
     #[schemars(skip)]
@@ -104,11 +104,11 @@ pub(crate) struct Config {
 
     /// OTLP protocol used for OTel traces.
     /// Note this only applies if OTel traces are enabled and is only intended for use in tests.
-    pub(crate) experimental_otlp_tracing_protocol: Protocol,
+    pub(crate) otlp_tracing_protocol: Protocol,
 
     /// OTLP protocol used for OTel metrics.
     /// Note this is only intended for use in tests.
-    pub(crate) experimental_otlp_metrics_protocol: Protocol,
+    pub(crate) otlp_metrics_protocol: Protocol,
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
     pub(crate) send_headers: ForwardHeaders,
@@ -396,9 +396,9 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             endpoint: endpoint_default(),
-            experimental_otlp_endpoint: otlp_endpoint_default(),
-            experimental_otlp_tracing_protocol: Protocol::default(),
-            experimental_otlp_metrics_protocol: Protocol::default(),
+            otlp_endpoint: otlp_endpoint_default(),
+            otlp_tracing_protocol: Protocol::default(),
+            otlp_metrics_protocol: Protocol::default(),
             apollo_key: apollo_key(),
             apollo_graph_ref: apollo_graph_reference(),
             client_name_header: client_name_header_default(),

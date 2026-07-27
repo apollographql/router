@@ -249,15 +249,13 @@ async fn setup(
         Some(serde_json::Value::String(format!("http://{backend_addr}")))
     })
     .unwrap();
-    config = jsonpath_lib::replace_with(
-        config,
-        "$.telemetry.apollo.experimental_otlp_endpoint",
-        &mut |_| Some(serde_json::Value::String(format!("http://{backend_addr}"))),
-    )
+    config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.otlp_endpoint", &mut |_| {
+        Some(serde_json::Value::String(format!("http://{backend_addr}")))
+    })
     .unwrap();
     config = jsonpath_lib::replace_with(
         config,
-        "$.telemetry.apollo.experimental_otlp_tracing_protocol",
+        "$.telemetry.apollo.otlp_tracing_protocol",
         &mut |_| Some(serde_json::Value::String("http".to_string())),
     )
     .unwrap();
