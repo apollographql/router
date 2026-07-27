@@ -28,6 +28,7 @@ use position::TagDirectiveTargetPosition;
 use referencer::Referencers;
 
 use crate::bail;
+use crate::compat::coerce_and_validate_schema_values;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
@@ -260,6 +261,13 @@ impl FederationSchema {
     pub(crate) fn validate_or_return_self(
         mut self,
     ) -> Result<ValidFederationSchema, (Self, FederationError)> {
+        // Used for validating @deprecated and (partially) default values, which apollo-rs does not
+        // do at this time. It will also perform enum-to-string/string-to-enum coercion in values,
+        // which isn't a valid GraphQL coercion rule but was being done in the JS logic implicitly
+        // due to its schema representation.
+        if let Err(error) = coerce_and_validate_schema_values(&mut self.schema) {
+            return Err((self, error));
+        }
         let schema = match self.schema.validate() {
             Ok(schema) => schema.into_inner(),
             Err(e) => {
