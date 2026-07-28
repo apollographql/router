@@ -348,6 +348,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn it_rejects_empty_query() {
+        let (query_parsing_service, query_parsing_handle) = mock_query_parsing();
+        let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+
+        let mut service = ServiceBuilder::new()
+            .layer(ParseQueryLayer::new(query_parsing_service, false))
+            .service(mock);
+
+        let mut response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                supergraph::Request::fake_builder()
+                    .query("")
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(StatusCode::BAD_REQUEST, response.response.status());
+        let graphql_response = response.next_response().await.unwrap();
+        assert!(graphql_response.contains_error_code("MISSING_QUERY_STRING"));
+
+        // Neither service is actually reached.
+        crate::plugin::test::assert_no_mock_calls(query_parsing_handle).await;
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
+    #[tokio::test]
     async fn it_rejects_invalid_query() {
         let (query_parsing_service, mut query_parsing_handle) = mock_query_parsing();
         let config = Configuration::default();
@@ -365,7 +396,7 @@ mod tests {
             .layer(ParseQueryLayer::new(query_parsing_service, false))
             .service(mock);
 
-        let response = service
+        let mut response = service
             .ready()
             .await
             .unwrap()
@@ -379,6 +410,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(StatusCode::BAD_REQUEST, response.response.status());
+        let graphql_response = response.next_response().await.unwrap();
+        assert!(dbg!(graphql_response).contains_error_code("GRAPHQL_VALIDATION_FAILED"));
 
         crate::plugin::test::await_mock_driver(query_parsing_driver).await;
         // The inner service is not reached.
