@@ -147,6 +147,8 @@ where
                     inner.call(req).await
                 }
                 Err(MaybeBackPressureError::PermanentError(errors)) => {
+                    // TODO(@goto-bus-stop): validation error redaction should prob be a layer very
+                    // early on in the stack, that works on the JSON representation of errors?
                     let errors = if redact_query_validation_errors
                         && matches!(errors, SpecError::ValidationError(_))
                     {
@@ -386,7 +388,10 @@ mod tests {
         let query_parsing_driver = tokio::spawn(async move {
             let (req, responder) = query_parsing_handle.next_request().await.unwrap();
             responder.send_response(crate::spec::Query::parse_document(
-                &req.query, None, &schema, &config,
+                &req.query,
+                req.operation_name.as_deref(),
+                &schema,
+                &config,
             ));
         });
 
@@ -426,7 +431,10 @@ mod tests {
         let query_parsing_driver = tokio::spawn(async move {
             let (req, responder) = query_parsing_handle.next_request().await.unwrap();
             responder.send_response(crate::spec::Query::parse_document(
-                &req.query, None, &schema, &config,
+                &req.query,
+                req.operation_name.as_deref(),
+                &schema,
+                &config,
             ));
         });
 
@@ -451,7 +459,7 @@ mod tests {
 
         assert_eq!(StatusCode::BAD_REQUEST, response.response.status());
         let graphql_response = response.next_response().await.unwrap();
-        assert!(graphql_response.contains_error_code("GRAPHQL_VALIDATION_FAILED"));
+        assert!(graphql_response.contains_error_code("UNKNOWN_ERROR"));
         assert!(
             !serde_json::to_string(&graphql_response)
                 .unwrap()
