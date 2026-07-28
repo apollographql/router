@@ -810,6 +810,7 @@ impl ConnectorCacheService {
                 cached_entities,
                 &storage,
                 &source_name,
+                &connector_synthetic_name,
                 connector_ttl,
                 debug,
                 debug_request,
@@ -856,6 +857,7 @@ impl ConnectorCacheService {
         cached: ConnectorCachedEntities,
         storage: &Storage,
         source_name: &str,
+        connector_synthetic_name: &str,
         connector_ttl: Duration,
         debug: bool,
         debug_request: Option<graphql::Request>,
@@ -872,11 +874,14 @@ impl ConnectorCacheService {
             cache_control: cached_cache_control,
         } = cached;
 
-        // Get the response cache control from context (set by connector_request_service)
-        let mut response_cache_control = context
-            .extensions()
-            .with_lock(|lock| lock.get::<CacheControl>().cloned())
-            .unwrap_or_else(CacheControl::default_no_store);
+        // Get this connector's own response cache-control (recorded per HTTP response by the
+        // connector request service, merged min-TTL across the batch). Never read the
+        // request-wide aggregate here: it merges unrelated fetches (e.g. a headerless subgraph
+        // response upstream in the plan) and would poison storability/TTL/privacy for these
+        // entities.
+        let mut response_cache_control =
+            get_connector_cache_control(context, connector_synthetic_name)
+                .unwrap_or_else(CacheControl::default_no_store);
 
         // If the request had no-store, propagate that to the response cache control
         if let Some(ref req_cc) = request_cache_control {
@@ -1515,10 +1520,13 @@ impl ConnectorRequestCacheService {
                     ..
                 } = response.mapped_response
                 {
-                    let mut cache_control = context
-                        .extensions()
-                        .with_lock(|lock| lock.get::<CacheControl>().cloned())
-                        .unwrap_or_else(CacheControl::default_no_store);
+                    // Base the store decision on THIS response's own Cache-Control (parsed
+                    // straight from the transport response), never on the request-wide
+                    // aggregate, which merges unrelated fetches and would let them poison
+                    // this entry's storability/TTL/privacy.
+                    let mut cache_control =
+                        connector_response_cache_control(&response, connector_ttl)
+                            .unwrap_or_else(CacheControl::default_no_store);
 
                     // If the request had no-store, propagate that to the response cache control
                     if let Some(ref req_cc) = request_cache_control {
@@ -1636,23 +1644,90 @@ impl ConnectorRequestCacheService {
         request: connector::request_service::Request,
     ) -> Result<connector::request_service::Response, BoxError> {
         let context = request.context.clone();
+        let connector_synthetic_name = request.connector.id.synthetic_name();
         let response = self.service.call(request).await?;
 
         // Extract Cache-Control from the transport response headers
-        if let Ok(
-            apollo_federation::connectors::runtime::http_json_transport::TransportResponse::Http(
-                http_response,
-            ),
-        ) = &response.transport_result
+        if let Some(cache_control) = connector_response_cache_control(&response, self.connector_ttl)
         {
-            let cache_control = CacheControl::try_from(&http_response.inner.headers)
-                .unwrap_or_else(|_| CacheControl::default_no_store())
-                .with_default_ttl(Some(self.connector_ttl));
+            // Merge into the request-wide aggregate used for the client-facing Cache-Control
+            // header ...
             update_cache_control(&context, &cache_control);
+            // ... and record it under this connector's identity, so store decisions (root and
+            // entity paths) only ever consult cache-control from THIS connector's own upstream
+            // responses, never from unrelated fetches in the same client request.
+            record_connector_cache_control(&context, &connector_synthetic_name, &cache_control);
         }
 
         Ok(response)
     }
+}
+
+/// Per-connector cache-control accumulator, stored in context extensions.
+///
+/// `update_cache_control` maintains a single request-wide aggregate for the client-facing header,
+/// which merges every fetch (subgraph and connector) in the request. Basing *store* decisions on
+/// that aggregate would let unrelated fetches (e.g. a headerless subgraph response) poison a
+/// connector's storability/TTL/privacy. This map keeps a separate most-restrictive merge per
+/// connector (keyed by the connector's synthetic name), fed only by that connector's own HTTP
+/// responses. Multiple HTTP requests fanned out for one entity batch merge together here (min
+/// TTL across the batch), which is the intended semantics.
+#[derive(Default)]
+struct ConnectorCacheControls(HashMap<String, CacheControl>);
+
+fn record_connector_cache_control(
+    context: &Context,
+    connector_synthetic_name: &str,
+    cache_control: &CacheControl,
+) {
+    context.extensions().with_lock(|lock| {
+        let map = lock.get_or_default_mut::<ConnectorCacheControls>();
+        match map.0.get_mut(connector_synthetic_name) {
+            Some(existing) => *existing = existing.merge(cache_control),
+            None => {
+                map.0
+                    .insert(connector_synthetic_name.to_string(), cache_control.clone());
+            }
+        }
+    });
+}
+
+fn get_connector_cache_control(context: &Context, connector_synthetic_name: &str) -> Option<CacheControl> {
+    context.extensions().with_lock(|lock| {
+        lock.get::<ConnectorCacheControls>()
+            .and_then(|map| map.0.get(connector_synthetic_name).cloned())
+    })
+}
+
+/// Compute the cache-control for a single connector HTTP response.
+///
+/// Returns `None` when there was no HTTP response (transport error, mapping-only, cache hit).
+///
+/// Deliberate divergence from the subgraph path (documented in the response-caching docs): a
+/// response with **no** `Cache-Control` header is cacheable with the configured TTL, instead of
+/// being treated as no-store. A *present but unparseable* header still falls back to no-store.
+fn connector_response_cache_control(
+    response: &connector::request_service::Response,
+    connector_ttl: Duration,
+) -> Option<CacheControl> {
+    let Ok(
+        apollo_federation::connectors::runtime::http_json_transport::TransportResponse::Http(
+            http_response,
+        ),
+    ) = &response.transport_result
+    else {
+        return None;
+    };
+
+    let cache_control = if http_response.inner.headers.contains_key(CACHE_CONTROL) {
+        CacheControl::try_from(&http_response.inner.headers)
+            .unwrap_or_else(|_| CacheControl::default_no_store())
+            .with_default_ttl(Some(connector_ttl))
+    } else {
+        // No Cache-Control header at all: use the configured TTL as the fallback.
+        CacheControl::default().with_default_ttl(Some(connector_ttl))
+    };
+    Some(cache_control)
 }
 
 /// Extract `@cacheTag` invalidation keys for a connector root field from the supergraph schema.
