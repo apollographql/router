@@ -517,7 +517,7 @@ mod tests {
     use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
     use crate::plugin::test::MockSubgraph;
-    use crate::plugins::authorization::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+    use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
     use crate::plugins::authorization::authenticated::AuthenticatedVisitor;
     use crate::services::router::ClientRequestAccepts;
     use crate::services::supergraph;
