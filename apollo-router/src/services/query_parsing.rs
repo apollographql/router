@@ -140,7 +140,9 @@ pub(crate) type ServiceError = MaybeBackPressureError<SpecError>;
 pub(crate) type BoxCloneService =
     tower::util::BoxCloneService<Request, ParsedDocument, ServiceError>;
 
-/// Build a query parsing service with caching.
+/// Build a query parsing service with in-memory caching.
+///
+/// The cache size is the same as the query plan cache size.
 pub(crate) fn query_parsing_service(
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,
