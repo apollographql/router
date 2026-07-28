@@ -268,7 +268,10 @@ mod tests {
         let query_parsing_driver = tokio::spawn(async move {
             let (req, responder) = query_parsing_handle.next_request().await.unwrap();
             responder.send_response(crate::spec::Query::parse_document(
-                &req.query, None, &schema, &config,
+                &req.query,
+                req.operation_name.as_deref(),
+                &schema,
+                &config,
             ));
         });
 
@@ -322,6 +325,43 @@ mod tests {
         crate::plugin::test::await_mock_driver(query_parsing_driver).await;
         crate::plugin::test::await_mock_driver(inner_driver).await;
     }
+
+    #[tokio::test]
+    async fn it_rejects_backpressure() {
+        let (query_parsing_service, mut query_parsing_handle) = mock_query_parsing();
+        let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+
+        let query_parsing_driver = tokio::task::spawn(async move {
+            let (_req, responder) = query_parsing_handle.next_request().await.unwrap();
+            responder.send_error("mocked backpressure");
+        });
+
+        let mut service = ServiceBuilder::new()
+            .layer(ParseQueryLayer::new(query_parsing_service, false))
+            .service(mock);
+
+        let mut response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                supergraph::Request::fake_builder()
+                    .query("query { me { id } }")
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
+        let graphql_response = response.next_response().await.unwrap();
+        assert!(graphql_response.contains_error_code("REQUEST_CONCURRENCY_LIMITED"));
+
+        crate::plugin::test::await_mock_driver(query_parsing_driver).await;
+        // The inner service is not actually reached
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
 
     #[tokio::test]
     async fn it_rejects_missing_query() {
