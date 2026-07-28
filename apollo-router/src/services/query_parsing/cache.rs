@@ -196,11 +196,17 @@ mod tests {
         let driver = tokio::spawn(async move {
             let (req, responder) = handle.next_request().await.unwrap();
             responder.send_response(crate::spec::Query::parse_document(
-                &req.query, None, &schema, &config,
+                &req.query,
+                req.operation_name.as_deref(),
+                &schema,
+                &config,
             ));
             let (req, responder) = handle.next_request().await.unwrap();
             responder.send_response(crate::spec::Query::parse_document(
-                &req.query, None, &schema, &config,
+                &req.query,
+                req.operation_name.as_deref(),
+                &schema,
+                &config,
             ));
         });
 
@@ -218,6 +224,68 @@ mod tests {
             .call(Request::new(
                 "query { topProducts { name } }".to_string(),
                 None,
+            ))
+            .await
+            .unwrap();
+
+        assert_ne!(a.hash, b.hash);
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test]
+    async fn different_operation_name_is_cache_miss() {
+        let config = Configuration::default();
+        let schema = crate::spec::Schema::parse(SCHEMA, &config).unwrap();
+
+        let (mock, mut handle) = mock_pair();
+        let mut service = ServiceBuilder::new()
+            .layer(QueryParsingCacheLayer::new(NonZeroUsize::new(10).unwrap()))
+            .service(mock);
+
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(crate::spec::Query::parse_document(
+                &req.query,
+                req.operation_name.as_deref(),
+                &schema,
+                &config,
+            ));
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(crate::spec::Query::parse_document(
+                &req.query,
+                req.operation_name.as_deref(),
+                &schema,
+                &config,
+            ));
+        });
+
+        let document = r#"
+            query UserId {
+                me { id }
+            }
+
+            query ProductNames {
+                topProducts { name }
+            }
+        "#;
+
+        let a = service
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::new(
+                document.to_string(),
+                Some("UserId".to_string()),
+            ))
+            .await
+            .unwrap();
+        let b = service
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::new(
+                document.to_string(),
+                Some("ProductNames".to_string()),
             ))
             .await
             .unwrap();
