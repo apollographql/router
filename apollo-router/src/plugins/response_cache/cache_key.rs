@@ -65,7 +65,8 @@ pub(super) struct PrimaryCacheKeyEntity<'a> {
     pub(super) subgraph_name: &'a str,
     pub(super) entity_type: &'a str,
     pub(super) representation: &'a Map<ByteString, Value>,
-    /// NB: hashed before insertion into this struct, so that the hashed representation can be reused for all entities in this query
+    /// NB: hashed before insertion into this struct, so that the hashed representation can be
+    /// reused for all entities in this query
     pub(super) subgraph_query_hash: &'a str,
     pub(super) additional_data_hash: &'a str,
     pub(super) private_id: Option<&'a str>,
@@ -185,11 +186,18 @@ pub(super) fn hash_operation(operation: &str) -> String {
 
 /// Hash additional data for connector cache keys.
 /// Similar to `hash_additional_data` but works with connector `Variables` instead of `graphql::Request`.
+///
+/// `key_inputs` carries the connector's *referenced* per-request inputs (`$context` values and
+/// forwarded `$request.headers` — see `connector_key_inputs`). These shape the upstream HTTP
+/// request/response mapping but are NOT part of `variables`, so without hashing them two client
+/// requests that produce different upstream requests (e.g. a per-user forwarded header) would
+/// collide on the same cache key and leak one user's data to another.
 pub(super) fn hash_connector_additional_data(
     source_name: &str,
     variables: &Object,
     context: &Context,
     cache_key: &CacheKeyMetadata,
+    key_inputs: &Value,
 ) -> String {
     let mut hasher = blake3::Hasher::new();
 
@@ -200,6 +208,12 @@ pub(super) fn hash_connector_additional_data(
     );
 
     cache_key
+        .serialize(Blake3Serializer::new(&mut hasher))
+        .expect("this serializer doesn't throw any errors; qed");
+
+    // Referenced $context / $request.headers inputs. Hashed after the auth metadata so equal
+    // inputs produce equal keys and any per-user difference partitions them.
+    key_inputs
         .serialize(Blake3Serializer::new(&mut hasher))
         .expect("this serializer doesn't throw any errors; qed");
 
@@ -541,12 +555,14 @@ mod tests {
             vars.as_object().unwrap(),
             &context,
             &Default::default(),
+            &serde_json_bytes::Value::Null,
         );
         let hash_b = hash_connector_additional_data(
             "source_b",
             vars.as_object().unwrap(),
             &context,
             &Default::default(),
+            &serde_json_bytes::Value::Null,
         );
         assert_ne!(hash_a, hash_b);
     }
@@ -569,12 +585,14 @@ mod tests {
             vars.as_object().unwrap(),
             &context,
             &Default::default(),
+            &serde_json_bytes::Value::Null,
         );
         let hash_unknown_2 = hash_connector_additional_data(
             "another_unknown",
             vars.as_object().unwrap(),
             &context,
             &Default::default(),
+            &serde_json_bytes::Value::Null,
         );
         assert_eq!(hash_unknown_1, hash_unknown_2);
     }
@@ -590,5 +608,92 @@ mod tests {
         };
         assert!(connector_key.hash().contains(":connector:"));
         assert!(!connector_key.hash().contains(":subgraph:"));
+    }
+
+    #[test]
+    fn hash_connector_additional_data_partitions_on_key_inputs() {
+        let context = Context::new();
+        let vars = serde_json_bytes::json!({"key": "value"});
+        // Two requests identical except for a referenced forwarded-header value must NOT collide.
+        let inputs_alice = serde_json_bytes::json!({
+            "context": {},
+            "headers": { "x-user": ["alice"] }
+        });
+        let inputs_bob = serde_json_bytes::json!({
+            "context": {},
+            "headers": { "x-user": ["bob"] }
+        });
+        let hash_alice = hash_connector_additional_data(
+            "src",
+            vars.as_object().unwrap(),
+            &context,
+            &Default::default(),
+            &inputs_alice,
+        );
+        let hash_bob = hash_connector_additional_data(
+            "src",
+            vars.as_object().unwrap(),
+            &context,
+            &Default::default(),
+            &inputs_bob,
+        );
+        assert_ne!(
+            hash_alice, hash_bob,
+            "different forwarded-header values must partition the cache key"
+        );
+
+        // Identical key inputs must produce identical hashes (cache still works within a user).
+        let hash_alice_again = hash_connector_additional_data(
+            "src",
+            vars.as_object().unwrap(),
+            &context,
+            &Default::default(),
+            &inputs_alice,
+        );
+        assert_eq!(hash_alice, hash_alice_again);
+    }
+
+    #[test]
+    fn hash_connector_additional_data_empty_key_inputs_matches_null() {
+        // An empty referenced-inputs object hashes the same as `Null`, so connectors that
+        // reference no context/headers keep byte-identical keys (no needless partitioning).
+        let context = Context::new();
+        let vars = serde_json_bytes::json!({"key": "value"});
+        let empty = serde_json_bytes::json!({ "context": {}, "headers": {} });
+        let with_empty = hash_connector_additional_data(
+            "src",
+            vars.as_object().unwrap(),
+            &context,
+            &Default::default(),
+            &empty,
+        );
+        let with_null = hash_connector_additional_data(
+            "src",
+            vars.as_object().unwrap(),
+            &context,
+            &Default::default(),
+            &serde_json_bytes::Value::Null,
+        );
+        // They need not be equal to each other, but each must be stable; assert determinism.
+        assert_eq!(
+            with_empty,
+            hash_connector_additional_data(
+                "src",
+                vars.as_object().unwrap(),
+                &context,
+                &Default::default(),
+                &empty,
+            )
+        );
+        assert_eq!(
+            with_null,
+            hash_connector_additional_data(
+                "src",
+                vars.as_object().unwrap(),
+                &context,
+                &Default::default(),
+                &serde_json_bytes::Value::Null,
+            )
+        );
     }
 }

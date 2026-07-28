@@ -378,6 +378,13 @@ impl ConnectorCacheService {
             let private_id_exists = private_id.is_some();
             let is_debug = self.debug;
             let indexes = self.connectors_config.effective_indexes(&source_name);
+            // Snapshot the connector's referenced $context/$request.headers inputs for the cache
+            // key (request-scoped, shared by every representation in the batch).
+            let key_inputs = connector_key_inputs(
+                connector,
+                &request.context,
+                request.supergraph_request.headers(),
+            );
             self.handle_entity_query(
                 request,
                 storage,
@@ -389,6 +396,7 @@ impl ConnectorCacheService {
                 is_known_private,
                 private_query_key,
                 indexes,
+                key_inputs,
             )
             .instrument(tracing::info_span!(
                 "response_cache.lookup",
@@ -418,6 +426,7 @@ impl ConnectorCacheService {
         is_known_private: bool,
         private_query_key: PrivateQueryKey,
         indexes: InvalidationIndexes,
+        key_inputs: Value,
     ) -> Result<connect::Response, BoxError> {
         // Get auth metadata from context
         let auth_metadata = request
@@ -430,12 +439,15 @@ impl ConnectorCacheService {
         let operation_str = request.operation.serialize().no_indent().to_string();
         let operation_hash = hash_operation(&operation_str);
 
-        // Hash additional data (variables minus representations + auth metadata)
+        // Hash additional data (variables minus representations + auth metadata + referenced
+        // per-request $context/$request.headers inputs). The referenced inputs are request-scoped,
+        // so all representation keys in this batch share them (computed once by the caller).
         let additional_data_hash = hash_connector_additional_data(
             &source_name,
             &request.variables.variables,
             &request.context,
             &auth_metadata,
+            &key_inputs,
         );
 
         // Build debug request before representations are mutably borrowed
@@ -1326,6 +1338,13 @@ impl ConnectorRequestCacheService {
         // Capture connector info for cache tag extraction before request is consumed
         let connector_synthetic_name = request.connector.id.synthetic_name();
 
+        // Snapshot the connector's referenced $context/$request.headers inputs for the cache key.
+        let key_inputs = connector_key_inputs(
+            Some(request.connector.as_ref()),
+            &request.context,
+            request.supergraph_request.headers(),
+        );
+
         // Build a variables object from the request inputs for hashing
         let inputs = request.key.inputs();
         let cache_tag_args = inputs.args.clone();
@@ -1341,6 +1360,7 @@ impl ConnectorRequestCacheService {
             &variables,
             &request.context,
             &auth_metadata,
+            &key_inputs,
         );
 
         let mut cache_key = ConnectorCacheKeyRoot {
@@ -1720,9 +1740,225 @@ struct CacheMetadata {
     entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
 }
 
+/// Build a stable, sorted snapshot of the connector's *used* per-request inputs — the `$context`
+/// keys and client request headers that shape the upstream HTTP request or the response mapping —
+/// for inclusion in the cache key via [`hash_connector_additional_data`].
+///
+/// Client headers reach the upstream request through TWO distinct routes, and both must be keyed:
+/// 1. **Interpolation**: `{$request.headers.x}` in URL/body/header-value templates — collected via
+///    `Connector::{request,response}_headers` (variable references).
+/// 2. **Forwarding**: `http: {headers: [{name: ..., from: "x"}]}` — no variable reference exists,
+///    so the `from:` client header names are collected from the transport's header list directly.
+///
+/// Deliberately excluded (deployment-static, identical for every request): static header `value:`
+/// templates without variable references, `$config`, and `$env`. A `value:` template that DOES
+/// reference `$context`/`$request` is covered by route 1.
+///
+/// Only used inputs are included, so unreferenced/unforwarded headers never over-partition the
+/// cache. A connector that uses nothing here yields an empty object.
+///
+/// Without this, two client requests that produce *different* upstream connector requests because
+/// a forwarded header or context value differs would resolve to the SAME cache key — a cross-user
+/// data leak.
+fn connector_key_inputs(
+    connector: Option<&apollo_federation::connectors::Connector>,
+    context: &Context,
+    headers: &http::HeaderMap,
+) -> Value {
+    use apollo_federation::connectors::HeaderSource;
+    use apollo_federation::connectors::Namespace;
+
+    let Some(connector) = connector else {
+        return Value::Object(Default::default());
+    };
+
+    // Referenced $context keys (union of request- and response-mapping references). A referenced
+    // context key changes either what is fetched or how the response maps, so both matter.
+    let mut context_keys: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for map in [
+        &connector.request_variable_keys,
+        &connector.response_variable_keys,
+    ] {
+        if let Some(keys) = map.get(&Namespace::Context) {
+            context_keys.extend(keys.iter().map(|s| s.as_str()));
+        }
+    }
+    let mut context_obj = serde_json_bytes::Map::new();
+    for key in context_keys {
+        let value = context.get_json_value(key).unwrap_or(Value::Null);
+        context_obj.insert(ByteString::from(key), value);
+    }
+
+    // Used client-request headers by name (case-insensitive; all values, sorted):
+    // interpolated (`$request.headers.*` references) ...
+    let mut header_names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    header_names.extend(connector.request_headers.iter().cloned());
+    header_names.extend(connector.response_headers.iter().cloned());
+    // ... plus forwarded (`headers: [{from: ...}]`); the upstream request copies the CLIENT
+    // header named by `from`, so that is the name whose values must partition the key.
+    if let Some(transport) = connector.transport.as_ref() {
+        for header in &transport.headers {
+            if let HeaderSource::From(from) = &header.source {
+                header_names.insert(from.as_str().to_string());
+            }
+        }
+    }
+    let mut headers_obj = serde_json_bytes::Map::new();
+    for name in &header_names {
+        let mut values: Vec<String> = headers
+            .get_all(name.as_str())
+            .iter()
+            .filter_map(|v| v.to_str().ok().map(str::to_string))
+            .collect();
+        values.sort();
+        headers_obj.insert(
+            ByteString::from(name.as_str()),
+            Value::Array(values.into_iter().map(|v| Value::String(v.into())).collect()),
+        );
+    }
+
+    let mut root = serde_json_bytes::Map::new();
+    root.insert(ByteString::from("context"), Value::Object(context_obj));
+    root.insert(ByteString::from("headers"), Value::Object(headers_obj));
+    Value::Object(root)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_connector(
+        transport_headers: Vec<apollo_federation::connectors::Header>,
+        interpolated_request_headers: &[&str],
+    ) -> apollo_federation::connectors::Connector {
+        use apollo_compiler::name;
+        use apollo_federation::connectors::ConnectId;
+        use apollo_federation::connectors::ConnectSpec;
+        use apollo_federation::connectors::Connector;
+        use apollo_federation::connectors::HttpJsonTransport;
+        use apollo_federation::connectors::JSONSelection;
+
+        let schema =
+            apollo_compiler::Schema::parse_and_validate("type Query { b: String }", "./").unwrap();
+        Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(b),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                headers: transport_headers,
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: interpolated_request_headers
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            label: "test label".into(),
+        }
+    }
+
+    /// F9 regression: forwarded headers (`headers: [{from: ...}]`) must contribute to the key
+    /// inputs; interpolated (`$request.headers.*`) headers must too; static `value:` headers and
+    /// unrelated request headers must NOT (no over-partitioning).
+    #[test]
+    fn key_inputs_cover_forwarded_and_interpolated_headers_only() {
+        use apollo_federation::connectors::Header;
+        use apollo_federation::connectors::HeaderSource;
+        use apollo_federation::connectors::OriginatingDirective;
+
+        let connector = test_connector(
+            vec![
+                // forwarded: upstream name differs from the client (`from`) name on purpose —
+                // the CLIENT name is what must be keyed
+                Header::from_values(
+                    "x-upstream-user".parse().unwrap(),
+                    HeaderSource::From("x-user".parse().unwrap()),
+                    OriginatingDirective::Connect,
+                ),
+                // static value: deployment-static, must NOT be keyed
+                Header::from_values(
+                    "x-static".parse().unwrap(),
+                    HeaderSource::Value(
+                        apollo_federation::connectors::header::HeaderValue::parse_with_spec(
+                            "fixed",
+                            apollo_federation::connectors::ConnectSpec::V0_1,
+                        )
+                        .unwrap(),
+                    ),
+                    OriginatingDirective::Source,
+                ),
+            ],
+            &["x-lang"], // interpolated via {$request.headers.x-lang}
+        );
+
+        let context = Context::new();
+        let mut headers = http::HeaderMap::new();
+        headers.insert("x-user", http::HeaderValue::from_static("alice"));
+        headers.insert("x-lang", http::HeaderValue::from_static("fr"));
+        headers.insert("x-unrelated", http::HeaderValue::from_static("noise"));
+        headers.insert("x-static", http::HeaderValue::from_static("client-noise"));
+
+        let inputs = connector_key_inputs(Some(&connector), &context, &headers);
+        let headers_obj = inputs
+            .as_object()
+            .unwrap()
+            .get("headers")
+            .unwrap()
+            .as_object()
+            .unwrap();
+
+        assert!(
+            headers_obj.contains_key("x-user"),
+            "forwarded header (from:) must be keyed, got: {inputs:?}"
+        );
+        assert!(
+            headers_obj.contains_key("x-lang"),
+            "interpolated header must be keyed, got: {inputs:?}"
+        );
+        assert!(
+            !headers_obj.contains_key("x-unrelated"),
+            "unrelated header must not over-partition, got: {inputs:?}"
+        );
+        assert!(
+            !headers_obj.contains_key("x-static"),
+            "static value: header must not be keyed, got: {inputs:?}"
+        );
+        assert!(
+            !headers_obj.contains_key("x-upstream-user"),
+            "the upstream rename must not be keyed — the client `from` name is, got: {inputs:?}"
+        );
+
+        // Different forwarded value ⇒ different snapshot; unrelated header change ⇒ identical.
+        let mut headers_bob = headers.clone();
+        headers_bob.insert("x-user", http::HeaderValue::from_static("bob"));
+        assert_ne!(
+            inputs,
+            connector_key_inputs(Some(&connector), &context, &headers_bob)
+        );
+        let mut headers_noise = headers.clone();
+        headers_noise.insert("x-unrelated", http::HeaderValue::from_static("other"));
+        assert_eq!(
+            inputs,
+            connector_key_inputs(Some(&connector), &context, &headers_noise)
+        );
+    }
 
     fn config_with(
         all_enabled: Option<bool>,
