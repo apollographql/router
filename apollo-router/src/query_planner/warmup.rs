@@ -610,10 +610,10 @@ mod tests {
                 Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
             );
 
-            let query_analysis = query_parsing::query_parsing_service(schema, configuration);
+            let query_parsing_service = query_parsing::query_parsing_service(schema, configuration);
 
             let mut service = ServiceBuilder::new()
-                .layer(WarmupParseQueryLayer::new(query_analysis))
+                .layer(WarmupParseQueryLayer::new(query_parsing_service))
                 .map_err(|err| {
                     panic!(
                         "we have to cast the error because these services do not use BoxError: {err}"
