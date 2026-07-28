@@ -264,6 +264,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 }
 
 impl YamlRouterFactory {
+    #[allow(clippy::too_many_arguments)]
     async fn inner_create(
         &mut self,
         configuration: Arc<Configuration>,
