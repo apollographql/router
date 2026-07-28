@@ -127,22 +127,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
     {
         Box::pin(async move {
             let pipeline_handle = service_factory.pipeline_handle();
-            // Build the connection service once per reload. Each accepted connection clones this,
-            // which is a cheap channel-handle copy pointing at the shared worker below.
-            //
-            // Stack (outermost → innermost):
-            //   BoxCloneSyncService — type-erased Sync wrapper for axum Extension storage (axum
-            //                         requires Clone + Send + Sync; the pipeline is Send-only).
-            //   UnconstrainedBuffer — provides Sync via its channel handles (Send+Sync regardless
-            //                         of the inner service) and runs poll_ready outside Tokio's
-            //                         cooperative-scheduling budget, preventing spurious Pending
-            //                         from budget-sensitive inner layers (e.g. RateLimit, Buffer
-            //                         inside traffic_shaping) that would otherwise cause load_shed
-            //                         to emit false Overloaded errors.
-            //   load_shed          — if the pipeline's poll_ready returns Pending (genuinely
-            //                         saturated), new requests fail fast with Overloaded (→ 503)
-            //                         rather than queuing indefinitely.
-            //   pipeline           — the router pipeline from RouterCreator.
+            // Build the connection service once per reload; connections clone it cheaply.
             let router_service = BoxCloneSyncService::new(
                 ServiceBuilder::new()
                     .load_shed()
@@ -610,10 +595,6 @@ mod tests {
         }
     }
 
-    /// When the connection-scoped router service is permanently not-ready, `load_shed` (added by
-    /// `connection_router_service`) sheds the request with `Overloaded` rather than hanging, and
-    /// `handle_graphql` must turn that into a `503`, not the generic `500` from
-    /// `internal_server_error` — otherwise a shed request is indistinguishable from a real bug.
     #[tokio::test]
     async fn overloaded_router_service_returns_503() {
         let connection_service = crate::axum_factory::utils::connection_router_service(

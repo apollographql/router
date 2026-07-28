@@ -434,7 +434,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 match Self::try_start(
                     state_machine,
                     &mut server_handle,
-                    Some(&router_service_factory),
+                    Some(router_service_factory.clone()),
                     configuration.target().clone(),
                     schema.target().clone(),
                     license.target().clone(),
@@ -555,7 +555,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
     async fn try_start<S>(
         state_machine: &mut StateMachine<S, FA>,
         server_handle: &mut Option<HttpServerHandle>,
-        previous_router_service_factory: Option<&FA::RouterFactory>,
+        previous_router_service_factory: Option<FA::RouterFactory>,
         configuration: Arc<Configuration>,
         schema_state: Arc<SchemaState>,
         license: Arc<LicenseState>,
@@ -2271,12 +2271,12 @@ mod tests {
         impl RouterSuperServiceFactory for MyRouterConfigurator {
             type RouterFactory = MockMyRouterFactory;
 
-            async fn create<'a>(
-                &'a mut self,
+            async fn create(
+                &mut self,
                 is_telemetry_disabled: bool,
                 configuration: Arc<Configuration>,
                 schema: Arc<Schema>,
-                previous_router_service_factory: Option<&'a MockMyRouterFactory>,
+                previous_router_service_factory: Option<MockMyRouterFactory>,
                 extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
                 license: Arc<LicenseState>
             ) -> Result<MockMyRouterFactory, BoxError>;
@@ -2420,7 +2420,7 @@ mod tests {
                     move |_,
                           _configuration: &Arc<Configuration>,
                           _,
-                          previous_router_service_factory: &Option<&MockMyRouterFactory>,
+                          previous_router_service_factory: &Option<MockMyRouterFactory>,
                           _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>,
                           _| { previous_router_service_factory.is_some() },
                 )

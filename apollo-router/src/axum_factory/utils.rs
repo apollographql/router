@@ -62,32 +62,9 @@ pub(crate) struct ConnectionInfo {
     pub(crate) server_address: Option<SocketAddr>,
 }
 
-/// The router pipeline created for a single connection (or, in tests, a single in-process
-/// session), shared across all requests on that connection/session.
-///
-/// Stored as an axum `Extension`, which requires `Send + Sync`. The `Send`-only
-/// `router::BoxCloneService` returned by `RouterFactory::create()` gains `Sync` when wrapped in
-/// `UnconstrainedBuffer` inside [`connection_router_service`], because `Buffer` is backed by
-/// channel handles that are `Send + Sync` regardless of the wrapped service's `Sync`-ness.
 pub(crate) type ConnectionRouterService =
     tower::util::BoxCloneSyncService<router::Request, router::Response, tower::BoxError>;
 
-/// Wraps a freshly created router service for use across a single connection.
-///
-/// Builds the stack `UnconstrainedBuffer(load_shed(service))`:
-///
-/// - The `load_shed` directly observes the service's `poll_ready`: if the pipeline signals
-///   `Poll::Pending`, new requests on this connection are immediately shed with `Overloaded`
-///   (→ 503) rather than piling up indefinitely.
-/// - The `UnconstrainedBuffer` sits outside the `load_shed` so that:
-///   1. Requests are queued and dispatched to the `load_shed` worker without holding up the
-///      caller's `poll_ready` path.
-///   2. Polling is unconstrained, preventing Tokio's cooperative-scheduling budget from
-///      producing spurious `Poll::Pending` returns that would cause false `Overloaded` errors
-///      (see [`crate::layers::unconstrained_buffer`]).
-///   3. `Buffer` is backed by channel handles that are `Send + Sync` regardless of the wrapped
-///      service's `Sync`-ness, converting the `Send`-only `router::BoxCloneService` into a type
-///      suitable for storage as an axum `Extension`.
 pub(crate) fn connection_router_service(
     service: router::BoxCloneService,
 ) -> ConnectionRouterService {

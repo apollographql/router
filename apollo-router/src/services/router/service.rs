@@ -643,14 +643,7 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
-    // `BoxCloneService` is `Send` but not `Sync`, so it cannot be stored directly in a struct
-    // that must be `Sync` (required because `RouterCreator` lives behind an `Arc` shared across
-    // threads). A `Buffer` would also provide `Sync` via its channel handles, but we deliberately
-    // avoid putting a buffer here: the caller (`axum_http_server_factory`) calls `create()` exactly
-    // once per reload, wraps the returned service in its own `UnconstrainedBuffer + load_shed`, and
-    // clones that composite service cheaply per connection. The `Mutex` is only locked during that
-    // single `clone()` call — never per connection and never per request.
-    service: Arc<parking_lot::Mutex<router::BoxCloneService>>,
+    service: router::BoxCloneService,
     pipeline_handle: Arc<PipelineHandle>,
     /// The configuration used to create this router, stored for hot reload previous config extraction
     pub(crate) configuration: Arc<Configuration>,
@@ -658,7 +651,7 @@ pub(crate) struct RouterCreator {
 
 impl RouterFactory for RouterCreator {
     fn create(&self) -> router::BoxCloneService {
-        self.service.lock().clone()
+        self.service.clone()
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
@@ -721,28 +714,22 @@ impl RouterCreator {
             ),
         );
 
-        // NOTE: This is the start of the router pipeline (router_service).
-        // The buffer provides backpressure for the full router pipeline and is required
-        // for correct LoadShed / ConcurrencyLimit / RateLimit behaviour: without a buffer
-        // before those layers (potentially introduced by traffic-shaping or license-
-        // enforcement plugins), Tokio's cooperative scheduling would cause poll_ready to
-        // return Pending spuriously and trigger Overloaded responses.
         let service = ServiceBuilder::new()
-                .layer(static_page.clone())
-                .service(
-                    supergraph_creator
-                        .plugins()
-                        .iter()
-                        .rev()
-                        .fold(router_service.boxed_clone(), |acc, (_, e)| {
-                            e.router_service(acc)
-                        }),
-                )
-                .boxed_clone();
+            .layer(static_page.clone())
+            .service(
+                supergraph_creator
+                    .plugins()
+                    .iter()
+                    .rev()
+                    .fold(router_service.boxed_clone(), |acc, (_, e)| {
+                        e.router_service(acc)
+                    }),
+            )
+            .boxed_clone();
 
         Ok(Self {
             supergraph_creator,
-            service: Arc::new(parking_lot::Mutex::new(service)),
+            service,
             pipeline_handle: Arc::new(pipeline_handle),
             configuration,
         })
