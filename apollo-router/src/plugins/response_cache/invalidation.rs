@@ -14,6 +14,7 @@ use tracing::Instrument;
 
 use super::plugin::StorageInterface;
 use crate::plugins::response_cache::ErrorCode;
+use crate::plugins::response_cache::cache_tag::CacheScope;
 use crate::plugins::response_cache::plugin::INTERNAL_CACHE_TAG_PREFIX;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
 use crate::plugins::response_cache::storage;
@@ -84,6 +85,7 @@ impl Invalidation {
 
     async fn handle_request(
         &self,
+        scope: CacheScope,
         storage: &Storage,
         request: &InvalidationRequest,
     ) -> Result<u64, InvalidationError> {
@@ -95,7 +97,7 @@ impl Invalidation {
         let (count, subgraphs) = match request {
             InvalidationRequest::Subgraph { subgraph } => {
                 let count = storage
-                    .invalidate_by_subgraph(subgraph, request.kind())
+                    .invalidate_by_subgraph(scope, subgraph, request.kind())
                     .await
                     .inspect_err(|err| {
                         u64_counter_with_unit!(
@@ -124,6 +126,7 @@ impl Invalidation {
             } => {
                 let subgraph_counts = storage
                     .invalidate(
+                        scope,
                         vec![invalidation_key],
                         vec![subgraph.clone()],
                         request.kind(),
@@ -163,6 +166,7 @@ impl Invalidation {
             } => {
                 let subgraph_counts = storage
                     .invalidate(
+                        scope,
                         vec![cache_tag.clone()],
                         subgraphs.clone().into_iter().collect(),
                         request.kind(),
@@ -207,7 +211,7 @@ impl Invalidation {
             }
             InvalidationRequest::ConnectorSource { source } => {
                 let count = storage
-                    .invalidate_by_subgraph(source, request.kind())
+                    .invalidate_by_subgraph(scope, source, request.kind())
                     .await
                     .inspect_err(|err| {
                         u64_counter_with_unit!(
@@ -235,7 +239,12 @@ impl Invalidation {
                 r#type: graphql_type,
             } => {
                 let source_counts = storage
-                    .invalidate(vec![invalidation_key], vec![source.clone()], request.kind())
+                    .invalidate(
+                        scope,
+                        vec![invalidation_key],
+                        vec![source.clone()],
+                        request.kind(),
+                    )
                     .await
                     .inspect_err(|err| {
                         u64_counter_with_unit!(
@@ -288,33 +297,47 @@ impl Invalidation {
         let mut errors = Vec::new();
         let mut futures = Vec::new();
         for request in requests {
-            let storages = match &request {
+            // Each storage is paired with the scope whose index namespace should be resolved
+            // against it, so `handle_request` renders `subgraph-`/`connector-` correctly.
+            let storages: Vec<(CacheScope, &Storage)> = match &request {
                 InvalidationRequest::Subgraph { subgraph }
                 | InvalidationRequest::Type { subgraph, .. } => match self.storage.get(subgraph) {
-                    Some(s) => vec![s],
+                    Some(s) => vec![(CacheScope::Subgraph, s)],
                     None => continue,
                 },
+                // A cache_tag name can belong to either scope (`sources` is folded into
+                // `subgraphs` at parse time), and `StorageInterface::get` falls back to the
+                // subgraph `all` storage for ANY name — so an `.or_else` chain would never reach
+                // connector storage when subgraph caching is configured. Run the invalidation
+                // against BOTH scopes' storages, each under its own scope: tag ZSET keys render
+                // per scope+name, so the non-owning storage simply deletes nothing (idempotent).
                 InvalidationRequest::CacheTag { subgraphs, .. } => subgraphs
                     .iter()
-                    .filter_map(|subgraph| {
+                    .flat_map(|subgraph| {
                         self.storage
                             .get(subgraph)
-                            .or_else(|| self.storage.get_connector(subgraph))
+                            .map(|s| (CacheScope::Subgraph, s))
+                            .into_iter()
+                            .chain(
+                                self.storage
+                                    .get_connector(subgraph)
+                                    .map(|s| (CacheScope::Connector, s)),
+                            )
                     })
                     .collect(),
                 InvalidationRequest::ConnectorSource { source }
                 | InvalidationRequest::ConnectorType { source, .. } => {
                     match self.storage.get_connector(source) {
-                        Some(s) => vec![s],
+                        Some(s) => vec![(CacheScope::Connector, s)],
                         None => continue,
                     }
                 }
             };
 
-            for storage in storages {
+            for (scope, storage) in storages {
                 let request = request.clone();
                 let f = async move {
-                    self.handle_request(storage, &request)
+                    self.handle_request(scope, storage, &request)
                         .instrument(tracing::info_span!("cache.invalidation.request"))
                         .await
                 };
@@ -515,16 +538,17 @@ impl InvalidationRequest {
                 )
             }
             InvalidationRequest::CacheTag { cache_tag, .. } => cache_tag.clone(),
-            // Under Option A the connector source is passed as the `subgraph_name` scope to
-            // `CacheTag::to_redis_key`, so connector invalidation keys must render byte-identically
-            // to `Subgraph`/`Type` with the source as the name. This is the write↔invalidate
-            // string-identity contract.
+            // Connector entries are indexed under the disjoint `connector` scope (see
+            // `CacheScope`), so connector invalidation keys must render with the `connector:`
+            // word to match the write path byte-for-byte. This is the write↔invalidate
+            // string-identity contract, now scoped so a `subgraph`-kind request can never
+            // resolve a connector source's index.
             InvalidationRequest::ConnectorSource { source } => {
-                format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{source}")
+                format!("version:{RESPONSE_CACHE_VERSION}:connector:{source}")
             }
             InvalidationRequest::ConnectorType { source, r#type } => {
                 format!(
-                    "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{source}:type:{type}",
+                    "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:connector:{source}:type:{type}",
                 )
             }
         }
@@ -559,11 +583,11 @@ mod tests {
             source: "mysubgraph.my_api".to_string(),
         };
         let key = req.invalidation_key();
-        // Under Option A the connector source is the scope name, so this renders identically to a
-        // `Subgraph` request with the source as the subgraph name (write↔invalidate identity).
+        // Connector entries live in the disjoint `connector` scope, so the key uses the
+        // `connector:` word — must match `CacheTag::to_redis_key(CacheScope::Connector, source)`.
         assert_eq!(
             key,
-            format!("version:{RESPONSE_CACHE_VERSION}:subgraph:mysubgraph.my_api")
+            format!("version:{RESPONSE_CACHE_VERSION}:connector:mysubgraph.my_api")
         );
     }
 
@@ -574,13 +598,13 @@ mod tests {
             r#type: "User".to_string(),
         };
         let key = req.invalidation_key();
-        // Renders identically to a `Type` request with the source as the subgraph name, so it
-        // matches `CacheTag::Type(..).to_redis_key(source)` byte-for-byte (write↔invalidate
-        // identity).
+        // Matches the inner doc-key segment of
+        // `CacheTag::Type(..).to_redis_key(CacheScope::Connector, source)` byte-for-byte
+        // (write↔invalidate identity, connector-scoped).
         assert_eq!(
             key,
             format!(
-                "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:mysubgraph.my_api:type:User"
+                "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:connector:mysubgraph.my_api:type:User"
             )
         );
     }

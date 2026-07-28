@@ -25,6 +25,7 @@ use tracing::Instrument;
 use tracing::Span;
 
 use super::cache_control::CacheControl;
+use super::cache_tag::CacheScope;
 use super::cache_tag::CacheTag;
 use super::invalidation_endpoint::IndexMode;
 use super::invalidation_endpoint::InvalidationIndexes;
@@ -1031,6 +1032,7 @@ impl ConnectorCacheService {
                                 cache_tags: doc_cache_tags,
                                 expire: ttl,
                                 debug,
+                                scope: CacheScope::Connector,
                             });
                         }
 
@@ -1607,6 +1609,7 @@ impl ConnectorRequestCacheService {
                             cache_tags,
                             expire: ttl,
                             debug,
+                            scope: CacheScope::Connector,
                         };
 
                         let source = source_name;

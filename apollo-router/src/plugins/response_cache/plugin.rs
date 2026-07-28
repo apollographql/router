@@ -41,6 +41,7 @@ use tracing::Level;
 use tracing::Span;
 
 use super::cache_control::CacheControl;
+use super::cache_tag::CacheScope;
 use super::cache_tag::CacheTag;
 use super::connectors::ConnectorCacheConfiguration;
 use super::connectors::ConnectorCacheService;
@@ -1984,6 +1985,7 @@ async fn cache_store_root_from_response(
                 cache_tags,
                 expire: ttl,
                 debug,
+                scope: CacheScope::Subgraph,
             };
 
             let subgraph_name = response.subgraph_name.clone();
@@ -2874,6 +2876,7 @@ async fn insert_entities_in_result(
                         cache_tags,
                         expire: ttl,
                         debug,
+                        scope: CacheScope::Subgraph,
                     });
                 }
 
