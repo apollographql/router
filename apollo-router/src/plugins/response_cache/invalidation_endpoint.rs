@@ -260,9 +260,11 @@ impl Service<router::Request> for InvalidationService {
                                 // index_modes. Allows customers to opt out of maintaining
                                 // by-subgraph and by-type indexes when they only invalidate by
                                 // cache tag, and surfaces misconfiguration to callers fast.
-                                if let Some(rejection) =
-                                    find_disabled_mode_rejection(&config, &body)
-                                {
+                                if let Some(rejection) = find_disabled_mode_rejection(
+                                    &config,
+                                    &connector_config,
+                                    &body,
+                                ) {
                                     let (subgraph, kind) = rejection;
                                     Span::current()
                                         .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
@@ -466,27 +468,77 @@ pub(crate) fn effective_invalidation_indexes(
 }
 
 /// Scan the parsed invalidation request batch for any item whose `kind` is not enabled for its
-/// target subgraph. Returns `Some((subgraph_name, kind))` for the first offending pair so the
+/// target scope. Returns `Some((scope_name, kind))` for the first offending pair so the
 /// caller can render a precise 400 response, or `None` when every request is permitted.
 ///
-/// Subgraph names are visited in sorted order so the error message is deterministic across
-/// repeated calls, which matters for `CacheTag` requests whose `subgraphs` field is an unordered
+/// Connector-targeted requests resolve their indexes from the connector configuration;
+/// subgraph-targeted ones from the subgraph configuration. `cache_tag` names may belong to
+/// either scope (`sources` is folded into `subgraphs` at parse time), so a name is only
+/// rejected when **both** configurations disable the cache-tag index for it.
+///
+/// Names are visited in sorted order so the error message is deterministic across repeated
+/// calls, which matters for `CacheTag` requests whose `subgraphs` field is an unordered
 /// `HashSet<String>`.
 fn find_disabled_mode_rejection(
     config: &SubgraphConfiguration<Subgraph>,
+    connector_config: &ConnectorCacheConfiguration,
     body: &[InvalidationRequest],
 ) -> Option<(String, &'static str)> {
     for request in body {
         let kind_str = request.kind();
-        let Some(mode) = invalidation_kind_to_index_mode(kind_str) else {
-            continue;
-        };
-        let mut subgraphs = request.subgraph_names();
-        subgraphs.sort();
-        for subgraph in subgraphs {
-            let indexes = effective_invalidation_indexes(config, &subgraph);
-            if !indexes.is_enabled(mode) {
-                return Some((subgraph, kind_str));
+        match request {
+            InvalidationRequest::ConnectorSource { source } => {
+                if !connector_config
+                    .effective_indexes(source)
+                    .is_enabled(IndexMode::Subgraph)
+                {
+                    return Some((source.clone(), kind_str));
+                }
+            }
+            InvalidationRequest::ConnectorType { source, .. } => {
+                if !connector_config
+                    .effective_indexes(source)
+                    .is_enabled(IndexMode::Type)
+                {
+                    return Some((source.clone(), kind_str));
+                }
+            }
+            InvalidationRequest::CacheTag { .. } => {
+                let mut names = request.subgraph_names();
+                names.sort();
+                for name in names {
+                    let subgraph_enabled = effective_invalidation_indexes(config, &name)
+                        .is_enabled(IndexMode::CacheTag);
+                    // The connector side only vouches for a name when it actually has an
+                    // invalidation config that could apply to it; an entirely unconfigured
+                    // connector block must not un-reject subgraph-targeted requests.
+                    let connector_has_invalidation_config = connector_config
+                        .sources
+                        .get(&name)
+                        .map(|s| s.invalidation.is_some())
+                        .unwrap_or(false)
+                        || connector_config.all.invalidation.is_some();
+                    let connector_enabled = connector_has_invalidation_config
+                        && connector_config
+                            .effective_indexes(&name)
+                            .is_enabled(IndexMode::CacheTag);
+                    if !subgraph_enabled && !connector_enabled {
+                        return Some((name, kind_str));
+                    }
+                }
+            }
+            InvalidationRequest::Subgraph { .. } | InvalidationRequest::Type { .. } => {
+                let Some(mode) = invalidation_kind_to_index_mode(kind_str) else {
+                    continue;
+                };
+                let mut subgraphs = request.subgraph_names();
+                subgraphs.sort();
+                for subgraph in subgraphs {
+                    let indexes = effective_invalidation_indexes(config, &subgraph);
+                    if !indexes.is_enabled(mode) {
+                        return Some((subgraph, kind_str));
+                    }
+                }
             }
         }
     }
@@ -498,6 +550,7 @@ mod indexes_tests {
     use std::collections::HashMap;
 
     use super::*;
+    use crate::plugins::response_cache::connectors::ConnectorCacheSource;
     use crate::plugins::response_cache::plugin::Subgraph;
 
     /// Test helper: build an `InvalidationIndexes` from a list of modes that should be enabled.
@@ -671,7 +724,7 @@ indexes:
         let body = vec![InvalidationRequest::Subgraph {
             subgraph: "users".to_string(),
         }];
-        assert_eq!(find_disabled_mode_rejection(&cfg, &body), None);
+        assert_eq!(find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body), None);
     }
 
     #[test]
@@ -681,7 +734,7 @@ indexes:
             subgraph: "users".to_string(),
         }];
         assert_eq!(
-            find_disabled_mode_rejection(&cfg, &body),
+            find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body),
             Some(("users".to_string(), "subgraph"))
         );
     }
@@ -694,7 +747,7 @@ indexes:
             r#type: "User".to_string(),
         }];
         assert_eq!(
-            find_disabled_mode_rejection(&cfg, &body),
+            find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body),
             Some(("users".to_string(), "type"))
         );
     }
@@ -711,7 +764,7 @@ indexes:
             subgraphs,
             cache_tag: "homepage".to_string(),
         }];
-        let rejection = find_disabled_mode_rejection(&cfg, &body);
+        let rejection = find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body);
         assert_eq!(rejection, Some(("users".to_string(), "cache_tag")));
     }
 
@@ -727,7 +780,7 @@ indexes:
             subgraph: "payments".to_string(),
         }];
         assert_eq!(
-            find_disabled_mode_rejection(&cfg, &body),
+            find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body),
             Some(("payments".to_string(), "subgraph"))
         );
     }
@@ -752,8 +805,117 @@ indexes:
             cache_tag: "homepage".to_string(),
         }];
         // The disabled subgraph is "users"; should be returned reliably.
-        let rejection = find_disabled_mode_rejection(&cfg, &body);
+        let rejection = find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body);
         assert_eq!(rejection, Some(("users".to_string(), "cache_tag")));
+    }
+
+    #[test]
+    fn find_disabled_mode_rejection_flags_connector_kind_when_disabled() {
+        let cfg = subgraph_config(None, None);
+        let connector_cfg = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: "k".to_string(),
+                    indexes: indexes_with(&[IndexMode::Type, IndexMode::CacheTag]),
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        };
+        let body = vec![InvalidationRequest::ConnectorSource {
+            source: "graph.api".to_string(),
+        }];
+        assert_eq!(
+            find_disabled_mode_rejection(&cfg, &connector_cfg, &body),
+            Some(("graph.api".to_string(), "connector"))
+        );
+    }
+
+    #[test]
+    fn find_disabled_mode_rejection_flags_connector_type_when_disabled() {
+        let cfg = subgraph_config(None, None);
+        let connector_cfg = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: "k".to_string(),
+                    indexes: indexes_with(&[IndexMode::Subgraph, IndexMode::CacheTag]),
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        };
+        let body = vec![InvalidationRequest::ConnectorType {
+            source: "graph.api".to_string(),
+            r#type: "User".to_string(),
+        }];
+        assert_eq!(
+            find_disabled_mode_rejection(&cfg, &connector_cfg, &body),
+            Some(("graph.api".to_string(), "type"))
+        );
+    }
+
+    #[test]
+    fn find_disabled_mode_rejection_connector_requests_ignore_subgraph_indexes() {
+        // The subgraph block disables everything, but connector-targeted requests must resolve
+        // their indexes from the connector configuration (default: all enabled).
+        let cfg = subgraph_config(Some(indexes_with(&[])), None);
+        let connector_cfg = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: "k".to_string(),
+                    indexes: InvalidationIndexes::default(),
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        };
+        let body = vec![
+            InvalidationRequest::ConnectorSource {
+                source: "graph.api".to_string(),
+            },
+            InvalidationRequest::ConnectorType {
+                source: "graph.api".to_string(),
+                r#type: "User".to_string(),
+            },
+        ];
+        assert_eq!(
+            find_disabled_mode_rejection(&cfg, &connector_cfg, &body),
+            None
+        );
+    }
+
+    #[test]
+    fn find_disabled_mode_rejection_cache_tag_allowed_by_connector_config() {
+        // Subgraph side disables cache_tag for the name, but the connector side has an
+        // invalidation config with cache_tag enabled — the request must be permitted.
+        let cfg = subgraph_config(
+            Some(indexes_with(&[IndexMode::Subgraph, IndexMode::Type])),
+            None,
+        );
+        let connector_cfg = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: "k".to_string(),
+                    indexes: InvalidationIndexes::default(),
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        };
+        let mut subgraphs = std::collections::HashSet::new();
+        subgraphs.insert("graph.api".to_string());
+        let body = vec![InvalidationRequest::CacheTag {
+            subgraphs,
+            cache_tag: "tag-1".to_string(),
+        }];
+        assert_eq!(
+            find_disabled_mode_rejection(&cfg, &connector_cfg, &body),
+            None
+        );
     }
 }
 
