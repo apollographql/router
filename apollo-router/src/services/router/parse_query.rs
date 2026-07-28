@@ -411,7 +411,52 @@ mod tests {
 
         assert_eq!(StatusCode::BAD_REQUEST, response.response.status());
         let graphql_response = response.next_response().await.unwrap();
-        assert!(dbg!(graphql_response).contains_error_code("GRAPHQL_VALIDATION_FAILED"));
+        assert!(graphql_response.contains_error_code("GRAPHQL_VALIDATION_FAILED"));
+
+        crate::plugin::test::await_mock_driver(query_parsing_driver).await;
+        // The inner service is not reached.
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
+    #[tokio::test]
+    async fn it_redacts_validation_error() {
+        let (query_parsing_service, mut query_parsing_handle) = mock_query_parsing();
+        let config = Configuration::default();
+        let schema = crate::spec::Schema::parse(SCHEMA, &config).unwrap();
+        let query_parsing_driver = tokio::spawn(async move {
+            let (req, responder) = query_parsing_handle.next_request().await.unwrap();
+            responder.send_response(crate::spec::Query::parse_document(
+                &req.query, None, &schema, &config,
+            ));
+        });
+
+        let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+
+        let mut service = ServiceBuilder::new()
+            .layer(ParseQueryLayer::new(query_parsing_service, true))
+            .service(mock);
+
+        let mut response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                supergraph::Request::fake_builder()
+                    .query("query Missing { doesNotExist }")
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(StatusCode::BAD_REQUEST, response.response.status());
+        let graphql_response = response.next_response().await.unwrap();
+        assert!(graphql_response.contains_error_code("GRAPHQL_VALIDATION_FAILED"));
+        assert!(
+            !serde_json::to_string(&graphql_response)
+                .unwrap()
+                .contains("doesNotExist")
+        );
 
         crate::plugin::test::await_mock_driver(query_parsing_driver).await;
         // The inner service is not reached.
