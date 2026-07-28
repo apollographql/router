@@ -144,7 +144,7 @@ impl Endpoint {
 ///
 /// Instances of this trait are used by the HTTP server to obtain a new
 /// router service, shared across all requests on a connection.
-pub(crate) trait RouterFactory: Clone + Send + Sync + 'static {
+pub(crate) trait RouterFactory: Clone + Send + 'static {
     fn create(&self) -> router::BoxCloneService;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
@@ -162,7 +162,7 @@ pub(crate) trait RouterFactory: Clone + Send + Sync + 'static {
 /// Instances of this traits are used by the StateMachine to generate a new
 /// RouterFactory from configuration when it changes
 #[async_trait::async_trait]
-pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
+pub(crate) trait RouterSuperServiceFactory {
     type RouterFactory: RouterFactory;
 
     async fn create<'a>(

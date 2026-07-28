@@ -41,8 +41,6 @@ use crate::axum_factory::CanceledRequest;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::graphql;
-use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
@@ -645,7 +643,14 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
-    service: UnconstrainedBuffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
+    // `BoxCloneService` is `Send` but not `Sync`, so it cannot be stored directly in a struct
+    // that must be `Sync` (required because `RouterCreator` lives behind an `Arc` shared across
+    // threads). A `Buffer` would also provide `Sync` via its channel handles, but we deliberately
+    // avoid putting a buffer here: the caller (`axum_http_server_factory`) calls `create()` exactly
+    // once per reload, wraps the returned service in its own `UnconstrainedBuffer + load_shed`, and
+    // clones that composite service cheaply per connection. The `Mutex` is only locked during that
+    // single `clone()` call — never per connection and never per request.
+    service: Arc<parking_lot::Mutex<router::BoxCloneService>>,
     pipeline_handle: Arc<PipelineHandle>,
     /// The configuration used to create this router, stored for hot reload previous config extraction
     pub(crate) configuration: Arc<Configuration>,
@@ -653,7 +658,7 @@ pub(crate) struct RouterCreator {
 
 impl RouterFactory for RouterCreator {
     fn create(&self) -> router::BoxCloneService {
-        self.service.clone().boxed_clone()
+        self.service.lock().clone()
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
@@ -722,8 +727,7 @@ impl RouterCreator {
         // before those layers (potentially introduced by traffic-shaping or license-
         // enforcement plugins), Tokio's cooperative scheduling would cause poll_ready to
         // return Pending spuriously and trigger Overloaded responses.
-        let service = UnconstrainedBuffer::new(
-            ServiceBuilder::new()
+        let service = ServiceBuilder::new()
                 .layer(static_page.clone())
                 .service(
                     supergraph_creator
@@ -734,13 +738,11 @@ impl RouterCreator {
                             e.router_service(acc)
                         }),
                 )
-                .boxed_clone(),
-            DEFAULT_BUFFER_SIZE,
-        );
+                .boxed_clone();
 
         Ok(Self {
             supergraph_creator,
-            service,
+            service: Arc::new(parking_lot::Mutex::new(service)),
             pipeline_handle: Arc::new(pipeline_handle),
             configuration,
         })

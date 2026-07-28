@@ -30,6 +30,7 @@ use tokio_rustls::TlsAcceptor;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::load_shed::error::Overloaded;
+use tower::util::BoxCloneSyncService;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use tracing::instrument::WithSubscriber;
@@ -52,6 +53,7 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
+use crate::layers::ServiceBuilderExt;
 use crate::plugins::license_enforcement::layer::LicenseLayer;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecording;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecordingStream;
@@ -125,12 +127,28 @@ impl HttpServerFactory for AxumHttpServerFactory {
     {
         Box::pin(async move {
             let pipeline_handle = service_factory.pipeline_handle();
-            // Built once here and invoked once per accepted connection (see listeners.rs),
-            // rather than once per request.
-            let router_service_factory: Arc<dyn Fn() -> router::BoxCloneService + Send + Sync> = {
-                let service_factory = service_factory.clone();
-                Arc::new(move || service_factory.create())
-            };
+            // Build the connection service once per reload. Each accepted connection clones this,
+            // which is a cheap channel-handle copy pointing at the shared worker below.
+            //
+            // Stack (outermost → innermost):
+            //   BoxCloneSyncService — type-erased Sync wrapper for axum Extension storage (axum
+            //                         requires Clone + Send + Sync; the pipeline is Send-only).
+            //   UnconstrainedBuffer — provides Sync via its channel handles (Send+Sync regardless
+            //                         of the inner service) and runs poll_ready outside Tokio's
+            //                         cooperative-scheduling budget, preventing spurious Pending
+            //                         from budget-sensitive inner layers (e.g. RateLimit, Buffer
+            //                         inside traffic_shaping) that would otherwise cause load_shed
+            //                         to emit false Overloaded errors.
+            //   load_shed          — if the pipeline's poll_ready returns Pending (genuinely
+            //                         saturated), new requests fail fast with Overloaded (→ 503)
+            //                         rather than queuing indefinitely.
+            //   pipeline           — the router pipeline from RouterCreator.
+            let router_service = BoxCloneSyncService::new(
+                ServiceBuilder::new()
+                    .load_shed()
+                    .buffered()
+                    .service(service_factory.create()),
+            );
             let all_routers = make_axum_router(&configuration, extra_endpoints, license)?;
 
             // serve main router
@@ -190,7 +208,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
                 all_routers.main.1,
                 pipeline_handle.clone(),
-                Some(router_service_factory),
+                Some(router_service),
                 actual_main_listen_address.clone(),
                 main_listener,
                 configuration.clone(),

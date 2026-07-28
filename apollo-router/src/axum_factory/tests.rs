@@ -188,9 +188,8 @@ impl RouterFactory for CountingRouterFactory {
     }
 }
 
-/// Confirms `RouterFactory::create()` is called once per accepted connection, not once per
-/// request: several requests reused on the same keep-alive connection share a single `create()`
-/// call, while a request from a distinct connection triggers its own.
+/// Confirms `RouterFactory::create()` is called exactly once per server startup (not per
+/// connection or per request): the resulting service is cloned cheaply for each connection.
 #[tokio::test]
 async fn it_creates_router_service_once_per_connection_not_once_per_request() {
     let create_calls = Arc::new(AtomicU32::new(0));
@@ -274,7 +273,7 @@ async fn it_creates_router_service_once_per_connection_not_once_per_request() {
     assert_eq!(
         create_calls.load(Ordering::SeqCst),
         1,
-        "requests reused on the same keep-alive connection should share one RouterFactory::create() call"
+        "multiple requests on the same connection should not trigger additional create() calls"
     );
 
     // A distinct client (own connection pool) forces a fresh TCP connection.
@@ -293,8 +292,8 @@ async fn it_creates_router_service_once_per_connection_not_once_per_request() {
     assert_eq!(status, reqwest::StatusCode::OK);
     assert_eq!(
         create_calls.load(Ordering::SeqCst),
-        2,
-        "a request from a distinct connection should trigger its own RouterFactory::create() call"
+        1,
+        "a second connection should reuse the same create() call — service is built once per reload"
     );
 
     server.shutdown().await.unwrap();

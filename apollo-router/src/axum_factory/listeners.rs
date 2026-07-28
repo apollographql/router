@@ -35,14 +35,12 @@ use tower_service::Service;
 use crate::ListenAddr;
 use crate::axum_factory::ENDPOINT_CALLBACK;
 use crate::axum_factory::connection_handle::ConnectionHandle;
-use crate::axum_factory::utils::ConnectionInfo;
-use crate::axum_factory::utils::connection_router_service;
+use crate::axum_factory::utils::{ConnectionInfo, ConnectionRouterService};
 use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
-use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
 
 static MAX_FILE_HANDLES_WARN: AtomicBool = AtomicBool::new(false);
@@ -322,7 +320,7 @@ pub(super) fn serve_router_on_listen_addr(
     // `None` for listeners that never serve GraphQL requests (eg. health, metrics):
     // they never read the `ConnectionRouterService` extension, so building one per
     // accepted connection would be pure waste.
-    router_service_factory: Option<Arc<dyn Fn() -> router::BoxCloneService + Send + Sync>>,
+    router_service: Option<ConnectionRouterService>,
     address: ListenAddr,
     mut listener: Listener,
     configuration: Arc<Configuration>,
@@ -365,13 +363,7 @@ pub(super) fn serve_router_on_listen_addr(
                                 MAX_FILE_HANDLES_WARN.store(false, Ordering::SeqCst);
                             }
 
-                            // The one and only call to the RF factory for this connection: every
-                            // request on this connection shares this single created service.
-                            // Skipped entirely (and only computed once the connection is known
-                            // to be accepted) when this listener has no router service to serve.
-                            let router_service = router_service_factory
-                                .as_ref()
-                                .map(|factory| connection_router_service(factory()));
+                            let router_service = router_service.clone();
 
                             tokio::task::spawn(async move {
                                 // this sender must be moved into the session to track that it is still running
