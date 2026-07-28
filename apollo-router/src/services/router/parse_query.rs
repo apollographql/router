@@ -362,7 +362,6 @@ mod tests {
         crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
-
     #[tokio::test]
     async fn it_rejects_missing_query() {
         let (query_parsing_service, query_parsing_handle) = mock_query_parsing();

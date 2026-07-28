@@ -142,6 +142,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::Arc;
 
     use tower::ServiceBuilder;
@@ -153,14 +154,18 @@ mod tests {
     use crate::plugins::authorization::REQUIRED_SCOPES_KEY;
     use crate::spec::Query;
 
-    const SUPERGRAPH_AUTH_SCHEMA: &str =
+    const REQUIRES_SCOPES_SCHEMA: &str =
         include_str!("../../../tests/fixtures/supergraph-auth.graphql");
+    const POLICY_SCHEMA: &str =
+        include_str!("../../../tests/fixtures/directives/policy/policy_basic_schema.graphql");
+    const AUTHENTICATED_SCHEMA: &str =
+        include_str!("../../../tests/integration/fixtures/authenticated_directive.graphql");
 
     #[tokio::test]
-    async fn extracts_scopes_from_parsed_document() {
+    async fn extracts_scopes() {
         let query = "query { me { id name } }";
         let config = Configuration::default();
-        let schema = Arc::new(Schema::parse(SUPERGRAPH_AUTH_SCHEMA, &config).unwrap());
+        let schema = Arc::new(Schema::parse(REQUIRES_SCOPES_SCHEMA, &config).unwrap());
         let doc = Query::parse_document(query, None, &schema, &config).unwrap();
 
         let (mock, mut handle) =
@@ -192,8 +197,15 @@ mod tests {
 
         let res = service.ready().await.unwrap().call(req).await.unwrap();
 
-        assert!(
-            res.context.contains_key(REQUIRED_SCOPES_KEY),
+        assert_eq!(
+            res.context
+                .get::<_, HashSet<String>>(REQUIRED_SCOPES_KEY)
+                .unwrap(),
+            Some(HashSet::from([
+                "profile".to_string(),
+                "read:name".to_string(),
+                "read:user".to_string()
+            ])),
             "required scopes should have been inserted into context"
         );
 
@@ -201,9 +213,101 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn errors_without_a_parsed_document() {
+    async fn extracts_authenticated() {
+        let query = "query { products(limit: 1) { price } }";
         let config = Configuration::default();
-        let schema = Arc::new(Schema::parse(SUPERGRAPH_AUTH_SCHEMA, &config).unwrap());
+        let schema = Arc::new(Schema::parse(AUTHENTICATED_SCHEMA, &config).unwrap());
+        let doc = Query::parse_document(query, None, &schema, &config).unwrap();
+
+        let (mock, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::fake_builder()
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+
+        let mut service = ServiceBuilder::new()
+            .layer(ExtractAuthorizationChecksLayer::new(schema))
+            .service(mock);
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+        let req = supergraph::Request::fake_builder()
+            .query(query)
+            .context(context)
+            .build()
+            .unwrap();
+
+        let res = service.ready().await.unwrap().call(req).await.unwrap();
+
+        assert_eq!(
+            res.context
+                .get_json_value(AUTHENTICATION_REQUIRED_KEY)
+                .unwrap(),
+            serde_json_bytes::json!(true),
+            "required scopes should have been inserted into context"
+        );
+
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test]
+    async fn extracts_policies() {
+        let query = "query { private { id } }";
+        let config = Configuration::default();
+        let schema = Arc::new(Schema::parse(POLICY_SCHEMA, &config).unwrap());
+        let doc = Query::parse_document(query, None, &schema, &config).unwrap();
+
+        let (mock, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::fake_builder()
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+
+        let mut service = ServiceBuilder::new()
+            .layer(ExtractAuthorizationChecksLayer::new(schema))
+            .service(mock);
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+        let req = supergraph::Request::fake_builder()
+            .query(query)
+            .context(context)
+            .build()
+            .unwrap();
+
+        let res = service.ready().await.unwrap().call(req).await.unwrap();
+
+        assert_eq!(
+            res.context.get_json_value(REQUIRED_POLICIES_KEY).unwrap(),
+            serde_json_bytes::json!({ "admin": null }),
+            "required policies should have been inserted into context"
+        );
+
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test]
+    async fn errors_without_document() {
+        let config = Configuration::default();
+        let schema = Arc::new(Schema::parse(REQUIRES_SCOPES_SCHEMA, &config).unwrap());
 
         // Inner service is never reached — the layer errors out before calling it.
         let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
