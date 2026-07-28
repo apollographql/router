@@ -217,13 +217,23 @@ impl Service<router::Request> for InvalidationService {
                                             req,
                                         )
                                     } else {
+                                        // Only `cache_tag` requests may name connector sources
+                                        // (via `sources`, folded into `subgraphs` at parse time),
+                                        // so only they may authorize with the connector shared
+                                        // key. `subgraph`/`type` kinds target subgraph storage
+                                        // exclusively and must present the subgraph key.
+                                        let allow_connector_key = matches!(
+                                            req,
+                                            InvalidationRequest::CacheTag { .. }
+                                        );
                                         req.subgraph_names().iter().all(|name| {
                                             validate_shared_key(&config, shared_key, name)
-                                                || validate_connector_shared_key_by_source(
-                                                    &connector_config,
-                                                    shared_key,
-                                                    name,
-                                                )
+                                                || (allow_connector_key
+                                                    && validate_connector_shared_key_by_source(
+                                                        &connector_config,
+                                                        shared_key,
+                                                        name,
+                                                    ))
                                         })
                                     }
                                 });
@@ -1260,5 +1270,115 @@ mod tests {
             "any_key",
             "any_source"
         ));
+    }
+
+    /// Build an `InvalidationService` with distinct subgraph and connector shared keys, backed by
+    /// a throwaway Redis namespace.
+    async fn service_with_split_keys(namespace: &str) -> InvalidationService {
+        let (_drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false, namespace), drop_rx)
+            .await
+            .unwrap();
+        let storage = Arc::new(StorageInterface::from(storage));
+        let invalidation = Invalidation::new(storage.clone()).await.unwrap();
+
+        let config = Arc::new(SubgraphConfiguration {
+            all: Subgraph {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: String::from("subgraph-key"),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            subgraphs: HashMap::new(),
+        });
+        let connector_config = Arc::new(ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: String::from("connector-key"),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        });
+        InvalidationService::new(config, connector_config, invalidation)
+    }
+
+    /// The connector shared key must NOT authorize subgraph-targeted invalidation kinds.
+    #[tokio::test]
+    async fn connector_shared_key_does_not_authorize_subgraph_kinds() {
+        let service =
+            service_with_split_keys("connector_shared_key_does_not_authorize_subgraph_kinds")
+                .await;
+        for body_json in [
+            serde_json::json!([{"kind": "subgraph", "subgraph": "accounts"}]),
+            serde_json::json!([{"kind": "type", "subgraph": "accounts", "type": "User"}]),
+        ] {
+            let req = router::Request::fake_builder()
+                .method(http::Method::POST)
+                .header(AUTHORIZATION, "connector-key")
+                .body(body::from_bytes(serde_json::to_vec(&body_json).unwrap()))
+                .build()
+                .unwrap();
+            let res = service.clone().oneshot(req).await.unwrap();
+            assert_eq!(
+                res.response.status(),
+                StatusCode::UNAUTHORIZED,
+                "connector key must not authorize {body_json}"
+            );
+        }
+    }
+
+    /// The subgraph shared key must NOT authorize connector-targeted invalidation kinds.
+    #[tokio::test]
+    async fn subgraph_shared_key_does_not_authorize_connector_kinds() {
+        let service =
+            service_with_split_keys("subgraph_shared_key_does_not_authorize_connector_kinds")
+                .await;
+        for body_json in [
+            serde_json::json!([{"kind": "connector", "source": "graph.api"}]),
+            serde_json::json!([{"kind": "type", "source": "graph.api", "type": "User"}]),
+        ] {
+            let req = router::Request::fake_builder()
+                .method(http::Method::POST)
+                .header(AUTHORIZATION, "subgraph-key")
+                .body(body::from_bytes(serde_json::to_vec(&body_json).unwrap()))
+                .build()
+                .unwrap();
+            let res = service.clone().oneshot(req).await.unwrap();
+            assert_eq!(
+                res.response.status(),
+                StatusCode::UNAUTHORIZED,
+                "subgraph key must not authorize {body_json}"
+            );
+        }
+    }
+
+    /// `cache_tag` requests may target either scope, so both keys must authorize them.
+    #[tokio::test]
+    async fn cache_tag_kind_accepts_either_shared_key() {
+        let service = service_with_split_keys("cache_tag_kind_accepts_either_shared_key").await;
+        for key in ["subgraph-key", "connector-key"] {
+            let req = router::Request::fake_builder()
+                .method(http::Method::POST)
+                .header(AUTHORIZATION, key)
+                .body(body::from_bytes(
+                    serde_json::to_vec(
+                        &serde_json::json!([{"kind": "cache_tag", "sources": ["graph.api"], "cache_tag": "tag-1"}]),
+                    )
+                    .unwrap(),
+                ))
+                .build()
+                .unwrap();
+            let res = service.clone().oneshot(req).await.unwrap();
+            assert_eq!(
+                res.response.status(),
+                StatusCode::ACCEPTED,
+                "{key} should authorize cache_tag requests"
+            );
+        }
     }
 }
