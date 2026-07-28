@@ -1019,7 +1019,15 @@ impl ConnectorCacheService {
                             .filter_map(|t| t.user_value().map(String::from))
                             .collect();
 
+                        // Never cache a null entity value. On the connector `$batch` path an item
+                        // the upstream omitted is padded to `Value::Null` (match-by-id), with no
+                        // GraphQL error — caching it would freeze a transient omission as a null
+                        // for the whole TTL. A legitimately-present entity is a JSON object, so
+                        // this only skips genuinely-unresolved entities; they re-fetch next time.
+                        let is_null_entity = value.is_null();
+
                         if !has_errors
+                            && !is_null_entity
                             && !unstorable_private_response
                             && response_cache_control.should_store()
                         {

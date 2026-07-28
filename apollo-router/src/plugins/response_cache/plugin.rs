@@ -359,6 +359,38 @@ impl PluginPrivate for ResponseCache {
             );
         }
 
+        // Mirror the two startup checks above for the connector block.
+        if init.config.connector.all.ttl.is_none()
+            && init
+                .config
+                .connector
+                .sources
+                .values()
+                .any(|s| s.ttl.is_none())
+        {
+            return Err(
+                "a TTL must be configured for all connector sources or globally"
+                    .to_string()
+                    .into(),
+            );
+        }
+
+        if init
+            .config
+            .connector
+            .all
+            .invalidation
+            .as_ref()
+            .map(|i| i.shared_key.is_empty())
+            .unwrap_or_default()
+        {
+            return Err(
+                "you must set a default shared_key invalidation for all connector sources"
+                    .to_string()
+                    .into(),
+            );
+        }
+
         let mut storage_interface = StorageInterface::default();
 
         let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
