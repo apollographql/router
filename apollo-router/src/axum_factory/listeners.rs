@@ -327,12 +327,34 @@ async fn process_error(io_error: std::io::Error) {
     }
 }
 
+/// Adds the state a single connection needs to the app: its [`ConnectionInfo`], the router
+/// service its requests run through, and the flag recording whether it has seen a request.
+fn with_connection_state<S, ReqBody, ResBody>(
+    app: S,
+    connection_info: Option<ConnectionInfo>,
+    router_service: Option<ConnectionRouterService>,
+    received_first_request: Arc<AtomicBool>,
+) -> tower::util::BoxCloneService<http::Request<ReqBody>, http::Response<ResBody>, S::Error>
+where
+    S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>> + Clone + Send + 'static,
+    S::Error: 'static,
+    S::Future: Send + 'static,
+    ReqBody: 'static,
+    ResBody: 'static,
+{
+    ServiceBuilder::new()
+        .option_layer(connection_info.map(AddExtensionLayer::new))
+        .option_layer(router_service.map(AddExtensionLayer::new))
+        .layer_fn(|inner| IdleConnectionChecker::new(received_first_request.clone(), inner))
+        .service(app)
+        .boxed_clone()
+}
+
 pub(super) fn serve_router_on_listen_addr(
     router: axum::Router,
     pipeline_handle: Arc<PipelineHandle>,
     // `None` for listeners that never serve GraphQL requests (eg. health, metrics):
-    // they never read the `ConnectionRouterService` extension, so building one per
-    // accepted connection would be pure waste.
+    // they never read the `ConnectionRouterService` extension.
     router_service: Option<ConnectionRouterService>,
     address: ListenAddr,
     mut listener: Listener,
@@ -405,15 +427,15 @@ pub(super) fn serve_router_on_listen_addr(
                                     NetworkStream::Tcp(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
 
-                                        let app = ServiceBuilder::new()
-                                            .layer(AddExtensionLayer::new(ConnectionInfo {
+                                        let app = with_connection_state(
+                                            app,
+                                            Some(ConnectionInfo {
                                                 peer_address: stream.peer_addr().ok(),
                                                 server_address: stream.local_addr().ok(),
-                                            }))
-                                            .option_layer(router_service.map(AddExtensionLayer::new))
-                                            .layer_fn(|inner| IdleConnectionChecker::new(received_first_request.clone(), inner))
-                                            .service(app)
-                                            .boxed_clone();
+                                            }),
+                                            router_service,
+                                            received_first_request.clone(),
+                                        );
 
                                         stream
                                             .set_nodelay(true)
@@ -431,11 +453,12 @@ pub(super) fn serve_router_on_listen_addr(
                                     #[cfg(unix)]
                                     NetworkStream::Unix(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
-                                        let app = ServiceBuilder::new()
-                                            .option_layer(router_service.map(AddExtensionLayer::new))
-                                            .layer_fn(|inner| IdleConnectionChecker::new(received_first_request.clone(), inner))
-                                            .service(app)
-                                            .boxed_clone();
+                                        let app = with_connection_state(
+                                            app,
+                                            None,
+                                            router_service,
+                                            received_first_request.clone(),
+                                        );
                                         let tokio_stream = TokioIo::new(stream);
                                         let hyper_service = TowerToHyperService::new(app);
                                         let mut builder = Builder::new(TokioExecutor::new());
@@ -466,11 +489,12 @@ pub(super) fn serve_router_on_listen_addr(
                                         };
 
                                         let received_first_request = Arc::new(AtomicBool::new(false));
-                                        let app = ServiceBuilder::new()
-                                            .option_layer(router_service.map(AddExtensionLayer::new))
-                                            .layer_fn(|inner| IdleConnectionChecker::new(received_first_request.clone(), inner))
-                                            .service(app)
-                                            .boxed_clone();
+                                        let app = with_connection_state(
+                                            app,
+                                            None,
+                                            router_service,
+                                            received_first_request.clone(),
+                                        );
 
                                         tls_stream.get_ref().0
                                             .set_nodelay(true)
