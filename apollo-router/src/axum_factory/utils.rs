@@ -99,17 +99,20 @@ async fn shed_as_503(
 ) -> Result<router::Response, tower::BoxError> {
     match future.await {
         Err(err) if err.is::<Overloaded>() => {
-            tracing::warn!(
-                code = "ROUTER_OVERLOADED",
-                "the router pipeline has no capacity for this request, shedding it",
+            // Debug rather than warn: shedding is per-request, so a sustained overload would
+            // otherwise emit a line per rejected request while the router is already struggling.
+            // The 503 is counted by the `apollo.router.operations` metric.
+            tracing::debug!(
+                code = "REQUEST_CONCURRENCY_LIMITED",
+                "the connection queue is full, shedding request",
             );
 
             Ok(router::Response::error_builder()
                 .status_code(StatusCode::SERVICE_UNAVAILABLE)
                 .error(
                     graphql::Error::builder()
-                        .message("Your request has been shed because the router is overloaded")
-                        .extension_code("ROUTER_OVERLOADED")
+                        .message("Your request has been concurrency limited waiting for the router")
+                        .extension_code("REQUEST_CONCURRENCY_LIMITED")
                         .build(),
                 )
                 .context(context)
@@ -194,11 +197,11 @@ mod tests {
         let error = body.errors.first().expect("a GraphQL error is expected");
         assert_eq!(
             error.extensions.get("code").and_then(|code| code.as_str()),
-            Some("ROUTER_OVERLOADED")
+            Some("REQUEST_CONCURRENCY_LIMITED")
         );
         assert_eq!(
             error.message,
-            "Your request has been shed because the router is overloaded"
+            "Your request has been concurrency limited waiting for the router"
         );
     }
 
