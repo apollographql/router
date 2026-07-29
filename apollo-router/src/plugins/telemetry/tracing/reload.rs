@@ -5,26 +5,9 @@ use opentelemetry::trace::SpanBuilder;
 use opentelemetry::trace::Tracer;
 use parking_lot::RwLock;
 
-use crate::plugins::telemetry::otel::OtelData;
-use crate::plugins::telemetry::otel::PreSampledTracer;
-
 #[derive(Clone)]
 pub(crate) struct ReloadTracer<S> {
     parent: Arc<RwLock<S>>,
-}
-
-impl<S: PreSampledTracer> PreSampledTracer for ReloadTracer<S> {
-    fn sampled_context(&self, data: &mut OtelData) -> opentelemetry::Context {
-        self.parent.read().sampled_context(data)
-    }
-
-    fn new_trace_id(&self) -> opentelemetry::trace::TraceId {
-        self.parent.read().new_trace_id()
-    }
-
-    fn new_span_id(&self) -> opentelemetry::trace::SpanId {
-        self.parent.read().new_span_id()
-    }
 }
 
 impl<S: Tracer> Tracer for ReloadTracer<S> {

@@ -1,7 +1,6 @@
 //! Calls out to the apollo-federation crate
 
 use std::fmt::Debug;
-use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::task::Poll;
@@ -32,8 +31,6 @@ use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::error::ValidationErrors;
 use crate::graphql;
-use crate::introspection::IntrospectionCache;
-use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::metrics::meter_provider;
 use crate::plugins::authorization;
@@ -55,7 +52,6 @@ use crate::services::query_planner::PlanOptions;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
-use crate::spec::operation_limits::OperationLimits;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const UNSUPPORTED_FED1: &str = "fed1";
@@ -93,7 +89,6 @@ pub(crate) struct QueryPlannerService {
     authorization_config: Arc<authorization::Conf>,
     _federation_instrument: ObservableGauge<u64>,
     signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm,
-    introspection: Arc<IntrospectionCache>,
 }
 
 fn federation_version_instrument(federation_version: Option<i64>) -> ObservableGauge<u64> {
@@ -184,16 +179,11 @@ impl QueryPlannerService {
             let result = result.map_err(FederationErrorBridge::from);
 
             let elapsed = start.elapsed().as_secs_f64();
-            match &result {
-                Ok(_) => metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "success"),
-                Err(FederationErrorBridge::Cancellation(e)) if e.contains("timeout") => {
-                    metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "timeout")
-                }
-                Err(FederationErrorBridge::Cancellation(_)) => {
-                    metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "cancelled")
-                }
-                Err(_) => metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "error"),
-            }
+            let outcome = match &result {
+                Ok(_) => QueryPlanningOutcome::Success,
+                Err(e) => QueryPlanningOutcome::from(e),
+            };
+            metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, outcome, compute_job_type);
 
             let plan = result?;
             let root_node = convert_root_query_plan_node(&plan);
@@ -221,16 +211,14 @@ impl QueryPlannerService {
         configuration: Arc<Configuration>,
     ) -> Result<Self, ServiceBuildError> {
         let planner = Self::create_planner(&schema, &configuration)?;
-        let introspection = Arc::new(IntrospectionCache::new(&configuration));
 
-        Self::new(schema, configuration, planner, introspection)
+        Self::new(schema, configuration, planner)
     }
 
     pub(crate) fn new(
         schema: Arc<Schema>,
         configuration: Arc<Configuration>,
         planner: Arc<QueryPlanner>,
-        introspection: Arc<IntrospectionCache>,
     ) -> Result<Self, ServiceBuildError> {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
@@ -248,7 +236,6 @@ impl QueryPlannerService {
             configuration,
             _federation_instrument: federation_instrument,
             signature_normalization_algorithm,
-            introspection,
         })
     }
 
@@ -257,16 +244,8 @@ impl QueryPlannerService {
         query: String,
         operation_name: Option<&str>,
         doc: &ParsedDocument,
-        query_metrics_in: &mut OperationLimits<u32>,
     ) -> Result<Query, QueryPlannerError> {
         let executable = &doc.executable;
-        crate::spec::operation_limits::check(
-            query_metrics_in,
-            &self.configuration.limits.router,
-            &query,
-            executable,
-            operation_name,
-        )?;
 
         let (fragments, operation, defer_stats, schema_aware_hash) =
             Query::extract_query_information(&self.schema, &query, executable, operation_name)?;
@@ -304,7 +283,6 @@ impl QueryPlannerService {
         plan_options: PlanOptions,
         doc: &ParsedDocument,
         compute_job_type: ComputeJobType,
-        query_metrics: OperationLimits<u32>,
     ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
         let plan_result = self
             .plan_inner(
@@ -367,7 +345,6 @@ impl QueryPlannerService {
                 root: query_plan_root_node,
                 formatted_query_plan,
                 query: Arc::new(selections),
-                query_metrics,
                 estimated_size: Default::default(),
             }),
         })
@@ -394,7 +371,6 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
             metadata,
             plan_options,
             compute_job_type,
-            variables,
         } = req;
 
         let this = self.clone();
@@ -441,7 +417,6 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
                     },
                     doc,
                     compute_job_type,
-                    variables,
                 )
                 .await;
 
@@ -473,30 +448,14 @@ impl QueryPlannerService {
         mut key: QueryKey,
         mut doc: ParsedDocument,
         compute_job_type: ComputeJobType,
-        variables: Object,
     ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
-        let mut query_metrics = Default::default();
         let mut selections = self
             .parse_selections(
                 key.original_query.clone(),
                 key.operation_name.as_deref(),
                 &doc,
-                &mut query_metrics,
             )
             .await?;
-
-        match self
-            .introspection
-            .maybe_execute(&self.schema, &key, &doc, variables)
-            .await
-        {
-            ControlFlow::Continue(()) => (),
-            ControlFlow::Break(result) => {
-                return Ok(QueryPlannerContent::CachedIntrospectionResponse {
-                    response: Box::new(result.map_err(MaybeBackPressureError::TemporaryError)?),
-                });
-            }
-        }
 
         // TODO(@goto-bus-stop): this is not a query planning concern
         let filter_res = if self.enable_authorization_directives {
@@ -551,7 +510,6 @@ impl QueryPlannerService {
                     key.filtered_query.clone(),
                     key.operation_name.as_deref(),
                     &doc,
-                    &mut query_metrics,
                 )
                 .await?;
             filtered.is_original = false;
@@ -567,7 +525,6 @@ impl QueryPlannerService {
             key.plan_options,
             &doc,
             compute_job_type,
-            query_metrics,
         )
         .await
     }
@@ -581,17 +538,57 @@ pub(crate) struct QueryPlanResult {
     pub(super) evaluated_plan_paths: u64,
 }
 
+/// The outcome of a query-planning attempt. Shared across query-planning metrics (e.g.
+/// `apollo.router.query_planning.plan.duration` and `apollo.router.query_planning.warmup.*`) so
+/// they use a single vocabulary. Not every value is produced by every code path.
+#[derive(Copy, Clone, Debug, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+pub(crate) enum QueryPlanningOutcome {
+    Success,
+    Timeout,
+    Cancelled,
+    Error,
+    MemoryLimit,
+}
+
+impl_otel_value_from_static_str!(QueryPlanningOutcome);
+
+impl From<&FederationErrorBridge> for QueryPlanningOutcome {
+    fn from(err: &FederationErrorBridge) -> Self {
+        match err {
+            FederationErrorBridge::Cancellation(msg) if msg.contains("timeout") => {
+                QueryPlanningOutcome::Timeout
+            }
+            FederationErrorBridge::Cancellation(_) => QueryPlanningOutcome::Cancelled,
+            _ => QueryPlanningOutcome::Error,
+        }
+    }
+}
+
+impl From<&QueryPlannerError> for QueryPlanningOutcome {
+    fn from(err: &QueryPlannerError) -> Self {
+        match err {
+            QueryPlannerError::Timeout(_) => QueryPlanningOutcome::Timeout,
+            QueryPlannerError::MemoryLimitExceeded(_) => QueryPlanningOutcome::MemoryLimit,
+            QueryPlannerError::FederationError(bridge) => QueryPlanningOutcome::from(bridge),
+            _ => QueryPlanningOutcome::Error,
+        }
+    }
+}
+
 pub(crate) fn metric_query_planning_plan_duration(
     planner: &'static str,
     elapsed: f64,
-    outcome: &'static str,
+    outcome: QueryPlanningOutcome,
+    compute_job_type: ComputeJobType,
 ) {
     f64_histogram!(
         "apollo.router.query_planning.plan.duration",
         "Duration of the query planning, in seconds.",
         elapsed,
         "planner" = planner,
-        "outcome" = outcome
+        "outcome" = outcome,
+        "job.type" = compute_job_type
     );
 }
 
@@ -704,8 +701,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn noop_query_should_produce_empty_plan() {
-        let mut config = Configuration::default();
-        config.supergraph.introspection = true;
+        let config = Configuration::default();
         let config = Arc::new(config);
 
         let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
@@ -790,87 +786,8 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn test_single_aliased_root_typename() {
-        let config = Arc::new(Configuration::default());
-        let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
-
-        let mut service = QueryPlannerService::for_test(schema.clone(), config.clone()).unwrap();
-
-        let query = "{ x: __typename }";
-        let document = Query::parse_document(query, None, &schema, &config).unwrap();
-
-        let response = service
-            .ready()
-            .await
-            .unwrap()
-            .call(
-                QueryPlannerRequest::builder()
-                    .query(query)
-                    .and_operation_name(document.operation.name.as_deref())
-                    .document(document)
-                    .compute_job_type(ComputeJobType::QueryPlanning)
-                    .metadata(CacheKeyMetadata::default())
-                    .plan_options(PlanOptions::default())
-                    .build(),
-            )
-            .await
-            .unwrap();
-
-        if let QueryPlannerContent::CachedIntrospectionResponse { response } =
-            response.content.expect("successful response")
-        {
-            assert_eq!(
-                r#"{"data":{"x":"Query"}}"#,
-                serde_json::to_string(&response).unwrap()
-            )
-        } else {
-            panic!();
-        }
-    }
-
-    #[test(tokio::test)]
-    async fn test_two_root_typenames() {
-        let config = Arc::new(Configuration::default());
-        let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
-
-        let mut service = QueryPlannerService::for_test(schema.clone(), config.clone()).unwrap();
-
-        let query = "{ x: __typename __typename }";
-        let document = Query::parse_document(query, None, &schema, &config).unwrap();
-
-        let response = service
-            .ready()
-            .await
-            .unwrap()
-            .call(
-                QueryPlannerRequest::builder()
-                    .query(query)
-                    .and_operation_name(document.operation.name.as_deref())
-                    .document(document)
-                    .compute_job_type(ComputeJobType::QueryPlanning)
-                    .metadata(CacheKeyMetadata::default())
-                    .plan_options(PlanOptions::default())
-                    .build(),
-            )
-            .await
-            .unwrap();
-
-        if let QueryPlannerContent::CachedIntrospectionResponse { response } =
-            response.content.expect("successful response")
-        {
-            assert_eq!(
-                r#"{"data":{"x":"Query","__typename":"Query"}}"#,
-                serde_json::to_string(&response).unwrap()
-            )
-        } else {
-            panic!();
-        }
-    }
-
-    #[test(tokio::test)]
     async fn test_subselections() {
-        let mut configuration: Configuration = Default::default();
-        configuration.supergraph.introspection = true;
+        let configuration: Configuration = Default::default();
         let configuration = Arc::new(configuration);
 
         let schema = Schema::parse(EXAMPLE_SCHEMA, &configuration).unwrap();
@@ -1129,8 +1046,7 @@ mod tests {
             }
         }
 
-        let mut configuration: Configuration = Default::default();
-        configuration.supergraph.introspection = true;
+        let configuration: Configuration = Default::default();
         let configuration = Arc::new(configuration);
 
         let doc = Query::parse_document(query, None, &planner.schema, &configuration).unwrap();
@@ -1146,7 +1062,6 @@ mod tests {
                 },
                 doc,
                 ComputeJobType::QueryPlanning,
-                Default::default(),
             )
             .await
             .unwrap();
@@ -1227,12 +1142,32 @@ mod tests {
     fn test_metric_query_planning_plan_duration() {
         let start = Instant::now();
         let elapsed = start.elapsed().as_secs_f64();
-        metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "success");
+        metric_query_planning_plan_duration(
+            RUST_QP_MODE,
+            elapsed,
+            QueryPlanningOutcome::Success,
+            ComputeJobType::QueryPlanning,
+        );
         assert_histogram_exists!(
             "apollo.router.query_planning.plan.duration",
             f64,
             "planner" = "rust",
-            "outcome" = "success"
+            "outcome" = "success",
+            "job.type" = "query_planning"
+        );
+        // Warm-up planning is distinguished by the `job.type` attribute.
+        metric_query_planning_plan_duration(
+            RUST_QP_MODE,
+            elapsed,
+            QueryPlanningOutcome::Success,
+            ComputeJobType::QueryPlanningWarmup,
+        );
+        assert_histogram_exists!(
+            "apollo.router.query_planning.plan.duration",
+            f64,
+            "planner" = "rust",
+            "outcome" = "success",
+            "job.type" = "query_planning_warmup"
         );
     }
 

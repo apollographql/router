@@ -43,7 +43,7 @@ async fn test_metrics_reloading() {
     let mut config_value: serde_yaml::Value =
         serde_yaml::from_str(PROMETHEUS_CONFIG).expect("fixture is valid YAML");
     let apollo_block: serde_yaml::Value = serde_yaml::from_str(
-        "field_level_instrumentation_sampler: always_on\nexperimental_otlp_tracing_protocol: http\nexperimental_otlp_metrics_protocol: http\nbatch_processor:\n  scheduled_delay: 100ms\n",
+        "field_level_instrumentation_sampler: always_on\notlp_tracing_protocol: http\notlp_metrics_protocol: http\nbatch_processor:\n  scheduled_delay: 100ms\n",
     )
     .unwrap();
     config_value
@@ -74,7 +74,7 @@ async fn test_metrics_reloading() {
     //     also fine for this test, which just asserts the License
     //     poller's success counter increments.
     //   * Both `telemetry.apollo.endpoint` and
-    //     `telemetry.apollo.experimental_otlp_endpoint` pinned to the
+    //     `telemetry.apollo.otlp_endpoint` pinned to the
     //     per-test `apollo_otlp_server` mock with a catch-all
     //     `POST → 200` route, so all four reporting paths
     //     (`studio_reports_total{report_type=metrics|traces}` ×
@@ -136,7 +136,7 @@ async fn test_metrics_reloading() {
 
     // Studio + Uplink metrics. With both Apollo Studio and Apollo Uplink
     // pointed at local wiremocks (Studio via the harness's per-test mock at
-    // `experimental_otlp_endpoint`, Uplink via `APOLLO_UPLINK_ENDPOINTS`), all
+    // `otlp_endpoint`, Uplink via `APOLLO_UPLINK_ENDPOINTS`), all
     // four reporting paths complete successfully and deterministically — no
     // public-Internet dependency, no batch-timer race.
     //
@@ -537,18 +537,22 @@ async fn test_gauges_on_reload() {
     router
         .assert_metrics_contains(r#"apollo_router_cache_storage_estimated_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} "#, None)
         .await;
+
+    // APQ cache should contain the persisted query
     router
         .assert_metrics_contains(
             r#"apollo_router_cache_size{kind="APQ",type="memory",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
+    // Query plan cache should contain the regular query + the persisted query
     router
         .assert_metrics_contains(
-            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 1"#,
+            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 2"#,
             None,
         )
         .await;
+    // Introspection cache should contain the introspection query
     router
         .assert_metrics_contains(
             r#"apollo_router_cache_size{kind="introspection",type="memory",otel_scope_name="apollo/router"} 1"#,

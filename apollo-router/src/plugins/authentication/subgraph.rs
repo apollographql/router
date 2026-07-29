@@ -117,7 +117,7 @@ impl AWSSigV4Config {
                         &SdkConfig::builder()
                             .http_client(
                                 aws_smithy_http_client::Builder::new()
-                                    .tls_provider(Provider::Rustls(CryptoMode::Ring))
+                                    .tls_provider(Provider::Rustls(CryptoMode::AwsLc))
                                     .build_https(),
                             )
                             .sleep_impl(TokioSleep::new())
@@ -190,7 +190,7 @@ fn credentials_chain_builder() -> aws_config::default_provider::credentials::Bui
         ProviderConfig::default()
             .with_http_client(
                 aws_smithy_http_client::Builder::new()
-                    .tls_provider(Provider::Rustls(CryptoMode::Ring))
+                    .tls_provider(Provider::Rustls(CryptoMode::AwsLc))
                     .build_https(),
             )
             .with_sleep_impl(TokioSleep::new())

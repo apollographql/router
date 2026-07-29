@@ -54,6 +54,7 @@ use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
 use crate::layers::ServiceBuilderExt;
+use crate::metrics::FutureMetricsExt;
 use crate::plugins::license_enforcement::layer::LicenseLayer;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecording;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecordingStream;
@@ -206,13 +207,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 configuration.supergraph.path
             );
 
-            tracing::warn!(
-                "The `apollo.router.session.count.active` metric is deprecated and may be \
-                 removed in a future release. Switch to the OpenTelemetry-compliant \
-                 `http.server.active_requests` metric instead. See \
-                 https://www.apollographql.com/docs/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/standard-instruments#session"
-            );
-
             // serve extra routers
 
             let listeners_and_routers =
@@ -287,12 +281,12 @@ impl HttpServerFactory for AxumHttpServerFactory {
             });
 
             // Spawn the main (GraphQL) server into a task
-            let main_future = tokio::task::spawn(main_server)
+            let main_future = tokio::task::spawn(main_server.with_current_meter_provider())
                 .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
                 .boxed();
 
             // Spawn all other servers (health, metrics, etc...) into a task
-            let extra_futures = tokio::task::spawn(join_all(servers))
+            let extra_futures = tokio::task::spawn(join_all(servers).with_current_meter_provider())
                 .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
                 .boxed();
 
@@ -408,13 +402,6 @@ async fn handle_graphql(
     Extension(service): Extension<ConnectionRouterService>,
     http_request: Request<axum::body::Body>,
 ) -> impl IntoResponse {
-    let _guard = i64_up_down_counter_with_unit!(
-        "apollo.router.session.count.active",
-        "Amount of in-flight sessions (deprecated, use `http.server.active_requests` instead)",
-        "{session}",
-        1
-    );
-
     let HandlerOptions {
         early_cancel,
         experimental_log_on_broken_pipe,

@@ -26,7 +26,6 @@ executors:
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
       - image: cimg/redis:7.4.9
-      - image: openzipkin/zipkin:3.6.1
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.50.0
       # redis cluster - 3 primaries, 3 replicas
       - image: cimg/redis:7.4.9
@@ -111,7 +110,13 @@ parameters:
   quick_nightly:
     type: boolean
     default: false
-  test_updated_cargo_deps:
+  # test_build triggers the standalone `build-test-image` workflow: a single
+  # linux/amd64 Docker image built from whatever branch/commit triggered the
+  # pipeline, tagged by branch+commit (not a release/nightly version), and
+  # pushed to ghcr.io/apollographql/router-test-builds. This is unrelated to
+  # release or nightly versioning -- it exists for ad hoc test builds
+  # consumed by the internal testing framework (RTF).
+  test_build:
     type: boolean
     default: false
 
@@ -604,90 +609,6 @@ jobs:
                       }
                     ]
                   }
-  test_updated:
-    environment:
-      <<: *common_job_environment
-    parameters:
-      platform:
-        type: executor
-        default: amd_linux_test
-      from_test_updated_cargo_deps_workflow:
-        type: boolean
-        default: false
-    executor: << parameters.platform >>
-    steps:
-      - checkout
-      - setup_environment:
-          platform: << parameters.platform >>
-      - run:
-          name: Update all Rust dependencies
-          command: |
-            rm Cargo.lock
-            cargo fetch
-      - xtask_test:
-          variant: "updated"
-
-      - when:
-          condition:
-            equal:
-              [true, << parameters.from_test_updated_cargo_deps_workflow >>]
-          steps:
-            - slack/notify:
-                event: fail
-                custom: |
-                  {
-                    "blocks": [
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": ":x: The `test_updated_cargo_deps` workflow has *failed* for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`!"
-                        }
-                      },
-                      {
-                        "type": "actions",
-                        "elements": [
-                          {
-                            "type": "button",
-                            "action_id": "success_tagged_deploy_view",
-                            "text": {
-                              "type": "plain_text",
-                              "text": "View Job"
-                            },
-                            "url": "${CIRCLE_BUILD_URL}"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-            - slack/notify:
-                event: pass
-                custom: |
-                  {
-                    "blocks": [
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": ":white_check_mark: The `test_updated_cargo_deps` workflow has passed for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`."
-                        }
-                      },
-                      {
-                        "type": "actions",
-                        "elements": [
-                          {
-                            "type": "button",
-                            "action_id": "success_tagged_deploy_view",
-                            "text": {
-                              "type": "plain_text",
-                              "text": "View Job"
-                            },
-                            "url": "${CIRCLE_BUILD_URL}"
-                          }
-                        ]
-                      }
-                    ]
-                  }
   pre_verify_release:
     environment:
       <<: *common_job_environment
@@ -1065,20 +986,102 @@ jobs:
                   VERSION_WITHOUT_LEADING_V="${VERSION#v}"
                   cargo xtask release notes "$VERSION_WITHOUT_LEADING_V" || true
 
+  # Standalone ad hoc test build. Deliberately independent of `build_release`:
+  # no release-versioning (`cargo xtask release prepare`), no nightly/release
+  # tag scheme, no helm chart, no security scan, no notifications. Builds a
+  # single linux/amd64 image from whatever branch/commit triggered the
+  # pipeline and pushes it to a dedicated, non-release image repository for
+  # consumption by the internal testing framework (RTF). See
+  # AD_HOC_TEST_BUILD_PLAN.md for the design rationale.
+  build_test_image:
+    environment:
+      <<: *common_job_environment
+      RELEASE_BIN: router
+      REPO_URL: << pipeline.project.git_url >>
+    executor: amd_linux_build
+    steps:
+      - checkout
+      - setup_environment:
+          platform: amd_linux_build
+      - run:
+          name: Build router binary
+          command: cargo xtask dist
+      - run:
+          command: mkdir -p artifacts
+      - run:
+          name: Package artifact
+          command: cargo xtask package --output artifacts/
+      - store_artifacts:
+          path: artifacts/
+      - setup_remote_docker:
+          # CircleCI Image Policy
+          #   https://circleci.com/docs/remote-docker-images-support-policy/
+          version: docker23
+          docker_layer_caching: true
+      - run:
+          name: Docker build and push test image
+          command: |
+            BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
+            ARTIFACT_FILENAME="router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+            ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/${ARTIFACT_FILENAME}"
+            ROUTER_TAG=ghcr.io/apollographql/router-test-builds
+
+            # Tag by branch + short commit sha -- NOT a release/nightly version.
+            # This pipeline has nothing to do with release or nightly versioning.
+            SANITIZED_BRANCH=$(echo "${CIRCLE_BRANCH}" | tr -c 'a-zA-Z0-9' '-')
+            SHORT_SHA=$(git rev-parse --short=8 HEAD)
+            TAG="${SANITIZED_BRANCH}-${SHORT_SHA}"
+
+            # Validate local artifact exists and calculate its checksum as a safety net
+            if [ ! -f "artifacts/${ARTIFACT_FILENAME}" ]; then
+              echo "Error: Local artifact not found: artifacts/${ARTIFACT_FILENAME}"
+              exit 1
+            fi
+            LOCAL_ARTIFACT_SHA256SUM=$(sha256sum "artifacts/${ARTIFACT_FILENAME}" | cut -d' ' -f1)
+            echo "Local artifact checksum: ${LOCAL_ARTIFACT_SHA256SUM}"
+
+            # Download the artifact and calculate its checksum
+            echo "Downloading artifact to calculate checksum..."
+            curl -sSL -H "Circle-Token: ${CIRCLE_TOKEN}" -o "router-artifact.tar.gz" "${ARTIFACT_URL}"
+            ARTIFACT_URL_SHA256SUM=$(sha256sum "router-artifact.tar.gz" | cut -d' ' -f1)
+            rm -f router-artifact.tar.gz
+
+            # Compare local vs remote artifact checksums
+            if [ "${LOCAL_ARTIFACT_SHA256SUM}" != "${ARTIFACT_URL_SHA256SUM}" ]; then
+              echo "Error: Local and remote artifact checksums don't match!"
+              echo "Local:      ${LOCAL_ARTIFACT_SHA256SUM}"
+              echo "Remote: ${ARTIFACT_URL_SHA256SUM}"
+              exit 1
+            fi
+            echo "Local and remote artifact checksums match: ${LOCAL_ARTIFACT_SHA256SUM}"
+
+            echo "REPO_URL: ${REPO_URL}"
+            echo "BASE_VERSION: ${BASE_VERSION}"
+            echo "TAG: ${TAG}"
+            echo "ROUTER_TAG: ${ROUTER_TAG}"
+
+            docker context create buildx-build
+            docker buildx create --driver docker-container --use buildx-build
+            docker buildx inspect --bootstrap
+            echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
+            # Build and push debug image
+            docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${TAG} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${TAG}-debug dockerfiles/.
+            docker push ${ROUTER_TAG}:${TAG}-debug
+            # Build and push regular image
+            docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg ROUTER_RELEASE=${TAG} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${TAG} dockerfiles/.
+            docker push ${ROUTER_TAG}:${TAG}
+
+            echo "Pushed: ${ROUTER_TAG}:${TAG}"
+            echo "Pushed: ${ROUTER_TAG}:${TAG}-debug"
+
 workflows:
-  test_updated_cargo_deps:
-    when: << pipeline.parameters.test_updated_cargo_deps >>
-    jobs:
-      - test_updated:
-          platform: amd_linux_test
-          from_test_updated_cargo_deps_workflow: true
   ci_checks:
     when:
       not:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
-          - << pipeline.parameters.test_updated_cargo_deps >>
+          - << pipeline.parameters.test_build >>
     jobs:
       - fmt_check:
           matrix:
@@ -1182,7 +1185,7 @@ workflows:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
-          - << pipeline.parameters.test_updated_cargo_deps >>
+          - << pipeline.parameters.test_build >>
     jobs:
       - pre_verify_release:
           matrix:
@@ -1260,7 +1263,7 @@ workflows:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
-          - << pipeline.parameters.test_updated_cargo_deps >>
+          - << pipeline.parameters.test_build >>
     jobs:
       - secops/gitleaks:
           context:
@@ -1274,3 +1277,14 @@ workflows:
             - github-orb
           git-base-revision: <<#pipeline.git.base_revision>><<pipeline.git.base_revision>><</pipeline.git.base_revision >>
           disabled-signatures: "rules.providers.semgrep.security.javascript.lang.security.detect-insecure-websocket"
+
+  # Ad hoc test build: trigger manually via CircleCI's "Trigger Pipeline" UI
+  # on any branch, setting the `test_build` boolean parameter to true. Not
+  # part of releases or nightlies -- see AD_HOC_TEST_BUILD_PLAN.md.
+  build-test-image:
+    when: << pipeline.parameters.test_build >>
+    jobs:
+      - build_test_image:
+          context:
+            - router
+            - orb-publishing

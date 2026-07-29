@@ -34,11 +34,11 @@ use once_cell::sync::OnceCell;
 use opentelemetry::Context;
 use opentelemetry::InstrumentationScope;
 use opentelemetry::trace::SpanContext;
-use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry_sdk::trace::IdGenerator;
 use opentelemetry_sdk::trace::Tracer;
 use tower::BoxError;
 use tracing_subscriber::EnvFilter;
@@ -56,7 +56,7 @@ use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::otel;
 use crate::plugins::telemetry::otel::OpenTelemetryLayer;
-use crate::plugins::telemetry::otel::PreSampledTracer;
+use crate::plugins::telemetry::otel::OtelData;
 use crate::plugins::telemetry::reload::rate_limit::RateLimitLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::tracer::TraceId;
@@ -146,12 +146,13 @@ pub(crate) fn apollo_opentelemetry_initialized() -> bool {
 // To that end, we update the context just for that request to create valid span et trace ids, with the
 // sampling bit set to false
 pub(crate) fn prepare_context(context: Context) -> Context {
-    if !context.span().span_context().is_valid()
-        && let Some(tracer) = OPENTELEMETRY_TRACER_HANDLE.get()
-    {
+    if !context.span().span_context().is_valid() {
+        // There's no real span behind these ids (the trace isn't sampled), so any
+        // random generator works here - nothing needs to match a span build later.
+        let id_generator = opentelemetry_sdk::trace::RandomIdGenerator::default();
         let span_context = SpanContext::new(
-            tracer.new_trace_id(),
-            tracer.new_span_id(),
+            id_generator.new_trace_id(),
+            id_generator.new_span_id(),
             TraceFlags::default(),
             false,
             TraceState::default(),
@@ -159,21 +160,6 @@ pub(crate) fn prepare_context(context: Context) -> Context {
         return context.with_remote_span_context(span_context);
     }
     context
-}
-
-#[derive(Clone, Debug)]
-pub(crate) enum SampledSpan {
-    NotSampled(TraceId, SpanId),
-    Sampled(TraceId, SpanId),
-}
-
-impl SampledSpan {
-    pub(crate) fn trace_and_span_id(&self) -> (TraceId, SpanId) {
-        match self {
-            SampledSpan::NotSampled(trace_id, span_id)
-            | SampledSpan::Sampled(trace_id, span_id) => (trace_id.clone(), *span_id),
-        }
-    }
 }
 
 pub(crate) trait IsSampled {
@@ -186,19 +172,21 @@ where
     T: tracing_subscriber::registry::LookupSpan<'a>,
 {
     fn is_sampled(&self) -> bool {
-        // if this extension is set, that means the parent span was accepted, and so the
-        // entire trace is accepted
         self.extensions()
-            .get::<SampledSpan>()
-            .is_some_and(|s| matches!(s, SampledSpan::Sampled(_, _)))
+            .get::<OtelData>()
+            .is_some_and(|d| d.current_cx.span().is_recording())
     }
 
+    /// Returns the trace ID for this span, or `None` if the span context is invalid.
+    ///
+    /// An invalid span context (all-zero IDs) is produced by a `NoopTracer` or a not-yet-
+    /// initialised provider. Callers should not propagate all-zero IDs into headers or logs.
     fn get_trace_id(&self) -> Option<TraceId> {
+        // OtelData is always inserted by on_new_span; the ? is a defensive fallback.
         let extensions = self.extensions();
-        extensions.get::<SampledSpan>().map(|s| match s {
-            SampledSpan::Sampled(trace_id, _) | SampledSpan::NotSampled(trace_id, _) => {
-                trace_id.clone()
-            }
-        })
+        let d = extensions.get::<OtelData>()?;
+        let otel_span = d.current_cx.span();
+        let sc = otel_span.span_context();
+        sc.is_valid().then(|| sc.trace_id().to_bytes().into())
     }
 }

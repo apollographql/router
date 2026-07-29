@@ -7,8 +7,6 @@ use apollo_compiler::executable;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::plugins::limits;
-
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub(crate) struct OperationLimits<T> {
     pub(crate) depth: T,
@@ -58,8 +56,7 @@ impl OperationLimits<bool> {
 /// Returns which limits are exceeded by the given query, if any
 pub(crate) fn check(
     query_metrics_in: &mut OperationLimits<u32>,
-    config_limits: &limits::RouterLimitsConfig,
-    query: &str,
+    max: OperationLimits<Option<u32>>,
     document: &ExecutableDocument,
     operation_name: Option<&str>,
 ) -> Result<(), OperationLimits<bool>> {
@@ -76,29 +73,13 @@ pub(crate) fn check(
     // Keep a record of the measurements
     *query_metrics_in = measured;
 
-    check_measured(&measured, config_limits, query, operation_name)
-}
-
-pub(crate) fn check_measured(
-    query_metrics: &OperationLimits<u32>,
-    config_limits: &limits::RouterLimitsConfig,
-    query: &str,
-    operation_name: Option<&str>,
-) -> Result<(), OperationLimits<bool>> {
-    let max = OperationLimits {
-        depth: config_limits.max_depth,
-        height: config_limits.max_height,
-        root_fields: config_limits.max_root_fields,
-        aliases: config_limits.max_aliases,
-    };
-
     // If we don't have a configured limit, we can just return Ok
     if !max.map(|limit| limit.is_some()).any() {
         // No configured limit
         return Ok(());
     }
 
-    let exceeded = max.combine(*query_metrics, |_, config, measured| {
+    let exceeded = max.combine(measured, |_, config, measured| {
         if let Some(limit) = config {
             measured > limit
         } else {
@@ -108,7 +89,7 @@ pub(crate) fn check_measured(
 
     if exceeded.any() {
         let mut messages = Vec::new();
-        max.combine(*query_metrics, |ident, max, measured| {
+        max.combine(measured, |ident, max, measured| {
             if let Some(max) = max
                 && measured > max
             {
@@ -116,13 +97,14 @@ pub(crate) fn check_measured(
             }
         });
         let message = messages.join(", ");
+        let query = document.to_string();
+
         tracing::warn!(
             "request exceeded complexity limits: {message}, \
             query: {query:?}, operation name: {operation_name:?}"
         );
-        if !config_limits.warn_only {
-            return Err(exceeded);
-        }
+
+        return Err(exceeded);
     }
     Ok(())
 }

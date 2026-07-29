@@ -23,7 +23,6 @@ use multimap::MultiMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use tower::BoxError;
-use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
@@ -41,6 +40,7 @@ use crate::axum_factory::CanceledRequest;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::graphql;
+use crate::layers::InternalServiceBuilderExt as _;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
@@ -604,6 +604,9 @@ where
         parts: &Parts,
         body: Body,
     ) -> Result<Result<graphql::Request, TranslateError>, BoxError> {
+        // NB: `plugins::limits::layer::RequestBodyLimit::call` re-derives this same "is this a
+        // GraphQL-over-HTTP GET" check to decide whether to size-limit the query string instead
+        // of the body. If this convention ever changes, update that check too.
         let graphql_request = if parts.method == Method::GET {
             Self::translate_query_request(parts)
         } else {
@@ -704,27 +707,23 @@ impl RouterCreator {
         let config_hash = configuration.hash();
         let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
 
-        let router_service = content_negotiation::RouterContentNegotiationLayer::default().layer(
-            RouterService::new(
-                supergraph_creator.make(),
-                apq_expander,
-                persisted_queries,
-                query_analysis,
-                configuration.batching.clone(),
-            ),
+        let router_service = RouterService::new(
+            supergraph_creator.make(),
+            apq_expander,
+            persisted_queries,
+            query_analysis,
+            configuration.batching.clone(),
         );
 
+        // Buffering happens once per connection in `axum_factory::utils::connection_router_service`,
+        // not here, so this pipeline stays a plain (unbuffered) service.
         let service = ServiceBuilder::new()
             .layer(static_page.clone())
-            .service(
-                supergraph_creator
-                    .plugins()
-                    .iter()
-                    .rev()
-                    .fold(router_service.boxed_clone(), |acc, (_, e)| {
-                        e.router_service(acc)
-                    }),
-            )
+            .rust_plugins(supergraph_creator.plugins(), |plugin, service| {
+                plugin.router_service(service)
+            })
+            .layer(content_negotiation::RouterContentNegotiationLayer::default())
+            .service(router_service)
             .boxed_clone();
 
         Ok(Self {

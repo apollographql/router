@@ -88,16 +88,6 @@ You can attach custom attributes using [router selectors](/router/configuration/
 - `apollo.router.graphql_error` - counts GraphQL errors in responses. Also counts errors which occur during the response validation phase, which are represented in client responses as `extensions.valueCompletion` instead of actual GraphQL errors. Attributes:
   - `code`: error code, including `RESPONSE_VALIDATION_FAILED` in the case of a value completion error.
 
-## Session
-
-- `apollo.router.session.count.active` - Number of in-flight GraphQL requests. **Deprecated**: use `http.server.active_requests` instead.
-
-<Note>
-
-`apollo.router.session.count.active` is a legacy Apollo-specific metric. Apollo recommends using [`http.server.active_requests`](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/instruments#opentelemetry-standard-instruments) instead, which follows OpenTelemetry semantic conventions and is the standard way to measure in-flight HTTP requests. `apollo.router.session.count.active` might be removed in a future release.
-
-</Note>
-
 ## Cache
 
 - `apollo.router.cache.size` — Number of entries in the cache
@@ -180,7 +170,18 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 ## Query planning
 
 - `apollo.router.query_planning.warmup.duration` - Time spent warming up the query planner queries in seconds.
-- `apollo.router.query_planning.plan.duration` - Histogram of plan durations isolated to query planning time only.
+- `apollo.router.query_planning.warmup.operations` - Counter of operations processed during query planner warm-up. Together with `apollo.router.query_planning.warmup.operations.expected`, this lets you compute warm-up coverage (planned / expected). Attributes:
+  - `outcome`: The result of warming up the operation. Shares the `apollo.router.query_planning.plan.duration` values (`success`, `timeout`, `cancelled`, `error`), plus `memory_limit` for memory-limit cancellations and `reused` for operations whose plan was carried over from the previous cache (or already present) rather than planned fresh.
+  - `source`: Where the operation came from (`persisted_query` for the persisted-query manifest, `cache` for operations carried over from the previous in-memory cache)
+- `apollo.router.query_planning.warmup.operations.expected` - Counter of operations that warm-up intended to plan. Attributes:
+  - `source`: Where the operation came from (`persisted_query`, `cache`)
+- `apollo.router.query_planning.warmup.backpressure` - Counter of the number of times warm-up retried after a temporary compute-backpressure error. Attributes:
+  - `source`: Where the operation came from (`persisted_query`, `cache`)
+  - `phase`: The warm-up phase where backpressure occurred (`parse` for document parsing, `plan` for the planner call)
+- `apollo.router.query_planning.plan.duration` - Histogram of plan durations isolated to query planning time only. Attributes:
+  - `planner`: The query planner implementation that produced the plan (for example, `rust`)
+  - `outcome`: The result of planning the operation (`success`, `timeout`, `cancelled`, `error`)
+  - `job.type`: The compute-job type that produced the plan (`query_planning` for a regular request, `query_planning_warmup` for query planner warm-up), matching the `job.type` attribute on `apollo.router.compute_jobs.duration`
 - `apollo.router.query_planning.total.duration` - Histogram of plan durations including queue time.
 - `apollo.router.query_planning.plan.evaluated_plans` - Histogram of the number of evaluated query plans.
 - `apollo.router.query_planning.plan.evaluated_paths` - Histogram of the number of paths (including intermediate ones) the planner considers before generating a plan. High values often correlate with long planning times on complex schemas or queries. Tune the limits as described in [Tuning query planner limits](/graphos/routing/query-planning/query-planning-best-practices#tuning-query-planner-limits).
@@ -317,7 +318,7 @@ telemetry:
 ## Telemetry
 
 - `apollo.router.telemetry.batch_processor.errors` - The number of errors encountered by exporter batch processors.
-  - `name`: One of `apollo-tracing`, `datadog-tracing`, `jaeger-collector`, `otlp-tracing`, `zipkin-tracing`.
+  - `name`: One of `apollo-tracing`, `datadog-tracing`, `otlp-tracing`.
   - `error`: One of `channel closed`, `channel full`.
 
 - `apollo.router.telemetry.metrics.cardinality_overflow` - A count of how often a telemetry metric hit OpenTelemetry's cardinality limit. When a metric exceeds its cardinality limit, new attribute combinations are aggregated into an overflow bucket.

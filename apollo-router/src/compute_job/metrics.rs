@@ -21,12 +21,7 @@ pub(super) enum Outcome {
     Abandoned,
 }
 
-impl From<Outcome> for opentelemetry::Value {
-    fn from(outcome: Outcome) -> Self {
-        let s: &'static str = outcome.into();
-        s.into()
-    }
-}
+impl_otel_value_from_static_str!(Outcome);
 
 pub(super) struct JobWatcher {
     span: Span,

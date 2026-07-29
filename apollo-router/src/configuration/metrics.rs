@@ -335,8 +335,6 @@ impl InstrumentData {
             "$..tracing.otlp[?(@.enabled==true)]",
             opt.tracing.datadog,
             "$..tracing.datadog[?(@.enabled==true)]",
-            opt.tracing.zipkin,
-            "$..tracing.zipkin[?(@.enabled==true)]",
             opt.events,
             "$..events",
             opt.events.router,
@@ -502,8 +500,8 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_otlp_endpoint,
-            "$.telemetry.apollo.experimental_otlp_endpoint"
+            apollo.router.config.otlp_endpoint,
+            "$.telemetry.apollo.otlp_endpoint"
         );
 
         populate_config_instrument!(
@@ -522,13 +520,13 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_otlp_tracing_protocol,
-            "$.telemetry.apollo.experimental_otlp_tracing_protocol"
+            apollo.router.config.otlp_tracing_protocol,
+            "$.telemetry.apollo.otlp_tracing_protocol"
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_otlp_metrics_protocol,
-            "$.telemetry.apollo.experimental_otlp_metrics_protocol"
+            apollo.router.config.otlp_metrics_protocol,
+            "$.telemetry.apollo.otlp_metrics_protocol"
         );
 
         populate_config_instrument!(

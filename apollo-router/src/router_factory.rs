@@ -23,7 +23,6 @@ use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::configuration::TlsClient;
-use crate::introspection::IntrospectionCache;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
@@ -323,21 +322,15 @@ impl YamlRouterFactory {
         license: Arc<LicenseState>,
         previous_config: Option<Arc<Configuration>>,
     ) -> Result<(SupergraphCreator, warmup::BoxCloneService), BoxError> {
-        let introspection = Arc::new(IntrospectionCache::new(&configuration));
-
         let (query_planner_service, subgraph_schemas) = {
             let _span = tracing::info_span!("query_planner_creation").entered();
 
             let planner = QueryPlannerService::create_planner(&schema, &configuration)?;
             let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&planner);
 
-            let query_planner_service = QueryPlannerService::new(
-                schema.clone(),
-                configuration.clone(),
-                planner.clone(),
-                introspection.clone(),
-            )?
-            .boxed_clone();
+            let query_planner_service =
+                QueryPlannerService::new(schema.clone(), configuration.clone(), planner.clone())?
+                    .boxed_clone();
 
             (query_planner_service, subgraph_schemas)
         };
@@ -378,9 +371,6 @@ impl YamlRouterFactory {
 
             // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
             let pair = builder.with_plugins(plugins).build().await?;
-
-            // Only now can we build telemetry instruments
-            introspection.activate();
 
             Ok(pair)
         }
@@ -1902,7 +1892,7 @@ mod create_subgraph_services_tests {
         );
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = factory
-            .create("test")
+            .get("test")
             .unwrap()
             .oneshot(subgraph_request(url, "test", "query"))
             .await
@@ -1958,7 +1948,7 @@ mod create_subgraph_services_tests {
         );
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         factory
-            .create("test")
+            .get("test")
             .unwrap()
             .oneshot(subgraph_request(url, "test", "query"))
             .await
@@ -2076,13 +2066,13 @@ mod create_subgraph_services_tests {
             .build();
 
         factory
-            .create("enabled_subgraph")
+            .get("enabled_subgraph")
             .unwrap()
             .oneshot(enabled_request)
             .await
             .unwrap();
         factory
-            .create("disabled_subgraph")
+            .get("disabled_subgraph")
             .unwrap()
             .oneshot(disabled_request)
             .await

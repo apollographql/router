@@ -2670,6 +2670,7 @@ mod tests {
     use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::limits::operation_limits::OperationLimits;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
@@ -2686,7 +2687,6 @@ mod tests {
     use crate::services::RouterResponse;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
-    use crate::spec::operation_limits::OperationLimits;
 
     type JsonMap = serde_json_bytes::Map<ByteString, Value>;
 
@@ -4053,7 +4053,7 @@ mod tests {
     /// Verify that the `RouterInstruments::on_response` dispatch to `subscriptions_terminated`
     /// is wired up end-to-end. If the delegation were removed or mis-wired, `stashed_attributes`
     /// would be empty and the `subgraph.name`/`client.name` labels would silently disappear from
-    /// the metric — exactly the regression this PR guards against.
+    /// the metric.
     #[tokio::test]
     async fn test_router_instruments_on_response_wires_subscriptions_terminated() {
         async {

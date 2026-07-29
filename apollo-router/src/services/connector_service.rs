@@ -1,5 +1,6 @@
 //! Tower service for connectors.
 
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -21,6 +22,8 @@ use tower::ServiceExt;
 use tracing_futures::Instrument;
 
 use super::connect::BoxCloneService;
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::connectors::handle_responses::aggregate_responses;
 use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
@@ -30,6 +33,7 @@ use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
+use crate::services::connect::ServiceResult;
 use crate::services::connector::request_service::BoxCloneService as ConnectorRequestBoxService;
 use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::spec::Schema;
@@ -51,9 +55,7 @@ pub(crate) const APOLLO_CONNECTOR_SOURCE_DETAIL: Key =
 
 /// A service for executing connector requests.
 ///
-/// Bound to a single connector (and therefore a single connector source) at construction
-/// time via [`ConnectorServiceFactory::create`], so that `poll_ready` can propagate the
-/// readiness of the one [`ConnectorRequestService`](super::connector::request_service::ConnectorRequestService)
+/// Bound to a single connector, and therefore a single connector source.
 /// it will actually dispatch to.
 #[derive(Clone)]
 pub(crate) struct ConnectorService {
@@ -233,12 +235,12 @@ async fn execute(
 
 #[derive(Clone)]
 pub(crate) struct ConnectorServiceFactory {
-    pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
-    pub(crate) subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
-    pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
+    /// Pre-built services for each connector.
+    services: Arc<
+        HashMap<String, UnconstrainedBuffer<ConnectRequest, BoxFuture<'static, ServiceResult>>>,
+    >,
 }
 
 impl ConnectorServiceFactory {
@@ -249,15 +251,30 @@ impl ConnectorServiceFactory {
         connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
         connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
     ) -> Self {
+        let mut services = HashMap::with_capacity(connectors_by_service_name.len());
+        for (service_name, connector) in connectors_by_service_name.iter() {
+            let connector_request_service =
+                connector_request_service_factory.create(connector.source_config_key());
+
+            let service = ConnectorService {
+                _schema: schema.clone(),
+                _subgraph_schemas: subgraph_schemas.clone(),
+                _subscription_config: subscription_config.clone(),
+                connector: connector.clone(),
+                connector_request_service,
+            };
+            services.insert(
+                service_name.to_string(),
+                UnconstrainedBuffer::new(service.boxed_clone(), DEFAULT_BUFFER_SIZE),
+            );
+        }
+
         Self {
-            subgraph_schemas,
-            schema: schema.clone(),
-            subscription_config,
             connectors_by_service_name,
             _connect_spec_version_instrument: connect_spec_version_instrument(
                 schema.connectors.as_ref(),
             ),
-            connector_request_service_factory,
+            services: Arc::new(services),
         }
     }
 
@@ -275,27 +292,14 @@ impl ConnectorServiceFactory {
         )
     }
 
-    /// Creates a [`ConnectorService`] bound to the connector registered for `service_name`,
-    /// or `None` if no connector is registered under that name.
+    /// Retrieves the pre-built [`ConnectorService`] stack for `service_name`, or `None` if
+    /// no connector is registered under that name.
     ///
-    /// The inner per-source [`ConnectorRequestService`](super::connector::request_service::ConnectorRequestService)
-    /// is resolved once here (rather than on every `call`), so the returned service's
-    /// `poll_ready` reflects that single inner service's real readiness.
-    pub(crate) fn create(&self, service_name: &str) -> Option<BoxCloneService> {
-        let connector = self.connectors_by_service_name.get(service_name)?.clone();
-        let connector_request_service = self
-            .connector_request_service_factory
-            .create(connector.source_config_key());
-
-        Some(
-            ConnectorService {
-                _schema: self.schema.clone(),
-                _subgraph_schemas: self.subgraph_schemas.clone(),
-                _subscription_config: self.subscription_config.clone(),
-                connector,
-                connector_request_service,
-            }
-            .boxed_clone(),
-        )
+    /// The returned service is a clone of the stack built once in [`Self::new`] at reload
+    /// time, so this is a cheap retrieval rather than a construction.
+    pub(crate) fn get(&self, service_name: &str) -> Option<BoxCloneService> {
+        self.services
+            .get(service_name)
+            .map(|svc| svc.clone().boxed_clone())
     }
 }

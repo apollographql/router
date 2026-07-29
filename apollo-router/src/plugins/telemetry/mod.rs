@@ -89,6 +89,7 @@ use crate::layers::instrument::InstrumentLayer;
 use crate::metrics::meter_provider;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::plugins::limits::operation_limits::OperationLimits;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
@@ -141,7 +142,6 @@ use crate::services::layers::persisted_queries::RequestPersistedQueryId;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::spec::operation_limits::OperationLimits;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
@@ -1840,9 +1840,6 @@ impl Telemetry {
         }
         if config.exporters.tracing.datadog.is_enabled() {
             attributes.push(KeyValue::new("telemetry.tracing.datadog", true));
-        }
-        if config.exporters.tracing.zipkin.is_enabled() {
-            attributes.push(KeyValue::new("telemetry.tracing.zipkin", true));
         }
 
         if !attributes.is_empty() {

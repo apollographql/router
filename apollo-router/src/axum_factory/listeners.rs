@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+use std::time::Instant;
 
 use axum::Router;
 use axum::response::*;
@@ -40,6 +41,8 @@ use crate::axum_factory::utils::ConnectionRouterService;
 use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
+use crate::metrics::FutureMetricsExt;
+use crate::plugins::telemetry::span_factory;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::services::router::pipeline_handle::PipelineHandle;
@@ -206,7 +209,7 @@ pub(super) async fn get_extra_listeners(
 }
 
 // Drive a connection until graceful shutdown.
-async fn handle_connection<C, E>(
+async fn handle_connection<C, E: AsRef<dyn std::error::Error + Send + Sync>>(
     connection: C,
     mut connection_handle: ConnectionHandle,
     connection_shutdown: CancellationToken,
@@ -216,10 +219,19 @@ async fn handle_connection<C, E>(
     C: Future<Output = Result<(), E>>,
     C: GracefulConnection<Error = E>,
 {
+    let connection_start = Instant::now();
     tokio::pin!(connection);
     tokio::select! {
         // the connection finished first
-        _res = &mut connection => {
+        res = &mut connection => {
+            // Hyper rejects requests with oversized headers (431) or URI (414) before they
+            // reach the axum service layer, so those responses are invisible to the normal
+            // metrics/tracing middleware. We detect them here from the connection error and
+            // emit metrics manually so they remain observable.
+            if let Err(ref err) = res &&
+                 let Some(status_code) = classify_hyper_rejection(err.as_ref()) {
+                    emit_connection_rejection_metrics(status_code, connection_start);
+                }
         }
         // the shutdown receiver was triggered first,
         // so we tell the connection to do a graceful shutdown
@@ -478,7 +490,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request).await;
                                     }
                                 }
-                            });
+                            }.with_current_meter_provider());
                         }
                         Err(e) => process_error(e).await
                     }
@@ -538,6 +550,71 @@ fn configure_connection(
     builder
 }
 
+/// Walk the error source chain to find a [`hyper::Error`] indicating that hyper rejected
+/// the request with a 431 or 414 before it reached the service layer.
+///
+/// Uses `is_parse_too_large()` (stable public API) as the primary gate. The Display string
+/// is used only to discriminate between the two variants that `is_parse_too_large` bundles
+/// together: `Parse::TooLarge` (431) and `Parse::UriTooLong` (414). If hyper ever changes
+/// that string we default to 431, the more common case.
+fn classify_hyper_rejection(err: &(dyn std::error::Error + Send + Sync + 'static)) -> Option<u16> {
+    fn check(hyper_err: &hyper::Error) -> Option<u16> {
+        hyper_err.is_parse_too_large().then(|| {
+            if hyper_err.to_string() == "URI too long" {
+                414
+            } else {
+                431
+            }
+        })
+    }
+
+    if let Some(code) = err.downcast_ref::<hyper::Error>().and_then(check) {
+        return Some(code);
+    }
+    let mut source = err.source();
+    while let Some(e) = source {
+        if let Some(code) = e.downcast_ref::<hyper::Error>().and_then(check) {
+            return Some(code);
+        }
+        source = e.source();
+    }
+    None
+}
+
+/// Emit metrics and a trace span for HTTP requests rejected by hyper before reaching
+/// the axum service layer (e.g. 431 Request Header Fields Too Large).
+///
+/// `start` is the `Instant` recorded immediately before `serve_connection_with_upgrades` was
+/// called. Because it is per-connection rather than per-request, the recorded duration will be
+/// inflated on keep-alive connections that served prior valid requests. In practice these
+/// rejections almost always occur on the first request of a connection.
+fn emit_connection_rejection_metrics(status_code: u16, start: Instant) {
+    let elapsed = start.elapsed();
+    let elapsed_s = elapsed.as_secs_f64();
+    let elapsed_ns = elapsed.as_nanos() as i64;
+
+    // Same name, unit, and description as the histogram created by RouterInstruments so that
+    // APM tools aggregate these rejected requests together with normal request durations.
+    f64_histogram_with_unit!(
+        "http.server.request.duration",
+        "Duration of HTTP server requests.",
+        "s",
+        elapsed_s,
+        "http.response.status_code" = status_code as i64
+    );
+
+    // Create a trace span matching the shape of a normal router span so APM tools and Apollo
+    // Studio can see the rejected request alongside normal requests. No distributed trace context
+    // is available because the headers were not successfully parsed.
+    //
+    // Enter the span before recording so that OTel-layer exporters (Datadog, OTLP, Zipkin, …)
+    // derive a non-zero wall-clock duration from on_enter/on_close. The entered guard is held
+    // until end of function, then dropped implicitly, which closes the span.
+    let entered = span_factory::create_router_rejection().entered();
+    entered.record("http.response.status_code", status_code as i64);
+    entered.record("apollo_private.duration_ns", elapsed_ns);
+}
+
 #[derive(Clone)]
 struct IdleConnectionChecker<S> {
     received_request: Arc<AtomicBool>,
@@ -585,6 +662,7 @@ mod tests {
     use http::HeaderMap;
     use http::HeaderValue;
     use mime::APPLICATION_JSON;
+    use reqwest::StatusCode;
     use reqwest::header::CONTENT_TYPE;
     use serde_json::json;
     use tower::ServiceExt;
@@ -595,6 +673,8 @@ mod tests {
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
     use crate::graphql;
+    use crate::metrics::FutureMetricsExt;
+    use crate::plugins::limits;
     use crate::services::SupergraphResponse;
     use crate::services::router;
     use crate::services::router::body;
@@ -772,5 +852,138 @@ mod tests {
         crate::plugin::test::await_mock_driver(router_driver).await;
 
         Ok(())
+    }
+
+    // --- Tests for HTTP 431 / 414 metric and trace emission ---
+
+    #[tokio::test]
+    async fn emit_connection_rejection_metrics_records_431() {
+        async {
+            emit_connection_rejection_metrics(431, Instant::now());
+            assert_histogram_count!(
+                "http.server.request.duration",
+                1,
+                "http.response.status_code" = 431i64
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn emit_connection_rejection_metrics_records_414() {
+        async {
+            emit_connection_rejection_metrics(414, Instant::now());
+            assert_histogram_count!(
+                "http.server.request.duration",
+                1,
+                "http.response.status_code" = 414i64
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn it_returns_431_when_too_many_headers() {
+        async {
+            // Configure a very low header limit to trigger hyper's 431 response.
+            let conf = Arc::new(
+                Configuration::fake_builder()
+                    .operation_limits(limits::Config {
+                        router: limits::RouterLimitsConfig {
+                            http1_max_request_headers: Some(5),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })
+                    .build()
+                    .unwrap(),
+            );
+
+            let router_service = router::service::empty().await;
+            let (server, _) = init_with_config(router_service, conf, MultiMap::new())
+                .await
+                .unwrap();
+
+            // Send far more headers than the 5-header limit allows.
+            let mut req_builder = reqwest::Client::new().get(format!(
+                "{}",
+                server.graphql_listen_address().as_ref().unwrap()
+            ));
+            for i in 0..20 {
+                req_builder = req_builder.header(format!("x-custom-{i}"), "value");
+            }
+
+            let response = req_builder.send().await.unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::from_u16(431).unwrap(),
+                "expected 431 Request Header Fields Too Large"
+            );
+            let _ = response.bytes().await;
+
+            server.shutdown().await.unwrap();
+
+            assert_histogram_count!(
+                "http.server.request.duration",
+                1,
+                "http.response.status_code" = 431i64
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn it_returns_414_when_uri_too_long() {
+        use tokio::io::AsyncReadExt;
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpStream;
+
+        async {
+            // hyper's MAX_URI_LEN is hardcoded at 65534 bytes (u16::MAX - 1) and is not
+            // configurable. Exceeding it triggers Parse::UriTooLong → 414. No special router
+            // config is needed; the default configuration is sufficient.
+            //
+            // reqwest rejects URLs this long before even connecting, so we use a raw TCP
+            // stream and write the HTTP request manually.
+            let router_service = router::service::empty().await;
+            let (server, _) = init_with_config(
+                router_service,
+                Arc::new(Configuration::fake_builder().build().unwrap()),
+                MultiMap::new(),
+            )
+            .await
+            .unwrap();
+
+            let listen_addr = server.graphql_listen_address().as_ref().unwrap();
+            let (ip, port) = listen_addr.ip_and_port().unwrap();
+            let mut stream = TcpStream::connect((ip, port)).await.unwrap();
+
+            // Path is 65535 bytes — one over MAX_URI_LEN (65534) — triggering UriTooLong.
+            let long_path = format!("/{}", "a".repeat(65534));
+            let request = format!("GET {} HTTP/1.1\r\nHost: localhost\r\n\r\n", long_path);
+            stream.write_all(request.as_bytes()).await.unwrap();
+
+            // Read just enough to verify the status line.
+            let mut buf = [0u8; 32];
+            let n = stream.read(&mut buf).await.unwrap();
+            assert!(
+                buf[..n].starts_with(b"HTTP/1.1 414"),
+                "expected 414 URI Too Long, got: {}",
+                String::from_utf8_lossy(&buf[..n])
+            );
+
+            server.shutdown().await.unwrap();
+
+            assert_histogram_count!(
+                "http.server.request.duration",
+                1,
+                "http.response.status_code" = 414i64
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }
