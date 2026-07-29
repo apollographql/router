@@ -29,8 +29,6 @@ use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::load_shed::error::Overloaded;
-use tower::util::BoxCloneSyncService;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use tracing::instrument::WithSubscriber;
@@ -43,6 +41,7 @@ use super::listeners::ensure_listenaddrs_consistency;
 use super::listeners::extra_endpoints;
 use super::utils::ConnectionRouterService;
 use super::utils::PropagatingMakeSpan;
+use super::utils::connection_router_service;
 use crate::Context;
 use crate::axum_factory::compression::Compressor;
 use crate::axum_factory::listeners::get_extra_listeners;
@@ -53,7 +52,6 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
-use crate::layers::ServiceBuilderExt;
 use crate::metrics::FutureMetricsExt;
 use crate::plugins::license_enforcement::layer::LicenseLayer;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecording;
@@ -128,13 +126,8 @@ impl HttpServerFactory for AxumHttpServerFactory {
     {
         Box::pin(async move {
             let pipeline_handle = service_factory.pipeline_handle();
-            // Build the connection service once per reload; connections clone it cheaply.
-            let router_service = BoxCloneSyncService::new(
-                ServiceBuilder::new()
-                    .load_shed()
-                    .buffered()
-                    .service(service_factory.create()),
-            );
+            // Built once per reload; connections clone it cheaply.
+            let router_service = connection_router_service(service_factory.create());
             let all_routers = make_axum_router(&configuration, extra_endpoints, license)?;
 
             // serve main router
@@ -436,7 +429,6 @@ async fn handle_graphql(
     };
 
     match res {
-        Err(err) if err.is::<Overloaded>() => overloaded_response(),
         Err(err) => internal_server_error(err),
         Ok(response) => {
             let (mut parts, body) = response.response.into_parts();
@@ -502,17 +494,6 @@ where
     (StatusCode::INTERNAL_SERVER_ERROR, Json(json!(response))).into_response()
 }
 
-fn overloaded_response() -> Response {
-    let error = graphql::Error::builder()
-        .message("service unavailable")
-        .extension_code("SERVICE_UNAVAILABLE")
-        .build();
-
-    let response = graphql::Response::builder().error(error).build();
-
-    (StatusCode::SERVICE_UNAVAILABLE, Json(json!(response))).into_response()
-}
-
 struct CancelHandler<'a> {
     context: &'a Context,
     got_first_response: bool,
@@ -553,61 +534,12 @@ pub(crate) struct CanceledRequest;
 
 #[cfg(test)]
 mod tests {
-    use std::task::Context;
-    use std::task::Poll;
-
     use http::header::ACCEPT;
     use http::header::CONTENT_TYPE;
     use tower::Service;
 
     use super::*;
     use crate::assert_snapshot_subscriber;
-
-    /// A service that never becomes ready, so `call` should never be invoked: standing in for
-    /// a permanently-overloaded pipeline.
-    #[derive(Clone)]
-    struct NeverReady;
-
-    impl Service<router::Request> for NeverReady {
-        type Response = router::Response;
-        type Error = tower::BoxError;
-        type Future = std::future::Pending<Result<router::Response, tower::BoxError>>;
-
-        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-            Poll::Pending
-        }
-
-        fn call(&mut self, _req: router::Request) -> Self::Future {
-            unreachable!("load_shed should short-circuit calls to a never-ready service")
-        }
-    }
-
-    #[tokio::test]
-    async fn overloaded_router_service_returns_503() {
-        let connection_service = crate::axum_factory::utils::connection_router_service(
-            router::BoxCloneService::new(NeverReady),
-        );
-        let options = HandlerOptions {
-            early_cancel: true,
-            experimental_log_on_broken_pipe: false,
-        };
-
-        let request: Request<axum::body::Body> = http::Request::builder()
-            .method("POST")
-            .uri("/")
-            .header(ACCEPT, "application/json")
-            .header(CONTENT_TYPE, "application/json")
-            .body(axum::body::Body::from(
-                r#"{"query":"query { __typename }"}"#,
-            ))
-            .unwrap();
-
-        let response = handle_graphql(Extension(options), Extension(connection_service), request)
-            .await
-            .into_response();
-
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    }
 
     // Drive the http router call into its cancellation-handling path (where `CancelHandler`
     // is constructed) and then deterministically cancel it before completion. With
