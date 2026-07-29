@@ -444,10 +444,8 @@ impl<'a> TestHarness<'a> {
         )?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
 
-        // `make_axum_router` no longer bakes a router service into the router: real
-        // connections get one created once per connection in `listeners.rs`. Here, a single
-        // `build_http_service()` call stands in for one connection/session, so create one
-        // router service up front and layer it on the same way.
+        // The router reads its pipeline from a request extension, which the server factory
+        // populates. Add the same extension here so the returned service is callable.
         let router_service = connection_router_service(router_creator.create());
         let router = ServiceBuilder::new()
             .layer(tower_http::add_extension::AddExtensionLayer::new(

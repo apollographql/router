@@ -142,18 +142,16 @@ impl Endpoint {
 }
 /// Factory for creating a router service instance.
 ///
-/// Instances of this trait are used by the HTTP server to obtain a new
-/// router service, shared across all requests on a connection.
+/// The HTTP server calls `create` once per reload and shares the resulting
+/// service across every connection it serves.
 pub(crate) trait RouterFactory: Clone + Send + 'static {
     fn create(&self) -> router::BoxCloneService;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 
-    /// Returns the handle for this factory's pipeline. Callers that keep a
-    /// clone alive for the lifetime of a connection keep the
-    /// `apollo.router.pipelines` gauge from dropping to 0 while that
-    /// connection is still serving requests from this pipeline, even after a
-    /// reload has replaced this factory.
+    /// Returns the handle for this factory's pipeline. Hold a clone for as long as
+    /// requests are still served from this pipeline, including across a reload that
+    /// replaces this factory.
     fn pipeline_handle(&self) -> Arc<PipelineHandle>;
 }
 

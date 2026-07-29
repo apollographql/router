@@ -715,8 +715,6 @@ impl RouterCreator {
             configuration.batching.clone(),
         );
 
-        // Buffering happens once per connection in `axum_factory::utils::connection_router_service`,
-        // not here, so this pipeline stays a plain (unbuffered) service.
         let service = ServiceBuilder::new()
             .layer(static_page.clone())
             .rust_plugins(supergraph_creator.plugins(), |plugin, service| {

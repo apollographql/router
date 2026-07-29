@@ -188,10 +188,10 @@ impl RouterFactory for CountingRouterFactory {
     }
 }
 
-/// Confirms `RouterFactory::create()` is called exactly once per server startup (not per
-/// connection or per request): the resulting service is cloned cheaply for each connection.
+/// Confirms `RouterFactory::create()` runs once per server startup rather than per
+/// connection or per request; each connection clones the resulting service.
 #[tokio::test]
-async fn it_creates_router_service_once_per_connection_not_once_per_request() {
+async fn it_creates_the_router_service_once_per_reload() {
     let create_calls = Arc::new(AtomicU32::new(0));
     let (service, mut handle) = tower_test::mock::spawn::<router::Request, router::Response>();
 
