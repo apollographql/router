@@ -42,7 +42,7 @@ use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::metrics::FutureMetricsExt;
-use crate::plugins::telemetry::span_factory;
+use crate::plugins::telemetry::pipeline_bypass::record_rejected_request;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::services::router::pipeline_handle::PipelineHandle;
@@ -230,7 +230,7 @@ async fn handle_connection<C, E: AsRef<dyn std::error::Error + Send + Sync>>(
             // emit metrics manually so they remain observable.
             if let Err(ref err) = res &&
                  let Some(status_code) = classify_hyper_rejection(err.as_ref()) {
-                    emit_connection_rejection_metrics(status_code, connection_start);
+                    record_rejected_request(status_code, connection_start);
                 }
         }
         // the shutdown receiver was triggered first,
@@ -605,40 +605,6 @@ fn classify_hyper_rejection(err: &(dyn std::error::Error + Send + Sync + 'static
     None
 }
 
-/// Emit metrics and a trace span for HTTP requests rejected by hyper before reaching
-/// the axum service layer (e.g. 431 Request Header Fields Too Large).
-///
-/// `start` is the `Instant` recorded immediately before `serve_connection_with_upgrades` was
-/// called. Because it is per-connection rather than per-request, the recorded duration will be
-/// inflated on keep-alive connections that served prior valid requests. In practice these
-/// rejections almost always occur on the first request of a connection.
-fn emit_connection_rejection_metrics(status_code: u16, start: Instant) {
-    let elapsed = start.elapsed();
-    let elapsed_s = elapsed.as_secs_f64();
-    let elapsed_ns = elapsed.as_nanos() as i64;
-
-    // Same name, unit, and description as the histogram created by RouterInstruments so that
-    // APM tools aggregate these rejected requests together with normal request durations.
-    f64_histogram_with_unit!(
-        "http.server.request.duration",
-        "Duration of HTTP server requests.",
-        "s",
-        elapsed_s,
-        "http.response.status_code" = status_code as i64
-    );
-
-    // Create a trace span matching the shape of a normal router span so APM tools and Apollo
-    // Studio can see the rejected request alongside normal requests. No distributed trace context
-    // is available because the headers were not successfully parsed.
-    //
-    // Enter the span before recording so that OTel-layer exporters (Datadog, OTLP, Zipkin, …)
-    // derive a non-zero wall-clock duration from on_enter/on_close. The entered guard is held
-    // until end of function, then dropped implicitly, which closes the span.
-    let entered = span_factory::create_router_rejection().entered();
-    entered.record("http.response.status_code", status_code as i64);
-    entered.record("apollo_private.duration_ns", elapsed_ns);
-}
-
 #[derive(Clone)]
 struct IdleConnectionChecker<S> {
     received_request: Arc<AtomicBool>,
@@ -876,36 +842,6 @@ mod tests {
         crate::plugin::test::await_mock_driver(router_driver).await;
 
         Ok(())
-    }
-
-    // --- Tests for HTTP 431 / 414 metric and trace emission ---
-
-    #[tokio::test]
-    async fn emit_connection_rejection_metrics_records_431() {
-        async {
-            emit_connection_rejection_metrics(431, Instant::now());
-            assert_histogram_count!(
-                "http.server.request.duration",
-                1,
-                "http.response.status_code" = 431i64
-            );
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
-    async fn emit_connection_rejection_metrics_records_414() {
-        async {
-            emit_connection_rejection_metrics(414, Instant::now());
-            assert_histogram_count!(
-                "http.server.request.duration",
-                1,
-                "http.response.status_code" = 414i64
-            );
-        }
-        .with_metrics()
-        .await;
     }
 
     #[tokio::test]

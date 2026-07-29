@@ -16,6 +16,7 @@ use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
+use crate::plugins::telemetry::pipeline_bypass::record_bypassed_request;
 use crate::plugins::telemetry::span_factory;
 use crate::services::router;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
@@ -99,9 +100,15 @@ async fn shed_as_503(
 ) -> Result<router::Response, tower::BoxError> {
     match future.await {
         Err(err) if err.is::<Overloaded>() => {
+            // Shedding happens before the router pipeline, and its `http.server.*` instruments
+            // with it, so record the duration here to keep shed requests visible.
+            record_bypassed_request(
+                StatusCode::SERVICE_UNAVAILABLE.as_u16(),
+                context.created_at.elapsed(),
+            );
+
             // Debug rather than warn: shedding is per-request, so a sustained overload would
             // otherwise emit a line per rejected request while the router is already struggling.
-            // The 503 is counted by the `apollo.router.operations` metric.
             tracing::debug!(
                 code = "REQUEST_CONCURRENCY_LIMITED",
                 "the connection queue is full, shedding request",
@@ -152,6 +159,7 @@ mod tests {
     use tower::Service;
 
     use super::*;
+    use crate::metrics::FutureMetricsExt;
 
     /// An unready pipeline must not stall readiness, because hyper awaits `poll_ready` inside
     /// each request's future. Shedding once the queue fills is covered by
@@ -203,6 +211,27 @@ mod tests {
             error.message,
             "Your request has been concurrency limited waiting for the router"
         );
+    }
+
+    /// The router pipeline's `http.server.*` instruments never see a shed request, so the shed
+    /// path has to record the duration itself.
+    #[tokio::test]
+    async fn shed_requests_record_a_request_duration() {
+        async {
+            let _ = shed_as_503(
+                Context::new(),
+                std::future::ready(Err(Overloaded::new().into())),
+            )
+            .await;
+
+            assert_histogram_count!(
+                "http.server.request.duration",
+                1,
+                "http.response.status_code" = 503i64
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     /// Anything other than an `Overloaded` has to pass through untouched.
