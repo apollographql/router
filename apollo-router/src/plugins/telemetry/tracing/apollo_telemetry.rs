@@ -311,7 +311,7 @@ impl Exporter {
 
 /// Hard upper bound on the (approximate) size of a single trace exported to Apollo. Traces larger
 /// than this are dropped unconditionally: GraphOS ingestion rejects oversized traces, so exporting
-/// them just wastes CPU and bandwidth. Oversized traces are most often caused by pathologically 
+/// them just wastes CPU and bandwidth. Oversized traces are most often caused by pathologically
 /// large FTv1 blobs in subgraph spans.
 const MAX_TRACE_SIZE_BYTES: usize = 10 * 1024 * 1024;
 
@@ -415,13 +415,13 @@ impl SpanExporter for Exporter {
         if total_traces > 0 {
             let throttle = self.trace_throttle.mode_name();
             u64_counter!(
-                "apollo.router.telemetry.apollo.trace_filter.total",
+                "apollo.router.telemetry.apollo.trace_throttle.total",
                 "Complete traces considered for export to Apollo Studio",
                 total_traces,
                 throttle = throttle
             );
             u64_counter!(
-                "apollo.router.telemetry.apollo.trace_filter.kept",
+                "apollo.router.telemetry.apollo.trace_throttle.kept",
                 "Traces kept for export to Apollo Studio after throttling",
                 kept_traces,
                 throttle = throttle
@@ -430,7 +430,7 @@ impl SpanExporter for Exporter {
 
         if oversized_traces > 0 {
             u64_counter!(
-                "apollo.router.telemetry.apollo.trace_filter.oversized",
+                "apollo.router.telemetry.apollo.trace_throttle.oversized",
                 "Complete traces dropped because their approximate size exceeded the 10MB limit",
                 oversized_traces
             );
