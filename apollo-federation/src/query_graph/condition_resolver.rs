@@ -188,7 +188,7 @@ pub(crate) trait CachingConditionResolver {
     fn query_graph(&self) -> &QueryGraph;
 
     fn resolve_without_cache(
-        &self,
+        &mut self,
         edge: EdgeIndex,
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
