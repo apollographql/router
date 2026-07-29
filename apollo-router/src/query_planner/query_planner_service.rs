@@ -52,7 +52,6 @@ use crate::services::query_planner::PlanOptions;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
-use crate::spec::operation_limits::OperationLimits;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const UNSUPPORTED_FED1: &str = "fed1";
@@ -180,16 +179,11 @@ impl QueryPlannerService {
             let result = result.map_err(FederationErrorBridge::from);
 
             let elapsed = start.elapsed().as_secs_f64();
-            match &result {
-                Ok(_) => metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "success"),
-                Err(FederationErrorBridge::Cancellation(e)) if e.contains("timeout") => {
-                    metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "timeout")
-                }
-                Err(FederationErrorBridge::Cancellation(_)) => {
-                    metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "cancelled")
-                }
-                Err(_) => metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "error"),
-            }
+            let outcome = match &result {
+                Ok(_) => QueryPlanningOutcome::Success,
+                Err(e) => QueryPlanningOutcome::from(e),
+            };
+            metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, outcome, compute_job_type);
 
             let plan = result?;
             let root_node = convert_root_query_plan_node(&plan);
@@ -250,16 +244,8 @@ impl QueryPlannerService {
         query: String,
         operation_name: Option<&str>,
         doc: &ParsedDocument,
-        query_metrics_in: &mut OperationLimits<u32>,
     ) -> Result<Query, QueryPlannerError> {
         let executable = &doc.executable;
-        crate::spec::operation_limits::check(
-            query_metrics_in,
-            &self.configuration.limits.router,
-            &query,
-            executable,
-            operation_name,
-        )?;
 
         let (fragments, operation, defer_stats, schema_aware_hash) =
             Query::extract_query_information(&self.schema, &query, executable, operation_name)?;
@@ -297,7 +283,6 @@ impl QueryPlannerService {
         plan_options: PlanOptions,
         doc: &ParsedDocument,
         compute_job_type: ComputeJobType,
-        query_metrics: OperationLimits<u32>,
     ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
         let plan_result = self
             .plan_inner(
@@ -360,7 +345,6 @@ impl QueryPlannerService {
                 root: query_plan_root_node,
                 formatted_query_plan,
                 query: Arc::new(selections),
-                query_metrics,
                 estimated_size: Default::default(),
             }),
         })
@@ -465,13 +449,11 @@ impl QueryPlannerService {
         mut doc: ParsedDocument,
         compute_job_type: ComputeJobType,
     ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
-        let mut query_metrics = Default::default();
         let mut selections = self
             .parse_selections(
                 key.original_query.clone(),
                 key.operation_name.as_deref(),
                 &doc,
-                &mut query_metrics,
             )
             .await?;
 
@@ -528,7 +510,6 @@ impl QueryPlannerService {
                     key.filtered_query.clone(),
                     key.operation_name.as_deref(),
                     &doc,
-                    &mut query_metrics,
                 )
                 .await?;
             filtered.is_original = false;
@@ -544,7 +525,6 @@ impl QueryPlannerService {
             key.plan_options,
             &doc,
             compute_job_type,
-            query_metrics,
         )
         .await
     }
@@ -558,17 +538,57 @@ pub(crate) struct QueryPlanResult {
     pub(super) evaluated_plan_paths: u64,
 }
 
+/// The outcome of a query-planning attempt. Shared across query-planning metrics (e.g.
+/// `apollo.router.query_planning.plan.duration` and `apollo.router.query_planning.warmup.*`) so
+/// they use a single vocabulary. Not every value is produced by every code path.
+#[derive(Copy, Clone, Debug, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+pub(crate) enum QueryPlanningOutcome {
+    Success,
+    Timeout,
+    Cancelled,
+    Error,
+    MemoryLimit,
+}
+
+impl_otel_value_from_static_str!(QueryPlanningOutcome);
+
+impl From<&FederationErrorBridge> for QueryPlanningOutcome {
+    fn from(err: &FederationErrorBridge) -> Self {
+        match err {
+            FederationErrorBridge::Cancellation(msg) if msg.contains("timeout") => {
+                QueryPlanningOutcome::Timeout
+            }
+            FederationErrorBridge::Cancellation(_) => QueryPlanningOutcome::Cancelled,
+            _ => QueryPlanningOutcome::Error,
+        }
+    }
+}
+
+impl From<&QueryPlannerError> for QueryPlanningOutcome {
+    fn from(err: &QueryPlannerError) -> Self {
+        match err {
+            QueryPlannerError::Timeout(_) => QueryPlanningOutcome::Timeout,
+            QueryPlannerError::MemoryLimitExceeded(_) => QueryPlanningOutcome::MemoryLimit,
+            QueryPlannerError::FederationError(bridge) => QueryPlanningOutcome::from(bridge),
+            _ => QueryPlanningOutcome::Error,
+        }
+    }
+}
+
 pub(crate) fn metric_query_planning_plan_duration(
     planner: &'static str,
     elapsed: f64,
-    outcome: &'static str,
+    outcome: QueryPlanningOutcome,
+    compute_job_type: ComputeJobType,
 ) {
     f64_histogram!(
         "apollo.router.query_planning.plan.duration",
         "Duration of the query planning, in seconds.",
         elapsed,
         "planner" = planner,
-        "outcome" = outcome
+        "outcome" = outcome,
+        "job.type" = compute_job_type
     );
 }
 
@@ -1122,12 +1142,32 @@ mod tests {
     fn test_metric_query_planning_plan_duration() {
         let start = Instant::now();
         let elapsed = start.elapsed().as_secs_f64();
-        metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "success");
+        metric_query_planning_plan_duration(
+            RUST_QP_MODE,
+            elapsed,
+            QueryPlanningOutcome::Success,
+            ComputeJobType::QueryPlanning,
+        );
         assert_histogram_exists!(
             "apollo.router.query_planning.plan.duration",
             f64,
             "planner" = "rust",
-            "outcome" = "success"
+            "outcome" = "success",
+            "job.type" = "query_planning"
+        );
+        // Warm-up planning is distinguished by the `job.type` attribute.
+        metric_query_planning_plan_duration(
+            RUST_QP_MODE,
+            elapsed,
+            QueryPlanningOutcome::Success,
+            ComputeJobType::QueryPlanningWarmup,
+        );
+        assert_histogram_exists!(
+            "apollo.router.query_planning.plan.duration",
+            f64,
+            "planner" = "rust",
+            "outcome" = "success",
+            "job.type" = "query_planning_warmup"
         );
     }
 

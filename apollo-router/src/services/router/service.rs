@@ -607,6 +607,9 @@ where
         parts: &Parts,
         body: Body,
     ) -> Result<Result<graphql::Request, TranslateError>, BoxError> {
+        // NB: `plugins::limits::layer::RequestBodyLimit::call` re-derives this same "is this a
+        // GraphQL-over-HTTP GET" check to decide whether to size-limit the query string instead
+        // of the body. If this convention ever changes, update that check too.
         let graphql_request = if parts.method == Method::GET {
             Self::translate_query_request(parts)
         } else {
@@ -723,12 +726,10 @@ impl RouterCreator {
         // return Pending spuriously and trigger Overloaded responses.
         let service = ServiceBuilder::new()
             .buffered()
-            .concrete_boxed_clone()
             .layer(static_page.clone())
             .rust_plugins(supergraph_creator.plugins(), |plugin, service| {
                 plugin.router_service(service)
             })
-            .concrete_boxed_clone()
             .layer(content_negotiation::RouterContentNegotiationLayer::default())
             .service(router_service);
 

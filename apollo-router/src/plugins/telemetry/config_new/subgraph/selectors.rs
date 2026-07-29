@@ -11,6 +11,7 @@ use crate::Context;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_jsonpath;
+use crate::plugins::limits::operation_limits::OperationLimits;
 use crate::plugins::response_cache;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
@@ -30,7 +31,6 @@ use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::Query;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
 use crate::services::subgraph;
-use crate::spec::operation_limits::OperationLimits;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]

@@ -24,8 +24,8 @@ impl TracingConfigurator for Config {
     fn configure(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
         tracing::debug!("configuring Apollo tracing");
         let exporter = apollo_telemetry::Exporter::builder()
-            .endpoint(&self.experimental_otlp_endpoint)
-            .tracing_protocol(&self.experimental_otlp_tracing_protocol)
+            .endpoint(&self.otlp_endpoint)
+            .tracing_protocol(&self.otlp_tracing_protocol)
             .apollo_key(
                 self.apollo_key
                     .as_ref()
