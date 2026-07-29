@@ -7,4 +7,6 @@ The Router now caps the volume of traces it exports to Apollo (GraphOS) with a t
 
 This throttle applies only to the trace pipeline that exports to Apollo Studio, and only to whatever the existing head samplers (`telemetry.apollo.sampler` and `telemetry.exporters.tracing.common.sampler`) already let through — it can only further reduce that traffic. Traces exported to a customer's own OTLP collector or to Datadog are unaffected. The existing `telemetry.apollo.sampler` continues to work as before, and to disable Apollo trace export entirely, set it to `always_off`.
 
+Independently of the throttle, the Router now also always drops any individual trace larger than 10MB before exporting it to Apollo, since GraphOS rejects oversized traces at ingestion anyway. This limit is fixed and not configurable.
+
 By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/9848

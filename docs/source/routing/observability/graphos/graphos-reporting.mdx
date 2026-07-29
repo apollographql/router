@@ -95,7 +95,11 @@ telemetry:
 
 The value uses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`, so it's an absolute fraction of all requests. It must not exceed `telemetry.exporters.tracing.common.sampler`; the router returns an error at startup if it does.
 
-To keep trace volume manageable for high-traffic graphs, the router then applies a throttle that further reduces the number of traces it sends to GraphOS. This runs after the `telemetry.apollo.sampler` and `telemetry.exporters.tracing.common.sampler` head samplers, so it only ever affects the traces those samplers already selected. This helps to avoid the processing and transfer of traces that would be dropped by GraphOS at ingestion time anyway, and it affects only the GraphOS pipeline — traces sent to your own OTLP collector or to Datadog are unaffected.
+#### Apollo trace throttling
+
+<MinVersionBadge version="Router v3.0.0" />
+
+To keep trace volume manageable for high-traffic graphs, the router applies a throttle that further reduces the number of traces it sends to GraphOS. This runs after the `telemetry.apollo.sampler` and `telemetry.exporters.tracing.common.sampler` head samplers, so it only ever affects the traces those samplers already selected. This helps to avoid the processing and transfer of traces that would be dropped by GraphOS at ingestion time anyway, and it affects only the GraphOS pipeline — traces sent to your own OTLP collector or to Datadog are unaffected.
 
 The strategy of the throttle can be configured with `telemetry.apollo.tracing.throttle`:
 
@@ -108,6 +112,8 @@ telemetry:
 
 - `representative_traces` (default): Sends at most one representative trace per minute for each distinct combination of operation, client, latency bucket, error status, and operation type. Tre router drops traces that duplicate a combination already seen within the current minute. Error traces are sampled at a higher rate so that failures remain visible. This gives broad coverage of distinct behaviors while significantly reducing volume for repetitive traffic.
 - `rate_limited`: Sends every trace but caps the export rate at a fixed maximum of 100 traces per second, per router instance. This is cheaper in CPU and memory than `representative_traces` and is a good fallback if you find that representative sampling is too resource-intensive for your workload. The rate is not configurable.
+
+Independently of the throttle, the router always drops any individual trace larger than 10MB before sending it to GraphOS. GraphOS rejects oversized traces at ingestion anyway, so exporting them would only waste CPU and bandwidth. Oversized traces are most often caused by pathologically large field-level (FTV1) trace data on subgraph spans. This limit is fixed and can't be configured.
 
 ## Reporting field-level traces
 
