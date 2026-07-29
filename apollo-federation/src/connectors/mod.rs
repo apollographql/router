@@ -48,6 +48,7 @@ pub use json_selection::JSONSelection;
 pub use json_selection::Key;
 pub(crate) use json_selection::LitExpr;
 pub use json_selection::PathSelection;
+pub(crate) use json_selection::SelectionAnalysis;
 pub(crate) use json_selection::SelectionTrie;
 pub use json_selection::SubSelection;
 pub(crate) use json_selection::TopLevelSelection;

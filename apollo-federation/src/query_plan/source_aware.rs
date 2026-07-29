@@ -120,7 +120,11 @@ impl SourceAwareQueryPlanner {
         let mut plan = self
             .planner
             .build_query_plan(operation, None, Default::default())?;
-        stamp_connector_coordinates(&mut plan, &self.connectors);
+        stamp_connector_coordinates(
+            &mut plan,
+            &self.connectors,
+            self.planner.supergraph_schema().schema(),
+        );
         Ok(plan)
     }
 }

@@ -13,6 +13,15 @@
 //! * an entity fetch `{ _entities … { … on User { d } } }` → the connector on
 //!   `User.d`.
 //!
+//! **Entity-resolver connectors (source-aware Phase 1, step 3).** Some entity
+//! fetches select fields that are *not* themselves connector-backed — e.g.
+//! `{ _entities … { … on User { username } } }`, where `username` has no
+//! `User.username` connector but is resolved by pulling the whole `User` through
+//! `Query.user @connect(entity: true)`. Such a fetch is stamped by matching the
+//! resolver connector's *output type* to the entity type (`User`), not by
+//! `(type, field)`. Scoped to [`EntityResolver::Explicit`] (a root-type field
+//! resolving an entity); see the note under **Scope**.
+//!
 //! **Multi-connector merged fetches (source-aware Phase 1, step 2A).** Because
 //! the raw-graph planner sees connectors as one subgraph, it merges root fields
 //! backed by *different* connectors into a single `connectors` fetch (under
@@ -26,9 +35,11 @@
 //! bounded) shapes handled.
 //!
 //! **Scope.** Handled: root-field connectors, single field-connector entity
-//! fetches, and multi-connector *root-field* merges (the split above). Not yet
+//! fetches, multi-connector *root-field* merges (the split above), and
+//! `Explicit` entity-resolver connectors (the output-type match above). Not yet
 //! handled, left `None`:
-//! * type-level entity-resolver connectors (`@connect` on the type itself);
+//! * type-level entity-resolver connectors (`@connect` on the type itself —
+//!   `TypeBatch`/`TypeSingle`);
 //! * multi-connector merges involving *entity* fields (shared representations)
 //!   or bound variables — left unsplit rather than split incorrectly;
 //! * `Defer`/`Condition`/`Subscription` plan nodes.
@@ -38,12 +49,17 @@ use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
+use apollo_compiler::Schema;
 use apollo_compiler::executable::OperationType;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 
+use shape::ShapeCase;
+
 use crate::connectors::Connector;
+use crate::connectors::EntityResolver;
+use crate::connectors::SelectionAnalysis;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::FetchNode;
@@ -57,7 +73,11 @@ use crate::query_plan::serializable_document::SerializableDocument;
 /// authoritatively from `connectors`. Fetches to non-connector subgraphs, and
 /// connector fetches that resolve ambiguously (see module scope), are left with
 /// `connector == None`.
-pub fn stamp_connector_coordinates(plan: &mut QueryPlan, connectors: &[Connector]) {
+pub fn stamp_connector_coordinates(
+    plan: &mut QueryPlan,
+    connectors: &[Connector],
+    schema: &Schema,
+) {
     match plan.node.take() {
         Some(TopLevelPlanNode::Fetch(fetch)) => {
             let fetch = *fetch;
@@ -70,20 +90,24 @@ pub fn stamp_connector_coordinates(plan: &mut QueryPlan, connectors: &[Connector
                 }),
                 None => {
                     let mut fetch = fetch;
-                    stamp_fetch(&mut fetch, connectors);
+                    stamp_fetch(&mut fetch, connectors, schema);
                     TopLevelPlanNode::Fetch(Box::new(fetch))
                 }
             });
         }
         Some(mut other) => {
             match &mut other {
-                TopLevelPlanNode::Sequence(seq) => {
-                    seq.nodes.iter_mut().for_each(|n| stamp_node(n, connectors))
+                TopLevelPlanNode::Sequence(seq) => seq
+                    .nodes
+                    .iter_mut()
+                    .for_each(|n| stamp_node(n, connectors, schema)),
+                TopLevelPlanNode::Parallel(par) => par
+                    .nodes
+                    .iter_mut()
+                    .for_each(|n| stamp_node(n, connectors, schema)),
+                TopLevelPlanNode::Flatten(flatten) => {
+                    stamp_node(&mut flatten.node, connectors, schema)
                 }
-                TopLevelPlanNode::Parallel(par) => {
-                    par.nodes.iter_mut().for_each(|n| stamp_node(n, connectors))
-                }
-                TopLevelPlanNode::Flatten(flatten) => stamp_node(&mut flatten.node, connectors),
                 TopLevelPlanNode::Fetch(_) => unreachable!("handled above"),
                 TopLevelPlanNode::Defer(_)
                 | TopLevelPlanNode::Condition(_)
@@ -95,7 +119,7 @@ pub fn stamp_connector_coordinates(plan: &mut QueryPlan, connectors: &[Connector
     }
 }
 
-fn stamp_node(node: &mut PlanNode, connectors: &[Connector]) {
+fn stamp_node(node: &mut PlanNode, connectors: &[Connector], schema: &Schema) {
     match node {
         PlanNode::Fetch(_) => {
             // Take the fetch out so we can either stamp it in place or replace
@@ -114,20 +138,26 @@ fn stamp_node(node: &mut PlanNode, connectors: &[Connector]) {
                 }),
                 None => {
                     let mut fetch = fetch;
-                    stamp_fetch(&mut fetch, connectors);
+                    stamp_fetch(&mut fetch, connectors, schema);
                     PlanNode::Fetch(Box::new(fetch))
                 }
             };
         }
-        PlanNode::Sequence(seq) => seq.nodes.iter_mut().for_each(|n| stamp_node(n, connectors)),
-        PlanNode::Parallel(par) => par.nodes.iter_mut().for_each(|n| stamp_node(n, connectors)),
-        PlanNode::Flatten(flatten) => stamp_node(&mut flatten.node, connectors),
+        PlanNode::Sequence(seq) => seq
+            .nodes
+            .iter_mut()
+            .for_each(|n| stamp_node(n, connectors, schema)),
+        PlanNode::Parallel(par) => par
+            .nodes
+            .iter_mut()
+            .for_each(|n| stamp_node(n, connectors, schema)),
+        PlanNode::Flatten(flatten) => stamp_node(&mut flatten.node, connectors, schema),
         // Out of scope for this increment (see module docs).
         PlanNode::Defer(_) | PlanNode::Condition(_) => {}
     }
 }
 
-fn stamp_fetch(fetch: &mut FetchNode, connectors: &[Connector]) {
+fn stamp_fetch(fetch: &mut FetchNode, connectors: &[Connector], schema: &Schema) {
     let Ok(doc) = fetch.operation_document.as_parsed() else {
         return;
     };
@@ -153,12 +183,80 @@ fn stamp_fetch(fetch: &mut FetchNode, connectors: &[Connector]) {
         }
     }
 
-    // Exactly one connector → carry its identity. Zero (non-connector subgraph)
-    // → leave None. The many-connector case is handled earlier by
-    // `split_root_field_fetch`, so a fetch reaching here with >1 match is one we
-    // deliberately don't split (see that function's guards) and is left None.
+    // Field-connector match: exactly one connector → carry its identity. Zero
+    // (non-connector subgraph) → fall through to the entity-resolver match below.
+    // The many-connector case is handled earlier by `split_root_field_fetch`, so
+    // a fetch reaching here with >1 match is one we deliberately don't split (see
+    // that function's guards) and is left None.
     if let [connector] = matched.as_slice() {
         fetch.connector = Some(connector.id.coordinate());
+        return;
+    }
+    if !matched.is_empty() {
+        return;
+    }
+
+    // Entity-resolver match (step 3). An `_entities` fetch whose selected fields
+    // are *not* themselves connector-backed (so field matching above found
+    // nothing) is served by the connector that resolves the whole entity — e.g.
+    // `username` on `User` is resolved through `Query.user @connect(entity: true)`
+    // (`EntityResolver::Explicit`), whose `simple_name` is `Query.user`, not
+    // `User.username`. Match by the entity's *output type* instead of by
+    // `(parent_type, field)`.
+    //
+    // Scope: `EntityResolver::Explicit` only (a root-type field resolving an
+    // entity). Type-level entity-resolver connectors (`TypeBatch`/`TypeSingle`,
+    // `@connect` on the type itself) remain a documented follow-on. `Implicit`
+    // resolvers are field connectors and are already handled by the field match
+    // above.
+    let entity_types: HashSet<&str> = targets.iter().map(|(t, _)| t.as_str()).collect();
+    let [entity_type] = entity_types.into_iter().collect::<Vec<_>>()[..] else {
+        // Zero or multiple entity types in one fetch → no single identity; leave
+        // None (documented scope).
+        return;
+    };
+    let mut resolvers: Vec<&Connector> = Vec::new();
+    for connector in connectors {
+        if connector.id.subgraph_name.as_str() == subgraph
+            && matches!(connector.entity_resolver, Some(EntityResolver::Explicit))
+            && connector
+                .id
+                .directive
+                .base_type_name(schema)
+                .is_some_and(|t| t.as_str() == entity_type)
+            && !resolvers
+                .iter()
+                .any(|r| r.id.coordinate() == connector.id.coordinate())
+        {
+            resolvers.push(connector);
+        }
+    }
+    if let [connector] = resolvers.as_slice() {
+        fetch.connector = Some(connector.id.coordinate());
+    }
+}
+
+/// The set of top-level fields a connector's `selection` actually returns on its
+/// output object, derived via the [`SelectionAnalysis`] caching pathway. This is
+/// the per-connector field availability that expansion used to encode
+/// structurally (a minimal synthetic subgraph exposing only these fields); the
+/// collapsed source-aware graph loses it, so we recompute it from the selection.
+///
+/// `__typename` is excluded (always implicitly available). Returns `None` when
+/// the output shape is not an object (e.g. a field connector returning a scalar)
+/// — those are not the root/entity over-merge case this guards.
+fn connector_provided_fields(connector: &Connector) -> Option<HashSet<String>> {
+    let analysis = SelectionAnalysis::new(connector.selection.clone());
+    let shape = analysis.output_shape();
+    match shape.case() {
+        ShapeCase::Object { fields, .. } => Some(
+            fields
+                .iter()
+                .map(|(name, _)| name.to_string())
+                .filter(|name| name != "__typename")
+                .collect(),
+        ),
+        _ => None,
     }
 }
 
@@ -400,7 +498,7 @@ mod tests {
             )
             .unwrap();
             let mut plan = planner.build_query_plan(&doc, None, Default::default()).unwrap();
-            stamp_connector_coordinates(&mut plan, &connectors);
+            stamp_connector_coordinates(&mut plan, &connectors, planner.supergraph_schema().schema());
             let stamps = fetch_stamps(&plan);
             let connector_stamp = stamps
                 .iter()
@@ -426,7 +524,7 @@ mod tests {
             )
             .unwrap();
             let mut plan = planner.build_query_plan(&doc, None, Default::default()).unwrap();
-            stamp_connector_coordinates(&mut plan, &connectors);
+            stamp_connector_coordinates(&mut plan, &connectors, planner.supergraph_schema().schema());
             let stamps = fetch_stamps(&plan);
 
             // Every graphql fetch is left unstamped (not a connector).
@@ -452,5 +550,38 @@ mod tests {
                 "connectors root fetch stamped with Query.user coordinate, got {stamps:?}"
             );
         }
+    }
+
+    /// The SelectionAnalysis-backed provided-field primitive precisely locates
+    /// the over-merge (side-effect #3): `Query.users` provides `{id, name}` but
+    /// not `username`, while the `Query.user` entity resolver provides it. This
+    /// is the signal the output-shape split uses to reconstruct the connector
+    /// boundary expansion got structurally.
+    #[test]
+    fn connector_provided_fields_locates_over_merge() {
+        let sdl = include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
+        let fed = FederationSchema::new(Schema::parse(sdl, "s.graphql").unwrap()).unwrap();
+        let subgraphs = extract_subgraphs_from_supergraph(&fed, Some(false)).unwrap();
+        let connectors: Vec<Connector> = subgraphs
+            .subgraphs
+            .values()
+            .flat_map(|sg| Connector::from_schema(sg.schema.schema(), &sg.name).unwrap_or_default())
+            .collect();
+        let by_coord = |needle: &str| {
+            connectors
+                .iter()
+                .find(|c| c.id.coordinate().contains(needle))
+                .unwrap_or_else(|| panic!("connector {needle} not found"))
+        };
+        let users = connector_provided_fields(by_coord("Query.users")).unwrap();
+        let user = connector_provided_fields(by_coord("Query.user[")).unwrap();
+        assert!(
+            users.contains("name") && !users.contains("username"),
+            "Query.users provides name but not username, got {users:?}"
+        );
+        assert!(
+            user.contains("username"),
+            "Query.user entity resolver provides username, got {user:?}"
+        );
     }
 }

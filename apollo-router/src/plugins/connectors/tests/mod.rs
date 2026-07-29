@@ -299,17 +299,25 @@ async fn source_aware_entity_plus_requires_end_to_end() {
     );
 }
 
-/// Step-3 repro (ignored): the **entity-resolver** connector class
-/// (`Query.user`, `entity: true`) does not yet dispatch under source-aware.
+/// Step 3 repro (ignored): `username` comes back `null` under source-aware —
+/// but the root cause is a **planning over-merge**, not a stamping/dispatch gap.
 ///
-/// `username` is served by resolving the `User` entity through `Query.user`.
-/// Plan-time stamping (B-2a) covers root and field connectors but not this
-/// entity-resolver class, so under source-aware the fetch falls through to the
-/// many-to-one `by_service_name` fallback, mis-dispatches, and `username`
-/// comes back `null` while the expansion path returns the real value. When step
-/// 3 stamps/dispatches this class, un-`ignore` this test.
+/// The raw-graph plan for this query is a single `connectors` fetch
+/// `{ users { … username } }`: because the collapsed graph doesn't encode
+/// per-connector field availability, the planner merges `username` into the
+/// root `users` fetch. But the `Query.users` connector's `selection` is only
+/// `id name`, so `username` is never fetched → `null`. There is *no* separate
+/// `_entities` fetch to stamp; the entity-resolver stamping (match by output
+/// type) is in place as the dispatch half, but it only fires once the planner
+/// actually emits that fetch.
+///
+/// The fix (side-effect #3 in `SOURCE_AWARE_EXPANSION_SIDE_EFFECTS.md`) is to
+/// restrict raw-graph reachability by each connector's output shape (via
+/// `connector_provided_fields` / `SelectionAnalysis`) so the planner emits a
+/// valid `_entities` fetch — reconstructing the boundary expansion got from its
+/// minimal synthetic subgraphs. Un-`ignore` when that lands.
 #[tokio::test]
-#[ignore = "step 3: Query.user entity-resolver connector not yet stamped/dispatched under source-aware (username -> null)"]
+#[ignore = "step 3 (b): planner over-merges username into the root fetch (Query.users selection lacks it); needs output-shape reachability restriction in the raw graph"]
 async fn source_aware_entity_resolver_connector_gap() {
     let query = "query { users { __typename id name username d } }";
 

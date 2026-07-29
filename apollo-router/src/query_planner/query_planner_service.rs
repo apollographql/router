@@ -225,7 +225,11 @@ impl QueryPlannerService {
             // (B-2a) so dispatch can resolve the connector by carried identity
             // rather than synthetic service name. No-op on the expansion path.
             if let Some(connectors) = &connectors_to_stamp {
-                stamp_connector_coordinates(&mut plan, connectors);
+                stamp_connector_coordinates(
+                    &mut plan,
+                    connectors,
+                    rust_planner.supergraph_schema().schema(),
+                );
             }
             let root_node = convert_root_query_plan_node(&plan);
             Ok((plan, root_node))
