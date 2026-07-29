@@ -17,6 +17,7 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
+use shape::Shape;
 
 pub use self::headers::Header;
 pub(crate) use self::headers::HeaderParseError;
@@ -132,6 +133,28 @@ impl ConnectorErrorsSettings {
                     .into_iter()
                     .flat_map(|m| m.variable_references()),
             )
+    }
+
+    /// The static shape of the error-path contribution to the connector's
+    /// output: a union of the shapes of `errors.message`, `errors.extensions`
+    /// (both `@source` and `@connect` levels). Returns `None` when no error
+    /// mappings are configured.
+    pub fn shape(&self) -> Option<Shape> {
+        let parts: Vec<Shape> = [
+            self.message.as_ref(),
+            self.source_extensions.as_ref(),
+            self.connect_extensions.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|s| s.shape())
+        .collect();
+
+        match parts.len() {
+            0 => None,
+            1 => parts.into_iter().next(),
+            _ => Some(Shape::one(parts, [])),
+        }
     }
 }
 
@@ -414,6 +437,22 @@ impl Connector {
     /// Get the set of abstract type names from the schema subtypes map
     pub fn abstract_types(&self) -> IndexSet<String> {
         self.schema_subtypes_map.keys().cloned().collect()
+    }
+
+    /// The full static output shape of the connector — the shape of `selection`
+    /// unioned with the shape contributed by the error-path mappings
+    /// (`errors.message` and `errors.extensions`). When no error mappings are
+    /// configured, this is equivalent to `self.selection.shape()`.
+    ///
+    /// Returning the union lets downstream consumers (entity-key checking,
+    /// type walking) reason about both branches of an errors-as-data connector
+    /// rather than seeing only the success path.
+    pub fn output_shape(&self) -> Shape {
+        let selection_shape = self.selection.shape();
+        match self.error_settings.shape() {
+            Some(error_shape) => Shape::one([selection_shape, error_shape], []),
+            None => selection_shape,
+        }
     }
 }
 
@@ -936,5 +975,82 @@ mod tests {
         let subgraph = subgraphs.get("connectors").unwrap();
         let connectors = Connector::from_schema(subgraph.schema.schema(), "connectors").unwrap();
         assert_debug_snapshot!(&connectors);
+    }
+
+    // Tests for CNN-1095: errors-as-data output shape combines selection's
+    // shape with the error-path mappings' shape. The coworker-suggested
+    // `Shape::one([normal_shape, error_shape], [])` pattern is the foundation
+    // downstream consumers (entity-key checker, type walker) can build on.
+    mod output_shape {
+        use shape::ShapeCase;
+
+        use super::*;
+        use crate::connectors::JSONSelection;
+
+        #[test]
+        fn errors_settings_shape_is_none_when_no_mappings_configured() {
+            let settings = ConnectorErrorsSettings::default();
+            assert!(
+                settings.shape().is_none(),
+                "expected None when no error mappings are set"
+            );
+        }
+
+        #[test]
+        fn errors_settings_shape_unions_all_configured_mappings() {
+            let settings = ConnectorErrorsSettings {
+                message: Some(JSONSelection::parse("error.message").unwrap()),
+                source_extensions: Some(JSONSelection::parse("source_code: error.code").unwrap()),
+                connect_extensions: Some(JSONSelection::parse("code: error.code").unwrap()),
+                connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
+            };
+            let shape = settings
+                .shape()
+                .expect("expected Some shape when message + extensions are configured");
+            assert!(
+                matches!(shape.case(), ShapeCase::One(_)),
+                "expected ShapeCase::One union of message + source/connect extensions, got: {shape:?}"
+            );
+        }
+
+        #[test]
+        fn connector_output_shape_unions_selection_with_errors() {
+            let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
+            let subgraph = subgraphs.get("connectors").unwrap();
+            let mut connectors =
+                Connector::from_schema(subgraph.schema.schema(), "connectors").unwrap();
+            let mut connector = connectors.remove(0);
+
+            // Attach errors-as-data settings so output_shape() produces a union.
+            connector.error_settings = ConnectorErrorsSettings {
+                message: Some(JSONSelection::parse("error.message").unwrap()),
+                source_extensions: None,
+                connect_extensions: Some(JSONSelection::parse("code: error.code").unwrap()),
+                connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
+            };
+
+            let combined = connector.output_shape();
+            assert!(
+                matches!(combined.case(), ShapeCase::One(_)),
+                "expected ShapeCase::One union of selection + errors, got: {combined:?}"
+            );
+        }
+
+        #[test]
+        fn connector_output_shape_with_no_errors_equals_selection_shape() {
+            let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
+            let subgraph = subgraphs.get("connectors").unwrap();
+            let mut connectors =
+                Connector::from_schema(subgraph.schema.schema(), "connectors").unwrap();
+            let connector = connectors.remove(0);
+
+            // Default error_settings has no mappings, so output_shape() should
+            // be exactly selection.shape().
+            assert_eq!(
+                connector.output_shape(),
+                connector.selection.shape(),
+                "with no error mappings, output_shape should match selection.shape"
+            );
+        }
     }
 }

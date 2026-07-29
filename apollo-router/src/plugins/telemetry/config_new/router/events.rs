@@ -58,21 +58,15 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
         {
             let mut attrs = Vec::with_capacity(4);
 
-            #[cfg(test)]
-            let mut headers: indexmap::IndexMap<String, http::HeaderValue> = response
-                .response
-                .headers()
-                .clone()
-                .into_iter()
-                .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                .collect();
-            #[cfg(test)]
-            headers.sort_keys();
-            #[cfg(not(test))]
-            let headers = response.response.headers();
+            let header_string = crate::services::header_masking::masked_headers_for_log(
+                &response.context,
+                crate::services::header_masking::Direction::Response,
+                None,
+                response.response.headers(),
+            );
             attrs.push(KeyValue::new(
                 HTTP_RESPONSE_HEADERS,
-                opentelemetry::Value::String(format!("{headers:?}").into()),
+                opentelemetry::Value::String(header_string.into()),
             ));
             attrs.push(KeyValue::new(
                 HTTP_RESPONSE_STATUS,

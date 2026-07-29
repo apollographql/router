@@ -28,6 +28,7 @@ use position::TagDirectiveTargetPosition;
 use referencer::Referencers;
 
 use crate::bail;
+use crate::compat::coerce_and_validate_schema_values;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
@@ -260,6 +261,13 @@ impl FederationSchema {
     pub(crate) fn validate_or_return_self(
         mut self,
     ) -> Result<ValidFederationSchema, (Self, FederationError)> {
+        // Used for validating @deprecated and (partially) default values, which apollo-rs does not
+        // do at this time. It will also perform enum-to-string/string-to-enum coercion in values,
+        // which isn't a valid GraphQL coercion rule but was being done in the JS logic implicitly
+        // due to its schema representation.
+        if let Err(error) = coerce_and_validate_schema_values(&mut self.schema) {
+            return Err((self, error));
+        }
         let schema = match self.schema.validate() {
             Ok(schema) => schema.into_inner(),
             Err(e) => {
@@ -342,11 +350,9 @@ impl FederationSchema {
     }
 
     // PORT_NOTE: Corresponds to `FederationMetadata.federationFeature` in JS
-    fn federation_link(&self) -> Option<&Arc<Link>> {
+    fn federation_link(&self) -> Option<Arc<Link>> {
         self.metadata().and_then(|metadata| {
-            metadata
-                .by_identity
-                .get(FederationSpecDefinition::latest().identity())
+            metadata.for_identity(FederationSpecDefinition::latest().identity())
         })
     }
 
@@ -390,9 +396,8 @@ impl FederationSchema {
             let Some(links) = self.metadata() else {
                 bail!("Schema should be a core schema")
             };
-            let Some(federation_link) = links
-                .by_identity
-                .get(FederationSpecDefinition::latest().identity())
+            let Some(federation_link) =
+                links.for_identity(FederationSpecDefinition::latest().identity())
             else {
                 bail!("Schema should have the latest federation link")
             };
@@ -1298,6 +1303,13 @@ impl ValidFederationSchema {
     pub fn new_assume_valid(
         mut schema: FederationSchema,
     ) -> Result<ValidFederationSchema, (FederationSchema, FederationError)> {
+        // While LinksMetadata::from_schema() partially validated @link usages, we need to run
+        // further @link validations after the schema is confirmed to be valid GraphQL.
+        if let Some(links_metadata) = &schema.links_metadata
+            && let Err(error) = links_metadata.validate_no_shadowing_imports(&schema)
+        {
+            return Err((schema, error));
+        }
         // Populating subgraph metadata requires a mutable FederationSchema, while computing the subgraph
         // metadata requires a valid FederationSchema. Since valid schemas are immutable, we have
         // to jump through some hoops here. We already assume that `schema` is valid GraphQL, so we

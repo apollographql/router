@@ -19,7 +19,7 @@ use tracing::trace;
 use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
 use crate::bail;
-use crate::compat::coerce_schema_values;
+use crate::compat::coerce_and_validate_schema_values;
 use crate::ensure;
 use crate::error::FederationError;
 use crate::error::Locations;
@@ -233,8 +233,20 @@ impl Subgraph<Initial> {
         // Simulate graphql-js behavior accepting duplicate argument definitions.
         parser_backward_compatibility::remove_duplicate_arguments(&mut schema);
 
-        // Coerce directive argument values based on directive definitions.
-        coerce_schema_values(&mut schema);
+        // NOTE: We try to coerce and validate here, but because the schema may be missing some
+        // definitions for types/directives, validation won't necessarily succeed, and coercion may
+        // skip some string-to-enum-value coercions (because the enum type is missing). The JS logic
+        // avoids this issue because the representation itself doesn't distinguish between enum
+        // values and strings, but it's unavoidable in Rust here because we try to instead keep the
+        // distinction in the representation and autocorrect when we determine from the type there's
+        // a distinction (meaning the type has to be available). You could technically try to make
+        // any code until the schema is expanded be able to accept both enum values and strings
+        // interchangeably, but this is too much work for a backward compatibility edge case, and
+        // at some point we're going to remove this anyway. So ultimately, we may error if e.g. the
+        // user had strings for enums in their @link without a definition, though this is a backward
+        // incompatibility with JS logic that we're willing to accept. Also, keep in mind link
+        // expansion will do this coerce-and-validate again after the schema is expanded.
+        let _ = coerce_and_validate_schema_values(&mut schema);
 
         Self::new(name, url, schema, orphan_extension_types)
     }
@@ -270,7 +282,7 @@ impl Subgraph<Initial> {
             .make_mut()
             .directives
             .push(Component::new(Directive {
-                name: Identity::link_identity().name,
+                name: Identity::LINK_NAME,
                 arguments: vec![
                     Node::new(ast::Argument {
                         name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
@@ -768,7 +780,7 @@ pub(crate) fn schema_as_fed2_subgraph(
     use_latest: bool,
 ) -> Result<(), FederationError> {
     let (link_name_in_schema, metadata) = if let Some(metadata) = schema.metadata() {
-        let link_spec = metadata.link_spec_definition()?;
+        let link_spec = metadata.link_spec_definition();
         // We don't accept pre-1.0 @core: this avoid having to care about what the name
         // of the argument below is, and why would be bother?
         ensure!(
@@ -779,10 +791,7 @@ pub(crate) fn schema_as_fed2_subgraph(
             "Fed2 schema must use @link with version >= 1.0, but schema uses {spec_url}",
             spec_url = link_spec.url()
         );
-        let Some(link) = link_spec.link_in_schema(schema) else {
-            bail!("Core schema is missing the link spec link directive");
-        };
-        (link.spec_name_in_schema().clone(), metadata)
+        (metadata.link_itself().spec_name_in_schema(), metadata)
     } else {
         let link_spec = LinkSpecDefinition::latest();
         let link_name_in_schema = add_link_spec_to_schema(schema, link_spec)?;
@@ -986,7 +995,7 @@ fn add_link_spec_to_schema(
     schema: &mut FederationSchema,
     link_spec: &'static LinkSpecDefinition,
 ) -> Result<Name, FederationError> {
-    let link_spec_name = &link_spec.identity().name;
+    let link_spec_name = link_spec.name();
     let alias = find_unused_name_for_directive(schema, link_spec_name)?;
     let link_name_in_schema = alias.clone().unwrap_or_else(|| link_spec_name.clone());
     link_spec.add_to_schema(schema, alias)?;

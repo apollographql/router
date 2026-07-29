@@ -6,7 +6,9 @@ use std::error::Error;
 use async_trait::async_trait;
 use bytesize::ByteSize;
 use http::StatusCode;
+use http::header::CONTENT_TYPE;
 pub(crate) use layer::BodyLimitControl;
+use mime::APPLICATION_JSON;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -21,8 +23,8 @@ use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
-use crate::plugins::limits::layer::BodyLimitError;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
+use crate::plugins::limits::layer::RequestSizeLimitError;
 use crate::services::SubgraphRequest;
 use crate::services::connector;
 use crate::services::router;
@@ -108,6 +110,12 @@ pub(crate) struct RouterLimitsConfig {
     /// `"extensions": {"code": "MAX_ALIASES_LIMIT"}`
     pub(crate) max_aliases: Option<u32>,
 
+    /// Limit the total number of selections encountered when recursively expanding
+    /// fragment spreads in an operation. This protects against extremely large or
+    /// deeply nested operations that could consume excessive resources during
+    /// query planning. Default: 10000000 (10 million).
+    pub(crate) max_recursive_selections: u32,
+
     /// If set to true (which is the default is dev mode),
     /// requests that exceed a `max_*` limit are *not* rejected.
     /// Instead they are executed normally, and a warning is logged.
@@ -136,7 +144,7 @@ pub(crate) struct RouterLimitsConfig {
     #[schemars(with = "Option<String>", default)]
     pub(crate) http1_max_request_buf_size: Option<ByteSize>,
 
-    /// For HTTP2, limit the header list to a threshold of bytes. Default is 16kb.
+    /// For HTTP2, limit the header list to a threshold of bytes. Default is 16kib.
     ///
     /// If router receives more headers than allowed size of the header list, it responds to the client with
     /// "431 Request Header Fields Too Large".
@@ -159,6 +167,8 @@ impl Default for RouterLimitsConfig {
             max_height: None,
             max_root_fields: None,
             max_aliases: None,
+
+            max_recursive_selections: 10_000_000,
             warn_only: false,
             http_max_request_bytes: 2_000_000,
             http1_max_request_headers: None,
@@ -311,14 +321,19 @@ impl LimitsPlugin {
         resp: Result<router::Response, BoxError>,
         ctx: Context,
     ) -> Result<router::Response, BoxError> {
-        // There are two ways we can get a payload too large error:
-        // 1. The request body is too large and detected via content length header
-        // 2. The request body is and it failed at some other point in the pipeline.
-        // We expect that other pipeline errors will have wrapped the source error rather than throwing it away.
+        // A request can be rejected for exceeding `http_max_request_bytes` in a few ways:
+        // 1. The body's Content-Length header exceeds the limit (eager rejection, `BodyTooLarge`).
+        // 2. A GET request's query string exceeds the limit (eager rejection, `QueryTooLarge`).
+        // 3. The body exceeds the limit while streaming; this surfaces elsewhere in the pipeline
+        //    as a raw 413 response rather than one of our own `RequestSizeLimitError`s, and is
+        //    always body-related (`BodyTooLarge`) since GET requests have no body to stream.
+        // Cases 1 and 2 carry the actual variant that triggered them (downcast below) — always
+        // propagate it rather than hardcoding one, or a `QueryTooLarge` rejection gets silently
+        // mislabeled as `BodyTooLarge` and reported with the wrong status code.
         match resp {
             Ok(r) => {
                 if r.response.status() == StatusCode::PAYLOAD_TOO_LARGE {
-                    Ok(BodyLimitError::PayloadTooLarge.into_response(ctx))
+                    Ok(RequestSizeLimitError::BodyTooLarge.into_response(ctx))
                 } else {
                     Ok(r)
                 }
@@ -330,31 +345,39 @@ impl LimitsPlugin {
                     root_cause = cause;
                 }
 
-                match root_cause.downcast_ref::<BodyLimitError>() {
+                match root_cause.downcast_ref::<RequestSizeLimitError>() {
                     None => Err(e),
-                    Some(_) => Ok(BodyLimitError::PayloadTooLarge.into_response(ctx)),
+                    Some(err) => Ok((*err).into_response(ctx)),
                 }
             }
         }
     }
 }
 
-impl BodyLimitError {
-    fn into_response(self, ctx: Context) -> router::Response {
+impl RequestSizeLimitError {
+    /// 413 for an oversized body; 414 for an oversized URI, per RFC 9110 (the query string is
+    /// part of the request-target, not the content, so `Payload Too Large` doesn't apply to it).
+    fn status_code(&self) -> StatusCode {
         match self {
-            BodyLimitError::PayloadTooLarge => router::Response::error_builder()
-                .error(
-                    graphql::Error::builder()
-                        .message(self.to_string())
-                        .extension_code("INVALID_GRAPHQL_REQUEST")
-                        .extension("details", self.to_string())
-                        .build(),
-                )
-                .status_code(StatusCode::PAYLOAD_TOO_LARGE)
-                .context(ctx)
-                .build()
-                .unwrap(),
+            RequestSizeLimitError::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+            RequestSizeLimitError::QueryTooLarge => StatusCode::URI_TOO_LONG,
         }
+    }
+
+    fn into_response(self, ctx: Context) -> router::Response {
+        router::Response::error_builder()
+            .error(
+                graphql::Error::builder()
+                    .message(self.to_string())
+                    .extension_code("INVALID_GRAPHQL_REQUEST")
+                    .extension("details", self.to_string())
+                    .build(),
+            )
+            .status_code(self.status_code())
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+            .context(ctx)
+            .build()
+            .unwrap()
     }
 }
 
@@ -392,6 +415,44 @@ mod test {
     use crate::plugins::test::PluginTestHarness;
     use crate::services::router;
 
+    async fn body_to_string(resp: router::Response) -> String {
+        String::from_utf8(
+            router::body::into_bytes(resp.response.into_body())
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap()
+    }
+
+    /// Asserts that `resp` has `expected_status` and a GraphQL error message/details matching
+    /// `expected_message`.
+    async fn assert_rejected(
+        resp: Result<router::Response, BoxError>,
+        expected_status: StatusCode,
+        expected_message: &str,
+    ) {
+        assert!(resp.is_ok());
+        let resp = resp.unwrap();
+        assert_eq!(resp.response.status(), expected_status);
+        assert_eq!(
+            resp.response.headers().get(http::header::CONTENT_TYPE),
+            Some(&http::HeaderValue::from_static("application/json"))
+        );
+        let expected_body = format!(
+            r#"{{"errors":[{{"message":"{expected_message}","extensions":{{"details":"{expected_message}","code":"INVALID_GRAPHQL_REQUEST"}}}}]}}"#
+        );
+        assert_eq!(body_to_string(resp).await, expected_body);
+    }
+
+    /// Asserts that `resp` is a 200 with the default empty-response body.
+    async fn assert_ok(resp: Result<router::Response, BoxError>) {
+        assert!(resp.is_ok());
+        let resp = resp.unwrap();
+        assert_eq!(resp.response.status(), StatusCode::OK);
+        assert_eq!(body_to_string(resp).await, "{}");
+    }
+
     #[tokio::test]
     async fn test_body_content_length_limit_exceeded() {
         let plugin = plugin().await;
@@ -408,19 +469,12 @@ mod test {
                     .unwrap(),
             )
             .await;
-        assert!(resp.is_ok());
-        let resp = resp.unwrap();
-        assert_eq!(resp.response.status(), StatusCode::PAYLOAD_TOO_LARGE);
-        assert_eq!(
-            String::from_utf8(
-                router::body::into_bytes(resp.response.into_body())
-                    .await
-                    .unwrap()
-                    .to_vec()
-            )
-            .unwrap(),
-            "{\"errors\":[{\"message\":\"Request body payload too large\",\"extensions\":{\"details\":\"Request body payload too large\",\"code\":\"INVALID_GRAPHQL_REQUEST\"}}]}"
-        );
+        assert_rejected(
+            resp,
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Request body payload too large",
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -440,20 +494,7 @@ mod test {
                     .unwrap(),
             )
             .await;
-
-        assert!(resp.is_ok());
-        let resp = resp.unwrap();
-        assert_eq!(resp.response.status(), StatusCode::OK);
-        assert_eq!(
-            String::from_utf8(
-                router::body::into_bytes(resp.response.into_body())
-                    .await
-                    .unwrap()
-                    .to_vec()
-            )
-            .unwrap(),
-            "{}"
-        );
+        assert_ok(resp).await;
     }
 
     #[tokio::test]
@@ -469,19 +510,12 @@ mod test {
                     .unwrap(),
             )
             .await;
-        assert!(resp.is_ok());
-        let resp = resp.unwrap();
-        assert_eq!(resp.response.status(), StatusCode::PAYLOAD_TOO_LARGE);
-        assert_eq!(
-            String::from_utf8(
-                router::body::into_bytes(resp.response.into_body())
-                    .await
-                    .unwrap()
-                    .to_vec()
-            )
-            .unwrap(),
-            "{\"errors\":[{\"message\":\"Request body payload too large\",\"extensions\":{\"details\":\"Request body payload too large\",\"code\":\"INVALID_GRAPHQL_REQUEST\"}}]}"
-        );
+        assert_rejected(
+            resp,
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Request body payload too large",
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -497,19 +531,108 @@ mod test {
                     .unwrap(),
             )
             .await;
-        assert!(resp.is_ok());
-        let resp = resp.unwrap();
-        assert_eq!(resp.response.status(), StatusCode::OK);
-        assert_eq!(
-            String::from_utf8(
-                router::body::into_bytes(resp.response.into_body())
-                    .await
-                    .unwrap()
-                    .to_vec()
+        assert_ok(resp).await;
+    }
+
+    #[tokio::test]
+    async fn test_get_query_length_limit_exceeded() {
+        let plugin = plugin().await;
+        let resp = plugin
+            .router_service(|_| async { panic!("should have rejected request") })
+            .call(
+                router::Request::fake_builder()
+                    .method(http::Method::GET)
+                    .uri(http::Uri::from_static(
+                        "http://example.com/?query=this-query-is-way-too-long-for-the-limit",
+                    ))
+                    .build()
+                    .unwrap(),
             )
-            .unwrap(),
-            "{}"
-        );
+            .await;
+        assert_rejected(
+            resp,
+            StatusCode::URI_TOO_LONG,
+            "Request query payload too large",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_get_query_length_limit_ok() {
+        let plugin = plugin().await;
+        let resp = plugin
+            .router_service(|_| async { Ok(router::Response::fake_builder().build().unwrap()) })
+            .call(
+                router::Request::fake_builder()
+                    .method(http::Method::GET)
+                    .uri(http::Uri::from_static("http://example.com/?query=ok"))
+                    .build()
+                    .unwrap(),
+            )
+            .await;
+        assert_ok(resp).await;
+    }
+
+    #[tokio::test]
+    async fn test_get_query_length_exactly_at_limit_ok() {
+        let plugin = plugin().await;
+        // "query=1234" is exactly 10 bytes, matching the fixture's configured limit.
+        let resp = plugin
+            .router_service(|_| async { Ok(router::Response::fake_builder().build().unwrap()) })
+            .call(
+                router::Request::fake_builder()
+                    .method(http::Method::GET)
+                    .uri(http::Uri::from_static("http://example.com/?query=1234"))
+                    .build()
+                    .unwrap(),
+            )
+            .await;
+        assert_ok(resp).await;
+    }
+
+    #[tokio::test]
+    async fn test_get_query_length_one_byte_over_limit_exceeded() {
+        let plugin = plugin().await;
+        // "query=12345" is exactly 11 bytes, one over the fixture's configured limit of 10.
+        let resp = plugin
+            .router_service(|_| async { panic!("should have rejected request") })
+            .call(
+                router::Request::fake_builder()
+                    .method(http::Method::GET)
+                    .uri(http::Uri::from_static("http://example.com/?query=12345"))
+                    .build()
+                    .unwrap(),
+            )
+            .await;
+        assert_rejected(
+            resp,
+            StatusCode::URI_TOO_LONG,
+            "Request query payload too large",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_post_request_query_string_not_checked() {
+        // The GET query-length check must not affect POST requests at the full plugin
+        // composition level, even if their (unused) query string would exceed the limit; only
+        // the body/content-length matters for POST. `layer.rs` has an equivalent test at the raw
+        // `RequestBodyLimit` layer; this exercises the same guarantee through `LimitsPlugin`.
+        let plugin = plugin().await;
+        let resp = plugin
+            .router_service(|_| async { Ok(router::Response::fake_builder().build().unwrap()) })
+            .call(
+                router::Request::fake_builder()
+                    .method(http::Method::POST)
+                    .uri(http::Uri::from_static(
+                        "http://example.com/?query=this-query-is-way-too-long-for-the-limit",
+                    ))
+                    .body(router::body::empty())
+                    .build()
+                    .unwrap(),
+            )
+            .await;
+        assert_ok(resp).await;
     }
 
     #[tokio::test]
@@ -824,6 +947,7 @@ mod test {
         let (parts, _) = http::Response::builder().body(()).unwrap().into_parts();
         crate::services::connector::request_service::Response {
             context: req.context.clone(),
+            subgraph_name: req.connector.id.subgraph_name.to_string(),
             transport_result: Ok(TransportResponse::Http(HttpResponse { inner: parts })),
             mapped_response: MappedResponse::Data {
                 data: Value::Null,

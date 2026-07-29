@@ -11,36 +11,36 @@ fn valid_supergraph_schema() {
     const SCHEMA: &str = "../examples/graphql/supergraph.graphql";
 
     // Number of bytes when the heap size reached its global maximum with a 5% buffer.
-    // Actual number: 143_792.
-    const MAX_BYTES_SUPERGRAPH: usize = 150_982; // ~147 KiB
+    // Actual number: 181_885.
+    const MAX_BYTES_SUPERGRAPH: usize = 190_980; // ~187 KiB
 
     // Total number of allocations with a 5% buffer.
-    // Actual number: 4_961.
-    const MAX_ALLOCATIONS_SUPERGRAPH: u64 = 5_209;
+    // Actual number: 5_910.
+    const MAX_ALLOCATIONS_SUPERGRAPH: u64 = 6_206;
 
     // Number of bytes when the heap size reached its global maximum with a 5% buffer.
-    // Actual number: 203_359.
+    // Actual number: 241_136.
     //
-    // API schema generation allocates additional 59_567 bytes (203_359-143_792=59_567).
-    const MAX_BYTES_API_SCHEMA: usize = 213_527; // ~209 KiB
+    // API schema generation allocates additional 59_251 bytes (241_136-181_885=59_251).
+    const MAX_BYTES_API_SCHEMA: usize = 253_193; // ~247 KiB
 
     // Total number of allocations with a 5% buffer.
-    // Actual number: 5_526.
+    // Actual number: 6_569.
     //
-    // API schema has an additional 565 allocations (= 5_526 - 4_961).
-    const MAX_ALLOCATIONS_API_SCHEMA: u64 = 5_802;
+    // API schema has an additional 659 allocations (= 6_569 - 5_910).
+    const MAX_ALLOCATIONS_API_SCHEMA: u64 = 6_898;
 
     // Number of bytes when the heap size reached its global maximum with a 5% buffer.
-    // Actual number: 629_765.
+    // Actual number: 686_993.
     //
-    // Extract subgraphs allocates additional 416_238 bytes (629_765-213_527=416_238).
-    const MAX_BYTES_SUBGRAPHS: usize = 661_253; // ~646 KiB
+    // Extract subgraphs allocates additional 445_857 bytes (686_993-241_136=445_857).
+    const MAX_BYTES_SUBGRAPHS: usize = 721_342; // ~679 KiB
 
     // Total number of allocations with a 5% buffer.
-    // Actual number: 11_770.
+    // Actual number: 14_740.
     //
-    // Extract subgraphs from supergraph has an additional 6_287 allocations (= 11_989 - 5_702).
-    const MAX_ALLOCATIONS_SUBGRAPHS: u64 = 12_359;
+    // Extract subgraphs from supergraph has an additional 8_171 allocations (= 14_740 - 6_569).
+    const MAX_ALLOCATIONS_SUBGRAPHS: u64 = 15_477;
 
     let schema = std::fs::read_to_string(SCHEMA).unwrap();
 

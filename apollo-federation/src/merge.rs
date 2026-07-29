@@ -264,9 +264,8 @@ impl Merger {
         }
 
         if self.errors.is_empty() {
-            crate::compat::coerce_schema_default_values(&mut supergraph);
-
             // TODO: validate here and extend `MergeFailure` to propagate validation errors
+            let _ = crate::compat::coerce_and_validate_schema_values(&mut supergraph);
             let supergraph = Valid::assume_valid(supergraph);
             Ok(MergeSuccess {
                 schema: supergraph,
@@ -927,7 +926,8 @@ struct DirectiveNames {
 impl DirectiveNames {
     fn for_metadata(metadata: &Option<&LinksMetadata>) -> Self {
         let federation_identity =
-            metadata.and_then(|m| m.by_identity.get(&Identity::federation_identity()));
+            metadata.and_then(|m| m.for_identity(&Identity::federation_identity()));
+        let federation_identity = federation_identity.as_ref();
 
         let key = federation_identity
             .map(|link| link.directive_name_in_schema(&FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC))

@@ -1082,6 +1082,7 @@ impl SelectionSet {
             type_position.type_name().clone(),
             source_text,
             false,
+            crate::schema::field_set::FieldSetValidation::Validate,
         )?
         .0;
         let fragments = Default::default();
@@ -2438,6 +2439,10 @@ impl DeferNormalizer {
             {
                 let DeferDirectiveArguments { label, if_: _ } = args;
                 if let Some(label) = label {
+                    // Reject duplicate labels (should've been a validation error)
+                    if digest.used_labels.contains(&label) {
+                        return Err(SingleFederationError::DuplicateDeferLabel { label }.into());
+                    }
                     digest.used_labels.insert(label);
                 }
             }

@@ -2,6 +2,836 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.16.1] - 2026-07-20
+
+## 🐛 Fixes
+
+### Fix input-object and enum variable coercion to respect the API schema
+
+When a client sent an operation with an unknown field on an input-object variable, the router's `VALIDATION_INVALID_TYPE_VARIABLE` error message embedded the full composed input type definition, including federation directives (`@join__type`, `@tag`, etc.) and internal subgraph names, regardless of the `introspection` or `redact_query_validation_errors` settings. This error now reports only the type name, matching the existing behavior for enum and scalar coercion errors.
+
+Separately, variable coercion validated input-object fields and enum values against the internal supergraph schema rather than the client-facing API schema, so a variable could reference an `@inaccessible` field or enum value even though the same reference would be rejected in the operation document itself. Variable coercion now validates against the API schema, consistent with how operation documents are already validated.
+
+By [@carodewig](https://github.com/carodewig)
+
+### Fix coercion and validation of default values
+
+Default values in schemas and operations are now coerced and validated more correctly, fixing several bugs:
+
+- Fixed invalid default values not being reported as errors.
+- Removed default value auto-expansion logic.
+- Restricted non-list value coercion to operations.
+- Fixed missing coercion edge cases to always reject null values applied to non-null types.
+- Fixed validation of unknown fields in input object default values.
+- Added missing enum value validations to ensure they are valid and are part of the enum definition.
+- Added missing validation for `@deprecated` on required arguments and input fields.
+
+By [@sachindshinde](https://github.com/sachindshinde)
+
+### Update operation validation to enforce unique `@defer` labels
+
+The query planner now rejects operations that reuse a `@defer` label, so labels are unique within an operation.
+
+By [@duckki](https://github.com/duckki)
+
+### Treat list sizes as non-negative in demand control cost estimation
+
+Demand control now bounds the list sizes it uses when estimating operation cost. Slicing-argument values (for example `first`) provided as negative integers are clamped to zero, and configured `list_size` defaults use a saturating conversion so that very large values cannot wrap. This keeps an operation's estimated cost from being computed lower than the work it represents.
+
+By [@abernix](https://github.com/abernix)
+
+### Enforce `http_max_request_bytes` on GraphQL queries sent via HTTP GET
+
+The router's `limits.http_max_request_bytes` setting previously only limited the size of the HTTP request body, so it had no effect on GraphQL-over-HTTP GET requests, which carry the query in the URL's query string instead of the body. In environments with a strict `http_max_request_bytes` configured, this allowed the limit to be bypassed by sending a GET request instead of a POST.
+
+GET requests are now checked against the same `http_max_request_bytes` limit, measured against the byte length of the URI's query string, and rejected with a 414 (URI Too Long) response if it's exceeded.
+
+Note that this measures the percent-encoded query string, which is larger than the same query's byte count in a compact POST JSON body (URL encoding can expand some characters to 3 bytes each). A query that fits under the limit as a POST body may need a slightly higher limit to also fit as a GET query string.
+
+By [@carodewig](https://github.com/carodewig)
+
+### Reject JWTs that omit the `iss` claim when a JWKS entry configures an `issuers` allowlist
+
+When a JWKS entry is configured with an `issuers` allowlist, the router now rejects a validly-signed JWT that omits its `iss` claim (or sets it to `null`), instead of accepting it. Previously a token could sidestep the allowlist by not carrying an issuer at all, even though a token presenting a non-matching issuer was already rejected.
+
+This matches how the router already handles the `aud` claim under an `audiences` allowlist: once an operator configures an allowlist, a token that cannot satisfy it is rejected. Behavior is unchanged when no issuers are configured — tokens with or without an `iss` claim are still accepted.
+
+By [@carodewig](https://github.com/carodewig)
+
+### Enforce a kid-specific JWKS entry's constraints instead of falling through to a less-specific entry
+
+When two JWKS entries shared the same key material — one kid-specific and constrained by `issuer`/`audience`, the other algorithm-only and unconstrained — a token that should have been rejected by the constrained entry could be accepted through the unconstrained one. When searching for a key, a kid match and an algorithm match each scored equally, so a kid-specific entry (matched on kid only) and an alg-only entry (matched on algorithm only) tied and were both returned as candidates. Validation then verified the signature against the constrained entry, failed its issuer/audience check, and fell through to the unconstrained entry, which accepted the token.
+
+When a token's key ID (`kid`) matches one or more JWKS entries, only those matching entries are now considered, and each is validated in turn. A token can no longer be accepted by falling through to an entry whose `kid` it never matched. Entries that share key material under the same `kid` but carry different constraints — for example, the same key duplicated across a multi-tenant identity provider — are all still tried, so legitimate multi-entry setups continue to work.
+
+By [@carodewig](https://github.com/carodewig)
+
+### Reject oversized `sha256Hash` values before hex-decoding in APQ
+
+The Automatic Persisted Queries (APQ) layer decoded the client-supplied `sha256Hash` extension value with `hex::decode` before checking its length. A valid SHA-256 hash is always exactly 64 hex characters; a request with an arbitrarily large `sha256Hash` string (megabytes of valid hex) would still be hex-decoded in full, allocating memory and burning CPU proportional to the attacker-controlled input size before any comparison against the actual query hash occurred.
+
+The router now rejects any `sha256Hash` whose length is not exactly 64 characters immediately, before attempting to decode it. This matches existing behavior for other malformed hashes: the request falls through to the normal `PERSISTED_QUERY_NOT_FOUND` response.
+
+By [@carodewig](https://github.com/carodewig)
+
+### Respect the persisted-query client-name scope in freeform safelist matching
+
+Body-based (freeform) persisted-query safelist matching previously ignored the `clientName` scope declared in the PQ manifest, so an operation registered for one client was accepted for any client. Freeform matching now respects the manifest's client-name scope — trying the request's client name first and falling back to a client-agnostic entry — consistent with how ID-based lookup already behaves. Note that `clientName` is a self-reported, unauthenticated header and is not an authorization boundary.
+
+By [@carodewig](https://github.com/carodewig)
+
+
+
+# [2.16.0] - 2026-06-30
+
+## 🚀 Features
+
+### Add header masking for sensitive data in logs and telemetry ([PR #9155](https://github.com/apollographql/router/pull/9155))
+
+Adds header masking configuration to automatically mask sensitive header values in router logs, telemetry events, and coprocessor communications. This prevents accidental exposure of credentials, API keys, session tokens, and other sensitive information in observability data.
+
+**Key Features:**
+
+- **Automatic masking** of common sensitive headers (authorization, cookie, x-api-key, etc.)
+- **Fail-secure by default** — when no `masking:` block is configured, masking is enabled with a built-in sensitive-header list (authorization, cookie, set-cookie, x-api-key, etc.)
+- **Independently configurable request and response masking** — different sensitive lists for headers leaving the router vs. headers coming back
+- **Global and per-subgraph configuration** — set defaults under `headers.all` and override for specific subgraphs
+- **Connector inheritance** — connectors inherit masking rules from their parent subgraph
+- **Comprehensive coverage** across `router.request`, `router.response`, `supergraph.request`, `supergraph.response`, `connector.request`, `connector.response` telemetry events, coprocessor logging, OpenTelemetry spans, and Apollo trace-report header forwarding (`telemetry.apollo.send_headers`) — which now redacts the same sensitive headers as the rest of header masking instead of only a hardcoded `authorization`/`cookie`/`set-cookie` set
+- **Case-insensitive matching** for header names
+
+**Configuration:**
+
+Masking is configured within the `headers` plugin, nested under `request` and/or `response` sections. By default both global and per-subgraph `sensitive_headers` lists are **additive**: any entries you provide are added to the built-in fail-secure list (authorization, cookie, set-cookie, x-api-key, …). Set `replace_defaults: true` on a global or per-subgraph block to opt out of the built-ins and treat that block's list as authoritative. A subgraph that enables masking always inherits the built-in defaults even when global masking is disabled.
+
+```yaml
+headers:
+  # Global defaults applied to all subgraphs
+  all:
+    request:
+      masking:
+        enabled: true  # default
+        # Additional headers to mask on top of the built-in fail-secure list.
+        sensitive_headers:
+          - x-custom-secret
+    response:
+      masking:
+        enabled: true
+        sensitive_headers:
+          - x-internal-trace-id
+
+  # Per-subgraph extensions (added to global + built-ins).
+  subgraphs:
+    products:
+      request:
+        masking:
+          enabled: true
+          sensitive_headers:
+            - x-products-api-key
+
+  # Example: replace the built-in list entirely (advanced).
+  # all:
+  #   request:
+  #     masking:
+  #       replace_defaults: true
+  #       sensitive_headers:
+  #         - x-only-this
+```
+
+**Per-selector override (telemetry):**
+
+Telemetry header selectors — custom span/event/instrument attributes that read a request or response header — accept an optional `redact` field to override the masking rules for that single attribute:
+
+- `redact: mask` — always mask this header's value, regardless of the masking config.
+- `redact: allow` — always emit the raw value, ignoring the masking rules.
+- omitted (default) — defer to the configured global/per-subgraph masking rules.
+
+```yaml
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          my.auth.header:
+            request_header: authorization
+            redact: mask
+```
+
+> **Note:** Telemetry emitted at the shared `http_client` transport layer uses the global masking rules, because that layer has no subgraph identity. Per-subgraph overrides still apply at the subgraph and connector telemetry layers, and the global rules include the fail-secure defaults.
+>
+> **Note:** Masking applies to header *values*. In coprocessor debug logs, only the headers are masked — a request `body` or `context` that a coprocessor copies a sensitive header into is logged verbatim, so avoid placing secrets there if debug logging is enabled.
+
+When enabled, sensitive header values are replaced with `***MASKED***` in debug logs and telemetry output while preserving header names for debugging purposes.
+
+By [@zachfettersmoore](https://github.com/zachfettersmoore) in https://github.com/apollographql/router/pull/9155
+
+### Add router telemetry selectors to count and extract fields from GraphQL response errors ([PR #9448](https://github.com/apollographql/router/pull/9448))
+
+The telemetry `RouterSelector` surface gains two optional selectors for working with the GraphQL `errors` list on the router response:
+
+- **`response_errors_count`** — evaluates a JSONPath against the `errors` payload and exposes the match count as an integer OpenTelemetry value. Use a path like `$[*]` to count every error, or a filter expression to count only errors that match specific extension codes, messages, or other fields.
+- **`response_errors_field`** — runs a JSONPath per error object and collects the matched values into an OpenTelemetry string array attribute, so you can attach structured error detail (for example `$.message` or `$.extensions.code`) to custom metrics or log pipelines.
+
+These selectors follow the same response-body wiring as the existing `response_errors` selector, so they are available once the serialized router response body is available for inspection.
+
+By [@smyrick](https://github.com/smyrick) and [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9448
+
+### Allow configuring maximum cardinality for user-facing metrics ([PR #9220](https://github.com/apollographql/router/pull/9220))
+
+Users can now set a `cardinality_limit` in their router config to override the OpenTelemetry SDK's default limit of 2000 distinct attribute combinations per metric. Once the limit is reached, additional attribute combinations are dropped and replaced with a single overflow series tagged `otel_metric_overflow="true"`, losing their per-attribute breakdown.
+
+Note that raising the cardinality limit increases memory usage proportionally, since each allowed attribute combination consumes memory. Monitor `apollo.router.telemetry.metrics.cardinality_overflow` to detect when a metric is hitting its limit.
+
+The limit can be set globally under `telemetry.exporters.metrics.common.cardinality_limit` and per-metric under individual `views[].cardinality_limit`. The per-metric setting takes precedence over the global one.
+
+```yaml
+telemetry:
+  exporters:
+    metrics:
+      common:
+        cardinality_limit: 5000
+        views:
+          - name: http.server.request.duration
+            cardinality_limit: 20000
+```
+
+**Behavior change for existing `views[]` entries on non-histogram instruments.** Previously, any `views[]` entry without an explicit `aggregation` silently converted counters and gauges to histograms. A counter named `my.counter` with a per-view entry would emit `my_counter_bucket`/`my_counter_sum`/`my_counter_count` instead of `my_counter_total`. Per-view configuration (`cardinality_limit`, `rename`, `description`, `unit`, `allowed_attribute_keys`) now preserves the instrument's native aggregation.
+
+If you were relying on this conversion (e.g., you have dashboards or alerts built on `_bucket`/`_sum`/`_count` series for a counter), add an explicit `aggregation: histogram` to the affected view to keep the previous behavior:
+
+```yaml
+views:
+  - name: my.counter
+    aggregation:
+      histogram:
+        buckets: [0.1, 0.5, 1.0]
+```
+
+By [@rregitsky](https://github.com/rossregitsky) in https://github.com/apollographql/router/pull/9220
+
+### Configure independent sampling rates per tracing exporter ([PR #9582](https://github.com/apollographql/router/pull/9582))
+
+You can now set a `sampler` on individual tracing exporters so that each exporter receives a different fraction of traces. Previously, `telemetry.exporters.tracing.common.sampler` applied globally and all exporters received the same set of spans.
+
+The per-exporter `sampler` field is available on:
+
+- `telemetry.exporters.tracing.otlp.sampler`
+- `telemetry.exporters.tracing.zipkin.sampler`
+- `telemetry.exporters.tracing.datadog.sampler`
+- `telemetry.apollo.sampler`
+
+The value uses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`, so it represents an absolute fraction of all requests — not a fraction of already-sampled spans. For example, to send 10% of traces to Apollo Studio but only 2% to an external OTLP endpoint:
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      common:
+        sampler: 0.1
+      otlp:
+        enabled: true
+        endpoint: 
+        sampler: 0.02
+```
+
+The per-exporter `sampler` must not exceed `telemetry.exporters.tracing.common.sampler`; Router returns an error at startup if it does.
+
+The `sampler` field is ignored on the Datadog exporter when `preview_datadog_agent_sampling` is enabled, because in that mode the Datadog agent controls sampling decisions and all spans must be forwarded unfiltered. The OTLP sampler is still respected in that mode (since OTLP typically targets a different backend), but a warning is emitted at startup — if the OTLP endpoint is also the Datadog agent, it may receive incomplete traces.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9582
+
+### Make `max_recursive_selections` configurable ([PR #9445](https://github.com/apollographql/router/pull/9445))
+
+The router protects against deeply recursive or explosively large operations by counting the total number of selections encountered when recursively expanding fragment spreads. Previously this limit was hardcoded at 10,000,000. It can now be tuned via `limits.router.max_recursive_selections`:
+
+```yaml
+limits:
+  router:
+    max_recursive_selections: 10000000  # default
+```
+
+Reducing this value further restricts the complexity of operations the router will accept. The existing escape hatch (`APOLLO_ROUTER_DISABLE_SECURITY_RECURSIVE_SELECTIONS_CHECK`) still applies when the limit is exceeded.
+
+Previously, setting `limits.router.warn_only` would not affect the max recursive selections check, this has now been changed to only emit a warning log if `warn_only` is set to true.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/9445
+
+### Add per-subgraph `indexes` configuration to `response_cache` invalidation ([Issue #9521](https://github.com/apollographql/router/issues/9521))
+
+Adds a new `indexes` block under each subgraph's `response_cache.subgraph.<name>.invalidation` configuration, letting operators choose which invalidation indexes Apollo Router maintains in Redis for that subgraph. All three indexes are enabled by default, so existing deployments are unchanged.
+
+```yaml
+response_cache:
+  enabled: true
+  invalidation:
+    listen: "127.0.0.1:3000"
+    path: "/invalidation"
+  subgraph:
+    all:
+      enabled: true
+      invalidation:
+        enabled: true
+        shared_key: ""
+        indexes:                # all three default to true; omit fields you want kept on
+          subgraph: false       # disable `By subgraph` invalidation for this subgraph
+          type: false           # disable `By type` invalidation for this subgraph
+          # cache_tag inherits its default (true) and continues to be honored
+    subgraphs:
+      networkapi_subgraph:
+        invalidation:
+          enabled: true
+          indexes:
+            type: false         # mix per subgraph; other fields inherit their defaults
+```
+
+When a subgraph's `indexes` block disables a mode, the corresponding ZSET writes are skipped on cache inserts and the `/invalidation` endpoint returns HTTP 400 with a structured error for requests of that kind. Operators with workloads that only ever invalidate by a subset of modes can use this to tailor `response_cache`'s indexing to their access pattern.
+
+**Index changes are additive only.** Enabling a previously-disabled index does not retroactively populate it for entries that were written under the prior configuration. If a deployment changes `indexes.subgraph` from `false` to `true`, the `subgraph-{name}` ZSET will only see entries written after the change; pre-change entries are invisible to `By subgraph` invalidation requests until they age out via TTL. To bring a newly-enabled index online over the full cache set, flush Redis (or the affected namespace) before turning the index on.
+
+By [@ebylund](https://github.com/ebylund) in [PR #9531](https://github.com/apollographql/router/pull/9531)
+
+## 🐛 Fixes
+
+### Fix `Cache-Control` parsing and serialization in the response cache ([PR #9562](https://github.com/apollographql/router/pull/9562))
+
+The response cache's `Cache-Control` handling has been refactored and several bugs fixed:
+
+- **`stale-if-error=N` parse error fixed**: Subgraph responses containing `stale-if-error=600` previously caused a `SUBREQUEST_HTTP_ERROR`. The directive is now stored as `Option<u64>` and parsed correctly.
+- **Rolling-upgrade serde compatibility**: Old Redis entries that stored `stale-if-error` or `stale-while-revalidate` as a boolean are now transparently deserialized instead of failing.
+- **Extension-only `Cache-Control` headers**: A header containing only unrecognized extension directives (e.g. `cdn-cache-control=300`) is now treated as `no-store` rather than being cached indefinitely with no TTL.
+- **`s-maxage` preserved separately from `max-age`** throughout parsing, merging, and serialization.
+- **Extension directive values**: Directives whose values contain `=` (e.g. `cdn-cache-control=rev=abc`) are now correctly passed through to the `_ => {}` wildcard instead of returning a parse error, per RFC 9111 §5.2.
+- **`no-cache` field-specific form**: `no-cache="Authorization"` (RFC 9111 §5.2.2.4) now correctly permits caching rather than being treated as a blanket revalidation directive.
+- **Clock skew**: Cache entries whose `created` timestamp is in the future are now treated as expired.
+- **`public`/`private` mutual exclusion**: The response serializer now correctly suppresses `public` when `private` is also set.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9562
+
+### Fix Redis replica routing failure caused by lazy connections with even replica counts ([Issue/PR #9589](https://github.com/apollographql/router/pull/9589))
+
+When a Redis cluster had an even number of replicas, the router's use of `lazy_connections = true` could trigger a bug in fred's round-robin replica selection logic. Fred increments its round-robin counter when searching for a routable replica, and increments it again when it can't find one before requeuing the command. With an even replica count this causes fred to consistently target replicas that have no established connection, leading to GET failures falling through to backends and Redis CPU spikes.
+
+Switched to `lazy_connections = false` (eager connections) so all replica connections are established upfront. The `RouteableReplicaFilter` that was the original motivation for lazy connections — preventing unroutable replicas from entering the routing table — continues to handle that responsibility, making the blast-radius isolation that lazy connections provided redundant.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9589
+
+### Emit `graphql.error.extensions.code` on span events for all counted GraphQL errors ([PR #9207](https://github.com/apollographql/router/pull/9207))
+
+The `apollo.router.operations.error` metric carries `graphql.error.extensions.code` for every counted GraphQL error, but the matching span event only fired for errors raised by the `demand_control` and `connectors` plugins. Subgraph-returned, supergraph, execution, and router parse/validation errors reached OTLP traces without the code attribute, so trace-based consumers could not attribute errors to specific codes the way metric-based consumers already could.
+
+The router now also emits the span event from `count_operation_errors` as a catch-all, gated on the same flag as the metric (`telemetry.apollo.errors.preview_extended_error_metrics: enabled`). The `connectors` and `demand_control` plugins continue to emit on their own spans so the event keeps the source-site attributes (connector coordinate, demand control context, etc.); to avoid double-emission, `graphql::Error` carries a non-serialized `span_event_emitted` flag that the catch-all checks and respects. The metric still increments either way, and the flag is never serialized into the user-facing error response.
+
+By [@david-castaneda](https://github.com/david-castaneda) in https://github.com/apollographql/router/pull/9207
+
+### Reduce Redis maintenance worker backpressure with batch-drain and deduplication ([PR #9642](https://github.com/apollographql/router/pull/9642))
+
+The response cache uses Redis ZSETs as invalidation indexes — each cache entry is a member scored by its expiry timestamp. A background maintenance worker periodically calls `ZREMRANGEBYSCORE` to purge expired members. Under heavy write load, the worker's channel could accumulate thousands of identical keys, causing it to issue redundant Redis commands and fall behind.
+
+This fix changes the worker to batch-drain up to 1,000 pending keys per cycle and deduplicate them into a `HashSet` before issuing any Redis commands, ensuring at most one `ZREMRANGEBYSCORE` call per unique key per cycle regardless of how many duplicates were queued.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9642
+
+### Clamp license timers to a safe limit ([PR #9561](https://github.com/apollographql/router/pull/9561))
+
+A router started with a license whose expiry date falls more than roughly two years in the future crashed on startup with invalid deadline; err=Invalid. It now starts and serves traffic normally with such licenses.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/9561
+
+### Report missing fields as coercion errors and suppress redundant errors ([PR #9549](https://github.com/apollographql/router/pull/9549))
+
+When a requested field is missing from the merged subgraph response, emit a
+`RESPONSE_VALIDATION_FAILED` error in `response.errors` — turned on by
+`enable_result_coercion_errors`. Previously, missing fields were only reported in
+`extensions.valueCompletion` (and only for non-nullable fields), not in `response.errors`.
+
+Additionally, redundant coercion and `valueCompletion` errors along null-bubble paths are now
+suppressed. Previously, a single bad value inside nested non-null types could produce multiple
+duplicate entries — one per non-null wrapper in the bubble chain. Now each coercion failure produces
+exactly one originating error in `response.errors` and one `valueCompletion` entry at the source,
+with no nesting-level duplicates.
+
+By [@duckki](https://github.com/duckki) in https://github.com/apollographql/router/pull/9549
+
+### Ensure `client.name` and `client.version` attributes on router metrics can use selectors ([PR #9502](https://github.com/apollographql/router/pull/9502))
+
+A recent change added `client.name` and `client.version` as standard attributes on `RouterAttributes` to support aliasing. This inadvertently caused the JSON schema to reject selector-based overrides e.g.
+
+```yaml
+client.name: 
+  request_header: x-my-header
+```
+
+for those fields. We now support both the boolean/alias form, as well as the custom selector syntax.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/9502
+
+### Prevent recursive input types from hanging composition or crashing expression validation ([PR #9524](https://github.com/apollographql/router/pull/9524))
+
+A self-referential connector input type (e.g. `input Node { child: Node }`) previously caused two problems:
+
+- During schema expansion, the input visitor's iterative `walk` would re-enter the same group indefinitely, consuming memory until composition was killed (previously reported as `Type "X" has already been pre-inserted`).
+- During `@connect` expression validation, `resolve_shape` would recurse through the type's `Object` fields without a cycle guard, causing a stack overflow.
+
+Recursive inputs now expand correctly and validate without unbounded recursion. When the validator re-enters a schema-defined named shape that is already on the resolution stack, it short-circuits to `Unknown` rather than walking the cycle.
+
+By [@briannafugate](https://github.com/briannafugate) in https://github.com/apollographql/router/pull/9524
+
+### Ensure errors-as-data extensions deep-merge with connector error defaults ([PR #9575](https://github.com/apollographql/router/pull/9575))
+
+When a connector's `isSuccess` evaluates to false and the user has configured `errors.extensions`, the resulting top-level error now correctly deep-merges the user-supplied extensions into the default extensions object. Previously, a mapping like `errors.extensions: "http: { myField: ... }"` would wipe out the default `http: { status }` field; now both appear side-by-side, matching the [public docs](https://www.apollographql.com/docs/graphos/connectors/responses/error-handling) contract that defaults are retained alongside user fields.
+
+This PR also adds `Connector::output_shape()` as foundation API for downstream validators (entity-key checker, type walker) to reason about both the success and error branches of an errors-as-data connector via `Shape::one([selection.shape(), errors_shape()], [])`. No existing validator behavior changes in this PR.
+
+By [@briannafugate](https://github.com/briannafugate) in https://github.com/apollographql/router/pull/9575
+
+### Restore defer dependencies that were lost by query plan reduction ([PR #9443](https://github.com/apollographql/router/pull/9443))
+
+This fixes a query planner bug where the deferred block of an `@defer` query could be missing field values that should have been forwarded from the primary block, resulting in `null` fields or absent data in the deferred chunk at runtime.
+
+When the query planner builds the fetch dependency graph, it runs a reduction step that prunes redundant "must run before" edges. That step could drop edges whose source fetch was the only producer of fields the deferred block needed (typically `__typename` or entity keys). The planner now detects those dropped edges and restores them as deferred dependencies so the deferred block receives the values it needs.
+
+By [@duckki](https://github.com/duckki) in https://github.com/apollographql/router/pull/9443
+
+### Fix cross-section hash collision in subgraph `Request::to_sha256` ([Issue/PR #9497](https://github.com/apollographql/router/pull/9497))
+
+The subgraph dedup hash concatenated its sections (headers, claim, operation_name, query, variables, extensions) with no domain separator. An empty section followed by a populated one fed the hasher the same bytes as the populated section followed by an empty one, so a request with `variables: {"k": "1"}, extensions: {}` produced the same SHA-256 as a request with `variables: {}, extensions: {"k": "1"}`. Because this hash drives the subgraph dedup cache and subscription dedup keying, the cache could serve one request's response back to a semantically distinct request.
+
+Tag each section with a two-byte sentinel (`\0H`, `\0C`, `\0O`, `\0Q`, `\0V`, `\0E`) before its bytes, so cross-section collisions are no longer possible. Added two regression tests covering the `variables` ↔ `extensions` swap and the `operation_name` ↔ `query` concatenation collision.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Resolve fields selected beneath list-shaped arrow methods like `->entries` in connect v0.4 ([PR #9619](https://github.com/apollographql/router/pull/9619))
+
+Composition with connect v0.4 reported spurious `CONNECTORS_UNRESOLVED_FIELD` errors for fields selected
+beneath an `->entries` sub-selection — e.g. `attributes: attributes->entries { key value }` against
+`attributes: [AttributesEntry]` left `AttributesEntry.key` and `AttributesEntry.value` "unresolved", even
+though the selection plainly resolves them. The identical schema composed cleanly under connect v0.3.
+
+Cause: v0.4's shape-based selection validator only collected seen fields for object-shaped selections;
+list-valued shapes — produced by methods with statically known list outputs, like `->entries` — fell
+through a catch-all and contributed no seen fields. The validator now walks `Array` shapes by validating
+each item shape against the field's (already list-unwrapped) inner named type.
+
+By [@fernando-apollo](https://github.com/fernando-apollo) in [PR #9619](https://github.com/apollographql/router/pull/9619)
+
+### Only delete coprocessor context keys from those that were sent in a given stage ([PR #9519](https://github.com/apollographql/router/pull/9519))
+
+Addresses a race condition where context keys added by concurrent parallel subgraph stages could unintentionally be deleted.
+
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/9519
+
+### Stabilize subgraph dedup hash against HeaderMap iteration order ([PR #9497](https://github.com/apollographql/router/pull/9497))
+
+The `SubgraphRequest::to_sha256` helper, used as the key for subscription dedup
+and the dedup-cache fast path, iterated `http::HeaderMap` directly. `HeaderMap`
+does not guarantee a stable iteration order across requests, so two logically
+identical requests could produce different SHA-256 hashes and miss the dedup
+cache. The previous implementation acknowledged this with a `// this assumes
+headers are in the same order` comment but did not enforce it. Header pairs are
+now sorted before being fed to the hasher, making the hash deterministic for a
+given set of (name, value) entries regardless of insertion order.
+
+This also fixes a macOS-only flake in
+`integration::subscriptions::ws_passthrough::test_subscription_ws_passthrough_dedup`,
+where header bucket ordering differed often enough to defeat dedup in practice.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Prevent scalar-list selections from being flagged as group selections in connect v0.4 ([PR #9636](https://github.com/apollographql/router/pull/9636))
+
+Composition with connect v0.4 reported a spurious `GROUP_SELECTION_IS_NOT_OBJECT` error for a renamed
+arrow-method projection over a nested-list scalar field — e.g. `data: data->map(@->map(@->toString))`
+against `data: [[String]]` produced "selects a group `data {}`, but `ReportData.data` is of type `String`
+which is not an object." The selection is a scalar projection, not a group selection, and the field is
+`[[String]]`. The identical schema composed cleanly under connect v0.3.
+
+Cause: the shape-based group-selection check treated every `Array`-shaped selection as a group selection,
+then required the field's type to be an object. A list is now treated as a group selection only when its
+element shape is itself a group (a list of objects), so a list of scalars validates cleanly. This is a
+sibling fix to [PR #9619](https://github.com/apollographql/router/pull/9619), in the group-selection
+detector rather than the seen-fields walker.
+
+By [@benjamn](https://github.com/benjamn) in [PR #9636](https://github.com/apollographql/router/pull/9636)
+
+## 📃 Configuration
+
+### Deprecate `traffic_shaping.deduplicate_variables` field ([PR #9586](https://github.com/apollographql/router/pull/9586))
+
+The router config field `traffic_shaping.deduplicate_variables` is now deprecated. Since variable deduplication is unconditionally enabled, the field is silently ignored and will be removed. A warning will now be issued at startup when this field is set to alert operators to remove the field from their config.
+
+By [@conwuegb](https://github.com/conwuegb) in https://github.com/apollographql/router/pull/9586
+
+### Remove the `preview_connect_v0_4` opt-in for Connect v0.4 ([PR #9644](https://github.com/apollographql/router/pull/9644))
+
+Using Connect spec v0.4 in a subgraph (via `@link(url: "https://specs.apollo.dev/connect/v0.4")`) no longer requires setting `connectors.preview_connect_v0_4: true` in `router.yaml`. Linking the v0.4 spec is itself a sufficient opt-in, so the router no longer rejects these schemas at startup. The `preview_connect_v0_4` configuration key is now a deprecated no-op; it continues to be accepted so existing configurations keep working, and can be safely removed.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9644
+
+## 🛠 Maintenance
+
+### Fix Linux flake in response_cache::integration_test_basic (Redis readiness) ([PR #9497](https://github.com/apollographql/router/pull/9497))
+
+`integration::response_cache::integration_test_basic` was flaking on Linux CI with `Redis error … kind: Timeout` during the second `TestHarness` request. The router's response cache uses fred's default `default_command_timeout` of 500ms; under CI load the second harness's freshly-built fred pool was being asked to issue its first per-client lookup before Redis (or the host) had stabilised after teardown of the first harness's pool, exceeding the 500ms budget.
+
+This is a test-only change. Before each `TestHarness::builder()` invocation in this test, we now prove Redis can complete a full PING round-trip from a brand-new fred client within a tight per-attempt budget, retrying against a deadline. If Redis can serve a cold-start command quickly, the router pool's first command will not race the 500ms timeout. No sleeps, no widened timeouts, no retries added to nextest, no `#[ignore]`.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Deprecate `apollo_router::otel_compat` ([PR #9573](https://github.com/apollographql/router/pull/9573))
+
+`otel_compat::HeaderExtractor` and `otel_compat::HeaderInjector` are now deprecated. The `opentelemetry_http` crate (v0.31+) already ships identical types that work with `http` 1.x.
+
+Use `opentelemetry_http::HeaderExtractor` and `opentelemetry_http::HeaderInjector` directly. These types will be removed in a future major version.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9573
+
+### Retry `mise install` in CircleCI to absorb transient GitHub release fetch failures ([PR #9497](https://github.com/apollographql/router/pull/9497))
+
+The `install_mise` step in `.circleci/config.yml` ran `mise install` exactly once, so any transient 404 from GitHub releases (mise's aqua backend pulls each pinned tool from `github.com/.../releases/download/...`) failed an otherwise-healthy job. We've seen this surface as three different jobs failing in the same workflow, each on a different tool (kubeconform, protoc, gh) — the signature of intermittent CDN/rate-limit flakes rather than a config bug.
+
+Wrap both invocations (Linux/macOS and Windows) in a 3-attempt loop with linear 5s/10s backoff. On the third failure the step still exits non-zero so genuine configuration errors are not masked.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Fix Linux flake in samples::/enterprise/connectors-defer ([PR #9497](https://github.com/apollographql/router/pull/9497))
+
+The `/enterprise/connectors-defer` samples test was intermittently failing on Linux CI with:
+
+```
+expected: [{"data":{"m":{"f":"1"}},"hasNext":true},{"hasNext":false,"incremental":[...],"path":["m"]}]
+received: [{"data":{"m":{"f":"1"}},"hasNext":true},{"hasNext":true,"incremental":[...],"path":["m"]},{"data":null,"hasNext":false}]
+```
+
+This is the well-known two-shape framing of deferred multipart responses (see `filter_stream` race in `execution/service.rs`): both forms are spec-compliant, and which one the router emits depends on whether the channel disconnects before or after the final `try_recv`. PR #9263 introduced a `deferred_responses_equivalent` helper to bridge the two shapes, but its index-based fast-path comparison was fragile enough that this exact case still slipped through in CI (3 occurrences in the last 14 days, most recent CircleCI job 377016 on 2026-05-21).
+
+The fix replaces the indexing logic with a small `collapse_terminator` normalizer that, when an array ends in `{ data: null, hasNext: false }` preceded by a chunk with `hasNext: true`, drops the terminator and flips the preceding chunk's `hasNext` to `false`. The equivalence check then becomes plain equality of the two normalized forms — symmetric, free of off-by-one risk, and trivially correct for fast-path inputs (which pass through unchanged). No router behaviour changes; this is a test-harness fix only.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Emit startup warning when deprecated `Static(String)` telemetry selector is used ([Issue #1766](https://github.com/apollographql/router/issues/1766))
+
+The string shorthand form for static telemetry attribute selectors (e.g. `my_attribute: "value"`) is now deprecated and will log a warning at startup. Use the object form instead:
+
+```yaml
+my_attribute:
+  static: "value"
+```
+
+The object form additionally supports typed values (bool, int, float, array), making it strictly more capable than the string shorthand.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/issues/1766
+
+### Fix Linux flake in `apollo_otel_traces::test_send_variable_value` (accounts subgraph ECONNRESET) ([PR #9497](https://github.com/apollographql/router/pull/9497))
+
+`apollo_otel_traces::test_send_variable_value` flaked on CircleCI's Linux executor whenever the public Apollo demo subgraphs (`https://*.demo.starstuff.dev/`) reset the TLS connection mid-request. The router surfaced the failure as `SubrequestHttpError { service: "accounts", reason: "Connection reset by peer (os error 104)" }`, which then turned the `apollo.subgraph.name=accounts` `http_request` span's status from `code: 0` (OK) to `code: 2` (ERROR) and dropped the `apollo_private.ftv1` attribute — both of which the snapshot expects to be present and OK. See the original CircleCI job 377214 for the captured trace log.
+
+**Root cause**
+
+`tests/fixtures/supergraph.graphql` hardcodes the live demo subgraph URLs (e.g. `@join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev/")`), and the existing `get_router_service` helper opts into real network egress via `with_subgraph_network_requests()`. The test therefore made real HTTPS calls to a third-party host every run; an `ECONNRESET` from that host was indistinguishable (to the snapshot) from a router bug.
+
+**What changed**
+
+Introduced a localhost wiremock (`start_demo_subgraphs_mock_server`) that serves canned federation responses for the three demo subgraphs — `accounts`, `products`, `reviews` — at distinct paths, each returning a valid FTV1 trace blob captured from the live demo deployment. A companion helper, `get_router_service_with_subgraph_mock`, wires `override_subgraph_url` config into the harness so the router rewrites the hardcoded `https://*.demo.starstuff.dev/` URIs to the wiremock. The FTV1 bytes are redacted by `assert_report!`, so the existing snapshot still matches.
+
+Scope is intentionally narrow to ROUTER-1814: only `test_send_variable_value` is migrated to the mock-backed path. The same flake mode applies to other tests in this file that go through `get_trace_report` (e.g. `non_defer`, `test_client_name`, `test_send_header`); those will be addressed in follow-up tickets.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Bound `dump_stack_traces()` with a timeout so a wedged child can't eat the panic output ([PR #9497](https://github.com/apollographql/router/pull/9497))
+
+`IntegrationTest::dump_stack_traces` in `apollo-router/tests/common.rs` (Linux-only) is the synchronous diagnostic invoked immediately before a panic in three deadline-expiry sites (`wait_for_log_message`, `assert_log_not_contains`, `assert_shutdown_with_deadline`). It calls `rstack::TraceOptions::trace(pid)`, which has no internal timeout and is backed by `PTRACE_ATTACH`. If the target router child is in `TASK_UNINTERRUPTIBLE` or has wedged signal handling, the attach blocks indefinitely, outliving the panic and letting nextest's slow-timeout kill the whole process without ever surfacing the deadline message.
+
+Wrap the `rstack` call in `tokio::task::spawn_blocking` + `tokio::time::timeout(10s)`. The function becomes `async`; the three callers are already in `async fn` so the migration is mechanical. On timeout, a clear message is logged so the operator knows the diagnostic was skipped — not that nothing happened. Happy-path `rstack::trace` on a responsive process completes in ~100 ms, well under the 10 s ceiling.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Add the `connect-migrate` CLI for migrating Connectors schemas to `connect/v0.4` ([PR #9574](https://github.com/apollographql/router/pull/9574))
+
+Adds `connect-migrate`, a command-line tool for migrating Apollo Connectors schemas to `connect/v0.4`, built behind the non-default `connect-migrate` cargo feature of `apollo-federation`. It is not part of the router runtime — the binary is built and distributed separately (via [`apollographql/connect-migrate`](https://github.com/apollographql/connect-migrate)).
+
+`connect-migrate analyze` dual-parses every `@connect(selection: …)` at a schema's currently-linked `connect/v0.n` against the `v0.4` target and emits an agent-facing manifest sorting each divergent site into deterministic `$.` rewrites, output-identical no-ops, and genuine questions for the developer. It is the supported upgrade path for the `connect/v0.4` selection behavior change (where a primitive in value position is now read as a literal rather than a property access).
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9574
+
+### Migrate `test_metrics_with_client_name_http_header` to subgraph mock ([Issue/PR #9497](https://github.com/apollographql/router/pull/9497))
+
+Scope-miss fix on ROUTER-1827 / commit `1f50ccc51`. The PR description claimed "all 6 `apollo_reports::test_metrics_with_*` tests now sandboxed" but `test_metrics_with_client_name_http_header` was missed — it still called the live-network `get_metrics_report`. Same `ECONNRESET`-from-public-demo flake mode (ROUTER-1814 / ROUTER-1823 / ROUTER-1827) applied. One-line swap to `get_metrics_report_with_subgraph_mock`, matching the other five siblings.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Restore `cargo-llvm-cov` to mise so nightly macOS coverage stops failing ([PR #9497](https://github.com/apollographql/router/pull/9497))
+
+The `cargo:cargo-llvm-cov` pin was dropped from `.config/mise/config.toml` during the May 2025 mise migration. The `do_coverage` CircleCI step still invokes `cargo llvm-cov nextest`, with no installer anywhere else in the repo. Nightly `coverage-macos_test` has been red on `dev` since 2026-04-09 (~30 consecutive runs) once the macOS executor stopped providing the binary out of band. Re-pin the latest stable (`0.8.7`).
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Close apollo_reports family flake — finish migrating remaining live-network callers ([Issue/PR #9497](https://github.com/apollographql/router/pull/9497))
+
+Three follow-ups to ROUTER-1823 / ROUTER-1827 / ROUTER-1829 that surfaced in the 2026-05-28 last-24h CI sweep:
+
+**B.** Migrated `test_persisted_query_by_id_stats` (`apollo_reports.rs:1199`) — the actual test that flaked with `Connection reset by peer` from `products.demo.starstuff.dev` on CircleCI build [379461](https://circleci.com/gh/apollographql/router/379461) — from `get_metrics_report` to `get_metrics_report_with_subgraph_mock`. Snapshot re-blessed against the wiremock's canonical FTV1 shape (gains per-field stats for `upc`).
+
+**C.** Added `get_batch_router_service_with_subgraph_mock` + `get_batch_trace_report_with_subgraph_mock` helpers (mirrors the existing `*_with_subgraph_mock` pair). Migrated all 3 callers of `get_batch_trace_report` (`apollo_reports.rs:894`, `1088`, `1236`), including the actual test that flaked with `502 Bad Gateway` from `reviews.demo.starstuff.dev` on CircleCI build [379415](https://circleci.com/gh/apollographql/router/379415) — `test_demand_control_trace_batched`. Deleted the now-dead `get_batch_trace_report` helper.
+
+**D.** Migrated the last `get_trace_report` caller (`test_condition_if` at line 819) from `get_trace_report` to `get_trace_report_with_subgraph_mock`, re-blessing `apollo_reports__condition_if(-2).snap` to reflect the wiremock's canonical field-ordering + type-info shape. Deleted the now-dead `get_trace_report` helper.
+
+After this lands, **only `get_metrics_report` and `get_batch_metrics_report` callers remain on the live demo subgraphs** — those are tracked as a follow-up in POST-CLOSEOUT-CI-WATCH.md.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Fix Linux flake in connectors::tests::test_operation_counter ([PR #9497](https://github.com/apollographql/router/pull/9497))
+
+`plugins::connectors::tests::test_operation_counter` was intermittently failing on Linux CI with:
+
+```
+[Request 1]: Expected path /users/1, got /users/2
+```
+
+The test issues `query { users { id name username } }` against a mocked subgraph. Connectors resolves this as a root `/users` fetch followed by two entity fetches — `/users/1` and `/users/2` — that run in parallel. Wiremock records requests in the order they actually arrive at the mock server, which is non-deterministic for concurrent in-flight requests. The test was using `req_asserts::matches`, which compares the recorded sequence positionally to the matcher list, so any time `/users/2` won the race it failed the assertion.
+
+The fix swaps the positional matcher list for the existing `Plan::Sequence(Plan::Fetch, Plan::Parallel(...))` helper — the same pattern already used by `test_root_field_plus_entity_plus_requires` and `test_entity_references` for exactly this scenario. The parallel branch matches by set membership rather than position, so request ordering between the two entity fetches no longer affects the result. The counter assertion is unchanged.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Fix Linux flake in `apollo_reports::test_metrics_with_library_name_http_header` (products subgraph ECONNRESET) ([PR #9497](https://github.com/apollographql/router/pull/9497))
+
+`apollo_reports::test_metrics_with_library_name_http_header` flaked on CircleCI's ARM Linux executor whenever the public Apollo demo subgraphs (`https://*.demo.starstuff.dev/`) reset the TLS connection mid-request. The router surfaced the failure as `SubrequestHttpError { service: "products", reason: "Connection reset by peer (os error 104)" }`, which then turned the recorded metrics shape (no subgraph errors, full `Product`/`Review`/`User` field counts) into a `topProducts: null` error payload, drifting the snapshot. See CircleCI job 378550 for the captured log.
+
+**Root cause**
+
+`tests/fixtures/supergraph.graphql` hardcodes the live demo subgraph URLs (e.g. `@join__graph(name: "products", url: "https://products.demo.starstuff.dev/")`), and the existing `get_metrics_report` helper opts into real network egress via `with_subgraph_network_requests()`. The test therefore made real HTTPS calls to a third-party host every run; an `ECONNRESET` from that host was indistinguishable (to the snapshot) from a router bug. Same flake mode as ROUTER-1814 in the sibling `apollo_otel_traces` binary.
+
+**What changed**
+
+Ported the wiremock pattern from `apollo_otel_traces` (`start_demo_subgraphs_mock_server` + `get_router_service_with_subgraph_mock`) into `apollo_reports.rs`, adapted for the `Report` collector and the `get_router_service` signature. Added a companion `get_metrics_report_with_subgraph_mock` and switched `test_metrics_with_library_name_http_header` over to it. The mock serves canned federation responses for `accounts`, `products`, and `reviews` at distinct paths and the router rewrites the hardcoded `https://*.demo.starstuff.dev/` URIs via `override_subgraph_url`. The FTV1 bytes are redacted by `assert_report!`, so the existing snapshot still matches.
+
+Scope is intentionally narrow: only `test_metrics_with_library_name_http_header` is migrated. The same flake mode applies to the five sibling `test_metrics_with_*_http_header` / `test_metrics_with_*_request_extension` tests and other `get_metrics_report` / `get_trace_report` callers in this file; those will be addressed in follow-up tickets.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Deprecate `persisted_queries.experimental_local_manifests` ([PR #9523](https://github.com/apollographql/router/pull/9523))
+
+The `persisted_queries.experimental_local_manifests` configuration key is now deprecated. Operators using this key will see a deprecation warning at router startup directing them to the GA `persisted_queries.local_manifests` key, which has the same behavior. The deprecated key continues to work in 2.x via the existing config migration, but will be removed in 3.x.
+
+```yaml
+# Before
+persisted_queries:
+  enabled: true
+  experimental_local_manifests:
+    - ./manifest.json
+
+# After
+persisted_queries:
+  enabled: true
+  local_manifests:
+    - ./manifest.json
+```
+
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9523
+
+### Warn at startup when coprocessor uses deprecated 1.x context key mode ([PR #9632](https://github.com/apollographql/router/pull/9632))
+
+The coprocessor plugin now emits a startup deprecation warning when `context: deprecated` is configured, in addition to the existing warning for the legacy boolean form `context: true`. Both forms opt into 1.x context key names and should be migrated to use `context: all` or selective context keys with current 2.x key names.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9632
+
+### Give `wait_for_log_message` extra headroom on Windows to stop Windows-only integration test flakes ([PR #9477](https://github.com/apollographql/router/pull/9477))
+
+`IntegrationTest::wait_for_log_message` (used by `assert_started`, `assert_reloaded`, `assert_not_started`, and friends) had a fixed 30 s deadline. Windows CircleCI runners spawn subprocesses and dispatch filesystem-watch events noticeably slower than Unix, so reload-driven waits frequently ran right up against the ceiling — most visibly causing intermittent Windows failures of `integration::telemetry::metrics::test_prom_reset_on_reload` and `integration::rhai::all_rhai_callbacks_are_invoked` on `dev`. Bump the deadline to 60 s on Windows only; Unix runs are unchanged.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9477
+
+### Fix Linux flake in file_upload::body_limits::rejects_oversized_operations_field ([PR #9497](https://github.com/apollographql/router/pull/9497))
+
+The `chunk_size_1_None` variant of `file_upload::body_limits::rejects_oversized_operations_field` flaked on Linux CI by panicking at the harness's 10 s `assert_shutdown` deadline with "unable to shutdown router".
+
+The test built a single-shot streaming body and posted it through the default `reqwest::Client`, whose connection pool keeps the inbound TCP connection idle after the response. When the body arrives in one frame, the router fully drains it before multer trips the operations-field `SizeLimit` and returns 413, so the connection is pool-eligible from hyper's perspective. After the test calls `router.graceful_shutdown()`, the per-connection task in `handle_connection!` (`src/axum_factory/listeners.rs`) waits the full `connection_shutdown_timeout` (5 s default injected by the harness) for the idle client connection to close. On a loaded 2xlarge Linux runner that 5 s plus CI scheduling slack pushes total shutdown past the 10 s budget. The 100-byte chunked sibling variants escape because the body is aborted mid-upload, forcing the connection closed immediately.
+
+The fix builds the request with `reqwest::Client::builder().pool_max_idle_per_host(0)`, matching the existing `no_keepalive_reqwest_client` pattern already used in `tests/integration/subgraph_response.rs` and `tests/integration/coprocessor.rs` for the same race. The test now closes its TCP connection as soon as the response is consumed, so the router exits within its normal shutdown window.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Emit startup warning when deprecated `apollo.preview_entity_cache` plugin is used ([PR #9631](https://github.com/apollographql/router/pull/9631))
+
+The `apollo.preview_entity_cache` plugin is deprecated and will be removed in Router 3.0. A warning is now logged at startup when it is enabled.
+
+Migrate to `apollo.response_cache`, which supersedes it. The two plugins are mutually exclusive and cannot be enabled at the same time.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9631
+
+### Fix macOS flake in unix_tests::test_unix_socket_max_header_list_size::case_1 ([PR #9491](https://github.com/apollographql/router/pull/9491))
+
+`integration::http_server::unix_tests::test_unix_socket_max_header_list_size::case_1_header_within_limits_of_config` had a residual flake on macOS arm64 CI even after the `drop(sender) + graceful_shutdown_with_deadline(20s)` pattern from PR #9418 was applied to its shared `#[rstest]` function body.
+
+The companion `case_2_header_bigger_than_config` (server rejects with 431 before reading the body) was fully closed by that prior fix. `case_1` (server accepts the 10 MiB header and returns a successful GraphQL response) has one extra shoulder of the same drain race: the response body was never consumed before drop. In HTTP/2, dropping an unread `Incoming` body sends `RST_STREAM` on the response stream, which forces the server-side response-writer task through an error-path teardown instead of the END_STREAM happy path. On a busy macOS arm64 runner this extra cleanup — stacked on top of the 10 MiB request-header parse the server is still finishing — was enough to push the post-SIGTERM drain past `assert_shutdown`'s budget. `case_2` does not exhibit this shoulder because the 431 response carries no body to leave unread.
+
+Fix: drain the response body to its natural END_STREAM with `body.collect().await` before dropping the sender. Applied unconditionally (it's a no-op on the 431 path's empty body) to keep the test linear and avoid a status-conditional split. The `drop(sender) + graceful_shutdown_with_deadline(20s)` pattern from #9418 stays in place — this is additive, not a replacement.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9491
+
+### Fix Windows wall-clock race in `uplink::license_stream::test_to_instant` ([Issue/PR #9497](https://github.com/apollographql/router/pull/9497))
+
+`test_to_instant` asserted `past_instant < Instant::now()` after computing `past_instant` via `to_positive_instant`. On Windows the monotonic clock advances at ~16 ms ticks, so the two `Instant::now()` reads inside the same tick return the same value and the strict `<` fails. Loosen to `<=` (the function's actual contract is "≥ now at call time, ≤ now after"). Same T9 wall-clock class as ROUTER-1825's `router_overhead::tracker::test_no_subgraph_requests` fix.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Add Redis readiness probe before 3rd `TestHarness::builder()` in `response_cache::integration_test_basic` ([Issue/PR #9497](https://github.com/apollographql/router/pull/9497))
+
+ROUTER-1813 / PR #9495 added `wait_for_redis_responsive` probes before the first two `TestHarness::builder()` calls in `integration_test_basic` to defeat fred's 500 ms `default_command_timeout` racing the first command on a freshly-built pool. The preamble comment promises *"Before each `TestHarness::builder()` invocation in this test"* — but the third harness at line 1488 was missed. Add the same one-line probe to close the bug class the original PR set out to close. Surfaced by ultrareview on PR #9497.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### De-flake `router_overhead::tracker::test_no_subgraph_requests` ([Issue/PR #9497](https://github.com/apollographql/router/pull/9497))
+
+Widen the wall-clock upper bound on `test_no_subgraph_requests` from 250 ms to 500 ms to match its three sibling tests in `apollo-router/src/plugins/telemetry/config_new/router_overhead/tracker.rs`. The lone outlier at 250 ms was flaking on macOS CircleCI executors under contention; the sibling tests document the rationale for the wider bound (see `test_sequential_subgraph_requests`).
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Add fragment caching to `Query::apply_root_selection_set` ([PR #9469](https://github.com/apollographql/router/pull/9469))
+
+Adds fragment caching to `Query::apply_root_selection_set` to significantly reduce time spent formatting responses from operations with deeply nested fragments.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/9469
+
+### Optimize enum processing used for apollo studio metrics ([PR #9473](https://github.com/apollographql/router/pull/9473))
+
+Performance in `apollo_studio_interop::extract_enums_from_selection_set` is improved for operations with deeply nested fragments.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/9473
+
+### Fix macOS flake in `samples::/core/query2` (accounts subgraph ECONNRESET) ([PR #9497](https://github.com/apollographql/router/pull/9497))
+
+`samples::/core/query2` flaked on CircleCI's macOS executor when the public Apollo demo subgraph `https://accounts.demo.starstuff.dev/` reset the TCP connection mid-request. The router surfaced it as `SubrequestHttpError { service: "accounts", reason: "Connection reset by peer (os error 54)" }`, and the assertion diff between the canned `{"me":{"name":"Ada Lovelace"}}` and the resulting error payload failed the test. See CircleCI job 376290 (macOS, `prep-2.14.1`, 2026-05-20).
+
+**Root cause**
+
+`tests/samples/core/query2/plan.json` declared `"subgraphs": {}`. The samples test driver (`apollo-router/tests/samples_tests.rs::load_subgraph_mocks`) only registers a wiremock subgraph override per entry in that map, so with an empty map the router fell through to the hardcoded supergraph URL `https://accounts.demo.starstuff.dev/` for the `me { name }` query. The expected response `Ada Lovelace` is in fact the live response from that public demo subgraph, so the test was relying on real public-internet egress for its happy path. That made every `ECONNRESET` from the demo host an indistinguishable flake. Same shape as ROUTER-1823 in `apollo_reports`.
+
+**What changed**
+
+Added a single `accounts` mock entry to `tests/samples/core/query2/plan.json` that returns the same `{"me":{"name":"Ada Lovelace"}}` body the test already asserts on. This is the same pattern the sibling `samples::/core/query1` already uses for its `accounts` mock. With the mock present, `load_subgraph_mocks` inserts an `override_subgraph_url` entry that points `accounts` at the local wiremock server, so the test no longer egresses to `*.demo.starstuff.dev`.
+
+Scope is intentionally narrow: only `core/query2` had the empty-subgraphs leak. All other samples (`core/query1`, `core/defer`, `basic/interface-object`, the `enterprise/*` suites) already provide the necessary subgraph mocks, so no framework-level change is needed.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Fix Linux flake in four `apollo_reports::test_metrics_with_*` siblings (products subgraph ECONNRESET) ([PR #9497](https://github.com/apollographql/router/pull/9497))
+
+Four sibling `test_metrics_with_*` tests in `apollo-router/tests/apollo_reports.rs` flaked on CircleCI's AMD Linux executor (build 376289, prep-2.14.1, 2026-05-20) whenever the public Apollo demo subgraphs (`https://*.demo.starstuff.dev/`) reset the TLS connection mid-request. The router surfaced the failure as `SubrequestHttpError { service: "products", reason: "Connection reset by peer (os error 104)" }`, which then turned the recorded metrics shape into a `topProducts: null` error payload, drifting the snapshots.
+
+**Root cause**
+
+Identical to ROUTER-1823 (`test_metrics_with_library_name_http_header`): `tests/fixtures/supergraph.graphql` hardcodes live demo subgraph URLs, and `get_metrics_report` routes through `with_subgraph_network_requests()`, so the tests make real HTTPS calls to a third-party host every run. The four sibling tests share the same exposure.
+
+**What changed**
+
+Migrated the four remaining `test_metrics_with_*` siblings to the wiremock-backed `get_metrics_report_with_subgraph_mock` helper added in ROUTER-1823. Call signatures were identical — the helper was directly usable, no extension required. Tests migrated:
+
+- `test_metrics_with_client_version_http_header`
+- `test_metrics_with_library_version_http_header`
+- `test_metrics_with_library_name_request_extension`
+- `test_metrics_with_library_version_request_extension`
+
+Scope is intentionally narrow: only the four `test_metrics_with_*` siblings exposed to the same flake mode are migrated. Other `get_metrics_report` / `get_trace_report` callers in this file (trace family, stats, persisted query variants) will be addressed in follow-up tickets if/when they flake.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Close `apollo_reports` trace-report family flake (8 of 9 callers sandboxed) ([PR #9497](https://github.com/apollographql/router/pull/9497))
+
+Two `apollo_reports` tests in the trace family flaked in the 2026-05-28 last-24h CI sweep against the public Apollo demo subgraphs:
+
+- `test_persisted_query_by_id_stats` (CircleCI build 379461, ARM Linux): `Connection reset by peer (os error 104)` from `products.demo.starstuff.dev`
+- `test_demand_control_trace_batched` (CircleCI build 379415, AMD Linux): `502: Bad Gateway` from `reviews.demo.starstuff.dev`
+
+Same root-cause class as ROUTER-1814 / ROUTER-1823 / ROUTER-1827, deferred follow-up on those tickets: `apollo_reports::get_trace_report` still routed through `with_subgraph_network_requests()` against the live `https://*.demo.starstuff.dev/` hosts hardcoded in `tests/fixtures/supergraph.graphql`.
+
+**What changed**
+
+Added `get_trace_report_with_subgraph_mock` as a sibling of the existing `get_metrics_report_with_subgraph_mock` helper, using the same wiremock-backed `get_router_service_with_subgraph_mock` and the same canned subgraph responses (`start_demo_subgraphs_mock_server`). Migrated 8 of 9 `get_trace_report` call sites:
+
+- `non_defer`, `test_condition_else`, `test_trace_id`, `test_trace_with_client_name_http_header`, `test_trace_with_client_version_http_header`, `test_send_header`, `test_send_variable_value`, `test_demand_control_trace`
+
+**Why one site (`test_condition_if`) was left on the live helper**
+
+The wiremock's canned FTV1 blob for the products subgraph emits the `Product` selection set in the order `upc`, `name`, which matches every other trace-family snapshot in this file (`non_defer`, `trace_id`, `condition_else`, etc.). The committed `apollo_reports__condition_if.snap` records the opposite order (`name`, `upc`) — a pre-existing inconsistency from the live demo subgraph's flaky field ordering at the time the snapshot was last captured. Migrating `test_condition_if` would have required re-blessing the snapshot, which is out of scope for a flake fix; flagged inline for a follow-up.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Deprecate `apollo.router.session.count.active` metric ([PR #9541](https://github.com/apollographql/router/pull/9541))
+
+The `apollo.router.session.count.active` up/down counter is now marked deprecated. Its exported metric description directs operators to the OpenTelemetry-compliant replacement `http.server.active_requests`, and the router additionally logs a deprecation warning at startup. The metric continues to be emitted under its current name for backward compatibility, but may be removed in a future release.
+
+Note: `http.server.active_requests` is enabled by default when `telemetry.instrumentation.instruments.default_requirement_level` is `required` or `recommended` (the default). Operators who have explicitly set `default_requirement_level: none` will need to enable it manually in their telemetry config.
+
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9541
+
+### Fix Linux flake in otlp::tracing::test_plugin_overridden_client_name_is_included_in_telemetry ([PR #9497](https://github.com/apollographql/router/pull/9497))
+
+`integration::telemetry::otlp::tracing::test_plugin_overridden_client_name_is_included_in_telemetry` flaked on CircleCI's Linux executor with `unable to send successful request to router, error sending request for url (http://127.0.0.1:<port>/)` from `IntegrationTest::execute_query`. The first two iterations of the test loop completed (visible as two successful trace verifications in the captured stdout); the third iteration's outbound HTTP request to the spawned router never reached the router. See CircleCI job 378759.
+
+**Root cause**
+
+The test runs four sequential `validate_otlp_trace` iterations against the same long-lived router. Between iterations, `Verifier::validate_trace` polls `find_valid_trace` at 50 ms intervals for up to 10 s while the harness's default `reqwest::Client` keeps an idle inbound TCP connection pooled to the router. Under CI load the pooled HTTP/1 keep-alive connection can be reset (by the router-side connection task or by the host network stack) before the next iteration reuses it; `reqwest` surfaces the reset as a connection-level `error sending request`. The router itself is still running fine — the failure is purely on the stale pooled connection.
+
+**Fix**
+
+Wire a `reqwest::Client::builder().pool_max_idle_per_host(0)` client into the test via `IntegrationTest::builder().reqwest_client(...)`. Each iteration now opens its own TCP connection to the router, eliminating the stale-pooled-connection race. This matches the established `no_keepalive_reqwest_client` pattern already used in `tests/integration/coprocessor.rs`, `tests/integration/subgraph_response.rs`, and `tests/integration/file_upload.rs` for the same class of flake (T17 sibling). No deadline widening; no test-level retries.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Remove stale "NOT migrated" comment above `test_condition_if` ([Issue/PR #9497](https://github.com/apollographql/router/pull/9497))
+
+Earlier in PR #9497, commit `ea97375ea` left a block comment above `test_condition_if` explaining that the test was deferred from the `get_trace_report` migration because of a snapshot ordering inconsistency. Commit `eb84b6642` then completed the migration *and* re-blessed both `apollo_reports__condition_if.snap` and `apollo_reports__condition_if-2.snap` — but missed deleting the now-stale comment. Surfaced by ultrareview on PR #9497.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+### Fix Linux flakes in subscriptions::callback startup race pair ([PR #9497](https://github.com/apollographql/router/pull/9497))
+
+Two sibling tests in `integration::subscriptions::callback` flaked on Linux CI on `test-amd_linux_test` with the same `assert_started`-vs-accept-loop race:
+
+- `test_subscription_callback_pure_error_payload` (CircleCI build 378842, 2026-05-26) panicked at `tests/integration/../common.rs:1412:25` with `unable to send successful request to router, error sending request for url (...)`. Test elapsed 1.8 s — the router log line `GraphQL endpoint exposed` had fired but the axum server task had not yet been polled when the first `execute_query` POST arrived, so the kernel RST'd the connection.
+- `test_subscription_callback_error_payload` (CircleCI build 377898, 2026-05-22) panicked at `tests/integration/subscriptions/callback.rs:169:5` with `router at http://127.0.0.1:40031/ did not accept HTTP requests within 30s`. This test already had the `wait_for_router_ready` HEAD probe added in a prior bundle commit, but its 30 s deadline was exhausted under heavy CI contention — the accept loop took longer than 30 s to be polled.
+
+Same root cause as the earlier `_error_payload` fix: `router.assert_started()` only waits for the `GraphQL endpoint exposed` log emitted in `axum_factory::axum_http_server_factory::create` immediately after `TcpListener::bind` resolves, BEFORE the spawned axum server task is actually polled. Under flake-bash 10x parallel contention the gap can be either short enough to fail with a connection reset (`_pure_error_payload`) or long enough to outrun a 30 s deadline (`_error_payload`).
+
+The fix is twofold and matches the helper added in commit 836eaf683:
+
+- Apply the existing `wait_for_router_ready` HEAD probe to `_pure_error_payload` between `assert_started().await` and the first `execute_query`, so the test only sends its POST once the accept loop is actually serving connections.
+- Widen the `_error_payload` deadline from 30 s to 60 s. The probe only burns time when something is wrong; the bundle's bounded `dump_stack_traces` (10 s) still protects against truly hung subprocesses. 60 s matches the existing slack in `wait_for_callbacks` plus the harness's `assert_shutdown` 20 s ceiling.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
+
+## 📚 Documentation
+
+### Remove cloud router documentation ([PR #9464](https://github.com/apollographql/router/pull/9464))
+
+The cloud router service (serverless and dedicated) has been retired.  The associated documentation has been removed.
+
+By [@DMallare](https://github.com/DMallare) in https://github.com/apollographql/router/pull/9464
+
+### Update links for API key and access management pages ([PR #9225](https://github.com/apollographql/router/pull/9225))
+
+Update outdated links for API key and access management documentation pages.
+
+By [@mabuyo](https://github.com/mabuyo) in https://github.com/apollographql/router/pull/9225
+
+
+
+# [2.15.1] - 2026-06-10
+
+## 🐛 Fixes
+
+### Fix Redis replica routing failure caused by lazy connections with even replica counts ([Issue/PR #9589](https://github.com/apollographql/router/pull/9589))
+
+When a Redis cluster had an even number of replicas, the router's use of `lazy_connections = true` could trigger a bug in fred's round-robin replica selection logic. Fred increments its round-robin counter when searching for a routable replica, and increments it again when it can't find one before requeuing the command. With an even replica count this causes fred to consistently target replicas that have no established connection, leading to GET failures falling through to backends and Redis CPU spikes.
+
+Switched to `lazy_connections = false` (eager connections) so all replica connections are established upfront. The `RouteableReplicaFilter` that was the original motivation for lazy connections — preventing unroutable replicas from entering the routing table — continues to handle that responsibility, making the blast-radius isolation that lazy connections provided redundant.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9589
+
+
+
 # [2.15.0] - 2026-05-26
 
 ## 🚀 Features

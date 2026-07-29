@@ -523,6 +523,88 @@ Content-Type: application/json
 
 The `count` field indicates the number of keys that were removed from Redis.
 
+## Tune which invalidation indexes are maintained
+
+{/* TODO(erik): confirm the release version for this section and add the appropriate availability note (e.g. "Available in Router v2.16 and later"). */}
+
+By default, every subgraph that uses active invalidation maintains all three Redis invalidation indexes—`subgraph`, `type`, and `cache_tag`—so any [invalidation method](#invalidation-methods) works at any time. Each index is a Redis ZSET written on every cache insert. For most deployments this is the right default and its cost is negligible.
+
+At very high cache volumes, an operator who only ever invalidates by a subset of those methods can opt out of the unused indexes to reduce per-insert Redis work. The `indexes` block under a subgraph's `invalidation` configuration controls which indexes that subgraph maintains:
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  invalidation:
+    listen: "127.0.0.1:3000"
+    path: "/invalidation"
+  subgraph:
+    all:
+      enabled: true
+      invalidation:
+        enabled: true
+        shared_key: "${env.INVALIDATION_SHARED_KEY}"
+        indexes:            # each field defaults to true
+          subgraph: false   # don't maintain the by-subgraph index
+          type: false       # don't maintain the by-type index
+          # cache_tag omitted, so it keeps its default of true
+    subgraphs:
+      products:
+        invalidation:
+          enabled: true
+          indexes:
+            subgraph: false
+            type: true
+            cache_tag: true
+```
+
+Each field maps to one invalidation method:
+
+| Field | Default | Required for |
+| --- | --- | --- |
+| `subgraph` | `true` | [By subgraph](#by-subgraph) invalidation requests |
+| `type` | `true` | [By entity type](#by-entity-type) invalidation requests |
+| `cache_tag` | `true` | [By cache tag](#by-cache-tag) invalidation requests |
+
+### How the `indexes` value is resolved
+
+Resolution is by whole block, not field by field:
+
+1. If a subgraph has its own `invalidation` block, that block's `indexes` value is used for that subgraph.
+2. Otherwise, the `all` block's `indexes` value is used.
+3. If neither configures `invalidation`, all three indexes are maintained.
+
+Within a single `indexes` block, any field you omit defaults to `true`. Omitting a field does **not** inherit that field from the `all` block. For example, a subgraph that sets `indexes: { type: false }` maintains `subgraph` and `cache_tag` (each defaulting to `true`) and disables only `type`, regardless of what the `all` block specifies. If you want a subgraph to share the `all` block's settings, omit that subgraph's `invalidation` block entirely rather than specifying a partial `indexes`.
+
+### Disabling all indexes
+
+Setting all three fields to `false` is supported and means "TTL-only caching with no invalidation API" for that subgraph:
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  subgraph:
+    all:
+      enabled: true
+      invalidation:
+        enabled: true
+        indexes:
+          subgraph: false
+          type: false
+          cache_tag: false
+```
+
+No invalidation-index writes happen on cache inserts, and every request to the `/invalidation` endpoint for that subgraph returns `400`. Cache entries still expire by TTL.
+
+### Behavior when a requested method is disabled
+
+If an `/invalidation` request targets a subgraph whose `indexes` does not enable the requested kind, the endpoint returns `400` with a structured error identifying the subgraph and the unsupported kind, rather than silently doing nothing. This surfaces a misconfigured invalidation caller quickly instead of letting it fail open.
+
+> **Indexes are additive only.** Enabling a previously-disabled index does not retroactively index existing cache entries. If you change a subgraph from `{ cache_tag: true }` to `{ cache_tag: true, subgraph: true }`, the by-subgraph index is populated only for entries written after the change; earlier entries remain invisible to by-subgraph invalidation until they expire by TTL. To bring a newly enabled index online across the full cache set, flush Redis before enabling it.
+
+## CDN invalidation
+
+Everything above invalidates data in the router's own Redis-backed cache. If you also cache responses at a CDN or reverse proxy in front of the router, the CDN needs its own way to know what to purge—the same `@cacheTag`/`apolloCacheTags`/`apolloEntityCacheTags` labels described above can be propagated to the CDN as a response header for that purpose. See [CDN Invalidation](/router/performance/caching/response-caching/cdn-invalidation) for how to enable and use it.
+
 ## Combining both approaches
 
 You can use both `@cacheControl` (for TTL-based passive invalidation) and `@cacheTag` (for active invalidation) together on the same types and fields. This gives you the flexibility to set reasonable TTLs as a safety net while also having the ability to invalidate data immediately when needed.

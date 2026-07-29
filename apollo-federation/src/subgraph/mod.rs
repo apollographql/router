@@ -16,6 +16,7 @@ use apollo_compiler::validation::Valid;
 use indexmap::map::Entry;
 
 use crate::ValidFederationSubgraph;
+use crate::compat::coerce_and_validate_schema_values;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
@@ -73,7 +74,8 @@ impl Subgraph {
             .get_all(&default_link_name);
 
         for directive in link_directives {
-            let link_directive = Link::from_directive_application(directive, &schema)?;
+            let link_directive =
+                Link::from_directive_application_when_link_spec_unknown(directive, &schema)?;
             if link_directive.url.identity == Identity::federation_identity() {
                 if imported_federation_definitions.is_some() {
                     let msg = "Invalid use of @link in schema: invalid graphql schema - multiple @link imports for the federation specification are not supported";
@@ -105,6 +107,7 @@ impl Subgraph {
             imported_federation_definitions,
             imported_link_definitions,
         )?;
+        coerce_and_validate_schema_values(&mut schema)?;
         let schema = schema.validate()?;
         Ok(ValidSubgraph {
             name: name.to_owned(),

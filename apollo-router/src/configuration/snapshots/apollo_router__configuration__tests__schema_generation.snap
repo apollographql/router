@@ -281,6 +281,17 @@ expression: "&schema"
           ],
           "description": "Percentage of traces to send via the OTel protocol when sending to Apollo Studio."
         },
+        "sampler": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SamplerOption"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-exporter sampler for traces sent to Apollo Studio.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`."
+        },
         "send_headers": {
           "allOf": [
             {
@@ -937,6 +948,44 @@ expression: "&schema"
       "required": [
         "public_url"
       ],
+      "type": "object"
+    },
+    "CdnInvalidationConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for surfacing invalidation labels to a CDN as a header (for example, Cloudflare)\nseparated by a delimiting character (by default, \",\")\n\nWhen enabled, the router collects the union of cache tags contributed by each subgraph\n(from `apolloCacheTags`, `apolloEntityCacheTags`, and resolved `@cacheTag` directive values)\nand emits them as a single configurable header on the supergraph response. The coarser\n`subgraph`/`type` labels are always recorded onto the request context (available to\ncoprocessors or Rhai regardless of this config), but the fine-grained tag values are only\naggregated when `enabled` is `true` — there's no way to read the full label set from context\nwithout also enabling header emission.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Whether to emit the configured header on the supergraph response. Defaults to false.",
+          "type": "boolean"
+        },
+        "experimental_on_overflow": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/OverflowBehavior"
+            }
+          ],
+          "default": "truncate",
+          "description": "What to do when the joined header value would exceed `max_bytes`.\n\nThis is an experimental configuration option that might be removed in future releases,\nplease use caution when deciding to use it. Defaults to `truncate`."
+        },
+        "header_delimiter": {
+          "default": ",",
+          "description": "The delimiter used by the invalidation labels header (eg, `\" \"`, `\",\"`). Defaults to `\",\"`.",
+          "type": "string"
+        },
+        "header_name": {
+          "default": "Cache-Tag",
+          "description": "Name of the invalidation labels header used by CDNs",
+          "type": "string"
+        },
+        "max_bytes": {
+          "default": 16384,
+          "description": "Maximum number of bytes for the joined header value. When the joined value would exceed\nthis size, `experimental_on_overflow` decides what to do. Defaults to 16kb.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
       "type": "object"
     },
     "Client": {
@@ -2031,6 +2080,21 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
+        "cdn_invalidation": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CdnInvalidationConfig"
+            }
+          ],
+          "default": {
+            "enabled": false,
+            "experimental_on_overflow": "truncate",
+            "header_delimiter": ",",
+            "header_name": "Cache-Tag",
+            "max_bytes": 16384
+          },
+          "description": "Propagation of aggregated response_cache cache tags to the supergraph response.\nOff by default; opt in to surface cache tags to a CDN for tag-based purging. See\n`CdnInvalidationConfig` for the individual fields."
+        },
         "debug": {
           "default": false,
           "description": "Enable debug mode for the debugger",
@@ -2222,11 +2286,12 @@ expression: "&schema"
     },
     "ConnectorHeadersConfiguration": {
       "additionalProperties": false,
+      "description": "Configuration for connectors (no masking - inherits from parent subgraph)",
       "properties": {
         "all": {
           "anyOf": [
             {
-              "$ref": "#/definitions/HeadersLocation"
+              "$ref": "#/definitions/ConnectorHeadersLocation"
             },
             {
               "type": "null"
@@ -2236,10 +2301,28 @@ expression: "&schema"
         },
         "sources": {
           "additionalProperties": {
-            "$ref": "#/definitions/HeadersLocation"
+            "$ref": "#/definitions/ConnectorHeadersLocation"
           },
           "description": "Map of subgraph_name.connector_source_name to configuration",
           "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorHeadersLocation": {
+      "additionalProperties": false,
+      "description": "Configuration for connector headers at a specific location\nConnectors only have request operations - masking is inherited from parent subgraph",
+      "properties": {
+        "request": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConnectorRequestHeadersLocation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Request-side propagate/insert/remove operations"
         }
       },
       "type": "object"
@@ -2311,6 +2394,20 @@ expression: "&schema"
             "string",
             "null"
           ]
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorRequestHeadersLocation": {
+      "additionalProperties": false,
+      "description": "Request-side connector header configuration. Mirrors the wrapped\n`operations:` shape used by `HeadersLocation`, so connector config doesn't\ndrift from regular subgraph config.",
+      "properties": {
+        "operations": {
+          "description": "Propagate/Insert/Remove operations",
+          "items": {
+            "$ref": "#/definitions/Operation"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -2411,6 +2508,17 @@ expression: "&schema"
                 "string",
                 "null"
               ]
+            },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             }
           },
           "required": [
@@ -2431,6 +2539,17 @@ expression: "&schema"
                 "string",
                 "null"
               ]
+            },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             }
           },
           "required": [
@@ -2892,7 +3011,8 @@ expression: "&schema"
         },
         "preview_connect_v0_4": {
           "default": null,
-          "description": "Feature gate for Connect spec v0.3. Set to `true` to enable the using\nthe v0.3 spec during the preview phase.",
+          "deprecated": true,
+          "description": "Feature gate for Connect spec v0.4. Previously required to opt into the\nv0.4 spec during its preview phase; now a no-op, since `@link`-ing\nconnect/v0.4 in a subgraph is itself a sufficient opt-in.",
           "type": [
             "boolean",
             "null"
@@ -3212,6 +3332,17 @@ expression: "&schema"
           "default": {},
           "description": "Custom mapping to be used as the resource field in spans, defaults to:\nrouter -> http.route\nsupergraph -> graphql.operation.name\nquery_planning -> graphql.operation.name\nsubgraph -> subgraph.name\nsubgraph_request -> subgraph.name\nhttp_request -> http.route",
           "type": "object"
+        },
+        "sampler": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SamplerOption"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-exporter sampler.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`.\n\nIgnored when `preview_datadog_agent_sampling` is enabled — in that mode the Datadog agent\ncontrols sampling via `sampling.priority` and all spans must be forwarded unfiltered."
         },
         "span_metrics": {
           "additionalProperties": {
@@ -5664,6 +5795,35 @@ expression: "&schema"
         }
       ]
     },
+    "GlobalHeadersConfiguration": {
+      "additionalProperties": false,
+      "description": "Per-subgraph (or global) header configuration. Request configuration covers\npropagation + masking; response configuration covers masking only.",
+      "properties": {
+        "request": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HeadersLocation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Request configuration (operations and masking)"
+        },
+        "response": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResponseHeadersLocation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Response configuration (masking only)"
+        }
+      },
+      "type": "object"
+    },
     "GraphQLSelector": {
       "anyOf": [
         {
@@ -5854,20 +6014,45 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "HeaderMaskingConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for header masking in logs and telemetry",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Enable header masking globally (default: true for fail-secure behavior)",
+          "type": "boolean"
+        },
+        "replace_defaults": {
+          "default": false,
+          "description": "When true, `sensitive_headers` replaces the built-in default list\ninstead of extending it. Default: false (additive, fail-secure).",
+          "type": "boolean"
+        },
+        "sensitive_headers": {
+          "default": [],
+          "description": "Additional header names to mask (case-insensitive). By default these are\nmerged with the built-in sensitive-header list (see\n`default_sensitive_headers`). Set `replace_defaults: true` to opt out of\nthe built-ins and treat this list as authoritative.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "HeadersConfig": {
       "additionalProperties": false,
-      "description": "Configuration for header propagation",
+      "description": "Configuration for header propagation and masking",
       "properties": {
         "all": {
           "anyOf": [
             {
-              "$ref": "#/definitions/HeadersLocation"
+              "$ref": "#/definitions/GlobalHeadersConfiguration"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Rules to apply to all subgraphs"
+          "description": "Rules to apply to all subgraphs (global defaults)"
         },
         "connector": {
           "allOf": [
@@ -5879,9 +6064,9 @@ expression: "&schema"
         },
         "subgraphs": {
           "additionalProperties": {
-            "$ref": "#/definitions/HeadersLocation"
+            "$ref": "#/definitions/GlobalHeadersConfiguration"
           },
-          "description": "Rules to specific subgraphs",
+          "description": "Rules for specific subgraphs",
           "type": "object"
         }
       },
@@ -5889,18 +6074,28 @@ expression: "&schema"
     },
     "HeadersLocation": {
       "additionalProperties": false,
+      "description": "Request-side header configuration: propagation operations + optional masking.",
       "properties": {
-        "request": {
-          "description": "Propagate/Insert/Remove headers from request",
+        "masking": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HeaderMaskingConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Header masking configuration applied to request headers in logs/telemetry."
+        },
+        "operations": {
+          "description": "Propagate/Insert/Remove operations",
           "items": {
             "$ref": "#/definitions/Operation"
           },
           "type": "array"
         }
       },
-      "required": [
-        "request"
-      ],
       "type": "object"
     },
     "HealthCheckConfig": {
@@ -6032,6 +6227,17 @@ expression: "&schema"
                 "null"
               ]
             },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
+            },
             "request_header": {
               "description": "The name of the request header.",
               "type": "string"
@@ -6052,6 +6258,17 @@ expression: "&schema"
                 "string",
                 "null"
               ]
+            },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             },
             "response_header": {
               "description": "The name of the response header.",
@@ -6723,6 +6940,28 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "InvalidationIndexes": {
+      "additionalProperties": false,
+      "description": "Which invalidation indexes a subgraph maintains for its cached entries. Each field controls\nwhether the corresponding ZSET is written on cache inserts and whether the corresponding\ninvalidation request kind is honored at the `/invalidation` endpoint.\n\nAll three indexes are enabled by default. Operators with workloads that only ever invalidate\nby a subset of modes can opt out of the unused indexes to reduce per-insert Redis work.\n\nNote: `indexes` is **additive only**. Enabling a previously-disabled index does NOT\nretroactively index existing cache entries. If a deployment changes from\n`{cache_tag: true}` to `{cache_tag: true, subgraph: true}`, the `subgraph-{name}` ZSET will\nbe populated only for entries written after the config change. Pre-change entries are\ninvisible to `By subgraph` invalidation requests until they age out via TTL. To bring the\nnew index online over the full cache set, flush Redis before enabling the additional index.",
+      "properties": {
+        "cache_tag": {
+          "default": true,
+          "description": "Maintain the per-tag indexes for `apolloCacheTags`, `apolloEntityCacheTags`, and resolved\n`@cacheTag` directive values. Required for `By cache tag` invalidation requests.",
+          "type": "boolean"
+        },
+        "subgraph": {
+          "default": true,
+          "description": "Maintain the `subgraph-{name}` index. Required for `By subgraph` invalidation requests.",
+          "type": "boolean"
+        },
+        "type": {
+          "default": true,
+          "description": "Maintain the by-type index. Required for `By type` invalidation requests.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "JWTConf": {
       "additionalProperties": false,
       "properties": {
@@ -6872,6 +7111,7 @@ expression: "&schema"
             "max_aliases": null,
             "max_depth": null,
             "max_height": null,
+            "max_recursive_selections": 10000000,
             "max_root_fields": null,
             "parser_max_recursion": 500,
             "parser_max_tokens": 15000,
@@ -7415,6 +7655,17 @@ expression: "&schema"
           "default": "grpc",
           "description": "The protocol to use when sending data"
         },
+        "sampler": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SamplerOption"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-exporter sampler for tracing.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect. Has no effect on metrics.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`.\n\nWhen `preview_datadog_agent_sampling` is enabled, this sampler is still applied (including\nto `RecordOnly` spans that would not normally be exported), but a warning is emitted at\nstartup. If this OTLP endpoint targets the Datadog agent, the agent may receive incomplete\ntraces; if it targets a different backend (e.g. Jaeger or Grafana Tempo), subsampling\nindependently is safe."
+        },
         "temporality": {
           "allOf": [
             {
@@ -7534,6 +7785,21 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "OverflowBehavior": {
+      "description": "What the router does when the joined `Cache-Tag`/invalidation-labels header value would\nexceed `max_bytes`. See `CdnInvalidationConfig::experimental_on_overflow`.",
+      "oneOf": [
+        {
+          "const": "truncate",
+          "description": "Pack the header coarsest-first (subgraph, then type, then tag) and drop whatever doesn't\nfit, finest-grained first, so an oversized response still gets a usable, if partial,\nheader.",
+          "type": "string"
+        },
+        {
+          "const": "drop",
+          "description": "Omit the header entirely rather than send a partial one. Note: this does not drop the\n`Cache-Control` header, so the response is still cached — this option is only useful\npaired with a CDN-side rule that treats a missing invalidation-labels header as a signal\nto bypass caching for that response (e.g. Cloudflare response rules setting `no-store`\nwhen the header is absent).",
+          "type": "string"
+        }
+      ]
     },
     "PersistedQueries": {
       "additionalProperties": false,
@@ -8225,6 +8491,21 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "RedactMode": {
+      "description": "Per-selector masking override. `Allow` shows the raw header value; `Mask`\nalways replaces it with `***MASKED***`. When unset, the selector defers to\nthe global request/response rules in `MaskingRulesMap`.",
+      "oneOf": [
+        {
+          "const": "allow",
+          "description": "Always show the header value, ignoring any global masking rules.",
+          "type": "string"
+        },
+        {
+          "const": "mask",
+          "description": "Always mask the header value, regardless of global rules.",
+          "type": "string"
+        }
+      ]
+    },
     "RedisCache": {
       "additionalProperties": false,
       "description": "Redis cache configuration",
@@ -8418,6 +8699,25 @@ expression: "&schema"
         }
       ]
     },
+    "ResponseHeadersLocation": {
+      "additionalProperties": false,
+      "description": "Response-side header configuration. Response propagation isn't a router\nfeature, so only masking is configurable here.",
+      "properties": {
+        "masking": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HeaderMaskingConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Header masking configuration applied to response headers in logs/telemetry."
+        }
+      },
+      "type": "object"
+    },
     "ResponseStatus": {
       "oneOf": [
         {
@@ -8502,7 +8802,7 @@ expression: "&schema"
         },
         "http2_max_headers_list_bytes": {
           "default": null,
-          "description": "For HTTP2, limit the header list to a threshold of bytes. Default is 16kb.\n\nIf router receives more headers than allowed size of the header list, it responds to the client with\n\"431 Request Header Fields Too Large\".",
+          "description": "For HTTP2, limit the header list to a threshold of bytes. Default is 16kib.\n\nIf router receives more headers than allowed size of the header list, it responds to the client with\n\"431 Request Header Fields Too Large\".",
           "type": [
             "string",
             "null"
@@ -8549,6 +8849,13 @@ expression: "&schema"
             "integer",
             "null"
           ]
+        },
+        "max_recursive_selections": {
+          "default": 10000000,
+          "description": "Limit the total number of selections encountered when recursively expanding\nfragment spreads in an operation. This protects against extremely large or\ndeeply nested operations that could consume excessive resources during\nquery planning. Default: 10000000 (10 million).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         },
         "max_root_fields": {
           "default": null,
@@ -8806,6 +9113,17 @@ expression: "&schema"
               ],
               "description": "Optional default value."
             },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
+            },
             "request_header": {
               "description": "The name of the request header.",
               "type": "string"
@@ -8926,8 +9244,19 @@ expression: "&schema"
               ],
               "description": "Optional default value."
             },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
+            },
             "response_header": {
-              "description": "The name of the request header.",
+              "description": "The name of the response header.",
               "type": "string"
             }
           },
@@ -10288,6 +10617,19 @@ expression: "&schema"
           "description": "Enable the invalidation",
           "type": "boolean"
         },
+        "indexes": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/InvalidationIndexes"
+            }
+          ],
+          "default": {
+            "cache_tag": true,
+            "subgraph": true,
+            "type": true
+          },
+          "description": "Which invalidation indexes to maintain for this subgraph's cached entries. Defaults to\nall three (`subgraph`, `type`, `cache_tag`) enabled, matching the original\n`response_cache` behavior. Operators with workloads that only invalidate by a subset of\nmodes can opt out of the unused indexes to reduce per-insert Redis work.\n\nSetting all three to `false` disables invalidation indexing entirely; the `/invalidation`\nendpoint then returns HTTP 400 for any request against this subgraph. This shape is\nuseful for pure TTL-based caching without an invalidation API."
+        },
         "shared_key": {
           "default": "",
           "description": "Shared key needed to request the invalidation endpoint",
@@ -10628,6 +10970,17 @@ expression: "&schema"
                 "null"
               ]
             },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
+            },
             "subgraph_request_header": {
               "description": "The name of a subgraph request header.",
               "type": "string"
@@ -10660,6 +11013,17 @@ expression: "&schema"
                 "string",
                 "null"
               ]
+            },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             },
             "subgraph_response_header": {
               "description": "The name of a subgraph response header.",
@@ -10823,6 +11187,17 @@ expression: "&schema"
                 "string",
                 "null"
               ]
+            },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             },
             "supergraph_request_header": {
               "description": "The supergraph request header name.",
@@ -11834,6 +12209,17 @@ expression: "&schema"
                 "null"
               ]
             },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
+            },
             "request_header": {
               "description": "The name of the request header.",
               "type": "string"
@@ -11853,6 +12239,17 @@ expression: "&schema"
                 "string",
                 "null"
               ]
+            },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             },
             "response_header": {
               "description": "The name of the response header.",
@@ -12708,6 +13105,17 @@ expression: "&schema"
             }
           ],
           "description": "The endpoint to send to"
+        },
+        "sampler": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SamplerOption"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-exporter sampler.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`."
         }
       },
       "required": [

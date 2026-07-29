@@ -3,7 +3,6 @@ mod error;
 pub(super) mod redis;
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -11,7 +10,9 @@ pub(super) use error::Error;
 use tokio_util::time::FutureExt;
 
 use super::cache_control::CacheControl;
+use crate::plugins::response_cache::cache_tag::CacheTag;
 use crate::plugins::response_cache::invalidation::InvalidationKind;
+use crate::plugins::response_cache::invalidation_labels::InvalidationLabels;
 use crate::plugins::response_cache::metrics::record_fetch_duration;
 use crate::plugins::response_cache::metrics::record_fetch_error;
 use crate::plugins::response_cache::metrics::record_insert_duration;
@@ -20,16 +21,27 @@ use crate::plugins::response_cache::metrics::record_invalidation_duration;
 
 type StorageResult<T> = Result<T, Error>;
 
-/// A `Document` is a unit of data to be stored in the cache, including any invalidation keys, its
-/// TTL, cache control information, etc.
+/// A `Document` is a unit of data to be stored in the cache, including any cache-tag entries
+/// it indexes under, its TTL, cache-control information, etc.
+///
+/// The cache-tag entries on a Document are pre-filtered by the plugin layer based on the
+/// subgraph's configured invalidation indexes; the storage layer's job is purely to render
+/// each entry into its Redis ZSET key via [`CacheTag::to_redis_key`] and persist the document
+/// data and tag memberships. No invalidation policy lives here.
 #[derive(Debug, Clone)]
 pub(super) struct Document {
     pub(super) key: String,
     pub(super) data: serde_json_bytes::Value,
     pub(super) control: CacheControl,
-    pub(super) invalidation_keys: Vec<String>,
+    pub(super) cache_tags: Vec<CacheTag>,
+    /// The fine-grained tag values (schema `@cacheTag` or `apolloCacheTags`/
+    /// `apolloEntityCacheTags` extensions) to persist alongside this document so a later cache
+    /// hit can rebuild the CDN `Cache-Tag` header for it, independent of `cache_tags` above.
+    /// `cache_tags` is pre-filtered by the Redis `IndexMode::CacheTag` index setting — this
+    /// field is populated whenever CDN invalidation wants it too, even if that index is off, so
+    /// enabling CDN invalidation alone never silently changes what gets `ZADD`ed into Redis.
+    pub(super) cdn_invalidation_tags: Vec<String>,
     pub(super) expire: Duration,
-    pub(super) debug: bool,
 }
 
 /// A `CacheEntry` is a unit of data returned from the cache. It contains the cache key, value, and
@@ -39,8 +51,12 @@ pub(super) struct CacheEntry {
     pub(super) key: String,
     pub(super) data: serde_json_bytes::Value,
     pub(super) control: CacheControl,
-    // Only set in debug mode
-    pub(super) cache_tags: Option<HashSet<String>>,
+    /// Invalidation labels are those labels used to invalidate cached data; they pick out data
+    /// uniquely or, if the label applies more coarsely, to sets of data. They're used for Redis
+    /// cache invalidation through the invalidation endpoint and by CDNs through their CDN-specific
+    /// endpoints; for CDNs, they're emitted as a header and separated by a delimiter, which are
+    /// both configurable
+    pub(super) invalidation_labels: Option<InvalidationLabels>,
 }
 
 /// The `CacheStorage` trait defines an API that the backing storage layer must implement for

@@ -21,6 +21,16 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::Type;
 use apollo_compiler::validation::Valid;
+use either::Either;
+
+use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
+use crate::error::SingleFederationError;
+use crate::schema::position::DirectiveDefinitionPosition;
+use crate::schema::position::InputObjectFieldDefinitionPosition;
+use crate::schema::position::InterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 
 /// Return true if a directive application is "semantic", meaning it's observable in introspection.
 fn is_semantic_directive_application(directive: &Directive) -> bool {
@@ -147,217 +157,270 @@ pub(crate) fn remove_non_semantic_directives(schema: &mut Schema) {
 // Just a boolean with a `?` operator
 type CoerceResult = Result<(), ()>;
 
-#[derive(Clone, Copy)]
-enum DefaultValueBehavior {
-    /// Inject missing input object fields from their type-level defaults.
-    /// Correct for executable document coercion at runtime.
-    Expand,
-    /// Preserve the literal as written — only check validity.
-    /// Correct for schema-level default values in composition output.
-    Check,
+#[derive(Default)]
+struct CoerceOptions {
+    coerce_non_list_values_for_list_types: bool,
 }
 
-/// Recursively coerce input object values, mutating the value.
-/// If the default value is invalid, returns `Err(())`.
+/// This function, when passed a GraphQL value from a schema or operation, will:
+/// 1. Coerce enum values for the String type and string values for enum types. This is not a
+///    GraphQL spec coercion rule, but instead for backwards compatibility with JS logic, which has
+///    schema and operation representations that effectively did the same coercions.
+/// 2. Optionally coerce non-list values for list types. This is technically a GraphQL spec coercion
+///    rule, but really we're doing it here for backward compatibility with JS logic, which would do
+///    this coercion for its operation and selection set representations.
+/// 3. Partially validate that the value is correct for its type. We purposefully do not validate
+///    custom scalars (since router can't know the validation rules for those) and variables (since
+///    the validation logic here is only really used for default values in schemas, which can't
+///    contain variables). However, for backward compatibility with JS logic, we additionally omit
+///    checking that:
+///    - object values have required fields for input object types
+///    - integer values are within the range of a 32-bit signed integer for the Int type
+///    - float values are a finite IEEE 754 value for the Float type
+///    - default values don't contain cycles (this is distinct from input object cycle checks)
+///
+/// Note that coercion still proceeds if a validation error was found. This is to mimic JS logic,
+/// which coerced before validating in separate passes. Also, we don't return error messages because
+/// the JS logic similarly didn't (in the future, we'll get better messages from apollo-rs when it
+/// starts validating default values).
 fn coerce_value(
     types: &IndexMap<Name, ExtendedType>,
     target: &mut Node<Value>,
     ty: &Type,
-    default_value_behavior: DefaultValueBehavior,
+    options: &CoerceOptions,
 ) -> CoerceResult {
-    match (target.make_mut(), types.get(ty.inner_named_type())) {
-        (Value::Object(object), Some(ExtendedType::InputObject(definition))) if ty.is_named() => {
-            for (field_name, field_definition) in definition.fields.iter() {
-                match object.iter_mut().find(|(key, _value)| key == field_name) {
-                    Some((_name, value)) => {
-                        coerce_value(types, value, &field_definition.ty, default_value_behavior)?;
-                    }
-                    None => {
-                        if matches!(default_value_behavior, DefaultValueBehavior::Expand) {
-                            if let Some(default_value) = &field_definition.default_value {
-                                let mut value = default_value.clone();
-                                coerce_value(
-                                    types,
-                                    &mut value,
-                                    &field_definition.ty,
-                                    DefaultValueBehavior::Expand,
-                                )?;
-                                object.push((field_name.clone(), value));
-                            } else if field_definition.is_required() {
-                                return Err(());
-                            }
-                        } else if field_definition.default_value.is_none()
-                            && field_definition.is_required()
-                        {
-                            return Err(());
+    match ty {
+        Type::NonNullNamed(ty) => {
+            if target.is_null() {
+                // A null value is invalid for a non-null type.
+                return Err(());
+            }
+            coerce_value(types, target, &Type::Named(ty.clone()), options)
+        }
+        Type::NonNullList(ty) => {
+            if target.is_null() {
+                // A null value is invalid for a non-null type.
+                return Err(());
+            }
+            coerce_value(types, target, &Type::List(ty.clone()), options)
+        }
+        Type::List(ty) => {
+            if target.is_null() {
+                // Null is always valid for a nullable type.
+                return Ok(());
+            }
+            if matches!(target.as_ref(), Value::Variable(_)) {
+                // As mentioned above, we don't validate variables, since this validation is only
+                // used for schema default values (which don't contain variables). Note that we
+                // don't have variable definitions, but the GraphQL spec validation rule
+                // https://spec.graphql.org/September2025/#AreTypesCompatible()
+                // guarantees that a variable's type must have the same level of list wrapping as
+                // its location in a value, so there's no need to coerce either.
+                return Ok(());
+            }
+            if matches!(target.as_ref(), Value::List(_)) {
+                let Value::List(target) = target.make_mut() else {
+                    // An internal error, as we just checked above that this is a list.
+                    return Err(());
+                };
+                for element in target {
+                    coerce_value(types, element, ty, options)?;
+                }
+            } else {
+                coerce_value(types, target, ty, options)?;
+                if options.coerce_non_list_values_for_list_types {
+                    *target.make_mut() = Value::List(vec![target.clone()]);
+                }
+            }
+            Ok(())
+        }
+        Type::Named(ty) => {
+            if target.is_null() {
+                // Null is always valid for a nullable type.
+                return Ok(());
+            }
+            if matches!(target.as_ref(), Value::Variable(_)) {
+                // As mentioned above, we don't validate variables, since this validation is only
+                // used for schema default values (which don't contain variables). We also don't
+                // need to coerce variables.
+                return Ok(());
+            }
+            let Some(ty) = types.get(ty) else {
+                // An internal error, as valid schemas shouldn't have unknown type references.
+                return Err(());
+            };
+            match ty {
+                ExtendedType::InputObject(ty) => {
+                    let Value::Object(target) = target.make_mut() else {
+                        // A non-object value is invalid for an input object type.
+                        return Err(());
+                    };
+                    // In the event one of the fields is invalid, we want to keep coercing the
+                    // remaining ones.
+                    let mut is_error = false;
+                    for (field, target) in target.iter_mut() {
+                        let Some(definition) = ty.fields.get(field) else {
+                            // Unknown object fields are invalid for an input object type.
+                            is_error = true;
+                            continue;
+                        };
+                        if coerce_value(types, target, &definition.ty, options).is_err() {
+                            is_error = true;
                         }
                     }
-                }
-            }
-        }
-        (Value::List(list), Some(_)) if ty.is_list() => {
-            for element in list {
-                coerce_value(types, element, ty.item_type(), default_value_behavior)?;
-            }
-        }
-        // Coerce single values (except null) to a list.
-        (
-            Value::Object(_)
-            | Value::String(_)
-            | Value::Enum(_)
-            | Value::Int(_)
-            | Value::Float(_)
-            | Value::Boolean(_),
-            Some(_),
-        ) if ty.is_list() => {
-            coerce_value(types, target, ty.item_type(), default_value_behavior)?;
-            *target.make_mut() = Value::List(vec![target.clone()]);
-        }
-
-        // Accept null for any nullable type.
-        (Value::Null, _) if !ty.is_non_null() => {}
-
-        // Accept non-composite values if they match the type.
-        (Value::String(_), Some(ExtendedType::Scalar(scalar)))
-            if !scalar.is_built_in() || matches!(scalar.name.as_str(), "ID" | "String") => {}
-        (Value::String(value), Some(ExtendedType::Enum(_))) => {
-            *target.make_mut() = Value::Enum(Name::new_unchecked(value));
-        }
-        (Value::Boolean(_), Some(ExtendedType::Scalar(scalar)))
-            if !scalar.is_built_in() || scalar.name == "Boolean" => {}
-        (Value::Int(_), Some(ExtendedType::Scalar(scalar)))
-            if !scalar.is_built_in() || matches!(scalar.name.as_str(), "ID" | "Int" | "Float") => {}
-        (Value::Float(_), Some(ExtendedType::Scalar(scalar)))
-            if !scalar.is_built_in() || scalar.name == "Float" => {}
-        // Custom scalars accept any value, even objects and lists.
-        (Value::Object(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
-        (Value::List(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
-        (Value::Enum(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
-        (Value::Enum(value), Some(ExtendedType::Scalar(scalar)))
-            if scalar.is_built_in() && matches!(scalar.name.as_str(), "String") =>
-        {
-            *target.make_mut() = Value::String(value.to_string());
-        }
-        // Enums must match the type.
-        (Value::Enum(value), Some(ExtendedType::Enum(enum_)))
-            if enum_.values.contains_key(value) => {}
-
-        // Other types are totally invalid (and should ideally be rejected by validation).
-        _ => return Err(()),
-    }
-    Ok(())
-}
-
-/// Coerce default values in all the given arguments, mutating the arguments.
-/// If a default value is invalid, the whole default value is removed silently (graphql-js
-/// `printSchema` behavior for schema defaults).
-fn coerce_arguments_default_values(
-    types: &IndexMap<Name, ExtendedType>,
-    arguments: &mut Vec<Node<InputValueDefinition>>,
-) {
-    for arg in arguments {
-        let arg = arg.make_mut();
-        let Some(default_value) = &mut arg.default_value else {
-            continue;
-        };
-
-        if coerce_value(types, default_value, &arg.ty, DefaultValueBehavior::Check).is_err() {
-            arg.default_value = None;
-        }
-    }
-}
-
-/// Like [`coerce_arguments_default_values`] but preserves `= {}` defaults even when the
-/// input type has required fields. Used at subgraph-parse time to match graphql-js behavior:
-/// JS keeps `= {}` verbatim in the upgraded subgraph SDL regardless of required fields;
-/// the supergraph/API-schema path uses [`coerce_arguments_default_values`] directly, which
-/// still strips them there.
-fn coerce_arguments_default_values_keep_empty_object(
-    types: &IndexMap<Name, ExtendedType>,
-    arguments: &mut Vec<Node<InputValueDefinition>>,
-) {
-    for arg in arguments {
-        let arg = arg.make_mut();
-        let Some(default_value) = &mut arg.default_value else {
-            continue;
-        };
-        let is_empty_object =
-            matches!(default_value.as_ref(), Value::Object(fields) if fields.is_empty());
-        if coerce_value(types, default_value, &arg.ty, DefaultValueBehavior::Check).is_err() {
-            if is_empty_object {
-                // Restore `= {}` — coerce_value may have partially mutated the value before
-                // failing. Matches graphql-js parse-time behavior: keep `= {}` even when the
-                // input type has required fields with no defaults.
-                *default_value.make_mut() = Value::Object(Default::default());
-            } else {
-                arg.default_value = None;
-            }
-        }
-    }
-}
-
-/// Do graphql-js-style input coercion on default values. Invalid default values are silently
-/// removed from the schema.
-///
-/// This is not what we would want to do for coercion in a real execution scenario, but it matches
-/// a behaviour in graphql-js so we can compare API schema results between federation-next and JS
-/// federation. We can consider removing this when we no longer rely on JS federation.
-pub(crate) fn coerce_schema_default_values(schema: &mut Schema) {
-    // Keep a copy of the types in the schema so we can mutate the schema while walking it.
-    let types = schema.types.clone();
-
-    for ty in schema.types.values_mut() {
-        match ty {
-            ExtendedType::Object(object) => {
-                let object = object.make_mut();
-                for field in object.fields.values_mut() {
-                    let field = field.make_mut();
-                    coerce_arguments_default_values(&types, &mut field.arguments);
-                }
-            }
-            ExtendedType::Interface(interface) => {
-                let interface = interface.make_mut();
-                for field in interface.fields.values_mut() {
-                    let field = field.make_mut();
-                    coerce_arguments_default_values(&types, &mut field.arguments);
-                }
-            }
-            ExtendedType::InputObject(input_object) => {
-                let input_object = input_object.make_mut();
-                for field in input_object.fields.values_mut() {
-                    let field = field.make_mut();
-                    let Some(default_value) = &mut field.default_value else {
-                        continue;
-                    };
-
-                    if coerce_value(
-                        &types,
-                        default_value,
-                        &field.ty,
-                        DefaultValueBehavior::Check,
-                    )
-                    .is_err()
-                    {
-                        field.default_value = None;
+                    if is_error {
+                        return Err(());
                     }
+                    Ok(())
                 }
-            }
-            ExtendedType::Union(_) | ExtendedType::Scalar(_) | ExtendedType::Enum(_) => {
-                // Nothing to do
+                ExtendedType::Scalar(ty) => {
+                    if ty.is_built_in() {
+                        match ty.name.as_str() {
+                            "Int" => {
+                                if !matches!(target.as_ref(), Value::Int(_)) {
+                                    // A non-integer value is invalid for the Int type.
+                                    return Err(());
+                                }
+                                // As mentioned above, we don't validate the integer value is within
+                                // the range of a 32-bit signed integer for backward compatibility
+                                // with JS logic.
+                            }
+                            "Float" => {
+                                if !matches!(target.as_ref(), Value::Int(_) | Value::Float(_)) {
+                                    // A non-integer, non-float value is invalid for the Float type.
+                                    return Err(());
+                                }
+                                // As mentioned above, we don't validate the float value is a finite
+                                // IEEE 754 value for backward compatibility with JS logic.
+                            }
+                            "String" => {
+                                // As mentioned above, we coerce enum values for the String type for
+                                // backward compatibility with JS logic.
+                                if let Value::Enum(name) = target.as_ref() {
+                                    *target.make_mut() = Value::String(name.to_string());
+                                }
+                                if !matches!(target.as_ref(), Value::String(_)) {
+                                    // A non-string value is invalid for the String type (but note
+                                    // the exception above).
+                                    return Err(());
+                                }
+                            }
+                            "Boolean" => {
+                                if !matches!(target.as_ref(), Value::Boolean(_)) {
+                                    // A non-boolean value is invalid for the Boolean type.
+                                    return Err(());
+                                }
+                            }
+                            "ID" => {
+                                if !matches!(target.as_ref(), Value::Int(_) | Value::String(_)) {
+                                    // A non-integer, non-string value is invalid for the ID type.
+                                    return Err(());
+                                }
+                            }
+                            _ => {
+                                // An internal error, as GraphQL only has the above five built-in
+                                // scalar types.
+                                return Err(());
+                            }
+                        }
+                    }
+                    // As mentioned above, we don't validate custom scalars, since we can't know the
+                    // validation rules for them.
+                    Ok(())
+                }
+                ExtendedType::Enum(ty) => {
+                    // As mentioned above, we coerce string values for enum types for backward
+                    // compatibility with JS logic.
+                    if let Value::String(name) = target.as_ref() {
+                        let Ok(name) = Name::new(name) else {
+                            // A non-GraphQL-name value is invalid for enum types.
+                            return Err(());
+                        };
+                        *target.make_mut() = Value::Enum(name);
+                    }
+                    let Value::Enum(name) = target.as_ref() else {
+                        // A non-enum value is invalid for enum types (but note the exception
+                        // above).
+                        return Err(());
+                    };
+                    if !ty.values.contains_key(name) {
+                        // An unknown enum value is invalid for enum types.
+                        return Err(());
+                    }
+                    Ok(())
+                }
+                ExtendedType::Object(_) | ExtendedType::Interface(_) | ExtendedType::Union(_) => {
+                    // An internal error, as valid schemas shouldn't use non-input types for values.
+                    Err(())
+                }
             }
         }
     }
+}
 
-    for directive in schema.directive_definitions.values_mut() {
-        let directive = directive.make_mut();
-        coerce_arguments_default_values(&types, &mut directive.arguments);
+/// Coerce default values in all the given arguments, mutating the arguments. Invalid default values
+/// generate an error (but note that `coerce_value()` only does partial validation).
+fn coerce_and_validate_arguments_default_values(
+    types: &IndexMap<Name, ExtendedType>,
+    arguments: &mut Vec<Node<InputValueDefinition>>,
+    position: &Either<ObjectOrInterfaceFieldDefinitionPosition, DirectiveDefinitionPosition>,
+    errors: &mut Vec<SingleFederationError>,
+) {
+    for arg in arguments {
+        let name = arg.name.clone();
+        let coordinate = match &position {
+            Either::Left(ObjectOrInterfaceFieldDefinitionPosition::Object(position)) => {
+                position.argument(name).to_string()
+            }
+            Either::Left(ObjectOrInterfaceFieldDefinitionPosition::Interface(position)) => {
+                position.argument(name).to_string()
+            }
+            Either::Right(position) => position.argument(name).to_string(),
+        };
+        let arg = arg.make_mut();
+        if arg.is_required() && arg.directives.has("deprecated") {
+            errors.push(SingleFederationError::InvalidGraphQL {
+                message: format!("Required argument {} cannot be deprecated.", coordinate,),
+            })
+        }
+        let Some(default_value) = &mut arg.default_value else {
+            continue;
+        };
+        if coerce_value(types, default_value, &arg.ty, &Default::default()).is_err() {
+            errors.push(SingleFederationError::InvalidGraphQL {
+                message: format!(
+                    "Invalid default value (got: {}) provided for argument {} of type {}.",
+                    default_value.serialize().no_indent(),
+                    coordinate,
+                    arg.ty
+                ),
+            })
+        }
     }
 }
 
-pub(crate) fn coerce_schema_values(schema: &mut Schema) {
-    // Keep a copy of the types in the schema so we can mutate the schema while walking it.
-    let types = schema.types.clone();
+/// This function, for a schema, will do the following for any GraphQL values in that schema:
+/// 1. Coerce enum values for the String type and string values for enum types. This is not a
+///    GraphQL spec coercion rule, but instead for backwards compatibility with JS logic, which has
+///    schema and operation representations that effectively did the same coercions.
+/// 2. For default values specifically, partially validate that the value is correct for its type.
+///    We purposefully do not validate custom scalars (since router can't know the validation rules
+///    for those) and variables (since schemas can't contain variables). However, for backward
+///    compatibility with JS logic, we additionally omit checking that:
+///    - object values have required fields for input object types
+///    - integer values are within the range of a 32-bit signed integer for the Int type
+///    - float values are a finite IEEE 754 value for the Float type
+///    - default values don't contain cycles (this is distinct from input object cycle checks)
+/// 3. Validate that required arguments/input fields are not marked @deprecated (apollo-rs does not
+///    do this, but it's a GraphQL spec validation rule and federation JS logic does this).
+///
+/// Note that coercion still proceeds if a validation error was found. This is to mimic JS logic,
+/// which coerced before validating in separate passes.
+pub fn coerce_and_validate_schema_values(schema: &mut Schema) -> Result<(), FederationError> {
+    let mut errors: Vec<SingleFederationError> = Default::default();
 
+    // Keep a copy of the schema types/directives so we can mutate the schema while walking it.
+    let types = schema.types.clone();
     let directive_definitions = schema.directive_definitions.clone();
 
     for ty in schema.types.values_mut() {
@@ -371,11 +434,27 @@ pub(crate) fn coerce_schema_values(schema: &mut Schema) {
                 );
                 for field in object.fields.values_mut() {
                     let field = field.make_mut();
-                    coerce_arguments_default_values_keep_empty_object(&types, &mut field.arguments);
+                    coerce_and_validate_arguments_default_values(
+                        &types,
+                        &mut field.arguments,
+                        &Either::Left(
+                            ObjectFieldDefinitionPosition {
+                                type_name: object.name.clone(),
+                                field_name: field.name.clone(),
+                            }
+                            .into(),
+                        ),
+                        &mut errors,
+                    );
                     coerce_directive_application_values_ast(
                         &directive_definitions,
                         &types,
                         &mut field.directives,
+                    );
+                    coerce_argument_directive_application_values(
+                        &directive_definitions,
+                        &types,
+                        &mut field.arguments,
                     );
                 }
             }
@@ -388,11 +467,27 @@ pub(crate) fn coerce_schema_values(schema: &mut Schema) {
                 );
                 for field in interface.fields.values_mut() {
                     let field = field.make_mut();
-                    coerce_arguments_default_values_keep_empty_object(&types, &mut field.arguments);
+                    coerce_and_validate_arguments_default_values(
+                        &types,
+                        &mut field.arguments,
+                        &Either::Left(
+                            InterfaceFieldDefinitionPosition {
+                                type_name: interface.name.clone(),
+                                field_name: field.name.clone(),
+                            }
+                            .into(),
+                        ),
+                        &mut errors,
+                    );
                     coerce_directive_application_values_ast(
                         &directive_definitions,
                         &types,
                         &mut field.directives,
+                    );
+                    coerce_argument_directive_application_values(
+                        &directive_definitions,
+                        &types,
+                        &mut field.arguments,
                     );
                 }
             }
@@ -405,28 +500,37 @@ pub(crate) fn coerce_schema_values(schema: &mut Schema) {
                 );
                 for field in input_object.fields.values_mut() {
                     let field = field.make_mut();
+                    let coordinate = InputObjectFieldDefinitionPosition {
+                        type_name: input_object.name.clone(),
+                        field_name: field.name.clone(),
+                    }
+                    .to_string();
                     coerce_directive_application_values_ast(
                         &directive_definitions,
                         &types,
                         &mut field.directives,
                     );
+                    if field.is_required() && field.directives.has("deprecated") {
+                        errors.push(SingleFederationError::InvalidGraphQL {
+                            message: format!(
+                                "Required argument {} cannot be deprecated.",
+                                coordinate,
+                            ),
+                        })
+                    }
                     let Some(default_value) = &mut field.default_value else {
                         continue;
                     };
-                    let is_empty_object = matches!(default_value.as_ref(), Value::Object(fields) if fields.is_empty());
-                    if coerce_value(
-                        &types,
-                        default_value,
-                        &field.ty,
-                        DefaultValueBehavior::Check,
-                    )
-                    .is_err()
+                    if coerce_value(&types, default_value, &field.ty, &Default::default()).is_err()
                     {
-                        if is_empty_object {
-                            *default_value.make_mut() = Value::Object(Default::default());
-                        } else {
-                            field.default_value = None;
-                        }
+                        errors.push(SingleFederationError::InvalidGraphQL {
+                            message: format!(
+                                "Invalid default value (got: {}) provided for input field {} of type {}.",
+                                default_value.serialize().no_indent(),
+                                coordinate,
+                                field.ty
+                            )
+                        })
                     }
                 }
             }
@@ -467,8 +571,26 @@ pub(crate) fn coerce_schema_values(schema: &mut Schema) {
 
     for directive in schema.directive_definitions.values_mut() {
         let directive = directive.make_mut();
-        coerce_arguments_default_values(&types, &mut directive.arguments);
+        coerce_and_validate_arguments_default_values(
+            &types,
+            &mut directive.arguments,
+            &Either::Right(DirectiveDefinitionPosition {
+                directive_name: directive.name.clone(),
+            }),
+            &mut errors,
+        );
+        coerce_argument_directive_application_values(
+            &directive_definitions,
+            &types,
+            &mut directive.arguments,
+        );
     }
+
+    if !errors.is_empty() {
+        return Err(MultipleFederationErrors { errors }.into());
+    }
+
+    Ok(())
 }
 
 fn coerce_directive_application_values(
@@ -485,11 +607,16 @@ fn coerce_directive_application_values(
                 continue;
             };
             let arg = arg.make_mut();
+            // Note that GraphQL spec validation will catch invalidities in directive application
+            // argument values but with nicer error messaging, so if coerce_value() fails validation
+            // here we just ignore it.
             _ = coerce_value(
                 &schema.types,
                 &mut arg.value,
                 &definition.ty,
-                DefaultValueBehavior::Expand,
+                &CoerceOptions {
+                    coerce_non_list_values_for_list_types: true,
+                },
             );
         }
     }
@@ -510,11 +637,14 @@ fn coerce_directive_application_values_schema(
                 continue;
             };
             let arg = arg.make_mut();
+            // Note that GraphQL spec validation will catch invalidities in directive application
+            // argument values but with nicer error messaging, so if coerce_value() fails validation
+            // here we just ignore it.
             _ = coerce_value(
                 type_definitions,
                 &mut arg.value,
                 &definition.ty,
-                DefaultValueBehavior::Check,
+                &Default::default(),
             );
         }
     }
@@ -535,13 +665,36 @@ fn coerce_directive_application_values_ast(
                 continue;
             };
             let arg = arg.make_mut();
+            // Note that GraphQL spec validation will catch invalidities in directive application
+            // argument values but with nicer error messaging, so if coerce_value() fails validation
+            // here we just ignore it.
             _ = coerce_value(
                 type_definitions,
                 &mut arg.value,
                 &definition.ty,
-                DefaultValueBehavior::Check,
+                &Default::default(),
             );
         }
+    }
+}
+
+/// Coerce the values of directives applied to field arguments (the `ARGUMENT_DEFINITION` location).
+/// `coerce_schema_values` already handles directives on types, fields, input fields and enum
+/// values; arguments are handled here so e.g. an enum-typed directive argument given as a string
+/// literal is coerced to the enum value (matching graphql-js leniency) instead of failing later
+/// schema validation.
+fn coerce_argument_directive_application_values(
+    directive_definitions: &IndexMap<Name, Node<DirectiveDefinition>>,
+    type_definitions: &IndexMap<Name, ExtendedType>,
+    arguments: &mut [Node<InputValueDefinition>],
+) {
+    for arg in arguments {
+        let arg = arg.make_mut();
+        coerce_directive_application_values_ast(
+            directive_definitions,
+            type_definitions,
+            &mut arg.directives,
+        );
     }
 }
 
@@ -558,12 +711,17 @@ fn coerce_selection_set_values(
                     let Some(definition) = definition.argument_by_name(&arg.name) else {
                         continue;
                     };
+                    // Note that GraphQL spec validation will catch invalidities in field argument
+                    // values but with nicer error messaging, so if coerce_value() fails validation
+                    // here we just ignore it.
                     let arg = arg.make_mut();
                     _ = coerce_value(
                         &schema.types,
                         &mut arg.value,
                         &definition.ty,
-                        DefaultValueBehavior::Expand,
+                        &CoerceOptions {
+                            coerce_non_list_values_for_list_types: true,
+                        },
                     );
                 }
                 coerce_directive_application_values(schema, &mut field.directives);
@@ -591,16 +749,16 @@ fn coerce_operation_values(schema: &Valid<Schema>, operation: &mut Node<executab
             continue;
         };
 
-        // On error, the default value is invalid. This would have been caught by validation.
-        // In schemas, we explicitly remove the default value if it's invalid, to match the JS
-        // query planner behaviour.
-        // In queries, I hope we can just reject queries with invalid default values instead of
-        // silently doing the wrong thing :)
+        // Note that GraphQL spec validation will catch invalidities in variable definition default
+        // values but with nicer error messaging, so if coerce_value() fails validation here we just
+        // ignore it.
         _ = coerce_value(
             &schema.types,
             default_value,
             &variable.ty,
-            DefaultValueBehavior::Expand,
+            &CoerceOptions {
+                coerce_non_list_values_for_list_types: true,
+            },
         );
     }
 
@@ -621,12 +779,16 @@ pub(crate) fn coerce_executable_values(schema: &Valid<Schema>, document: &mut Ex
     }
 }
 
-/// Applies default value coercion and removes non-semantic directives so that
-/// the apollo-rs serialized output of the schema matches the result of
-/// `printSchema(buildSchema()` in graphql-js.
+/// Removes non-semantic directives so that the apollo-rs serialized output of the schema matches
+/// the result of JS logic's `printSchema()`.
+///
+/// Note this has different behavior than graphql-js's `printSchema()`, as `buildSchema()` in
+/// graphql-js will coerce default values (since the purpose of that schema representation is to
+/// execute operations, so it pre-coerces them). Similarly, introspection in graphql-js will return
+/// the coerced default values from `buildSchema()`, but the GraphQL spec doesn't say to coerce (see
+/// https://spec.graphql.org/September2025/#sec-The-__InputValue-Type for more information).
 pub(crate) fn make_print_schema_compatible(schema: &mut Schema) {
     remove_non_semantic_directives(schema);
-    coerce_schema_default_values(schema);
 }
 
 #[cfg(test)]
@@ -694,11 +856,46 @@ mod tests {
         {
           test(string: enumVal1, strings: enumVal2, custom: enumVal1, customList: enumVal2)
         }
-        "#), @r###"
+        "#), @r#"
         {
           test(string: "enumVal1", strings: ["enumVal2"], custom: enumVal1, customList: [enumVal2])
         }
-        "###);
+        "#);
+    }
+
+    #[test]
+    fn coerces_enum_string_in_field_argument_directive() {
+        // Regression: a directive applied to a *field argument* (ARGUMENT_DEFINITION) whose
+        // argument is enum-typed but given a string literal must be coerced to the enum value,
+        // just like directives on fields/enum-values. Previously `coerce_schema_values` skipped
+        // field-argument directives, so such a string survived to fail later schema validation.
+        let mut schema = Schema::parse(
+            r#"
+            directive @d(x: E!) on ARGUMENT_DEFINITION
+            enum E { A B }
+            type Query { f(a: Int @d(x: "A")): Int }
+            "#,
+            "schema.graphql",
+        )
+        .expect("valid subgraph schema");
+
+        super::coerce_and_validate_schema_values(&mut schema).unwrap();
+
+        let sdl = schema.to_string();
+        insta::assert_snapshot!(sdl, @"
+        directive @d(x: E!) on ARGUMENT_DEFINITION
+
+        enum E {
+          A
+          B
+        }
+
+        type Query {
+          f(
+            a: Int @d(x: A),
+          ): Int
+        }
+        ");
     }
 
     #[test]
@@ -726,7 +923,7 @@ mod tests {
         fragment f on T {
             get(bools: true)
         }
-        "#), @r###"
+        "#), @"
         {
           test {
             ...f
@@ -736,6 +933,6 @@ mod tests {
         fragment f on T {
           get(bools: [true])
         }
-        "###);
+        ");
     }
 }

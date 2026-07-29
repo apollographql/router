@@ -1,0 +1,6 @@
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          my.static.attribute: "deprecated static string value"
