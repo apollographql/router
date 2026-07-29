@@ -947,6 +947,9 @@ where
                 event = messages.next() => {
                     let Some(event) = event else { break };
                     let current_is_input = is_input_event(&event);
+                    // Captured before `event` is consumed below so we can compare it
+                    // against the next queued event's variant when deciding to coalesce.
+                    let current_kind = std::mem::discriminant(&event);
                     let event_name = event.to_string();
                     let previous_state = format!("{state:?}");
 
@@ -968,17 +971,21 @@ where
                         Shutdown => state.shutdown().await,
                     };
 
-                    // Coalesce: if this was an input event and another input event is
-                    // already queued right behind it, skip the reload — the next event
-                    // will supersede this target. A control event (Shutdown / NoMore*)
-                    // or an empty queue is always a reload boundary, and we force a
-                    // build once we've skipped MAX_COALESCED_RELOADS in a row so a
-                    // relentless burst can't defer the reload forever.
+                    // Coalesce: if this was an input event and another update of the
+                    // *same kind* is already queued right behind it, skip the reload —
+                    // the next event will supersede this target. We only coalesce
+                    // same-kind updates so that, say, a failing license or config
+                    // publish queued alongside a schema publish can't prevent the
+                    // schema from being applied (they build separately). A different
+                    // kind, a control event (Shutdown / NoMore*), or an empty queue is
+                    // always a reload boundary, and we force a build once we've skipped
+                    // MAX_COALESCED_RELOADS in a row so a relentless burst can't defer
+                    // the reload forever.
                     let coalesce_with_next = current_is_input
                         && consecutive_coalesced < MAX_COALESCED_RELOADS
                         && matches!(
                             std::pin::Pin::new(&mut messages).peek().now_or_never(),
-                            Some(Some(next)) if is_input_event(next)
+                            Some(Some(next)) if std::mem::discriminant(next) == current_kind
                         );
 
                     if coalesce_with_next {
@@ -2325,14 +2332,15 @@ mod tests {
         assert_eq!(shutdown_receivers.0.lock().len(), 1);
     }
 
-    // A burst of input events already queued in the channel collapses into a
-    // single build of the newest merged target; the superseded intermediates are
-    // skipped and counted by the coalesced metric.
+    // A queued burst of same-kind updates collapses into a single build of the
+    // newest; the superseded intermediates are skipped and counted by the metric.
+    // Startup's config/schema/license are different kinds and so don't coalesce;
+    // the schema burst that follows does.
     #[test(tokio::test)]
     async fn coalesces_queued_burst_into_single_reload() {
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
-        let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+        let router_factory = create_mock_router_configurator(2);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
         async move {
             assert_matches!(
                 execute_burst(
@@ -2340,7 +2348,9 @@ mod tests {
                     router_factory,
                     stream::iter(vec![
                         UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
+                        UpdateSchema(example_schema()),
                         UpdateLicense(Default::default()),
+                        // A queued burst of schema updates — same kind, so coalesced.
                         UpdateSchema(SchemaState {
                             sdl: minimal_schema.to_owned(),
                             launch_id: None,
@@ -2356,17 +2366,17 @@ mod tests {
                 .await,
                 Ok(())
             );
-            // Only the newest target is built (one server start); the four earlier
-            // inputs were coalesced away.
-            assert_eq!(shutdown_receivers.0.lock().len(), 1);
-            assert_counter!("apollo.router.state.reload.coalesced", 4);
+            // Startup builds once; the schema burst collapses to one more build for
+            // the newest, skipping the two intermediate schemas.
+            assert_eq!(shutdown_receivers.0.lock().len(), 2);
+            assert_counter!("apollo.router.state.reload.coalesced", 2);
         }
         .with_metrics()
         .await;
     }
 
-    // Coalescing must apply the NEWEST value of each input, not an intermediate.
-    // Two configs are queued; only the newest (homepage enabled) may reach create().
+    // Coalescing must apply the NEWEST value, not an intermediate. Two same-kind
+    // configs are queued back-to-back; only the newest (homepage enabled) is built.
     #[test(tokio::test)]
     async fn coalesced_burst_applies_newest_input() {
         let mut router_factory = MockMyRouterConfigurator::new();
@@ -2386,11 +2396,11 @@ mod tests {
                 server_factory,
                 router_factory,
                 stream::iter(vec![
-                    // Intermediate config (homepage disabled) — coalesced away.
-                    UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
                     UpdateSchema(example_schema()),
                     UpdateLicense(Default::default()),
-                    // Newest config (homepage enabled) — the one that must be built.
+                    // Two configs queued back-to-back (same kind → coalesced); only
+                    // the newest (homepage enabled) may reach create().
+                    UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
                     UpdateConfiguration(Arc::new(
                         Configuration::builder()
                             .homepage(Homepage::builder().enabled(true).build())
@@ -2404,6 +2414,44 @@ mod tests {
             Ok(())
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 1);
+    }
+
+    // Different-kind updates queued together are NOT coalesced: a schema and a
+    // config build separately, so an unrelated (possibly failing) config or license
+    // can't block a schema publish queued alongside it. Here the schema and the
+    // config each build, on top of startup, for three builds total.
+    #[test(tokio::test)]
+    async fn mixed_kind_updates_are_not_coalesced() {
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
+        let router_factory = create_mock_router_configurator(3);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(3);
+        assert_matches!(
+            execute_burst(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
+                    UpdateSchema(example_schema()),
+                    UpdateLicense(Default::default()),
+                    // A schema then a config, queued together but different kinds:
+                    // each is built separately rather than merged into one reload.
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None,
+                    }),
+                    UpdateConfiguration(Arc::new(
+                        Configuration::builder()
+                            .homepage(Homepage::builder().enabled(true).build())
+                            .build()
+                            .unwrap()
+                    )),
+                    Shutdown,
+                ])
+            )
+            .await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 3);
     }
 
     // Coalescing is capped: a burst larger than MAX_COALESCED_RELOADS forces an
