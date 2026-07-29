@@ -1,0 +1,16 @@
+---
+source: apollo-router/src/services/supergraph/tests.rs
+expression: response
+snapshot_kind: text
+---
+{
+  "errors": [
+    {
+      "message": "invalid variable `$tier`: found JSON string for GraphQL type `PartnerTier!`",
+      "extensions": {
+        "name": "tier",
+        "code": "VALIDATION_INVALID_TYPE_VARIABLE"
+      }
+    }
+  ]
+}
