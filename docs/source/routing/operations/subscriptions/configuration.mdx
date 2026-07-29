@@ -323,7 +323,7 @@ When a corporate firewall, VPC security group, or asymmetric routing policy brea
 
 Use the [`apollo.router.operations.subscriptions.terminated.client`](#tracking-subgraph-connection-failures-and-closures) metric as the primary diagnostic split. When the metric fires for the failing subscription (with `reason=heartbeat_delivery_failed` or `client_disconnect`), Router has observed the disconnect itself. The failure is at the router-to-client boundary or on the client. When the metric doesn't fire and the client still sees a 504, an intermediary might have closed the connection without Router seeing it. Check the proxy, gateway, and firewall logs first.
 
-If 504s persist after you have configured every hop for streaming and made sure the timeouts cover the expected lifetime, the metric tells you which side of the router boundary to investigate next.
+If 504s persist after you have configured every hop for streaming and made sure the timeouts cover the expected lifetime, the metric tells you what side of the router boundary to investigate next.
 
 ## Subscription deduplication
 
