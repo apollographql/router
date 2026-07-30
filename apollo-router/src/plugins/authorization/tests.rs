@@ -12,6 +12,7 @@ use tower::ServiceExt;
 use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::graphql;
 use crate::plugin::test::MockSubgraph;
 use crate::plugins::authorization::APOLLO_AUTHENTICATION_JWT_CLAIMS;
@@ -450,6 +451,137 @@ async fn authenticated_directive_reject_unauthorized() {
 
     insta::assert_json_snapshot!(response);
     assert_logs_contain_entire_request_authorization_error();
+}
+
+mod whole_query_rejection {
+    use super::*;
+
+    /// `Organization.id` and `User.phone` are both `@authenticated`, so filtering removes
+    /// paths from an unauthenticated request and `reject_unauthorized` turns that into a
+    /// whole-query rejection.
+    const REJECTED_QUERY: &str = "query { orga(id: 1) { id creatorUser { id name phone } } }";
+
+    type SubgraphHandles =
+        Arc<Mutex<Vec<tower_test::mock::Handle<subgraph::Request, subgraph::Response>>>>;
+
+    /// Builds a router that rejects `REJECTED_QUERY`, replacing every subgraph with a
+    /// `tower_test` mock. The mocks hold no canned responses, so reaching one fails.
+    async fn build_router_rejecting_whole_query() -> (router::BoxCloneService, SubgraphHandles) {
+        let handles: SubgraphHandles = Arc::new(Mutex::new(Vec::new()));
+        let handles_clone = handles.clone();
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({
+                "authorization": {
+                    "directives": {
+                        "enabled": true,
+                        "reject_unauthorized": true
+                    }
+                }
+            }))
+            .unwrap()
+            .schema(AUTHENTICATED_SCHEMA)
+            .subgraph_hook(move |_name, _service| {
+                let (mock, handle) =
+                    tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+                handles_clone.lock().unwrap().push(handle);
+                mock.boxed_clone()
+            })
+            .build_router()
+            .await
+            .unwrap();
+
+        (service, handles)
+    }
+
+    /// Fails if any subgraph mock received a request, or if the router built no subgraph
+    /// service at all, which would make the check vacuous.
+    async fn assert_no_subgraph_calls(handles: SubgraphHandles) {
+        let handles: Vec<_> = handles.lock().unwrap().drain(..).collect();
+        assert!(!handles.is_empty(), "no subgraph services were created");
+        for handle in handles {
+            crate::plugin::test::assert_no_mock_calls(handle).await;
+        }
+    }
+
+    fn rejected_request(context: Context) -> router::Request {
+        let req = graphql::Request {
+            query: Some(REJECTED_QUERY.to_string()),
+            ..Default::default()
+        };
+        router::Request {
+            context,
+            router_request: http::Request::builder()
+                .method("POST")
+                .header(CONTENT_TYPE, "application/json")
+                .header(ACCEPT, "application/json")
+                .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+                .unwrap(),
+        }
+    }
+
+    /// Sends `REJECTED_QUERY`, asserts the router rejected it on authorization grounds,
+    /// and returns the HTTP status.
+    async fn send_rejected_request(
+        service: router::BoxCloneService,
+        context: Context,
+    ) -> http::StatusCode {
+        let response = service.oneshot(rejected_request(context)).await.unwrap();
+        let status = response.response.status();
+
+        let body = response
+            .into_graphql_response_stream()
+            .await
+            .next()
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            body.errors.first().map(|e| e.message.as_str()),
+            Some("Unauthorized field or type"),
+            "the operation was not rejected on authorization grounds"
+        );
+
+        status
+    }
+
+    #[tokio::test]
+    async fn does_not_reach_execution() {
+        let (service, handles) = build_router_rejecting_whole_query().await;
+
+        send_rejected_request(service, Context::new()).await;
+
+        assert_no_subgraph_calls(handles).await;
+    }
+
+    /// Directive-based authorization strips selections from the document, so a rejection
+    /// carries field-error semantics: value completion nulls the stripped selections and
+    /// propagates to `data: null`. 200 with errors is the correct response.
+    #[tokio::test]
+    async fn returns_http_200() {
+        let (service, _handles) = build_router_rejecting_whole_query().await;
+
+        let status = send_rejected_request(service, Context::new()).await;
+
+        assert_eq!(status, http::StatusCode::OK);
+    }
+
+    /// `CachingQueryPlanner` records usage reporting only for the `Plan` variant.
+    /// Telemetry still meters the rejection as one licensed operation but sends no
+    /// signature, referenced fields, or per-type stats, so Studio cannot attribute it.
+    #[tokio::test]
+    async fn does_not_record_usage_reporting() {
+        let (service, _handles) = build_router_rejecting_whole_query().await;
+        let context = Context::new();
+
+        send_rejected_request(service, context.clone()).await;
+
+        assert!(
+            !context
+                .extensions()
+                .with_lock(|lock| lock.contains_key::<Arc<UsageReporting>>())
+        );
+    }
 }
 
 #[tokio::test]
