@@ -2071,7 +2071,7 @@ mod tests {
             .in_sequence(&mut seq)
             .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2115,7 +2115,7 @@ mod tests {
             .in_sequence(&mut seq)
             .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2131,7 +2131,7 @@ mod tests {
             .withf(|_, configuration, _, _, _, _| configuration.homepage.enabled)
             .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2406,7 +2406,7 @@ mod tests {
             })
             .returning(move |_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2426,7 +2426,7 @@ mod tests {
                 )
                 .returning(move |_, _, _, _, _, _| {
                     let mut router = MockMyRouterFactory::new();
-                    router.expect_clone().return_once(MockMyRouterFactory::new);
+                    router.expect_clone().returning(MockMyRouterFactory::new);
                     router.expect_web_endpoints().returning(MultiMap::new);
                     Ok(router)
                 });
@@ -2445,7 +2445,7 @@ mod tests {
             .times(expect_times_called)
             .returning(move |_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2469,7 +2469,7 @@ mod tests {
 
         fn mock_router_ok() -> MockMyRouterFactory {
             let mut router = MockMyRouterFactory::new();
-            router.expect_clone().return_once(MockMyRouterFactory::new);
+            router.expect_clone().returning(MockMyRouterFactory::new);
             router.expect_web_endpoints().returning(MultiMap::new);
             router
         }
