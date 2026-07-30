@@ -2632,10 +2632,10 @@ mod tests {
                     .build()
             );
 
-            // Stream ends cleanly — no reconnect attempt, no second event.
+            // Stream ends cleanly — no reconnect attempt, no second event. The forwarding task
+            // increments its metrics strictly before closing `handle_sink` (the event that
+            // produces this `None`), so no extra wait is needed here.
             assert!(gql_stream.next().await.is_none());
-
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
             assert_counter!(
                 "apollo.router.operations.subscriptions.terminated.subgraph",
@@ -3351,11 +3351,10 @@ mod tests {
                     .build()
             );
 
-            // Drain remaining items (errors from second drop) until the stream terminates.
+            // Drain remaining items (errors from second drop) until the stream terminates. The
+            // forwarding task increments its metrics strictly before closing `handle_sink` (the
+            // event that ends this stream), so no extra wait is needed once it's drained.
             while gql_stream.next().await.is_some() {}
-
-            // Both attempts exhausted — let the spawned forwarding task increment the counter.
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
             assert_counter!(
                 "apollo.router.operations.subscriptions.terminated.subgraph",
@@ -3449,7 +3448,8 @@ mod tests {
                 }
             }
 
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            // The forwarding task increments its metrics strictly before closing `handle_sink`
+            // (the event that ended the stream drained above), so no extra wait is needed here.
 
             // The drop is the terminal end of the subscription on the subgraph side.
             assert_counter!(
@@ -3546,8 +3546,9 @@ mod tests {
                 data_events += 1;
             }
 
-            // Allow the metrics to flush.
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            // The reconnect counter is incremented strictly before the reconnected stream's data
+            // is forwarded to this client, so observing the 3rd data event above already
+            // guarantees both reconnects are reflected in the metrics — no extra wait is needed.
 
             // Exactly 2 reconnects happened to reach 3 data events (the third connection is held
             // open, so no further reconnect occurs). With a hard ceiling on attempts
@@ -3640,7 +3641,8 @@ mod tests {
                 }
             }
 
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            // The forwarding task increments its metrics strictly before closing `handle_sink`
+            // (the event that ended the stream drained above), so no extra wait is needed here.
 
             // One reconnect attempt was issued (and failed).
             assert_counter!(
@@ -3823,7 +3825,8 @@ mod tests {
                 }
             }
 
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            // The forwarding task increments its metrics strictly before closing `handle_sink`
+            // (the event that ended the stream drained above), so no extra wait is needed here.
 
             // Exactly one connection was made — no reconnect was attempted.
             assert_eq!(connection_count.load(Ordering::SeqCst), 1);
@@ -3863,11 +3866,12 @@ mod tests {
 
             // Use a long reconnect delay (200 ms) so the test can reliably drop the client
             // stream before the delay expires and the reconnect handshake starts.
+            let reconnect_delay = std::time::Duration::from_millis(200);
             let subgraph_service = SubscriptionSubgraphLayer::new(
                 crate::plugins::subscription::notification::Notify::builder().build(),
                 Some(Arc::new(subscription_config_with_reconnect_delay(
                     3,
-                    std::time::Duration::from_millis(200),
+                    reconnect_delay,
                 ))),
                 Arc::from("test"),
             )
@@ -3919,9 +3923,12 @@ mod tests {
             // should interrupt it before the delay expires.
             drop(gql_stream);
 
-            // Wait long enough for the closing signal to propagate (a few ms) but well
-            // short of the 200 ms reconnect delay.
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            // Wait past the configured reconnect delay, not just "a few ms": a broken
+            // implementation that ignores the closing signal would sleep the full delay and then
+            // dial the stalling server, incrementing `connection_count` almost immediately after
+            // (the mock increments it on TCP accept, before the handshake stalls). A wait shorter
+            // than `reconnect_delay` can't tell "aborted correctly" apart from "still sleeping".
+            tokio::time::sleep(reconnect_delay + std::time::Duration::from_millis(300)).await;
 
             // The closing signal must have fired during the delay sleep — no reconnect
             // handshake should have been issued.
@@ -4023,10 +4030,26 @@ mod tests {
             // `open_ws_gql_stream` to initiate a TCP connection to the stalling server,
             // then drop the stream to fire the closing signal mid-handshake.
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            // Confirm the handshake is actually in flight before we drop the stream — otherwise
+            // the assertions below would pass trivially because the handshake was never attempted.
+            assert_eq!(
+                connection_count.load(Ordering::SeqCst),
+                2,
+                "expected the reconnect handshake to have dialed the stalling server by now"
+            );
             drop(gql_stream);
 
-            // Give the closing signal time to propagate through the notification task and
-            // be picked up by the biased select! inside open_ws_gql_stream.
+            // Give the closing signal time to propagate through the notification task and be
+            // picked up by the biased select! inside open_ws_gql_stream.
+            //
+            // NB: because `emulate_websocket_server_drops_then_stalls` never completes the
+            // handshake, `open_ws_gql_stream` — and thus the `reconnect` counter increment, which
+            // only fires after it returns — would also never resolve if the closing signal were
+            // ignored. No amount of waiting here can distinguish "aborted correctly" from "still
+            // hung on the stalled handshake" via this counter alone; the counter check below
+            // mainly guards against a regression that increments it speculatively before the
+            // handshake completes. `test_websocket_reconnect_closing_signal_during_delay` is the
+            // test that deterministically proves the closing signal aborts in-flight reconnects.
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
             // The handshake was aborted by the closing signal — the counter must NOT have
