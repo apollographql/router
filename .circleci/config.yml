@@ -108,14 +108,17 @@ parameters:
   nightly:
     type: boolean
     default: false
-  coverage:
-    type: boolean
-    default: false
   # quick_nightly will skip testing and only build the release artifacts.
   quick_nightly:
     type: boolean
     default: false
-  test_updated_cargo_deps:
+  # test_build triggers the standalone `build-test-image` workflow: a single
+  # linux/amd64 Docker image built from whatever branch/commit triggered the
+  # pipeline, tagged by branch+commit (not a release/nightly version), and
+  # pushed to ghcr.io/apollographql/router-test-builds. This is unrelated to
+  # release or nightly versioning -- it exists for ad hoc test builds
+  # consumed by the internal testing framework (RTF).
+  test_build:
     type: boolean
     default: false
 
