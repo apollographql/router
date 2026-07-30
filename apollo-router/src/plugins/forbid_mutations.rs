@@ -42,7 +42,7 @@ impl Plugin for ForbidMutations {
     fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         if self.forbid {
             ServiceBuilder::new()
-                .checkpoint(|req: ExecutionRequest| {
+                .checkpoint_async(|req: ExecutionRequest| async move {
                     if req.query_plan.contains_mutations() {
                         let error = Error::builder()
                             .message("Mutations are forbidden".to_string())
@@ -71,6 +71,7 @@ mod forbid_http_get_mutations_tests {
     use http::Method;
     use http::StatusCode;
     use serde_json::json;
+    use tower::Service;
     use tower::ServiceExt;
 
     use super::*;
@@ -78,37 +79,35 @@ mod forbid_http_get_mutations_tests {
     use crate::graphql;
     use crate::http_ext::Request;
     use crate::plugin::PluginInit;
-    use crate::plugin::test::MockExecutionService;
     use crate::query_planner::PlanNode;
     use crate::query_planner::QueryPlan;
     use crate::query_planner::fetch::OperationKind;
 
     #[tokio::test]
     async fn it_lets_queries_pass_through() {
-        let mut mock_service = MockExecutionService::new();
+        let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
-
-        let service_stack = ForbidMutations::new(PluginInit::fake_new(
+        let mut service_stack = ForbidMutations::new(PluginInit::fake_new(
             ForbidMutationsConfig(true),
             Default::default(),
         ))
         .await
         .expect("couldn't create forbid_mutations plugin")
-        .execution_service(mock_service.boxed_clone());
+        .execution_service(mock.boxed_clone());
 
-        let request = create_request(Method::GET, OperationKind::Query);
-
-        let _ = service_stack
-            .oneshot(request)
+        let call = service_stack
+            .ready()
             .await
             .unwrap()
-            .next_response()
-            .await
-            .unwrap();
+            .call(create_request(Method::GET, OperationKind::Query));
+
+        let driver = tokio::spawn(async move {
+            let (_req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(ExecutionResponse::fake_builder().build().unwrap());
+        });
+
+        call.await.unwrap().next_response().await.unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
@@ -119,48 +118,46 @@ mod forbid_http_get_mutations_tests {
             .build();
         let expected_status = StatusCode::BAD_REQUEST;
 
+        let (mock, handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
         let service_stack = ForbidMutations::new(PluginInit::fake_new(
             ForbidMutationsConfig(true),
             Default::default(),
         ))
         .await
         .expect("couldn't create forbid_mutations plugin")
-        .execution_service(MockExecutionService::new().boxed_clone());
-        let request = create_request(Method::GET, OperationKind::Mutation);
+        .execution_service(mock.boxed_clone());
 
-        let mut response = service_stack.oneshot(request).await.unwrap();
+        let mut response = service_stack
+            .oneshot(create_request(Method::GET, OperationKind::Mutation))
+            .await
+            .unwrap();
         let actual_error = &response.next_response().await.unwrap().errors[0];
 
         assert_eq!(expected_status, response.response.status());
         assert_error_eq_ignoring_id!(actual_error, expected_error);
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
     async fn configuration_set_to_false_lets_mutations_pass_through() {
-        let mut mock_service = MockExecutionService::new();
+        let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
-
-        let service_stack = ForbidMutations::new(PluginInit::fake_new(
+        let mut service_stack = ForbidMutations::new(PluginInit::fake_new(
             ForbidMutationsConfig(false),
             Default::default(),
         ))
         .await
         .expect("couldn't create forbid_mutations plugin")
-        .execution_service(mock_service.boxed_clone());
+        .execution_service(mock.boxed_clone());
 
-        let request = create_request(Method::GET, OperationKind::Mutation);
-
-        let _ = service_stack
-            .oneshot(request)
+        let call = service_stack
+            .ready()
             .await
             .unwrap()
-            .next_response()
-            .await
-            .unwrap();
+            .call(create_request(Method::GET, OperationKind::Mutation));
+        let (_req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(ExecutionResponse::fake_builder().build().unwrap());
+        call.await.unwrap().next_response().await.unwrap();
     }
 
     fn create_request(method: Method, operation_kind: OperationKind) -> ExecutionRequest {

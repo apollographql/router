@@ -10,6 +10,7 @@ use tonic::metadata::MetadataMap;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::metrics::BlockingSafeTokioRuntime;
 use crate::plugins::telemetry::otlp::Config;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
@@ -17,7 +18,6 @@ use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::NamedSpanExporter;
-use crate::plugins::telemetry::tracing::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 
 impl TracingConfigurator for super::super::otlp::Config {
@@ -35,20 +35,49 @@ impl TracingConfigurator for super::super::otlp::Config {
 
         let exporter = config.build_span_exporter()?;
         let named_exporter = NamedSpanExporter::new(exporter, "otlp");
-        let batch_span_processor =
-            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("otlp-tracing"))
-                .with_batch_config(config.batch_processor.clone().with_env_overrides()?.into())
-                .build()
-                .filtered();
+        let batch_span_processor = BatchSpanProcessor::builder(
+            named_exporter,
+            BlockingSafeTokioRuntime::new_for_tracing("otlp-tracing"),
+        )
+        .with_batch_config(config.batch_processor.clone().with_env_overrides()?.into())
+        .build()
+        .filtered();
 
-        if builder
-            .tracing_common()
-            .preview_datadog_agent_sampling
-            .unwrap_or_default()
-        {
-            builder.with_span_processor(batch_span_processor.always_sampled())
+        let common = builder.tracing_common();
+        let datadog_agent_sampling = common.preview_datadog_agent_sampling.unwrap_or(false);
+
+        // In Datadog agent sampling mode all spans are forwarded (including RecordOnly spans)
+        // so the agent can apply its own sampling decisions via sampling.priority.
+        // Unlike the Datadog exporter, OTLP typically targets a different backend, so a
+        // per-exporter sampler is respected — but warn if one is set, since if this OTLP
+        // endpoint also points at the Datadog agent it would receive incomplete traces.
+        if datadog_agent_sampling && config.sampler.is_some() {
+            ::tracing::warn!(
+                "telemetry.exporters.tracing.otlp.sampler is configured alongside \
+                 preview_datadog_agent_sampling. If this OTLP endpoint is the Datadog agent, \
+                 the agent may receive incomplete traces."
+            );
+        }
+
+        if datadog_agent_sampling {
+            let processor = batch_span_processor.always_sampled();
+            if let Some(ref sampler) = config.sampler {
+                let sampled_batch_span_processor =
+                    processor.with_sampler(sampler, common.parent_based_sampler, &common.sampler);
+                builder.with_span_processor(sampled_batch_span_processor);
+            } else {
+                builder.with_span_processor(processor);
+            }
+        } else if let Some(ref sampler) = config.sampler {
+            let sampled_batch_span_processor = batch_span_processor.with_sampler(
+                sampler,
+                common.parent_based_sampler,
+                &common.sampler,
+            );
+
+            builder.with_span_processor(sampled_batch_span_processor);
         } else {
-            builder.with_span_processor(batch_span_processor)
+            builder.with_span_processor(batch_span_processor);
         }
 
         Ok(())

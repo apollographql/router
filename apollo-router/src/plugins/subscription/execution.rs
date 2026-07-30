@@ -1,10 +1,14 @@
 //! Tests for this functionality are still mostly in the `crate::services::supergraph::tests` module.
 
+use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Weak;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use futures::FutureExt;
+use futures::Stream;
+use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::SendError;
@@ -16,6 +20,7 @@ use tracing::Span;
 use tracing::field;
 use tracing_futures::Instrument;
 
+use crate::Configuration;
 use crate::Context;
 use crate::Notify;
 use crate::apollo_studio_interop::UsageReporting;
@@ -30,10 +35,10 @@ use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::services::ExecutionRequest;
-use crate::services::SupergraphRequest;
 use crate::services::execution;
 use crate::services::execution::QueryPlan;
 use crate::services::subgraph::BoxGqlStream;
+use crate::spec::Schema;
 
 pub(crate) const SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE: &str = "SUBSCRIPTION_CONFIG_RELOAD";
 pub(crate) const SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE: &str = "SUBSCRIPTION_SCHEMA_RELOAD";
@@ -81,7 +86,7 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = S::Future;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(
         &mut self,
@@ -93,31 +98,41 @@ where
     fn call(&mut self, mut req: ExecutionRequest) -> Self::Future {
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
+        let notify = self.notify.clone();
 
-        if req.query_plan.is_subscription() {
-            let notify = self.notify.clone();
-            let context = req.context.clone();
-            let (subs_tx, subs_rx) = mpsc::channel(1);
-            let query_plan = req.query_plan.clone();
-            let execution_service_cloned = inner.clone();
-            let cloned_supergraph_req =
-                clone_supergraph_request(&req.supergraph_request, context.clone());
-            // Spawn the side-channel task for subscription.
-            tokio::spawn(async move {
-                subscription_task(
-                    execution_service_cloned,
-                    context,
-                    query_plan,
-                    subs_rx,
-                    notify,
-                    cloned_supergraph_req,
-                )
-                .await;
-            });
-            req.subscription_tx = subs_tx.into();
-        }
+        Box::pin(async move {
+            if req.query_plan.is_subscription() {
+                let context = req.context.clone();
+                let (subs_tx, subs_rx) = mpsc::channel(1);
+                let query_plan = req.query_plan.clone();
+                let execution_service_cloned = inner.clone();
+                let supergraph_http_request = req.supergraph_request.clone();
 
-        inner.call(req)
+                // Subscribe to config and schema changes immediately, so we don't
+                // miss out on any events happening in-between here and when we
+                // actually start responding to changes (which happens asynchronously
+                // inside the subscription task).
+                let configuration_updated_rx = Box::pin(notify.subscribe_configuration());
+                let schema_updated_rx = Box::pin(notify.subscribe_schema());
+
+                // Spawn the side-channel task for subscription.
+                tokio::spawn(async move {
+                    subscription_task(
+                        execution_service_cloned,
+                        context,
+                        query_plan,
+                        subs_rx,
+                        supergraph_http_request,
+                        configuration_updated_rx,
+                        schema_updated_rx,
+                    )
+                    .await;
+                });
+                req.subscription_tx = subs_tx.into();
+            }
+
+            inner.call(req).await
+        })
     }
 }
 
@@ -161,8 +176,9 @@ async fn subscription_task(
     context: Context,
     query_plan: Arc<QueryPlan>,
     mut rx: mpsc::Receiver<SubscriptionTaskParams>,
-    notify: Notify<String, graphql::Response>,
-    supergraph_req: SupergraphRequest,
+    supergraph_http_request: http::Request<graphql::Request>,
+    mut configuration_updated_rx: Pin<Box<dyn Stream<Item = Weak<Configuration>> + Send>>,
+    mut schema_updated_rx: Pin<Box<dyn Stream<Item = Arc<Schema>> + Send>>,
 ) {
     let sub_params = match rx.recv().await {
         Some(sub_params) => sub_params,
@@ -175,15 +191,16 @@ async fn subscription_task(
     let mut receiver = sub_params.stream_rx;
     let sender = sub_params.client_sender;
 
-    // Get the rest of the query_plan to execute for subscription events
-    let query_plan = match &*query_plan.root {
-        crate::query_planner::PlanNode::Subscription { rest, .. } => rest.clone().map(|r| {
+    // Get the rest of the query_plan to execute for subscription events. If `rest` is `None`, we
+    // bubble that up to the whole query plan instead of having an empty node: this lets us avoid
+    // doing excessive calls into the execution service when no fetches are required.
+    let query_plan = match query_plan.root.as_deref() {
+        Some(crate::query_planner::PlanNode::Subscription { rest, .. }) => rest.clone().map(|r| {
             Arc::new(QueryPlan {
                 usage_reporting: query_plan.usage_reporting.clone(),
-                root: Arc::new(*r),
+                root: Some(Arc::new(*r)),
                 formatted_query_plan: query_plan.formatted_query_plan.clone(),
                 query: query_plan.query.clone(),
-                query_metrics: query_plan.query_metrics,
                 estimated_size: Default::default(),
             })
         }),
@@ -226,16 +243,16 @@ async fn subscription_task(
         OPENED_SUBSCRIPTIONS.fetch_add(1, Ordering::Relaxed);
     }
 
-    let mut configuration_updated_rx = notify.subscribe_configuration();
-    let mut schema_updated_rx = notify.subscribe_schema();
+    // Note: `configuration_updated_rx` and `schema_updated_rx` are now
+    // subscribed in `SubscriptionExecutionService::call` (before the spawn)
+    // and passed in as parameters. See the comment in `call` for the race
+    // this fix addresses.
 
-    let mut timeout = if supergraph_req
-        .context
+    let mut timeout = if context
         .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
         .is_some()
     {
-        let expires_in =
-            crate::plugins::authentication::jwks::jwt_expires_in(&supergraph_req.context);
+        let expires_in = crate::plugins::authentication::jwks::jwt_expires_in(&context);
         tokio::time::sleep(expires_in).boxed()
     } else {
         futures::future::pending().boxed()
@@ -266,13 +283,21 @@ async fn subscription_task(
                 match message {
                     Some(mut val) => {
                         val.created_at = Some(Instant::now());
-                        let res = dispatch_subscription_event(&supergraph_req, execution_service.clone(), query_plan.as_ref(), context.clone(), val, sender.clone())
+                        let res = dispatch_subscription_event(
+                            &supergraph_http_request,
+                            execution_service.clone(),
+                            query_plan.as_ref(),
+                            context.clone(),
+                            val,
+                            sender.clone(),
+                        )
                             .instrument(tracing::info_span!(SUBSCRIPTION_EVENT_SPAN_NAME,
                                 graphql.operation.name = %operation_name,
                                 otel.kind = "INTERNAL",
                                 apollo_private.operation_signature = %operation_signature,
                                 apollo_private.duration_ns = field::Empty,)
-                            ).await;
+                            )
+                            .await;
                         if let Err(err) = res {
                             tracing::error!("cannot send the subscription to the client: {err:?}");
                             break;
@@ -303,7 +328,7 @@ async fn subscription_task(
 }
 
 async fn dispatch_subscription_event(
-    supergraph_req: &SupergraphRequest,
+    supergraph_http_request: &http::Request<graphql::Request>,
     execution_service: impl Service<
         ExecutionRequest,
         Response = execution::Response,
@@ -318,12 +343,9 @@ async fn dispatch_subscription_event(
     let span = Span::current();
     let res = match query_plan {
         Some(query_plan) => {
-            let cloned_supergraph_req = clone_supergraph_request(
-                &supergraph_req.supergraph_request,
-                supergraph_req.context.clone(),
-            );
+            let cloned_supergraph_req = supergraph_http_request.clone();
             let execution_request = ExecutionRequest::internal_builder()
-                .supergraph_request(cloned_supergraph_req.supergraph_request)
+                .supergraph_request(cloned_supergraph_req)
                 .query_plan(query_plan.clone())
                 .context(context)
                 .source_stream_value(val.data.take().unwrap_or_default())
@@ -364,28 +386,4 @@ async fn dispatch_subscription_event(
     );
 
     res
-}
-
-fn clone_supergraph_request(
-    req: &http::Request<graphql::Request>,
-    context: Context,
-) -> SupergraphRequest {
-    let mut cloned_supergraph_req = SupergraphRequest::builder()
-        .extensions(req.body().extensions.clone())
-        .and_query(req.body().query.clone())
-        .context(context)
-        .method(req.method().clone())
-        .and_operation_name(req.body().operation_name.clone())
-        .uri(req.uri().clone())
-        .variables(req.body().variables.clone());
-
-    for (header_name, header_value) in req.headers().clone() {
-        if let Some(header_name) = header_name {
-            cloned_supergraph_req = cloned_supergraph_req.header(header_name, header_value);
-        }
-    }
-
-    cloned_supergraph_req
-        .build()
-        .expect("cloning an existing supergraph response should not fail")
 }

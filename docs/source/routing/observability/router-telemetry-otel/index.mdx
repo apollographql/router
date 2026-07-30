@@ -45,7 +45,6 @@ The router emits telemetry in the industry-standard OpenTelemetry Protocol (OTLP
 - Datadog
 - New Relic
 - Jaeger
-- Zipkin
 
 The router follows the [W3C Trace Context specification](https://www.w3.org/TR/trace-context/) for `trace_id` generation and propagation. OpenTelemetry uses 128-bit (32-character hexadecimal) trace IDs as defined in the W3C standard. When working with systems that don't follow this standard, the router provides format conversion options to ensure compatibility.
 
@@ -275,7 +274,6 @@ This configuration snippet enables
 telemetry:
   instrumentation:
     spans:
-      mode: spec_compliant
       router:
         attributes:
           otel.name:

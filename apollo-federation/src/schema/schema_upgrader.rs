@@ -30,6 +30,7 @@ use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::schema::SchemaElement;
 use crate::schema::SubgraphMetadata;
+use crate::schema::field_set::FieldSetValidation;
 use crate::subgraph::SubgraphError;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
@@ -201,7 +202,7 @@ impl SchemaUpgrader {
         orphan_extension_types
             .into_iter()
             .filter(|type_name| {
-                schema.try_get_type((*type_name).clone()).is_some_and(|ty| {
+                schema.try_get_type(type_name).is_some_and(|ty| {
                     let Ok(ty) = ty.get(schema.schema()) else {
                         return false;
                     };
@@ -520,9 +521,13 @@ impl SchemaUpgrader {
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         let cloned_schema = schema.clone();
+        // NOTE: we should be passing a supergraph schema so we could verify the remaining `@requires`
+        // field set values are valid. Schema upgrader runs before merge process, we don't have
+        // access to the supergraph so we need to skip the validation.
         remove_inactive_requires_and_provides_from_subgraph(
-            &cloned_schema, // TODO: I don't know what this value should be
+            &cloned_schema,
             schema,
+            FieldSetValidation::Skip,
         )
     }
 
@@ -655,7 +660,7 @@ impl SchemaUpgrader {
             let field = obj_field_pos.get(schema.schema())?;
             let return_type = field.ty.inner_named_type();
             if schema
-                .try_get_type(return_type.clone())
+                .try_get_type(return_type)
                 .is_some_and(|t| !t.is_composite_type())
             {
                 candidates.insert(obj_field_pos.clone());

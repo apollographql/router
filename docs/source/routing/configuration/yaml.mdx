@@ -29,7 +29,6 @@ import Limits from '../../../shared/config/limits.mdx';
 import OverrideSubUrl from '../../../shared/config/override_subgraph_url.mdx';
 import PersistedQueries from '../../../shared/config/persisted_queries.mdx';
 import Plugins from '../../../shared/config/plugins.mdx';
-import PreviewEntityCache from '../../../shared/config/preview_entity_cache.mdx';
 import ResponseCache from '../../../shared/config/response_cache.mdx';
 import PreviewFileUploads from '../../../shared/config/preview_file_uploads.mdx';
 import Reload from '../../../shared/config/reload.mdx';
@@ -319,18 +318,6 @@ plugins:
 ```
 
 Learn more in [Native Plugins for router](/graphos/routing/customization/native-plugins).
-
----
-
-<PreviewEntityCache /> 
-
-<Note>
-
-For new projects, Apollo recommends using [Response Caching](/graphos/routing/performance/caching/response-caching/overview) instead.
-
-</Note>
-
-Learn more in [Entity Caching](/graphos/routing/v1/performance/caching/entity).
 
 ---
 
@@ -951,12 +938,14 @@ headers:
   subgraphs:
     products:
       request:
-        - insert: &insert_custom_header
-            name: "custom-header"
-            value: "something"
+        operations:
+          - insert: &insert_custom_header
+              name: "custom-header"
+              value: "something"
     reviews:
       request:
-        - insert: *insert_custom_header
+        operations:
+          - insert: *insert_custom_header
 ```
 
 Here, the `name` and `value` entries under `&insert_custom_header` are reused under `*insert_custom_header`.

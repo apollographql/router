@@ -1694,11 +1694,28 @@ mod connection_timing_metrics {
             // First request: establishes a new TCP connection → connector fires.
             let response = send_request(service.clone(), uri.clone(), r#"{"query":"{ a }"}"#).await;
             assert_eq!(response.http_response.status(), StatusCode::OK);
+            // CRITICAL: hyper-util's pool only returns a connection to the pool once the
+            // response body has been fully consumed AND the response is dropped. If we leave
+            // the body undrained, the second request below races against the pool checkout
+            // and may open a second TCP connection — which would (correctly) increment the
+            // metric to 2 and cause the assertion below to fail. The drain + drop here makes
+            // the pool checkout deterministic. See PR #9412/#9406/#9386/#9337 flakes.
+            let (_parts, body) = response.http_response.into_parts();
+            let _ = router::body::into_bytes(body).await.unwrap();
+            // Even after drain, hyper-util needs the connection task scheduled to
+            // observe body-end and return the connection to its idle set. A short
+            // sleep guarantees this on busy CI runners. Sibling test
+            // `test_pool_idle_timeout_evicts_connections::case::long_timeout_reuses`
+            // uses the same pattern (200ms sleep, expect 1 conn). Well below
+            // the default pool_idle_timeout so the pool keeps the connection.
+            tokio::time::sleep(Duration::from_millis(50)).await;
 
             // Second request: hyper reuses the pooled connection → connector NOT called.
             tower::ServiceExt::ready(&mut service).await.unwrap();
             let response = send_request(service, uri, r#"{"query":"{ b }"}"#).await;
             assert_eq!(response.http_response.status(), StatusCode::OK);
+            let (_parts, body) = response.http_response.into_parts();
+            let _ = router::body::into_bytes(body).await.unwrap();
 
             // Metric count = 1, not 2: one connection was established for two HTTP requests.
             assert_histogram_count!(
@@ -1775,8 +1792,8 @@ mod redis_tls_config {
     //! Exercises the `generate_tls_client_config` → `TlsConnector` path that Redis uses.
     //!
     //! The router's Redis integration builds a `tokio_rustls::TlsConnector` from a
-    //! `ClientConfig` produced by `crate::services::generate_tls_client_config` (re-exported
-    //! from `subgraph_service`). These tests verify that this construction succeeds for the
+    //! `ClientConfig` produced by `crate::services::subgraph::http::generate_tls_client_config`.
+    //! These tests verify that this construction succeeds for the
     //! same cert scenarios used by the HTTP client, catching API breakages in rustls/tokio-rustls
     //! upgrades even without a live Redis server.
 
@@ -1791,7 +1808,8 @@ mod redis_tls_config {
         }
 
         let tls_config =
-            crate::services::generate_tls_client_config(Some(root_store), None).unwrap();
+            crate::services::subgraph::http::generate_tls_client_config(Some(root_store), None)
+                .unwrap();
         let _connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
     }
 
@@ -1811,15 +1829,18 @@ mod redis_tls_config {
             key: load_key(client_key_pem).unwrap(),
         };
 
-        let tls_config =
-            crate::services::generate_tls_client_config(Some(root_store), Some(&client_auth))
-                .unwrap();
+        let tls_config = crate::services::subgraph::http::generate_tls_client_config(
+            Some(root_store),
+            Some(&client_auth),
+        )
+        .unwrap();
         let _connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
     }
 
     #[test]
     fn native_roots_produces_valid_connector() {
-        let tls_config = crate::services::generate_tls_client_config(None, None).unwrap();
+        let tls_config =
+            crate::services::subgraph::http::generate_tls_client_config(None, None).unwrap();
         let _connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
     }
 }

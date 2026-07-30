@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "2.14.0"
+version = "2.16.1"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.95.0"
+rust-version = "1.96.0"
 edition = "2024"
 build = "build/main.rs"
 default-run = "router"
@@ -56,16 +56,19 @@ ci = []
 snapshot = []
 
 [dependencies]
-addr2line = "0.26.0"
+addr2line = "0.27.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=2.14.0" }
+apollo-errors = "0.7.1"
+apollo-federation = { path = "../apollo-federation", version = "=2.16.1" }
+apollo-qos = "0.5.0"
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "futures-io",
     "brotli",
     "gzip",
     "deflate",
+    "zstd",
 ] }
 async-trait.workspace = true
 axum = { version = "0.8.1", features = ["http2"] }
@@ -94,7 +97,7 @@ diff = "0.1.13"
 displaydoc = "0.2"
 flate2 = "1.0.30"
 fred = { version = "10.1.0", features = [
-    "enable-rustls-ring",
+    "enable-rustls",
     "i-cluster",
     "tcp-user-timeouts",
     "metrics",
@@ -134,16 +137,16 @@ hyper-rustls = { version = "0.27.3", default-features = false, features = [
     "rustls-native-certs",
 ] }
 indexmap = { version = "2.2.6", features = ["serde"] }
-itertools = "0.14.0"
+itertools = "0.15.0"
 jsonpath_lib = "0.3.0"
 jsonpath-rust = "0.3.5"
-jsonschema = { version = "0.46.0", default-features = false }
+jsonschema = { version = "0.48.0", default-features = false }
 jsonwebtoken = { version = "10.0.0", features = ["rust_crypto"] }
 libc = "0.2.155"
 linkme = "0.3.30"
 lru = "0.18.0"
 mediatype = "0.21.0"
-mockall = "0.14.0"
+mockall = "0.15.0"
 mime = "0.3.17"
 multer = "3.1.0"
 multimap = "0.10.0" # Warning: part of the public API
@@ -153,7 +156,7 @@ notify = { version = "8.0.0", default-features = false, features = [
 ] }
 nu-ansi-term = "0.50"
 num-traits = "0.2.19"
-oci-client = { version = "0.15.0", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "trust-dns"] }
+oci-client = { version = "0.17.0", default-features = false, features = ["hickory-dns"] }
 once_cell = "1.19.0"
 
 # Any package that starts with `opentelemetry` needs to be updated with care
@@ -167,8 +170,8 @@ once_cell = "1.19.0"
 # groups `^tracing` and `^opentelemetry*` dependencies together as of
 # https://github.com/apollographql/router/pull/1509.  A comment which exists
 # there (and on `tracing` packages below) should be updated should this change.
-opentelemetry = { version = "0.31", features = ["trace", "metrics"] }
-opentelemetry_sdk = { version = "0.31", default-features = false, features = [
+opentelemetry = { version = "0.32", features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "0.32", default-features = false, features = [
     "rt-tokio",
     "trace",
     "metrics",
@@ -176,27 +179,22 @@ opentelemetry_sdk = { version = "0.31", default-features = false, features = [
     "experimental_trace_batch_span_processor_with_async_runtime",
     "experimental_metrics_periodicreader_with_async_runtime",
 ] }
-opentelemetry-aws = "0.19"
+opentelemetry-aws = "0.20"
 rmp = "0.8"
-opentelemetry-http = "0.31"
-opentelemetry-jaeger-propagator = "0.31"
-opentelemetry-otlp = { version = "0.31", default-features = false, features = [
+opentelemetry-http = "0.32"
+opentelemetry-otlp = { version = "0.32", default-features = false, features = [
     "grpc-tonic",
     "gzip-tonic",
     "gzip-http",
     "tonic",
-    "tls",
+    "tls-aws-lc",
     "http-proto",
     "metrics",
     "reqwest-client",
     "trace",
 ] }
-opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
-opentelemetry-zipkin = { version = "0.31", default-features = false, features = [
-    "reqwest-client",
-    "reqwest-rustls",
-] }
-opentelemetry-prometheus = "0.31"
+opentelemetry-semantic-conventions = { version = "0.32", features = ["semconv_experimental"] }
+opentelemetry-prometheus = "0.32"
 paste = "1.0.15"
 pin-project-lite = "0.2.14"
 prometheus = "0.14"
@@ -204,11 +202,10 @@ prost = "0.14.0"
 prost-types = "0.14.0"
 proteus = "0.5.0"
 rand = "0.10.0"
-rhai = { version = "1.23.6", features = ["sync", "serde", "internals"] }
+rhai = { version = "~1.25.0", features = ["sync", "serde", "internals"] }
 regex = "1.10.5"
 reqwest = { workspace = true, default-features = false, features = [
-    "rustls-tls",
-    "rustls-tls-native-roots",
+    "rustls",
     "gzip",
     "json",
     "stream",
@@ -241,13 +238,14 @@ tokio-stream = { version = "0.1.15", features = ["sync", "net", "fs"] }
 tokio-util = { version = "0.7.11", features = ["net", "codec", "time", "compat"] }
 tonic = { version = "0.14.5", features = [
     "transport",
-    "tls-ring",
+    "tls-aws-lc",
     "tls-native-roots",
     "gzip",
 ] }
 tower.workspace = true
-tower-http = { version = "0.6.2", features = ["full"] }
+tower-http = { version = "0.7.0", features = ["full"] }
 tower-service = "0.3.2"
+tower-test = "0.4.0"
 tracing = "0.1.40"
 tracing-core = "0.1.32"
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
@@ -258,7 +256,7 @@ uuid = { version = "1.9.1", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
 wiremock = "0.6"
 wsl = "0.1.0"
-tokio-tungstenite = { version = "0.29.0", features = [
+tokio-tungstenite = { version = "0.30.0", features = [
     "rustls-tls-native-roots",
 ] }
 tokio-rustls = { version = "0.26.0", default-features = false }
@@ -266,10 +264,6 @@ hickory-resolver = "0.26.0"
 http-serde = "2.1.1"
 hmac = "0.12.1"
 parking_lot = { version = "0.12.3", features = ["serde"] }
-memchr = "2.7.4"
-brotli = "8.0.0"
-zstd = "0.13.1"
-zstd-safe = "7.1.0"
 # note: AWS dependencies should always use the same version
 # note: hyper 1.0 update seems to mean this isn't true...
 aws-sigv4 = "1.2.6"
@@ -279,7 +273,7 @@ aws-types = "1.3.3"
 aws-smithy-async = { version = "1.2.5", features = ["rt-tokio"] }
 aws-smithy-http-client = { version = "1.0.1", default-features = false, features = [
     "default-client",
-    "rustls-ring",
+    "rustls-aws-lc",
 ] }
 aws-smithy-runtime-api = { version = "1.7.3", features = ["client"] }
 sha1.workspace = true
@@ -288,7 +282,7 @@ time = { version = "0.3.36", features = ["serde"] }
 similar.workspace = true
 console = "0.16.0"
 bytesize = { version = "1.3.0", features = ["serde"] }
-ahash = "0.8.11"
+ahash.workspace = true
 itoa = "1.0.9"
 ryu = "1.0.15"
 apollo-environment-detector = "0.1.0"
@@ -302,17 +296,17 @@ uname = "0.1.1"
 hyperlocal = { version = "0.9.1", default-features = false, features = [
     "client",
 ] }
-tikv-jemallocator = { version = "0.6.0", features = ["profiling"], optional = true }
-tikv-jemalloc-ctl = { version = "0.6.0", features = ["stats", "profiling"], optional = true }
-tikv-jemalloc-sys = { version = "0.6.0", features = ["profiling"] }
+tikv-jemallocator = { version = "0.7.0", features = ["profiling"], optional = true }
+tikv-jemalloc-ctl = { version = "0.7.0", features = ["stats", "profiling"], optional = true }
+tikv-jemalloc-sys = { version = "0.7.0", features = ["profiling"] }
 
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 ctor = "1.0.0"
-ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
+ecdsa = { version = "0.17.0", features = ["algorithm", "pem", "pkcs8"] }
 encoding_rs.workspace = true
 fred = { version = "10.1.0", features = [
-    "enable-rustls-ring",
+    "enable-rustls",
     "mocks",
     "i-cluster",
     "tcp-user-timeouts",
@@ -321,23 +315,24 @@ fred = { version = "10.1.0", features = [
 futures-test = "0.3.30"
 insta.workspace = true
 maplit = "1.0.2"
+brotli = "8.0.0"
 memchr = { version = "2.7.4", default-features = false }
-mockall = "0.14.0"
+mockall = "0.15.0"
 num-traits = "0.2.19"
 once_cell.workspace = true
-opentelemetry-stdout = { version = "0.31", features = ["trace"] }
-opentelemetry = { version = "0.31", features = ["testing"] }
-opentelemetry_sdk = { version = "0.31", features = ["testing"] }
-opentelemetry-proto = { version = "0.31", features = [
+opentelemetry-stdout = { version = "0.32", features = ["trace"] }
+opentelemetry = { version = "0.32", features = ["testing"] }
+opentelemetry_sdk = { version = "0.32", features = ["testing"] }
+opentelemetry-proto = { version = "0.32", features = [
     "metrics",
     "trace",
     "gen-tonic-messages",
     "with-serde",
 ] }
-opentelemetry-datadog = { version = "0.19", features = ["reqwest-client"] }
-p256 = "0.13.2"
+opentelemetry-datadog = { version = "0.20", features = ["reqwest-client"] }
+p256 = "0.14.0"
 pretty_assertions = "1.4.1"
-reqwest = { version = "0.12.9", default-features = false, features = [
+reqwest = { version = "0.13.0", default-features = false, features = [
     "json",
     "multipart",
     "stream",
@@ -352,7 +347,6 @@ tempfile.workspace = true
 test-log = { version = "0.2.16", default-features = false, features = [
     "trace",
 ] }
-tower-test = "0.4.0"
 multer = { version = "3.1.0", features = ["json"] }
 
 # See note above in this file about `^tracing` packages which also applies to
@@ -361,7 +355,7 @@ tracing-subscriber = { version = "0.3.20", default-features = false, features = 
     "env-filter",
     "fmt",
 ] }
-tracing-opentelemetry = "0.32"
+tracing-opentelemetry = "0.33"
 tracing-test = "=0.2.6"
 tracing-mock = "0.1.0-beta.1"
 walkdir = "2.5.0"

@@ -11,16 +11,16 @@ use futures::future::BoxFuture;
 use tower::BoxError;
 use tower::Service;
 
-use super::PersistedQueryLayer;
+use super::PersistedQueryExpander;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 
 pub(crate) struct ExpandIdsLayer {
-    wrapped: Arc<PersistedQueryLayer>,
+    wrapped: Arc<PersistedQueryExpander>,
 }
 
 impl ExpandIdsLayer {
-    pub(crate) fn new(wrapped: Arc<PersistedQueryLayer>) -> Self {
+    pub(crate) fn new(wrapped: Arc<PersistedQueryExpander>) -> Self {
         Self { wrapped }
     }
 }
@@ -39,7 +39,7 @@ impl<S> tower::Layer<S> for ExpandIdsLayer {
 #[derive(Clone)]
 pub(crate) struct ExpandIdsService<S> {
     inner: S,
-    wrapped: Arc<PersistedQueryLayer>,
+    wrapped: Arc<PersistedQueryExpander>,
 }
 
 impl<S> Service<SupergraphRequest> for ExpandIdsService<S>
@@ -72,11 +72,11 @@ where
 }
 
 pub(crate) struct EnforceSafelistLayer {
-    wrapped: Arc<PersistedQueryLayer>,
+    wrapped: Arc<PersistedQueryExpander>,
 }
 
 impl EnforceSafelistLayer {
-    pub(crate) fn new(wrapped: Arc<PersistedQueryLayer>) -> Self {
+    pub(crate) fn new(wrapped: Arc<PersistedQueryExpander>) -> Self {
         Self { wrapped }
     }
 }
@@ -95,7 +95,7 @@ impl<S> tower::Layer<S> for EnforceSafelistLayer {
 #[derive(Clone)]
 pub(crate) struct EnforceSafelistService<S> {
     inner: S,
-    wrapped: Arc<PersistedQueryLayer>,
+    wrapped: Arc<PersistedQueryExpander>,
 }
 
 impl<S> Service<SupergraphRequest> for EnforceSafelistService<S>

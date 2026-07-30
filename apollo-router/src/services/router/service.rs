@@ -23,7 +23,6 @@ use multimap::MultiMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use tower::BoxError;
-use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
@@ -41,12 +40,9 @@ use crate::axum_factory::CanceledRequest;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::graphql;
-use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::InternalServiceBuilderExt as _;
+use crate::layers::ServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
-#[cfg(test)]
-use crate::plugin::test::MockSupergraphService;
-use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
-use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
@@ -57,9 +53,8 @@ use crate::plugins::telemetry::config_new::router::events::DisplayRouterRequest;
 use crate::plugins::telemetry::config_new::router::events::DisplayRouterResponse;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
-use crate::query_planner::InMemoryCachePlanner;
+use crate::query_planner::InMemoryQueryPlanCache;
 use crate::router_factory::RouterFactory;
-use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::HasPlugins;
 use crate::services::HasSchema;
 use crate::services::MULTIPART_DEFER_ACCEPT;
@@ -71,18 +66,19 @@ use crate::services::RouterResponse;
 use crate::services::SupergraphCreator;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::services::layers::apq::APQLayer;
+use crate::services::layers::apq::APQExpander;
 use crate::services::layers::content_negotiation;
 use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::layers::persisted_queries::EnforceSafelistLayer;
 use crate::services::layers::persisted_queries::ExpandIdsLayer;
-use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::layers::persisted_queries::PersistedQueryExpander;
+use crate::services::layers::query_analysis::QueryAnalysis;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::router;
 use crate::services::router::batching::BatchingLayer;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::router::pipeline_handle::PipelineRef;
+use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::supergraph;
 
 pub(crate) static MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
@@ -103,24 +99,23 @@ pub(crate) struct RouterService {
 impl RouterService {
     fn new(
         supergraph_service: supergraph::BoxCloneService,
-        apq_layer: APQLayer,
-        persisted_query_layer: Arc<PersistedQueryLayer>,
-        query_analysis_layer: QueryAnalysisLayer,
+        apq_expander: APQExpander,
+        persisted_queries: Arc<PersistedQueryExpander>,
+        query_analysis: Arc<QueryAnalysis>,
         batching: Batching,
     ) -> Self {
         // Some of the layers in the stack are wrapping previous implementations that are called
         // layers, but are not tower layers at all.
-        let apq_layer = Arc::new(apq_layer);
-        let query_analysis_layer = Arc::new(query_analysis_layer);
+        let apq_expander = Arc::new(apq_expander);
 
         let service = ServiceBuilder::new()
             .layer(DisplayRouterRequestLayer)
             .layer(BatchingLayer::new(batching))
             .layer(RouterToSupergraphRequestLayer)
-            .layer(ExpandIdsLayer::new(persisted_query_layer.clone()))
-            .layer(APQCachingLayer::new(apq_layer))
-            .layer(ParseQueryLayer::new(query_analysis_layer))
-            .layer(EnforceSafelistLayer::new(persisted_query_layer))
+            .layer(ExpandIdsLayer::new(persisted_queries.clone()))
+            .layer(APQCachingLayer::new(apq_expander))
+            .layer(ParseQueryLayer::new(query_analysis))
+            .layer(EnforceSafelistLayer::new(persisted_queries))
             .service(supergraph_service)
             .boxed_clone();
 
@@ -143,12 +138,8 @@ impl Service<RouterRequest> for RouterService {
 }
 
 #[cfg(test)]
-pub(crate) async fn from_supergraph_mock_callback_and_configuration(
-    supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
-    + Send
-    + Sync
-    + 'static
-    + Clone,
+pub(crate) async fn from_supergraph_mock_with_configuration(
+    mock: tower_test::mock::Mock<supergraph::Request, supergraph::Response>,
     configuration: Arc<Configuration>,
 ) -> impl Service<
     router::Request,
@@ -157,25 +148,16 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
 + Clone {
-    let mut supergraph_service = MockSupergraphService::new();
-
-    supergraph_service.expect_clone().returning(move || {
-        let cloned_callback = supergraph_callback.clone();
-        let mut supergraph_service = MockSupergraphService::new();
-        supergraph_service.expect_call().returning(cloned_callback);
-        supergraph_service
-    });
-
-    let (_, _, supergraph_creator) = crate::TestHarness::builder()
+    let (_, _, query_analysis, supergraph_creator) = crate::TestHarness::builder()
         .configuration(configuration.clone())
-        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone())
+        .supergraph_hook(move |_| mock.clone().boxed_clone())
         .build_common()
         .await
         .unwrap();
 
     RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
-        Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
+        query_analysis,
+        Arc::new(PersistedQueryExpander::new(&configuration).await.unwrap()),
         Arc::new(supergraph_creator),
         configuration,
     )
@@ -185,12 +167,8 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
 }
 
 #[cfg(test)]
-pub(crate) async fn from_supergraph_mock_callback(
-    supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
-    + Send
-    + Sync
-    + 'static
-    + Clone,
+pub(crate) async fn from_supergraph_mock(
+    mock: tower_test::mock::Mock<supergraph::Request, supergraph::Response>,
 ) -> impl Service<
     router::Request,
     Response = router::Response,
@@ -198,11 +176,7 @@ pub(crate) async fn from_supergraph_mock_callback(
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
 + Clone {
-    from_supergraph_mock_callback_and_configuration(
-        supergraph_callback,
-        Arc::new(Configuration::default()),
-    )
-    .await
+    from_supergraph_mock_with_configuration(mock, Arc::new(Configuration::default())).await
 }
 
 #[cfg(test)]
@@ -212,21 +186,24 @@ pub(crate) async fn empty() -> impl Service<
     Error = BoxError,
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send {
-    let mut supergraph_service = MockSupergraphService::new();
-    supergraph_service
-        .expect_clone()
-        .returning(MockSupergraphService::new);
+    // The handle is intentionally discarded — empty() creates a service that is never expected
+    // to be called. Any call would block indefinitely.
+    let (mock, _handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-    let (_, _, supergraph_creator) = crate::TestHarness::builder()
+    let (_, _, query_analysis, supergraph_creator) = crate::TestHarness::builder()
         .configuration(Default::default())
-        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone())
+        .supergraph_hook(move |_| mock.clone().boxed_clone())
         .build_common()
         .await
         .unwrap();
 
     RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
-        Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
+        query_analysis,
+        Arc::new(
+            PersistedQueryExpander::new(&Default::default())
+                .await
+                .unwrap(),
+        ),
         Arc::new(supergraph_creator),
         Arc::new(Configuration::default()),
     )
@@ -311,9 +288,25 @@ where
                 #[cfg(not(test))]
                 let headers = &parts.headers;
 
+                let header_string = {
+                    #[cfg(test)]
+                    {
+                        // Deterministic output for snapshot/log assertions.
+                        format!("{:?}", headers)
+                    }
+                    #[cfg(not(test))]
+                    {
+                        crate::services::header_masking::masked_headers_for_log(
+                            &context,
+                            crate::services::header_masking::Direction::Request,
+                            None,
+                            headers,
+                        )
+                    }
+                };
                 attrs.push(KeyValue::new(
                     HTTP_REQUEST_HEADERS,
-                    opentelemetry::Value::String(format!("{:?}", headers).into()),
+                    opentelemetry::Value::String(header_string.into()),
                 ));
                 attrs.push(KeyValue::new(
                     HTTP_REQUEST_METHOD,
@@ -518,12 +511,6 @@ where
 
                     let response = match response.subscribed {
                         Some(true) => {
-                            let subgraph_name: Option<String> = context
-                                .get(SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY)
-                                .ok()
-                                .flatten();
-                            let client_name: Option<String> =
-                                context.get(CLIENT_NAME).ok().flatten();
                             let terminated_counter = context.extensions().with_lock(|lock| {
                                 lock.get::<SubscriptionsTerminatedCounter>().cloned()
                             });
@@ -531,8 +518,6 @@ where
                                 parts,
                                 router::body::from_result_stream(
                                     Multipart::new(body, ProtocolMode::Subscription)
-                                        .with_subgraph_name(subgraph_name)
-                                        .with_client_name(client_name)
                                         .with_terminated_counter(terminated_counter),
                                 ),
                             )
@@ -622,6 +607,9 @@ where
         parts: &Parts,
         body: Body,
     ) -> Result<Result<graphql::Request, TranslateError>, BoxError> {
+        // NB: `plugins::limits::layer::RequestBodyLimit::call` re-derives this same "is this a
+        // GraphQL-over-HTTP GET" check to decide whether to size-limit the query string instead
+        // of the body. If this convention ever changes, update that check too.
         let graphql_request = if parts.method == Method::GET {
             Self::translate_query_request(parts)
         } else {
@@ -688,28 +676,28 @@ impl RouterFactory for RouterCreator {
 
 impl RouterCreator {
     pub(crate) async fn new(
-        query_analysis_layer: QueryAnalysisLayer,
-        persisted_query_layer: Arc<PersistedQueryLayer>,
+        query_analysis: Arc<QueryAnalysis>,
+        persisted_queries: Arc<PersistedQueryExpander>,
         supergraph_creator: Arc<SupergraphCreator>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, BoxError> {
         let static_page = StaticPageLayer::new(&configuration);
-        let apq_layer = if configuration.apq.enabled {
-            APQLayer::with_cache(
+        let apq_expander = if configuration.apq.enabled {
+            APQExpander::with_cache(
                 DeduplicatingCache::from_configuration(&configuration.apq.router.cache, "APQ")
                     .await?,
             )
         } else {
-            APQLayer::disabled()
+            APQExpander::disabled()
         };
         // There is a problem here.
         // APQ isn't a plugin and so cannot participate in plugin lifecycle events.
         // After telemetry `activate` NO part of the pipeline can fail as globals have been interacted with.
-        // However, the APQLayer uses DeduplicatingCache which is fallible. So if this fails on hot reload the router will be
+        // However, the APQExpander uses DeduplicatingCache which is fallible. So if this fails on hot reload the router will be
         // left in an inconsistent state and all metrics will likely stop working.
         // Fixing this will require a larger refactor to bring APQ into the router lifecycle.
         // For now just call activate to make the gauges work on the happy path.
-        apq_layer.activate();
+        apq_expander.activate();
 
         // Create a handle that will help us keep track of this pipeline.
         // A metric is exposed that allows the use to see if pipelines are being hung onto.
@@ -722,13 +710,13 @@ impl RouterCreator {
         let config_hash = configuration.hash();
         let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
 
-        let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
+        let router_service = RouterService::new(
             supergraph_creator.make(),
-            apq_layer,
-            persisted_query_layer,
-            query_analysis_layer,
+            apq_expander,
+            persisted_queries,
+            query_analysis,
             configuration.batching.clone(),
-        ));
+        );
 
         // NOTE: This is the start of the router pipeline (router_service).
         // The buffer provides backpressure for the full router pipeline and is required
@@ -736,21 +724,14 @@ impl RouterCreator {
         // before those layers (potentially introduced by traffic-shaping or license-
         // enforcement plugins), Tokio's cooperative scheduling would cause poll_ready to
         // return Pending spuriously and trigger Overloaded responses.
-        let service = UnconstrainedBuffer::new(
-            ServiceBuilder::new()
-                .layer(static_page.clone())
-                .service(
-                    supergraph_creator
-                        .plugins()
-                        .iter()
-                        .rev()
-                        .fold(router_service.boxed_clone(), |acc, (_, e)| {
-                            e.router_service(acc)
-                        }),
-                )
-                .boxed_clone(),
-            DEFAULT_BUFFER_SIZE,
-        );
+        let service = ServiceBuilder::new()
+            .buffered()
+            .layer(static_page.clone())
+            .rust_plugins(supergraph_creator.plugins(), |plugin, service| {
+                plugin.router_service(service)
+            })
+            .layer(content_negotiation::RouterContentNegotiationLayer::default())
+            .service(router_service);
 
         Ok(Self {
             supergraph_creator,
@@ -762,7 +743,7 @@ impl RouterCreator {
 }
 
 impl RouterCreator {
-    pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
+    pub(crate) fn previous_cache(&self) -> InMemoryQueryPlanCache {
         self.supergraph_creator.previous_cache()
     }
 }

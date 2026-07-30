@@ -2,13 +2,9 @@
 use std::fmt::Display;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
-use std::time::Instant;
 
 use axum::Router;
 use axum::extract::Extension;
-use axum::extract::State;
 use axum::http::StatusCode;
 use axum::middleware;
 use axum::middleware::Next;
@@ -54,40 +50,19 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
-use crate::plugins::telemetry::SpanMode;
+use crate::metrics::FutureMetricsExt;
+use crate::plugins::license_enforcement::layer::LicenseLayer;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecording;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecordingStream;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
-use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
-use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 use crate::uplink::license_enforcement::LicenseState;
 
 static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^/\{\*[^/]+\}$").expect("this regex to check wildcard paths is valid")
 });
-
-#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
-fn jemalloc_metrics_instruments() -> (
-    tokio::task::JoinHandle<()>,
-    Vec<opentelemetry::metrics::ObservableGauge<u64>>,
-) {
-    use crate::axum_factory::metrics::jemalloc;
-
-    (
-        jemalloc::start_epoch_advance_loop(),
-        vec![
-            jemalloc::create_active_gauge(),
-            jemalloc::create_allocated_gauge(),
-            jemalloc::create_metadata_gauge(),
-            jemalloc::create_mapped_gauge(),
-            jemalloc::create_resident_gauge(),
-            jemalloc::create_retained_gauge(),
-        ],
-    )
-}
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -297,12 +272,12 @@ impl HttpServerFactory for AxumHttpServerFactory {
             });
 
             // Spawn the main (GraphQL) server into a task
-            let main_future = tokio::task::spawn(main_server)
+            let main_future = tokio::task::spawn(main_server.with_current_meter_provider())
                 .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
                 .boxed();
 
             // Spawn all other servers (health, metrics, etc...) into a task
-            let extra_futures = tokio::task::spawn(join_all(servers))
+            let extra_futures = tokio::task::spawn(join_all(servers).with_current_meter_provider())
                 .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
                 .boxed();
 
@@ -319,22 +294,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
     }
 }
 
-// This function can be removed once https://github.com/apollographql/router/issues/4083 is done.
-pub(crate) fn span_mode(configuration: &Configuration) -> SpanMode {
-    configuration
-        .apollo_plugins
-        .plugins
-        .iter()
-        .find(|(s, _)| s.as_str() == "telemetry")
-        .and_then(|(_, v)| v.get("instrumentation").and_then(|v| v.as_object()))
-        .and_then(|v| v.get("spans").and_then(|v| v.as_object()))
-        .and_then(|v| {
-            v.get("mode")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-        })
-        .unwrap_or_default()
-}
-
 fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
@@ -347,8 +306,6 @@ where
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
-    let span_mode = span_mode(configuration);
-
     // XXX(@goto-bus-stop): in hyper 0.x, we required a HandleErrorLayer around this,
     // to turn errors from decompression into an axum error response. Now,
     // `RequestDecompressionLayer` appears to preserve(?) the error type from the inner service?
@@ -367,17 +324,13 @@ where
             .layer(
                 TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan {
                     license: license.clone(),
-                    span_mode,
                 }),
             )
             // CORS layer must be before any layer that can short-circuit with an error response, else
             // browser clients will not be able to view the error response body.
             .layer(cors)
             .layer(Extension(service_factory))
-            .layer(middleware::from_fn_with_state(
-                (license, Instant::now(), Arc::new(AtomicU64::new(0))),
-                license_handler,
-            ))
+            .layer(LicenseLayer::new(license))
             .layer(decompression),
     );
 
@@ -411,48 +364,6 @@ async fn metrics_handler(request: Request<axum::body::Body>, next: Next) -> Resp
     resp
 }
 
-async fn license_handler(
-    State((license, start, delta)): State<(Arc<LicenseState>, Instant, Arc<AtomicU64>)>,
-    request: Request<axum::body::Body>,
-    next: Next,
-) -> Response {
-    if matches!(
-        &*license,
-        LicenseState::LicensedHalt { limits: _ } | LicenseState::LicensedWarn { limits: _ }
-    ) {
-        // This will rate limit logs about license to 1 a second.
-        // The way it works is storing the delta in seconds from a starting instant.
-        // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successful log.
-        // If not successful some other thread will have logged.
-        let last_elapsed_seconds = delta.load(Ordering::SeqCst);
-        let elapsed_seconds = start.elapsed().as_secs();
-        if elapsed_seconds > last_elapsed_seconds
-            && delta
-                .compare_exchange(
-                    last_elapsed_seconds,
-                    elapsed_seconds,
-                    Ordering::SeqCst,
-                    Ordering::SeqCst,
-                )
-                .is_ok()
-        {
-            ::tracing::error!(
-                code = APOLLO_ROUTER_LICENSE_EXPIRED,
-                LICENSE_EXPIRED_SHORT_MESSAGE
-            );
-        }
-    }
-
-    if matches!(&*license, LicenseState::LicensedHalt { limits: _ }) {
-        http::Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(axum::body::Body::default())
-            .expect("canned response must be valid")
-    } else {
-        next.run(request).await
-    }
-}
-
 #[derive(Clone)]
 struct HandlerOptions {
     early_cancel: bool,
@@ -478,14 +389,8 @@ where
     }));
     #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     {
-        use tower::layer::layer_fn;
-        let (_epoch_advance_loop, jemalloc_instrument) = jemalloc_metrics_instruments();
-        // Tie the lifetime of the jemalloc instruments to the lifetime of the router
-        // by referencing them in a no-op layer.
-        router = router.layer(layer_fn(move |service| {
-            let _jemalloc_instrument = &jemalloc_instrument;
-            service
-        }));
+        router =
+            router.layer(crate::services::layers::jemalloc_metrics::JemallocMetricsLayer::new());
     }
 
     router
@@ -496,13 +401,6 @@ async fn handle_graphql<RF: RouterFactory>(
     Extension(service_factory): Extension<RF>,
     http_request: Request<axum::body::Body>,
 ) -> impl IntoResponse {
-    let _guard = i64_up_down_counter_with_unit!(
-        "apollo.router.session.count.active",
-        "Amount of in-flight sessions",
-        "{session}",
-        1
-    );
-
     let HandlerOptions {
         early_cancel,
         experimental_log_on_broken_pipe,
@@ -644,42 +542,12 @@ pub(crate) struct CanceledRequest;
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use http::header::ACCEPT;
     use http::header::CONTENT_TYPE;
     use tower::Service;
 
     use super::*;
     use crate::assert_snapshot_subscriber;
-    #[test]
-    fn test_span_mode_default() {
-        let config =
-            Configuration::from_str(include_str!("testdata/span_mode_default.router.yaml"))
-                .unwrap();
-        let mode = span_mode(&config);
-        assert_eq!(mode, SpanMode::SpecCompliant);
-    }
-
-    #[test]
-    fn test_span_mode_spec_compliant() {
-        let config = Configuration::from_str(include_str!(
-            "testdata/span_mode_spec_compliant.router.yaml"
-        ))
-        .unwrap();
-        let mode = span_mode(&config);
-        assert_eq!(mode, SpanMode::SpecCompliant);
-    }
-
-    #[test]
-    fn test_span_mode_deprecated() {
-        let config =
-            Configuration::from_str(include_str!("testdata/span_mode_deprecated.router.yaml"))
-                .unwrap();
-        let mode = span_mode(&config);
-        assert_eq!(mode, SpanMode::Deprecated);
-    }
-
     // Drive the http router call into its cancellation-handling path (where `CancelHandler`
     // is constructed) and then deterministically cancel it before completion. With
     // `experimental_log_on_broken_pipe = true`, dropping `CancelHandler` without an

@@ -31,6 +31,7 @@ use crate::query_graph::OverrideConditions;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::build_federated_query_graph;
+use crate::query_graph::condition_resolver::ConditionResolverCache;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
@@ -296,7 +297,7 @@ impl QueryPlanner {
                 let is_interface_object = query_graph
                     .subgraphs()
                     .map(|(_name, schema)| {
-                        let Some(position) = schema.try_get_type(position.type_name.clone()) else {
+                        let Some(position) = schema.try_get_type(&position.type_name) else {
                             return Ok(false);
                         };
                         schema.is_interface_object_type(position)
@@ -317,7 +318,7 @@ impl QueryPlanner {
 
         let is_inconsistent = |position: AbstractTypeDefinitionPosition| {
             let mut sources = query_graph.subgraphs().filter_map(|(_name, subgraph)| {
-                match subgraph.try_get_type(position.type_name().clone())? {
+                match subgraph.try_get_type(position.type_name())? {
                     // This is only called for type names that are abstract in the supergraph, so it
                     // can only be an object in a subgraph if it is an `@interfaceObject`. And as `@interfaceObject`s
                     // "stand-in" for all possible runtime types, they don't create inconsistencies by themselves
@@ -496,12 +497,14 @@ impl QueryPlanner {
         let mut non_local_selection_state = options
             .non_local_selections_limit_enabled
             .then(non_local_selections_estimation::State::default);
+        let mut resolver_cache = ConditionResolverCache::new();
         let (root_node, cost) = if !defer_conditions.is_empty() {
             compute_plan_for_defer_conditionals(
                 &mut parameters,
                 &mut processor,
                 defer_conditions,
                 &mut non_local_selection_state,
+                &mut resolver_cache,
             )
         } else {
             compute_plan_internal(
@@ -509,6 +512,7 @@ impl QueryPlanner {
                 &mut processor,
                 has_defers,
                 &mut non_local_selection_state,
+                &mut resolver_cache,
             )
         }?;
 
@@ -594,6 +598,7 @@ fn compute_root_serial_dependency_graph_for_mutation(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+    resolver_cache: &mut ConditionResolverCache,
 ) -> Result<Vec<FetchDependencyGraph>, FederationError> {
     let QueryPlanningParameters {
         supergraph_schema,
@@ -605,7 +610,7 @@ fn compute_root_serial_dependency_graph_for_mutation(
         supergraph_schema
             .schema()
             .root_operation(operation.root_kind.into())
-            .and_then(|name| supergraph_schema.get_type(name.clone()).ok())
+            .and_then(|name| supergraph_schema.try_get_type(name))
             .and_then(|ty| ty.try_into().ok())
     } else {
         None
@@ -625,6 +630,7 @@ fn compute_root_serial_dependency_graph_for_mutation(
         selection_set,
         has_defers,
         non_local_selection_state,
+        resolver_cache,
     )?;
     let mut prev_subgraph = only_root_subgraph(&fetch_dependency_graph)?;
     for selection_set in split_roots {
@@ -637,6 +643,7 @@ fn compute_root_serial_dependency_graph_for_mutation(
             selection_set,
             has_defers,
             non_local_selection_state,
+            resolver_cache,
         )?;
         let new_subgraph = only_root_subgraph(&new_dep_graph)?;
         if new_subgraph == prev_subgraph {
@@ -761,6 +768,7 @@ fn compute_root_parallel_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+    resolver_cache: &mut ConditionResolverCache,
 ) -> Result<(FetchDependencyGraph, QueryPlanCost), FederationError> {
     trace!("Starting process to construct a parallel fetch dependency graph");
     let selection_set = parameters.operation.selection_set.clone();
@@ -769,6 +777,7 @@ fn compute_root_parallel_dependency_graph(
         selection_set,
         has_defers,
         non_local_selection_state,
+        resolver_cache,
     )?;
     snapshot!(
         "FetchDependencyGraph",
@@ -783,6 +792,7 @@ fn compute_root_parallel_best_plan(
     selection: SelectionSet,
     has_defers: bool,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+    resolver_cache: &mut ConditionResolverCache,
 ) -> Result<BestQueryPlanInfo, FederationError> {
     let planning_traversal = QueryPlanningTraversal::new(
         parameters,
@@ -792,6 +802,7 @@ fn compute_root_parallel_best_plan(
         FetchDependencyGraphToCostProcessor,
         non_local_selection_state.as_mut(),
         None,
+        resolver_cache,
     )?;
 
     // Getting no plan means the query is essentially unsatisfiable (it's a valid query, but we can prove it will never return a result),
@@ -806,6 +817,7 @@ fn compute_root_parallel_best_plan_for_mutation(
     selection: SelectionSet,
     has_defers: bool,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+    resolver_cache: &mut ConditionResolverCache,
 ) -> Result<BestQueryPlanInfo, FederationError> {
     parameters.federated_query_graph.out_edges(parameters.head).into_iter().map(|edge_ref| {
         let mutation_subgraph = parameters.federated_query_graph.node_weight(edge_ref.target())?.source.clone();
@@ -817,6 +829,7 @@ fn compute_root_parallel_best_plan_for_mutation(
             FetchDependencyGraphToCostProcessor,
             non_local_selection_state.as_mut(),
             Some(mutation_subgraph),
+            resolver_cache,
         )?;
         planning_traversal.find_best_plan()
     }).process_results(|iter| iter
@@ -843,6 +856,7 @@ fn compute_plan_internal(
     processor: &mut FetchDependencyGraphToQueryPlanProcessor,
     has_defers: bool,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+    resolver_cache: &mut ConditionResolverCache,
 ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     let root_kind = parameters.operation.root_kind;
 
@@ -853,6 +867,7 @@ fn compute_plan_internal(
             parameters,
             has_defers,
             non_local_selection_state,
+            resolver_cache,
         )?;
         let mut main = None;
         let mut deferred = vec![];
@@ -882,6 +897,7 @@ fn compute_plan_internal(
             parameters,
             has_defers,
             non_local_selection_state,
+            resolver_cache,
         )?;
 
         let (main, deferred) = dependency_graph.process(&mut *processor, root_kind)?;
@@ -912,13 +928,20 @@ fn compute_plan_for_defer_conditionals(
     processor: &mut FetchDependencyGraphToQueryPlanProcessor,
     defer_conditions: IndexMap<Name, IndexSet<String>>,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+    resolver_cache: &mut ConditionResolverCache,
 ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     generate_condition_nodes(
         parameters.operation.clone(),
         defer_conditions.iter(),
         &mut |op| {
             parameters.operation = op;
-            compute_plan_internal(parameters, processor, true, non_local_selection_state)
+            compute_plan_internal(
+                parameters,
+                processor,
+                true,
+                non_local_selection_state,
+                resolver_cache,
+            )
         },
     )
 }

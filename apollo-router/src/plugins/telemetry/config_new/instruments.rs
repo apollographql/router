@@ -22,7 +22,6 @@ use tower::BoxError;
 
 use super::DefaultForLevel;
 use super::Selector;
-use super::cache::CACHE_METRIC;
 use super::cache::CacheInstruments;
 use super::cache::CacheInstrumentsConfig;
 use super::cache::attributes::CacheAttributes;
@@ -41,6 +40,8 @@ use super::supergraph::instruments::SupergraphCustomInstruments;
 use super::supergraph::instruments::SupergraphInstrumentsConfig;
 use crate::Context;
 use crate::metrics;
+use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
+use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
@@ -468,14 +469,15 @@ impl InstrumentsConfig {
             .subscriptions_terminated
             .is_enabled()
             .then(|| {
-                let attrs = match &self.router.attributes.subscriptions_terminated {
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        attributes.attributes.clone()
-                    }
-                    _ => SubscriptionsTerminatedAttributes::default(),
+                let selectors = match &self.router.attributes.subscriptions_terminated {
+                    DefaultedStandardInstrument::Extendable { attributes } => attributes.clone(),
+                    _ => Arc::new(Extendable {
+                        attributes: SubscriptionsTerminatedAttributes::default(),
+                        custom: HashMap::new(),
+                    }),
                 };
-                SubscriptionsTerminatedCounter {
-                    counter: static_instruments
+                SubscriptionsTerminatedCounter::new(
+                    static_instruments
                         .get(APOLLO_ROUTER_OPERATIONS_SUBSCRIPTIONS_TERMINATED)
                         .expect(
                             "cannot get static instrument for subscriptions terminated; this should not happen",
@@ -485,10 +487,8 @@ impl InstrumentsConfig {
                         .expect(
                             "cannot convert instrument to counter for subscriptions terminated; this should not happen",
                         ),
-                    reason_enabled: attrs.reason(),
-                    subgraph_name_enabled: attrs.subgraph_name(),
-                    client_name_enabled: attrs.client_name(),
-                }
+                    selectors,
+                )
             });
 
         RouterInstruments {
@@ -989,20 +989,6 @@ impl InstrumentsConfig {
     pub(crate) fn new_builtin_cache_instruments(&self) -> HashMap<String, StaticInstrument> {
         let meter = metrics::meter_provider().meter(METER_NAME);
         let mut static_instruments: HashMap<String, StaticInstrument> = HashMap::new();
-        if self.cache.attributes.cache.is_enabled() {
-            static_instruments.insert(
-                CACHE_METRIC.to_string(),
-                StaticInstrument::CounterF64(
-                    meter
-                        .f64_counter(CACHE_METRIC)
-                        .with_unit("ops")
-                        .with_description(
-                            "Entity cache hit/miss operations at the subgraph level (deprecated)",
-                        )
-                        .build(),
-                ),
-            );
-        }
         if self.cache.attributes.response_cache.is_enabled() {
             static_instruments.insert(
                 RESPONSE_CACHE_METRIC.to_string(),
@@ -1026,43 +1012,6 @@ impl InstrumentsConfig {
         static_instruments: Arc<HashMap<String, StaticInstrument>>,
     ) -> CacheInstruments {
         CacheInstruments {
-            cache_hit: self.cache.attributes.cache.is_enabled().then(|| {
-                let mut nb_attributes = 0;
-                let selectors = match &self.cache.attributes.cache {
-                    DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
-                        None
-                    }
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
-                    }
-                };
-                CustomCounter {
-                    inner: Mutex::new(CustomCounterInner {
-                        increment: Increment::Custom(None),
-                        condition: Condition::True,
-                        counter: Some(static_instruments
-                            .get(CACHE_METRIC)
-                            .expect(
-                                "cannot get static instrument for cache; this should not happen",
-                            )
-                            .as_counter_f64()
-                            .cloned()
-                            .expect(
-                                "cannot convert instrument to counter for cache; this should not happen",
-                            )
-                        ),
-                        attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(SubgraphSelector::Cache {
-                            cache: CacheKind::Hit,
-                            entity_type: None,
-                        })),
-                        selectors,
-                        incremented: false,
-                        _phantom: PhantomData,
-                    }),
-                }
-            }),
             cache_hit_response_cache: self.cache.attributes.response_cache.is_enabled().then(|| {
                 let mut nb_attributes = 0;
                 let selectors = match &self.cache.attributes.response_cache {
@@ -1090,8 +1039,8 @@ impl InstrumentsConfig {
                             )
                         ),
                         attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(SubgraphSelector::Cache {
-                            cache: CacheKind::Hit,
+                        selector: Some(Arc::new(SubgraphSelector::ResponseCache {
+                            response_cache: CacheKind::Hit,
                             entity_type: None,
                         })),
                         selectors,
@@ -1191,11 +1140,42 @@ impl SubscriptionsTerminatedAttributes {
     fn reason(&self) -> bool {
         self.reason.unwrap_or(false)
     }
-    fn subgraph_name(&self) -> bool {
-        self.subgraph_name.unwrap_or(false)
+}
+
+impl SubscriptionsTerminatedAttributes {
+    fn collect_attrs(&self, ctx: &Context) -> Vec<KeyValue> {
+        let mut attrs = Vec::new();
+        if self.subgraph_name.unwrap_or(false) {
+            let name = ctx
+                .get::<_, String>(SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            attrs.push(KeyValue::new("subgraph.name", name));
+        }
+        if self.client_name.unwrap_or(false) {
+            let client_name = ctx
+                .get::<_, String>(CLIENT_NAME)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            attrs.push(KeyValue::new("client.name", client_name));
+        }
+        attrs
     }
-    fn client_name(&self) -> bool {
-        self.client_name.unwrap_or(false)
+}
+
+impl Selectors<router::Request, router::Response, ()> for SubscriptionsTerminatedAttributes {
+    fn on_request(&self, _request: &router::Request) -> Vec<KeyValue> {
+        Vec::new()
+    }
+
+    fn on_response(&self, response: &router::Response) -> Vec<KeyValue> {
+        self.collect_attrs(&response.context)
+    }
+
+    fn on_error(&self, _error: &BoxError, ctx: &Context) -> Vec<KeyValue> {
+        self.collect_attrs(ctx)
     }
 }
 
@@ -1218,40 +1198,66 @@ impl DefaultForLevel for SubscriptionsTerminatedAttributes {
 
 /// Handle stashed in the request context so that
 /// [`Multipart`](crate::protocols::multipart::Multipart) can record the
-/// `apollo.router.operations.subscriptions.terminated.client` counter at drop time
-/// with only the attributes that are enabled in config.
+/// `apollo.router.operations.subscriptions.terminated.client` counter at drop time.
+///
+/// Selector-based attributes are collected during `on_response` and stored in
+/// `stashed_attributes` (shared via `Arc` across clones). The termination `reason`
+/// is added when the subscription stream is dropped.
 #[derive(Clone, Debug)]
 pub(crate) struct SubscriptionsTerminatedCounter {
-    pub(crate) counter: Counter<f64>,
-    pub(crate) reason_enabled: bool,
-    pub(crate) subgraph_name_enabled: bool,
-    pub(crate) client_name_enabled: bool,
+    counter: Counter<f64>,
+    selectors: Arc<Extendable<SubscriptionsTerminatedAttributes, RouterSelector>>,
+    stashed_attributes: Arc<Mutex<Vec<KeyValue>>>,
 }
 
 impl SubscriptionsTerminatedCounter {
-    pub(crate) fn record(
-        &self,
-        reason: &str,
-        subgraph_name: Option<&str>,
-        client_name: Option<&str>,
-    ) {
-        let mut attrs = Vec::with_capacity(3);
-        if self.reason_enabled {
-            attrs.push(opentelemetry::KeyValue::new("reason", reason.to_string()));
+    pub(crate) fn new(
+        counter: Counter<f64>,
+        selectors: Arc<Extendable<SubscriptionsTerminatedAttributes, RouterSelector>>,
+    ) -> Self {
+        Self {
+            counter,
+            selectors,
+            stashed_attributes: Arc::new(Mutex::new(Vec::new())),
         }
-        if self.subgraph_name_enabled {
-            attrs.push(opentelemetry::KeyValue::new(
-                "subgraph.name",
-                subgraph_name.unwrap_or_default().to_string(),
-            ));
-        }
-        if self.client_name_enabled {
-            attrs.push(opentelemetry::KeyValue::new(
-                "client.name",
-                client_name.unwrap_or_default().to_string(),
-            ));
+    }
+
+    pub(crate) fn record(&self, reason: &str) {
+        let mut attrs = self.stashed_attributes.lock().clone();
+        if self.selectors.attributes.reason() {
+            attrs.push(KeyValue::new("reason", reason.to_string()));
         }
         self.counter.add(1.0, &attrs);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_stashed_attributes(self, attributes: Vec<KeyValue>) -> Self {
+        *self.stashed_attributes.lock() = attributes;
+        self
+    }
+}
+
+impl Instrumented for SubscriptionsTerminatedCounter {
+    type Request = router::Request;
+    type Response = router::Response;
+    type EventResponse = ();
+
+    fn on_request(&self, request: &Self::Request) {
+        *self.stashed_attributes.lock() = self.selectors.on_request(request);
+        request
+            .context
+            .extensions()
+            .with_lock(|ext| ext.insert(self.clone()));
+    }
+
+    fn on_response(&self, response: &Self::Response) {
+        let new_attrs = self.selectors.on_response(response);
+        extend_attributes(&mut self.stashed_attributes.lock(), new_attrs);
+    }
+
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
+        let new_attrs = self.selectors.on_error(error, ctx);
+        extend_attributes(&mut self.stashed_attributes.lock(), new_attrs);
     }
 }
 
@@ -2664,6 +2670,7 @@ mod tests {
     use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::limits::operation_limits::OperationLimits;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
@@ -2680,7 +2687,6 @@ mod tests {
     use crate::services::RouterResponse;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
-    use crate::spec::operation_limits::OperationLimits;
 
     type JsonMap = serde_json_bytes::Map<ByteString, Value>;
 
@@ -3369,6 +3375,7 @@ mod tests {
                                     *http_response.headers_mut() = convert_http_headers(headers);
                                     let response = Response {
                                         context: context.clone(),
+                                        subgraph_name: String::new(),
                                         transport_result: Ok(TransportResponse::Http(
                                             HttpResponse {
                                                 inner: http_response.into_parts().0,
@@ -4041,5 +4048,73 @@ mod tests {
         let duration = std::time::Duration::from_micros(1500);
         // When unit is "ms", 1500us should be 1.5 milliseconds
         assert_eq!(duration_to_f64(duration, "ms"), 1.5);
+    }
+
+    /// Verify that the `RouterInstruments::on_response` dispatch to `subscriptions_terminated`
+    /// is wired up end-to-end. If the delegation were removed or mis-wired, `stashed_attributes`
+    /// would be empty and the `subgraph.name`/`client.name` labels would silently disappear from
+    /// the metric.
+    #[tokio::test]
+    async fn test_router_instruments_on_response_wires_subscriptions_terminated() {
+        async {
+            let config: InstrumentsConfig = serde_json::from_str(
+                json!({
+                    "router": {
+                        "apollo.router.operations.subscriptions.terminated.client": {
+                            "attributes": {
+                                "reason": true,
+                                "subgraph.name": true,
+                                "client.name": true
+                            }
+                        }
+                    }
+                })
+                .to_string()
+                .as_str(),
+            )
+            .unwrap();
+
+            let router_instruments =
+                config.new_router_instruments(Arc::new(config.new_builtin_router_instruments()));
+
+            let ctx = Context::new();
+            ctx.insert(
+                SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY,
+                "products".to_string(),
+            )
+            .unwrap();
+            ctx.insert(CLIENT_NAME, "ios-client".to_string()).unwrap();
+
+            let router_req = RouterRequest::fake_builder()
+                .context(ctx.clone())
+                .build()
+                .unwrap();
+            router_instruments.on_request(&router_req);
+
+            let router_response = RouterResponse::fake_builder()
+                .context(ctx.clone())
+                .build()
+                .unwrap();
+            router_instruments.on_response(&router_response);
+
+            // Extract the counter stashed into context extensions by on_request, which now
+            // carries the attributes populated by on_response via the shared Arc.
+            let counter = ctx
+                .extensions()
+                .with_lock(|lock| lock.get::<SubscriptionsTerminatedCounter>().cloned())
+                .expect("counter must be present after on_request");
+
+            counter.record("server_close");
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.terminated.client",
+                1,
+                "reason" = "server_close",
+                "subgraph.name" = "products",
+                "client.name" = "ios-client"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }

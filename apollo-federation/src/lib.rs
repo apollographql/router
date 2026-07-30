@@ -26,7 +26,7 @@
 )]
 
 mod api_schema;
-mod compat;
+pub mod compat;
 pub mod composition;
 pub mod connectors;
 #[cfg(feature = "correctness")]
@@ -56,6 +56,7 @@ use schema::FederationSchema;
 use strum::IntoEnumIterator;
 
 pub use crate::api_schema::ApiSchemaOptions;
+use crate::compat::coerce_and_validate_schema_values;
 use crate::connectors::ConnectSpec;
 use crate::error::FederationError;
 use crate::error::MultiTryAll;
@@ -185,7 +186,7 @@ pub(crate) fn validate_supergraph(
         }
         .into());
     };
-    let link_spec_definition = metadata.link_spec_definition()?;
+    let link_spec_definition = metadata.link_spec_definition();
     let Some(join_link) = metadata.for_identity(&Identity::join_identity()) else {
         return Err(SingleFederationError::InvalidFederationSupergraph {
             message: "Invalid supergraph: must use the join spec".to_owned(),
@@ -233,7 +234,9 @@ impl Supergraph {
         schema_str: &str,
         supported_specs: &[Url],
     ) -> Result<Self, FederationError> {
-        let schema = Schema::parse_and_validate(schema_str, "schema.graphql")?;
+        let mut schema = Schema::parse(schema_str, "schema.graphql")?;
+        coerce_and_validate_schema_values(&mut schema)?;
+        let schema = schema.validate()?;
         Self::from_schema(schema, Some(supported_specs))
     }
 
@@ -254,8 +257,7 @@ impl Supergraph {
         schema: Valid<Schema>,
         supported_specs: Option<&[Url]>,
     ) -> Result<Self, FederationError> {
-        let mut schema: Schema = schema.into_inner();
-        compat::coerce_schema_default_values(&mut schema);
+        let schema: Schema = schema.into_inner();
         let schema = FederationSchema::new(schema)?;
 
         let _ = validate_supergraph_for_query_planning(&schema)?;
@@ -350,12 +352,9 @@ fn check_spec_support(
         bail!("Schema must have metadata");
     };
     let mut errors = MultipleFederationErrors::new();
-    let link_spec = metadata.link_spec_definition()?;
+    let link_spec = metadata.link_spec_definition();
     if is_core_version_zero_dot_one(link_spec.url()) {
-        let has_link_with_purpose = metadata
-            .all_links()
-            .iter()
-            .any(|link| link.purpose.is_some());
+        let has_link_with_purpose = metadata.all_links().any(|link| link.purpose.is_some());
         if has_link_with_purpose {
             // PORT_NOTE: This is unreachable since the schema is validated before this check in
             //            Rust and a apollo-compiler error will have been raised already. This is
@@ -373,7 +372,7 @@ fn check_spec_support(
 
     let supported_specs: HashSet<_> = supported_specs.iter().collect();
     errors
-        .and_try(metadata.all_links().iter().try_for_all(|link| {
+        .and_try(metadata.all_links().try_for_all(|link| {
             let Some(purpose) = link.purpose else {
                 return Ok(());
             };

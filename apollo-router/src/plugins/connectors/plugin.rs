@@ -158,7 +158,9 @@ impl Plugin for Connectors {
                 let list = req
                     .query_plan
                     .root
-                    .service_usage_set()
+                    .as_ref()
+                    .map(|node| node.service_usage_set())
+                    .unwrap_or_default()
                     .into_iter()
                     .flat_map(|service_name| {
                         connectors

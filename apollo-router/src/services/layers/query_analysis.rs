@@ -69,10 +69,10 @@ pub(crate) fn recursive_selections_check_enabled() -> bool {
 
 /// A layer-like type that handles several aspects of query parsing and analysis.
 ///
-/// The supergraph layer implementation is in [QueryAnalysisLayer::supergraph_request].
+/// The supergraph layer implementation is in [QueryAnalysis::supergraph_request].
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
-pub(crate) struct QueryAnalysisLayer {
+pub(crate) struct QueryAnalysis {
     pub(crate) schema: Arc<Schema>,
     configuration: Arc<Configuration>,
     cache: Arc<Mutex<LruCache<QueryAnalysisKey, Result<(Context, ParsedDocument), SpecError>>>>,
@@ -86,9 +86,7 @@ struct QueryAnalysisKey {
     operation_name: Option<String>,
 }
 
-impl QueryAnalysisLayer {
-    const MAX_RECURSIVE_SELECTIONS: u32 = 10_000_000;
-
+impl QueryAnalysis {
     pub(crate) async fn new(schema: Arc<Schema>, configuration: Arc<Configuration>) -> Self {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema).unwrap_or(false);
@@ -122,6 +120,8 @@ impl QueryAnalysisLayer {
         let operation_name = operation_name.map(|o| o.to_string());
         let schema = self.schema.clone();
         let conf = self.configuration.clone();
+        let max_recursive_selections = conf.limits.router.max_recursive_selections;
+        let warn_only = conf.limits.router.warn_only;
 
         // Must be created *outside* of the compute_job or the span is not connected to the parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
@@ -139,25 +139,35 @@ impl QueryAnalysisLayer {
                         &mut Default::default(),
                         &doc.operation.selection_set,
                         0,
+                        max_recursive_selections,
                     );
                     if recursive_selections.is_none() {
                         if recursive_selections_check_enabled() {
-                            return Err(SpecError::ValidationError(ValidationErrors {
-                                errors: vec![GraphQLError {
-                                    message:
-                                        "Maximum recursive selections limit exceeded in this operation"
-                                            .to_string(),
-                                    locations: Default::default(),
-                                    path: Default::default(),
-                                    extensions: Default::default(),
-                                }],
-                            }))
+                            if warn_only {
+                                tracing::warn!(
+                                    operation_name = ?operation_name,
+                                    max_recursive_selections,
+                                    "operation exceeded maximum recursive selections limit",
+                                );
+                            } else {
+                                return Err(SpecError::ValidationError(ValidationErrors {
+                                    errors: vec![GraphQLError {
+                                        message:
+                                            "Maximum recursive selections limit exceeded in this operation"
+                                                .to_string(),
+                                        locations: Default::default(),
+                                        path: Default::default(),
+                                        extensions: Default::default(),
+                                    }],
+                                }))
+                            }
+                        } else {
+                            tracing::info!(
+                                operation_name = ?operation_name,
+                                max_recursive_selections,
+                                "operation exceeded maximum recursive selections limit, but limit is forcefully disabled",
+                            );
                         }
-                        tracing::info!(
-                            operation_name = ?operation_name,
-                            limit = Self::MAX_RECURSIVE_SELECTIONS,
-                            "operation exceeded maximum recursive selections limit, but limit is forcefully disabled",
-                        );
                     }
                     Ok(doc)
                 })
@@ -173,7 +183,7 @@ impl QueryAnalysisLayer {
 
     /// Measure the number of selections that would be encountered if we walked the given selection
     /// set while recursing into fragment spreads, and add it to the given count. `None` is returned
-    /// instead if this number exceeds `Self::MAX_RECURSIVE_SELECTIONS`.
+    /// instead if this number exceeds `max_recursive_selections`.
     ///
     /// This function assumes that fragments referenced by spreads exist and that they don't form
     /// cycles. If a fragment spread appears multiple times for the same named fragment, it is
@@ -183,11 +193,12 @@ impl QueryAnalysisLayer {
         fragment_cache: &mut HashMap<&'a Name, u32>,
         selection_set: &'a SelectionSet,
         mut count: u32,
+        max_recursive_selections: u32,
     ) -> Option<u32> {
         for selection in &selection_set.selections {
             count = count
                 .checked_add(1)
-                .take_if(|v| *v <= Self::MAX_RECURSIVE_SELECTIONS)?;
+                .take_if(|v| *v <= max_recursive_selections)?;
             match selection {
                 Selection::Field(field) => {
                     count = Self::count_recursive_selections(
@@ -195,6 +206,7 @@ impl QueryAnalysisLayer {
                         fragment_cache,
                         &field.selection_set,
                         count,
+                        max_recursive_selections,
                     )?;
                 }
                 Selection::InlineFragment(fragment) => {
@@ -203,6 +215,7 @@ impl QueryAnalysisLayer {
                         fragment_cache,
                         &fragment.selection_set,
                         count,
+                        max_recursive_selections,
                     )?;
                 }
                 Selection::FragmentSpread(fragment) => {
@@ -210,7 +223,7 @@ impl QueryAnalysisLayer {
                     if let Some(cached) = fragment_cache.get(name) {
                         count = count
                             .checked_add(*cached)
-                            .take_if(|v| *v <= Self::MAX_RECURSIVE_SELECTIONS)?;
+                            .take_if(|v| *v <= max_recursive_selections)?;
                     } else {
                         let old_count = count;
                         count = Self::count_recursive_selections(
@@ -222,6 +235,7 @@ impl QueryAnalysisLayer {
                                 .expect("validation should have ensured referenced fragments exist")
                                 .selection_set,
                             count,
+                            max_recursive_selections,
                         )?;
                         fragment_cache.insert(name, count - old_count);
                     };
@@ -419,10 +433,6 @@ pub(crate) struct ParsedDocumentInner {
     pub(crate) executable: Arc<Valid<ExecutableDocument>>,
     pub(crate) hash: Arc<QueryHash>,
     pub(crate) operation: Node<Operation>,
-    /// `__schema` or `__type`
-    pub(crate) has_schema_introspection: bool,
-    /// Non-meta fields explicitly defined in the schema
-    pub(crate) has_explicit_root_fields: bool,
 }
 
 impl ParsedDocumentInner {
@@ -433,22 +443,11 @@ impl ParsedDocumentInner {
         hash: Arc<QueryHash>,
     ) -> Result<Arc<Self>, SpecError> {
         let operation = get_operation(&executable, operation_name)?;
-        let mut has_schema_introspection = false;
-        let mut has_explicit_root_fields = false;
-        for field in operation.root_fields(&executable) {
-            match field.name.as_str() {
-                "__typename" => {} // turns out we have no conditional on `has_root_typename`
-                "__schema" | "__type" if operation.is_query() => has_schema_introspection = true,
-                _ => has_explicit_root_fields = true,
-            }
-        }
         Ok(Arc::new(Self {
             ast,
             executable,
             hash,
             operation,
-            has_schema_introspection,
-            has_explicit_root_fields,
         }))
     }
 }
@@ -490,3 +489,143 @@ impl PartialEq for ParsedDocumentInner {
 }
 
 impl Eq for ParsedDocumentInner {}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::Schema;
+
+    use super::QueryAnalysis;
+
+    fn parse(
+        schema_sdl: &str,
+        query: &str,
+    ) -> apollo_compiler::validation::Valid<ExecutableDocument> {
+        let schema = Schema::parse_and_validate(schema_sdl, "./").unwrap();
+        ExecutableDocument::parse_and_validate(&schema, query, "./").unwrap()
+    }
+
+    const SCHEMA: &str = "type Query { a: A } type A { b: B } type B { c: String }";
+
+    #[test]
+    fn count_recursive_selections_simple_query() {
+        let doc = parse(SCHEMA, "query { a { b { c } } }");
+        let op = doc.operations.get(None).unwrap();
+        let count = QueryAnalysis::count_recursive_selections(
+            &doc,
+            &mut HashMap::new(),
+            &op.selection_set,
+            0,
+            10_000_000,
+        );
+        // a(1) + b(2) + c(3) = 3 selections
+        assert_eq!(count, Some(3));
+    }
+
+    #[test]
+    fn count_recursive_selections_exceeds_limit() {
+        let doc = parse(SCHEMA, "query { a { b { c } } }");
+        let op = doc.operations.get(None).unwrap();
+        let count = QueryAnalysis::count_recursive_selections(
+            &doc,
+            &mut HashMap::new(),
+            &op.selection_set,
+            0,
+            2, // limit is 2, but query has 3 selections
+        );
+        assert_eq!(count, None);
+    }
+
+    #[test]
+    fn count_recursive_selections_exactly_at_limit() {
+        let doc = parse(SCHEMA, "query { a { b { c } } }");
+        let op = doc.operations.get(None).unwrap();
+        let count = QueryAnalysis::count_recursive_selections(
+            &doc,
+            &mut HashMap::new(),
+            &op.selection_set,
+            0,
+            3,
+        );
+        assert_eq!(count, Some(3));
+    }
+
+    #[test]
+    fn count_recursive_selections_with_fragment_spread() {
+        let schema = "type Query { a: A } type A { b: String, c: String }";
+        let query = "query { a { ...F } } fragment F on A { b c }";
+        let doc = parse(schema, query);
+        let op = doc.operations.get(None).unwrap();
+
+        // Under a generous limit: a(1) + spread(2) + b(3) + c(4) = 4
+        let count = QueryAnalysis::count_recursive_selections(
+            &doc,
+            &mut HashMap::new(),
+            &op.selection_set,
+            0,
+            100,
+        );
+        assert_eq!(count, Some(4));
+
+        // With a tight limit that the fragment exceeds
+        let count = QueryAnalysis::count_recursive_selections(
+            &doc,
+            &mut HashMap::new(),
+            &op.selection_set,
+            0,
+            3,
+        );
+        assert_eq!(count, None);
+    }
+
+    #[test]
+    fn count_recursive_selections_with_inline_fragment() {
+        let schema = "type Query { a: A } type A { b: String }";
+        let query = "query { a { ... on A { b } } }";
+        let doc = parse(schema, query);
+        let op = doc.operations.get(None).unwrap();
+        // a(1) + inline_fragment(2) + b(3) = 3
+        let count = QueryAnalysis::count_recursive_selections(
+            &doc,
+            &mut HashMap::new(),
+            &op.selection_set,
+            0,
+            100,
+        );
+        assert_eq!(count, Some(3));
+    }
+
+    #[test]
+    fn count_recursive_selections_fragment_reused() {
+        let schema = "type Query { a: A, a2: A } type A { b: String }";
+        let query = "query { a { ...F } a2 { ...F } } fragment F on A { b }";
+        let doc = parse(schema, query);
+        let op = doc.operations.get(None).unwrap();
+
+        // a(1) + spread(2) + b(3) + a2(4) + spread(5) + b_cached(6) = 6
+        let count = QueryAnalysis::count_recursive_selections(
+            &doc,
+            &mut HashMap::new(),
+            &op.selection_set,
+            0,
+            100,
+        );
+        assert_eq!(count, Some(6));
+    }
+
+    #[test]
+    fn count_recursive_selections_limit_zero_always_exceeds() {
+        let doc = parse("type Query { a: String }", "query { a }");
+        let op = doc.operations.get(None).unwrap();
+        let count = QueryAnalysis::count_recursive_selections(
+            &doc,
+            &mut HashMap::new(),
+            &op.selection_set,
+            0,
+            0,
+        );
+        assert_eq!(count, None);
+    }
+}

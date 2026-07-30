@@ -1,7 +1,7 @@
 ---
 title: Router Tracing
 subtitle: Collect tracing information from the router
-description: Collect and export tracing information from the Apollo GraphOS Router or Apollo Router Core. Supports OpenTelemetry Protocol (OTLP), Datadog, New Relic, Jaeger, Zipkin.
+description: Collect and export tracing information from the Apollo GraphOS Router or Apollo Router Core. Supports OpenTelemetry Protocol (OTLP), Datadog, New Relic, Jaeger.
 context:
   - telemetry
 redirectFrom:
@@ -15,7 +15,6 @@ Apollo Router supports a collection of tracing exporters:
 * [Dynatrace (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/dynatrace)
 * [Jaeger (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/jaeger)
 * [New Relic (via OTLP configuration)](/router/configuration/telemetry/exporters/tracing/new-relic)
-* [Zipkin](/router/configuration/telemetry/exporters/tracing/zipkin).
 
 The router generates [**spans**](/router/configuration/telemetry/instrumentation/spans) that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
 
@@ -119,6 +118,38 @@ telemetry:
 
 - `parent_based_sampler` enables clients to make the sampling decision. This guarantees that a trace that starts at a client will also have spans at the router. You may wish to disable it (setting `parent_based_sampler: false`) if your router is exposed directly to the internet.
 
+### Per-exporter sampler
+
+You can set an independent sampling rate on each exporter so that different backends receive different fractions of traces. For example, you might send 10% of traces to Apollo Studio but only 2% to an external OTLP endpoint:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        sampler: 0.1       # 10% of requests are traced
+      otlp:
+        enabled: true
+        endpoint: ${env.DISTRIBUTED_TRACING_ENDPOINT}
+        sampler: 0.02      # only 2% reach the external OTLP endpoint
+  apollo:
+    sampler: 0.1           # 10% reach Apollo Studio (matches common)
+```
+
+The per-exporter `sampler` is available on `telemetry.exporters.tracing.otlp`, `telemetry.exporters.tracing.datadog`, and `telemetry.apollo`.
+
+The value uses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`, so the rate is an absolute fraction of all requests — not a fraction of already-sampled spans. Setting `sampler: 0.02` means 2% of all requests, not "2% of the 10% that pass the common sampler."
+
+The per-exporter `sampler` must not exceed `telemetry.exporters.tracing.common.sampler`. The router returns an error at startup if it does.
+
+When `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent` header already marked as sampled by an upstream service are forwarded to the exporter regardless of the per-exporter sampler value, including when set to `always_off`.
+
+<Note>
+
+When `preview_datadog_agent_sampling` is enabled, the `sampler` field on the Datadog exporter is ignored and a warning is emitted at startup. In that mode, all spans must reach the Datadog agent unfiltered so the agent can apply its own sampling decisions. The OTLP sampler is still applied in this mode (since OTLP typically targets a different backend), but also emits a warning — if the OTLP endpoint also targets the Datadog agent, the agent may receive incomplete traces.
+
+</Note>
+
 ### `preview_datadog_agent_sampling`
 
 <div className="flex flex-row items-start gap-2 mt-2">
@@ -163,14 +194,8 @@ telemetry:
          # https://www.datadoghq.com/
          datadog: false
    
-         # https://www.jaegertracing.io/ (compliant with opentracing)
-         jaeger: false
-   
          # https://www.w3.org/TR/trace-context/
          trace_context: false
-   
-         # https://zipkin.io/ (compliant with opentracing)
-         zipkin: false
    
          # https://aws.amazon.com/xray/ (compliant with opentracing)
          aws_xray: false

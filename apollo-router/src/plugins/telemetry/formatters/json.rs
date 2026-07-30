@@ -12,7 +12,9 @@ use serde::ser::SerializeMap;
 use serde::ser::Serializer as _;
 use serde_json::Serializer;
 use tracing_core::Event;
+use tracing_core::Field;
 use tracing_core::Subscriber;
+use tracing_core::field;
 use tracing_serde::AsSerde;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
@@ -178,9 +180,7 @@ where
 
         // Get otel attributes
         {
-            let otel_attributes = ext
-                .get::<OtelData>()
-                .and_then(|otel_data| otel_data.builder.attributes.as_ref());
+            let otel_attributes = ext.get::<OtelData>().map(|otel_data| &otel_data.attributes);
             if let Some(otel_attributes) = otel_attributes {
                 for kv in otel_attributes.iter().filter(|kv| {
                     let key_name = kv.key.as_str();
@@ -261,6 +261,74 @@ where
     }
 }
 
+/// Collects tracing event fields into an ordered buffer so we can filter before serializing.
+///
+/// Needed because `otel_error!` (and similar OTel macros) append a trailing `""` format-string
+/// arg after explicit kv fields, which causes tracing to record both `message = ""` (from the
+/// empty format string) and an explicit `message = kv` field — producing duplicate JSON keys.
+/// By collecting first we can drop the empty-string `message` when a real one is present.
+struct EventFieldCollector {
+    fields: Vec<(String, serde_json::Value)>,
+}
+
+impl EventFieldCollector {
+    fn new() -> Self {
+        Self { fields: Vec::new() }
+    }
+
+    fn serialize_into<M: SerializeMap>(self, map: &mut M) -> Result<(), M::Error> {
+        let has_real_message = self.fields.iter().any(|(k, v)| {
+            k == "message" && !matches!(v, serde_json::Value::String(s) if s.is_empty())
+        });
+        for (key, value) in self.fields {
+            if key == "message"
+                && has_real_message
+                && matches!(&value, serde_json::Value::String(s) if s.is_empty())
+            {
+                continue;
+            }
+            map.serialize_entry(key.as_str(), &value)?;
+        }
+        Ok(())
+    }
+}
+
+impl field::Visit for EventFieldCollector {
+    fn record_f64(&mut self, field: &Field, value: f64) {
+        self.fields
+            .push((field.name().to_owned(), serde_json::Value::from(value)));
+    }
+
+    fn record_i64(&mut self, field: &Field, value: i64) {
+        self.fields
+            .push((field.name().to_owned(), serde_json::Value::from(value)));
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        self.fields
+            .push((field.name().to_owned(), serde_json::Value::from(value)));
+    }
+
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        self.fields
+            .push((field.name().to_owned(), serde_json::Value::from(value)));
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.fields
+            .push((field.name().to_owned(), serde_json::Value::from(value)));
+    }
+
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        let name = field.name();
+        let name = name.strip_prefix("r#").unwrap_or(name);
+        self.fields.push((
+            name.to_owned(),
+            serde_json::Value::from(format!("{value:?}")),
+        ));
+    }
+}
+
 impl<S> EventFormatter<S> for Json
 where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
@@ -283,17 +351,10 @@ where
             let mut serializer = serializer.serialize_map(None)?;
 
             if self.config.display_timestamp {
-                #[cfg(test)]
-                {
-                    serializer.serialize_entry("timestamp", "[timestamp]")?;
-                }
-                #[cfg(not(test))]
-                {
-                    let timestamp = time::OffsetDateTime::now_utc()
-                        .format(&time::format_description::well_known::Iso8601::DEFAULT)
-                        .map_err(|e| serde::ser::Error::custom(e.to_string()))?;
-                    serializer.serialize_entry("timestamp", &timestamp)?;
-                }
+                let timestamp = time::OffsetDateTime::now_utc()
+                    .format(&time::format_description::well_known::Iso8601::DEFAULT)
+                    .map_err(|e| serde::ser::Error::custom(e.to_string()))?;
+                serializer.serialize_entry("timestamp", &timestamp)?;
             }
 
             if self.config.display_level {
@@ -380,10 +441,11 @@ where
                 }
             }
 
-            let mut visitor = tracing_serde::SerdeMapVisitor::new(serializer);
-            event.record(&mut visitor);
-
-            serializer = visitor.take_serializer()?;
+            let mut collector = EventFieldCollector::new();
+            event.record(&mut collector);
+            collector
+                .serialize_into(&mut serializer)
+                .map_err(serde::ser::Error::custom)?;
 
             if self.config.display_target {
                 serializer.serialize_entry("target", meta.target())?;
@@ -452,8 +514,8 @@ fn extract_dd_trace_id<'a, 'b, T: LookupSpan<'a>>(span: &SpanRef<'a, T>) -> Opti
         let ext = root_span.extensions();
         // Extract dd_trace_id, this could be in otel data or log attributes
         if let Some(otel_data) = ext.get::<OtelData>()
-            && let Some(attributes) = otel_data.builder.attributes.as_ref()
-            && let Some(kv) = attributes
+            && let Some(kv) = otel_data
+                .attributes
                 .iter()
                 .find(|kv| kv.key.as_str() == "dd.trace_id")
         {
@@ -487,9 +549,7 @@ where
 
             // Get otel attributes
             {
-                let otel_attributes = ext
-                    .get::<OtelData>()
-                    .and_then(|otel_data| otel_data.builder.attributes.as_ref());
+                let otel_attributes = ext.get::<OtelData>().map(|otel_data| &otel_data.attributes);
                 if let Some(otel_attributes) = otel_attributes {
                     attributes.extend(
                         otel_attributes
@@ -568,6 +628,9 @@ impl fmt::Debug for WriteAdaptor<'_> {
 
 #[cfg(test)]
 mod test {
+    use opentelemetry::InstrumentationScope;
+    use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
     use tracing::subscriber;
     use tracing_core::Event;
     use tracing_core::Subscriber;
@@ -582,6 +645,11 @@ mod test {
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::formatters::json::extract_dd_trace_id;
     use crate::plugins::telemetry::otel;
+
+    fn make_tracer() -> opentelemetry_sdk::trace::Tracer {
+        SdkTracerProvider::default()
+            .tracer_with_scope(InstrumentationScope::builder("test").build())
+    }
 
     struct RequiresDatadogLayer;
     impl<S> Layer<S> for RequiresDatadogLayer
@@ -604,7 +672,7 @@ mod test {
         subscriber::with_default(
             Registry::default()
                 .with(RequiresDatadogLayer)
-                .with(otel::layer().force_sampling()),
+                .with(otel::layer().with_tracer(make_tracer())),
             || {
                 let root_span = tracing::info_span!("root", dd.trace_id = "1234");
                 let _root_span = root_span.enter();
@@ -619,7 +687,7 @@ mod test {
             Registry::default()
                 .with(RequiresDatadogLayer)
                 .with(DynAttributeLayer)
-                .with(otel::layer().force_sampling()),
+                .with(otel::layer()),
             || {
                 let root_span = tracing::info_span!("root");
                 root_span.set_span_dyn_attribute("dd.trace_id".into(), "1234".into());
@@ -636,7 +704,7 @@ mod test {
             Registry::default()
                 .with(RequiresDatadogLayer)
                 .with(DynAttributeLayer)
-                .with(otel::layer().force_sampling()),
+                .with(otel::layer()),
             || {
                 let root_span = tracing::info_span!("root");
                 let _root_span = root_span.enter();

@@ -30,6 +30,7 @@ use tower::BoxError;
 
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::GenericWith;
+use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::consts::BUILT_IN_SPAN_NAMES;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_ORIGINAL_NAME;
@@ -40,12 +41,12 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
+use crate::plugins::telemetry::metrics::BlockingSafeTokioRuntime;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::resource::ConfigResource;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::NamedSpanExporter;
-use crate::plugins::telemetry::tracing::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::datadog_exporter;
 use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
@@ -108,6 +109,21 @@ pub(crate) struct Config {
     /// Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request`, `connect`, `connect_request` and `http_request`.
     #[serde(default = "default_span_metrics")]
     span_metrics: HashMap<String, bool>,
+
+    /// Per-exporter sampler.
+    ///
+    /// Uses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.
+    /// Accepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.
+    /// Should be ≤ the common sampler; setting it higher has no effect.
+    ///
+    /// When `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`
+    /// header already marked as sampled by the calling service will be passed through to this
+    /// exporter regardless of this sampler's value — including when set to `always_off`.
+    ///
+    /// Ignored when `preview_datadog_agent_sampling` is enabled — in that mode the Datadog agent
+    /// controls sampling via `sampling.priority` and all spans must be forwarded unfiltered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) sampler: Option<SamplerOption>,
 }
 
 fn default_span_metrics() -> HashMap<String, bool> {
@@ -258,21 +274,35 @@ impl TracingConfigurator for Config {
         };
         let named_exporter = NamedSpanExporter::new(wrapper, "datadog");
 
-        let batch_processor =
-            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("datadog-tracing"))
-                .with_batch_config(self.batch_processor.clone().with_env_overrides()?.into())
-                .build()
-                .filtered();
+        let batch_processor = BatchSpanProcessor::builder(
+            named_exporter,
+            BlockingSafeTokioRuntime::new_for_tracing("datadog-tracing"),
+        )
+        .with_batch_config(self.batch_processor.clone().with_env_overrides()?.into())
+        .build()
+        .filtered();
 
-        if builder
-            .tracing_common()
-            .preview_datadog_agent_sampling
-            .unwrap_or_default()
-        {
-            builder.with_span_processor(batch_processor.always_sampled())
+        let common = builder.tracing_common();
+
+        // In Datadog agent sampling mode all spans must be forwarded so the agent can apply
+        // its own sampling decisions via sampling.priority. A per-exporter sampler would
+        // produce incomplete traces from the agent's perspective, so ignore it with a warning.
+        if common.preview_datadog_agent_sampling.unwrap_or(false) {
+            if self.sampler.is_some() {
+                ::tracing::warn!(
+                    "telemetry.exporters.tracing.datadog.sampler is ignored when \
+                     preview_datadog_agent_sampling is enabled"
+                );
+            }
+            builder.with_span_processor(batch_processor.always_sampled());
+        } else if let Some(ref sampler) = self.sampler {
+            let sampled_batch_span_processor =
+                batch_processor.with_sampler(sampler, common.parent_based_sampler, &common.sampler);
+            builder.with_span_processor(sampled_batch_span_processor);
         } else {
-            builder.with_span_processor(batch_processor)
+            builder.with_span_processor(batch_processor);
         }
+
         Ok(())
     }
 }
@@ -337,10 +367,10 @@ impl SpanExporter for ExporterWrapper {
         }
         self.delegate.export(batch)
     }
-    fn shutdown(&mut self) -> OTelSdkResult {
+    fn shutdown(&self) -> OTelSdkResult {
         self.delegate.shutdown()
     }
-    fn force_flush(&mut self) -> OTelSdkResult {
+    fn force_flush(&self) -> OTelSdkResult {
         self.delegate.force_flush()
     }
     fn set_resource(&mut self, resource: &Resource) {

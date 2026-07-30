@@ -280,7 +280,10 @@ mod tests {
     use apollo_federation::connectors::runtime::responses::MappedResponse;
     use http::HeaderValue;
     use http::header::CONTENT_LENGTH;
+    use opentelemetry::InstrumentationScope;
+    use opentelemetry::trace::TracerProvider as _;
     use opentelemetry_sdk::Resource;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
     use parking_lot::Mutex;
     use parking_lot::MutexGuard;
     use tests::events::EventLevel;
@@ -452,6 +455,24 @@ connector:
         }
     }
 
+    fn make_tracer() -> opentelemetry_sdk::trace::Tracer {
+        SdkTracerProvider::default()
+            .tracer_with_scope(InstrumentationScope::builder("test").build())
+    }
+
+    /// Return insta filters that redact non-deterministic values from JSON log snapshots.
+    ///
+    /// The JSON formatter emits real timestamps and OTel trace/span IDs whose values change
+    /// every run.  Applying these filters in tests keeps the snapshots hermetic without
+    /// changing the formatter's behaviour in production.
+    fn json_snapshot_filters() -> Vec<(&'static str, &'static str)> {
+        vec![
+            (r#""timestamp":"[^"]*""#, r#""timestamp":"[timestamp]""#),
+            (r#""trace_id":"[0-9a-f]{32}""#, r#""trace_id":"[trace_id]""#),
+            (r#""span_id":"[0-9a-f]{16}""#, r#""span_id":"[span_id]""#),
+        ]
+    }
+
     fn generate_simple_span() {
         let test_span = info_span!(
             "test",
@@ -519,6 +540,45 @@ connector:
     }
 
     #[tokio::test]
+    async fn test_json_logging_no_duplicate_empty_message() {
+        // otel_error!(name: "op", message = "explicit") expands to:
+        //   error!(name = "op", message = "explicit", "")
+        // The trailing "" sets message = "" while the kv field sets message = "explicit",
+        // producing duplicate JSON keys. Verify the formatter drops the empty-string one.
+        let buff = LogBuffer::default();
+        let json_format = JsonFormat {
+            display_timestamp: false,
+            display_span_list: false,
+            display_current_span: false,
+            display_resource: false,
+            ..Default::default()
+        };
+        let format = Json::new(Resource::builder_empty().build(), json_format);
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+
+        ::tracing::subscriber::with_default(fmt::Subscriber::new().with(fmt_layer), || {
+            error!(
+                name = "export_failure",
+                message = "explicit error message",
+                ""
+            );
+        });
+
+        let raw = buff.to_string();
+        let raw = raw.trim();
+        let parsed: serde_json::Value =
+            serde_json::from_str(raw).expect("output should be valid JSON");
+        assert_eq!(
+            parsed["message"], "explicit error message",
+            "explicit message should be present"
+        );
+        assert!(
+            !raw.contains(r#""message":"""#) && !raw.contains(r#""message": """#),
+            "empty-string message should be dropped; got: {raw}"
+        );
+    }
+
+    #[tokio::test]
     async fn test_json_logging_attributes() {
         let buff = LogBuffer::default();
         let format = Json::default();
@@ -528,7 +588,9 @@ connector:
             fmt::Subscriber::new().with(fmt_layer),
             generate_simple_span,
         );
-        insta::assert_snapshot!(buff);
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -542,7 +604,9 @@ connector:
             generate_nested_spans,
         );
 
-        insta::assert_snapshot!(buff.to_string());
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -562,7 +626,9 @@ connector:
             generate_nested_spans,
         );
 
-        insta::assert_snapshot!(buff.to_string());
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -598,7 +664,7 @@ connector:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             || {
                 let test_span = info_span!(
@@ -647,7 +713,7 @@ connector:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             || {
                 let test_span = info_span!(
@@ -679,7 +745,9 @@ connector:
             },
         );
 
-        insta::assert_snapshot!(buff.to_string());
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -698,7 +766,7 @@ connector:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             move || {
                 let test_span = info_span!(
@@ -887,6 +955,7 @@ connector:
 
                 let connector_response = Response {
                     context: context.clone(),
+                    subgraph_name: String::new(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
@@ -927,7 +996,9 @@ connector:
             },
         );
 
-        insta::assert_snapshot!(buff.to_string());
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -945,7 +1016,7 @@ connector:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             || {
                 let span = info_span!("test_expand_json");
@@ -1041,7 +1112,7 @@ subgraph:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             move || {
                 let test_span = info_span!("test");
@@ -1108,7 +1179,9 @@ subgraph:
             },
         );
 
-        insta::assert_snapshot!(buff.to_string());
+        insta::with_settings!({ filters => json_snapshot_filters() }, {
+            insta::assert_snapshot!(buff.to_string());
+        });
     }
 
     #[tokio::test]
@@ -1128,7 +1201,7 @@ subgraph:
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(fmt_layer),
             move || {
                 let test_span = info_span!(
@@ -1323,6 +1396,7 @@ subgraph:
 
                 let connector_response = Response {
                     context: context.clone(),
+                    subgraph_name: String::new(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)

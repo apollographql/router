@@ -1,12 +1,5 @@
 version: "3.9"
 services:
-  zipkin:
-    image: openzipkin/zipkin:latest
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    ports:
-      - 9411:9411
   datadog:
     image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:latest
     security_opt:
@@ -29,7 +22,7 @@ services:
 
   # redis cluster
   redis-cluster-7000:
-    image: cimg/redis:7.4.8
+    image: cimg/redis:7.4.9
     command:
       [
         "redis-server",
@@ -47,7 +40,7 @@ services:
       - redis-net
 
   redis-cluster-7001:
-    image: cimg/redis:7.4.8
+    image: cimg/redis:7.4.9
     command:
       [
         "redis-server",
@@ -65,7 +58,7 @@ services:
       - redis-net
 
   redis-cluster-7002:
-    image: cimg/redis:7.4.8
+    image: cimg/redis:7.4.9
     command:
       [
         "redis-server",
@@ -83,7 +76,7 @@ services:
       - redis-net
 
   redis-cluster-7003:
-    image: cimg/redis:7.4.8
+    image: cimg/redis:7.4.9
     command:
       [
         "redis-server",
@@ -101,7 +94,7 @@ services:
       - redis-net
 
   redis-cluster-7004:
-    image: cimg/redis:7.4.8
+    image: cimg/redis:7.4.9
     command:
       [
         "redis-server",
@@ -119,7 +112,7 @@ services:
       - redis-net
 
   redis-cluster-7005:
-    image: cimg/redis:7.4.8
+    image: cimg/redis:7.4.9
     command:
       [
         "redis-server",
@@ -150,7 +143,7 @@ services:
   # internal networking (in particular, different IPs for the services) but redis will hold on to cluster info (that's the
   # working theory, it might be wrong)
   redis-cluster-startup:
-    image: cimg/redis:7.4.8
+    image: cimg/redis:7.4.9
     depends_on:
       - redis-cluster-7000
       - redis-cluster-7001

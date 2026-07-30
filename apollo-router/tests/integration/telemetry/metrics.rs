@@ -1,9 +1,14 @@
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use regex::Regex;
 use serde_json::json;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
@@ -38,7 +43,7 @@ async fn test_metrics_reloading() {
     let mut config_value: serde_yaml::Value =
         serde_yaml::from_str(PROMETHEUS_CONFIG).expect("fixture is valid YAML");
     let apollo_block: serde_yaml::Value = serde_yaml::from_str(
-        "field_level_instrumentation_sampler: always_on\nexperimental_otlp_tracing_protocol: http\nexperimental_otlp_metrics_protocol: http\nbatch_processor:\n  scheduled_delay: 100ms\n",
+        "field_level_instrumentation_sampler: always_on\notlp_tracing_protocol: http\notlp_metrics_protocol: http\nbatch_processor:\n  scheduled_delay: 100ms\n",
     )
     .unwrap();
     config_value
@@ -69,7 +74,7 @@ async fn test_metrics_reloading() {
     //     also fine for this test, which just asserts the License
     //     poller's success counter increments.
     //   * Both `telemetry.apollo.endpoint` and
-    //     `telemetry.apollo.experimental_otlp_endpoint` pinned to the
+    //     `telemetry.apollo.otlp_endpoint` pinned to the
     //     per-test `apollo_otlp_server` mock with a catch-all
     //     `POST → 200` route, so all four reporting paths
     //     (`studio_reports_total{report_type=metrics|traces}` ×
@@ -131,7 +136,7 @@ async fn test_metrics_reloading() {
 
     // Studio + Uplink metrics. With both Apollo Studio and Apollo Uplink
     // pointed at local wiremocks (Studio via the harness's per-test mock at
-    // `experimental_otlp_endpoint`, Uplink via `APOLLO_UPLINK_ENDPOINTS`), all
+    // `otlp_endpoint`, Uplink via `APOLLO_UPLINK_ENDPOINTS`), all
     // four reporting paths complete successfully and deterministically — no
     // public-Internet dependency, no batch-timer race.
     //
@@ -263,6 +268,85 @@ async fn test_subgraph_auth_metrics() {
     );
 
     router.assert_metrics_contains(r#"apollo_router_operations_authentication_aws_sigv4_total{authentication_aws_sigv4_failed="false",subgraph_service_name="products",otel_scope_name="apollo/router"} 2"#, None).await;
+}
+
+// Regression test: SigV4 signing params must not leak from a configured subgraph
+// to an unconfigured one when both are resolved in the same operation.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_sigv4_does_not_leak_to_unconfigured_subgraph() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    // Set up a single mock server that both subgraphs route to.
+    let mock_server = MockServer::start().await;
+    let subgraph_url = mock_server.uri();
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": { "topProducts": [{"name": "Table"}], "me": {"name": "Alice"} }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            telemetry:
+              exporters:
+                metrics:
+                  prometheus:
+                    listen: 127.0.0.1:4000
+                    enabled: true
+                    path: /metrics
+            include_subgraph_errors:
+              all: true
+            authentication:
+              subgraph:
+                subgraphs:
+                  products:
+                    aws_sig_v4:
+                      hardcoded:
+                        access_key_id: "test"
+                        secret_access_key: "test"
+                        region: "us-east-1"
+                        service_name: "test_service"
+            "#,
+        )
+        .subgraph_overrides(HashMap::from([
+            ("products".to_string(), subgraph_url.clone()),
+            ("accounts".to_string(), subgraph_url.clone()),
+        ]))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Query resolves topProducts (products subgraph, SigV4 configured) and me
+    // (accounts subgraph, not configured) in the same operation.
+    router
+        .execute_query(
+            Query::builder()
+                .body(json!({"query": "{ topProducts { name } me { name } }"}))
+                .build(),
+        )
+        .await;
+
+    // Wait for the products signing metric to appear, proving metrics have been
+    // flushed, then immediately assert accounts was not signed.
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_operations_authentication_aws_sigv4_total{authentication_aws_sigv4_failed="false",subgraph_service_name="products",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_does_not_contain(
+            r#"apollo_router_operations_authentication_aws_sigv4_total{authentication_aws_sigv4_failed="false",subgraph_service_name="accounts""#,
+        )
+        .await;
+
+    router.graceful_shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -453,18 +537,22 @@ async fn test_gauges_on_reload() {
     router
         .assert_metrics_contains(r#"apollo_router_cache_storage_estimated_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} "#, None)
         .await;
+
+    // APQ cache should contain the persisted query
     router
         .assert_metrics_contains(
             r#"apollo_router_cache_size{kind="APQ",type="memory",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
+    // Query plan cache should contain the regular query + the persisted query
     router
         .assert_metrics_contains(
-            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 1"#,
+            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 2"#,
             None,
         )
         .await;
+    // Introspection cache should contain the introspection query
     router
         .assert_metrics_contains(
             r#"apollo_router_cache_size{kind="introspection",type="memory",otel_scope_name="apollo/router"} 1"#,

@@ -21,10 +21,10 @@
 //! - `Apollo`/`ApolloRealtime` - For metrics sent to Apollo Studio with specific filtering
 
 use std::collections::HashSet;
+use std::num::NonZeroU32;
 
 use ahash::HashMap;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
@@ -194,38 +194,236 @@ impl<'a> MetricsBuilder<'a> {
     }
 
     pub(crate) fn configure_views(&mut self, meter_provider_type: MeterProviderType) {
-        let boundaries = self.metrics_common().buckets.clone();
-
-        // Pre-merge user views with default histogram aggregation
-        let merged_views: HashMap<String, MetricView> = self
+        let bucket_boundaries = self.metrics_common().buckets.clone();
+        let cardinality_limit = self.metrics_common().cardinality_limit;
+        let user_views: HashMap<String, MetricView> = self
             .metrics_common()
             .views
             .clone()
             .into_iter()
-            .map(|v| {
-                let name = v.name.clone();
-                let default_view = MetricView::default_histogram(name.clone(), boundaries.clone());
-                (name, default_view.merge(v))
-            })
+            .map(|v| (v.name.clone(), v))
             .collect();
 
-        // Single view that handles both user-configured and default histogram views
         self.with_view(meter_provider_type, move |instrument: &Instrument| {
-            merged_views
-                .get(instrument.name())
-                .cloned()
-                .map(|view| view.into_stream())
-                .or_else(|| {
-                    (instrument.kind() == InstrumentKind::Histogram).then(|| {
-                        Stream::builder()
-                            .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                                boundaries: boundaries.clone(),
-                                record_min_max: true,
-                            })
-                            .build()
-                            .expect("Failed to create stream for default histogram bucket view")
-                    })
-                })
+            resolve_view(
+                instrument,
+                &user_views,
+                &bucket_boundaries,
+                cardinality_limit,
+            )
+        });
+    }
+}
+
+/// Resolves the view [`Stream`] for an instrument by layering a user-configured
+/// view (if any) on top of the globals. The histogram aggregation default is
+/// seeded only for histogram instruments, never for counters or gauges.
+fn resolve_view(
+    instrument: &Instrument,
+    user_views: &HashMap<String, MetricView>,
+    bucket_boundaries: &[f64],
+    cardinality_limit: Option<NonZeroU32>,
+) -> Option<Stream> {
+    let is_histogram = instrument.kind() == InstrumentKind::Histogram;
+    let histogram_buckets = is_histogram.then(|| bucket_boundaries.to_vec());
+    let user_view = user_views.get(instrument.name()).cloned();
+
+    if histogram_buckets.is_none() && cardinality_limit.is_none() && user_view.is_none() {
+        return None;
+    }
+
+    let default_view =
+        MetricView::default_view(instrument.name(), histogram_buckets, cardinality_limit);
+    let view = match user_view {
+        Some(user) => default_view.merge(user),
+        None => default_view,
+    };
+    Some(view.into_stream())
+}
+
+#[cfg(test)]
+mod view_selection_tests {
+    use opentelemetry::KeyValue;
+    use opentelemetry::metrics::MeterProvider;
+    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
+    use opentelemetry_sdk::metrics::MeterProviderBuilder;
+    use opentelemetry_sdk::metrics::data::AggregatedMetrics;
+    use opentelemetry_sdk::metrics::data::MetricData;
+    use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
+    use opentelemetry_sdk::runtime;
+
+    use super::*;
+
+    const BUCKETS: &[f64] = &[0.1, 0.5, 1.0, 5.0];
+
+    fn empty_view(name: &str) -> MetricView {
+        MetricView {
+            name: name.to_string(),
+            rename: None,
+            description: None,
+            unit: None,
+            aggregation: None,
+            allowed_attribute_keys: None,
+            cardinality_limit: None,
+        }
+    }
+
+    fn meter_provider_with(
+        exporter: InMemoryMetricExporter,
+        user_views: Vec<MetricView>,
+        global_cardinality_limit: Option<NonZeroU32>,
+    ) -> SdkMeterProvider {
+        let user_views: HashMap<String, MetricView> = user_views
+            .into_iter()
+            .map(|v| (v.name.clone(), v))
+            .collect();
+        let bucket_boundaries = BUCKETS.to_vec();
+        MeterProviderBuilder::default()
+            .with_reader(PeriodicReader::builder(exporter, runtime::Tokio).build())
+            .with_view(move |instrument: &Instrument| {
+                resolve_view(
+                    instrument,
+                    &user_views,
+                    &bucket_boundaries,
+                    global_cardinality_limit,
+                )
+            })
+            .build()
+    }
+
+    /// Runs the caller's closure against the first exported metric with the given
+    /// name. Panics if not found. The callback receives a borrowed `AggregatedMetrics`
+    /// because the SDK type is not `Clone`.
+    fn with_metric<R>(
+        exporter: &InMemoryMetricExporter,
+        name: &str,
+        f: impl FnOnce(&AggregatedMetrics) -> R,
+    ) -> R {
+        let metrics = exporter
+            .get_finished_metrics()
+            .expect("exporter returns metrics");
+        for rm in &metrics {
+            for sm in rm.scope_metrics() {
+                for metric in sm.metrics() {
+                    if metric.name() == name {
+                        return f(metric.data());
+                    }
+                }
+            }
+        }
+        panic!("metric {name} not exported")
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn counter_with_per_view_cardinality_limit_stays_a_counter() {
+        let exporter = InMemoryMetricExporter::default();
+        let mut view = empty_view("test.counter");
+        view.cardinality_limit = NonZeroU32::new(1000);
+        let provider = meter_provider_with(exporter.clone(), vec![view], None);
+
+        let counter = provider.meter("t").u64_counter("test.counter").build();
+        counter.add(1, &[]);
+        provider.force_flush().unwrap();
+
+        with_metric(&exporter, "test.counter", |data| {
+            assert!(
+                matches!(data, AggregatedMetrics::U64(MetricData::Sum(_))),
+                "expected Sum aggregation, got {data:?}"
+            );
+        });
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn histogram_without_user_view_uses_global_buckets() {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = meter_provider_with(exporter.clone(), vec![], NonZeroU32::new(100));
+
+        let histogram = provider.meter("t").f64_histogram("defaulted").build();
+        histogram.record(0.3, &[]);
+        provider.force_flush().unwrap();
+
+        with_metric(&exporter, "defaulted", |data| {
+            let AggregatedMetrics::F64(MetricData::Histogram(hist)) = data else {
+                panic!("expected Histogram aggregation, got {data:?}")
+            };
+            let bounds: Vec<f64> = hist
+                .data_points()
+                .next()
+                .map(|dp| dp.bounds().collect())
+                .unwrap_or_default();
+            assert_eq!(bounds, BUCKETS);
+        });
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn counter_without_user_view_or_global_limit_falls_through_to_sdk_default() {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = meter_provider_with(exporter.clone(), vec![], None);
+
+        let counter = provider.meter("t").u64_counter("plain.counter").build();
+        counter.add(5, &[]);
+        provider.force_flush().unwrap();
+
+        with_metric(&exporter, "plain.counter", |data| {
+            assert!(
+                matches!(data, AggregatedMetrics::U64(MetricData::Sum(_))),
+                "expected Sum aggregation, got {data:?}"
+            );
+        });
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn counter_with_global_cardinality_limit_no_user_view_overflows() {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = meter_provider_with(exporter.clone(), vec![], NonZeroU32::new(2));
+
+        let counter = provider.meter("t").u64_counter("global.limited").build();
+        counter.add(1, &[KeyValue::new("k", "a")]);
+        counter.add(1, &[KeyValue::new("k", "b")]);
+        counter.add(1, &[KeyValue::new("k", "c")]);
+        provider.force_flush().unwrap();
+
+        with_metric(&exporter, "global.limited", |data| {
+            let AggregatedMetrics::U64(MetricData::Sum(sum)) = data else {
+                panic!("expected Sum aggregation (native counter), got {data:?}")
+            };
+            let has_overflow = sum.data_points().any(|dp| {
+                dp.attributes()
+                    .any(|kv| kv.key.as_str() == "otel.metric.overflow")
+            });
+            assert!(
+                has_overflow,
+                "global limit of 2 with no per-view should overflow on the third attribute set",
+            );
+        });
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn counter_with_user_view_cardinality_limit_wins_over_global() {
+        let exporter = InMemoryMetricExporter::default();
+        let mut view = empty_view("limited.counter");
+        view.cardinality_limit = NonZeroU32::new(2);
+        let provider = meter_provider_with(exporter.clone(), vec![view], NonZeroU32::new(1000));
+
+        let counter = provider.meter("t").u64_counter("limited.counter").build();
+        counter.add(1, &[KeyValue::new("k", "a")]);
+        counter.add(1, &[KeyValue::new("k", "b")]);
+        counter.add(1, &[KeyValue::new("k", "c")]);
+        provider.force_flush().unwrap();
+
+        with_metric(&exporter, "limited.counter", |data| {
+            let AggregatedMetrics::U64(MetricData::Sum(sum)) = data else {
+                panic!("expected Sum aggregation, got {data:?}")
+            };
+            let has_overflow = sum.data_points().any(|dp| {
+                dp.attributes()
+                    .any(|kv| kv.key.as_str() == "otel.metric.overflow")
+            });
+            assert!(
+                has_overflow,
+                "per-view limit of 2 should overflow on the third attribute set; \
+                 a global limit of 1000 alone would emit no overflow"
+            );
         });
     }
 }

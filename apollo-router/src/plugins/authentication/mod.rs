@@ -40,9 +40,9 @@ use crate::plugins::authentication::jwks::Audiences;
 use crate::plugins::authentication::jwks::Issuers;
 use crate::plugins::authentication::jwks::JwksConfig;
 use crate::plugins::authentication::subgraph::make_signing_params;
-use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::connector_service::ConnectorSourceRef;
 use crate::services::router;
+use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
 
 pub(crate) mod jwks;
 
@@ -257,8 +257,10 @@ impl PluginPrivate for AuthenticationPlugin {
 
         ServiceBuilder::new()
             .instrument(authentication_service_span())
-            .checkpoint(move |request: router::Request| {
-                Ok(authenticate(&configuration, &jwks_manager, request))
+            .checkpoint_async(move |request: router::Request| {
+                let configuration = configuration.clone();
+                let jwks_manager = jwks_manager.clone();
+                async move { Ok(authenticate(&configuration, &jwks_manager, request)) }
             })
             .service(service)
             .boxed_clone()

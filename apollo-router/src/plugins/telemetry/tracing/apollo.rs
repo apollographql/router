@@ -7,11 +7,11 @@ use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::metrics::BlockingSafeTokioRuntime;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
-use crate::plugins::telemetry::span_factory::SpanMode;
 use crate::plugins::telemetry::tracing::NamedSpanExporter;
-use crate::plugins::telemetry::tracing::NamedTokioRuntime;
+use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::apollo_telemetry;
 
 impl TracingConfigurator for Config {
@@ -27,8 +27,8 @@ impl TracingConfigurator for Config {
         tracing::debug!("configuring Apollo tracing");
         let exporter = apollo_telemetry::Exporter::builder()
             .endpoint(&self.endpoint)
-            .otlp_endpoint(&self.experimental_otlp_endpoint)
-            .otlp_tracing_protocol(&self.experimental_otlp_tracing_protocol)
+            .otlp_endpoint(&self.otlp_endpoint)
+            .otlp_tracing_protocol(&self.otlp_tracing_protocol)
             .otlp_tracing_sampler(&self.otlp_tracing_sampler)
             .apollo_key(
                 self.apollo_key
@@ -46,15 +46,28 @@ impl TracingConfigurator for Config {
             .field_execution_sampler(&self.field_level_instrumentation_sampler)
             .batch_processor_config(&self.tracing.batch_processor)
             .errors_configuration(&self.errors)
-            .use_legacy_request_span(matches!(builder.spans().mode, SpanMode::Deprecated))
             .metrics_reference_mode(self.metrics_reference_mode)
             .build()?;
         let named_exporter = NamedSpanExporter::new(exporter, "apollo");
-        builder.with_span_processor(
-            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("apollo-tracing"))
-                .with_batch_config(self.tracing.batch_processor.clone().into())
-                .build(),
-        );
+        let batch_span_processor = BatchSpanProcessor::builder(
+            named_exporter,
+            BlockingSafeTokioRuntime::new_for_tracing("apollo-tracing"),
+        )
+        .with_batch_config(self.tracing.batch_processor.clone().into())
+        .build();
+
+        if let Some(sampler) = &self.sampler {
+            let common = builder.tracing_common();
+            let sampled_batch_span_processor = batch_span_processor.with_sampler(
+                sampler,
+                common.parent_based_sampler,
+                &common.sampler,
+            );
+
+            builder.with_span_processor(sampled_batch_span_processor);
+        } else {
+            builder.with_span_processor(batch_span_processor);
+        }
         Ok(())
     }
 }

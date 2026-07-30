@@ -37,8 +37,8 @@ use crate::query_planner::FlattenNode;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::Primary;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
+use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::fetch::FetchNode;
-use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::fetch::Variables;
 use crate::services::FetchRequest;
 use crate::services::fetch;
@@ -70,29 +70,33 @@ impl QueryPlan {
     ) -> Response {
         let root = Path::empty();
 
-        log::trace_query_plan(&self.root);
+        log::trace_query_plan(self.root.as_deref());
         let deferred_fetches = HashMap::new();
 
-        let (value, errors) = self
-            .root
-            .execute_recursively(
-                &ExecutionParameters {
-                    context,
-                    service,
-                    schema,
-                    supergraph_request,
-                    deferred_fetches: &deferred_fetches,
-                    query: &self.query,
-                    root_node: &self.root,
-                    subscription_handle: &subscription_handle,
-                    subscription_config,
-                    subgraph_schemas,
-                },
-                &root,
-                &initial_value.unwrap_or_default(),
-                sender,
-            )
-            .await;
+        let (value, errors) = match self.root.as_deref() {
+            Some(root_node) => {
+                root_node
+                    .execute_recursively(
+                        &ExecutionParameters {
+                            context,
+                            service,
+                            schema,
+                            supergraph_request,
+                            deferred_fetches: &deferred_fetches,
+                            query: &self.query,
+                            root_node,
+                            subscription_handle: &subscription_handle,
+                            subscription_config,
+                            subgraph_schemas,
+                        },
+                        &root,
+                        &initial_value.unwrap_or_default(),
+                        sender,
+                    )
+                    .await
+            }
+            None => (Value::Object(Default::default()), vec![]),
+        };
         if !deferred_fetches.is_empty() {
             u64_counter!(
                 "apollo.router.operations.defer",
@@ -105,11 +109,16 @@ impl QueryPlan {
     }
 
     pub fn contains_mutations(&self) -> bool {
-        self.root.contains_mutations()
+        self.root
+            .as_ref()
+            .is_some_and(|node| node.contains_mutations())
     }
 
     pub fn subgraph_fetches(&self) -> usize {
-        self.root.subgraph_fetches()
+        self.root
+            .as_ref()
+            .map(|node| node.subgraph_fetches())
+            .unwrap_or(0)
     }
 }
 

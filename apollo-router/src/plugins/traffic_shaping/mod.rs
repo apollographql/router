@@ -278,9 +278,6 @@ pub(crate) struct Config {
     subgraphs: HashMap<String, SubgraphShaping>,
     /// Applied on specific subgraphs
     connector: ConnectorsShapingConfig,
-
-    /// DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
-    deduplicate_variables: Option<bool>,
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
@@ -527,8 +524,14 @@ impl PluginPrivate for TrafficShaping {
             ServiceBuilder::new()
                 .buffered()
                 .map_future_with_request_data(
-                    |req: &Request| (req.context.clone(), req.key.clone()),
-                    move |(context, response_key), future| {
+                    |req: &Request| {
+                        (
+                            req.context.clone(),
+                            req.key.clone(),
+                            req.connector.id.subgraph_name.to_string(),
+                        )
+                    },
+                    move |(context, response_key, subgraph_name), future| {
                         async {
                             let response: Result<Response, BoxError> = future.await;
                             match response {
@@ -536,6 +539,7 @@ impl PluginPrivate for TrafficShaping {
                                 Err(err) if err.is::<Elapsed>() => {
                                     let response = Response::error_new(
                                         context,
+                                        subgraph_name,
                                         Error::GatewayTimeout,
                                         "Your request has been timed out",
                                         response_key,
@@ -545,6 +549,7 @@ impl PluginPrivate for TrafficShaping {
                                 Err(err) if err.is::<Overloaded>() => {
                                     let response = Response::error_new(
                                         context,
+                                        subgraph_name,
                                         Error::RateLimited,
                                         "Your request has been rate limited",
                                         response_key,
@@ -682,19 +687,17 @@ mod test {
     use crate::json_ext::Object;
     use crate::plugin::DynPlugin;
     use crate::plugin::test::MockConnector;
-    use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraph;
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::RouterFactory;
     use crate::router_factory::create_plugins;
-    use crate::services::HasSchema;
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
     use crate::services::connector::request_service::Request as ConnectorRequest;
-    use crate::services::layers::persisted_queries::PersistedQueryLayer;
-    use crate::services::layers::query_analysis::QueryAnalysisLayer;
+    use crate::services::layers::persisted_queries::PersistedQueryExpander;
+    use crate::services::layers::query_analysis::QueryAnalysis;
     use crate::services::router;
     use crate::services::router::service::RouterCreator;
     use crate::spec::Schema;
@@ -774,8 +777,6 @@ mod test {
 
         let config: Configuration = serde_yaml::from_str(
             r#"
-        traffic_shaping:
-            deduplicate_variables: true
         supergraph:
             # TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
             generate_query_fragments: false
@@ -785,19 +786,21 @@ mod test {
 
         let config = Arc::new(config);
         let schema = Arc::new(Schema::parse(schema, &config).unwrap());
-        let planner = QueryPlannerService::new(schema.clone(), config.clone())
-            .await
-            .unwrap();
-        let subgraph_schemas = Arc::new(
-            planner
-                .subgraph_schemas()
-                .iter()
-                .map(|(k, v)| (k.clone(), v.schema.clone()))
-                .collect(),
-        );
+        let query_analysis = Arc::new(QueryAnalysis::new(schema.clone(), config.clone()).await);
 
-        let mut builder =
-            PluggableSupergraphServiceBuilder::new(planner).with_configuration(config.clone());
+        let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
+        let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
+        let planner = QueryPlannerService::new(schema.clone(), config.clone(), qp_arc)
+            .unwrap()
+            .boxed_clone();
+
+        let mut builder = PluggableSupergraphServiceBuilder::new(
+            planner,
+            schema.clone(),
+            subgraph_schemas.clone(),
+            query_analysis.clone(),
+        )
+        .with_configuration(config.clone());
 
         let plugins = Arc::new(
             create_plugins(
@@ -819,11 +822,15 @@ mod test {
             .with_subgraph_service("reviews", review_service.boxed_clone())
             .with_subgraph_service("products", product_service.boxed_clone());
 
-        let supergraph_creator = builder.build().await.expect("should build");
+        let (supergraph_creator, _warmup) = builder.build().await.expect("should build");
 
         RouterCreator::new(
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
-            Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
+            query_analysis,
+            Arc::new(
+                PersistedQueryExpander::new(&Default::default())
+                    .await
+                    .unwrap(),
+            ),
             Arc::new(supergraph_creator),
             Arc::new(Configuration::default()),
         )
@@ -909,12 +916,9 @@ mod test {
 
     #[tokio::test]
     async fn it_returns_valid_response_for_deduplicated_variables() {
-        let config = serde_yaml::from_str::<serde_json::Value>(
-            r#"
-        deduplicate_variables: true
-        "#,
-        )
-        .unwrap();
+        // Variable deduplication is now unconditionally enabled, so an empty
+        // traffic shaping config is sufficient.
+        let config = serde_yaml::from_str::<serde_json::Value>("{}").unwrap();
         // Build a traffic shaping plugin
         let plugin = get_traffic_shaping_plugin(&config).await;
         let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
@@ -1261,20 +1265,23 @@ mod test {
         .unwrap();
 
         let plugin = get_traffic_shaping_plugin(&config).await;
-        let mut mock_service = MockRouterService::new();
+        let (mock, mut handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
 
-        mock_service.expect_call().times(0..3).returning(|_| {
-            Ok(RouterResponse::fake_builder()
-                .data(json!({ "test": 1234_u32 }))
-                .build()
-                .unwrap())
+        // First and third requests pass through; the second is rate-limited by the plugin and
+        // never reaches the inner service.
+        let driver = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(
+                    RouterResponse::fake_builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .build()
+                        .unwrap(),
+                );
+            }
         });
-        mock_service
-            .expect_clone()
-            .returning(MockRouterService::new);
 
-        // let mut svc = plugin.router_service(mock_service.clone().boxed());
-        let mut svc = plugin.router_service(mock_service.boxed_clone());
+        let mut svc = plugin.router_service(mock.boxed_clone());
 
         let response: RouterResponse = svc
             .ready()
@@ -1314,6 +1321,7 @@ mod test {
             .await
             .unwrap();
         assert_eq!(StatusCode::OK, response.response.status());
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test(flavor = "multi_thread")]

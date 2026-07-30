@@ -75,16 +75,34 @@ telemetry:
 
 <MinVersionBadge version="Router v2.13.0" />
 
-By default, the router sends GraphOS OTLP data over gRPC. To switch to HTTP protobuf, set `experimental_otlp_tracing_protocol` and `experimental_otlp_metrics_protocol`:
+By default, the router sends GraphOS OTLP data over gRPC. To switch to HTTP protobuf, set `otlp_tracing_protocol` and `otlp_metrics_protocol`:
 
 ```yaml title="router.yaml"
 telemetry:
   apollo:
-    experimental_otlp_tracing_protocol: http   # grpc (default) | http
-    experimental_otlp_metrics_protocol: http   # grpc (default) | http
+    otlp_tracing_protocol: http   # grpc (default) | http
+    otlp_metrics_protocol: http   # grpc (default) | http
 ```
 
 Use HTTP when your network or proxy infrastructure handles HTTP traffic but not gRPC. For proxy routing, see [HTTP proxy support](#http-proxy-support).
+
+#### Configuring the Apollo Studio sampling rate
+
+You can set an independent sampling rate for traces sent to Apollo Studio using `telemetry.apollo.sampler`. This lets you send a different fraction of traces to Studio than to other exporters:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        sampler: 0.1   # 10% of requests are traced globally
+  apollo:
+    sampler: 0.05      # only 5% of requests reach Apollo Studio
+```
+
+The value uses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`, so it's an absolute fraction of all requests. It must not exceed `telemetry.exporters.tracing.common.sampler`; the router returns an error at startup if it does.
+
+If omitted, Apollo Studio receives all spans that pass the common sampler.
 
 ## Reporting field-level traces
 
@@ -470,6 +488,6 @@ The router's GraphOS OTLP exporters respect the standard `HTTP_PROXY`, `HTTPS_PR
 
 <Note>
 
-HTTP proxy routing applies to the HTTP transport. Set `experimental_otlp_tracing_protocol` and `experimental_otlp_metrics_protocol` to `http` to route GraphOS OTLP traffic through a proxy. See [Configuring the transport protocol](#configuring-the-transport-protocol) for details.
+HTTP proxy routing applies to the HTTP transport. Set `otlp_tracing_protocol` and `otlp_metrics_protocol` to `http` to route GraphOS OTLP traffic through a proxy. See [Configuring the transport protocol](#configuring-the-transport-protocol) for details.
 
 </Note>

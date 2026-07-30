@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::Deref;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -30,8 +29,6 @@ use fred::types::config::ReconnectPolicy;
 use fred::types::config::TlsConfig;
 use fred::types::config::TlsHostMapping;
 use fred::types::config::UnresponsiveConfig;
-use fred::types::scan::ScanResult;
-use futures::Stream;
 use futures::future::join_all;
 use parking_lot::RwLock;
 use tokio::sync::Mutex;
@@ -45,7 +42,7 @@ use super::ValueType;
 use super::metrics::RedisMetricsCollector;
 use crate::cache::replica_filter::RouteableReplicaFilter;
 use crate::configuration::RedisCache;
-use crate::services::generate_tls_client_config;
+use crate::services::subgraph::http::generate_tls_client_config;
 
 pub(super) static ACTIVE_CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
 const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
@@ -422,15 +419,18 @@ impl RedisCacheStorage {
                 // then recreate the client with a fresh view of the infrastructure
                 config.replica.ignore_reconnection_errors = false;
                 config.replica.primary_fallback = true;
-                // NOTE: lazy_connections must be true (fred's default). With eager connections,
-                // a replica connection failure during add_connection propagates via ? through
-                // sync_replicas and can trigger the reconnection policy pool-wide. With lazy
-                // connections, failures are deferred to per-command time and isolated. The
-                // RouteableReplicaFilter prevents ghost replicas from entering the routing
-                // table at topology sync time regardless, but lazy connections provide
-                // additional blast-radius isolation for replicas that pass the TCP probe but
-                // fail Redis protocol setup (AUTH, HELLO, etc).
-                config.replica.lazy_connections = true;
+                // NOTE: lazy_connections must be false! There's a bug in fred's round-robin logic
+                // for selecting replicas when in a cluster that has an even number of replicas.
+                // The details are roughly that when fred looks for a routeable replica, it
+                // increments its round-robin counter, and if it can't find one, it moves on to
+                // creating one but also increments the counter _again_ before requeuing the redis
+                // command to run. When there are, eg, 2 replicas, those requeues will make it so
+                // that fred always tries to route a command to a replica that has no connection.
+                // Redis CPU explodes, GETs fail and fallthrough to backends, and so on. Not great.
+                // Don't set this to true! We originally set it to true to have additional blast
+                // radius for sync failures but we now have a ReplicaFilter doing that work for us
+                // (by removing unrouteable replicas from what we try to route to)
+                config.replica.lazy_connections = false;
                 config.tcp = TcpConfig {
                     #[cfg(target_os = "linux")]
                     user_timeout: Some(self.redis_client_config.timeout),
@@ -457,10 +457,64 @@ impl RedisCacheStorage {
             ACTIVE_CLIENT_COUNT.fetch_add(1, Ordering::Relaxed);
         }
 
+        // When `required_to_start` is set, subscribe to each client's `connect`
+        // notification *before* kicking off connection tasks. fred's
+        // `Pool::wait_for_connect` subscribes only at the moment it is `.await`ed,
+        // so there is a race: if `connect_pool` exhausts its reconnection policy
+        // before `wait_for_connect` reaches the `recv()` call, the terminal
+        // `broadcast_connect(Err(..))` is fired before any subscriber exists. The
+        // broadcast channel does not buffer past events for late subscribers, and
+        // fred never sends another connect event (the pool has aborted), so
+        // `wait_for_connect` hangs indefinitely. We saw this surface in CI as the
+        // `connection_failure_blocks_startup` integration test timing out at the
+        // nextest 120 s deadline.
+        //
+        // We mirror fred's own `Pool::init` shape (clients/pool.rs `init`) which
+        // collects subscribers first and then calls `connect`, but keep the
+        // separate per-client `ConnectHandle`s that the downstream watcher task
+        // (see below) needs to detect a pool abort. This is a subscribe-before-
+        // publish fix; the broader connection lifecycle is unchanged.
+        let connect_rxs: Vec<_> = if self.redis_client_config.required_to_start {
+            client_pool
+                .clients()
+                .iter()
+                .map(|c| c.inner().notifications.connect.load().subscribe())
+                .collect()
+        } else {
+            Vec::new()
+        };
+
         // NB: error is not recorded here as it will be observed by the task following `client.error_rx()`
         let client_handles = client_pool.connect_pool();
         if self.redis_client_config.required_to_start {
-            client_pool.wait_for_connect().await?;
+            // Drive each pre-subscribed receiver to its first event. If any
+            // client's connect attempts ultimately fail, surface that error so the
+            // router can refuse to start (the contract documented on
+            // `required_to_start`).
+            for mut rx in connect_rxs {
+                loop {
+                    match rx.recv().await {
+                        Ok(Ok(())) => break,
+                        Ok(Err(e)) => return Err(Box::new(e)),
+                        Err(RecvError::Lagged(_)) => {
+                            // A lag means the broadcast queue overflowed between
+                            // the subscribe and recv; this only happens under
+                            // extreme load and is not a connect failure, so
+                            // re-recv on the SAME rx to wait for the next event.
+                            // Without the inner loop, `continue` would advance
+                            // the outer `for` and drop this client's receiver
+                            // without ever observing its connect.
+                            continue;
+                        }
+                        Err(RecvError::Closed) => {
+                            return Err(Box::new(RedisError::new(
+                                RedisErrorKind::Canceled,
+                                "redis connect notification channel closed before any connect attempt completed",
+                            )));
+                        }
+                    }
+                }
+            }
             tracing::trace!("redis connections established");
         }
 
@@ -520,10 +574,6 @@ impl RedisCacheStorage {
         self.activate();
 
         Ok(())
-    }
-
-    pub(crate) fn ttl(&self) -> Option<Duration> {
-        self.ttl
     }
 
     /// Signal that the meter provider is ready and metrics gauges can be created.
@@ -620,11 +670,6 @@ impl RedisCacheStorage {
                 Ok(result)
             }
         }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn set_ttl(&mut self, ttl: Option<Duration>) {
-        self.ttl = ttl;
     }
 
     // NOTE: we return a RedisError here because it's easier to integrate into the rest of the
@@ -756,14 +801,6 @@ impl RedisCacheStorage {
         }
     }
 
-    pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
-        &self,
-        keys: Vec<RedisKey<K>>,
-    ) -> Result<Vec<Result<RedisValue<V>, RedisError>>, RedisError> {
-        self.get_multiple_with_options(keys, Options::default())
-            .await
-    }
-
     /// `Result<Vec<Result<RedisValue<V>, RedisError>>, RedisError>` is a horrible return type but
     /// is needed to capture the multiple levels of errors that can occur.
     ///
@@ -845,48 +882,6 @@ impl RedisCacheStorage {
         }
     }
 
-    /// Inserts multiple records. Returns Ok(()) on success, emitting traces for successful
-    /// inserts, and otherwise an error and error traces and error-level log
-    pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
-        &self,
-        data: &[(RedisKey<K>, RedisValue<V>)],
-        ttl: Option<Duration>,
-    ) -> Result<(), RedisError> {
-        tracing::trace!("inserting into redis: {:#?}", data);
-        let expiration = self.expiration(ttl);
-
-        // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
-        // seems to split the pipeline by hash slot in the background.
-        let pipeline = self.pipeline().await?;
-        for (key, value) in data {
-            let key = self.make_key(key.clone());
-            let _: Result<(), _> = pipeline
-                .set(key, value.clone(), expiration.clone(), None, false)
-                .await;
-        }
-
-        let result: Result<Vec<()>, _> = pipeline.all().await;
-        match result {
-            Ok(values) => tracing::trace!("successfully inserted {} values", values.len()),
-            Err(err) => {
-                tracing::trace!("caught error during insert: {err:?}");
-                self.record_query_error(&err);
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
-    /// `scan_with_namespaced_results` and already includes it.
-    pub(crate) async fn delete_from_scan_result<I>(&self, keys: I) -> Result<u32, RedisError>
-    where
-        I: Iterator<Item = fred::types::Key>,
-    {
-        self.delete_from_scan_result_with_options(keys, Options::default())
-            .await
-    }
-
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
     /// `scan_with_namespaced_results` and already includes it.
     pub(crate) async fn delete_from_scan_result_with_options<I>(
@@ -918,25 +913,6 @@ impl RedisCacheStorage {
         }
 
         Ok(total)
-    }
-
-    /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
-    pub(crate) async fn scan_with_namespaced_results(
-        &self,
-        pattern: String,
-        count: Option<u32>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>>, RedisError>
-    {
-        let pattern = self.make_key(RedisKey(pattern));
-        if self.is_cluster {
-            // NOTE: scans might be better send to only the read replicas, but the read-only client
-            // doesn't have a scan_cluster(), just a paginated version called scan_page()
-            Ok(Box::pin(
-                self.client().await?.scan_cluster(pattern, count, None),
-            ))
-        } else {
-            Ok(Box::pin(self.client().await?.scan(pattern, count, None)))
-        }
     }
 }
 
@@ -1006,7 +982,10 @@ fn setup_event_listeners(caller: &'static str, client: &Client) {
 ))]
 impl RedisCacheStorage {
     pub(crate) async fn truncate_namespace(&self) -> Result<(), RedisError> {
+        use std::pin::Pin;
+
         use fred::prelude::Key;
+        use futures::Stream;
         use futures::StreamExt;
 
         if self.namespace.is_none() {
@@ -1039,6 +1018,82 @@ impl RedisCacheStorage {
                 .map(ToString::to_string)
                 .unwrap_or(key),
             None => key,
+        }
+    }
+
+    pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
+        &self,
+        keys: Vec<RedisKey<K>>,
+    ) -> Result<Vec<Result<RedisValue<V>, RedisError>>, RedisError> {
+        self.get_multiple_with_options(keys, Options::default())
+            .await
+    }
+
+    /// Inserts multiple records. Returns Ok(()) on success, emitting traces for successful
+    /// inserts, and otherwise an error and error traces and error-level log
+    pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
+        &self,
+        data: &[(RedisKey<K>, RedisValue<V>)],
+        ttl: Option<Duration>,
+    ) -> Result<(), RedisError> {
+        tracing::trace!("inserting into redis: {:#?}", data);
+        let expiration = self.expiration(ttl);
+
+        // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
+        // seems to split the pipeline by hash slot in the background.
+        let pipeline = self.pipeline().await?;
+        for (key, value) in data {
+            let key = self.make_key(key.clone());
+            let _: Result<(), _> = pipeline
+                .set(key, value.clone(), expiration.clone(), None, false)
+                .await;
+        }
+
+        let result: Result<Vec<()>, _> = pipeline.all().await;
+        match result {
+            Ok(values) => tracing::trace!("successfully inserted {} values", values.len()),
+            Err(err) => {
+                tracing::trace!("caught error during insert: {err:?}");
+                self.record_query_error(&err);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
+    /// `scan_with_namespaced_results` and already includes it.
+    pub(crate) async fn delete_from_scan_result<I>(&self, keys: I) -> Result<u32, RedisError>
+    where
+        I: Iterator<Item = fred::types::Key>,
+    {
+        self.delete_from_scan_result_with_options(keys, Options::default())
+            .await
+    }
+
+    /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
+    pub(crate) async fn scan_with_namespaced_results(
+        &self,
+        pattern: String,
+        count: Option<u32>,
+    ) -> Result<
+        std::pin::Pin<
+            Box<
+                dyn futures::Stream<Item = Result<fred::types::scan::ScanResult, RedisError>>
+                    + Send,
+            >,
+        >,
+        RedisError,
+    > {
+        let pattern = self.make_key(RedisKey(pattern));
+        if self.is_cluster {
+            // NOTE: scans might be better send to only the read replicas, but the read-only client
+            // doesn't have a scan_cluster(), just a paginated version called scan_page()
+            Ok(Box::pin(
+                self.client().await?.scan_cluster(pattern, count, None),
+            ))
+        } else {
+            Ok(Box::pin(self.client().await?.scan(pattern, count, None)))
         }
     }
 }

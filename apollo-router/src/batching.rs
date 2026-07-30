@@ -1,5 +1,26 @@
 //! Various utility functions and core structures used to implement batching support within
 //! the router.
+//!
+//! Batching works roughly along these lines:
+//! - At the router service, a batch query is split apart into multiple requests.
+//! - A single [Batch] structure is created, which is responsible for handling the batch lifecycle.
+//! - Each individual request gets a [BatchQuery] extension.
+//! - After query planning of each individual request, the [BatchQueryPlanAnalysisLayer] collects
+//!   the hashes of the plan nodes that will be executed unconditionally as part of the query plan.
+//!   Those query nodes are candidates for being batched up into a single request at the subgraph
+//!   side, as they do not depend on other data being fetched first.
+//! - [BatchQuery::set_query_hashes] is called with those hashes, to set the expected number of
+//!   subgraph requests. The hashes are also used to track successful and unsuccessful responses to
+//!   each individual subgraph request.
+//! - Once each subgraph request that is part of the batch reaches the subgraph service, instead of
+//!   submitting the request to the HTTP client, it calls into [BatchQuery::signal_progress]. This
+//!   is how subgraph requests are eventually batched up. When a [BatchQuery] has received all
+//!   expected progress calls (per [BatchQuery::set_query_hashes]), that query is considered
+//!   "finished".
+//! - The [Batch] lifecycle handler receives messages from each [BatchQuery]. Once _all_
+//!   [BatchQuery]s are finished, no more messages come in, and this is when the [Batch] lifecycle
+//!   handler actually batches up the requests to each subgraph, and sends the batched subgraph
+//!   requests to the HTTP client.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -25,12 +46,14 @@ use crate::error::SubgraphBatchingError;
 use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
-use crate::services::http::HttpClientServiceFactory;
 use crate::services::process_batches;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::spec::QueryHash;
+
+mod query_plan_analysis_layer;
+pub(crate) use self::query_plan_analysis_layer::*;
 
 /// A query that is part of a batch.
 /// Note: It's ok to make transient clones of this struct, but *do not* store clones anywhere apart
@@ -83,16 +106,19 @@ impl BatchQuery {
                 index: self.index,
                 query_hashes,
             })
-            .await?;
+            .await
+            .map_err(|e| SubgraphBatchingError::ProcessingFailed(e.to_string()))?;
         Ok(())
     }
 
     /// Signal to the batch handler that this specific batch query has made some progress.
     ///
     /// The returned channel can be awaited to receive the GraphQL response, when ready.
+    ///
+    /// The HTTP client must be pre-readied.
     pub(crate) async fn signal_progress(
         &self,
-        client_factory: HttpClientServiceFactory,
+        http_client: crate::services::http::BoxCloneService,
         request: SubgraphRequest,
     ) -> Result<oneshot::Receiver<Result<SubgraphResponse, BoxError>>, BoxError> {
         // Create a receiver for this query so that it can eventually get the request meant for it
@@ -111,13 +137,14 @@ impl BatchQuery {
             .send(BatchHandlerMessage::Progress(Box::new(
                 BatchHandlerMessageProgress {
                     index: self.index,
-                    client_factory,
+                    http_client,
                     request,
                     response_sender: tx,
                     span_context: Span::current().context(),
                 },
             )))
-            .await?;
+            .await
+            .map_err(|e| SubgraphBatchingError::ProcessingFailed(e.to_string()))?;
 
         if !self.finished() {
             self.remaining.fetch_sub(1, Ordering::AcqRel);
@@ -143,7 +170,8 @@ impl BatchQuery {
                 index: self.index,
                 reason,
             })
-            .await?;
+            .await
+            .map_err(|e| SubgraphBatchingError::ProcessingFailed(e.to_string()))?;
 
         if !self.finished() {
             self.remaining.fetch_sub(1, Ordering::AcqRel);
@@ -180,7 +208,7 @@ enum BatchHandlerMessage {
 /// A query has reached the subgraph service and we should update its state
 struct BatchHandlerMessageProgress {
     index: usize,
-    client_factory: HttpClientServiceFactory,
+    http_client: crate::services::http::BoxCloneService,
     request: SubgraphRequest,
     response_sender: oneshot::Sender<Result<SubgraphResponse, BoxError>>,
     span_context: otelContext,
@@ -190,7 +218,7 @@ struct BatchHandlerMessageProgress {
 pub(crate) struct BatchQueryInfo {
     /// The owning subgraph request
     request: SubgraphRequest,
-
+    http_client: crate::services::http::BoxCloneService,
     /// Notifier for the subgraph service handler
     ///
     /// Note: This must be used or else the subgraph request will time out
@@ -257,7 +285,6 @@ impl Batch {
             let mut requests: Vec<Vec<BatchQueryInfo>> =
                 Vec::from_iter((0..size).map(|_| Vec::new()));
 
-            let mut master_client_factory = None;
             tracing::debug!("Batch about to await messages...");
             // Start handling messages from various portions of the request lifecycle
             // When recv() returns None, we want to stop processing messages
@@ -310,7 +337,7 @@ impl Batch {
                         // Progress the index
                         let BatchHandlerMessageProgress {
                             index,
-                            client_factory,
+                            http_client,
                             request,
                             response_sender,
                             span_context,
@@ -322,11 +349,9 @@ impl Batch {
                             state.committed.insert(request.query_hash.clone());
                         }
 
-                        if master_client_factory.is_none() {
-                            master_client_factory = Some(client_factory);
-                        }
                         Span::current().add_link(span_context.span().span_context().clone());
                         requests[index].push(BatchQueryInfo {
+                            http_client,
                             request,
                             sender: response_sender,
                         })
@@ -351,6 +376,7 @@ impl Batch {
             // Now build up a Service oriented view to use in constructing our batches
             let mut svc_map: HashMap<String, Vec<BatchQueryInfo>> = HashMap::new();
             for BatchQueryInfo {
+                http_client,
                 request: sg_request,
                 sender: tx,
             } in all_in_one
@@ -362,15 +388,13 @@ impl Batch {
                     )
                     .or_default();
                 value.push(BatchQueryInfo {
+                    http_client,
                     request: sg_request,
                     sender: tx,
                 });
             }
 
-            // If we don't have a master_client_factory, we can't do anything.
-            if let Some(client_factory) = master_client_factory {
-                process_batches(client_factory, svc_map).await?;
-            }
+            process_batches(svc_map).await?;
             Ok(())
         }.instrument(tracing::info_span!("batch_request", size)));
 
@@ -418,54 +442,51 @@ impl Drop for Batch {
     }
 }
 
+/// A batch of requests that we'll send to a subgraph (...as a single batch request).
+pub(crate) struct SubgraphBatchRequest {
+    pub(crate) http_client: crate::services::http::BoxCloneService,
+    pub(crate) contexts: Vec<(Context, SubgraphRequestId)>,
+    pub(crate) request: http::Request<RouterBody>,
+    pub(crate) txs: Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
+}
+
 // Assemble a single batch request to a subgraph
 pub(crate) async fn assemble_batch(
-    requests: Vec<BatchQueryInfo>,
-) -> Result<
-    (
-        String,
-        Vec<(Context, SubgraphRequestId)>,
-        http::Request<RouterBody>,
-        Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
-    ),
-    BoxError,
-> {
-    let (txs, requests): (Vec<_>, Vec<_>) =
-        requests.into_iter().map(|r| (r.sender, r.request)).unzip();
+    batch_queries: Vec<BatchQueryInfo>,
+) -> Result<SubgraphBatchRequest, BoxError> {
+    let mut txs = Vec::with_capacity(batch_queries.len());
+    let mut contexts = Vec::with_capacity(batch_queries.len());
+    let mut graphql_bodies = Vec::with_capacity(batch_queries.len());
 
-    // Retain the various contexts for later use
-    let contexts = requests
-        .iter()
-        .map(|request| (request.context.clone(), request.id.clone()))
-        .collect::<Vec<(Context, SubgraphRequestId)>>();
+    let mut iter = batch_queries.into_iter();
 
-    // Extract the GraphQL body from each request. The first request also provides the HTTP
-    // parts (URI, headers, etc.) used as the transport envelope for the whole batch.
-    let mut requests_iter = requests.into_iter();
-    let first_request = requests_iter
-        .next()
-        .ok_or(SubgraphBatchingError::RequestsIsEmpty)?
-        .subgraph_request;
-    let operation_name = first_request
-        .body()
-        .operation_name
-        .clone()
-        .unwrap_or_default();
-    let (parts, first_body) = first_request.into_parts();
+    let first = iter.next().ok_or(SubgraphBatchingError::RequestsIsEmpty)?;
+    let http_client = first.http_client;
+    txs.push(first.sender);
+    contexts.push((first.request.context, first.request.id));
+    // We'll use the HTTP parts (headers, URI etc) from the first request for the whole batch
+    let (parts, first_body) = first.request.subgraph_request.into_parts();
+    graphql_bodies.push(first_body);
 
-    let mut gql_requests = Vec::with_capacity(txs.len());
-    gql_requests.push(first_body);
-    for r in requests_iter {
-        let (_, body) = r.subgraph_request.into_parts();
-        gql_requests.push(body);
+    for batch_query in iter {
+        txs.push(batch_query.sender);
+        contexts.push((batch_query.request.context, batch_query.request.id));
+        graphql_bodies.push(batch_query.request.subgraph_request.into_body());
     }
+    debug_assert_eq!(txs.len(), contexts.len());
+    debug_assert_eq!(txs.len(), graphql_bodies.len());
 
     // Construct the actual byte body of the batched request
-    let bytes = router::body::into_bytes(serde_json::to_string(&gql_requests)?).await?;
+    let bytes = serde_json::to_vec(&graphql_bodies)?;
 
     // Generate the final request and pass it up
     let request = http::Request::from_parts(parts, router::body::from_bytes(bytes));
-    Ok((operation_name, contexts, request, txs))
+    Ok(SubgraphBatchRequest {
+        http_client,
+        contexts,
+        request,
+        txs,
+    })
 }
 
 #[cfg(test)]
@@ -475,6 +496,7 @@ mod tests {
 
     use http::header::ACCEPT;
     use http::header::CONTENT_TYPE;
+    use http_body_util::BodyExt;
     use tokio::sync::oneshot;
     use tower::ServiceExt;
     use wiremock::MockServer;
@@ -483,8 +505,8 @@ mod tests {
 
     use super::Batch;
     use super::BatchQueryInfo;
+    use super::SubgraphBatchRequest;
     use super::assemble_batch;
-    use crate::Configuration;
     use crate::Context;
     use crate::TestHarness;
     use crate::graphql;
@@ -493,10 +515,14 @@ mod tests {
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::services::http::HttpClientServiceFactory;
+    use crate::services::http::HttpRequest;
+    use crate::services::http::HttpResponse;
+    use crate::services::layers::content_negotiation::inject_subgraph_request_headers;
     use crate::services::router;
     use crate::services::router::body;
     use crate::services::subgraph;
     use crate::services::subgraph::SubgraphRequestId;
+    use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
     use crate::spec::QueryHash;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -513,6 +539,7 @@ mod tests {
                 (
                     rx,
                     BatchQueryInfo {
+                        http_client: HttpClientServiceFactory::for_test("test"),
                         request: SubgraphRequest::fake_builder()
                             .subgraph_request(http::Request::builder().body(gql_request).unwrap())
                             .subgraph_name(format!("slot{index}"))
@@ -529,7 +556,12 @@ mod tests {
             .map(|r| r.request.context.id.clone())
             .collect::<Vec<String>>();
         // Assemble them
-        let (op_name, contexts, request, txs) = assemble_batch(requests)
+        let SubgraphBatchRequest {
+            http_client: _,
+            contexts,
+            request,
+            txs,
+        } = assemble_batch(requests)
             .await
             .expect("it can assemble a batch");
 
@@ -539,9 +571,6 @@ mod tests {
             .collect::<Vec<String>>();
         // Make sure all of our contexts are preserved during assembly
         assert_eq!(input_context_ids, output_context_ids);
-
-        // Make sure that the name of the entire batch is that of the first
-        assert_eq!(op_name, "batch_test_0");
 
         // We should see the aggregation of all of the requests
         let actual: Vec<graphql::Request> = serde_json::from_str(
@@ -629,15 +658,13 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_limits_the_number_of_progressed_sends() {
+        let (mock, handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
         let batch = Arc::new(Batch::spawn_handler(2));
 
         let bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
 
-        let factory = HttpClientServiceFactory::from_config(
-            "testbatch",
-            &Configuration::default(),
-            crate::configuration::shared::Client::default(),
-        );
+        let http_client = mock.boxed_clone();
+
         let request = SubgraphRequest::fake_builder()
             .subgraph_request(
                 http::Request::builder()
@@ -653,25 +680,26 @@ mod tests {
         );
         assert!(!bq.finished());
         assert!(
-            bq.signal_progress(factory.clone(), request.clone())
+            bq.signal_progress(http_client.clone(), request.clone())
                 .await
                 .is_ok()
         );
         assert!(bq.finished());
-        assert!(bq.signal_progress(factory, request).await.is_err());
+        assert!(bq.signal_progress(http_client, request).await.is_err());
+
+        // We're only finishing one of two batch queries in this test,
+        // so we should not see a subgraph request actually being sent.
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_limits_the_number_of_mixed_sends() {
+        let (mock, handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
         let batch = Arc::new(Batch::spawn_handler(2));
 
         let bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
 
-        let factory = HttpClientServiceFactory::from_config(
-            "testbatch",
-            &Configuration::default(),
-            crate::configuration::shared::Client::default(),
-        );
+        let http_client = mock.boxed_clone();
         let request = SubgraphRequest::fake_builder()
             .subgraph_request(
                 http::Request::builder()
@@ -686,26 +714,27 @@ mod tests {
                 .is_ok()
         );
         assert!(!bq.finished());
-        assert!(bq.signal_progress(factory, request).await.is_ok());
+        assert!(bq.signal_progress(http_client, request).await.is_ok());
         assert!(bq.finished());
         assert!(
             bq.signal_cancelled("only once though".to_string())
                 .await
                 .is_err()
         );
+
+        // We're only finishing one of two batch queries in this test,
+        // so we should not see a subgraph request actually being sent.
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_limits_the_number_of_mixed_sends_two_query_hashes() {
+        let (mock, handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
         let batch = Arc::new(Batch::spawn_handler(2));
 
         let bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
 
-        let factory = HttpClientServiceFactory::from_config(
-            "testbatch",
-            &Configuration::default(),
-            crate::configuration::shared::Client::default(),
-        );
+        let http_client = mock.boxed_clone();
         let request = SubgraphRequest::fake_builder()
             .subgraph_request(
                 http::Request::builder()
@@ -717,7 +746,7 @@ mod tests {
         let qh = Arc::new(QueryHash::default());
         assert!(bq.set_query_hashes(vec![qh.clone(), qh]).await.is_ok());
         assert!(!bq.finished());
-        assert!(bq.signal_progress(factory, request).await.is_ok());
+        assert!(bq.signal_progress(http_client, request).await.is_ok());
         assert!(!bq.finished());
         assert!(
             bq.signal_cancelled("only twice though".to_string())
@@ -730,6 +759,10 @@ mod tests {
                 .await
                 .is_err()
         );
+
+        // We're only finishing one of two batch queries in this test,
+        // so we should not see a subgraph request actually being sent.
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     fn expect_batch(request: &wiremock::Request) -> ResponseTemplate {
@@ -791,24 +824,22 @@ mod tests {
         let schema = include_str!("../tests/fixtures/batching/schema.graphql");
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({
-            "include_subgraph_errors": {
-                "all": true
-            },
-            "include_subgraph_errors": {
-                "all": true
-            },
-            "batching": {
-                "enabled": true,
-                "mode": "batch_http_link",
-                "subgraph": {
-                    "all": {
-                        "enabled": true
+                "include_subgraph_errors": {
+                    "all": true
+                },
+                "batching": {
+                    "enabled": true,
+                    "mode": "batch_http_link",
+                    "subgraph": {
+                        "all": {
+                            "enabled": true
+                        }
                     }
-                }
-            },
-            "override_subgraph_url": {
-                "a": format!("{}/a", mock_server.uri())
-            }}))
+                },
+                "override_subgraph_url": {
+                    "a": format!("{}/a", mock_server.uri())
+                },
+            }))
             .unwrap()
             .schema(schema)
             .subgraph_hook(move |_subgraph_name, service| {
@@ -830,7 +861,7 @@ mod tests {
 
         let requests: Vec<_> = (0..3)
             .map(|index| {
-                Request::fake_builder()
+                graphql::Request::builder()
                     .query(format!("query op{index}{{ entryA(count: 3) {{ index }} }}"))
                     .build()
             })
@@ -859,5 +890,181 @@ mod tests {
 
         let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
         insta::assert_json_snapshot!(response);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_sends_batched_request() {
+        let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+        let batch = Arc::new(Batch::spawn_handler(2));
+
+        let http_client = mock.boxed_clone();
+
+        let query1 = Batch::query_for_index(batch.clone(), 0).unwrap();
+        let query2 = Batch::query_for_index(batch.clone(), 1).unwrap();
+
+        let request1 = SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::builder().query("{ field1 }").build())
+                    .unwrap(),
+            )
+            .subgraph_name("a")
+            .build();
+
+        let request2 = SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::builder().query("{ field2 }").build())
+                    .unwrap(),
+            )
+            .subgraph_name("a")
+            .build();
+
+        // We have to provide pre-readied HTTP clients.
+        let client1 = http_client.clone().ready_oneshot().await.unwrap();
+        let response1 = query1.signal_progress(client1, request1).await.unwrap();
+        let client2 = http_client.clone().ready_oneshot().await.unwrap();
+        let response2 = query2.signal_progress(client2, request2).await.unwrap();
+
+        let (request, responder) =
+            tokio::time::timeout(Duration::from_secs(5), handle.next_request())
+                .await
+                .expect("should get a request")
+                .expect("service closed without request?");
+
+        let body = request
+            .http_request
+            .into_body()
+            .collect()
+            .await
+            .expect("should read subgraph request body");
+        let (body1, body2) =
+            serde_json::from_slice::<(graphql::Request, graphql::Request)>(&body.to_bytes())
+                .expect("should have a two-element array json body");
+        assert_eq!(body1.query.as_deref(), Some("{ field1 }"));
+        assert_eq!(body2.query.as_deref(), Some("{ field2 }"));
+
+        responder.send_response(HttpResponse {
+            http_response: http::Response::builder()
+                .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone())
+                .body(router::body::from_bytes(
+                    r#"[
+                    { "data": { "field1": "value1" } },
+                    { "data": { "field2": "value2" } }
+                ]"#,
+                ))
+                .unwrap(),
+            context: request.context,
+        });
+
+        // Check that the batch response was split up correctly
+        let response1 = response1
+            .await
+            .expect("channel should be open")
+            .expect("successful response");
+        let response1 = response1.response.into_body();
+        assert_eq!(
+            response1.data,
+            Some(serde_json_bytes::json!({ "field1": "value1" }))
+        );
+
+        let response2 = response2
+            .await
+            .expect("channel should be open")
+            .expect("successful response");
+        let response2 = response2.response.into_body();
+        assert_eq!(
+            response2.data,
+            Some(serde_json_bytes::json!({ "field2": "value2" }))
+        );
+
+        // Only 1 call is expected
+        drop(http_client);
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_does_not_duplicate_headers_injected_by_subgraph_layer() {
+        // Regression test: every request making up a batch has already passed through
+        // `SubgraphLayer` (which injects Accept/Content-Type headers) before `call_http` diverts
+        // it into batching via `signal_progress`. `process_batch` must not inject those headers a
+        // second time, since `inject_subgraph_request_headers` appends (rather than replaces) the
+        // Accept header.
+        let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+        let batch = Arc::new(Batch::spawn_handler(2));
+
+        let http_client = mock.boxed_clone();
+
+        let query1 = Batch::query_for_index(batch.clone(), 0).unwrap();
+        let query2 = Batch::query_for_index(batch.clone(), 1).unwrap();
+
+        let mut request1 = SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::builder().query("{ field1 }").build())
+                    .unwrap(),
+            )
+            .subgraph_name("a")
+            .build();
+        inject_subgraph_request_headers(request1.subgraph_request.headers_mut());
+
+        let mut request2 = SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::builder().query("{ field2 }").build())
+                    .unwrap(),
+            )
+            .subgraph_name("a")
+            .build();
+        inject_subgraph_request_headers(request2.subgraph_request.headers_mut());
+
+        // We have to provide pre-readied HTTP clients.
+        let client1 = http_client.clone().ready_oneshot().await.unwrap();
+        let response1 = query1.signal_progress(client1, request1).await.unwrap();
+        let client2 = http_client.clone().ready_oneshot().await.unwrap();
+        let response2 = query2.signal_progress(client2, request2).await.unwrap();
+
+        let (request, responder) =
+            tokio::time::timeout(Duration::from_secs(5), handle.next_request())
+                .await
+                .expect("should get a request")
+                .expect("service closed without request?");
+
+        let headers = request.http_request.headers();
+        let accept_values: Vec<_> = headers.get_all(ACCEPT).iter().collect();
+        assert_eq!(
+            accept_values.len(),
+            1,
+            "Accept header should not be duplicated, got: {accept_values:?}"
+        );
+        assert_eq!(
+            headers.get(CONTENT_TYPE).unwrap(),
+            &APPLICATION_JSON_HEADER_VALUE
+        );
+
+        responder.send_response(HttpResponse {
+            http_response: http::Response::builder()
+                .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone())
+                .body(router::body::from_bytes(
+                    r#"[
+                    { "data": { "field1": "value1" } },
+                    { "data": { "field2": "value2" } }
+                ]"#,
+                ))
+                .unwrap(),
+            context: request.context,
+        });
+
+        response1
+            .await
+            .expect("channel should be open")
+            .expect("successful response");
+        response2
+            .await
+            .expect("channel should be open")
+            .expect("successful response");
+
+        drop(http_client);
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 }

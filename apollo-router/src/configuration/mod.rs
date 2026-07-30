@@ -69,6 +69,7 @@ pub(crate) mod cooperative_cancellation;
 pub(crate) mod cors;
 pub(crate) mod expansion;
 mod experimental;
+pub(crate) mod header_masking_config;
 pub(crate) mod metrics;
 pub(crate) mod mode;
 mod persisted_queries;
@@ -458,15 +459,6 @@ impl Configuration {
             },
         }
     }
-
-    fn apollo_plugin_enabled(&self, plugin_name: &str) -> bool {
-        self.apollo_plugins
-            .plugins
-            .get(plugin_name)
-            .and_then(|config| config.as_object().and_then(|c| c.get("enabled")))
-            .and_then(|enabled| enabled.as_bool())
-            .unwrap_or(false)
-    }
 }
 
 impl Default for Configuration {
@@ -607,16 +599,6 @@ impl Configuration {
                     error: "either set persisted_queries.log_unknown: false or persisted_queries.enabled: true in your router yaml configuration".into()
                 });
             }
-        }
-
-        // response & entity caching
-        if self.apollo_plugin_enabled("response_cache")
-            && self.apollo_plugin_enabled("preview_entity_cache")
-        {
-            return Err(ConfigurationError::InvalidConfiguration {
-                message: "entity cache and response cache features are mutually exclusive",
-                error: "either set response_cache.enabled: false or preview_entity_cache.enabled: false in your router yaml configuration".into(),
-            });
         }
 
         Ok(self)
@@ -985,10 +967,6 @@ pub(crate) struct QueryPlanning {
     /// The default value is None, which specifies no limit.
     pub(crate) experimental_paths_limit: Option<u32>,
 
-    /// If cache warm up is configured, this will allow the router to keep a query plan created with
-    /// the old schema, if it determines that the schema update does not affect the corresponding query
-    pub(crate) experimental_reuse_query_plans: bool,
-
     /// Configures cooperative cancellation of query planning
     ///
     /// See [`CooperativeCancellation`] for more details.
@@ -1004,7 +982,6 @@ impl QueryPlanning {
         warmed_up_queries: Option<usize>,
         experimental_plans_limit: Option<u32>,
         experimental_paths_limit: Option<u32>,
-        experimental_reuse_query_plans: Option<bool>,
         experimental_cooperative_cancellation: Option<CooperativeCancellation>,
     ) -> Self {
         Self {
@@ -1012,7 +989,6 @@ impl QueryPlanning {
             warmed_up_queries,
             experimental_plans_limit,
             experimental_paths_limit,
-            experimental_reuse_query_plans: experimental_reuse_query_plans.unwrap_or_default(),
             experimental_cooperative_cancellation: experimental_cooperative_cancellation
                 .unwrap_or_default(),
         }

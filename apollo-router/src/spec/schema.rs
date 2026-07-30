@@ -11,10 +11,11 @@ use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
 use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
+use apollo_federation::compat::coerce_and_validate_schema_values;
 use apollo_federation::connectors::expand::Connectors;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
-use apollo_federation::link::database::links_metadata;
+use apollo_federation::link::metadata::LinksMetadata;
 use apollo_federation::link::spec::Identity;
 use apollo_federation::router_supported_supergraph_specs;
 use apollo_federation::schema::ValidFederationSchema;
@@ -94,13 +95,17 @@ impl Schema {
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        let definitions = result
+        let mut definitions = result
             .map_err(|invalid| {
                 SchemaError::Parse(ParseErrors {
                     errors: invalid.errors,
                 })
             })?
-            .to_schema_validate()
+            .to_schema()
+            .map_err(|errors| SchemaError::Validate(errors.into()))?;
+        coerce_and_validate_schema_values(&mut definitions)?;
+        let definitions = definitions
+            .validate()
             .map_err(|errors| SchemaError::Validate(errors.into()))?;
 
         let mut subgraphs = HashMap::new();
@@ -315,7 +320,7 @@ impl Schema {
 
     /// This function assumes `@link` usage is valid in the schema, and will return `false` if not.
     pub(crate) fn has_spec(&self, spec_identity: &Identity, expected_version_range: &str) -> bool {
-        let Ok(Some(metadata)) = links_metadata(self.supergraph_schema()) else {
+        let Ok(Some(metadata)) = LinksMetadata::from_schema(self.supergraph_schema()) else {
             return false;
         };
         let Some(link) = metadata.for_identity(spec_identity) else {
@@ -338,7 +343,7 @@ impl Schema {
         expected_version_range: &str,
         default: &Name,
     ) -> Option<String> {
-        let metadata = links_metadata(schema).ok()??;
+        let metadata = LinksMetadata::from_schema(schema).ok()??;
         let link = metadata.for_identity(spec_identity)?;
         let semver_version = Version::parse(format!("{}.0", link.url.version).as_str()).ok()?;
         let version_range = VersionReq::parse(expected_version_range).ok()?;

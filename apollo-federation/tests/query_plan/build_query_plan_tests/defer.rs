@@ -1,3 +1,6 @@
+use apollo_compiler::ExecutableDocument;
+use apollo_federation::error::FederationError;
+use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 fn config_with_defer() -> QueryPlannerConfig {
@@ -3526,5 +3529,676 @@ fn defer_on_renamed_root_type() {
       },
     }
     "###
+    );
+}
+
+// When a deferred node depends on a fetch that operates at a deeper path than the
+// deferred Flatten, the transitive reduction removes the direct edge from an ancestor
+// fetch (which provides __typename and entity keys) to the deferred node. Without
+// recovery, the deferred node only registers the deeper fetch as a dependency,
+// missing the ancestor's data at runtime.
+#[test]
+fn defer_deferred_depends_on_ancestor_with_same_merge_at_intermediate() {
+    let planner = planner!(
+        config = config_with_defer(),
+        A: r#"
+        type Query { start: Q }
+        type Q @key(fields: "id") { id: ID! extra: String @shareable }
+        "#,
+        B: r#"
+        type Q @key(fields: "id") { id: ID! data: String }
+        "#,
+        C: r#"
+        type Q @key(fields: "id extra data") {
+            id: ID! @external
+            extra: String @external
+            data: String @external
+            target: R
+        }
+        type R { x: Int }
+        "#,
+    );
+
+    // Graph before reduction:
+    //   A (root, merge_at=None) → B (entity, merge_at=["start"]) → Deferred (merge_at=["start"])
+    //   A → Deferred
+    // After reduction: A→Deferred removed (transitive path A→B→Deferred).
+    // B has the same merge_at as Deferred, but B doesn't provide `extra` — only A does.
+    // So A must still be registered as a dependency.
+    assert_plan!(planner,
+        r#"
+        query {
+          start {
+            id
+            extra
+            ... @defer {
+              target {
+                x
+              }
+            }
+          }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { start { id extra } }:
+          Sequence {
+            Fetch(service: "A", id: 0) {
+              {
+                start {
+                  __typename
+                  id
+                  extra
+                }
+              }
+            },
+            Flatten(path: "start") {
+              Fetch(service: "B", id: 1) {
+                {
+                  ... on Q {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Q {
+                    data
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0, 1], path: "start") {
+            { target { x } }:
+            Flatten(path: "start") {
+              Fetch(service: "C") {
+                {
+                  ... on Q {
+                    __typename
+                    id
+                    extra
+                    data
+                  }
+                } =>
+                {
+                  ... on Q {
+                    target {
+                      x
+                    }
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+}
+
+#[test]
+fn defer_deferred_depends_on_intermediate_fetch_missing_ancestor() {
+    let planner = planner!(
+        config = config_with_defer(),
+        A: r#"
+        type Query {
+            start: Q
+        }
+
+        type Q {
+            id: ID! @shareable
+            inner: Inner @shareable
+        }
+
+        type Inner @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        B: r#"
+        type Q {
+            inner: Inner @shareable
+        }
+
+        type Inner @key(fields: "id") {
+            id: ID!
+            data: ID!
+        }
+        "#,
+        C: r#"
+        type Inner {
+            data: ID! @external
+        }
+
+        type Q @key(fields: "id inner { data }") {
+            id: ID!
+            inner: Inner @external
+            target: R
+        }
+
+        type R {
+            x: Int
+        }
+        "#,
+    );
+    // The deferred block's Flatten at "start" requires `Q { __typename id inner { data } }`.
+    // Fetch A provides `start.__typename`, `start.id`, and `start.inner`.
+    // Fetch B (id: 0) provides `inner.data`.
+    // Both are needed by the deferred Flatten, so both should be in the depends list.
+    //
+    // Regression test: The transitive reduction used to remove the direct edge from A to
+    // the deferred node (since A → B → deferred is a transitive path), so only B was
+    // registered as a dependency. The deferred node was missing A's data (__typename, id)
+    // at runtime. The fix detects that B's merge_at ("start.inner") is strictly deeper
+    // than the deferred target's merge_at ("start"), so A is also registered.
+    assert_plan!(planner,
+        r#"
+        query {
+          start {
+            __typename
+            id
+            ... on Q @defer {
+              target {
+                x
+              }
+            }
+          }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { start { __typename id } }:
+          Sequence {
+            Fetch(service: "A", id: 0) {
+              {
+                start {
+                  __typename
+                  id
+                  inner {
+                    __typename
+                    id
+                  }
+                }
+              }
+            },
+            Flatten(path: "start.inner") {
+              Fetch(service: "B", id: 1) {
+                {
+                  ... on Inner {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Inner {
+                    data
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0, 1], path: "start") {
+            { ... on Q { target { x } } }:
+            Flatten(path: "start") {
+              Fetch(service: "C") {
+                {
+                  ... on Q {
+                    __typename
+                    id
+                    inner {
+                      data
+                    }
+                  }
+                } =>
+                {
+                  ... on Q {
+                    target {
+                      x
+                    }
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+}
+
+// Variant where the deferred section is reached through an interface type condition
+// (e.g. `... on P { q { ... on Q @defer { ... } } }`): the merge_at path contains a
+// TypenameEquals element. The `selection_set_at_path` function needs to handle this
+// element to correctly detect that the source fetch provides fields needed by the
+// deferred node.
+#[test]
+fn defer_deferred_depends_through_type_condition_path() {
+    let planner = planner!(
+        config = config_with_defer(),
+        A: r#"
+        type Query {
+            start: I
+        }
+
+        interface I {
+            something: Int!
+        }
+
+        type P implements I {
+            something: Int!
+            q: Q
+        }
+
+        type Q {
+            id: ID! @shareable
+            inner: Inner @shareable
+        }
+
+        type Inner @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        B: r#"
+        type Q {
+            inner: Inner @shareable
+        }
+
+        type Inner @key(fields: "id") {
+            id: ID!
+            data: ID!
+        }
+        "#,
+        C: r#"
+        type Inner {
+            data: ID! @external
+        }
+
+        type Q @key(fields: "id inner { data }") {
+            id: ID!
+            inner: Inner @external
+            target: R
+        }
+
+        type R {
+            x: Int
+        }
+        "#,
+    );
+    assert_plan!(planner,
+        r#"
+        query {
+          start {
+            ... on P {
+              q {
+                __typename
+                id
+                ... on Q @defer {
+                  target {
+                    x
+                  }
+                }
+              }
+            }
+          }
+        }
+        "#,
+
+        // The deferred block depends on both fetch 0 (provides __typename, id from A)
+        // and fetch 1 (provides inner.data from B). The merge_at path for the deferred
+        // section includes a type condition, so selection_set_at_path must look inside
+        // inline fragments to find fields.
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { start { ... on P { q { __typename id } } } }:
+          Sequence {
+            Fetch(service: "A", id: 0) {
+              {
+                start {
+                  __typename
+                  ... on P {
+                    q {
+                      __typename
+                      id
+                      inner {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            Flatten(path: "start.q.inner") {
+              Fetch(service: "B", id: 1) {
+                {
+                  ... on Inner {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Inner {
+                    data
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0, 1], path: "start/... on P/q") {
+            { ... on Q { target { x } } }:
+            Flatten(path: "start.q") {
+              Fetch(service: "C") {
+                {
+                  ... on Q {
+                    __typename
+                    id
+                    inner {
+                      data
+                    }
+                  }
+                } =>
+                {
+                  ... on Q {
+                    target {
+                      x
+                    }
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+}
+
+// Variant where the source fetch and the deferred child both have merge_at paths
+// that share a common prefix: we must skip the shared prefix and navigate only the
+// remaining suffix to compare fields at the correct nesting depth.
+//
+// Here:
+//   Fetch A (root, merge_at=None): provides `start { __typename id }`
+//   Fetch B (merge_at=["start"]): provides `q { id, inner { __typename id } }`
+//   Fetch C (merge_at=["start","q","inner"]): provides `inner { data }`
+//   Deferred (merge_at=["start","q"]): needs `Q { __typename id inner { data } }`
+//
+// B (merge_at=["start"]) and Deferred (merge_at=["start","q"]) share prefix ["start"].
+// We must navigate B's selection by suffix ["q"] to find the overlapping `id` field.
+#[test]
+fn defer_deferred_depends_on_source_with_shared_merge_at_prefix() {
+    let planner = planner!(
+        config = config_with_defer(),
+        A: r#"
+        type Query {
+            start: T
+        }
+
+        type T @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        B: r#"
+        type T @key(fields: "id") {
+            id: ID!
+            q: Q
+        }
+
+        type Q {
+            id: ID! @shareable
+            inner: Inner @shareable
+        }
+
+        type Inner @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        C: r#"
+        type Inner @key(fields: "id") {
+            id: ID!
+            data: ID!
+        }
+        "#,
+        D: r#"
+        type Inner {
+            data: ID! @external
+        }
+
+        type Q @key(fields: "id inner { data }") {
+            id: ID!
+            inner: Inner @external
+            target: R
+        }
+
+        type R {
+            x: Int
+        }
+        "#,
+    );
+    assert_plan!(planner,
+        r#"
+        query {
+          start {
+            q {
+              id
+              ... on Q @defer {
+                target {
+                  x
+                }
+              }
+            }
+          }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { start { q { id } } }:
+          Sequence {
+            Fetch(service: "A") {
+              {
+                start {
+                  __typename
+                  id
+                }
+              }
+            },
+            Flatten(path: "start") {
+              Fetch(service: "B", id: 0) {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    q {
+                      __typename
+                      id
+                      inner {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "start.q.inner") {
+              Fetch(service: "C", id: 1) {
+                {
+                  ... on Inner {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Inner {
+                    data
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0, 1], path: "start/q") {
+            { ... on Q { target { x } } }:
+            Flatten(path: "start.q") {
+              Fetch(service: "D") {
+                {
+                  ... on Q {
+                    __typename
+                    id
+                    inner {
+                      data
+                    }
+                  }
+                } =>
+                {
+                  ... on Q {
+                    target {
+                      x
+                    }
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+}
+
+#[track_caller]
+fn assert_duplicate_defer_label<T: std::fmt::Debug>(
+    result: Result<T, FederationError>,
+    expected_label: &str,
+) {
+    match result {
+        Err(FederationError::SingleFederationError(
+            SingleFederationError::DuplicateDeferLabel { label },
+        )) if label == expected_label => {}
+        Err(e) => panic!("expected DuplicateDeferLabel({expected_label:?}), got: {e}"),
+        Ok(plan) => panic!("expected DuplicateDeferLabel({expected_label:?}), got plan: {plan:?}"),
+    }
+}
+
+/// Regression guard for a stack overflow in
+/// `FetchDependencyGraph::process_root_nodes`. An operation with two nested
+/// `@defer` inline fragments sharing the same `label` used to make the outer
+/// defer its own descendant in the deferred-info graph, and the recursive
+/// processing then never terminated.
+///
+/// Minimum repro:
+/// ```graphql
+/// { t { ... @defer(label: "dup") { ... @defer(label: "dup") { id } } } }
+/// ```
+#[test]
+fn defer_test_nested_duplicate_label_must_not_stack_overflow() {
+    let planner = planner!(
+        config = config_with_defer(),
+        Subgraph1: r#"
+        type Query {
+            t: T
+        }
+
+        type T @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        Subgraph2: r#"
+        type T @key(fields: "id") {
+            id: ID!
+            v: Int
+        }
+        "#,
+    );
+
+    let operation = r#"
+        {
+          t {
+            ... @defer(label: "dup") {
+              ... @defer(label: "dup") {
+                id
+              }
+            }
+          }
+        }
+    "#;
+
+    let api_schema = planner.api_schema();
+    let document =
+        ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "operation.graphql")
+            .expect("operation parses+validates against the api schema");
+
+    assert_duplicate_defer_label(
+        planner.build_query_plan(&document, None, Default::default()),
+        "dup",
+    );
+}
+
+/// Companion to `defer_test_nested_duplicate_label_must_not_stack_overflow`:
+/// when two `@defer` inline fragments are *siblings* (same parent) and share a
+/// `label`, the planner used to silently deduplicate them into a single
+/// deferred block — a spec violation (GraphQL Defer & Stream §3.2) that would
+/// produce ambiguous data for any client demultiplexing the streaming
+/// response by label.
+///
+/// The same `DeferNormalizer::new` check that fixes the nested-defer crash
+/// also rejects sibling duplicates.
+#[test]
+fn defer_test_sibling_duplicate_label_must_be_rejected() {
+    let planner = planner!(
+        config = config_with_defer(),
+        Subgraph1: r#"
+        type Query {
+            t: T
+        }
+
+        type T @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        Subgraph2: r#"
+        type T @key(fields: "id") {
+            id: ID!
+            v: Int
+            w: Int
+        }
+        "#,
+    );
+
+    let operation = r#"
+        {
+          t {
+            ... @defer(label: "dup") { v }
+            ... @defer(label: "dup") { w }
+          }
+        }
+    "#;
+
+    let api_schema = planner.api_schema();
+    let document =
+        ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "operation.graphql")
+            .expect("operation parses+validates against the api schema");
+
+    assert_duplicate_defer_label(
+        planner.build_query_plan(&document, None, Default::default()),
+        "dup",
     );
 }

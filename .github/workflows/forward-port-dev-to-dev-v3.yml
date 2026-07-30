@@ -1,0 +1,93 @@
+name: Forward-port dev to dev-v3.x
+
+on:
+  schedule:
+    # Every Monday at 09:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  forward-port:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
+
+      - name: Configure git
+        run: |
+          git config user.name "apollo-bot2"
+          git config user.email "apollo-bot2@users.noreply.github.com"
+
+      - name: Create or update forward-port branch
+        id: merge
+        run: |
+          BRANCH="forward-port/dev-to-dev-v3.x"
+          git checkout -b "$BRANCH" origin/dev-v3.x
+
+          if git merge --no-edit origin/dev; then
+            echo "merge_conflicts=false" >> "$GITHUB_OUTPUT"
+          else
+            # Stage conflicted files as-is (with conflict markers) so we can commit
+            # and create a PR that shows the diff needing manual resolution.
+            git diff --name-only --diff-filter=U | xargs git add
+            git commit -m "chore: forward-port dev into dev-v3.x"
+            echo "merge_conflicts=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          if git diff --quiet origin/dev-v3.x..HEAD; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Push forward-port branch
+        if: steps.merge.outputs.has_changes == 'true'
+        run: |
+          git push --force-with-lease origin "${{ steps.merge.outputs.branch }}"
+
+      - name: Open PR if none exists
+        if: steps.merge.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
+        run: |
+          BRANCH="${{ steps.merge.outputs.branch }}"
+          EXISTING=$(gh pr list \
+            --head "$BRANCH" \
+            --base dev-v3.x \
+            --state open \
+            --json number \
+            --jq '.[0].number')
+
+          if [[ -n "$EXISTING" ]]; then
+            echo "PR #$EXISTING already open — branch updated, no new PR needed."
+          else
+            if [[ "${{ steps.merge.outputs.merge_conflicts }}" == "true" ]]; then
+              {
+                echo '> [!CAUTION]'
+                echo '> This PR contains merge conflicts that must be resolved manually before merging.'
+                echo "> Check out the \`$BRANCH\` branch, resolve the conflict markers, commit, and push."
+                echo ''
+                echo 'Automated weekly forward-port of changes from `dev` into `dev-v3.x`.'
+              } > /tmp/pr-body.md
+            else
+              {
+                echo 'Automated weekly forward-port of changes from `dev` into `dev-v3.x`.'
+                echo ''
+                echo 'Merge this once CI passes.'
+              } > /tmp/pr-body.md
+            fi
+
+            gh pr create \
+              --base dev-v3.x \
+              --head "$BRANCH" \
+              --title "chore: forward-port dev into dev-v3.x" \
+              --body-file /tmp/pr-body.md
+          fi
+
+      - name: Nothing to forward-port
+        if: steps.merge.outputs.has_changes == 'false'
+        run: echo "dev-v3.x is already up to date with dev — nothing to do."

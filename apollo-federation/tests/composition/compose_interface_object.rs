@@ -545,6 +545,72 @@ fn interface_object_with_inaccessible_field() {
 }
 
 #[test]
+fn interface_object_field_tag_propagates_to_locally_external_field() {
+    // Regression test: a `@tag` applied only on the `@interfaceObject` side of a field must
+    // still reach implementations that are forced to re-declare that same field locally as
+    // `@external` (a common pattern used to satisfy a `@requires`).
+    //
+    // Setup:
+    // - subgraph_a: abstracts `Product` as an `@interfaceObject` and tags `name`.
+    // - subgraph_b: defines the real `Product` interface and `Book`, which implements it.
+    //   `Book.name` is declared `@external` only so it can be referenced by `@requires`.
+    //
+    // Without the fix, `Book.name` in the supergraph would be missing `@tag(name: "custom")`
+    // even though the interface's merged `Product.name` field has it.
+    let subgraph_a = r#"
+        extend schema
+            @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key", "@tag", "@interfaceObject"])
+
+        type Query {
+            product: Product
+        }
+
+        type Product @key(fields: "id") @interfaceObject {
+            id: ID!
+            name: String @tag(name: "custom")
+        }
+    "#;
+
+    let subgraph_b = r#"
+        extend schema
+            @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key", "@external", "@requires"])
+
+        type Query {
+            book: Book
+        }
+
+        interface Product @key(fields: "id") {
+            id: ID!
+        }
+
+        type Book implements Product @key(fields: "id") {
+            id: ID!
+            name: String @external
+            description: String @requires(fields: "name")
+        }
+    "#;
+
+    let parsed_a =
+        Subgraph::parse("subgraph-a", "http://example.com", subgraph_a).expect("valid subgraph");
+    let parsed_b =
+        Subgraph::parse("subgraph-b", "http://example.com", subgraph_b).expect("valid subgraph");
+
+    let supergraph = compose(vec![parsed_a, parsed_b]).expect("Expected composition to succeed");
+
+    let name_field = supergraph
+        .schema()
+        .schema()
+        .type_field("Book", "name")
+        .expect("Book.name field should exist");
+    assert_eq!(
+        name_field.to_string(),
+        r#"name: String @join__field(graph: SUBGRAPH_B, external: true) @tag(name: "custom")"#,
+        "Book.name should inherit @tag from the abstracting @interfaceObject field \
+         even though it's locally declared @external"
+    );
+}
+
+#[test]
 fn interface_with_non_resolvable_key_does_not_require_all_implementations() {
     // subgraphA defines the interface with a resolvable key and all implementations
     let subgraph_a = ServiceDefinition {
@@ -987,6 +1053,53 @@ fn interface_object_type_kind_mismatch_labels_correctly_when_object_processed_fi
         &[(
             "TYPE_KIND_MISMATCH",
             r#"Type "I" has mismatched kind: it is defined as Object Type in subgraph "subgraphA" but Interface Object Type (Object Type with @interfaceObject) in subgraph "subgraphB""#,
+        )],
+    );
+}
+
+#[test]
+fn validate_multiple_overlapping_interface_object_types_in_same_subgraph() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+            type Query { t: T }
+            interface I1 { id: ID! }
+            interface I2 { id: ID! }
+            type T implements I1 & I2 @key(fields: "id") {
+              id: ID!
+            }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+            type I1 @key(fields: "id") @interfaceObject {
+              id: ID!
+              a: String!
+            }
+            type I2 @key(fields: "id") @interfaceObject {
+              id: ID!
+              b: String!
+            }
+        "#,
+    };
+
+    let subgraph_c = ServiceDefinition {
+        name: "subgraphC",
+        type_defs: r#"
+            interface I1 @key(fields: "id") { id: ID! }
+            interface I2 @key(fields: "id") { id: ID! }
+            type T implements I1 & I2 @key(fields: "id") { id: ID!, t: String }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b, subgraph_c]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INTERFACE_OBJECT_USAGE_ERROR",
+            r#"[subgraphB] @interfaceObject types "I1" and "I2" in subgraph "subgraphB" share implementation type "T". Each @interfaceObject type in a subgraph must have a disjoint set of implementations."#,
         )],
     );
 }

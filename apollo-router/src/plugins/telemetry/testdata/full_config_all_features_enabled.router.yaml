@@ -10,20 +10,10 @@ apq:
     all:
       enabled: true
 
-# Enable entity cache
-preview_entity_cache:
-  enabled: true
-  subgraph:
-    all:
-      enabled: true
-      redis:
-        urls: ["redis://..."]
-
 # Telemetry plugin config
 telemetry:
   instrumentation:
     spans:
-      mode: spec_compliant
       default_attribute_requirement_level: recommended
       router:
         attributes:

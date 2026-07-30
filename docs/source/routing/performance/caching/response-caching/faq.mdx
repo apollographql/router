@@ -9,7 +9,9 @@ minVersion: Router v2.10.0
 
 ### Are cache tags compatible with CDN surrogate keys?
 
-Yes. Cache tags work like CDN surrogate key systems (used by Fastly, Cloudflare, and other CDN providers). Both approaches let you tag cached content and invalidate it by tag name. In the router, cache tags are set via the `@cacheTag` directive. In CDNs, surrogate keys are typically set via response headers like `Surrogate-Key` or `Cache-Tag`.
+Yes. Cache tags work like CDN surrogate key systems (used by Fastly, Cloudflare, and other CDN providers). Both approaches let you tag cached content and invalidate it by tag name. In the router, cache tags are set via the `@cacheTag` directive, and surrogate keys are typically set via response headers like `Surrogate-Key` or `Cache-Tag`.
+
+You don't need to wire this up yourself: enable [CDN invalidation](/router/performance/caching/response-caching/cdn-invalidation) to have the router emit your existing cache tags as a response header your CDN can purge by directly.
 
 ### Why cache in the router when CDN, client, or subgraph caching already exists?
 
@@ -93,9 +95,7 @@ The 2024 preview used a linear scan approach for active invalidation that scaled
 
 ### How does the current release affect existing users?
 
-Response caching is backward-compatible with entity caching. You can switch to response caching without breaking changes.
-
-If you're currently using the `preview_entity_caching` plugin, migrate to response caching as soon as possible. The new implementation provides better performance and more flexible caching controls.
+The `preview_entity_cache` plugin has been removed in Router 3.0. If you're upgrading from Router 2.x, you must migrate to `response_cache` before upgrading. The new implementation provides better performance and more flexible caching controls.
 
 ### How do I migrate from entity caching to response caching?
 
@@ -140,3 +140,9 @@ During internal testing\*, the Router was able to fetch at least 5000 entities p
 98% of inserts under 15ms.
 
 \*Tests conducted against a single-shard Redis cluster running on a [`redis-standard-small`](https://docs.cloud.google.com/memorystore/docs/cluster/cluster-node-specification#node_type_specification) instance.
+
+### Why is my Redis CPU high under `response_cache`, and can I reduce it?
+
+By default, each subgraph that uses active invalidation maintains all three Redis invalidation indexes—`subgraph`, `type`, and `cache_tag`—writing to each on every cache insert. At high cache volumes, maintaining indexes you never invalidate by is avoidable Redis work.
+
+If your workload only invalidates by a subset of methods (for example, only by cache tag), you can opt out of the unused indexes per subgraph with the [`indexes`](/router/performance/caching/response-caching/invalidation#tune-which-invalidation-indexes-are-maintained) block under `subgraph.<all|name>.invalidation`. Each field set to `false` removes one ZSET write per cache insert for that subgraph. See [Tune which invalidation indexes are maintained](/router/performance/caching/response-caching/invalidation#tune-which-invalidation-indexes-are-maintained) for the full configuration and the additive-only caveat.

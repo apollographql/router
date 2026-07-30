@@ -64,7 +64,7 @@ pub(crate) struct Config {
 
     /// The Apollo Studio endpoint for exporting traces and metrics.
     #[schemars(with = "String", default = "otlp_endpoint_default")]
-    pub(crate) experimental_otlp_endpoint: Url,
+    pub(crate) otlp_endpoint: Url,
 
     /// The Apollo Studio API key.
     #[schemars(skip)]
@@ -110,11 +110,11 @@ pub(crate) struct Config {
 
     /// OTLP protocol used for OTel traces.
     /// Note this only applies if OTel traces are enabled and is only intended for use in tests.
-    pub(crate) experimental_otlp_tracing_protocol: Protocol,
+    pub(crate) otlp_tracing_protocol: Protocol,
 
     /// OTLP protocol used for OTel metrics.
     /// Note this is only intended for use in tests.
-    pub(crate) experimental_otlp_metrics_protocol: Protocol,
+    pub(crate) otlp_metrics_protocol: Protocol,
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
     pub(crate) send_headers: ForwardHeaders,
@@ -146,6 +146,18 @@ pub(crate) struct Config {
 
     /// Enable sending additional subgraph metrics to Apollo Studio via OTLP
     pub(crate) subgraph_metrics: bool,
+
+    /// Per-exporter sampler for traces sent to Apollo Studio.
+    ///
+    /// Uses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.
+    /// Accepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.
+    /// Should be ≤ the common sampler; setting it higher has no effect.
+    ///
+    /// When `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`
+    /// header already marked as sampled by the calling service will be passed through to this
+    /// exporter regardless of this sampler's value — including when set to `always_off`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) sampler: Option<SamplerOption>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
@@ -394,9 +406,9 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             endpoint: endpoint_default(),
-            experimental_otlp_endpoint: otlp_endpoint_default(),
-            experimental_otlp_tracing_protocol: Protocol::default(),
-            experimental_otlp_metrics_protocol: Protocol::default(),
+            otlp_endpoint: otlp_endpoint_default(),
+            otlp_tracing_protocol: Protocol::default(),
+            otlp_metrics_protocol: Protocol::default(),
             apollo_key: apollo_key(),
             apollo_graph_ref: apollo_graph_reference(),
             client_name_header: client_name_header_default(),
@@ -416,6 +428,7 @@ impl Default for Config {
             experimental_local_field_metrics: false,
             metrics_reference_mode: ApolloMetricsReferenceMode::default(),
             subgraph_metrics: false,
+            sampler: None,
         }
     }
 }

@@ -286,6 +286,15 @@ pub enum Code {
     MissingSchemaType,
     /// Omitting `http:` from `@connect` requires connect spec v0.4 or later
     HttpOmittedRequiresV0_4,
+    /// A `@connect` selection is requestless — the directive specifies no
+    /// transport (`http:` is absent, and no other transport argument has been
+    /// added yet) — but the selection reads request-phase data: `$root` (the
+    /// response body), `$status` (the response status), or `$response` (the
+    /// response headers). None of those are bound without a transport, so the
+    /// offending paths would silently produce `null` at runtime. The wording
+    /// is transport-agnostic so that if/when a `sql:` (or other) transport
+    /// joins `http:`, this same code keeps describing the same condition.
+    RequestlessSelectionUsesRequestData,
 }
 
 impl Code {

@@ -29,7 +29,6 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
-use crate::plugin;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
@@ -54,6 +53,115 @@ macro_rules! test_schema {
     };
 }
 
+/// The common part of supergraph schema shared by every test schema below
+/// (directives, scalars, and the `link__Purpose` enum). Tests append a
+/// `enum join__Graph { ... }` block plus their type definitions; use
+/// [`supergraph_schema`] to glue the pieces together.
+const SUPERGRAPH_SCHEMA_COMMON: &str = r#"schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
+    query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+scalar link__Import
+
+enum link__Purpose {
+    SECURITY
+    EXECUTION
+}
+"#;
+
+/// Glue the federation boilerplate with the test-specific schema body
+/// (graph enum + type definitions).
+fn supergraph_schema(body: &str) -> String {
+    format!("{SUPERGRAPH_SCHEMA_COMMON}{body}")
+}
+
+/// Default test harness config: include subgraph errors, coercion errors off.
+fn default_config() -> serde_json::Value {
+    serde_json::json!({ "include_subgraph_errors": { "all": true } })
+}
+
+/// Config with `enable_result_coercion_errors=true`, so missing/invalid
+/// values surface in `response.errors` with `RESPONSE_VALIDATION_FAILED`.
+fn coercion_errors_config() -> serde_json::Value {
+    serde_json::json!({
+        "include_subgraph_errors": { "all": true },
+        "supergraph": { "enable_result_coercion_errors": true },
+    })
+}
+
+/// Run a single GraphQL request against a mocked supergraph and return
+/// the response as a JSON value. Bundles the `TestHarness` →
+/// `supergraph::Request::fake_builder` → `oneshot` plumbing that every
+/// test in this file would otherwise repeat verbatim.
+async fn run_query(
+    schema: &str,
+    subgraphs: MockedSubgraphs,
+    query: &str,
+    config: serde_json::Value,
+) -> serde_json::Value {
+    let service = TestHarness::builder()
+        .configuration_json(config)
+        .unwrap()
+        .schema(schema)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::new())
+        .query(query)
+        .build()
+        .unwrap();
+
+    let mut stream = service.oneshot(request).await.unwrap();
+    let response = stream.next_response().await.unwrap();
+    serde_json::to_value(&response).unwrap()
+}
+
+/// Assert on the **full** set of user-visible diagnostics in a supergraph
+/// response: both `response.errors` and `extensions.valueCompletion`. Use
+/// this instead of filter-and-check-inclusion so that any unexpected
+/// extra (or missing, or duplicated) emission shows up as a test failure.
+fn assert_response_diagnostics(
+    value: &serde_json::Value,
+    expected_errors: serde_json::Value,
+    expected_value_completion: serde_json::Value,
+) {
+    let actual_errors = value["errors"].clone();
+    let actual_errors = if actual_errors.is_null() {
+        serde_json::json!([])
+    } else {
+        actual_errors
+    };
+    let actual_value_completion = value["extensions"]["valueCompletion"].clone();
+    let actual_value_completion = if actual_value_completion.is_null() {
+        serde_json::json!([])
+    } else {
+        actual_value_completion
+    };
+    assert_eq!(
+        actual_errors, expected_errors,
+        "response.errors mismatch (actual on left, expected on right)"
+    );
+    assert_eq!(
+        actual_value_completion, expected_value_completion,
+        "extensions.valueCompletion mismatch (actual on left, expected on right)"
+    );
+}
+
 fn subgraph_service_factory(
     graphs: Vec<(String, subgraph::BoxCloneService)>,
 ) -> SubgraphServiceFactory {
@@ -63,6 +171,7 @@ fn subgraph_service_factory(
         // Required for subscriptions: we are not testing that here
         Default::default(),
         None,
+        Default::default(),
     )
 }
 
@@ -83,71 +192,6 @@ fn service_usage() {
     );
 }
 
-/// This test panics in the product subgraph. HOWEVER, this does not result in a panic in the
-/// test, since the buffer() functionality in the tower stack "loses" the panic and we end up
-/// with a closed service.
-///
-/// See: https://github.com/tower-rs/tower/issues/455
-///
-/// The query planner reports the failed subgraph fetch as an error with a reason of "service
-/// closed", which is what this test expects.
-#[tokio::test]
-async fn mock_subgraph_service_with_panics_should_be_reported_as_service_closed() {
-    let query_plan: QueryPlan = QueryPlan {
-        root: serde_json::from_str(test_query_plan!()).unwrap(),
-        formatted_query_plan: Default::default(),
-        query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
-        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
-        estimated_size: Default::default(),
-    };
-
-    let mut mock_products_service = plugin::test::MockSubgraphService::new();
-    // This clone happens in `SubgraphServiceFactory::new`
-    mock_products_service.expect_clone().return_once(|| {
-        let mut mock_products_service = plugin::test::MockSubgraphService::new();
-        mock_products_service.expect_call().times(1).withf(|_| {
-            panic!("this panic should be propagated to the test harness");
-        });
-        mock_products_service
-    });
-
-    let (sender, _) = tokio::sync::mpsc::channel(10);
-
-    let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
-    let ssf = subgraph_service_factory(vec![(
-        "product".into(),
-        mock_products_service.boxed_clone(),
-    )]);
-    let sf = FetchService::new(
-        schema.clone(),
-        Default::default(),
-        Arc::new(ssf),
-        None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
-        Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    );
-
-    let result = query_plan
-        .execute(
-            &Context::new(),
-            &sf,
-            &Default::default(),
-            &schema,
-            &Default::default(),
-            sender,
-            None,
-            &None,
-            None,
-        )
-        .await;
-    assert_eq!(result.errors.len(), 1);
-    let reason: String =
-        serde_json_bytes::from_value(result.errors[0].extensions.get("reason").unwrap().clone())
-            .unwrap();
-    assert_eq!(reason, "buffer's worker closed unexpectedly".to_string());
-}
-
 #[tokio::test]
 async fn fetch_includes_operation_name() {
     let query_plan: QueryPlan = QueryPlan {
@@ -155,30 +199,22 @@ async fn fetch_includes_operation_name() {
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
     let succeeded: Arc<AtomicBool> = Default::default();
     let inner_succeeded = Arc::clone(&succeeded);
 
-    let mut mock_products_service = plugin::test::MockSubgraphService::new();
-    mock_products_service.expect_clone().return_once(|| {
-        let mut mock_products_service = plugin::test::MockSubgraphService::new();
-        mock_products_service
-            .expect_call()
-            .times(1)
-            .withf(move |request| {
-                let matches = request.subgraph_request.body().operation_name
-                    == Some("topProducts_product_0".into());
-                inner_succeeded.store(matches, Ordering::SeqCst);
-                matches
-            })
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
-        mock_products_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_products_service
+    let (mock_products_service, mut handle) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        let matches =
+            req.subgraph_request.body().operation_name == Some("topProducts_product_0".into());
+        inner_succeeded.store(matches, Ordering::SeqCst);
+        responder.send_response(SubgraphResponse::fake_builder().build());
     });
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
@@ -211,6 +247,7 @@ async fn fetch_includes_operation_name() {
         )
         .await;
 
+    crate::plugin::test::await_mock_driver(driver).await;
     assert!(succeeded.load(Ordering::SeqCst), "incorrect operation name");
 }
 
@@ -221,30 +258,21 @@ async fn fetch_makes_post_requests() {
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
     let succeeded: Arc<AtomicBool> = Default::default();
     let inner_succeeded = Arc::clone(&succeeded);
 
-    let mut mock_products_service = plugin::test::MockSubgraphService::new();
-
-    mock_products_service.expect_clone().return_once(|| {
-        let mut mock_products_service = plugin::test::MockSubgraphService::new();
-        mock_products_service
-            .expect_call()
-            .times(1)
-            .withf(move |request| {
-                let matches = request.subgraph_request.method() == Method::POST;
-                inner_succeeded.store(matches, Ordering::SeqCst);
-                matches
-            })
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
-        mock_products_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_products_service
+    let (mock_products_service, mut handle) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        let matches = req.subgraph_request.method() == Method::POST;
+        inner_succeeded.store(matches, Ordering::SeqCst);
+        responder.send_response(SubgraphResponse::fake_builder().build());
     });
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
@@ -277,6 +305,7 @@ async fn fetch_makes_post_requests() {
         )
         .await;
 
+    crate::plugin::test::await_mock_driver(driver).await;
     assert!(
         succeeded.load(Ordering::SeqCst),
         "subgraph requests must be http post"
@@ -287,120 +316,106 @@ async fn fetch_makes_post_requests() {
 async fn defer() {
     // plan for { t { x ... @defer { y } }}
     let query_plan: QueryPlan = QueryPlan {
-            formatted_query_plan: Default::default(),
-            root: PlanNode::Defer {
-                primary: Primary {
-                    subselection: Some("{ t { x } }".to_string()),
-                    node: Some(Box::new(PlanNode::Fetch(FetchNode {
-                        service_name: "X".into(),
-                        requires: vec![],
+        formatted_query_plan: Default::default(),
+        root: Some(Arc::new(PlanNode::Defer {
+            primary: Primary {
+                subselection: Some("{ t { x } }".to_string()),
+                node: Some(Box::new(PlanNode::Fetch(FetchNode {
+                    service_name: "X".into(),
+                    requires: vec![],
+                    variable_usages: vec![],
+                    operation: SerializableDocument::from_string("{ t { id __typename x } }"),
+                    operation_name: Some("t".into()),
+                    operation_kind: OperationKind::Query,
+                    id: Some("fetch1".into()),
+                    input_rewrites: None,
+                    output_rewrites: None,
+                    context_rewrites: None,
+                    schema_aware_hash: Default::default(),
+                    authorization: Default::default(),
+                }))),
+            },
+            deferred: vec![DeferredNode {
+                depends: vec![Depends {
+                    id: "fetch1".into(),
+                }],
+                label: None,
+                query_path: Path(vec![PathElement::Key("t".to_string(), None)]),
+                subselection: Some("{ y }".to_string()),
+                node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
+                    path: Path(vec![PathElement::Key("t".to_string(), None)]),
+                    node: Box::new(PlanNode::Fetch(FetchNode {
+                        service_name: "Y".into(),
+                        requires: vec![requires_selection::Selection::InlineFragment(
+                            requires_selection::InlineFragment {
+                                type_condition: Some(name!("T")),
+                                selections: vec![
+                                    requires_selection::Selection::Field(
+                                        requires_selection::Field {
+                                            alias: None,
+                                            name: name!("id"),
+                                            selections: Vec::new(),
+                                        },
+                                    ),
+                                    requires_selection::Selection::Field(
+                                        requires_selection::Field {
+                                            alias: None,
+                                            name: name!("__typename"),
+                                            selections: Vec::new(),
+                                        },
+                                    ),
+                                ],
+                            },
+                        )],
                         variable_usages: vec![],
-                        operation: SerializableDocument::from_string("{ t { id __typename x } }"),
-                        operation_name: Some("t".into()),
+                        operation: SerializableDocument::from_string(
+                            "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}",
+                        ),
+                        operation_name: None,
                         operation_kind: OperationKind::Query,
-                        id: Some("fetch1".into()),
+                        id: Some("fetch2".into()),
                         input_rewrites: None,
                         output_rewrites: None,
                         context_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
-                    }))),
-                },
-                deferred: vec![DeferredNode {
-                    depends: vec![Depends {
-                        id: "fetch1".into(),
-                    }],
-                    label: None,
-                    query_path: Path(vec![PathElement::Key("t".to_string(), None)]),
-                    subselection: Some("{ y }".to_string()),
-                    node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
-                        path: Path(vec![PathElement::Key("t".to_string(), None)]),
-                        node: Box::new(PlanNode::Fetch(FetchNode {
-                            service_name: "Y".into(),
-                            requires: vec![requires_selection::Selection::InlineFragment(
-                                requires_selection::InlineFragment {
-                                    type_condition: Some(name!("T")),
-                                    selections: vec![
-                                        requires_selection::Selection::Field(
-                                            requires_selection::Field {
-                                                alias: None,
-                                                name: name!("id"),
-                                                selections: Vec::new(),
-                                            },
-                                        ),
-                                        requires_selection::Selection::Field(
-                                            requires_selection::Field {
-                                                alias: None,
-                                                name: name!("__typename"),
-                                                selections: Vec::new(),
-                                            },
-                                        ),
-                                    ],
-                                },
-                            )],
-                            variable_usages: vec![],
-                            operation: SerializableDocument::from_string(
-                                "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}"
-                            ),
-                            operation_name: None,
-                            operation_kind: OperationKind::Query,
-                            id: Some("fetch2".into()),
-                            input_rewrites: None,
-                            output_rewrites: None,
-                            context_rewrites: None,
-                            schema_aware_hash: Default::default(),
-                            authorization: Default::default(),
-                        })),
-                    }))),
-                }],
-            }.into(),
-            usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
-            query: Arc::new(Query::empty_for_tests()),
-            query_metrics: Default::default(),
-            estimated_size: Default::default(),
-        };
+                    })),
+                }))),
+            }],
+        })),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
+        query: Arc::new(Query::empty_for_tests()),
+        estimated_size: Default::default(),
+    };
 
-    let mut mock_x_service = plugin::test::MockSubgraphService::new();
-    mock_x_service.expect_clone().return_once(|| {
-        let mut mock_x_service = plugin::test::MockSubgraphService::new();
-        mock_x_service
-            .expect_call()
-            .times(1)
-            .withf(move |_request| true)
-            .returning(|_| {
-                Ok(SubgraphResponse::fake_builder()
-                    .data(serde_json::json! {{
-                        "t": {"id": 1234,
-                        "__typename": "T",
-                         "x": "X"
-                        }
-                    }})
-                    .build())
-            });
-        mock_x_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_x_service
+    let (mock_x_service, mut handle_x) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_x = tokio::spawn(async move {
+        let (_req, responder) = handle_x.next_request().await.unwrap();
+        responder.send_response(
+            SubgraphResponse::fake_builder()
+                .data(serde_json::json! {{
+                    "t": {"id": 1234, "__typename": "T", "x": "X"}
+                }})
+                .build(),
+        );
     });
 
-    let mut mock_y_service = plugin::test::MockSubgraphService::new();
-    mock_y_service.expect_clone().return_once(|| {
-        let mut mock_y_service = plugin::test::MockSubgraphService::new();
-        mock_y_service
-            .expect_call()
-            .times(1)
-            .withf(move |_request| true)
-            .returning(|_| {
-                Ok(SubgraphResponse::fake_builder()
-                    .data(serde_json::json! {{
-                        "_entities": [{"y": "Y", "__typename": "T"}]
-                    }})
-                    .build())
-            });
-        mock_y_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_y_service
+    let (mock_y_service, mut handle_y) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_y = tokio::spawn(async move {
+        let (_req, responder) = handle_y.next_request().await.unwrap();
+        responder.send_response(
+            SubgraphResponse::fake_builder()
+                .data(serde_json::json! {{
+                    "_entities": [{"y": "Y", "__typename": "T"}]
+                }})
+                .build(),
+        );
     });
 
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
@@ -449,6 +464,8 @@ async fn defer() {
         // unneeded parts are removed in response formatting
         serde_json::json! {{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}},"path":["t"]}}
     );
+    crate::plugin::test::await_mock_driver(driver_x).await;
+    crate::plugin::test::await_mock_driver(driver_y).await;
 }
 
 #[tokio::test]
@@ -472,7 +489,7 @@ async fn defer_if_condition() {
         .unwrap(),
     );
 
-    let root: Arc<PlanNode> =
+    let root: Option<Arc<PlanNode>> =
         serde_json::from_str(include_str!("testdata/defer_clause_plan.json")).unwrap();
 
     let query_plan = QueryPlan {
@@ -488,7 +505,6 @@ async fn defer_if_condition() {
             .unwrap(),
         ),
         formatted_query_plan: None,
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
@@ -643,30 +659,28 @@ async fn dependent_mutations() {
         .unwrap(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
-    let mut mock_a_service = plugin::test::MockSubgraphService::new();
-    mock_a_service.expect_clone().returning(|| {
-        let mut mock_a_service = plugin::test::MockSubgraphService::new();
-        mock_a_service
-            .expect_call()
-            .times(1)
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
-        mock_a_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-
-        mock_a_service
+    let (mock_a_service, mut handle_a) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_a = tokio::spawn(async move {
+        let (_req, responder) = handle_a.next_request().await.unwrap();
+        responder.send_response(SubgraphResponse::fake_builder().build());
     });
 
     // the first fetch returned null, so there should never be a call to B
-    let mut mock_b_service = plugin::test::MockSubgraphService::new();
-    mock_b_service
-        .expect_clone()
-        .returning(plugin::test::MockSubgraphService::new);
-    mock_b_service.expect_call().never();
+    let (mock_b_service, mut handle_b) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_b = tokio::spawn(async move {
+        if handle_b.next_request().await.is_some() {
+            panic!("service B should not be called");
+        }
+    });
 
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
     let ssf = subgraph_service_factory(vec![
@@ -696,6 +710,9 @@ async fn dependent_mutations() {
             None,
         )
         .await;
+    crate::plugin::test::await_mock_driver(driver_a).await;
+    drop(sf);
+    crate::plugin::test::await_mock_driver(driver_b).await;
 }
 
 #[tokio::test]
@@ -931,8 +948,8 @@ async fn missing_fields_in_requires() {
   scalar join__FieldSet
 
   enum join__Graph {
-    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
-    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+    SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
   }
 
   scalar link__Import
@@ -1067,8 +1084,8 @@ async fn missing_typename_and_fragments_in_requires() {
   scalar join__FieldSet
 
   enum join__Graph {
-    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
-    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+    SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
   }
 
   scalar link__Import
@@ -1203,8 +1220,8 @@ async fn missing_typename_and_fragments_in_requires2() {
   scalar join__FieldSet
 
   enum join__Graph {
-    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
-    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+    SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
   }
 
   scalar link__Import
@@ -1357,8 +1374,8 @@ async fn null_in_requires() {
   scalar join__FieldSet
 
   enum join__Graph {
-    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
-    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+    SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
   }
 
   scalar link__Import
@@ -1842,7 +1859,7 @@ fn broken_plan_does_not_panic() {
     let operation = "{ invalid }";
     let subgraph_schema = "type Query { field: Int }";
     let mut plan = QueryPlan {
-        root: PlanNode::Fetch(FetchNode {
+        root: Some(Arc::new(PlanNode::Fetch(FetchNode {
             service_name: "X".into(),
             requires: vec![],
             variable_usages: vec![],
@@ -1855,25 +1872,797 @@ fn broken_plan_does_not_panic() {
             context_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
-        })
-        .into(),
+        }))),
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
     let subgraph_schema = apollo_compiler::Schema::parse_and_validate(subgraph_schema, "").unwrap();
     let mut subgraph_schemas = HashMap::default();
     subgraph_schemas.insert(
         "X".to_owned(),
-        query_planner::fetch::SubgraphSchema::new(subgraph_schema),
+        query_planner::HashedSubgraphSchema::new(subgraph_schema),
     );
     // Run the plan initialization code to make sure it doesn't panic.
+    let root_node = plan.root.as_mut().expect("non-empty query plan");
     let result =
-        Arc::make_mut(&mut plan.root).init_parsed_operations_and_hash_subqueries(&subgraph_schemas);
+        Arc::make_mut(root_node).init_parsed_operations_and_hash_subqueries(&subgraph_schemas);
     assert_eq!(
         result.unwrap_err().to_string(),
         r#"[1:3] Cannot query field "invalid" on type "Query"."#
+    );
+}
+
+/// Reproduces a bug where a deferred node's dependency list was missing a fetch
+/// that provides `__typename` and entity keys at the deferred Flatten path.
+///
+/// The root cause was in the query planner's `collect_redundant_edges` (transitive
+/// reduction): when a direct edge from a primary fetch to a deferred fetch was also
+/// reachable transitively through an intermediate fetch, the direct edge was removed.
+/// This caused `extract_children_and_deferred_dependencies` to only register the
+/// intermediate fetch as a dependency, omitting the primary fetch that provides
+/// `__typename` and entity keys.
+///
+/// The scenario:
+/// - Primary: Fetch(X, id=fetch1) gets `start.inner { __typename id sub }`,
+///   then Flatten Fetch(Y, id=fetch0) gets `sub.data`
+/// - Deferred(depends: [fetch0, fetch1]): Flatten at `start.inner`, Fetch(Z) requires
+///   `Inner { __typename id sub { subId data } }` and returns `target`
+///
+/// With the planner fix, both fetch0 AND fetch1 are registered as dependencies,
+/// ensuring the deferred node has complete data (including `__typename` and `id`).
+#[tokio::test]
+async fn defer_depends_skips_fetch_when_typename_missing() {
+    // Query plan for:
+    //   { start { id inner { __typename id ... @defer { target { x } } } } }
+    // where inner.sub.data is fetched by a dependency (Y, id=fetch0)
+    // and the deferred fetch (Z) requires inner.__typename + id + sub { subId data }
+    let query_plan: QueryPlan = QueryPlan {
+        formatted_query_plan: Default::default(),
+        root: Some(Arc::new(PlanNode::Defer {
+            primary: Primary {
+                subselection: Some("{ start { id inner { __typename id } } }".to_string()),
+                node: Some(Box::new(PlanNode::Sequence {
+                    nodes: vec![
+                        // Primary fetch: gets start with inner { __typename, id, sub }
+                        // With the planner fix, this fetch gets an id so the deferred
+                        // node can depend on it for __typename and id.
+                        PlanNode::Fetch(FetchNode {
+                            service_name: "X".into(),
+                            requires: vec![],
+                            variable_usages: vec![],
+                            operation: SerializableDocument::from_string(
+                                "{ start { __typename id inner { __typename id sub { __typename subId } } } }",
+                            ),
+                            operation_name: None,
+                            operation_kind: OperationKind::Query,
+                            id: Some("fetch1".into()),
+                            input_rewrites: None,
+                            output_rewrites: None,
+                            context_rewrites: None,
+                            schema_aware_hash: Default::default(),
+                            authorization: Default::default(),
+                        }),
+                        // Dependency fetch: gets sub.data (the deferred node depends on this)
+                        PlanNode::Flatten(FlattenNode {
+                            path: Path(vec![
+                                PathElement::Key("start".to_string(), None),
+                                PathElement::Key("inner".to_string(), None),
+                                PathElement::Key("sub".to_string(), None),
+                            ]),
+                            node: Box::new(PlanNode::Fetch(FetchNode {
+                                service_name: "Y".into(),
+                                requires: vec![requires_selection::Selection::InlineFragment(
+                                    requires_selection::InlineFragment {
+                                        type_condition: Some(name!("Sub")),
+                                        selections: vec![
+                                            requires_selection::Selection::Field(
+                                                requires_selection::Field {
+                                                    alias: None,
+                                                    name: name!("__typename"),
+                                                    selections: Vec::new(),
+                                                },
+                                            ),
+                                            requires_selection::Selection::Field(
+                                                requires_selection::Field {
+                                                    alias: None,
+                                                    name: name!("subId"),
+                                                    selections: Vec::new(),
+                                                },
+                                            ),
+                                        ],
+                                    },
+                                )],
+                                variable_usages: vec![],
+                                operation: SerializableDocument::from_string(
+                                    "query($representations:[_Any!]!){_entities(representations:$representations){...on Sub{data}}}",
+                                ),
+                                operation_name: None,
+                                operation_kind: OperationKind::Query,
+                                id: Some("fetch0".into()),
+                                input_rewrites: None,
+                                output_rewrites: None,
+                                context_rewrites: None,
+                                schema_aware_hash: Default::default(),
+                                authorization: Default::default(),
+                            })),
+                        }),
+                    ],
+                })),
+            },
+            deferred: vec![DeferredNode {
+                depends: vec![
+                    Depends {
+                        id: "fetch0".into(),
+                    },
+                    Depends {
+                        id: "fetch1".into(),
+                    },
+                ],
+                label: None,
+                query_path: Path(vec![
+                    PathElement::Key("start".to_string(), None),
+                    PathElement::Key("inner".to_string(), None),
+                ]),
+                subselection: Some("{ target { x } }".to_string()),
+                node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
+                    path: Path(vec![
+                        PathElement::Key("start".to_string(), None),
+                        PathElement::Key("inner".to_string(), None),
+                    ]),
+                    node: Box::new(PlanNode::Fetch(FetchNode {
+                        service_name: "Z".into(),
+                        requires: vec![requires_selection::Selection::InlineFragment(
+                            requires_selection::InlineFragment {
+                                type_condition: Some(name!("Inner")),
+                                selections: vec![
+                                    requires_selection::Selection::Field(
+                                        requires_selection::Field {
+                                            alias: None,
+                                            name: name!("__typename"),
+                                            selections: Vec::new(),
+                                        },
+                                    ),
+                                    requires_selection::Selection::Field(
+                                        requires_selection::Field {
+                                            alias: None,
+                                            name: name!("id"),
+                                            selections: Vec::new(),
+                                        },
+                                    ),
+                                    requires_selection::Selection::Field(
+                                        requires_selection::Field {
+                                            alias: None,
+                                            name: name!("sub"),
+                                            selections: vec![
+                                                requires_selection::Selection::Field(
+                                                    requires_selection::Field {
+                                                        alias: None,
+                                                        name: name!("subId"),
+                                                        selections: Vec::new(),
+                                                    },
+                                                ),
+                                                requires_selection::Selection::Field(
+                                                    requires_selection::Field {
+                                                        alias: None,
+                                                        name: name!("data"),
+                                                        selections: Vec::new(),
+                                                    },
+                                                ),
+                                            ],
+                                        },
+                                    ),
+                                ],
+                            },
+                        )],
+                        variable_usages: vec![],
+                        operation: SerializableDocument::from_string(
+                            "query($representations:[_Any!]!){_entities(representations:$representations){...on Inner{target{x}}}}",
+                        ),
+                        operation_name: None,
+                        operation_kind: OperationKind::Query,
+                        id: None,
+                        input_rewrites: None,
+                        output_rewrites: None,
+                        context_rewrites: None,
+                        schema_aware_hash: Default::default(),
+                        authorization: Default::default(),
+                    })),
+                }))),
+            }],
+        })),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
+        query: Arc::new(Query::empty_for_tests()),
+        estimated_size: Default::default(),
+    };
+
+    // Mock X service: returns the root query data for start
+    let (mock_x_service, mut handle_x) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_x = tokio::spawn(async move {
+        let (_req, responder) = handle_x.next_request().await.unwrap();
+        responder.send_response(
+            SubgraphResponse::fake_builder()
+                .data(serde_json::json! {{
+                    "start": {
+                        "__typename": "T",
+                        "id": "1",
+                        "inner": {
+                            "__typename": "Inner",
+                            "id": "i1",
+                            "sub": {
+                                "__typename": "Sub",
+                                "subId": "s1"
+                            }
+                        }
+                    }
+                }})
+                .build(),
+        );
+    });
+
+    // Mock Y service: entity fetch for Sub, returns data field
+    let (mock_y_service, mut handle_y) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_y = tokio::spawn(async move {
+        let (_req, responder) = handle_y.next_request().await.unwrap();
+        responder.send_response(
+            SubgraphResponse::fake_builder()
+                .data(serde_json::json! {{
+                    "_entities": [{"data": "d1"}]
+                }})
+                .build(),
+        );
+    });
+
+    // Mock Z service: entity fetch for Inner, returns target
+    // If the bug exists, this service will NOT be called (fetch is skipped).
+    let (mock_z_service, mut handle_z) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_z = tokio::spawn(async move {
+        let (_req, responder) = handle_z.next_request().await.unwrap();
+        responder.send_response(
+            SubgraphResponse::fake_builder()
+                .data(serde_json::json! {{
+                    "_entities": [{"target": {"x": "42"}}]
+                }})
+                .build(),
+        );
+    });
+
+    let (sender, receiver) = tokio::sync::mpsc::channel(10);
+
+    let schema = include_str!("testdata/defer_depends_schema.graphql");
+    let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
+    let ssf = subgraph_service_factory(vec![
+        ("X".into(), mock_x_service.boxed_clone()),
+        ("Y".into(), mock_y_service.boxed_clone()),
+        ("Z".into(), mock_z_service.boxed_clone()),
+    ]);
+    let sf = FetchService::new(
+        schema.clone(),
+        Default::default(),
+        Arc::new(ssf),
+        None,
+        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+        Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
+    );
+
+    let response = query_plan
+        .execute(
+            &Context::new(),
+            &sf,
+            &Default::default(),
+            &schema,
+            &Default::default(),
+            sender,
+            None,
+            &None,
+            None,
+        )
+        .await;
+
+    // Primary response should have start.inner with __typename and id
+    let primary_data = serde_json::to_value(&response).unwrap();
+    assert_eq!(
+        primary_data,
+        serde_json::json! {{
+            "data": {
+                "start": {
+                    "__typename": "T",
+                    "id": "1",
+                    "inner": {
+                        "__typename": "Inner",
+                        "id": "i1",
+                        "sub": {
+                            "__typename": "Sub",
+                            "subId": "s1",
+                            "data": "d1"
+                        }
+                    }
+                }
+            }
+        }}
+    );
+
+    // Deferred response should include target from Z fetch
+    let deferred = ReceiverStream::new(receiver).next().await.unwrap();
+    let deferred_data = serde_json::to_value(&deferred).unwrap();
+
+    // The deferred response data should contain target with x.
+    // If the bug exists (Z fetch skipped), target will be missing/null.
+    let inner_data = &deferred_data["data"]["start"]["inner"];
+    assert!(
+        inner_data.get("target").is_some() && !inner_data["target"].is_null(),
+        "target should not be null in the deferred response. \
+         This indicates the deferred fetch to Z was skipped because \
+         __typename was missing from the deferred node's context at the Flatten path. \
+         Got deferred response: {}",
+        serde_json::to_string_pretty(&deferred_data).unwrap()
+    );
+    assert_eq!(
+        inner_data["target"]["x"], "42",
+        "target should have x from Z fetch"
+    );
+    crate::plugin::test::await_mock_driver(driver_x).await;
+    crate::plugin::test::await_mock_driver(driver_y).await;
+    crate::plugin::test::await_mock_driver(driver_z).await;
+}
+
+// Documents that the user-visible "errors" array stays SILENT when the
+// user-asked fields are all nullable. The skipped @requires fetch leaves
+// `computed` and `nickname` null in `data` (existing behavior), but the
+// new approach only emits `RESPONSE_VALIDATION_FAILED` for non-null
+// requested fields. The planner-internal `code: String!` that triggered
+// the skip is not in the user's operation, so no diagnostic surfaces.
+#[tokio::test]
+async fn missing_nonnull_field_in_requires_returns_error() {
+    let schema = supergraph_schema(
+        r#"
+        enum join__Graph {
+            SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+            SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
+        }
+
+        type Query
+            @join__type(graph: SUB1)
+            @join__type(graph: SUB2)
+        {
+            entity: Entity @join__field(graph: SUB1)
+        }
+
+        type Entity
+            @join__type(graph: SUB1, key: "id")
+            @join__type(graph: SUB2, key: "id", extension: true)
+        {
+            id: ID!
+            name: String @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            code: String! @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            computed: String @join__field(graph: SUB2, requires: "code")
+            nickname: String @join__field(graph: SUB2, requires: "name")
+        }
+        "#,
+    );
+
+    let query = "query { entity { id computed nickname } }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "sub1",
+                MockSubgraph::builder()
+                    .with_json(
+                        // Router queries sub1 for entity fields including code and name (needed for @requires)
+                        serde_json::json! {{"query": "{entity{__typename id name code}}"}},
+                        // Sub1 returns WITHOUT `code` (simulating coprocessor stripping the field
+                        // from the request, so the subgraph never received it and doesn't return it)
+                        serde_json::json! {{"data": {
+                            "entity": {
+                              "__typename": "Entity",
+                              "id": "1",
+                              "name": "Alice"
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            ("sub2", MockSubgraph::builder().build()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let value = run_query(&schema, subgraphs, query, default_config()).await;
+
+    let data = &value["data"]["entity"];
+    // `computed` and `nickname` are nullable; they land as null in `data`.
+    assert_eq!(data["computed"], serde_json::Value::Null);
+    assert_eq!(data["nickname"], serde_json::Value::Null);
+
+    // Both fields are nullable, and coercion errors are off in this
+    // harness → no emission anywhere. (`emit_missing_field` only
+    // writes valueCompletion for non-null, and only writes response
+    // errors when coercion is on.)
+    assert_response_diagnostics(&value, serde_json::json!([]), serde_json::json!([]));
+}
+
+// Variant of C.1 with `enable_result_coercion_errors` ON. Nullable missing fields surface
+// `RESPONSE_VALIDATION_FAILED` in `response.errors` when the gate is enabled.
+#[tokio::test]
+async fn missing_nullable_field_in_requires_returns_error_coercion_on() {
+    let schema = supergraph_schema(
+        r#"
+        enum join__Graph {
+            SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+            SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
+        }
+
+        type Query
+            @join__type(graph: SUB1)
+            @join__type(graph: SUB2)
+        {
+            entity: Entity @join__field(graph: SUB1)
+        }
+
+        type Entity
+            @join__type(graph: SUB1, key: "id")
+            @join__type(graph: SUB2, key: "id", extension: true)
+        {
+            id: ID!
+            name: String @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            code: String! @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            computed: String @join__field(graph: SUB2, requires: "code")
+            nickname: String @join__field(graph: SUB2, requires: "name")
+        }
+        "#,
+    );
+
+    let query = "query { entity { id computed nickname } }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "sub1",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query": "{entity{__typename id name code}}"}},
+                        serde_json::json! {{"data": {
+                            "entity": {
+                              "__typename": "Entity",
+                              "id": "1",
+                              "name": "Alice"
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            ("sub2", MockSubgraph::builder().build()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let value = run_query(&schema, subgraphs, query, coercion_errors_config()).await;
+
+    let data = &value["data"]["entity"];
+    assert_eq!(data["computed"], serde_json::Value::Null);
+    assert_eq!(data["nickname"], serde_json::Value::Null);
+
+    // With coercion errors ON, nullable missing fields emit
+    // `RESPONSE_VALIDATION_FAILED` at the leaf path. No valueCompletion
+    // (that's non-null only).
+    assert_response_diagnostics(
+        &value,
+        serde_json::json!([
+            {
+                "message": "Missing field",
+                "path": ["entity", "computed"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+            {
+                "message": "Missing field",
+                "path": ["entity", "nickname"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+        ]),
+        serde_json::json!([]),
+    );
+}
+
+// Variant of `missing_nonnull_field_in_requires_returns_error` where `computed` is a non-nullable
+// field. When the skipped fetch's field is non-nullable, `apply_selection_set` propagates null up
+// to the parent (entity), per the GraphQL spec. The post-fix `format_response` emits a
+// `RESPONSE_VALIDATION_FAILED` error at the leaf path that triggered the null.
+#[tokio::test]
+async fn missing_nonnull_field_in_requires_returns_error_nonnull_leaf() {
+    let schema = supergraph_schema(
+        r#"
+        enum join__Graph {
+            SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+            SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
+        }
+
+        type Query
+            @join__type(graph: SUB1)
+            @join__type(graph: SUB2)
+        {
+            entity: Entity @join__field(graph: SUB1)
+        }
+
+        type Entity
+            @join__type(graph: SUB1, key: "id")
+            @join__type(graph: SUB2, key: "id", extension: true)
+        {
+            id: ID!
+            name: String @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            code: String! @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            computed: String! @join__field(graph: SUB2, requires: "code")
+            nickname: String @join__field(graph: SUB2, requires: "name")
+        }
+        "#,
+    );
+
+    let query = "query {
+        entity {
+          id
+          computed
+          nickname
+        }
+      }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "sub1",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query": "{entity{__typename id name code}}"}},
+                        // sub1 returns WITHOUT `code` — sub2 (which requires code) is skipped.
+                        serde_json::json! {{"data": {
+                            "entity": {
+                              "__typename": "Entity",
+                              "id": "1",
+                              "name": "Alice"
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            ("sub2", MockSubgraph::builder().build()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let value = run_query(&schema, subgraphs, query, coercion_errors_config()).await;
+
+    // `computed: String!` is non-nullable — the missing value bubbles up and nullifies
+    // `data.entity` per GraphQL null-propagation rules.
+    assert_eq!(value["data"]["entity"], serde_json::Value::Null);
+
+    // `RESPONSE_VALIDATION_FAILED` is emitted at the leaf
+    // `[entity, computed]` (the non-null user-asked field). `nickname`
+    // is nullable — the formatter returns `Err(InvalidValue)` at
+    // `computed` and short-circuits before iterating to `nickname`, so
+    // only `computed`'s emission appears. `emit_missing_field` writes
+    // to both sinks for non-null missing, so `valueCompletion` also
+    // carries an entry at the parent path `[entity]`.
+    assert_response_diagnostics(
+        &value,
+        serde_json::json!([
+            {
+                "message": "Missing field",
+                "path": ["entity", "computed"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+        ]),
+        serde_json::json!([
+            { "message": "Cannot return null for non-nullable type String", "path": ["entity"] },
+        ]),
+    );
+}
+
+// Variant of `missing_nonnull_field_in_requires_returns_error` where the root `Query.entity`
+// field is non-nullable. With `computed: String!` also non-nullable, the missing value at the
+// leaf bubbles up: `computed` → `entity` (becomes null) → `data` (becomes null, since
+// `Query.entity` is non-null). This tests how null-propagation behaves when there's no
+// nullable ancestor to stop at.
+#[tokio::test]
+async fn missing_nonnull_field_in_requires_returns_error_nonnull_entity() {
+    let schema = supergraph_schema(
+        r#"
+        enum join__Graph {
+            SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+            SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
+        }
+
+        type Query
+            @join__type(graph: SUB1)
+            @join__type(graph: SUB2)
+        {
+            entity: Entity! @join__field(graph: SUB1)
+        }
+
+        type Entity
+            @join__type(graph: SUB1, key: "id")
+            @join__type(graph: SUB2, key: "id", extension: true)
+        {
+            id: ID!
+            name: String @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            code: String! @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            computed: String! @join__field(graph: SUB2, requires: "code")
+            nickname: String @join__field(graph: SUB2, requires: "name")
+        }
+        "#,
+    );
+
+    let query = "query {
+        entity {
+          id
+          computed
+          nickname
+        }
+      }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "sub1",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query": "{entity{__typename id name code}}"}},
+                        // sub1 returns WITHOUT `code` — sub2 (which requires code) is skipped.
+                        serde_json::json! {{"data": {
+                            "entity": {
+                              "__typename": "Entity",
+                              "id": "1",
+                              "name": "Alice"
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            ("sub2", MockSubgraph::builder().build()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let value = run_query(&schema, subgraphs, query, coercion_errors_config()).await;
+
+    // `computed: String!` missing → nullifies `entity` → `Query.entity: Entity!` is non-null →
+    // the null bubbles up to `data` itself.
+    assert_eq!(value["data"], serde_json::Value::Null);
+
+    // Only ONE `RESPONSE_VALIDATION_FAILED` at the originating leaf
+    // `[entity, computed]`.
+    assert_response_diagnostics(
+        &value,
+        serde_json::json!([
+            {
+                "message": "Missing field",
+                "path": ["entity", "computed"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+        ]),
+        serde_json::json!([
+            { "message": "Cannot return null for non-nullable type String", "path": ["entity"] },
+        ]),
+    );
+}
+
+// Symmetry test: the missing and explicit-null branches in `spec/query.rs` response formatting
+// both emit `RESPONSE_VALIDATION_FAILED` in `response.errors` (in addition to the existing
+// `valueCompletion` entry either case still leaves in extensions).
+//
+// Before the fix, only the explicit-null branch surfaced a user-visible error; the missing branch
+// went only to `valueCompletion`. That asymmetry is the reason `@requires`-driven skips (which
+// look like "missing" from the formatter's perspective — the field was never fetched) used to
+// silently drop. With the fix, the symptom is the same regardless of whether the subgraph returned
+// an explicit null or omitted the field.
+#[tokio::test]
+async fn response_formatting_missing_vs_null_nonnull_field_asymmetry() {
+    let schema = supergraph_schema(
+        r#"
+        enum join__Graph {
+            SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+        }
+
+        type Query @join__type(graph: SUB1) {
+            entity: Entity @join__field(graph: SUB1)
+        }
+
+        type Entity @join__type(graph: SUB1, key: "id") {
+            id: ID!
+            name: String! @join__field(graph: SUB1)
+        }
+        "#,
+    );
+
+    let query = "query { entity { id name } }";
+
+    // Helper: build a service whose single subgraph returns the given `entity` payload.
+    async fn run_with_entity(
+        schema: &str,
+        query: &str,
+        entity: serde_json::Value,
+    ) -> serde_json::Value {
+        let subgraphs = MockedSubgraphs(
+            [(
+                "sub1",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query": "{entity{id name}}"}},
+                        serde_json::json! {{"data": {"entity": entity}}},
+                    )
+                    .build(),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        // Enable coercion errors so any errors generated by `format_non_nullable_value`
+        // show up in `response.errors`.
+        run_query(schema, subgraphs, query, coercion_errors_config()).await
+    }
+
+    // Case A: `name` is MISSING (absent) from the subgraph response.
+    // `apply_selection_set`'s missing-field branch calls `emit_missing_field`,
+    // which writes RVF to `response.errors` at the leaf, plus a
+    // valueCompletion entry at the **parent** path (it never recursed
+    // into the field).
+    let missing = run_with_entity(&schema, query, serde_json::json!({ "id": "1" })).await;
+    assert_eq!(
+        missing["data"]["entity"],
+        serde_json::Value::Null,
+        "non-null `name` missing → `entity` nullified"
+    );
+    assert_response_diagnostics(
+        &missing,
+        serde_json::json!([
+            {
+                "message": "Missing field",
+                "path": ["entity", "name"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+        ]),
+        serde_json::json!([
+            { "message": "Cannot return null for non-nullable type String", "path": ["entity"] },
+        ]),
+    );
+
+    // Case B: `name` is explicitly NULL in the subgraph response.
+    // `format_value` recurses, `format_non_nullable_value` then notices
+    // the null. Its legacy dual-emission writes RVF to both sinks at
+    // the **leaf** path (the field name was pushed by the caller).
+    let null = run_with_entity(
+        &schema,
+        query,
+        serde_json::json!({ "id": "1", "name": null }),
+    )
+    .await;
+    assert_eq!(
+        null["data"]["entity"],
+        serde_json::Value::Null,
+        "null non-null `name` → `entity` nullified"
+    );
+    assert_response_diagnostics(
+        &null,
+        serde_json::json!([
+            {
+                "message": "Null value found for non-nullable type String",
+                "path": ["entity", "name"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+        ]),
+        serde_json::json!([
+            { "message": "Null value found for non-nullable type String", "path": ["entity", "name"] },
+        ]),
     );
 }

@@ -2322,7 +2322,7 @@ fn propagates_default_input_values() {
 
     insta::assert_snapshot!(api_schema, @r###"
     type Query {
-      field(input: Input = {one: 0, nested: {one: 2, two: 2, default: "default"}, two: 2, three: 3, object: {value: 2}, nestedWithDefault: {one: 1, two: 2, default: "default"}}): Int
+      field(input: Input = {one: 0, nested: {one: 2}}): Int
     }
 
     input Input {
@@ -2333,11 +2333,7 @@ fn propagates_default_input_values() {
         value: 2,
       }
       nested: Nested
-      nestedWithDefault: Nested! = {
-        one: 1,
-        two: 2,
-        default: "default",
-      }
+      nestedWithDefault: Nested! = {}
     }
 
     input InputObject {
@@ -2377,13 +2373,15 @@ fn matches_graphql_js_directive_applications() {
     "###);
 }
 
+// Note that federation will keep certain default value invalidities, and will not coerce
+// default values as graphql-js would (as this is not required by the spec).
 #[test]
-fn matches_graphql_js_default_value_propagation() {
+fn matches_federation_default_value_propagation() {
     let api_schema = inaccessible_to_api_schema(
         r#"
         type Query {
-          defaultShouldBeRemoved(arg: OneRequiredOneDefault = {}): Int
-          defaultShouldHavePropagatedValues(arg: OneOptionalOneDefault = {}): Int
+          defaultShouldBeKeptDespiteInvalid(arg: OneRequiredOneDefault = {}): Int
+          defaultShouldNotHavePropagatedValues(arg: OneOptionalOneDefault = {}): Int
         }
 
         input OneOptionalOneDefault {
@@ -2401,8 +2399,8 @@ fn matches_graphql_js_default_value_propagation() {
 
     insta::assert_snapshot!(api_schema, @r###"
     type Query {
-      defaultShouldBeRemoved(arg: OneRequiredOneDefault): Int
-      defaultShouldHavePropagatedValues(arg: OneOptionalOneDefault = {defaulted: false}): Int
+      defaultShouldBeKeptDespiteInvalid(arg: OneRequiredOneDefault = {}): Int
+      defaultShouldNotHavePropagatedValues(arg: OneOptionalOneDefault = {}): Int
     }
 
     input OneOptionalOneDefault {

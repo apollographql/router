@@ -19,11 +19,11 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
-use crate::query_planner::fetch::SubgraphSchemas;
+use crate::query_planner::HashedSubgraphSchemas;
+use crate::query_planner::SubgraphSchemas;
 use crate::services::query_planner::PlanOptions;
 use crate::spec::Query;
 use crate::spec::QueryHash;
-use crate::spec::operation_limits::OperationLimits;
 
 /// A planner key.
 ///
@@ -41,11 +41,12 @@ pub(crate) struct QueryKey {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QueryPlan {
     pub(crate) usage_reporting: Arc<UsageReporting>,
-    pub(crate) root: Arc<PlanNode>,
+    /// The actual query plan. May be `None` if there is no execution work to do,
+    /// for example because the query only contains fields that are statically `@skip`ped.
+    pub(crate) root: Option<Arc<PlanNode>>,
     /// String representation of the query plan (not a json representation)
     pub(crate) formatted_query_plan: Option<Arc<String>>,
     pub(crate) query: Arc<Query>,
-    pub(crate) query_metrics: OperationLimits<u32>,
 
     /// The estimated size in bytes of the query plan
     #[serde(default)]
@@ -65,10 +66,9 @@ impl QueryPlan {
             usage_reporting: usage_reporting
                 .unwrap_or_else(|| UsageReporting::Error("this is a test report key".to_string()))
                 .into(),
-            root: Arc::new(root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() })),
+            root: root.map(Arc::new),
             formatted_query_plan: Default::default(),
             query: Arc::new(Query::empty_for_tests()),
-            query_metrics: Default::default(),
             estimated_size: Default::default(),
         }
     }
@@ -76,7 +76,9 @@ impl QueryPlan {
 
 impl QueryPlan {
     pub(crate) fn is_deferred(&self, variables: &Object) -> bool {
-        self.root.is_deferred(variables, &self.query)
+        self.root
+            .as_ref()
+            .is_some_and(|node| node.is_deferred(variables, &self.query))
     }
 
     pub(crate) fn is_subscription(&self) -> bool {
@@ -88,8 +90,10 @@ impl QueryPlan {
         batching_config: Batching,
         variables: &Object,
     ) -> Result<Vec<Arc<QueryHash>>, CacheResolverError> {
-        self.root
-            .query_hashes(batching_config, variables, &self.query)
+        match &self.root {
+            Some(root) => root.query_hashes(batching_config, variables, &self.query),
+            None => Ok(vec![]),
+        }
     }
 
     pub(crate) fn estimated_size(&self) -> usize {
@@ -374,9 +378,9 @@ impl PlanNode {
         Ok(())
     }
 
-    pub(crate) fn init_parsed_operations_and_hash_subqueries(
+    pub(super) fn init_parsed_operations_and_hash_subqueries(
         &mut self,
-        subgraph_schemas: &SubgraphSchemas,
+        subgraph_schemas: &HashedSubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
         match self {
             PlanNode::Fetch(fetch_node) => {

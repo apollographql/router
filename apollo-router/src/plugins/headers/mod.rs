@@ -5,6 +5,7 @@ use std::task::Context;
 use std::task::Poll;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::header::ACCEPT;
@@ -43,17 +44,53 @@ use crate::plugin::serde::deserialize_option_header_value;
 use crate::plugin::serde::deserialize_regex;
 use crate::services::SubgraphRequest;
 use crate::services::connector;
+use crate::services::router;
 use crate::services::subgraph;
 
 register_private_plugin!("apollo", "headers", Headers);
 
+/// Request-side header configuration: propagation operations + optional masking.
 #[derive(Clone, JsonSchema, Deserialize, Default)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct HeadersLocation {
-    /// Propagate/Insert/Remove headers from request
-    request: Vec<Operation>,
-    // Propagate/Insert/Remove headers from response
-    // response: Option<Operation>
+    /// Propagate/Insert/Remove operations
+    #[serde(default)]
+    operations: Vec<Operation>,
+
+    /// Header masking configuration applied to request headers in logs/telemetry.
+    #[serde(default)]
+    masking: Option<crate::configuration::header_masking_config::HeaderMaskingConfig>,
+}
+
+/// Response-side header configuration. Response propagation isn't a router
+/// feature, so only masking is configurable here.
+#[derive(Clone, JsonSchema, Deserialize, Default)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+struct ResponseHeadersLocation {
+    /// Header masking configuration applied to response headers in logs/telemetry.
+    #[serde(default)]
+    masking: Option<crate::configuration::header_masking_config::HeaderMaskingConfig>,
+}
+
+/// Configuration for connector headers at a specific location
+/// Connectors only have request operations - masking is inherited from parent subgraph
+#[derive(Clone, JsonSchema, Deserialize, Default)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+struct ConnectorHeadersLocation {
+    /// Request-side propagate/insert/remove operations
+    #[serde(default)]
+    request: Option<ConnectorRequestHeadersLocation>,
+}
+
+/// Request-side connector header configuration. Mirrors the wrapped
+/// `operations:` shape used by `HeadersLocation`, so connector config doesn't
+/// drift from regular subgraph config.
+#[derive(Clone, JsonSchema, Deserialize, Default)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+struct ConnectorRequestHeadersLocation {
+    /// Propagate/Insert/Remove operations
+    #[serde(default)]
+    operations: Vec<Operation>,
 }
 
 #[derive(Clone, JsonSchema, Deserialize)]
@@ -183,28 +220,48 @@ enum Propagate {
     },
 }
 
+/// Configuration for connectors (no masking - inherits from parent subgraph)
 #[derive(Clone, JsonSchema, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct ConnectorHeadersConfiguration {
-    /// Map of subgraph_name.connector_source_name to configuration
-    #[serde(default)]
-    sources: HashMap<String, HeadersLocation>,
-
     /// Options applying to all sources across all subgraphs
     #[serde(default)]
-    all: Option<HeadersLocation>,
+    all: Option<ConnectorHeadersLocation>,
+
+    /// Map of subgraph_name.connector_source_name to configuration
+    #[serde(default)]
+    sources: HashMap<String, ConnectorHeadersLocation>,
 }
 
-/// Configuration for header propagation
+/// Per-subgraph (or global) header configuration. Request configuration covers
+/// propagation + masking; response configuration covers masking only.
+#[derive(Clone, JsonSchema, Default, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+struct GlobalHeadersConfiguration {
+    /// Request configuration (operations and masking)
+    #[serde(default)]
+    request: Option<HeadersLocation>,
+
+    /// Response configuration (masking only)
+    #[serde(default)]
+    response: Option<ResponseHeadersLocation>,
+}
+
+/// Configuration for header propagation and masking
 #[derive(Clone, JsonSchema, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 #[schemars(rename = "HeadersConfig")]
 struct Config {
-    /// Rules to apply to all subgraphs
-    all: Option<HeadersLocation>,
-    /// Rules to specific subgraphs
-    subgraphs: HashMap<String, HeadersLocation>,
+    /// Rules to apply to all subgraphs (global defaults)
+    #[serde(default)]
+    all: Option<GlobalHeadersConfiguration>,
+
+    /// Rules for specific subgraphs
+    #[serde(default)]
+    subgraphs: HashMap<String, GlobalHeadersConfiguration>,
+
     /// Rules for connectors
+    #[serde(default)]
     connector: ConnectorHeadersConfiguration,
 }
 
@@ -213,6 +270,56 @@ struct Headers {
     subgraph_operations: HashMap<String, Arc<Vec<Operation>>>,
     all_connector_operations: Arc<Vec<Operation>>,
     connector_source_operations: HashMap<String, Arc<Vec<Operation>>>,
+
+    masking_rules_map: Arc<crate::services::header_masking::MaskingRulesMap>,
+}
+
+/// Resolve the effective masking config for one subgraph by layering its
+/// `masking` block on top of the global config:
+///
+/// - `enabled: false` fully opts the subgraph out (masks nothing).
+/// - `replace_defaults: true` makes the subgraph's `sensitive_headers` list
+///   authoritative for that subgraph (no inherited headers).
+/// - otherwise (the default) the subgraph's list *extends* the inherited list:
+///   the global effective list when global masking is enabled, or the built-in
+///   sensitive-header defaults when it's disabled — so enabling masking for a
+///   single subgraph stays fail-secure rather than silently masking only the
+///   subgraph's own list.
+fn merge_subgraph_masking(
+    global: &crate::configuration::header_masking_config::HeaderMaskingConfig,
+    sg: &crate::configuration::header_masking_config::HeaderMaskingConfig,
+) -> crate::configuration::header_masking_config::HeaderMaskingConfig {
+    use crate::configuration::header_masking_config::HeaderMaskingConfig;
+    use crate::configuration::header_masking_config::default_sensitive_headers;
+
+    // A subgraph fully opts out with `enabled: false`.
+    if !sg.enabled {
+        return sg.clone();
+    }
+
+    let sensitive_headers = if sg.replace_defaults {
+        // Authoritative: mask exactly the subgraph's list for this subgraph.
+        sg.sensitive_headers.clone()
+    } else {
+        // Extend the inherited list. Fall back to the built-in defaults when
+        // global masking is disabled so a subgraph that opts *in* still gets
+        // the fail-secure list.
+        let mut headers = if global.enabled {
+            global.effective_sensitive_headers()
+        } else {
+            default_sensitive_headers()
+        };
+        headers.extend(sg.sensitive_headers.iter().cloned());
+        headers
+    };
+
+    HeaderMaskingConfig {
+        enabled: true,
+        sensitive_headers,
+        // Already a fully-resolved list; don't have `from_config` merge
+        // defaults a second time.
+        replace_defaults: true,
+    }
 }
 
 #[async_trait::async_trait]
@@ -220,46 +327,127 @@ impl PluginPrivate for Headers {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        use crate::services::header_masking::DirectionRules;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        // Extract global request operations from all.request.operations
         let operations: Vec<Operation> = init
             .config
             .all
             .as_ref()
-            .map(|a| a.request.clone())
+            .and_then(|a| a.request.as_ref())
+            .map(|r| r.operations.clone())
             .unwrap_or_default();
+
+        // Build subgraph operations (global + subgraph-specific)
         let subgraph_operations = init
             .config
             .subgraphs
             .iter()
-            .map(|(subgraph_name, op)| {
+            .map(|(subgraph_name, sg_config)| {
                 let mut operations = operations.clone();
-                operations.append(&mut op.request.clone());
+                if let Some(request) = &sg_config.request {
+                    operations.append(&mut request.operations.clone());
+                }
                 (subgraph_name.clone(), Arc::new(operations))
             })
             .collect();
+
+        // Extract connector operations
         let all_connector_operations: Vec<Operation> = init
             .config
             .connector
             .all
             .as_ref()
-            .map(|a| a.request.clone())
+            .and_then(|a| a.request.as_ref())
+            .map(|r| r.operations.clone())
             .unwrap_or_default();
+
         let connector_source_operations = init
             .config
             .connector
             .sources
             .iter()
-            .map(|(subgraph_name, op)| {
-                let mut operations = operations.clone();
-                operations.append(&mut op.request.clone());
-                (subgraph_name.clone(), Arc::new(operations))
+            .map(|(source_name, connector_config)| {
+                let mut ops = operations.clone();
+                if let Some(request) = &connector_config.request {
+                    ops.append(&mut request.operations.clone());
+                }
+                (source_name.clone(), Arc::new(ops))
             })
             .collect();
+
+        // Fail-secure default: when the user hasn't written a `masking:` block,
+        // fall back to the full HeaderMaskingConfig::default() (the 12-header
+        // sensitive list) — *not* HeaderMaskingRules::default(), which would
+        // give an empty HashSet and silently mask nothing.
+        let effective_global_request_config = init
+            .config
+            .all
+            .as_ref()
+            .and_then(|a| a.request.as_ref())
+            .and_then(|r| r.masking.clone())
+            .unwrap_or_default();
+        let effective_global_response_config = init
+            .config
+            .all
+            .as_ref()
+            .and_then(|a| a.response.as_ref())
+            .and_then(|r| r.masking.clone())
+            .unwrap_or_default();
+
+        let global_request_masking = Arc::new(HeaderMaskingRules::from_config(
+            &effective_global_request_config,
+        ));
+        let global_response_masking = Arc::new(HeaderMaskingRules::from_config(
+            &effective_global_response_config,
+        ));
+
+        let per_subgraph_request_masking: HashMap<String, Arc<HeaderMaskingRules>> = init
+            .config
+            .subgraphs
+            .iter()
+            .filter_map(|(name, sg_config)| {
+                let sg_masking = sg_config
+                    .request
+                    .as_ref()
+                    .and_then(|r| r.masking.as_ref())?;
+                let merged = merge_subgraph_masking(&effective_global_request_config, sg_masking);
+                Some((
+                    name.clone(),
+                    Arc::new(HeaderMaskingRules::from_config(&merged)),
+                ))
+            })
+            .collect();
+
+        let per_subgraph_response_masking: HashMap<String, Arc<HeaderMaskingRules>> = init
+            .config
+            .subgraphs
+            .iter()
+            .filter_map(|(name, sg_config)| {
+                let sg_masking = sg_config
+                    .response
+                    .as_ref()
+                    .and_then(|r| r.masking.as_ref())?;
+                let merged = merge_subgraph_masking(&effective_global_response_config, sg_masking);
+                Some((
+                    name.clone(),
+                    Arc::new(HeaderMaskingRules::from_config(&merged)),
+                ))
+            })
+            .collect();
+
+        let masking_rules_map = Arc::new(crate::services::header_masking::MaskingRulesMap::new(
+            DirectionRules::new(global_request_masking, per_subgraph_request_masking),
+            DirectionRules::new(global_response_masking, per_subgraph_response_masking),
+        ));
 
         Ok(Headers {
             all_operations: Arc::new(operations),
             all_connector_operations: Arc::new(all_connector_operations),
             subgraph_operations,
             connector_source_operations,
+            masking_rules_map,
         })
     }
 
@@ -268,13 +456,19 @@ impl PluginPrivate for Headers {
         name: &str,
         service: subgraph::BoxCloneService,
     ) -> subgraph::BoxCloneService {
+        // Get operations for this subgraph (fallback to global)
+        let operations = self
+            .subgraph_operations
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| self.all_operations.clone());
+
+        // Note: masking rules aren't installed here — they're inserted into
+        // request context once in `router_service` below, and consumers
+        // resolve per-subgraph rules at read time via
+        // `MaskingRulesMap::get_request(Some(name))` / `get_response(...)`.
         ServiceBuilder::new()
-            .layer(HeadersLayer::new(
-                self.subgraph_operations
-                    .get(name)
-                    .cloned()
-                    .unwrap_or_else(|| self.all_operations.clone()),
-            ))
+            .layer(HeadersLayer::new(operations))
             .service(service)
             .boxed_clone()
     }
@@ -284,13 +478,28 @@ impl PluginPrivate for Headers {
         service: crate::services::connector::request_service::BoxCloneService,
         source_name: String,
     ) -> crate::services::connector::request_service::BoxCloneService {
+        let operations = self
+            .connector_source_operations
+            .get(&source_name)
+            .cloned()
+            .unwrap_or_else(|| self.all_connector_operations.clone());
+
         ServiceBuilder::new()
-            .layer(HeadersLayer::new(
-                self.connector_source_operations
-                    .get(&source_name)
-                    .cloned()
-                    .unwrap_or_else(|| self.all_connector_operations.clone()),
-            ))
+            .layer(HeadersLayer::new(operations))
+            .service(service)
+            .boxed_clone()
+    }
+
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
+        let masking_rules_map = self.masking_rules_map.clone();
+
+        ServiceBuilder::new()
+            .map_request(move |req: router::Request| {
+                req.context.extensions().with_lock(|lock| {
+                    lock.insert(masking_rules_map.clone());
+                });
+                req
+            })
             .service(service)
             .boxed_clone()
     }
@@ -316,6 +525,7 @@ impl<S> Layer<S> for HeadersLayer {
         }
     }
 }
+
 #[derive(Clone)]
 struct HeadersService<S> {
     inner: S,
@@ -346,42 +556,56 @@ static RESERVED_HEADERS: [HeaderName; 14] = [
 
 impl<S> Service<SubgraphRequest> for HeadersService<S>
 where
-    S: Service<SubgraphRequest>,
+    S: Service<SubgraphRequest> + Clone + Send + 'static,
+    S::Future: Send + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = S::Future;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
-        self.modify_subgraph_request(&mut req);
-        self.inner.call(req)
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
+        let operations = self.operations.clone();
+
+        Box::pin(async move {
+            Self::modify_subgraph_request(&operations, &mut req);
+            inner.call(req).await
+        })
     }
 }
 
 impl<S> Service<connector::request_service::Request> for HeadersService<S>
 where
-    S: Service<connector::request_service::Request>,
+    S: Service<connector::request_service::Request> + Clone + Send + 'static,
+    S::Future: Send + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = S::Future;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, mut req: connector::request_service::Request) -> Self::Future {
-        self.modify_connector_request(&mut req);
-        self.inner.call(req)
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
+        let operations = self.operations.clone();
+
+        Box::pin(async move {
+            Self::modify_connector_request(&operations, &mut req);
+            inner.call(req).await
+        })
     }
 }
 
 impl<S> HeadersService<S> {
-    fn modify_subgraph_request(&self, req: &mut SubgraphRequest) {
+    fn modify_subgraph_request(operations: &Arc<Vec<Operation>>, req: &mut SubgraphRequest) {
         let mut already_propagated: HashSet<String> = HashSet::new();
 
         let body_to_value = serde_json_bytes::value::to_value(req.supergraph_request.body()).ok();
@@ -389,7 +613,7 @@ impl<S> HeadersService<S> {
         let context = &req.context;
         let headers_mut = req.subgraph_request.headers_mut();
 
-        for operation in &*self.operations {
+        for operation in &**operations {
             operation.process_header_rules(
                 &mut already_propagated,
                 supergraph_headers,
@@ -401,7 +625,10 @@ impl<S> HeadersService<S> {
         }
     }
 
-    fn modify_connector_request(&self, req: &mut connector::request_service::Request) {
+    fn modify_connector_request(
+        operations: &Arc<Vec<Operation>>,
+        req: &mut connector::request_service::Request,
+    ) {
         let mut already_propagated: HashSet<String> = HashSet::new();
 
         let TransportRequest::Http(ref mut http_request) = req.transport_request else {
@@ -414,7 +641,7 @@ impl<S> HeadersService<S> {
         let existing_headers = http_request.inner.headers().clone();
         let headers_mut = http_request.inner.headers_mut();
 
-        for operation in &*self.operations {
+        for operation in &**operations {
             operation.process_header_rules(
                 &mut already_propagated,
                 supergraph_headers,
@@ -636,8 +863,6 @@ mod test {
     use crate::Context;
     use crate::graphql;
     use crate::graphql::Request;
-    use crate::plugin::test::MockConnectorService;
-    use crate::plugin::test::MockSubgraphService;
     use crate::plugins::test::PluginTestHarness;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
@@ -650,6 +875,7 @@ mod test {
         subgraphs:
           products:
             request:
+              operations:
                 - insert:
                     name: "test"
                     value: "test"
@@ -664,9 +890,10 @@ mod test {
             r#"
         all:
             request:
-            - insert:
-                name: "test"
-                value: "test"
+                operations:
+                - insert:
+                    name: "test"
+                    value: "test"
         "#,
         )
         .unwrap();
@@ -678,8 +905,9 @@ mod test {
             r#"
         all:
             request:
-                - remove:
-                    named: "test"
+                operations:
+                    - remove:
+                        named: "test"
         "#,
         )
         .unwrap();
@@ -688,8 +916,9 @@ mod test {
             r#"
         all:
             request:
-                - remove:
-                    matching: "d.*"
+                operations:
+                    - remove:
+                        matching: "d.*"
         "#,
         )
         .unwrap();
@@ -699,8 +928,9 @@ mod test {
                 r#"
         all:
             request:
-                - remove:
-                    matching: "d.*["
+                operations:
+                    - remove:
+                        matching: "d.*["
         "#,
             )
             .is_err()
@@ -713,8 +943,9 @@ mod test {
             r#"
         all:
             request:
-                - propagate:
-                    named: "test"
+                operations:
+                    - propagate:
+                        named: "test"
         "#,
         )
         .unwrap();
@@ -723,9 +954,10 @@ mod test {
             r#"
         all:
             request:
-                - propagate:
-                    named: "test"
-                    rename: "bif"
+                operations:
+                    - propagate:
+                        named: "test"
+                        rename: "bif"
         "#,
         )
         .unwrap();
@@ -734,10 +966,11 @@ mod test {
             r#"
         all:
             request:
-                - propagate:
-                    named: "test"
-                    rename: "bif"
-                    default: "bof"
+                operations:
+                    - propagate:
+                        named: "test"
+                        rename: "bif"
+                        default: "bof"
         "#,
         )
         .unwrap();
@@ -746,27 +979,235 @@ mod test {
             r#"
         all:
             request:
-                - propagate:
-                    matching: "d.*"
+                operations:
+                    - propagate:
+                        matching: "d.*"
         "#,
         )
         .unwrap();
     }
 
+    #[test]
+    fn test_masking_config_global() {
+        serde_yaml::from_str::<Config>(
+            r#"
+        all:
+            request:
+                masking:
+                    enabled: true
+                    sensitive_headers:
+                        - authorization
+                        - x-api-key
+        "#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_masking_config_per_subgraph() {
+        serde_yaml::from_str::<Config>(
+            r#"
+        subgraphs:
+          products:
+            request:
+              masking:
+                enabled: true
+                sensitive_headers:
+                  - authorization
+        "#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_masking_config_combined_with_operations() {
+        serde_yaml::from_str::<Config>(
+            r#"
+        all:
+            request:
+                operations:
+                    - propagate:
+                        named: "x-forwarded-for"
+                masking:
+                    enabled: true
+                    sensitive_headers:
+                        - authorization
+                        - cookie
+        "#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_masking_config_response_global() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+            response:
+                masking:
+                    enabled: true
+                    sensitive_headers:
+                        - set-cookie
+                        - www-authenticate
+        "#,
+        )
+        .unwrap();
+
+        let masking = config
+            .all
+            .as_ref()
+            .and_then(|a| a.response.as_ref())
+            .and_then(|r| r.masking.as_ref())
+            .expect("response masking should deserialize");
+        assert!(masking.enabled);
+        assert!(masking.sensitive_headers.iter().any(|h| h == "set-cookie"));
+    }
+
+    #[test]
+    fn test_masking_config_response_per_subgraph_differs_from_request() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        subgraphs:
+          products:
+            request:
+              masking:
+                enabled: true
+                sensitive_headers:
+                  - authorization
+            response:
+              masking:
+                enabled: true
+                sensitive_headers:
+                  - set-cookie
+        "#,
+        )
+        .unwrap();
+
+        let products = config.subgraphs.get("products").unwrap();
+        let req = products.request.as_ref().unwrap().masking.as_ref().unwrap();
+        let resp = products
+            .response
+            .as_ref()
+            .unwrap()
+            .masking
+            .as_ref()
+            .unwrap();
+        assert_eq!(req.sensitive_headers, vec!["authorization".to_string()]);
+        assert_eq!(resp.sensitive_headers, vec!["set-cookie".to_string()]);
+    }
+
+    #[test]
+    fn merge_subgraph_masking_extends_global_list() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        let global = HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".into(), "cookie".into()],
+            replace_defaults: false,
+        };
+        let sg = HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["x-products-secret".into()],
+            replace_defaults: false,
+        };
+        let merged = merge_subgraph_masking(&global, &sg);
+        assert!(merged.enabled);
+        assert!(merged.sensitive_headers.contains(&"authorization".into()));
+        assert!(merged.sensitive_headers.contains(&"cookie".into()));
+        assert!(
+            merged
+                .sensitive_headers
+                .contains(&"x-products-secret".into())
+        );
+    }
+
+    #[test]
+    fn merge_subgraph_masking_disabled_subgraph_is_full_opt_out() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        let global = HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".into()],
+            replace_defaults: false,
+        };
+        let sg = HeaderMaskingConfig {
+            enabled: false,
+            sensitive_headers: vec![],
+            replace_defaults: false,
+        };
+        let merged = merge_subgraph_masking(&global, &sg);
+        assert!(!merged.enabled);
+    }
+
+    #[test]
+    fn merge_subgraph_masking_disabled_global_falls_back_to_defaults() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        // Global masking off, but the subgraph opts in: it should still get the
+        // built-in fail-secure defaults, plus its own header — not just its own
+        // list.
+        let global = HeaderMaskingConfig {
+            enabled: false,
+            sensitive_headers: vec![],
+            replace_defaults: false,
+        };
+        let sg = HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["x-products-secret".into()],
+            replace_defaults: false,
+        };
+        let merged = merge_subgraph_masking(&global, &sg);
+        assert!(merged.enabled);
+        assert!(merged.sensitive_headers.contains(&"authorization".into()));
+        assert!(merged.sensitive_headers.contains(&"cookie".into()));
+        assert!(
+            merged
+                .sensitive_headers
+                .contains(&"x-products-secret".into())
+        );
+    }
+
+    #[test]
+    fn merge_subgraph_masking_replace_defaults_is_authoritative() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        // `replace_defaults: true` makes the subgraph's list authoritative — no
+        // inherited global or built-in headers.
+        let global = HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".into()],
+            replace_defaults: false,
+        };
+        let sg = HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["x-only-this".into()],
+            replace_defaults: true,
+        };
+        let merged = merge_subgraph_masking(&global, &sg);
+        assert!(merged.enabled);
+        assert_eq!(merged.sensitive_headers, vec!["x-only-this".to_string()]);
+    }
+
+    #[test]
+    fn test_masking_config_disabled() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+            request:
+                masking:
+                    enabled: false
+        "#,
+        )
+        .unwrap();
+
+        let masking = config
+            .all
+            .as_ref()
+            .and_then(|a| a.request.as_ref())
+            .and_then(|r| r.masking.as_ref());
+        assert!(masking.is_some());
+        assert!(!masking.unwrap().enabled);
+    }
+
     #[tokio::test]
     async fn test_insert_static() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("c", "d"),
-                ])
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::Static(
             InsertStatic {
@@ -776,24 +1217,27 @@ mod test {
         ))]))
         .layer(mock);
 
+        let driver = tokio::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+            request.assert_headers(vec![
+                ("aa", "vaa"),
+                ("ab", "vab"),
+                ("ac", "vac"),
+                ("c", "d"),
+            ]);
+            responder.send_response(example_response(request).unwrap());
+        });
         service.ready().await?.call(example_request()).await?;
+        crate::plugin::test::await_mock_driver(driver).await;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_insert_static() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("c", "d"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::Static(
             InsertStatic {
@@ -803,28 +1247,22 @@ mod test {
         ))]))
         .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("c", "d"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_insert_from_context() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("header_from_context", "my_value_from_context"),
-                ])
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(
             Insert::FromContext(InsertFromContext {
@@ -834,24 +1272,25 @@ mod test {
         )]))
         .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("header_from_context", "my_value_from_context"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_insert_from_context() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("header_from_context", "my_value_from_context"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(
             Insert::FromContext(InsertFromContext {
@@ -861,28 +1300,22 @@ mod test {
         )]))
         .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("header_from_context", "my_value_from_context"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_insert_from_request_body() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("header_from_request", "my_operation_name"),
-                ])
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
             InsertFromBody {
@@ -893,24 +1326,25 @@ mod test {
         ))]))
         .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("header_from_request", "my_operation_name"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_insert_from_request_body() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("header_from_request", "myCoolValue"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
             InsertFromBody {
@@ -921,28 +1355,22 @@ mod test {
         ))]))
         .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("header_from_request", "myCoolValue"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_insert_from_request_body_with_old_access_json_notation() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("header_from_request", "my_operation_name"),
-                ])
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
             InsertFromBody {
@@ -953,25 +1381,26 @@ mod test {
         ))]))
         .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("header_from_request", "my_operation_name"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_insert_from_request_body_with_old_access_json_notation()
     -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("header_from_request", "myCoolValue"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
             InsertFromBody {
@@ -982,38 +1411,39 @@ mod test {
         ))]))
         .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("header_from_request", "myCoolValue"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_remove_exact() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
             "aa".try_into()?,
         ))]))
         .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]);
+        responder.send_response(example_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_remove_exact_multiple() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
             "aa".try_into()?,
@@ -1063,85 +1493,74 @@ mod test {
             id: SubgraphRequestId(String::new()),
         };
 
-        service.ready().await?.call(req).await?;
+        let call = tokio::spawn(service.ready().await?.call(req));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]);
+        responder.send_response(example_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_remove_exact() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
             "aa".try_into()?,
         ))]))
         .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_remove_matching() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| request.assert_headers(vec![("ac", "vac")]))
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Matching(
             Regex::from_str("a[ab]")?,
         ))]))
         .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![("ac", "vac")]);
+        responder.send_response(example_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_remove_matching() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| request.assert_headers(vec![("ac", "vac")]))
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Matching(
             Regex::from_str("a[ab]")?,
         ))]))
         .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![("ac", "vac")]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_propagate_matching() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("da", "vda"),
-                    ("db", "vdb"),
-                    ("db", "vdb2"),
-                ])
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service =
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Matching {
@@ -1149,26 +1568,27 @@ mod test {
             })]))
             .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("da", "vda"),
+            ("db", "vdb"),
+            ("db", "vdb2"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_propagate_matching() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("da", "vda"),
-                    ("db", "vdb"),
-                    ("db", "vdb2"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service =
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Matching {
@@ -1176,28 +1596,24 @@ mod test {
             })]))
             .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("da", "vda"),
+            ("db", "vdb"),
+            ("db", "vdb2"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_propagate_exact() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("da", "vda"),
-                ])
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service =
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
@@ -1207,24 +1623,25 @@ mod test {
             })]))
             .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("da", "vda"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_propagate_exact() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("da", "vda"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service =
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
@@ -1234,28 +1651,22 @@ mod test {
             })]))
             .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("da", "vda"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_propagate_exact_rename() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("ea", "vda"),
-                ])
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service =
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
@@ -1265,24 +1676,25 @@ mod test {
             })]))
             .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("ea", "vda"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connect_propagate_exact_rename() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("ea", "vda"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service =
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
@@ -1292,29 +1704,22 @@ mod test {
             })]))
             .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("ea", "vda"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_propagate_multiple() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("ra", "vda"),
-                    ("rb", "vda"),
-                ])
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service = HeadersLayer::new(Arc::new(vec![
             Operation::Propagate(Propagate::Named {
@@ -1336,25 +1741,26 @@ mod test {
         ]))
         .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("ra", "vda"),
+            ("rb", "vda"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_propagate_multiple() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("ra", "vda"),
-                    ("rb", "vda"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service = HeadersLayer::new(Arc::new(vec![
             Operation::Propagate(Propagate::Named {
@@ -1376,29 +1782,23 @@ mod test {
         ]))
         .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("ra", "vda"),
+            ("rb", "vda"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_propagate_exact_default() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("ea", "defaulted"),
-                ])
-            })
-            .returning(example_response);
-
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
         let mut service =
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "ea".try_into()?,
@@ -1406,25 +1806,25 @@ mod test {
                 default: Some("defaulted".try_into()?),
             })]))
             .layer(mock);
-
-        service.ready().await?.call(example_request()).await?;
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("ea", "defaulted"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_propagate_exact_default() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("ea", "defaulted"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service =
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
@@ -1434,18 +1834,23 @@ mod test {
             })]))
             .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("ea", "defaulted"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await.unwrap()?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_propagate_reserved() -> Result<(), BoxError> {
         let service = HeadersService {
-            inner: MockSubgraphService::new(),
+            inner: tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>().0,
             operations: Arc::new(vec![Operation::Propagate(Propagate::Matching {
                 matching: Regex::from_str(".*")?,
             })]),
@@ -1491,7 +1896,7 @@ mod test {
             executable_document: None,
             id: SubgraphRequestId(String::new()),
         };
-        service.modify_subgraph_request(&mut request);
+        HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, &mut request);
         let headers = request
             .subgraph_request
             .headers()
@@ -1520,7 +1925,7 @@ mod test {
     #[tokio::test]
     async fn test_propagate_multiple_matching_rules() -> Result<(), BoxError> {
         let service = HeadersService {
-            inner: MockSubgraphService::new(),
+            inner: tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>().0,
             operations: Arc::new(vec![
                 Operation::Propagate(Propagate::Named {
                     named: HeaderName::from_static("dc"),
@@ -1563,7 +1968,7 @@ mod test {
             executable_document: None,
             id: SubgraphRequestId(String::new()),
         };
-        service.modify_subgraph_request(&mut request);
+        HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, &mut request);
         let headers = request
             .subgraph_request
             .headers()
