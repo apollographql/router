@@ -50,6 +50,8 @@ use super::JWTConf;
 use super::JwtStatus;
 use super::Source;
 use super::authenticate;
+use super::has_authenticated_jwt;
+use crate::Context;
 use crate::assert_errors_eq_ignoring_id;
 use crate::assert_response_eq_ignoring_error_id;
 use crate::assert_snapshot_subscriber;
@@ -65,6 +67,17 @@ use crate::plugins::authentication::jwks::search_jwks;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::supergraph;
+
+#[test]
+fn has_authenticated_jwt_reflects_context_state() {
+    let context = Context::new();
+    assert!(!has_authenticated_jwt(&context));
+
+    context
+        .insert(APOLLO_AUTHENTICATION_JWT_CLAIMS, "placeholder".to_string())
+        .unwrap();
+    assert!(has_authenticated_jwt(&context));
+}
 
 pub(crate) fn create_an_url(filename: &str) -> String {
     let jwks_base = Path::new("tests");
