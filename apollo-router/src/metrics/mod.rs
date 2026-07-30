@@ -1322,76 +1322,88 @@ macro_rules! f64_histogram_timer_with_unit {
     };
 }
 
-thread_local! {
-    // This is used exactly once in testing callsite caching.
-    #[cfg(test)]
-    pub(crate) static CACHE_CALLSITE: std::sync::atomic::AtomicBool = const {std::sync::atomic::AtomicBool::new(false)};
+/// Returns the instrument held by `cache`, calling `create` to build one if the cache is empty
+/// or its entry is no longer live.
+///
+/// Callers should drop the returned reference once they have recorded their measurement. It is a
+/// strong reference, and the cached entry stays live for as long as any strong reference to it
+/// exists, so holding one keeps that instrument in use past the point it would otherwise be
+/// replaced.
+// Kept as a plain function over an explicitly passed cache cell, rather than inlined into
+// `get_or_create_metric`, so that it can be unit tested against a local cache with no
+// process-wide state to set up or tear down.
+pub(crate) fn get_or_create_cached_instrument<T>(
+    cache: &std::sync::OnceLock<parking_lot::Mutex<std::sync::Weak<T>>>,
+    create: impl Fn() -> std::sync::Arc<T>,
+) -> std::sync::Arc<T> {
+    // The cache holds a weak reference; the matching strong reference is owned by the aggregate
+    // meter provider, which drops all of them when the telemetry configuration changes. So an
+    // entry that fails to upgrade means "the configuration changed since we last looked".
+    //
+    // A `Mutex` rather than an `RwLock` because the lock is only held for the upgrade below,
+    // never for a meaningful period, and an `RwLock` is potentially more expensive. Revisit if
+    // profiling ever shows contention here.
+    let mut guard = cache
+        .get_or_init(|| parking_lot::Mutex::new(std::sync::Arc::downgrade(&create())))
+        .lock();
+
+    if let Some(instrument) = guard.upgrade() {
+        // Fast path: the cached instrument is still live. Drop the guard immediately.
+        drop(guard);
+        instrument
+    } else {
+        // Slow path: the instrument was invalidated (or the `get_or_init` above created one
+        // that nothing else kept alive), so obtain it again and refresh the cache.
+        let instrument = create();
+        *guard = std::sync::Arc::downgrade(&instrument);
+        drop(guard);
+        instrument
+    }
 }
 
 macro_rules! get_or_create_metric {
     ($ty:ident, $instrument:ident, $name:expr, $description:literal, $unit:literal) => {
-        // The way this works is that we have a static at each call site that holds a weak reference to the instrument.
-        // We make a call we try to upgrade the weak reference. If it succeeds we use the instrument.
-        // Otherwise we create a new instrument and update the static.
-        // The aggregate meter provider is used to hold on to references of all instruments that have been created and will clear references when the underlying configuration has changed.
-        // There is a Mutex involved, however it is only locked for the duration of the upgrade once the instrument has been created.
-        // The Reason a Mutex is used rather than an RwLock is that we are not holding the lock for any significant period of time and the cost of an RwLock is potentially higher.
-        // If we profile and deem it's worth switching to RwLock then we can do that.
-
         paste::paste! {
             {
-                // There is a single test for caching callsites. Other tests do not cache because they will interfere with each other due to them using a task local meter provider to aid testing.
-                #[cfg(test)]
-                let cache_callsite = crate::metrics::CACHE_CALLSITE.with(|cell| cell.load(std::sync::atomic::Ordering::SeqCst));
+                let create_instrument_fn = || {
+                    crate::metrics::meter_provider_internal().create_registered_instrument(|p| {
+                        let meter = p.meter("apollo/router");
+                        let mut builder = meter.[<$ty _ $instrument>]($name);
+                        builder = builder.with_description($description);
 
-                // The compiler will optimize this in non test builds
-                #[cfg(not(test))]
-                let cache_callsite = true;
+                        if !$unit.is_empty() {
+                            builder = builder.with_unit($unit);
+                        }
 
-                let create_instrument_fn = |meter: opentelemetry::metrics::Meter| {
-                    let mut builder = meter.[<$ty _ $instrument>]($name);
-                    builder = builder.with_description($description);
-
-                    if !$unit.is_empty() {
-                        builder = builder.with_unit($unit);
-                    }
-
-                    builder.build()
+                        builder.build()
+                    })
                 };
 
-                if cache_callsite {
+                // Under `cargo test` each test gets its own meter provider (a task local for
+                // async tests, a thread local otherwise) so that tests cannot observe each
+                // other's metrics. The callsite cache below is a `static` keyed only on source
+                // location, so it has no notion of which test's provider is current: whichever
+                // test reached a given callsite first would otherwise pin that callsite's
+                // instrument to its own provider for every test that ran afterwards. So skip
+                // the cache in test builds and resolve against the current provider every time.
+                //
+                // The caching logic itself is still covered -- see the unit tests for
+                // `get_or_create_cached_instrument`, which exercise it directly against a local
+                // cache instead of toggling global state.
+                #[cfg(test)]
+                let instrument = create_instrument_fn();
+
+                // Callsite caching avoids re-resolving the instrument through several layers of
+                // locking (meter provider -> filter -> meter -> instrument builder) on every
+                // single metric call.
+                #[cfg(not(test))]
+                let instrument = {
                     static INSTRUMENT_CACHE: std::sync::OnceLock<parking_lot::Mutex<std::sync::Weak<opentelemetry::metrics::[<$instrument:camel>]<$ty>>>> = std::sync::OnceLock::new();
 
-                    let mut instrument_guard = INSTRUMENT_CACHE
-                        .get_or_init(|| {
-                            let meter_provider = crate::metrics::meter_provider_internal();
-                            let instrument_ref = meter_provider.create_registered_instrument(|p| create_instrument_fn(p.meter("apollo/router")));
-                            parking_lot::Mutex::new(std::sync::Arc::downgrade(&instrument_ref))
-                        })
-                        .lock();
-                    if let Some(instrument) = instrument_guard.upgrade() {
-                        // Fast path, we got the instrument, drop the mutex guard immediately.
-                        drop(instrument_guard);
-                        instrument
-                    } else {
-                        // Slow path, we need to obtain the instrument again.
-                        let meter_provider = crate::metrics::meter_provider_internal();
-                        let instrument_ref = meter_provider.create_registered_instrument(|p| create_instrument_fn(p.meter("apollo/router")));
-                        *instrument_guard = std::sync::Arc::downgrade(&instrument_ref);
-                        // We've updated the instrument and got a strong reference to it. We can drop the mutex guard now.
-                        drop(instrument_guard);
-                        instrument_ref
-                    }
-                }
-                else {
-                    // This is only for testing.
-                    // The reason it is not cfg test is that we have a legitimate test for callsite caching though
-                    // cache_callsite is always true for not test
-                    let meter_provider = crate::metrics::meter_provider();
-                    let meter = opentelemetry::metrics::MeterProvider::meter(&meter_provider, "apollo/router");
-                    let instrument = create_instrument_fn(meter);
-                    std::sync::Arc::new(instrument)
-                }
+                    crate::metrics::get_or_create_cached_instrument(&INSTRUMENT_CACHE, create_instrument_fn)
+                };
+
+                instrument
             }
         }
     };
@@ -1955,7 +1967,6 @@ mod test {
 
     use crate::metrics::FutureMetricsExt;
     use crate::metrics::meter_provider;
-    use crate::metrics::meter_provider_internal;
 
     fn assert_unit(name: &str, unit: &str) {
         let collected_metrics = crate::metrics::collect_metrics();
@@ -2259,41 +2270,115 @@ mod test {
         assert_eq!(parsed_literals.as_slice(), parsed_provided.as_slice());
     }
 
-    #[test]
-    fn test_callsite_caching() {
-        // Creating instruments may be slow due to multiple levels of locking that needs to happen through the various metrics layers.
-        // Callsite caching is implemented to prevent this happening on every call.
-        // See the metric macro above to see more information.
-        super::CACHE_CALLSITE.with(|cell| cell.store(true, std::sync::atomic::Ordering::SeqCst));
-        fn test() {
-            // This is a single callsite so should only have one metric
-            u64_counter!("test", "test description", 1, "attr" = "val");
+    // Covers `get_or_create_cached_instrument`, the callsite caching used by
+    // `get_or_create_metric!` to avoid re-resolving an instrument through the metrics layers on
+    // every call. Each test passes its own cache cell and fake provider, so no process-wide
+    // state is read or written and these cannot interfere with any other test.
+    mod callsite_caching {
+        use std::sync::Arc;
+        use std::sync::OnceLock;
+        use std::sync::Weak;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+
+        use parking_lot::Mutex;
+
+        use crate::metrics::get_or_create_cached_instrument;
+
+        /// Stands in for an instrument, carrying the generation it was created in.
+        // `get_or_create_cached_instrument` is generic over the instrument type and never
+        // inspects it, so a counter is enough to tell successive instruments apart.
+        #[derive(Debug, PartialEq)]
+        struct FakeInstrument(usize);
+
+        /// A `create` function that counts how many times it was called.
+        // `live` holds the strong references the aggregate meter provider would normally own.
+        // Dropping them models the provider invalidating its registered instruments.
+        #[derive(Default)]
+        struct FakeProvider {
+            creations: AtomicUsize,
+            live: Mutex<Vec<Arc<FakeInstrument>>>,
         }
 
-        // Callsite hasn't been used yet, so there should be no metrics
-        assert_eq!(meter_provider_internal().registered_instruments(), 0);
+        impl FakeProvider {
+            fn create(&self) -> Arc<FakeInstrument> {
+                let instrument = Arc::new(FakeInstrument(
+                    self.creations.fetch_add(1, Ordering::SeqCst),
+                ));
+                // The real provider keeps a strong reference so cached weak references stay
+                // upgradable until it invalidates them.
+                self.live.lock().push(instrument.clone());
+                instrument
+            }
 
-        // Call the metrics, it will be registered
-        test();
-        assert_counter!("test", 1, "attr" = "val");
-        assert_eq!(meter_provider_internal().registered_instruments(), 1);
+            fn creations(&self) -> usize {
+                self.creations.load(Ordering::SeqCst)
+            }
 
-        // Call the metrics again, but the second call will not register a new metric because it will have be retrieved from the static
-        test();
-        assert_counter!("test", 2, "attr" = "val");
-        assert_eq!(meter_provider_internal().registered_instruments(), 1);
+            /// Drops every strong reference, so cached weak references can no longer be
+            /// upgraded.
+            // Mirrors what `AggregateMeterProvider` does when the telemetry config changes.
+            fn invalidate(&self) {
+                self.live.lock().clear();
+            }
+        }
 
-        // Force invalidation of instruments
-        meter_provider_internal().invalidate();
-        assert_eq!(meter_provider_internal().registered_instruments(), 0);
+        #[test]
+        fn caches_the_instrument_after_the_first_call() {
+            let cache = OnceLock::new();
+            let provider = FakeProvider::default();
 
-        // Slow path
-        test();
-        assert_eq!(meter_provider_internal().registered_instruments(), 1);
+            let first = get_or_create_cached_instrument(&cache, || provider.create());
+            assert_eq!(provider.creations(), 1);
 
-        // Fast path
-        test();
-        assert_eq!(meter_provider_internal().registered_instruments(), 1);
+            // Subsequent calls take the fast path and reuse the very same instrument.
+            let second = get_or_create_cached_instrument(&cache, || provider.create());
+            assert_eq!(provider.creations(), 1);
+            assert!(Arc::ptr_eq(&first, &second));
+        }
+
+        #[test]
+        fn recreates_the_instrument_after_invalidation() {
+            let cache = OnceLock::new();
+            let provider = FakeProvider::default();
+
+            let first = get_or_create_cached_instrument(&cache, || provider.create());
+            assert_eq!(provider.creations(), 1);
+            assert_eq!(*first, FakeInstrument(0));
+            // The cached reference is weak, so it only becomes unupgradable once *every*
+            // strong reference is gone -- the provider's and any the caller still holds. In
+            // production a metric callsite drops its `Arc` as soon as it has recorded the
+            // measurement; do the same here, otherwise this caller would keep the invalidated
+            // instrument alive and the recreate below would never happen.
+            drop(first);
+
+            // Once the last strong reference is dropped the cached weak reference can no
+            // longer be upgraded, so the next call must take the slow path and rebuild.
+            provider.invalidate();
+            let recreated = get_or_create_cached_instrument(&cache, || provider.create());
+            assert_eq!(provider.creations(), 2);
+            assert_eq!(*recreated, FakeInstrument(1));
+
+            // ... and the refreshed cache entry is used by the calls that follow.
+            let after_recreate = get_or_create_cached_instrument(&cache, || provider.create());
+            assert_eq!(provider.creations(), 2);
+            assert!(Arc::ptr_eq(&recreated, &after_recreate));
+        }
+
+        #[test]
+        fn does_not_hold_the_lock_after_returning() {
+            let cache: OnceLock<Mutex<Weak<FakeInstrument>>> = OnceLock::new();
+            let provider = FakeProvider::default();
+
+            // Both the slow path (first call) and the fast path (second call) must release the
+            // guard before returning, otherwise the next metric call at this callsite would
+            // deadlock.
+            let _first = get_or_create_cached_instrument(&cache, || provider.create());
+            assert!(cache.get().expect("cache initialized").try_lock().is_some());
+
+            let _second = get_or_create_cached_instrument(&cache, || provider.create());
+            assert!(cache.get().expect("cache initialized").try_lock().is_some());
+        }
     }
 
     #[tokio::test]
