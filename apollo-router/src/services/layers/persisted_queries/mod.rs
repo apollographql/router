@@ -1110,6 +1110,22 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn pq_layer_freeform_graphql_with_safelist_log_unknown_true() {
+        // The compute job thread pool is lazily initialized on first use, shared
+        // for the whole process, and logs a one-time "compute job thread pool
+        // created" message (with a `threads`/`queue_capacity` derived from the
+        // number of CPUs on the machine) the first time it's used. Whether that
+        // message appears in this test's snapshot depends on whether some other
+        // test elsewhere in the binary happened to already initialize the pool
+        // first, and its field values depend on the machine's CPU count -- so
+        // capturing it in a per-test snapshot is inherently non-portable and
+        // flaky. Force initialization here, outside the snapshot-asserted scope,
+        // so the message never appears in the snapshot regardless of test order
+        // or machine. See `compute_job::tests::ensure_queue_is_initialized` for
+        // the same pattern.
+        crate::compute_job::execute(crate::compute_job::ComputeJobType::Introspection, |_| {})
+            .unwrap()
+            .await;
+
         async {
             pq_layer_freeform_graphql_with_safelist(true).await;
         }
