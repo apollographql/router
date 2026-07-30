@@ -201,79 +201,59 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use http::StatusCode;
+    use tower::Service as _;
     use tower::ServiceBuilder;
     use tower::ServiceExt as _;
 
-    use super::*;
+    use super::ParseQueryLayer;
     use crate::Configuration;
+    use crate::compute_job::MaybeBackPressureError;
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
+    use crate::services::OperationKind;
+    use crate::services::query_parsing;
+    use crate::services::supergraph;
 
     const SCHEMA: &str = include_str!("../../../testing_schema.graphql");
 
-    /// Wrap a tower-test mock so it can be used as a query parsing service.
-    ///
-    /// In this case a tower-test error indicates a compute job backpressure error, and an Err
-    /// response indicates an error inside the inner service.
-    #[derive(Clone)]
-    struct MockQueryParsing(
-        tower_test::mock::Mock<query_parsing::Request, Result<ParsedDocument, SpecError>>,
-    );
-
-    impl Service<query_parsing::Request> for MockQueryParsing {
-        type Response = ParsedDocument;
-        type Error = query_parsing::ServiceError;
-        type Future = BoxFuture<'static, Result<ParsedDocument, query_parsing::ServiceError>>;
-
-        fn poll_ready(
-            &mut self,
-            cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<Result<(), Self::Error>> {
-            self.0.poll_ready(cx).map_err(|_| {
-                MaybeBackPressureError::TemporaryError(crate::compute_job::ComputeBackPressureError)
-            })
-        }
-
-        fn call(&mut self, req: query_parsing::Request) -> Self::Future {
-            let inner = self.0.clone();
-            let mut inner = std::mem::replace(&mut self.0, inner);
-            Box::pin(async move {
-                match inner.call(req).await {
-                    Ok(Ok(doc)) => Ok(doc),
-                    Ok(Err(spec_error)) => Err(MaybeBackPressureError::PermanentError(spec_error)),
-                    Err(_boxed) => Err(MaybeBackPressureError::TemporaryError(
-                        crate::compute_job::ComputeBackPressureError,
-                    )),
-                }
-            })
-        }
+    fn downcast_mock_err(err: tower::BoxError) -> query_parsing::ServiceError {
+        *err.downcast()
+            .expect("mock should only return ServiceErrors")
     }
 
-    fn mock_query_parsing() -> (
-        query_parsing::BoxCloneService,
-        tower_test::mock::Handle<query_parsing::Request, Result<ParsedDocument, SpecError>>,
+    async fn mock_parser(
+        mut handle: tower_test::mock::Handle<query_parsing::Request, query_parsing::ParsedDocument>,
+        schema: Arc<crate::spec::Schema>,
+        config: Arc<Configuration>,
     ) {
-        let (mock, handle) = tower_test::mock::pair();
-        (
-            tower::util::BoxCloneService::new(MockQueryParsing(mock)),
-            handle,
-        )
-    }
-
-    #[tokio::test]
-    async fn it_accepts_valid_query() {
-        let (query_parsing_service, mut query_parsing_handle) = mock_query_parsing();
-        let config = Configuration::default();
-        let schema = crate::spec::Schema::parse(SCHEMA, &config).unwrap();
-        let query_parsing_driver = tokio::spawn(async move {
-            let (req, responder) = query_parsing_handle.next_request().await.unwrap();
-            responder.send_response(crate::spec::Query::parse_document(
+        while let Some((req, responder)) = handle.next_request().await {
+            match crate::spec::Query::parse_document(
                 &req.query,
                 req.operation_name.as_deref(),
                 &schema,
                 &config,
-            ));
-        });
+            ) {
+                Ok(document) => responder.send_response(document),
+                Err(err) => responder.send_error(MaybeBackPressureError::PermanentError(err)),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn it_accepts_valid_query() {
+        let (query_parsing_service, query_parsing_handle) =
+            tower_test::mock::pair::<query_parsing::Request, query_parsing::ParsedDocument>();
+        let query_parsing_service = ServiceBuilder::new()
+            .map_err(downcast_mock_err)
+            .service(query_parsing_service)
+            .boxed_clone();
+
+        let config = Arc::new(Configuration::default());
+        let schema = Arc::new(crate::spec::Schema::parse(SCHEMA, &config).unwrap());
+        let query_parsing_driver = tokio::spawn(mock_parser(query_parsing_handle, schema, config));
 
         let (mock, mut handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
@@ -285,7 +265,7 @@ mod tests {
             assert!(
                 req.context
                     .extensions()
-                    .with_lock(|lock| lock.contains_key::<ParsedDocument>())
+                    .with_lock(|lock| lock.contains_key::<query_parsing::ParsedDocument>())
             );
             assert!(
                 req.context
@@ -322,18 +302,26 @@ mod tests {
 
         assert_eq!(http::StatusCode::OK, response.response.status());
 
+        drop(service);
         crate::plugin::test::await_mock_driver(query_parsing_driver).await;
         crate::plugin::test::await_mock_driver(inner_driver).await;
     }
 
     #[tokio::test]
     async fn it_rejects_backpressure() {
-        let (query_parsing_service, mut query_parsing_handle) = mock_query_parsing();
+        let (query_parsing_service, mut query_parsing_handle) =
+            tower_test::mock::pair::<query_parsing::Request, query_parsing::ParsedDocument>();
+        let query_parsing_service = ServiceBuilder::new()
+            .map_err(downcast_mock_err)
+            .service(query_parsing_service)
+            .boxed_clone();
         let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         let query_parsing_driver = tokio::task::spawn(async move {
             let (_req, responder) = query_parsing_handle.next_request().await.unwrap();
-            responder.send_error("mocked backpressure");
+            responder.send_error(MaybeBackPressureError::TemporaryError(
+                crate::compute_job::ComputeBackPressureError,
+            ) as query_parsing::ServiceError);
         });
 
         let mut service = ServiceBuilder::new()
@@ -357,6 +345,7 @@ mod tests {
         let graphql_response = response.next_response().await.unwrap();
         assert!(graphql_response.contains_error_code("REQUEST_CONCURRENCY_LIMITED"));
 
+        drop(service);
         crate::plugin::test::await_mock_driver(query_parsing_driver).await;
         // The inner service is not actually reached
         crate::plugin::test::assert_no_mock_calls(handle).await;
@@ -364,7 +353,12 @@ mod tests {
 
     #[tokio::test]
     async fn it_rejects_missing_query() {
-        let (query_parsing_service, query_parsing_handle) = mock_query_parsing();
+        let (query_parsing_service, query_parsing_handle) =
+            tower_test::mock::pair::<query_parsing::Request, query_parsing::ParsedDocument>();
+        let query_parsing_service = ServiceBuilder::new()
+            .map_err(downcast_mock_err)
+            .service(query_parsing_service)
+            .boxed_clone();
         let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         let mut service = ServiceBuilder::new()
@@ -390,7 +384,12 @@ mod tests {
 
     #[tokio::test]
     async fn it_rejects_empty_query() {
-        let (query_parsing_service, query_parsing_handle) = mock_query_parsing();
+        let (query_parsing_service, query_parsing_handle) =
+            tower_test::mock::pair::<query_parsing::Request, query_parsing::ParsedDocument>();
+        let query_parsing_service = ServiceBuilder::new()
+            .map_err(downcast_mock_err)
+            .service(query_parsing_service)
+            .boxed_clone();
         let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         let mut service = ServiceBuilder::new()
@@ -421,18 +420,15 @@ mod tests {
 
     #[tokio::test]
     async fn it_rejects_invalid_query() {
-        let (query_parsing_service, mut query_parsing_handle) = mock_query_parsing();
-        let config = Configuration::default();
-        let schema = crate::spec::Schema::parse(SCHEMA, &config).unwrap();
-        let query_parsing_driver = tokio::spawn(async move {
-            let (req, responder) = query_parsing_handle.next_request().await.unwrap();
-            responder.send_response(crate::spec::Query::parse_document(
-                &req.query,
-                req.operation_name.as_deref(),
-                &schema,
-                &config,
-            ));
-        });
+        let (query_parsing_service, query_parsing_handle) =
+            tower_test::mock::pair::<query_parsing::Request, query_parsing::ParsedDocument>();
+        let query_parsing_service = ServiceBuilder::new()
+            .map_err(downcast_mock_err)
+            .service(query_parsing_service)
+            .boxed_clone();
+        let config = Arc::new(Configuration::default());
+        let schema = Arc::new(crate::spec::Schema::parse(SCHEMA, &config).unwrap());
+        let query_parsing_driver = tokio::spawn(mock_parser(query_parsing_handle, schema, config));
 
         let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
@@ -457,6 +453,7 @@ mod tests {
         let graphql_response = response.next_response().await.unwrap();
         assert!(graphql_response.contains_error_code("GRAPHQL_VALIDATION_FAILED"));
 
+        drop(service);
         crate::plugin::test::await_mock_driver(query_parsing_driver).await;
         // The inner service is not reached.
         crate::plugin::test::assert_no_mock_calls(handle).await;
@@ -464,18 +461,15 @@ mod tests {
 
     #[tokio::test]
     async fn it_redacts_validation_error() {
-        let (query_parsing_service, mut query_parsing_handle) = mock_query_parsing();
-        let config = Configuration::default();
-        let schema = crate::spec::Schema::parse(SCHEMA, &config).unwrap();
-        let query_parsing_driver = tokio::spawn(async move {
-            let (req, responder) = query_parsing_handle.next_request().await.unwrap();
-            responder.send_response(crate::spec::Query::parse_document(
-                &req.query,
-                req.operation_name.as_deref(),
-                &schema,
-                &config,
-            ));
-        });
+        let (query_parsing_service, query_parsing_handle) =
+            tower_test::mock::pair::<query_parsing::Request, query_parsing::ParsedDocument>();
+        let query_parsing_service = ServiceBuilder::new()
+            .map_err(downcast_mock_err)
+            .service(query_parsing_service)
+            .boxed_clone();
+        let config = Arc::new(Configuration::default());
+        let schema = Arc::new(crate::spec::Schema::parse(SCHEMA, &config).unwrap());
+        let query_parsing_driver = tokio::spawn(mock_parser(query_parsing_handle, schema, config));
 
         let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
@@ -505,6 +499,7 @@ mod tests {
                 .contains("doesNotExist")
         );
 
+        drop(service);
         crate::plugin::test::await_mock_driver(query_parsing_driver).await;
         // The inner service is not reached.
         crate::plugin::test::assert_no_mock_calls(handle).await;

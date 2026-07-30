@@ -93,7 +93,6 @@ where
 mod tests {
     use std::num::NonZeroUsize;
 
-    use futures::future::BoxFuture;
     use tower::Service as _;
     use tower::ServiceBuilder;
     use tower::ServiceExt as _;
@@ -104,68 +103,59 @@ mod tests {
 
     const SCHEMA: &str = include_str!("../../../testing_schema.graphql");
 
-    /// Wrap a tower-test mock so it can be used as a query parsing service.
-    ///
-    /// In this case a tower-test error indicates a compute job backpressure error, and an Err
-    /// response indicates an error inside the inner service.
-    #[derive(Clone)]
-    struct MockQueryParsing(tower_test::mock::Mock<Request, Result<ParsedDocument, SpecError>>);
-
-    impl tower::Service<Request> for MockQueryParsing {
-        type Response = ParsedDocument;
-        type Error = ServiceError;
-        type Future = BoxFuture<'static, Result<ParsedDocument, ServiceError>>;
-
-        fn poll_ready(
-            &mut self,
-            cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<Result<(), Self::Error>> {
-            self.0
-                .poll_ready(cx)
-                .map_err(|_| MaybeBackPressureError::TemporaryError(ComputeBackPressureError))
-        }
-
-        fn call(&mut self, req: Request) -> Self::Future {
-            let inner = self.0.clone();
-            let mut inner = std::mem::replace(&mut self.0, inner);
-            Box::pin(async move {
-                match inner.call(req).await {
-                    Ok(Ok(doc)) => Ok(doc),
-                    Ok(Err(spec_error)) => Err(MaybeBackPressureError::PermanentError(spec_error)),
-                    Err(_boxed) => Err(MaybeBackPressureError::TemporaryError(
-                        ComputeBackPressureError,
-                    )),
-                }
-            })
-        }
+    fn downcast_mock_err(err: tower::BoxError) -> ServiceError {
+        *err.downcast()
+            .expect("mock should only return ServiceErrors")
     }
 
-    fn mock_pair() -> (
-        MockQueryParsing,
-        tower_test::mock::Handle<Request, Result<ParsedDocument, SpecError>>,
+    async fn mock_parser(
+        mut handle: tower_test::mock::Handle<Request, ParsedDocument>,
+        schema: Arc<crate::spec::Schema>,
+        config: Arc<Configuration>,
     ) {
-        let (mock, handle) = tower_test::mock::pair();
-        (MockQueryParsing(mock), handle)
+        while let Some((req, responder)) = handle.next_request().await {
+            match crate::spec::Query::parse_document(
+                &req.query,
+                req.operation_name.as_deref(),
+                &schema,
+                &config,
+            ) {
+                Ok(document) => responder.send_response(document),
+                Err(err) => responder.send_error(err),
+            }
+        }
     }
 
     #[tokio::test]
     async fn same_query_is_cache_hit() {
-        let config = Configuration::default();
-        let schema = crate::spec::Schema::parse(SCHEMA, &config).unwrap();
+        let config = Arc::new(Configuration::default());
+        let schema = Arc::new(crate::spec::Schema::parse(SCHEMA, &config).unwrap());
 
-        let (mock, mut handle) = mock_pair();
+        let (mock, mut handle) = tower_test::mock::pair::<Request, ParsedDocument>();
         let mut service = ServiceBuilder::new()
             .layer(QueryParsingCacheLayer::new(NonZeroUsize::new(10).unwrap()))
+            .map_err(downcast_mock_err)
             .service(mock);
 
         let req = Request::new("query { me { id } }".to_string(), None);
 
         let driver = tokio::spawn(async move {
             let (req, responder) = handle.next_request().await.unwrap();
-            responder.send_response(crate::spec::Query::parse_document(
-                &req.query, None, &schema, &config,
-            ));
-            handle
+            match crate::spec::Query::parse_document(
+                &req.query,
+                req.operation_name.as_deref(),
+                &schema,
+                &config,
+            ) {
+                Ok(document) => responder.send_response(document),
+                Err(err) => responder.send_error(err),
+            }
+
+            // We *do* need to await the next request so that the service can be readied
+            assert!(
+                handle.next_request().await.is_none(),
+                "should not receive a second request"
+            );
         });
 
         let first = service
@@ -175,40 +165,27 @@ mod tests {
             .call(req.clone())
             .await
             .unwrap();
-        let handle = driver.await.unwrap();
 
         // Same request again should work despite mock only allowing one request
         let second = service.ready().await.unwrap().call(req).await.unwrap();
         assert_eq!(second.hash, first.hash);
-        crate::plugin::test::assert_no_mock_calls(handle).await;
+
+        drop(service);
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
     async fn different_query_is_cache_miss() {
-        let config = Configuration::default();
-        let schema = crate::spec::Schema::parse(SCHEMA, &config).unwrap();
+        let config = Arc::new(Configuration::default());
+        let schema = Arc::new(crate::spec::Schema::parse(SCHEMA, &config).unwrap());
 
-        let (mock, mut handle) = mock_pair();
+        let (mock, handle) = tower_test::mock::pair::<Request, ParsedDocument>();
         let mut service = ServiceBuilder::new()
             .layer(QueryParsingCacheLayer::new(NonZeroUsize::new(10).unwrap()))
+            .map_err(downcast_mock_err)
             .service(mock);
 
-        let driver = tokio::spawn(async move {
-            let (req, responder) = handle.next_request().await.unwrap();
-            responder.send_response(crate::spec::Query::parse_document(
-                &req.query,
-                req.operation_name.as_deref(),
-                &schema,
-                &config,
-            ));
-            let (req, responder) = handle.next_request().await.unwrap();
-            responder.send_response(crate::spec::Query::parse_document(
-                &req.query,
-                req.operation_name.as_deref(),
-                &schema,
-                &config,
-            ));
-        });
+        let driver = tokio::spawn(mock_parser(handle, schema, config));
 
         let a = service
             .ready()
@@ -229,35 +206,23 @@ mod tests {
             .unwrap();
 
         assert_ne!(a.hash, b.hash);
+
+        drop(service);
         crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
     async fn different_operation_name_is_cache_miss() {
-        let config = Configuration::default();
-        let schema = crate::spec::Schema::parse(SCHEMA, &config).unwrap();
+        let config = Arc::new(Configuration::default());
+        let schema = Arc::new(crate::spec::Schema::parse(SCHEMA, &config).unwrap());
 
-        let (mock, mut handle) = mock_pair();
+        let (mock, handle) = tower_test::mock::pair::<Request, ParsedDocument>();
         let mut service = ServiceBuilder::new()
             .layer(QueryParsingCacheLayer::new(NonZeroUsize::new(10).unwrap()))
+            .map_err(downcast_mock_err)
             .service(mock);
 
-        let driver = tokio::spawn(async move {
-            let (req, responder) = handle.next_request().await.unwrap();
-            responder.send_response(crate::spec::Query::parse_document(
-                &req.query,
-                req.operation_name.as_deref(),
-                &schema,
-                &config,
-            ));
-            let (req, responder) = handle.next_request().await.unwrap();
-            responder.send_response(crate::spec::Query::parse_document(
-                &req.query,
-                req.operation_name.as_deref(),
-                &schema,
-                &config,
-            ));
-        });
+        let driver = tokio::spawn(mock_parser(handle, schema, config));
 
         let document = r#"
             query UserId {
@@ -291,22 +256,25 @@ mod tests {
             .unwrap();
 
         assert_ne!(a.hash, b.hash);
+
+        drop(service);
         crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
     async fn parse_error_is_cached() {
-        let (mock, mut handle) = mock_pair();
+        let (mock, mut handle) = tower_test::mock::pair::<Request, ParsedDocument>();
         let mut service = ServiceBuilder::new()
             .layer(QueryParsingCacheLayer::new(NonZeroUsize::new(10).unwrap()))
+            .map_err(downcast_mock_err)
             .service(mock);
         let req = Request::new("query { me { id } }".to_string(), None);
 
         let driver = tokio::spawn(async move {
             let (_req, responder) = handle.next_request().await.unwrap();
-            // HACK(@goto-bus-stop): This is turned into a PermanentError by the `MockQueryParsing`
-            // helper.
-            responder.send_response(Err(SpecError::UnknownOperation("a".to_string())));
+            responder.send_error(MaybeBackPressureError::PermanentError(
+                SpecError::UnknownOperation("a".to_string()),
+            ) as ServiceError);
             handle
         });
 
@@ -334,24 +302,24 @@ mod tests {
 
     #[tokio::test]
     async fn backpressure_error_is_not_cached() {
-        let config = Configuration::default();
-        let schema = crate::spec::Schema::parse(SCHEMA, &config).unwrap();
+        let config = Arc::new(Configuration::default());
+        let schema = Arc::new(crate::spec::Schema::parse(SCHEMA, &config).unwrap());
 
-        let (mock, mut handle) = mock_pair();
+        let (mock, mut handle) = tower_test::mock::pair::<Request, ParsedDocument>();
         let mut service = ServiceBuilder::new()
             .layer(QueryParsingCacheLayer::new(NonZeroUsize::new(10).unwrap()))
+            .map_err(downcast_mock_err)
             .service(mock);
         let req = Request::new("query { me { id } }".to_string(), None);
 
         let driver = tokio::spawn(async move {
             let (_req, responder) = handle.next_request().await.unwrap();
-            responder.send_error("temporarily overloaded");
+            responder.send_error(
+                MaybeBackPressureError::TemporaryError(ComputeBackPressureError) as ServiceError,
+            );
 
             // We expect another request since the error is not cached!
-            let (req, responder) = handle.next_request().await.unwrap();
-            responder.send_response(crate::spec::Query::parse_document(
-                &req.query, None, &schema, &config,
-            ));
+            mock_parser(handle, schema, config).await;
         });
 
         let err = service
@@ -363,8 +331,10 @@ mod tests {
             .expect_err("should fail");
         assert!(matches!(err, MaybeBackPressureError::TemporaryError(_)));
 
-        let ok = service.ready().await.unwrap().call(req).await;
-        assert!(ok.is_ok());
+        let result = service.ready().await.unwrap().call(req).await;
+        assert!(result.is_ok());
+
+        drop(service);
         crate::plugin::test::await_mock_driver(driver).await;
     }
 }
