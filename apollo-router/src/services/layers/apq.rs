@@ -42,6 +42,10 @@ impl PersistedQuery {
 
     /// Attempt to decode the sha256 hash in a [`PersistedQuery`]
     pub(crate) fn decode_hash(self) -> Option<(String, Vec<u8>)> {
+        if self.sha256hash.len() != Sha256::output_size() * 2 {
+            return None;
+        }
+
         hex::decode(self.sha256hash.as_bytes())
             .ok()
             .map(|decoded| (self.sha256hash, decoded))
@@ -236,6 +240,7 @@ mod apq_tests {
 
     use futures::StreamExt;
     use http::StatusCode;
+    use rstest::rstest;
     use serde_json_bytes::json;
     use tower::Service;
     use tower::ServiceExt;
@@ -513,6 +518,29 @@ mod apq_tests {
         assert_error_eq_ignoring_id!(expected_apq_miss_error, second_apq_error.errors[0]);
         drop(router_service);
         crate::plugin::test::await_mock_driver(router_driver).await;
+    }
+
+    #[test]
+    fn decode_hash_accepts_a_valid_length_hash() {
+        let query = PersistedQuery {
+            version: 1,
+            sha256hash: "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
+                .to_string(),
+        };
+        assert!(query.decode_hash().is_some());
+    }
+
+    #[rstest]
+    #[case::too_long(&"aa".repeat(1_000_000))] // 2_000_000 hex chars, all valid hex
+    #[case::too_short("aabb")]
+    #[case::empty("")]
+    #[case::odd_length("ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b3")]
+    fn decode_hash_rejects_wrong_length_hashes(#[case] sha256hash: &str) {
+        let query = PersistedQuery {
+            version: 1,
+            sha256hash: sha256hash.to_string(),
+        };
+        assert!(query.decode_hash().is_none());
     }
 
     #[tokio::test]

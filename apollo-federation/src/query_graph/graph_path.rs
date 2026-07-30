@@ -1342,52 +1342,44 @@ where
         if matches!(resolution, ConditionResolution::Unsatisfied { .. }) {
             return Ok(ConditionResolution::Unsatisfied { reason: None });
         }
-        if let Some(Some(last_edge)) = self.edges.last().map(|e| (*e).into())
-            && matches!(
-                edge_weight.transition,
-                QueryGraphEdgeTransition::FieldCollection { .. }
-            )
-        {
-            let last_edge_weight = self.graph.edge_weight(last_edge)?;
-            if !matches!(
-                last_edge_weight.transition,
-                QueryGraphEdgeTransition::KeyResolution
-            ) {
-                let in_same_subgraph = if let ConditionResolution::Satisfied {
-                    path_tree: Some(path_tree),
-                    ..
-                } = &resolution
-                {
-                    path_tree.is_all_in_same_subgraph()?
-                } else {
-                    true
+        if matches!(
+            edge_weight.transition,
+            QueryGraphEdgeTransition::FieldCollection { .. }
+        ) {
+            let in_same_subgraph = if let ConditionResolution::Satisfied {
+                path_tree: Some(path_tree),
+                ..
+            } = &resolution
+            {
+                path_tree.is_all_in_same_subgraph()?
+            } else {
+                true
+            };
+            if in_same_subgraph {
+                debug!("@requires conditions are satisfied, but validating post-require key.");
+                let (edge_head, _) = self.graph.edge_endpoints(edge)?;
+                if self.graph.get_locally_satisfiable_key(edge_head)?.is_none() {
+                    debug!("Post-require conditions cannot be satisfied");
+                    return Ok(ConditionResolution::Unsatisfied {
+                        reason: Some(UnsatisfiedConditionReason::NoPostRequireKey),
+                    });
                 };
-                if in_same_subgraph {
-                    debug!("@requires conditions are satisfied, but validating post-require key.");
-                    let (edge_head, _) = self.graph.edge_endpoints(edge)?;
-                    if self.graph.get_locally_satisfiable_key(edge_head)?.is_none() {
-                        debug!("Post-require conditions cannot be satisfied");
-                        return Ok(ConditionResolution::Unsatisfied {
-                            reason: Some(UnsatisfiedConditionReason::NoPostRequireKey),
-                        });
-                    };
-                    // We're in a case where we have an `@requires` application (we have
-                    // conditions and the new edge has a `FieldCollection` transition) and we
-                    // have to jump to another subgraph to satisfy the `@requires`, which means
-                    // we need to use a key on "the current subgraph" to resume collecting the
-                    // field with the `@requires`. `get_locally_satisfiable_key()` essentially
-                    // tells us that we have such key, and that's good enough here. Note that
-                    // the way the code is organised, we don't use an actual edge of the query
-                    // graph, so we cannot use `condition_resolver` and so it's not easy to get
-                    // a proper cost or tree. That's ok in the sense that the cost of the key is
-                    // negligible because we know it's a "local" one (there is no subgraph jump)
-                    // and the code to build plan will deal with adding that key anyway (so not
-                    // having the tree is ok).
-                    // TODO(Sylvain): the whole handling of `@requires` is a bit too complex and
-                    // hopefully we might be able to clean that up, but it's unclear to me how
-                    // at the moment and it may not be a small change so this will have to do
-                    // for now.
-                }
+                // We're in a case where we have an `@requires` application (we have
+                // conditions and the new edge has a `FieldCollection` transition) and we
+                // have to jump to another subgraph to satisfy the `@requires`, which means
+                // we need to use a key on "the current subgraph" to resume collecting the
+                // field with the `@requires`. `get_locally_satisfiable_key()` essentially
+                // tells us that we have such key, and that's good enough here. Note that
+                // the way the code is organised, we don't use an actual edge of the query
+                // graph, so we cannot use `condition_resolver` and so it's not easy to get
+                // a proper cost or tree. That's ok in the sense that the cost of the key is
+                // negligible because we know it's a "local" one (there is no subgraph jump)
+                // and the code to build plan will deal with adding that key anyway (so not
+                // having the tree is ok).
+                // TODO(Sylvain): the whole handling of `@requires` is a bit too complex and
+                // hopefully we might be able to clean that up, but it's unclear to me how
+                // at the moment and it may not be a small change so this will have to do
+                // for now.
             }
         }
         if let ConditionResolution::Satisfied {

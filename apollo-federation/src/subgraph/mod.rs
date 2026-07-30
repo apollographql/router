@@ -16,6 +16,7 @@ use apollo_compiler::validation::Valid;
 use indexmap::map::Entry;
 
 use crate::ValidFederationSubgraph;
+use crate::compat::coerce_and_validate_schema_values;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
@@ -106,6 +107,7 @@ impl Subgraph {
             imported_federation_definitions,
             imported_link_definitions,
         )?;
+        coerce_and_validate_schema_values(&mut schema)?;
         let schema = schema.validate()?;
         Ok(ValidSubgraph {
             name: name.to_owned(),

@@ -2,6 +2,138 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.17.0] - 2026-07-24
+
+## 🚀 Features
+
+### `response_cache` can now emit a `Cache-Tag` header for CDN-side purging ([Issue #9481](https://github.com/apollographql/router/issues/9481))
+
+If you cache router responses at a CDN or reverse proxy in front of the router, the CDN previously had no way to know *what* to purge when your underlying data changed — `Cache-Control` only governs freshness (TTL), not invalidation. A new opt-in `response_cache.cdn_invalidation` block closes that gap: the router emits a response header carrying the same invalidation labels it already uses for active invalidation against its own Redis cache, so you can purge your CDN's edge cache using the CDN's own tag-based purge API.
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  cdn_invalidation:
+    enabled: true
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
+```
+
+The header's value is a delimited list of labels drawn from the same sources already used for Redis invalidation (`@cacheTag` directives and the `apolloCacheTags`/`apolloEntityCacheTags` response extensions) — no schema changes required if you've already set those up. Each label is one of three tiers, coarsest to finest:
+
+- `subgraph-{name}` — every subgraph touched by the response.
+- `type-{subgraph}-{type}` — every distinct `(subgraph, GraphQL type)` pair touched.
+- the exact tag value from `@cacheTag`/the extensions, unchanged.
+
+All three tiers are always sent together (subject to the size limit below), so you can escalate from purging a single fine-grained tag up to an entire subgraph's cached data if you're not confident a narrower purge fully propagated across every CDN edge location.
+
+This is independent of the router's Redis-backed invalidation indexes: you don't need Redis response caching enabled, and you don't need the `cache_tag` invalidation index on, for the header to work correctly — including on a cache hit, since the labels needed to rebuild the header are persisted alongside the cached entry.
+
+Configuration:
+
+```yaml title="router.yaml"
+response_cache:
+  cdn_invalidation:
+    enabled: true
+    header_name: "Cache-Tag"          # e.g. "Surrogate-Key" for Fastly
+    header_delimiter: ","             # e.g. " " for Fastly
+    max_bytes: 16384                  # matches Cloudflare's default Cache-Tag limit
+    experimental_on_overflow: truncate # "truncate" | "drop"
+```
+
+When a response's full label set would exceed `max_bytes`, the router packs the header coarsest-first and drops whatever doesn't fit, finest-grained first — so an oversized response still gets a usable header rather than none at all. That default (`truncate`) favors availability over precision: the response still gets cached at the CDN, just with a coarser invalidation surface than it ideally would have.
+
+For cases where that tradeoff isn't acceptable — where caching data you can't fully invalidate by its intended fine-grained tag is worse than not caching it at all — set `experimental_on_overflow: drop`. This omits the header entirely whenever truncation would otherwise occur, so you can pair it with a CDN-side rule that forces cache bypass on a missing header, guaranteeing you never end up with cached data whose purge surface is narrower than what your invalidation logic expects. It's marked experimental because it's a deliberate, opt-in safety valve rather than the router's default posture, and its shape may still change.
+
+With `response_cache.debug: true`, the cache debugger now also shows the labels behind each cache entry and, per response, the `Cache-Tag` header's outcome, value, untruncated size, and whether it was actually emitted. Three new metrics (`cdn_tag_header.outcome`, `cdn_tag_header.untruncated_size`, `cdn_tag_header.error`) track header emission, truncation, and errors.
+
+Off by default; existing deployments see no behavior change.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9811
+
+# [2.16.1] - 2026-07-20
+
+## 🐛 Fixes
+
+### Fix input-object and enum variable coercion to respect the API schema
+
+When a client sent an operation with an unknown field on an input-object variable, the router's `VALIDATION_INVALID_TYPE_VARIABLE` error message embedded the full composed input type definition, including federation directives (`@join__type`, `@tag`, etc.) and internal subgraph names, regardless of the `introspection` or `redact_query_validation_errors` settings. This error now reports only the type name, matching the existing behavior for enum and scalar coercion errors.
+
+Separately, variable coercion validated input-object fields and enum values against the internal supergraph schema rather than the client-facing API schema, so a variable could reference an `@inaccessible` field or enum value even though the same reference would be rejected in the operation document itself. Variable coercion now validates against the API schema, consistent with how operation documents are already validated.
+
+By [@carodewig](https://github.com/carodewig)
+
+### Fix coercion and validation of default values
+
+Default values in schemas and operations are now coerced and validated more correctly, fixing several bugs:
+
+- Fixed invalid default values not being reported as errors.
+- Removed default value auto-expansion logic.
+- Restricted non-list value coercion to operations.
+- Fixed missing coercion edge cases to always reject null values applied to non-null types.
+- Fixed validation of unknown fields in input object default values.
+- Added missing enum value validations to ensure they are valid and are part of the enum definition.
+- Added missing validation for `@deprecated` on required arguments and input fields.
+
+By [@sachindshinde](https://github.com/sachindshinde)
+
+### Update operation validation to enforce unique `@defer` labels
+
+The query planner now rejects operations that reuse a `@defer` label, so labels are unique within an operation.
+
+By [@duckki](https://github.com/duckki)
+
+### Treat list sizes as non-negative in demand control cost estimation
+
+Demand control now bounds the list sizes it uses when estimating operation cost. Slicing-argument values (for example `first`) provided as negative integers are clamped to zero, and configured `list_size` defaults use a saturating conversion so that very large values cannot wrap. This keeps an operation's estimated cost from being computed lower than the work it represents.
+
+By [@abernix](https://github.com/abernix)
+
+### Enforce `http_max_request_bytes` on GraphQL queries sent via HTTP GET
+
+The router's `limits.http_max_request_bytes` setting previously only limited the size of the HTTP request body, so it had no effect on GraphQL-over-HTTP GET requests, which carry the query in the URL's query string instead of the body. In environments with a strict `http_max_request_bytes` configured, this allowed the limit to be bypassed by sending a GET request instead of a POST.
+
+GET requests are now checked against the same `http_max_request_bytes` limit, measured against the byte length of the URI's query string, and rejected with a 414 (URI Too Long) response if it's exceeded.
+
+Note that this measures the percent-encoded query string, which is larger than the same query's byte count in a compact POST JSON body (URL encoding can expand some characters to 3 bytes each). A query that fits under the limit as a POST body may need a slightly higher limit to also fit as a GET query string.
+
+By [@carodewig](https://github.com/carodewig)
+
+### Reject JWTs that omit the `iss` claim when a JWKS entry configures an `issuers` allowlist
+
+When a JWKS entry is configured with an `issuers` allowlist, the router now rejects a validly-signed JWT that omits its `iss` claim (or sets it to `null`), instead of accepting it. Previously a token could sidestep the allowlist by not carrying an issuer at all, even though a token presenting a non-matching issuer was already rejected.
+
+This matches how the router already handles the `aud` claim under an `audiences` allowlist: once an operator configures an allowlist, a token that cannot satisfy it is rejected. Behavior is unchanged when no issuers are configured — tokens with or without an `iss` claim are still accepted.
+
+By [@carodewig](https://github.com/carodewig)
+
+### Enforce a kid-specific JWKS entry's constraints instead of falling through to a less-specific entry
+
+When two JWKS entries shared the same key material — one kid-specific and constrained by `issuer`/`audience`, the other algorithm-only and unconstrained — a token that should have been rejected by the constrained entry could be accepted through the unconstrained one. When searching for a key, a kid match and an algorithm match each scored equally, so a kid-specific entry (matched on kid only) and an alg-only entry (matched on algorithm only) tied and were both returned as candidates. Validation then verified the signature against the constrained entry, failed its issuer/audience check, and fell through to the unconstrained entry, which accepted the token.
+
+When a token's key ID (`kid`) matches one or more JWKS entries, only those matching entries are now considered, and each is validated in turn. A token can no longer be accepted by falling through to an entry whose `kid` it never matched. Entries that share key material under the same `kid` but carry different constraints — for example, the same key duplicated across a multi-tenant identity provider — are all still tried, so legitimate multi-entry setups continue to work.
+
+By [@carodewig](https://github.com/carodewig)
+
+### Reject oversized `sha256Hash` values before hex-decoding in APQ
+
+The Automatic Persisted Queries (APQ) layer decoded the client-supplied `sha256Hash` extension value with `hex::decode` before checking its length. A valid SHA-256 hash is always exactly 64 hex characters; a request with an arbitrarily large `sha256Hash` string (megabytes of valid hex) would still be hex-decoded in full, allocating memory and burning CPU proportional to the attacker-controlled input size before any comparison against the actual query hash occurred.
+
+The router now rejects any `sha256Hash` whose length is not exactly 64 characters immediately, before attempting to decode it. This matches existing behavior for other malformed hashes: the request falls through to the normal `PERSISTED_QUERY_NOT_FOUND` response.
+
+By [@carodewig](https://github.com/carodewig)
+
+### Respect the persisted-query client-name scope in freeform safelist matching
+
+Body-based (freeform) persisted-query safelist matching previously ignored the `clientName` scope declared in the PQ manifest, so an operation registered for one client was accepted for any client. Freeform matching now respects the manifest's client-name scope — trying the request's client name first and falling back to a client-agnostic entry — consistent with how ID-based lookup already behaves. Note that `clientName` is a self-reported, unauthenticated header and is not an authorization boundary.
+
+By [@carodewig](https://github.com/carodewig)
+
+
+
 # [2.16.0] - 2026-06-30
 
 ## 🚀 Features
