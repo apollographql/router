@@ -3894,6 +3894,126 @@ expression: "&schema"
         }
       ]
     },
+    "EventAcknowledgementConfiguration": {
+      "description": "Point at which a provider event can be acknowledged.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Acknowledge after an event enters Router's bounded local fan-out queue.",
+          "properties": {
+            "type": {
+              "const": "on_enqueue",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "EventBufferConfiguration": {
+      "additionalProperties": false,
+      "description": "Bounded buffering and overflow behavior.",
+      "properties": {
+        "capacity": {
+          "default": 128,
+          "description": "Maximum number of events retained for each local subscriber.",
+          "format": "uint",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "overflow": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/EventOverflowConfiguration"
+            }
+          ],
+          "default": {
+            "type": "drop_oldest"
+          },
+          "description": "Behavior when a local subscriber falls behind this capacity."
+        }
+      },
+      "type": "object"
+    },
+    "EventDeliveryConfiguration": {
+      "description": "Delivery and acknowledgement contract.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Live-edge delivery. Events are not retained by Router for client replay.",
+          "properties": {
+            "acknowledgement": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/EventAcknowledgementConfiguration"
+                }
+              ],
+              "default": {
+                "type": "on_enqueue"
+              }
+            },
+            "start": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/EventStartConfiguration"
+                }
+              ],
+              "default": {
+                "type": "latest"
+              }
+            },
+            "type": {
+              "const": "live",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "EventDistributionConfiguration": {
+      "description": "Distribution topology expected from the provider adapter.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Every Router process with a matching trigger must receive every event.",
+          "properties": {
+            "type": {
+              "const": "every_router_instance",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "EventFormatConfiguration": {
+      "additionalProperties": false,
+      "description": "Event wire-format configuration.",
+      "properties": {
+        "config": {
+          "additionalProperties": true,
+          "default": {},
+          "description": "Format-owned decoding and mapping configuration.",
+          "type": "object"
+        },
+        "type": {
+          "default": "graphql_entity",
+          "description": "Format implementation identifier. The initial implementation is `graphql_entity`.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "EventLevelConfig": {
       "description": "Log level configuration for events. Use \"off\" to not log the event, or a level name to log the\nevent at that level and above.",
       "enum": [
@@ -3926,6 +4046,190 @@ expression: "&schema"
           "const": "error",
           "description": "Log the event on error",
           "type": "string"
+        }
+      ]
+    },
+    "EventOrderingConfiguration": {
+      "description": "Ordering contract exposed by the first-pass implementation.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Preserve only the ordering supplied by the provider for one trigger.",
+          "properties": {
+            "type": {
+              "const": "provider",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "EventOverflowConfiguration": {
+      "description": "Behavior when a local event buffer is full.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Discard the oldest queued event and retain the newly received event.",
+          "properties": {
+            "type": {
+              "const": "drop_oldest",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "EventPolicyConfiguration": {
+      "additionalProperties": false,
+      "description": "Reusable event-delivery behavior.",
+      "properties": {
+        "buffer": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/EventBufferConfiguration"
+            }
+          ],
+          "default": {
+            "capacity": 128,
+            "overflow": {
+              "type": "drop_oldest"
+            }
+          }
+        },
+        "delivery": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/EventDeliveryConfiguration"
+            }
+          ],
+          "default": {
+            "acknowledgement": {
+              "type": "on_enqueue"
+            },
+            "start": {
+              "type": "latest"
+            },
+            "type": "live"
+          }
+        },
+        "distribution": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/EventDistributionConfiguration"
+            }
+          ],
+          "default": {
+            "type": "every_router_instance"
+          }
+        },
+        "ordering": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/EventOrderingConfiguration"
+            }
+          ],
+          "default": {
+            "type": "provider"
+          }
+        }
+      },
+      "type": "object"
+    },
+    "EventProviderConfiguration": {
+      "additionalProperties": false,
+      "description": "A physical connection to an event provider.",
+      "properties": {
+        "config": {
+          "additionalProperties": true,
+          "default": {},
+          "description": "Provider-owned configuration, validated by the selected provider.",
+          "type": "object"
+        },
+        "lifecycle": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderLifecycleConfiguration"
+            }
+          ],
+          "default": {
+            "connect_timeout": {
+              "nanos": 0,
+              "secs": 10
+            }
+          },
+          "description": "Connection lifecycle behavior shared by all providers."
+        },
+        "type": {
+          "description": "Provider implementation identifier, for example `nats` or `kafka`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "EventSourceConfiguration": {
+      "additionalProperties": false,
+      "description": "A logical event source referenced by graph metadata.",
+      "properties": {
+        "format": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/EventFormatConfiguration"
+            }
+          ],
+          "default": {
+            "config": {},
+            "type": "graphql_entity"
+          },
+          "description": "Wire-format decoder for events received from this source."
+        },
+        "policy": {
+          "description": "Name of the reusable delivery policy used by this source.",
+          "type": "string"
+        },
+        "provider": {
+          "description": "Name of the provider connection used by this source.",
+          "type": "string"
+        },
+        "provider_options": {
+          "additionalProperties": true,
+          "default": {},
+          "description": "Provider-owned per-source options such as consumer configuration.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "provider",
+        "policy"
+      ],
+      "type": "object"
+    },
+    "EventStartConfiguration": {
+      "description": "Position from which a provider begins a live subscription.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Receive only events produced after the trigger starts.",
+          "properties": {
+            "type": {
+              "const": "latest",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -3964,6 +4268,37 @@ expression: "&schema"
             }
           ],
           "description": "Subgraph service events"
+        }
+      },
+      "type": "object"
+    },
+    "EventsConfiguration": {
+      "additionalProperties": false,
+      "description": "Configuration for event-backed graph capabilities.",
+      "properties": {
+        "policies": {
+          "additionalProperties": {
+            "$ref": "#/definitions/EventPolicyConfiguration"
+          },
+          "default": {},
+          "description": "Reusable delivery policies.",
+          "type": "object"
+        },
+        "providers": {
+          "additionalProperties": {
+            "$ref": "#/definitions/EventProviderConfiguration"
+          },
+          "default": {},
+          "description": "Physical event-provider connections, keyed by a stable local name.",
+          "type": "object"
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/EventSourceConfiguration"
+          },
+          "default": {},
+          "description": "Logical event sources referenced from composed graph metadata.",
+          "type": "object"
         }
       },
       "type": "object"
@@ -8017,6 +8352,21 @@ expression: "&schema"
         "http"
       ],
       "type": "string"
+    },
+    "ProviderLifecycleConfiguration": {
+      "additionalProperties": false,
+      "description": "Common provider lifecycle behavior.",
+      "properties": {
+        "connect_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 10
+          },
+          "description": "Maximum duration allowed for the initial connection attempt.",
+          "type": "string"
+        }
+      },
+      "type": "object"
     },
     "Query": {
       "oneOf": [
@@ -13068,6 +13418,14 @@ expression: "&schema"
     },
     "enhanced_client_awareness": {
       "$ref": "#/definitions/Config4"
+    },
+    "events": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/EventsConfiguration"
+        }
+      ],
+      "description": "Provider-neutral event connections, logical sources, and delivery policies."
     },
     "experimental_chaos": {
       "allOf": [

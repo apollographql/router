@@ -67,6 +67,7 @@ use crate::uplink::UplinkConfig;
 pub(crate) mod connector;
 pub(crate) mod cooperative_cancellation;
 pub(crate) mod cors;
+pub(crate) mod events;
 pub(crate) mod expansion;
 mod experimental;
 pub(crate) mod header_masking_config;
@@ -201,6 +202,10 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) limits: limits::Config,
 
+    /// Provider-neutral event connections, logical sources, and delivery policies.
+    #[serde(default, skip_serializing_if = "events::EventsConfiguration::is_empty")]
+    pub(crate) events: events::EventsConfiguration,
+
     /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
     /// You probably don’t want this in production!
     #[serde(default)]
@@ -270,6 +275,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apq: Apq,
             persisted_queries: PersistedQueries,
             limits: limits::Config,
+            events: events::EventsConfiguration,
             experimental_chaos: chaos::Config,
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
@@ -304,6 +310,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apq: ad_hoc.apq,
             persisted_queries: ad_hoc.persisted_queries,
             limits: ad_hoc.limits,
+            events: ad_hoc.events,
             experimental_chaos: ad_hoc.experimental_chaos,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
             experimental_hoist_orphan_errors: ad_hoc.experimental_hoist_orphan_errors,
@@ -344,6 +351,7 @@ impl Configuration {
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
+        events: Option<events::EventsConfiguration>,
         chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
@@ -366,6 +374,7 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
+            events: events.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -485,6 +494,7 @@ impl Configuration {
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
+        events: Option<events::EventsConfiguration>,
         chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
@@ -501,6 +511,7 @@ impl Configuration {
             homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
+            events: events.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -526,6 +537,12 @@ impl Configuration {
 
 impl Configuration {
     pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
+        self.events
+            .validate()
+            .map_err(|error| ConfigurationError::InvalidConfiguration {
+                message: "invalid events configuration",
+                error,
+            })?;
         // Sandbox and Homepage cannot be both enabled
         if self.sandbox.enabled && self.homepage.enabled {
             return Err(ConfigurationError::InvalidConfiguration {
