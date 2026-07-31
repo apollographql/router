@@ -1,0 +1,4 @@
+/.bsp/
+/.scala-build/
+/target/
+/plugin.wasm

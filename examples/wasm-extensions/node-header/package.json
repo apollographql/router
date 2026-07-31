@@ -1,5 +1,5 @@
 {
-  "name": "router-wasm-javascript-header",
+  "name": "router-wasm-node-header",
   "private": true,
   "type": "module",
   "scripts": {
@@ -7,6 +7,7 @@
   },
   "devDependencies": {
     "@bytecodealliance/componentize-js": "0.22.0",
-    "@bytecodealliance/jco": "1.26.1"
+    "@bytecodealliance/jco": "1.26.1",
+    "esbuild": "0.25.10"
   }
 }

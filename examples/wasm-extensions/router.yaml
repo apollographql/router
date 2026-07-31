@@ -40,20 +40,20 @@ wasm:
               write:
                 names: [wasm.rust]
 
-    - name: javascript-header
+    - name: node-header
       source:
         type: file
-        path: examples/wasm-extensions/javascript-header/plugin.wasm
+        path: examples/wasm-extensions/node-header/plugin.wasm
       configuration: {}
       hooks:
         - hook: supergraph.request
           permissions:
             headers:
               write:
-                names: [x-wasm-javascript]
+                names: [x-wasm-node]
             context:
               write:
-                names: [wasm.javascript]
+                names: [wasm.node]
 
     - name: python-header
       source:
@@ -69,3 +69,48 @@ wasm:
             context:
               write:
                 names: [wasm.python]
+
+    - name: go-header
+      source:
+        type: file
+        path: examples/wasm-extensions/go-header/plugin.wasm
+      configuration: {}
+      hooks:
+        - hook: supergraph.request
+          permissions:
+            headers:
+              write:
+                names: [x-wasm-go]
+            context:
+              write:
+                names: [wasm.go]
+
+    - name: java-header
+      source:
+        type: file
+        path: examples/wasm-extensions/java-header/plugin.wasm
+      configuration: {}
+      hooks:
+        - hook: supergraph.request
+          permissions:
+            headers:
+              write:
+                names: [x-wasm-java]
+            context:
+              write:
+                names: [wasm.java]
+
+    - name: scala-header
+      source:
+        type: file
+        path: examples/wasm-extensions/scala-header/plugin.wasm
+      configuration: {}
+      hooks:
+        - hook: supergraph.request
+          permissions:
+            headers:
+              write:
+                names: [x-wasm-scala]
+            context:
+              write:
+                names: [wasm.scala]

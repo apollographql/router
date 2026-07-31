@@ -1,20 +1,22 @@
+import { headerValue } from "./target/plugin.js";
+
 export const hooks = {
-  handle(event) {
+  handle() {
     return {
       tag: "proceed",
       val: {
         headers: [
           {
             tag: "set",
-            val: { name: "x-wasm-javascript", values: ["active"] },
+            val: { name: "x-wasm-scala", values: [headerValue()] },
           },
         ],
         context: [
           {
             tag: "set",
             val: {
-              name: "wasm.javascript",
-              value: JSON.stringify({ language: "javascript" }),
+              name: "wasm.scala",
+              value: JSON.stringify({ language: "scala" }),
             },
           },
         ],

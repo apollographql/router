@@ -1,8 +1,21 @@
 # WebAssembly extensions
 
-This example runs three WebAssembly components authored in Rust, JavaScript, and Python. JavaScript and Python run at `supergraph.request`; Rust runs at `subgraph.request` with a service selector. Each component adds a distinct request header and context entry. Header propagation lets the example subgraph confirm that all three components executed.
+This example runs six WebAssembly components authored in Java, Node.js, Python, Rust, Go, and Scala. Node.js, Python, Go, Java, and Scala run at `supergraph.request`; Rust runs at `subgraph.request` with a service selector. Each component adds a distinct request header and context entry. Header propagation lets the example subgraph confirm that all six components executed.
 
 The shared WIT contract is in `apollo-router/wit/router-plugin/world.wit`.
+
+### Language support paths
+
+| Language | Component path | Notes |
+| --- | --- | --- |
+| Rust | Native `wasm32-wasip2` | `wit-bindgen` generates bindings at compile time. |
+| Go | Native Go WASI module plus Preview 1 adapter | The maintained `wit-bindgen go` generator emits the Canonical ABI bindings. |
+| Node.js | ComponentizeJS | Jco embeds the JavaScript implementation in a WASI component. |
+| Python | `componentize-py` | CPython and generated WIT bindings are embedded in the component. |
+| Java | TeaVM Java-to-JavaScript plus ComponentizeJS | Current `wit-bindgen` no longer has a maintained Java generator, so a small JavaScript WIT adapter calls the Java-authored logic. |
+| Scala | Scala.js plus ComponentizeJS | Scala has no direct WIT generator; a small JavaScript WIT adapter calls the Scala-authored logic. |
+
+Java and Scala are intentionally described as transpiled paths rather than native WIT paths. Their language code executes inside the component, but the Canonical ABI boundary is supplied by ComponentizeJS.
 
 ## Configuration model
 
@@ -42,10 +55,10 @@ cd examples/wasm-extensions/rust-header
 cargo build --release --target wasm32-wasip2
 ```
 
-JavaScript uses `jco` and ComponentizeJS:
+Node.js uses Jco and ComponentizeJS. Its local tools are also shared by the Java and Scala examples:
 
 ```sh
-cd examples/wasm-extensions/javascript-header
+cd examples/wasm-extensions/node-header
 npm install
 npm run build
 ```
@@ -58,6 +71,29 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/componentize-py -d ../../../apollo-router/wit/router-plugin -w router-plugin bindings .
 .venv/bin/componentize-py -d ../../../apollo-router/wit/router-plugin -w router-plugin componentize plugin -o plugin.wasm --stub-wasi
+```
+
+Go requires Go 1.25 or newer, `wit-bindgen` 0.60 or newer, and `wasm-tools`. The build script generates bindings, builds a WASI module, downloads the pinned Preview 1 reactor adapter, and creates a component:
+
+```sh
+cargo install --locked wit-bindgen-cli --version 0.60.0
+cargo install --locked wasm-tools
+cd examples/wasm-extensions/go-header
+./build.sh
+```
+
+Java requires Java 17 or newer, Maven, and the Node.js tools installed above. TeaVM compiles the Java method to an ES module before the wrapper is componentized:
+
+```sh
+cd examples/wasm-extensions/java-header
+./build.sh
+```
+
+Scala requires Scala CLI and the Node.js tools installed above. Scala.js compiles the exported Scala method to an ES module before the wrapper is componentized:
+
+```sh
+cd examples/wasm-extensions/scala-header
+./build.sh
 ```
 
 ## Run the example
@@ -82,5 +118,5 @@ curl http://127.0.0.1:4100/ \
 The response should be:
 
 ```json
-{"data":{"me":"active,active,active"}}
+{"data":{"me":"active,active,active,active,active,active"}}
 ```

@@ -8,8 +8,11 @@ class Handler(BaseHTTPRequestHandler):
         self.rfile.read(length)
         languages = [
             self.headers.get("x-wasm-rust", "missing"),
-            self.headers.get("x-wasm-javascript", "missing"),
+            self.headers.get("x-wasm-node", "missing"),
             self.headers.get("x-wasm-python", "missing"),
+            self.headers.get("x-wasm-go", "missing"),
+            self.headers.get("x-wasm-java", "missing"),
+            self.headers.get("x-wasm-scala", "missing"),
         ]
         body = json.dumps({"data": {"me": ",".join(languages)}}).encode()
         self.send_response(200)
