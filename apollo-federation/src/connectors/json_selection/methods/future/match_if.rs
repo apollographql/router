@@ -1,6 +1,7 @@
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 
+use crate::connectors::json_selection::ApplyContext;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
@@ -13,7 +14,6 @@ use crate::connectors::json_selection::lit_expr::LitExpr;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::json_selection::location::merge_ranges;
-use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(MatchIfMethod, match_if_method, match_if_shape);
@@ -33,8 +33,9 @@ fn match_if_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
+    let spec = context.spec();
     let mut errors = Vec::new();
 
     if let Some(MethodArgs { args, .. }) = method_args {
@@ -45,12 +46,12 @@ fn match_if_method(
                     _ => continue,
                 };
                 let (condition_opt, condition_errors) =
-                    pattern.apply_to_path(data, vars, input_path, spec);
+                    pattern.apply_to_path(data, vars, input_path, context);
                 errors.extend(condition_errors);
 
                 if condition_opt == Some(JSON::Bool(true)) {
                     return value
-                        .apply_to_path(data, vars, input_path, spec)
+                        .apply_to_path(data, vars, input_path, context)
                         .prepend_errors(errors);
                 };
             }

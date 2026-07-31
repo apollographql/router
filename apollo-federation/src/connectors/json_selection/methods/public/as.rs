@@ -1,6 +1,7 @@
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 
+use crate::connectors::json_selection::ApplyContext;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
@@ -57,8 +58,9 @@ fn as_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
+    let spec = context.spec();
     let (var_name_opt, mut errors) = check_method_args(method_name, method_args, input_path, spec);
 
     // If there's a second argument, evaluate it and return that value. From the
@@ -69,7 +71,7 @@ fn as_method(
         if let Some(expr_arg) = method_args.and_then(|MethodArgs { args, .. }| args.get(1)) {
             let (result_opt, mut expr_errors) =
             // Note that vars does not (and cannot) contain the new variable.
-            expr_arg.apply_to_path(data, vars, input_path, spec);
+            expr_arg.apply_to_path(data, vars, input_path, context);
             errors.append(&mut expr_errors);
             result_opt
         } else {

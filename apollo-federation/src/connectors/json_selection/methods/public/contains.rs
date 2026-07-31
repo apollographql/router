@@ -2,7 +2,7 @@ use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
 
-use crate::connectors::ConnectSpec;
+use crate::connectors::json_selection::ApplyContext;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
@@ -26,12 +26,13 @@ fn contains_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
+    let spec = context.spec();
     if let Some(MethodArgs { args, .. }) = method_args
         && let [arg] = args.as_slice()
     {
-        let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, spec);
+        let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, context);
         let mut apply_to_errors = arg_errors;
 
         let matches = value_opt.and_then(|search_value| {
