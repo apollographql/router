@@ -758,7 +758,7 @@ mod tests {
     use crate::query_planner::QueryPlannerService;
     use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerRequest;
-    use crate::services::layers::query_analysis::ParsedDocument;
+    use crate::services::query_parsing::ParsedDocument;
     use crate::services::query_planner::PlanOptions;
     use crate::spec;
     use crate::spec::Query;

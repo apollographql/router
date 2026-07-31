@@ -32,7 +32,7 @@ use crate::router_factory::YamlRouterFactory;
 use crate::services::SupergraphCreator;
 use crate::services::execution;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
-use crate::services::layers::query_analysis::QueryAnalysis;
+use crate::services::query_parsing;
 use crate::services::router;
 use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
@@ -304,15 +304,7 @@ impl<'a> TestHarness<'a> {
 
     pub(crate) async fn build_common(
         self,
-    ) -> Result<
-        (
-            Arc<Configuration>,
-            Arc<Schema>,
-            Arc<QueryAnalysis>,
-            SupergraphCreator,
-        ),
-        BoxError,
-    > {
+    ) -> Result<(Arc<Configuration>, Arc<Schema>, SupergraphCreator), BoxError> {
         let mut config = self.configuration.unwrap_or_default();
         let has_legacy_mock_subgraphs_plugin = self.extra_plugins.iter().any(|(_, dyn_plugin)| {
             dyn_plugin.name() == *crate::plugins::mock_subgraphs::PLUGIN_NAME
@@ -339,13 +331,10 @@ impl<'a> TestHarness<'a> {
             limits: Default::default(),
         }));
 
-        let query_analysis = Arc::new(QueryAnalysis::new(schema.clone(), config.clone()).await);
-
         let (supergraph_creator, _warmup) = YamlRouterFactory
             .inner_create_supergraph(
                 config.clone(),
                 schema.clone(),
-                query_analysis.clone(),
                 None,
                 Some(self.extra_plugins),
                 license,
@@ -353,12 +342,12 @@ impl<'a> TestHarness<'a> {
             )
             .await?;
 
-        Ok((config, schema, query_analysis, supergraph_creator))
+        Ok((config, schema, supergraph_creator))
     }
 
     /// Builds the supergraph service
     pub async fn build_supergraph(self) -> Result<supergraph::BoxCloneService, BoxError> {
-        let (config, schema, _query_analysis, supergraph_creator) = self.build_common().await?;
+        let (config, schema, supergraph_creator) = self.build_common().await?;
 
         Ok(tower::service_fn(move |request: supergraph::Request| {
             let router = supergraph_creator.make();
@@ -373,7 +362,7 @@ impl<'a> TestHarness<'a> {
             if let Some(query_str) = body.query.as_deref() {
                 let operation_name = body.operation_name.as_deref();
                 if !request.context.extensions().with_lock(|lock| {
-                    lock.contains_key::<crate::services::layers::query_analysis::ParsedDocument>()
+                    lock.contains_key::<crate::services::query_parsing::ParsedDocument>()
                 }) {
                     let doc = crate::spec::Query::parse_document(
                         query_str,
@@ -383,7 +372,7 @@ impl<'a> TestHarness<'a> {
                     )
                     .expect("parse error in test");
                     request.context.extensions().with_lock(|lock| {
-                        lock.insert::<crate::services::layers::query_analysis::ParsedDocument>(doc)
+                        lock.insert::<crate::services::query_parsing::ParsedDocument>(doc)
                     });
                 }
             }
@@ -395,11 +384,14 @@ impl<'a> TestHarness<'a> {
 
     /// Builds the router service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
-        let (config, _schema, query_analysis, supergraph_creator) = self.build_common().await?;
+        let (config, schema, supergraph_creator) = self.build_common().await?;
+
+        let query_parsing_service = query_parsing::query_parsing_service(schema, config.clone());
+
         let router_creator = RouterCreator::new(
-            query_analysis,
             Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
+            query_parsing_service,
             config.clone(),
         )
         .await
@@ -423,11 +415,14 @@ impl<'a> TestHarness<'a> {
         use crate::axum_factory::ListenAddrAndRouter;
         use crate::axum_factory::axum_http_server_factory::make_axum_router;
 
-        let (config, _schema, query_analysis, supergraph_creator) = self.build_common().await?;
+        let (config, schema, supergraph_creator) = self.build_common().await?;
+
+        let query_parsing_service = query_parsing::query_parsing_service(schema, config.clone());
+
         let router_creator = RouterCreator::new(
-            query_analysis,
             Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
+            query_parsing_service,
             config.clone(),
         )
         .await?;

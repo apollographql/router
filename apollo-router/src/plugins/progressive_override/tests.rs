@@ -18,7 +18,7 @@ use crate::plugins::progressive_override::UNRESOLVED_LABELS_KEY;
 use crate::services::RouterResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::services::layers::query_analysis::ParsedDocument;
+use crate::services::query_parsing::ParsedDocument;
 use crate::services::router;
 use crate::services::supergraph;
 

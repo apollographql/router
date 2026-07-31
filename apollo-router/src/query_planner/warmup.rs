@@ -6,6 +6,7 @@ use tower::ServiceExt as _;
 
 use crate::Context;
 use crate::compute_job::ComputeJobType;
+use crate::compute_job::MaybeBackPressureError;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::error::CacheResolverError;
 use crate::plugins::authorization;
@@ -15,7 +16,7 @@ use crate::query_planner::InMemoryQueryPlanCache;
 use crate::query_planner::QueryPlanningOutcome;
 use crate::services::CachingRequest;
 use crate::services::PlanOptions;
-use crate::services::layers::query_analysis::QueryAnalysis;
+use crate::services::query_parsing;
 
 pub(crate) type BoxCloneService =
     tower::util::BoxCloneService<WarmupRequest, (), CacheResolverError>;
@@ -101,12 +102,14 @@ pub(crate) struct WarmupRequest {
 /// different request/response type.
 #[derive(Clone)]
 pub(crate) struct WarmupParseQueryLayer {
-    query_analysis: Arc<QueryAnalysis>,
+    query_parsing_service: query_parsing::BoxCloneService,
 }
 
 impl WarmupParseQueryLayer {
-    pub(crate) fn new(query_analysis: Arc<QueryAnalysis>) -> Self {
-        Self { query_analysis }
+    pub(crate) fn new(query_parsing_service: query_parsing::BoxCloneService) -> Self {
+        Self {
+            query_parsing_service,
+        }
     }
 }
 
@@ -115,7 +118,7 @@ impl<S> tower::Layer<S> for WarmupParseQueryLayer {
 
     fn layer(&self, inner: S) -> Self::Service {
         WarmupParseQueryService {
-            query_analysis: self.query_analysis.clone(),
+            query_parsing_service: self.query_parsing_service.clone(),
             inner,
         }
     }
@@ -123,7 +126,7 @@ impl<S> tower::Layer<S> for WarmupParseQueryLayer {
 
 #[derive(Clone)]
 pub(crate) struct WarmupParseQueryService<S> {
-    query_analysis: Arc<QueryAnalysis>,
+    query_parsing_service: query_parsing::BoxCloneService,
     inner: S,
 }
 
@@ -140,32 +143,37 @@ where
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::ready!(self.query_parsing_service.poll_ready(cx)).map_err(|err| match err {
+            MaybeBackPressureError::PermanentError(err) => {
+                CacheResolverError::RetrievalError(Arc::new(err.into()))
+            }
+            MaybeBackPressureError::TemporaryError(err) => CacheResolverError::Backpressure(err),
+        })?;
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, req: WarmupRequest) -> Self::Future {
-        let query_analysis = self.query_analysis.clone();
+        let query_parsing_service = self.query_parsing_service.clone();
+        let mut query_parsing_service =
+            std::mem::replace(&mut self.query_parsing_service, query_parsing_service);
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
         let source = req.source;
 
         Box::pin(async move {
-            // XXX(@goto-bus-stop): we don't cache query parsing,
-            // which would be a nice to have
-            let result = query_analysis
-                .parse_document(
-                    &req.query,
-                    req.operation_name.as_deref(),
-                    ComputeJobType::QueryParsingWarmup,
-                )
+            let result = query_parsing_service
+                .call(query_parsing::Request::new_warmup(
+                    req.query.clone(),
+                    req.operation_name.clone(),
+                ))
                 .await;
 
             let document = match result {
                 Ok(document) => document,
-                Err(crate::compute_job::MaybeBackPressureError::PermanentError(err)) => {
+                Err(MaybeBackPressureError::PermanentError(err)) => {
                     return Err(CacheResolverError::RetrievalError(Arc::new(err.into())));
                 }
-                Err(crate::compute_job::MaybeBackPressureError::TemporaryError(err)) => {
+                Err(MaybeBackPressureError::TemporaryError(err)) => {
                     // if the compute pool has no room, we skip the
                     // operation instead of queueing more work onto an already-overloaded pool.
                     record_warmup_backpressure(source, WarmUpPhase::Parse);
@@ -323,23 +331,34 @@ mod tests {
 
     use crate::Configuration;
     use crate::cache::storage::CacheStorage;
+    use crate::compute_job::MaybeBackPressureError;
     use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
+    use crate::error::CacheResolverError;
     use crate::error::QueryPlannerError;
     use crate::metrics::FutureMetricsExt as _;
     use crate::query_planner::CachingQueryKey;
     use crate::query_planner::ConfigModeHash;
     use crate::query_planner::InMemoryQueryPlanCache;
     use crate::query_planner::QueryPlan;
-    use crate::query_planner::QueryPlanningOutcome;
     use crate::query_planner::warmup::WarmUpSource;
     use crate::query_planner::warmup::WarmupParseQueryLayer;
     use crate::query_planner::warmup::WarmupRequest;
     use crate::services::CachingRequest;
     use crate::services::QueryPlannerContent;
-    use crate::services::layers::query_analysis::ParsedDocument;
-    use crate::services::layers::query_analysis::QueryAnalysis;
+    use crate::services::query_parsing;
+    use crate::services::query_parsing::ParsedDocument;
     use crate::spec::Schema;
     use crate::spec::SchemaHash;
+
+    fn downcast_parsing_mock_err(err: tower::BoxError) -> query_parsing::ServiceError {
+        *err.downcast()
+            .expect("mock only produces query parsing errors")
+    }
+
+    fn downcast_planning_mock_err(err: tower::BoxError) -> CacheResolverError {
+        *err.downcast()
+            .expect("mock only produces CacheResolverErrors")
+    }
 
     /// Returns an in-memory cache with the given queries inside.
     async fn prepopulated_cache<Q: AsRef<str>>(
@@ -384,208 +403,219 @@ mod tests {
 
     #[tokio::test]
     async fn warm_up_pqs_on_startup() {
-        let mut requests = super::queries_to_warm_up(
-            None,
-            None,
-            Some(vec![
-                "{ me { username } }".to_string(),
-                "{ topProducts { upc } }".to_string(),
-            ]),
-            &PersistedQueriesPrewarmQueryPlanCache {
-                on_startup: true,
-                on_reload: false,
-            },
-        )
+        async {
+            let mut requests = super::queries_to_warm_up(
+                None,
+                None,
+                Some(vec![
+                    "{ me { username } }".to_string(),
+                    "{ topProducts { upc } }".to_string(),
+                ]),
+                &PersistedQueriesPrewarmQueryPlanCache {
+                    on_startup: true,
+                    on_reload: false,
+                },
+            )
+            .await;
+
+            requests.sort_by(|a, b| a.query.cmp(&b.query));
+
+            assert_eq!(requests[0].query, "{ me { username } }");
+            assert_eq!(requests[0].metadata, None);
+            assert_eq!(requests[0].plan_options, None);
+            assert_eq!(requests[1].query, "{ topProducts { upc } }");
+            assert_eq!(requests[1].metadata, None);
+            assert_eq!(requests[1].plan_options, None);
+
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations.expected",
+                0,
+                "source" = "cache"
+            );
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations.expected",
+                2,
+                "source" = "persisted_query"
+            );
+        }
+        .with_metrics()
         .await;
-
-        requests.sort_by(|a, b| a.query.cmp(&b.query));
-
-        assert_eq!(requests[0].query, "{ me { username } }");
-        assert_eq!(requests[0].metadata, None);
-        assert_eq!(requests[0].plan_options, None);
-        assert_eq!(requests[1].query, "{ topProducts { upc } }");
-        assert_eq!(requests[1].metadata, None);
-        assert_eq!(requests[1].plan_options, None);
     }
 
     #[tokio::test]
     async fn warm_up_pqs_on_reload() {
-        let pqs = vec![
-            "{ me { username } }".to_string(),
-            "{ topProducts { upc } }".to_string(),
-        ];
+        async {
+            let pqs = vec![
+                "{ me { username } }".to_string(),
+                "{ topProducts { upc } }".to_string(),
+            ];
 
-        let requests = super::queries_to_warm_up(
-            None,
-            None,
-            Some(pqs.clone()),
-            &PersistedQueriesPrewarmQueryPlanCache {
-                on_startup: false,
-                on_reload: true,
-            },
-        )
-        .await;
-        assert!(requests.is_empty());
+            let requests = super::queries_to_warm_up(
+                None,
+                None,
+                Some(pqs.clone()),
+                &PersistedQueriesPrewarmQueryPlanCache {
+                    on_startup: false,
+                    on_reload: true,
+                },
+            )
+            .await;
+            assert!(requests.is_empty());
 
-        let requests = super::queries_to_warm_up(
-            Some(
-                CacheStorage::new_in_memory(NonZeroUsize::new(1).unwrap(), "test")
-                    .in_memory_cache(),
-            ),
-            None,
-            Some(pqs.clone()),
-            &PersistedQueriesPrewarmQueryPlanCache {
-                on_startup: false,
-                on_reload: true,
-            },
-        )
+            let requests = super::queries_to_warm_up(
+                Some(
+                    CacheStorage::new_in_memory(NonZeroUsize::new(1).unwrap(), "test")
+                        .in_memory_cache(),
+                ),
+                None,
+                Some(pqs.clone()),
+                &PersistedQueriesPrewarmQueryPlanCache {
+                    on_startup: false,
+                    on_reload: true,
+                },
+            )
+            .await;
+            assert_eq!(requests.len(), 2);
+
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations.expected",
+                0,
+                "source" = "cache"
+            );
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations.expected",
+                2,
+                "source" = "persisted_query"
+            );
+        }
+        .with_metrics()
         .await;
-        assert_eq!(requests.len(), 2);
     }
 
     #[tokio::test]
     async fn warm_up_from_previous_cache() {
-        let queries = [
-            "{ me { username } }".to_string(),
-            "{ topProducts { upc } }".to_string(),
-            "{ me { reviews { body } } }".to_string(),
-        ];
-        let cache = prepopulated_cache(queries.iter()).await;
+        async {
+            let queries = [
+                "{ me { username } }".to_string(),
+                "{ topProducts { upc } }".to_string(),
+                "{ me { reviews { body } } }".to_string(),
+            ];
+            let cache = prepopulated_cache(queries.iter()).await;
 
-        let requests = super::queries_to_warm_up(
-            Some(cache),
-            None,
-            None,
-            &PersistedQueriesPrewarmQueryPlanCache::default(),
-        )
+            let requests = super::queries_to_warm_up(
+                Some(cache),
+                None,
+                None,
+                &PersistedQueriesPrewarmQueryPlanCache::default(),
+            )
+            .await;
+            assert_eq!(requests.len(), 1, "warm up 1/3rd of the queries by default");
+
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations.expected",
+                1,
+                "source" = "cache"
+            );
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations.expected",
+                0,
+                "source" = "persisted_query"
+            );
+        }
+        .with_metrics()
         .await;
-        assert_eq!(requests.len(), 1, "warm up 1/3rd of the queries by default");
     }
 
     #[tokio::test]
     async fn warm_up_from_previous_cache_with_custom_max() {
-        let queries = [
-            "{ me { username } }".to_string(),
-            "{ topProducts { upc } }".to_string(),
-            "{ me { reviews { body } } }".to_string(),
-        ];
-        let cache = prepopulated_cache(queries.iter()).await;
+        async {
+            let queries = [
+                "{ me { username } }".to_string(),
+                "{ topProducts { upc } }".to_string(),
+                "{ me { reviews { body } } }".to_string(),
+            ];
+            let cache = prepopulated_cache(queries.iter()).await;
 
-        let requests = super::queries_to_warm_up(
-            Some(cache),
-            Some(2),
-            None,
-            &PersistedQueriesPrewarmQueryPlanCache::default(),
-        )
+            let requests = super::queries_to_warm_up(
+                Some(cache),
+                Some(2),
+                None,
+                &PersistedQueriesPrewarmQueryPlanCache::default(),
+            )
+            .await;
+            assert_eq!(requests.len(), 2, "warm up the max # of queries from cache");
+
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations.expected",
+                2,
+                "source" = "cache"
+            );
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations.expected",
+                0,
+                "source" = "persisted_query"
+            );
+        }
+        .with_metrics()
         .await;
-        assert_eq!(requests.len(), 2, "warm up the max # of queries from cache");
     }
 
     #[tokio::test]
     async fn warmup_query_parser_layer() {
-        // The functionality of this layer is heavily intertwined with the CachingQueryPlanner,
-        // so we are just asserting some simple things here (such as tower compatibility). The
-        // really effective tests are integration tests.
+        async {
+            // The functionality of this layer is heavily intertwined with the CachingQueryPlanner,
+            // so we are just asserting some simple things here (such as tower compatibility). The
+            // really effective tests are integration tests.
 
-        let (mock, mut handle) = tower_test::mock::pair::<CachingRequest, ()>();
-        let driver = tokio::task::spawn(async move {
-            let (request, responder) = handle.next_request().await.unwrap();
-            request.context.extensions().with_lock(|lock| {
-                assert!(
-                    lock.get::<ParsedDocument>().is_some(),
-                    "should have inserted ParsedDocument"
-                );
+            let (mock, mut handle) = tower_test::mock::pair::<CachingRequest, ()>();
+            let driver = tokio::task::spawn(async move {
+                let (request, responder) = handle.next_request().await.unwrap();
+                request.context.extensions().with_lock(|lock| {
+                    assert!(
+                        lock.get::<ParsedDocument>().is_some(),
+                        "should have inserted ParsedDocument"
+                    );
+                });
+                responder.send_response(());
             });
-            responder.send_response(());
-        });
 
-        let configuration = Arc::new(Configuration::default());
-        let schema = Arc::new(
-            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
-        );
+            let configuration = Arc::new(Configuration::default());
+            let schema = Arc::new(
+                Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
+            );
 
-        let query_analysis = Arc::new(QueryAnalysis::new(schema, configuration).await);
+            let query_parsing_service = query_parsing::query_parsing_service(schema, configuration);
 
-        let mut service = ServiceBuilder::new()
-            .layer(WarmupParseQueryLayer::new(query_analysis))
-            .map_err(|err| {
-                panic!(
-                    "we have to cast the error because these services do not use BoxError: {err}"
-                )
-            })
-            .service(mock);
+            let mut service = ServiceBuilder::new()
+                .layer(WarmupParseQueryLayer::new(query_parsing_service))
+                .map_err(downcast_planning_mock_err)
+                .service(mock);
 
-        let _response: () = service
-            .ready()
-            .await
-            .unwrap()
-            .call(WarmupRequest {
-                query: "{ me { username } }".to_string(),
-                operation_name: None,
-                metadata: None,
-                plan_options: None,
-                source: WarmUpSource::Cache,
-            })
-            .await
-            .unwrap();
+            let _response: () = service
+                .ready()
+                .await
+                .unwrap()
+                .call(WarmupRequest {
+                    query: "{ me { username } }".to_string(),
+                    operation_name: None,
+                    metadata: None,
+                    plan_options: None,
+                    source: WarmUpSource::Cache,
+                })
+                .await
+                .unwrap();
 
-        crate::plugin::test::await_mock_driver(driver).await;
-    }
+            crate::plugin::test::await_mock_driver(driver).await;
 
-    #[test]
-    fn test_record_warmup_expected() {
-        super::record_warmup_expected(5, WarmUpSource::Cache);
-        assert_counter!(
-            "apollo.router.query_planning.warmup.operations.expected",
-            5,
-            "source" = "cache"
-        );
-
-        // Emitted even when zero, so the series always exists.
-        super::record_warmup_expected(0, WarmUpSource::PersistedQuery);
-        assert_counter!(
-            "apollo.router.query_planning.warmup.operations.expected",
-            0,
-            "source" = "persisted_query"
-        );
-    }
-
-    #[test]
-    fn test_record_warmup_outcome() {
-        super::record_warmup_outcome(WarmUpSource::Cache, QueryPlanningOutcome::Success);
-        assert_counter!(
-            "apollo.router.query_planning.warmup.operations",
-            1,
-            "outcome" = "success",
-            "source" = "cache"
-        );
-
-        super::record_warmup_outcome(WarmUpSource::PersistedQuery, QueryPlanningOutcome::Success);
-        assert_counter!(
-            "apollo.router.query_planning.warmup.operations",
-            1,
-            "outcome" = "success",
-            "source" = "persisted_query"
-        );
-    }
-
-    #[test]
-    fn test_record_warmup_backpressure() {
-        super::record_warmup_backpressure(WarmUpSource::Cache, super::WarmUpPhase::Parse);
-        assert_counter!(
-            "apollo.router.query_planning.warmup.backpressure",
-            1,
-            "source" = "cache",
-            "phase" = "parse"
-        );
-
-        super::record_warmup_backpressure(WarmUpSource::PersistedQuery, super::WarmUpPhase::Plan);
-        assert_counter!(
-            "apollo.router.query_planning.warmup.backpressure",
-            1,
-            "source" = "persisted_query",
-            "phase" = "plan"
-        );
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations",
+                1,
+                "outcome" = "success",
+                "source" = "cache"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
@@ -602,15 +632,11 @@ mod tests {
                 Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
             );
 
-            let query_analysis = Arc::new(QueryAnalysis::new(schema, configuration).await);
+            let query_parsing_service = query_parsing::query_parsing_service(schema, configuration);
 
             let mut service = ServiceBuilder::new()
-                .layer(WarmupParseQueryLayer::new(query_analysis))
-                .map_err(|err| {
-                    panic!(
-                        "we have to cast the error because these services do not use BoxError: {err}"
-                    )
-                })
+                .layer(WarmupParseQueryLayer::new(query_parsing_service))
+                .map_err(downcast_planning_mock_err)
                 .service(mock);
 
             let _response: () = service
@@ -634,6 +660,112 @@ mod tests {
                 1,
                 "outcome" = "success",
                 "source" = "persisted_query"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn warmup_records_parsing_backpressure_errors() {
+        async {
+            let (mock, handle) = tower_test::mock::pair::<CachingRequest, ()>();
+
+            let (query_parsing_mock, mut query_parsing_handle) =
+                tower_test::mock::pair::<query_parsing::Request, query_parsing::ParsedDocument>();
+            let query_parsing_driver = tokio::task::spawn(async move {
+                let (_request, responder) = query_parsing_handle.next_request().await.unwrap();
+                responder.send_error(MaybeBackPressureError::TemporaryError(
+                    crate::compute_job::ComputeBackPressureError,
+                ) as query_parsing::ServiceError);
+            });
+
+            let query_parsing_service = ServiceBuilder::new()
+                .map_err(downcast_parsing_mock_err)
+                .service(query_parsing_mock)
+                .boxed_clone();
+
+            let mut service = ServiceBuilder::new()
+                .layer(WarmupParseQueryLayer::new(query_parsing_service))
+                .map_err(downcast_planning_mock_err)
+                .service(mock);
+
+            let result = service
+                .ready()
+                .await
+                .unwrap()
+                .call(WarmupRequest {
+                    query: "{ me { username } }".to_string(),
+                    operation_name: None,
+                    metadata: None,
+                    plan_options: None,
+                    source: WarmUpSource::PersistedQuery,
+                })
+                .await;
+            if !matches!(&result, Err(CacheResolverError::Backpressure(_))) {
+                panic!("expected backpressure error, got {result:?}");
+            }
+
+            crate::plugin::test::assert_no_mock_calls(handle).await;
+            crate::plugin::test::await_mock_driver(query_parsing_driver).await;
+
+            assert_counter!(
+                "apollo.router.query_planning.warmup.backpressure",
+                1,
+                "source" = "persisted_query",
+                "phase" = "parse"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn warmup_records_planning_backpressure_errors() {
+        async {
+            let (mock, mut handle) = tower_test::mock::pair::<CachingRequest, ()>();
+            let driver = tokio::task::spawn(async move {
+                let (_request, responder) = handle.next_request().await.unwrap();
+                responder.send_error(CacheResolverError::Backpressure(
+                    crate::compute_job::ComputeBackPressureError,
+                ));
+            });
+
+            let configuration = Arc::new(Configuration::default());
+            let schema = Arc::new(
+                Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
+            );
+
+            let query_parsing_service = query_parsing::query_parsing_service(schema, configuration);
+
+            let mut service = ServiceBuilder::new()
+                .layer(WarmupParseQueryLayer::new(query_parsing_service))
+                .map_err(downcast_planning_mock_err)
+                .service(mock);
+
+            let result = service
+                .ready()
+                .await
+                .unwrap()
+                .call(WarmupRequest {
+                    query: "{ me { username } }".to_string(),
+                    operation_name: None,
+                    metadata: None,
+                    plan_options: None,
+                    source: WarmUpSource::PersistedQuery,
+                })
+                .await;
+            if !matches!(&result, Err(CacheResolverError::Backpressure(_))) {
+                panic!("expected backpressure error, got {result:?}");
+            }
+
+            crate::plugin::test::await_mock_driver(driver).await;
+
+            assert_counter!(
+                "apollo.router.query_planning.warmup.backpressure",
+                1,
+                "source" = "persisted_query",
+                "phase" = "plan"
             );
         }
         .with_metrics()

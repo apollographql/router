@@ -18,7 +18,7 @@ use serde::Serialize;
 use tower::BoxError;
 
 use crate::json_ext::Value;
-use crate::services::layers::query_analysis::ParsedDocument;
+use crate::services::query_parsing::ParsedDocument;
 
 pub(crate) mod extensions;
 

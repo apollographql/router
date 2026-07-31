@@ -48,6 +48,7 @@ pub type Error = hyper::Error;
 
 mod batching;
 pub mod body;
+pub(crate) mod parse_query;
 pub(crate) mod pipeline_handle;
 pub(crate) mod service;
 #[cfg(test)]
