@@ -109,7 +109,6 @@ impl Monitor {
     pub async fn wait_for(&self, timeout: Duration, predicate: impl Fn(&MonitorOutput) -> bool) {
         let start = Instant::now();
         while start.elapsed() < timeout {
-
             if predicate(&self.snapshot().await) {
                 return;
             }
