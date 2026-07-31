@@ -604,7 +604,8 @@ impl PluggableSupergraphServiceBuilder {
                 )),
             )),
             Arc::new(configuration.experimental_hoist_orphan_errors.clone()),
-        );
+        )
+        .with_event_configuration(configuration.events.clone());
 
         let apollo_telemetry_conf = self
             .plugins

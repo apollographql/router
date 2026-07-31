@@ -20,6 +20,7 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::plugins::subscription::event::EventRuntime;
 use crate::plugins::subscription::fetch_service_handle_subscription;
 use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::SubgraphSchemas;
@@ -39,6 +40,7 @@ pub(crate) struct FetchService {
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>, // TODO: add subscription support to FetchService
+    pub(crate) event_runtime: Arc<EventRuntime>,
     pub(crate) connector_service_factory: Arc<ConnectorServiceFactory>,
     pub(crate) hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
 }
@@ -54,12 +56,21 @@ impl FetchService {
     ) -> Self {
         Self {
             subgraph_service_factory,
+            event_runtime: Arc::new(EventRuntime::new(schema.clone(), Default::default())),
             schema,
             subgraph_schemas,
             _subscription_config: subscription_config,
             connector_service_factory,
             hoist_orphan_errors,
         }
+    }
+
+    pub(crate) fn with_event_configuration(
+        mut self,
+        configuration: crate::configuration::events::EventsConfiguration,
+    ) -> Self {
+        self.event_runtime = Arc::new(EventRuntime::new(self.schema.clone(), configuration));
+        self
     }
 }
 
@@ -78,6 +89,7 @@ impl tower::Service<Request> for FetchService {
             Request::Subscription(request) => fetch_service_handle_subscription(
                 self.schema.clone(),
                 self.subgraph_service_factory.clone(),
+                self.event_runtime.clone(),
                 request,
             ),
         }

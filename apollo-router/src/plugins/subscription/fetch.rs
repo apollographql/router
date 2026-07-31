@@ -16,6 +16,7 @@ use crate::error::Error;
 use crate::http_ext;
 use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
 use crate::plugins::subscription::SubscriptionTaskParams;
+use crate::plugins::subscription::event::EventRuntime;
 use crate::query_planner::OperationKind;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
 use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
@@ -38,6 +39,7 @@ use crate::spec::Schema;
 pub(crate) fn fetch_service_handle_subscription(
     schema: Arc<Schema>,
     subgraph_service_factory: Arc<SubgraphServiceFactory>,
+    event_runtime: Arc<EventRuntime>,
     request: SubscriptionRequest,
 ) -> Instrumented<BoxFuture<'static, Result<FetchResponse, BoxError>>> {
     let SubscriptionRequest {
@@ -58,14 +60,26 @@ pub(crate) fn fetch_service_handle_subscription(
     );
 
     // Subscriptions are not supported for connectors, so they always go to the subgraph service
-    subscription_with_subgraph_service(schema, subgraph_service_factory, request).instrument(
-        tracing::info_span!(
-            SUBSCRIBE_SPAN_NAME,
-            "otel.kind" = "INTERNAL",
-            "apollo.subgraph.name" = service_name.as_ref(),
-            "apollo_private.sent_time_offset" = fetch_time_offset
-        ),
-    )
+    if event_runtime.is_event_subscription(&request.subscription_node) {
+        event_runtime
+            .subscribe(request)
+            .instrument(tracing::info_span!(
+                SUBSCRIBE_SPAN_NAME,
+                "otel.kind" = "INTERNAL",
+                "apollo.subgraph.name" = service_name.as_ref(),
+                "apollo_private.sent_time_offset" = fetch_time_offset,
+                "apollo.subscription.source" = "event_stream"
+            ))
+    } else {
+        subscription_with_subgraph_service(schema, subgraph_service_factory, request).instrument(
+            tracing::info_span!(
+                SUBSCRIBE_SPAN_NAME,
+                "otel.kind" = "INTERNAL",
+                "apollo.subgraph.name" = service_name.as_ref(),
+                "apollo_private.sent_time_offset" = fetch_time_offset
+            ),
+        )
+    }
 }
 
 fn subscription_with_subgraph_service(

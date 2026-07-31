@@ -28,6 +28,7 @@ use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 
 mod callback;
+pub(crate) mod event;
 mod execution;
 mod fetch;
 pub(crate) mod notification;
