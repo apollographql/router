@@ -40,11 +40,10 @@ Usage metrics are still using the Apollo Usage Reporting protocol.
 <a id="configuring-usage-reporting-via-otlp"></a>
 #### Trace reporting via OTLP
 
-The router always exports traces to GraphOS via OTLP.
+The router always exports traces to GraphOS via OTLP. Two samplers control how many traces are sent:
 
-In router v1.x and v2.x, traces could also be sent via the legacy Apollo Usage Reporting protocol, with the split between the two transports controlled by the `otlp_tracing_sampler` option (`experimental_otlp_tracing_sampler` in v1.49-1.60). In router v3.x, the legacy trace transport and the `otlp_tracing_sampler` option have been removed.
-
-To control how many traces are sent to GraphOS, use the common tracing sampler or the Apollo exporter sampler:
+- `telemetry.exporters.tracing.common.sampler` sets the fraction of all requests that are traced at all.
+- `telemetry.apollo.sampler` sets the fraction of all requests whose traces reach GraphOS. This is an absolute fraction of all traffic, so it must not exceed the common sampler.
 
 ```yaml title="router.yaml"
 telemetry:
