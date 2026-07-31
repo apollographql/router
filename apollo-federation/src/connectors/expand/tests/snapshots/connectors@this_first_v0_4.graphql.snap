@@ -157,6 +157,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/this_fi
                 ),
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.v1 http: GET /widgets",
         ),
@@ -405,6 +406,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/this_fi
                 "Tag",
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.v1 http: GET /tags",
         ),
@@ -615,6 +617,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/this_fi
             connect_is_success: None,
         },
         output_type: None,
+        methods: None,
         label: Label(
             "connectors.v1 http: GET /widgets/{$this.id}",
         ),
