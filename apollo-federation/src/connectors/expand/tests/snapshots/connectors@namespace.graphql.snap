@@ -151,6 +151,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/namespa
                 "User",
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.v1 http: GET /me",
         ),
@@ -230,6 +231,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/namespa
                 "UserMutations",
             ),
         ),
+        methods: None,
         label: Label(
             "connectors. mappingOnly",
         ),
@@ -410,6 +412,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/namespa
                 "String",
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.v1 http: POST /api/users/{$args.id}",
         ),

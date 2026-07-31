@@ -209,6 +209,7 @@ expression: "&connectors"
                 ),
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.json http: GET /posts",
         ),
@@ -492,6 +493,7 @@ expression: "&connectors"
             connect_is_success: None,
         },
         output_type: None,
+        methods: None,
         label: Label(
             "[BATCH] connectors.json http: POST /posts",
         ),

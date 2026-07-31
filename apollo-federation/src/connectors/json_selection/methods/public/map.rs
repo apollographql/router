@@ -2,6 +2,7 @@ use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
 
+use crate::connectors::json_selection::ApplyContext;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
@@ -11,7 +12,6 @@ use crate::connectors::json_selection::apply_to::ApplyToResultMethods;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
-use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(MapMethod, map_method, map_shape);
@@ -33,8 +33,9 @@ fn map_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
+    let spec = context.spec();
     let Some(args) = method_args else {
         return (
             None,
@@ -65,7 +66,7 @@ fn map_method(
         for (i, element) in array.iter().enumerate() {
             let input_path = input_path.append(JSON::Number(i.into()));
             let (applied_opt, arg_errors) =
-                first_arg.apply_to_path(element, vars, &input_path, spec);
+                first_arg.apply_to_path(element, vars, &input_path, context);
             errors.extend(arg_errors);
             output.insert(i, applied_opt.unwrap_or(JSON::Null));
         }
@@ -75,7 +76,7 @@ fn map_method(
         // Return a singleton array wrapping the value of applying the
         // ->map method the non-array input data.
         first_arg
-            .apply_to_path(data, vars, input_path, spec)
+            .apply_to_path(data, vars, input_path, context)
             .and_then_collecting_errors(|value| {
                 (Some(JSON::Array(vec![value.clone()])), Vec::new())
             })
