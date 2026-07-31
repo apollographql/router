@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::collections::HashMap;
@@ -24,6 +26,7 @@ use crate::connectors::ApplyToErrorKind;
 use crate::connectors::ConnectSpec;
 use crate::connectors::Connector;
 use crate::connectors::JSONSelection;
+use crate::connectors::MethodRegistry;
 use crate::connectors::ProblemLocation;
 use crate::connectors::runtime::errors::RuntimeError;
 use crate::connectors::runtime::inputs::ContextReader;
@@ -125,6 +128,7 @@ pub fn handle_raw_response(
         data,
         parts,
         &inputs,
+        connector.methods.clone(),
         warnings,
     );
     if success {
@@ -359,12 +363,14 @@ fn is_success(
     data: &Value,
     parts: &Parts,
     inputs: &IndexMap<String, Value>,
+    methods: Option<Arc<MethodRegistry>>,
     mut warnings: Vec<Problem>,
 ) -> (bool, Vec<Problem>) {
     let Some(is_success_selection) = is_success_selection else {
         return (parts.status.is_success(), warnings);
     };
-    let (res, apply_to_errors) = is_success_selection.apply_with_vars(data, inputs);
+    let (res, apply_to_errors) =
+        is_success_selection.apply_with_vars_and_methods(data, inputs, methods);
     warnings.extend(aggregate_apply_to_errors(
         apply_to_errors,
         ProblemLocation::IsSuccess,
@@ -529,7 +535,9 @@ pub(super) fn map_response(
     inputs: IndexMap<String, Value>,
     mut warnings: Vec<Problem>,
 ) -> MappedResponse {
-    let (res, apply_to_errors) = key.selection().apply_with_vars(data, &inputs);
+    let (res, apply_to_errors) =
+        key.selection()
+            .apply_with_vars_and_methods(data, &inputs, connector.methods.clone());
 
     // Declared errors are the author's, addressed to the client; diagnostics
     // are the language's, addressed to the author. The split decides what
@@ -590,7 +598,8 @@ pub(super) fn map_error(
 ) -> MappedResponse {
     // Do we have an error message mapping set for this connector?
     let message = if let Some(message_selection) = &connector.error_settings.message {
-        let (res, apply_to_errors) = message_selection.apply_with_vars(data, &inputs);
+        let (res, apply_to_errors) =
+            message_selection.apply_with_vars_and_methods(data, &inputs, connector.methods.clone());
         warnings.extend(aggregate_apply_to_errors(
             apply_to_errors,
             ProblemLocation::ErrorsMessage,
@@ -625,7 +634,11 @@ pub(super) fn map_error(
     // can't make sense of it in the if/else due to how the builder is constructed.
     let mut extension_code = "CONNECTOR_FETCH".to_string();
     if let Some(extensions_selection) = &connector.error_settings.source_extensions {
-        let (res, apply_to_errors) = extensions_selection.apply_with_vars(data, &inputs);
+        let (res, apply_to_errors) = extensions_selection.apply_with_vars_and_methods(
+            data,
+            &inputs,
+            connector.methods.clone(),
+        );
         warnings.extend(aggregate_apply_to_errors(
             apply_to_errors,
             ProblemLocation::SourceErrorsExtensions,
@@ -649,7 +662,11 @@ pub(super) fn map_error(
     }
 
     if let Some(extensions_selection) = &connector.error_settings.connect_extensions {
-        let (res, apply_to_errors) = extensions_selection.apply_with_vars(data, &inputs);
+        let (res, apply_to_errors) = extensions_selection.apply_with_vars_and_methods(
+            data,
+            &inputs,
+            connector.methods.clone(),
+        );
         warnings.extend(aggregate_apply_to_errors(
             apply_to_errors,
             ProblemLocation::ConnectErrorsExtensions,
@@ -1107,8 +1124,14 @@ mod tests {
         let data = json!({"status": "ok"});
         let parts = make_parts(200);
 
-        let (success, problems) =
-            is_success(Some(&selection), &data, &parts, &Default::default(), vec![]);
+        let (success, problems) = is_success(
+            Some(&selection),
+            &data,
+            &parts,
+            &Default::default(),
+            None,
+            vec![],
+        );
 
         assert!(!success, "non-boolean isSuccess should fail the request");
         assert_eq!(problems.len(), 1, "expected one problem, got: {problems:?}");
@@ -1142,6 +1165,7 @@ mod tests {
                 &data,
                 &make_parts(200),
                 &Default::default(),
+                None,
                 vec![],
             );
 
@@ -1300,6 +1324,7 @@ mod tests {
             batch_settings: None,
             error_settings: ConnectorErrorsSettings::default(),
             output_type,
+            methods: None,
             label: "test".into(),
         }
     }
@@ -1819,5 +1844,64 @@ mod tests {
             panic!("expected Error variant");
         };
         assert_eq!(error.message, "original error");
+    }
+
+    /// End-to-end runtime: a `Connector` carrying a `methods` registry resolves a
+    /// `$->Def` selection through `map_response` (exercises the
+    /// `Connector.methods` → `apply_with_vars_and_methods` → dispatch threading).
+    #[test]
+    fn map_response_resolves_custom_def_from_connector_registry() {
+        use apollo_compiler::name;
+
+        use super::map_response;
+        use crate::connectors::CompiledMethod;
+        use crate::connectors::ConnectId;
+        use crate::connectors::ConnectSpec;
+        use crate::connectors::Connector;
+        use crate::connectors::MethodRegistry;
+
+        let registry = Arc::new(
+            MethodRegistry::build([
+                CompiledMethod::parse("User", "id name", ConnectSpec::V0_5).unwrap()
+            ])
+            .unwrap(),
+        );
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_5,
+            schema_subtypes_map: Default::default(),
+            methods: Some(registry),
+            id: ConnectId::new("subgraph".into(), None, name!(Query), name!(user), None, 0),
+            transport: None,
+            selection: JSONSelection::parse("$").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            output_type: None,
+            label: "test".into(),
+        };
+
+        let key = ResponseKey::RootField {
+            name: "user".to_string(),
+            inputs: RequestInputs::default(),
+            selection: Arc::new(
+                JSONSelection::parse_with_spec("$->User", ConnectSpec::V0_5).unwrap(),
+            ),
+        };
+        let data = json!({ "id": 1, "name": "Alice", "extra": true });
+
+        let result = map_response(&connector, &data, key, Default::default(), vec![]);
+        let MappedResponse::Data { data, problems, .. } = result else {
+            panic!("expected Data variant");
+        };
+        assert!(problems.is_empty(), "unexpected problems: {problems:?}");
+        // The `User` def resolves: only id + name, `extra` dropped.
+        assert_eq!(data, json!({ "id": 1, "name": "Alice" }));
     }
 }

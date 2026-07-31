@@ -108,6 +108,7 @@ impl Request {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
+            methods: None,
             id: ConnectId::new(
                 "test_subgraph".into(),
                 Some(SourceName::cast("test_sourcename")),

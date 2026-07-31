@@ -9,6 +9,7 @@ use itertools::Itertools;
 
 use super::errors::ERRORS_ARGUMENT_NAME;
 use super::errors::ErrorsArguments;
+use crate::connectors::CompiledMethod;
 use crate::connectors::ConnectSpec;
 use crate::connectors::Header;
 use crate::connectors::JSONSelection;
@@ -21,6 +22,8 @@ use crate::connectors::spec::connect_spec_from_schema;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::http::PATH_ARGUMENT_NAME;
 use crate::connectors::spec::http::QUERY_PARAMS_ARGUMENT_NAME;
+use crate::connectors::spec::methods::METHODS_ARGUMENT_NAME;
+use crate::connectors::spec::methods::compile_methods_argument;
 use crate::connectors::string_template;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
@@ -60,6 +63,17 @@ pub(crate) struct SourceDirectiveArguments {
 
     /// Conditional statement to override the default success criteria for responses
     pub(crate) is_success: Option<JSONSelection>,
+
+    /// Reusable custom `->` method definitions declared via `@source(methods:)`
+    /// (connect/v0.5+). Each entry is compiled from a `Name: "body"` pair in
+    /// the `methods` object literal. These are merged with every other `@source`'s
+    /// and `@connect`'s methods into one subgraph-wide registry; per-source they
+    /// are just the locally declared subset. See
+    /// [`crate::connectors::spec::methods`] for why declaration site is
+    /// colocation only.
+    // Consumed by runtime dispatch / extraction (step 2).
+    #[allow(dead_code)]
+    pub(crate) methods: Vec<CompiledMethod>,
 }
 
 impl SourceDirectiveArguments {
@@ -80,6 +94,7 @@ impl SourceDirectiveArguments {
         let mut http = None;
         let mut errors = None;
         let mut is_success = None;
+        let mut methods = Vec::new();
         for arg in args {
             let arg_name = arg.name.as_str();
 
@@ -112,6 +127,8 @@ impl SourceDirectiveArguments {
                     JSONSelection::parse_with_spec(selection_value, spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
+            } else if arg_name == METHODS_ARGUMENT_NAME.as_str() {
+                methods.extend(compile_methods_argument(&arg.value, directive_name, spec)?);
             }
         }
 
@@ -124,6 +141,7 @@ impl SourceDirectiveArguments {
             })?,
             errors,
             is_success,
+            methods,
         })
     }
 }
@@ -279,7 +297,7 @@ mod tests {
             .get(subgraph.schema.schema())
             .unwrap();
 
-        insta::assert_snapshot!(actual_definition.to_string(), @"directive @source(name: String!, http: connect__SourceHTTP!, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA");
+        insta::assert_snapshot!(actual_definition.to_string(), @"directive @source(name: String!, http: connect__SourceHTTP!, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, methods: connect__Methods) repeatable on SCHEMA");
 
         insta::assert_debug_snapshot!(
             subgraph.schema
