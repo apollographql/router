@@ -55,8 +55,9 @@ const STATE_CHANGE: &str = "state change";
 /// reload, but without a cap a relentless stream of ready events could defer the
 /// reload indefinitely and starve the router of any new state. Hitting the cap
 /// forces a build of the newest-merged-so-far target and resets the count, so we
-/// always make forward progress. Realistic bursts are far smaller than this.
-const MAX_COALESCED_RELOADS: usize = 100;
+/// always make forward progress. More than this many rapid same-kind publishes
+/// queued at once is unusual and likely points to a problem upstream.
+const MAX_COALESCED_RELOADS: usize = 10;
 
 #[derive(Default, Clone)]
 pub(crate) struct ListenAddresses {
@@ -946,10 +947,32 @@ where
 
                 event = messages.next() => {
                     let Some(event) = event else { break };
-                    let current_is_input = is_input_event(&event);
+
+                    // Consider whether to skip this event in favor of the next one. If another event
+                    // of the *same kind* is already queued right behind it, skip the reload —
+                    // the next event will supersede this target.
+                    //
+                    // We only coalesce same-kind updates so that, say, a failing license or config
+                    // publish queued alongside a schema publish can't prevent the
+                    // schema from being applied (they build separately).
+                    if can_be_superseded(&event) && consecutive_coalesced < MAX_COALESCED_RELOADS {
+                        let next_event = Pin::new(&mut messages).peek().now_or_never();
+                        if let Some(Some(next_event)) = next_event
+                            && std::mem::discriminant(&event) == std::mem::discriminant(next_event) {
+                            // A queued input supersedes this target; skip building it.
+                            consecutive_coalesced += 1;
+                            u64_counter_with_unit!(
+                                "apollo.router.state.reload.coalesced",
+                                "Number of intermediate reload targets skipped by coalescing queued updates",
+                                "{update}",
+                                1u64
+                            );
+                            continue;
+                        }
+                    }
+
                     // Captured before `event` is consumed below so we can compare it
                     // against the next queued event's variant when deciding to coalesce.
-                    let current_kind = std::mem::discriminant(&event);
                     let event_name = event.to_string();
                     let previous_state = format!("{state:?}");
 
@@ -971,54 +994,22 @@ where
                         Shutdown => state.shutdown().await,
                     };
 
-                    // Coalesce: if this was an input event and another update of the
-                    // *same kind* is already queued right behind it, skip the reload —
-                    // the next event will supersede this target. We only coalesce
-                    // same-kind updates so that, say, a failing license or config
-                    // publish queued alongside a schema publish can't prevent the
-                    // schema from being applied (they build separately). A different
-                    // kind, a control event (Shutdown / NoMore*), or an empty queue is
-                    // always a reload boundary, and we force a build once we've skipped
-                    // MAX_COALESCED_RELOADS in a row so a relentless burst can't defer
-                    // the reload forever.
-                    let coalesce_with_next = current_is_input
-                        && consecutive_coalesced < MAX_COALESCED_RELOADS
-                        && matches!(
-                            std::pin::Pin::new(&mut messages).peek().now_or_never(),
-                            Some(Some(next)) if std::mem::discriminant(next) == current_kind
-                        );
-
-                    if coalesce_with_next {
-                        // A queued input supersedes this target; skip building it.
-                        consecutive_coalesced += 1;
-                        u64_counter_with_unit!(
-                            "apollo.router.state.reload.coalesced",
-                            "Number of intermediate reload targets skipped by coalescing queued updates",
-                            "{update}",
-                            1u64
-                        );
-                    } else {
-                        state = state.attempt_reload(&mut self).await;
-                        consecutive_coalesced = 0;
-                    }
+                    state = state.attempt_reload(&mut self).await;
+                    consecutive_coalesced = 0;
 
                     self.record_transition(event_name, previous_state, &state);
-
-                    // If we've errored then exit even if there are more messages.
-                    if matches!(&state, Stopped | Errored(_)) {
-                        break;
-                    }
                 }
                 _ = retry_future => {
                     let previous_state = format!("{state:?}");
                     state = state.attempt_reload(&mut self).await;
                     consecutive_coalesced = 0;
                     self.record_transition("retry".to_string(), previous_state, &state);
-                    if matches!(&state, Stopped | Errored(_)) {
-                        break;
-                    }
                 }
-            };
+            }
+
+            if matches!(&state, Stopped | Errored(_)) {
+                break;
+            }
         }
         tracing::info!("stopped");
 
@@ -1032,13 +1023,14 @@ where
     }
 }
 
-/// Whether an event is an "input" update (as opposed to a control event like
-/// `Shutdown` or `NoMore*`). Only consecutive input events are coalesced into a
-/// single reload; control events are always reload boundaries.
-fn is_input_event(event: &Event) -> bool {
+/// Whether this event's reload target can be superseded by a later update of the
+/// same kind — i.e. a schema, configuration, or license publish. Forced reloads
+/// (`Reload` / `RhaiReload`) and control events (`Shutdown` / `NoMore*`) are never
+/// coalesced away.
+fn can_be_superseded(event: &Event) -> bool {
     matches!(
         event,
-        UpdateConfiguration(_) | UpdateSchema(_) | UpdateLicense(_) | Reload | RhaiReload
+        UpdateConfiguration(_) | UpdateSchema(_) | UpdateLicense(_)
     )
 }
 
