@@ -728,8 +728,8 @@ mod test {
     use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::execution;
-    use crate::services::layers::query_analysis::ParsedDocument;
-    use crate::services::layers::query_analysis::ParsedDocumentInner;
+    use crate::services::query_parsing::ParsedDocument;
+    use crate::services::query_parsing::ParsedDocumentInner;
     use crate::services::subgraph;
 
     #[tokio::test]

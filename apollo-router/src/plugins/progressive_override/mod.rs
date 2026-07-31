@@ -17,7 +17,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use self::layers::query_analysis::ParsedDocument;
+use self::query_parsing::ParsedDocument;
 use self::visitor::OverrideLabelVisitor;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
