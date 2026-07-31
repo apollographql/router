@@ -33,7 +33,7 @@ use crate::json_ext::Path;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::authentication;
 use crate::query_planner::FilteredQuery;
 use crate::query_planner::QueryKey;
 use crate::services::execution;
@@ -268,18 +268,9 @@ impl AuthorizationPlugin {
     }
 
     pub(crate) fn update_cache_key(context: &Context) {
-        let is_authenticated = context.contains_key(APOLLO_AUTHENTICATION_JWT_CLAIMS);
+        let is_authenticated = authentication::has_authenticated_jwt(context);
 
-        let request_scopes = context
-            .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
-            .and_then(|value| {
-                value.as_object().and_then(|object| {
-                    object.get("scope").and_then(|v| {
-                        v.as_str()
-                            .map(|s| s.split(' ').map(|s| s.to_string()).collect::<HashSet<_>>())
-                    })
-                })
-            });
+        let request_scopes = authentication::jwt_scopes(context);
         let query_scopes = context.get_json_value(REQUIRED_SCOPES_KEY).and_then(|v| {
             v.as_array().map(|v| {
                 v.iter()
@@ -560,6 +551,7 @@ impl Plugin for AuthorizationPlugin {
     ) -> supergraph::BoxCloneService {
         if self.require_authentication {
             ServiceBuilder::new()
+<<<<<<< HEAD
                 .checkpoint_async(move |request: supergraph::Request| async move {
                     // XXX(@goto-bus-stop): Why are we doing this here, as opposed to the
                     // authentication plugin, which manages this context value?
@@ -567,6 +559,13 @@ impl Plugin for AuthorizationPlugin {
                         .context
                         .contains_key(APOLLO_AUTHENTICATION_JWT_CLAIMS)
                     {
+=======
+                .checkpoint(move |request: supergraph::Request| {
+                    // Whether to reject unauthenticated requests is an authorization policy,
+                    // same as `@authenticated`/`@requiresScopes`/`@policy` — authentication only
+                    // verifies tokens, it doesn't decide this.
+                    if authentication::has_authenticated_jwt(&request.context) {
+>>>>>>> origin/dev
                         Ok(ControlFlow::Continue(request))
                     } else {
                         tracing::error!("rejecting unauthenticated request");
