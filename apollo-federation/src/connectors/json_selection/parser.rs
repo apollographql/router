@@ -11,6 +11,7 @@ use nom::branch::alt;
 use nom::character::complete::char;
 use nom::character::complete::one_of;
 use nom::combinator::all_consuming;
+use nom::combinator::cut;
 use nom::combinator::map;
 use nom::combinator::opt;
 use nom::combinator::recognize;
@@ -258,8 +259,64 @@ impl JSONSelection {
         spec: ConnectSpec,
     ) -> Result<Self, JSONSelectionParseError> {
         let span = new_span_with_spec(input, spec);
+        Self::finish_parse(input, spec, JSONSelection::parse_span(span))
+    }
 
-        match JSONSelection::parse_span(span) {
+    /// Parse a `@source(methods:)` body: an optional `($a, $b) =>` parameter
+    /// header followed by a complete JSONSelection. Returns the parameter
+    /// names (without their leading `$`) and the parsed body.
+    ///
+    /// The parameters are seeded as local variables before the body is parsed,
+    /// so `$a`/`$b` references inside the body resolve as `KnownVariable::Local`
+    /// rather than unknown externals. The header is stripped here, before the
+    /// JSONSelection grammar runs, so `=>` never enters the expression grammar.
+    pub(crate) fn parse_def_with_spec(
+        input: &str,
+        spec: ConnectSpec,
+    ) -> Result<(Vec<String>, Self), JSONSelectionParseError> {
+        match parse_param_header(new_span_with_spec(input, spec)) {
+            // A leading `(` commits to header parsing (`parse_param_header` uses
+            // `cut`), so a malformed header surfaces as `Err::Failure` rather
+            // than being silently reparsed as a body.
+            Ok((rest, params)) => {
+                // `params` are bare names (no `$`); the parser keys local
+                // variables by their full `$`-prefixed spelling (e.g. `$n`), so
+                // seed the body span with that form.
+                let names: Vec<String> = params.iter().map(|p| p.as_ref().clone()).collect();
+                let local_vars: Vec<String> = names.iter().map(|n| format!("${n}")).collect();
+                let body = rest.map_extra(|extra| SpanExtra {
+                    local_vars,
+                    ..extra
+                });
+                let selection = Self::finish_parse(input, spec, JSONSelection::parse_span(body))?;
+                Ok((names, selection))
+            }
+            // No header: the entire input is the body.
+            Err(nom::Err::Error(_)) => {
+                let body = new_span_with_spec(input, spec);
+                let selection = Self::finish_parse(input, spec, JSONSelection::parse_span(body))?;
+                Ok((Vec::new(), selection))
+            }
+            // Malformed header: route through finish_parse to reuse its error
+            // reporting (it reads the recorded errors off `e.input`).
+            Err(e @ nom::Err::Failure(_)) => {
+                Self::finish_parse(input, spec, Err(e)).map(|selection| (Vec::new(), selection))
+            }
+            Err(nom::Err::Incomplete(_)) => {
+                unreachable!("nom::Err::Incomplete not expected here")
+            }
+        }
+    }
+
+    /// Shared tail of [`Self::parse_with_spec`] and [`Self::parse_def_with_spec`]:
+    /// turn a `parse_span` result into a `Result<Self, JSONSelectionParseError>`,
+    /// reporting trailing characters and recorded errors against `input`.
+    fn finish_parse(
+        input: &str,
+        spec: ConnectSpec,
+        result: ParseResult<Self>,
+    ) -> Result<Self, JSONSelectionParseError> {
+        match result {
             Ok((remainder, selection)) => {
                 let fragment = remainder.fragment();
                 let produced_errors = !remainder.extra.errors.is_empty();
@@ -567,6 +624,84 @@ impl JSONSelection {
         self.external_var_paths()
             .into_iter()
             .flat_map(|var_path| var_path.variable_reference())
+    }
+
+    /// Collect every `->method(...)` call site appearing anywhere in this
+    /// selection, in source order, returning the method-name nodes (with their
+    /// ranges, for diagnostics).
+    ///
+    /// The walk is exhaustive: a method call can hide in a method *argument*
+    /// (`->foo($.x->bar)`), a nested subselection, an object-literal value, an
+    /// array element, or an operator-chain operand. This is the traversal that
+    /// builds the def call graph for the compose-time cycle check, so missing a
+    /// position would let a cyclic def slip through. Builtin and def names are
+    /// not distinguished here — the registry partitions them afterward.
+    pub(crate) fn method_calls(&self) -> Vec<&WithRange<String>> {
+        let mut out = Vec::new();
+        match &self.inner {
+            TopLevelSelection::Named(sub) => collect_methods_subselection(sub, &mut out),
+            TopLevelSelection::Value(lit) => collect_methods_lit(lit, &mut out),
+        }
+        out
+    }
+}
+
+fn collect_methods_subselection<'a>(sub: &'a SubSelection, out: &mut Vec<&'a WithRange<String>>) {
+    for named in &sub.selections {
+        collect_methods_lit(&named.path, out);
+    }
+}
+
+fn collect_methods_lit<'a>(lit: &'a WithRange<LitExpr>, out: &mut Vec<&'a WithRange<String>>) {
+    match lit.as_ref() {
+        LitExpr::String(_) | LitExpr::Number(_) | LitExpr::Bool(_) | LitExpr::Null => {}
+        LitExpr::LegacyObject(map) => {
+            for value in map.values() {
+                collect_methods_lit(value, out);
+            }
+        }
+        LitExpr::Object(sub) => collect_methods_subselection(sub, out),
+        LitExpr::Array(items) => {
+            for item in items {
+                collect_methods_lit(item, out);
+            }
+        }
+        LitExpr::Path(path) => collect_methods_pathlist(&path.path, out),
+        LitExpr::LitPath(root, tail) => {
+            collect_methods_lit(root, out);
+            collect_methods_pathlist(tail, out);
+        }
+        LitExpr::OpChain(_, operands) => {
+            for operand in operands {
+                collect_methods_lit(operand, out);
+            }
+        }
+    }
+}
+
+fn collect_methods_pathlist<'a>(
+    path: &'a WithRange<PathList>,
+    out: &mut Vec<&'a WithRange<String>>,
+) {
+    match path.as_ref() {
+        PathList::Var(_, tail) | PathList::Key(_, tail) | PathList::Question(tail) => {
+            collect_methods_pathlist(tail, out)
+        }
+        PathList::Expr(lit, tail) => {
+            collect_methods_lit(lit, out);
+            collect_methods_pathlist(tail, out);
+        }
+        PathList::Method(name, args, tail) => {
+            out.push(name);
+            if let Some(args) = args {
+                for arg in &args.args {
+                    collect_methods_lit(arg, out);
+                }
+            }
+            collect_methods_pathlist(tail, out);
+        }
+        PathList::Selection(sub) => collect_methods_subselection(sub, out),
+        PathList::Empty => {}
     }
 }
 
@@ -2014,6 +2149,46 @@ pub(super) fn is_identifier(input: &str) -> bool {
 
 fn parse_identifier(input: Span) -> ParseResult<WithRange<String>> {
     preceded(spaces_or_comments, parse_identifier_no_space).parse(input)
+}
+
+/// Parse an optional `($a, $b, ...) =>` parameter header for a `@source(methods:)`
+/// body, returning the parameter names (without the leading `$`). A leading `(`
+/// commits to header parsing via `cut`, so a missing `=>` or malformed
+/// parameter list is reported as a fatal error rather than being reparsed as a
+/// body. When the input does not begin with `(`, the leading `char('(')` fails
+/// with `Err::Error` and the caller treats the whole input as a header-less
+/// (nullary) body.
+fn parse_param_header(input: Span) -> ParseResult<Vec<WithRange<String>>> {
+    let (input, _) = spaces_or_comments(input)?;
+    let (input, _) = char('(').parse(input)?;
+    cut(parse_param_header_rest).parse(input)
+}
+
+fn parse_param_header_rest(input: Span) -> ParseResult<Vec<WithRange<String>>> {
+    let (input, first) = opt(parse_dollar_param).parse(input)?;
+    let (input, rest) = many0(preceded(
+        (spaces_or_comments, char(',')),
+        parse_dollar_param,
+    ))
+    .parse(input)?;
+    let (input, _) = (spaces_or_comments, char(')')).parse(input)?;
+    let (input, _) = spaces_or_comments(input)?;
+    let (input, _) = (char('='), char('>')).parse(input)?;
+
+    let mut params = Vec::new();
+    if let Some(first) = first {
+        params.push(first);
+    }
+    params.extend(rest);
+    Ok((input, params))
+}
+
+/// Parse a single `$name` parameter (leading whitespace/comments allowed),
+/// returning the identifier without the `$`.
+fn parse_dollar_param(input: Span) -> ParseResult<WithRange<String>> {
+    let (input, _) = spaces_or_comments(input)?;
+    let (input, _) = char('$').parse(input)?;
+    parse_identifier_no_space(input)
 }
 
 fn parse_identifier_no_space(input: Span) -> ParseResult<WithRange<String>> {

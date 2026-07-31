@@ -1,7 +1,7 @@
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 
-use crate::connectors::ConnectSpec;
+use crate::connectors::json_selection::ApplyContext;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::ShapeContext;
@@ -28,8 +28,9 @@ fn to_string_method(
     data: &JSON,
     _vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
+    let spec = context.spec();
     if let Some(args) = method_args
         && !args.args.is_empty()
     {

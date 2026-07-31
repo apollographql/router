@@ -1533,6 +1533,7 @@ mod tests {
             defined_directive_names,
             vec![
                 name!("connect"),
+                name!("connect__method"),
                 name!("connect__source"),
                 name!("deprecated"),
                 name!("federation__authenticated"),
@@ -1596,6 +1597,7 @@ mod tests {
                 name!("connect__ConnectorErrors"),
                 name!("connect__HTTPHeaderMapping"),
                 name!("connect__JSONSelection"),
+                name!("connect__Methods"),
                 name!("connect__SourceHTTP"),
                 name!("connect__URLTemplate"),
                 name!("federation__ContextFieldValue"),
