@@ -1890,15 +1890,11 @@ async fn test_redis_pings_replicas_to_keep_them_alive_when_clustered() {
     // reaches a replica (panics if it never does).
     let sentinel = "apollo-router-replica-heartbeat";
     redis_monitor
-        .wait_for(
-            std::time::Duration::from_secs(30),
-            "a keep-alive PING to a replica node",
-            |output| {
-                output
-                    .replicas(true)
-                    .command_with_arg_sent_to_any("PING", sentinel)
-            },
-        )
+        .wait_for(std::time::Duration::from_secs(30), |output| {
+            output
+                .replicas(true)
+                .command_with_arg_sent_to_any("PING", sentinel)
+        })
         .await;
 
     // The keep-alive is replica-only; primaries already get fred's built-in heartbeat. Check that

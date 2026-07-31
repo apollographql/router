@@ -2,13 +2,13 @@
 /// not sent.
 use std::process::Stdio;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
 use regex::Regex;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
+use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -36,7 +36,7 @@ pub struct Monitor {
     /// Live, shared view of the commands each collection task has observed so far. Lets callers
     /// poll for a command (see [`Monitor::wait_for`]) instead of sleeping a fixed duration before
     /// [`Monitor::collect`].
-    outputs: Vec<Arc<Mutex<SingleMonitorOutput>>>,
+    outputs: Vec<Arc<RwLock<SingleMonitorOutput>>>,
 }
 
 impl Monitor {
@@ -62,7 +62,7 @@ impl Monitor {
                 monitor(&port, is_replica, tx, init_tx).await;
             });
 
-            let output = Arc::new(Mutex::new(SingleMonitorOutput {
+            let output = Arc::new(RwLock::new(SingleMonitorOutput {
                 is_replica: false,
                 commands: Vec::new(),
             }));
@@ -70,7 +70,7 @@ impl Monitor {
 
             collection_tasks.spawn(async move {
                 while let Some((is_rep, command)) = rx.recv().await {
-                    let mut output = output.lock().unwrap();
+                    let mut output = output.write().await;
                     output.is_replica = is_rep;
                     output.commands.push(command);
                 }
@@ -95,37 +95,27 @@ impl Monitor {
 
     /// A snapshot of the commands observed so far, without consuming the monitor. Cloned out of the
     /// shared per-node buffers, so it's safe to call repeatedly while monitoring continues.
-    pub fn snapshot(&self) -> MonitorOutput {
-        MonitorOutput(
-            self.outputs
-                .iter()
-                .map(|output| output.lock().unwrap().clone())
-                .collect(),
-        )
+    pub async fn snapshot(&self) -> MonitorOutput {
+        let mut outputs = Vec::with_capacity(self.outputs.len());
+        for output in &self.outputs {
+            outputs.push(output.read().await.clone());
+        }
+        MonitorOutput(outputs)
     }
 
-    /// Poll [`Monitor::snapshot`] until `predicate` holds, returning that snapshot. Panics with
-    /// `description` if `timeout` elapses first. Prefer this over a fixed sleep before an assertion:
-    /// it returns as soon as the awaited command lands and fails loudly (rather than racing a fixed
-    /// margin) if it never does.
-    pub async fn wait_for(
-        &self,
-        timeout: Duration,
-        description: &str,
-        predicate: impl Fn(&MonitorOutput) -> bool,
-    ) -> MonitorOutput {
+    /// Poll [`Monitor::snapshot`] until `predicate` holds. Panics if `timeout` elapses first. Prefer
+    /// this over a fixed sleep before an assertion: it returns as soon as the awaited command lands
+    /// and fails loudly (rather than racing a fixed margin) if it never does.
+    pub async fn wait_for(&self, timeout: Duration, predicate: impl Fn(&MonitorOutput) -> bool) {
         let start = Instant::now();
-        loop {
-            let snapshot = self.snapshot();
-            if predicate(&snapshot) {
-                return snapshot;
+        while start.elapsed() < timeout {
+
+            if predicate(&self.snapshot().await) {
+                return;
             }
-            assert!(
-                start.elapsed() < timeout,
-                "Monitor::wait_for timed out after {timeout:?} waiting for {description}"
-            );
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
+        panic!("Monitor::wait_for timed out after {timeout:?}");
     }
 
     /// End all `monitor_tasks` and collect the results into a `MonitorOutput`.
@@ -139,7 +129,11 @@ impl Monitor {
         while self.monitor_tasks.join_next().await.is_some() {}
         while self.collection_tasks.join_next().await.is_some() {}
 
-        self.snapshot()
+        let mut outputs = Vec::with_capacity(self.outputs.len());
+        for output in &self.outputs {
+            outputs.push(output.read().await.clone());
+        }
+        MonitorOutput(outputs)
     }
 }
 
