@@ -42,6 +42,7 @@ use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
 use crate::plugins::telemetry::reload::otel::LayeredTracer;
 use crate::plugins::telemetry::reload::otel::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::reload::otel::reload_fmt;
+use crate::plugins::telemetry::reload::otel::set_installed_tracer_provider;
 
 /// State container for telemetry components to be activated.
 ///
@@ -200,10 +201,21 @@ impl Activation {
             let tracer = tracer_provider.tracer_with_scope(scope);
             hot_tracer.reload(tracer);
 
+            // Remember the provider we are about to install so that shutdown can flush and stop
+            // it explicitly. The `hot_tracer` above keeps a strong reference to it for the
+            // process lifetime, so dropping the global clone below is never enough to trigger the
+            // provider's own `Drop` -> `shutdown()`.
+            let previous = set_installed_tracer_provider(tracer_provider.clone());
+
             // Install the new provider globally. The old provider is returned and must be
             // dropped in a blocking task to avoid deadlocking the async runtime during shutdown.
             // block_in_place is used to ensure that no tasks after this point use the old tracer provider.
-            block_in_place(move || opentelemetry::global::set_tracer_provider(tracer_provider));
+            block_in_place(move || {
+                opentelemetry::global::set_tracer_provider(tracer_provider);
+                // Dropping the last clone of the replaced provider shuts its span processors
+                // down, so it has to happen here rather than on an async poll path.
+                drop(previous);
+            });
         }
     }
 

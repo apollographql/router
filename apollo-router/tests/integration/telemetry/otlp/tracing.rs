@@ -97,6 +97,48 @@ async fn test_basic() -> Result<(), BoxError> {
     Ok(())
 }
 
+/// SIGTERM must produce a clean exit, not a panic on the way out.
+///
+/// The OTel batch span processor runs its background loop on a `spawn_blocking` thread via
+/// `Handle::block_on` (see `BlockingSafeTokioRuntime`), and that loop only terminates on an
+/// explicit shutdown — a closed message channel is not enough, because its interval ticker keeps
+/// the stream alive. Nothing dropped the last clone of the installed tracer provider, so the
+/// processor was still polling `tokio::time::sleep` when the runtime was torn down, tripping
+/// tokio's `A Tokio 1.x context was found, but it is being shutdown` assert. The panic handler
+/// then turned an otherwise clean SIGTERM into `exit(1)`.
+///
+/// `assert_shutdown` ignores the exit code, which is why the rest of the suite never caught this.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_graceful_shutdown_exits_cleanly() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mock_server = mock_otlp_server(1..).await;
+    let config = include_str!("../fixtures/otlp.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    // Put spans through the batch processor so its background worker is running by the time we
+    // signal, rather than idling before its first tick.
+    router.execute_default_query().await;
+
+    router.graceful_shutdown().await;
+
+    router.read_logs();
+    router.assert_log_not_contained("it is being shutdown");
+    router.assert_clean_exit();
+
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_resources() -> Result<(), BoxError> {
     if !graph_os_enabled() {

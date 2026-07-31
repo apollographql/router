@@ -32,6 +32,7 @@ use crate::configuration::validate_yaml_configuration;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
+use crate::plugins::telemetry::reload::otel::shutdown_installed_tracer_provider;
 use crate::registry::OciConfig;
 use crate::registry::should_use_ssl;
 use crate::registry::validate_oci_reference;
@@ -330,7 +331,23 @@ pub fn main() -> Result<()> {
     }
 
     let runtime = builder.build()?;
-    runtime.block_on(Executable::builder().start())
+    let result = runtime.block_on(Executable::builder().start());
+
+    // Deliberately leak the runtime rather than dropping it.
+    //
+    // Dropping it marks the Tokio time driver as shut down, but OpenTelemetry's background
+    // workers are driven by `spawn_blocking` threads sitting in `Handle::block_on` (see
+    // `BlockingSafeTokioRuntime`), and those threads keep being polled through shutdown. Any
+    // worker still alive then polls a `tokio::time::Sleep` against the dead driver and trips
+    // `TimerEntry::poll_elapsed`'s "A Tokio 1.x context was found, but it is being shutdown"
+    // assert — which `setup_panic_handler` turns into `exit(1)` on an otherwise clean SIGTERM.
+    //
+    // Telemetry is shut down explicitly before we get here, so this is a backstop rather than the
+    // primary mechanism: it keeps a missed provider from escalating into a non-zero exit code.
+    // The process is about to exit, so there is nothing left to clean up.
+    std::mem::forget(runtime);
+
+    result
 }
 
 /// Entry point into creating a router executable with more customization than [`main`].
@@ -472,6 +489,13 @@ impl Executable {
         if apollo_telemetry_initialized {
             // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
             tokio::task::spawn_blocking(move || {
+                // Flush and stop the span processors of the provider installed by the last
+                // activation. Replacing the global provider below is not enough on its own: the
+                // tracer reload handle keeps another clone alive for the process lifetime, so the
+                // provider's `Drop` -> `shutdown()` never runs. Without this, buffered spans are
+                // lost and the processors' background workers are still polling Tokio timers when
+                // the runtime is torn down.
+                shutdown_installed_tracer_provider();
                 // Setting a new default provider causes the old one to be dropped and shut down
                 opentelemetry::global::set_tracer_provider(
                     opentelemetry_sdk::trace::SdkTracerProvider::default(),
