@@ -14,7 +14,7 @@ use crate::plugins::telemetry::span_factory;
 /// The metric name, unit, and description must stay identical to the histogram
 /// `RouterInstruments` builds from `HTTP_SERVER_REQUEST_DURATION_METRIC`, so that APM tools
 /// aggregate both together. The macro takes literals, so the compiler cannot tie them together —
-/// `pipeline_bypass_metric_matches_router_instrument` asserts they agree instead.
+/// `records_a_bypassed_request_on_the_router_instrument` asserts they agree instead.
 pub(crate) fn record_bypassed_request(status_code: u16, duration: Duration) {
     f64_histogram_with_unit!(
         "http.server.request.duration",
@@ -51,16 +51,6 @@ mod tests {
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::telemetry::config_new::instruments::HTTP_SERVER_REQUEST_DURATION_METRIC;
 
-    /// The literal in `record_bypassed_request` has to match the instrument the router pipeline
-    /// builds, or APM tools report the two populations separately.
-    #[test]
-    fn pipeline_bypass_metric_matches_router_instrument() {
-        assert_eq!(
-            HTTP_SERVER_REQUEST_DURATION_METRIC,
-            "http.server.request.duration"
-        );
-    }
-
     #[tokio::test]
     async fn records_a_rejected_request() {
         async {
@@ -75,15 +65,27 @@ mod tests {
         .await;
     }
 
+    /// Looking the emitted metric up by the pipeline's own constant is what ties the two
+    /// together: a name here that drifts from `HTTP_SERVER_REQUEST_DURATION_METRIC` leaves
+    /// nothing to find. The unit and description have to match too, or APM tools report the
+    /// bypassed and pipeline populations separately.
     #[tokio::test]
-    async fn records_a_bypassed_request() {
+    async fn records_a_bypassed_request_on_the_router_instrument() {
         async {
             record_bypassed_request(503, Duration::from_millis(5));
+
             assert_histogram_count!(
                 "http.server.request.duration",
                 1,
                 "http.response.status_code" = 503i64
             );
+
+            let collected = crate::metrics::collect_metrics();
+            let metric = collected
+                .find(HTTP_SERVER_REQUEST_DURATION_METRIC)
+                .expect("should emit the instrument the router pipeline builds");
+            assert_eq!(metric.unit(), "s");
+            assert_eq!(metric.description(), "Duration of HTTP server requests.");
         }
         .with_metrics()
         .await;
