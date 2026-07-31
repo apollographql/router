@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -1941,6 +1940,21 @@ expression: "&schema"
       ],
       "description": "Subgraph URL mappings"
     },
+    "Conf4": {
+      "additionalProperties": false,
+      "properties": {
+        "defaults": {
+          "$ref": "#/definitions/Defaults"
+        },
+        "plugins": {
+          "items": {
+            "$ref": "#/definitions/WasmPluginConfig"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "Config": {
       "additionalProperties": false,
       "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don't want this in production!\n\n## How Chaos Reloading Works\n\nThe chaos system automatically captures and replays the last known schema and configuration\nevents to force hot reloads even when the underlying content hasn't actually changed. This\nis particularly useful for memory leak detection during hot reload scenarios.\nIf configured, it will activate upon the first config event that is encountered.\n\n### Schema Reloading (`force_schema_reload`)\nWhen enabled, the router will periodically replay the last schema event with a timestamp\ncomment injected into the SDL (e.g., `# Chaos reload timestamp: 1234567890`). This ensures\nthe schema is seen as \"different\" and triggers a full hot reload, even though the functional\nschema content is identical.\n\n### Configuration Reloading (`force_config_reload`)\nWhen enabled, the router will periodically replay the last configuration event. The\nconfiguration is cloned and re-emitted, which triggers the router's configuration change\ndetection and reload logic.\n\n### Example Usage\n```yaml\nexperimental_chaos:\n  force_schema_reload: \"30s\"    # Trigger schema reload every 30 seconds\n  force_config_reload: \"2m\"     # Trigger config reload every 2 minutes\n```",
@@ -3050,6 +3064,18 @@ expression: "&schema"
         }
       ]
     },
+    "ContextPermissions": {
+      "additionalProperties": false,
+      "properties": {
+        "read": {
+          "$ref": "#/definitions/NameMatcher"
+        },
+        "write": {
+          "$ref": "#/definitions/NameMatcher"
+        }
+      },
+      "type": "object"
+    },
     "CooperativeCancellation": {
       "additionalProperties": false,
       "properties": {
@@ -3426,6 +3452,18 @@ expression: "&schema"
         "region",
         "service_name"
       ],
+      "type": "object"
+    },
+    "Defaults": {
+      "additionalProperties": false,
+      "properties": {
+        "failure": {
+          "$ref": "#/definitions/Failure"
+        },
+        "limits": {
+          "$ref": "#/definitions/Limits"
+        }
+      },
       "type": "object"
     },
     "DemandControlConfig": {
@@ -5593,6 +5631,22 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "Failure": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "$ref": "#/definitions/FailureMode"
+        }
+      },
+      "type": "object"
+    },
+    "FailureMode": {
+      "enum": [
+        "open",
+        "closed"
+      ],
+      "type": "string"
+    },
     "FieldName": {
       "oneOf": [
         {
@@ -5919,6 +5973,23 @@ expression: "&schema"
         }
       ]
     },
+    "GraphqlAccess": {
+      "enum": [
+        "none",
+        "read",
+        "read_write"
+      ],
+      "type": "string"
+    },
+    "GraphqlPermissions": {
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/GraphqlAccess"
+        }
+      },
+      "type": "object"
+    },
     "GrpcExporter": {
       "additionalProperties": false,
       "properties": {
@@ -6003,6 +6074,18 @@ expression: "&schema"
             "type": "string"
           },
           "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "HeaderPermissions": {
+      "additionalProperties": false,
+      "properties": {
+        "read": {
+          "$ref": "#/definitions/NameMatcher"
+        },
+        "write": {
+          "$ref": "#/definitions/NameMatcher"
         }
       },
       "type": "object"
@@ -6159,6 +6242,55 @@ expression: "&schema"
             "string",
             "null"
           ]
+        }
+      },
+      "type": "object"
+    },
+    "Hook": {
+      "enum": [
+        "supergraph.request",
+        "subgraph.request"
+      ],
+      "type": "string"
+    },
+    "HookConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Failure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hook": {
+          "$ref": "#/definitions/Hook"
+        },
+        "permissions": {
+          "$ref": "#/definitions/Permissions"
+        },
+        "selector": {
+          "$ref": "#/definitions/HookSelector"
+        }
+      },
+      "required": [
+        "hook"
+      ],
+      "type": "object"
+    },
+    "HookSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "service_names": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
         }
       },
       "type": "object"
@@ -7010,6 +7142,50 @@ expression: "&schema"
       "description": "The license enforcement plugin has no configuration.",
       "type": "object"
     },
+    "Limits": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_timeout": {
+          "default": {
+            "nanos": 10000000,
+            "secs": 0
+          },
+          "type": "string"
+        },
+        "max_concurrency": {
+          "default": 128,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_input_size": {
+          "default": "1048.6 KB",
+          "type": "string"
+        },
+        "max_memory_per_instance": {
+          "default": "16.8 MB",
+          "type": "string"
+        },
+        "max_output_size": {
+          "default": "1048.6 KB",
+          "type": "string"
+        },
+        "max_queue_size": {
+          "default": 256,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "queue_timeout": {
+          "default": {
+            "nanos": 5000000,
+            "secs": 0
+          },
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "LimitsConfig": {
       "additionalProperties": false,
       "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
@@ -7064,6 +7240,65 @@ expression: "&schema"
             "subgraphs": {}
           },
           "description": "Limits that apply to outbound subgraph responses."
+        }
+      },
+      "type": "object"
+    },
+    "LimitsOverride": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_timeout": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_concurrency": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_input_size": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_memory_per_instance": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_output_size": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_queue_size": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "queue_timeout": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -7469,6 +7704,20 @@ expression: "&schema"
       "description": "Config for the test plugin",
       "type": "object"
     },
+    "NameMatcher": {
+      "additionalProperties": false,
+      "properties": {
+        "names": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "type": "object"
+    },
     "OTLPConfig": {
       "additionalProperties": false,
       "properties": {
@@ -7672,6 +7921,21 @@ expression: "&schema"
           "type": "string"
         }
       ]
+    },
+    "Permissions": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/ContextPermissions"
+        },
+        "graphql": {
+          "$ref": "#/definitions/GraphqlPermissions"
+        },
+        "headers": {
+          "$ref": "#/definitions/HeaderPermissions"
+        }
+      },
+      "type": "object"
     },
     "PersistedQueries": {
       "additionalProperties": false,
@@ -9515,6 +9779,34 @@ expression: "&schema"
           "required": [
             "type",
             "name"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Source2": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "digest": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "type": {
+              "const": "file",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "path"
           ],
           "type": "object"
         }
@@ -12705,6 +12997,49 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "WasmPluginConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "configuration": {
+          "default": {}
+        },
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Failure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hooks": {
+          "items": {
+            "$ref": "#/definitions/HookConfig"
+          },
+          "type": "array"
+        },
+        "limits": {
+          "$ref": "#/definitions/LimitsOverride"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/Source2"
+        }
+      },
+      "required": [
+        "name",
+        "source",
+        "hooks"
+      ],
+      "type": "object"
+    },
     "WebSocketConfiguration": {
       "additionalProperties": false,
       "description": "WebSocket configuration for a specific subgraph",
@@ -13298,6 +13633,9 @@ expression: "&schema"
     },
     "traffic_shaping": {
       "$ref": "#/definitions/TrafficShapingConfig"
+    },
+    "wasm": {
+      "$ref": "#/definitions/Conf4"
     }
   },
   "title": "Configuration",

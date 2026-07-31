@@ -1,0 +1,64 @@
+package apollo:router-plugin@0.1.0;
+
+interface hooks {
+    record header {
+        name: string,
+        values: list<string>,
+    }
+
+    record context-entry {
+        name: string,
+        value: string,
+    }
+
+    record event {
+        hook: string,
+        request-id: string,
+        service-name: option<string>,
+        method: option<string>,
+        uri: option<string>,
+        headers: list<header>,
+        context: list<context-entry>,
+        body: option<string>,
+        configuration: string,
+    }
+
+    record header-value {
+        name: string,
+        value: string,
+    }
+
+    variant header-operation {
+        set(header),
+        append(header-value),
+        remove(string),
+    }
+
+    variant context-operation {
+        set(context-entry),
+        remove(string),
+    }
+
+    record mutation {
+        headers: list<header-operation>,
+        context: list<context-operation>,
+        body: option<string>,
+    }
+
+    record break-response {
+        status-code: u16,
+        headers: list<header>,
+        body: string,
+    }
+
+    variant outcome {
+        proceed(mutation),
+        break-request(break-response),
+    }
+
+    handle: func(event: event) -> result<outcome, string>;
+}
+
+world router-plugin {
+    export hooks;
+}

@@ -1,0 +1,71 @@
+supergraph:
+  listen: 127.0.0.1:4100
+  introspection: true
+
+headers:
+  all:
+    request:
+      operations:
+        - propagate:
+            matching: ^x-wasm-
+
+wasm:
+  defaults:
+    limits:
+      execution_timeout: 100ms
+      queue_timeout: 25ms
+      max_memory_per_instance: 32MiB
+      max_concurrency: 128
+      max_queue_size: 256
+      max_input_size: 1MiB
+      max_output_size: 1MiB
+    failure:
+      default: closed
+
+  plugins:
+    - name: rust-header
+      source:
+        type: file
+        path: examples/wasm-extensions/rust-header/target/wasm32-wasip2/release/router_wasm_rust_header.wasm
+      configuration: {}
+      hooks:
+        - hook: subgraph.request
+          selector:
+            service_names: [subgraph-a]
+          permissions:
+            headers:
+              write:
+                names: [x-wasm-rust]
+            context:
+              write:
+                names: [wasm.rust]
+
+    - name: javascript-header
+      source:
+        type: file
+        path: examples/wasm-extensions/javascript-header/plugin.wasm
+      configuration: {}
+      hooks:
+        - hook: supergraph.request
+          permissions:
+            headers:
+              write:
+                names: [x-wasm-javascript]
+            context:
+              write:
+                names: [wasm.javascript]
+
+    - name: python-header
+      source:
+        type: file
+        path: examples/wasm-extensions/python-header/plugin.wasm
+      configuration: {}
+      hooks:
+        - hook: supergraph.request
+          permissions:
+            headers:
+              write:
+                names: [x-wasm-python]
+            context:
+              write:
+                names: [wasm.python]
