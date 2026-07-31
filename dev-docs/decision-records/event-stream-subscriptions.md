@@ -28,7 +28,7 @@ field.
 events:
   providers:
     production-events:
-      type: nats
+      type: nats_core
       config:
         servers: [nats://localhost:4222]
       lifecycle:

@@ -11,6 +11,7 @@ use futures::StreamExt;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tower::BoxError;
 
@@ -26,6 +27,8 @@ use crate::services::subgraph::BoxGqlStream;
 use crate::spec::Schema;
 
 const SUBSCRIBE_DIRECTIVE_NAME: &str = "event__subscribe";
+
+mod nats_core;
 
 /// Opaque provider position, exposed only to telemetry and provider settlement.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -167,6 +170,7 @@ impl EventCatalog {
 pub(crate) struct EventRuntime {
     configuration: EventsConfiguration,
     catalog: EventCatalog,
+    nats_clients: Mutex<HashMap<String, async_nats::Client>>,
 }
 
 impl EventRuntime {
@@ -174,6 +178,7 @@ impl EventRuntime {
         Self {
             configuration,
             catalog: EventCatalog::from_schema(&schema),
+            nats_clients: Mutex::new(HashMap::new()),
         }
     }
 
@@ -233,9 +238,22 @@ impl EventRuntime {
                     source.provider
                 )));
             };
+            let Some(policy) = self.configuration.policies.get(&source.policy) else {
+                return Ok(event_error(format!(
+                    "event policy '{}' is not configured",
+                    source.policy
+                )));
+            };
 
             let stream = match self
-                .provider_stream(&provider.r#type, &source_name, destinations)
+                .provider_stream(
+                    &source.provider,
+                    provider,
+                    source,
+                    &source_name,
+                    destinations,
+                    policy.buffer.capacity.get(),
+                )
                 .await
             {
                 Ok(stream) => stream,
@@ -260,13 +278,30 @@ impl EventRuntime {
 
     async fn provider_stream(
         &self,
-        provider_type: &str,
-        _source_name: &str,
-        _destinations: Vec<String>,
+        provider_name: &str,
+        provider: &crate::configuration::events::EventProviderConfiguration,
+        source: &crate::configuration::events::EventSourceConfiguration,
+        source_name: &str,
+        destinations: Vec<String>,
+        buffer_capacity: usize,
     ) -> Result<ProviderEventStream, EventError> {
-        Err(EventError::new(format!(
-            "event provider type '{provider_type}' is not supported by this build"
-        )))
+        match provider.r#type.as_str() {
+            "nats_core" => {
+                nats_core::subscribe(
+                    self,
+                    provider_name,
+                    provider,
+                    source,
+                    source_name,
+                    destinations,
+                    buffer_capacity,
+                )
+                .await
+            }
+            provider_type => Err(EventError::new(format!(
+                "event provider type '{provider_type}' is not supported by this build"
+            ))),
+        }
     }
 }
 
