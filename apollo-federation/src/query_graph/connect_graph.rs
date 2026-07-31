@@ -9,31 +9,52 @@
 //! `conditions: Option<Arc<SelectionSet>>` — exactly how `@key`/`@requires`
 //! conditions are already represented (`build_query_graph.rs:1340`).
 //!
-//! This slice produces the edge *data* — the transition, the landing type, and
-//! the condition `SelectionSet` — for each connector, without yet mutating a
-//! live [`QueryGraph`](super::QueryGraph). Producing it as a standalone,
-//! testable value first keeps the eventual integration into `build_query_graph`
-//! a graft (push these onto the edge list) rather than a rewrite, and lets the
-//! condition-conversion be differentially tested against the Spike-A output.
+//! The first slice produced the edge *data* — the transition, the landing type,
+//! and the condition `SelectionSet` — for each connector, without mutating a
+//! live [`QueryGraph`](super::QueryGraph), letting the condition-conversion be
+//! differentially tested against the Spike-A output.
+//!
+//! The second slice, [`restrict_connector_reachability`], is the "restrictive
+//! provides" pass (see `SOURCE_AWARE_B2B_RESTRICTIVE_PROVIDES.md`): a post-build
+//! graph mutation that reconstructs the per-connector field boundary expansion
+//! encoded structurally as minimal synthetic subgraphs. For each connector field
+//! edge it copies the landing-type node, prunes the copy's field edges to the
+//! fields the connector's `selection` actually returns, and re-points the field
+//! edge to the copy — leaving pruned fields reachable only through the copy's
+//! `KeyResolution` re-entry edges, so the planner emits a proper `_entities`
+//! fetch (with its existing, correct key/validity logic) instead of over-merging
+//! a field into a fetch the connector cannot serve.
 
-// Phase-1 seam: the edge fields are consumed when this is grafted into
-// `build_query_graph`; until then they're read only by the tests below.
+// Phase-1 seam: `SourceEnteringEdge` fields are consumed when the edge data is
+// grafted into `build_query_graph`; until then they're read only by the tests.
 #![allow(dead_code)]
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::ast::NamedType;
+use petgraph::Direction;
+use petgraph::graph::EdgeIndex;
+use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
 
+use super::QueryGraph;
+use super::QueryGraphEdge;
 use super::QueryGraphEdgeTransition;
+use super::QueryGraphNode;
+use super::QueryGraphNodeType;
+use super::build_query_graph::precompute_non_trivial_followup_edges;
 use crate::connectors::Connector;
 use crate::connectors::EntityResolver;
 use crate::connectors::source_aware::derive_condition;
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
+use crate::query_plan::connector_stamp::connector_provided_fields;
+use crate::query_plan::query_planning_traversal::non_local_selections_estimation::precompute_non_local_selection_metadata;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
-use crate::supergraph::extract_subgraphs_from_supergraph;
 use crate::schema::field_set::parse_field_set;
+use crate::supergraph::extract_subgraphs_from_supergraph;
 
 /// The query-graph edge that *enters* a connector's source — the data a
 /// `SourceEntering`/`KeyResolution` edge carries in the source-aware graph.
@@ -117,6 +138,203 @@ pub(crate) fn build_connector_source_edges(
         }
     }
     Ok(edges)
+}
+
+/// The source-aware "restrictive provides" pass: reconstruct, in the query
+/// graph, the per-connector field boundary that expansion built as minimal
+/// synthetic subgraphs (see the module docs and
+/// `SOURCE_AWARE_B2B_RESTRICTIVE_PROVIDES.md`).
+///
+/// For each `FieldCollection` edge backed by a connector whose landing-type node
+/// has field edges the connector's `selection` does not return:
+///
+/// 1. **Copy** the landing-type node (mirroring `copy_for_provides_internal`,
+///    including the types-to-nodes bookkeeping), marked
+///    [`connector_boundary_copy`](QueryGraphNode::connector_boundary_copy) so
+///    path traversal permits its same-source re-entry.
+/// 2. **Clone** the landing node's out-edges onto the copy, **pruning** field
+///    edges for non-provided fields (keeping `__typename`). The original's
+///    self-key edge (head == tail, added by `handle_key` for every keyed type)
+///    clones into `copy -> original` — exactly the `KeyResolution` re-entry that
+///    keeps pruned fields reachable. True self-edges are ignored by the planner,
+///    but this copy-to-original edge joins distinct nodes and is considered.
+/// 3. **Re-point** the connector's field edge to the copy (mirroring
+///    `update_edge_tail`: paired add-then-remove preserves edge indices).
+///
+/// The planner keeps ownership of *validity*: it emits an `_entities` fetch for
+/// a pruned field only when the re-entry's key condition is actually satisfiable
+/// from the copy, and correctly fails otherwise — no hand-rolled
+/// missing-field-to-`_entities` translation.
+///
+/// Conservatively skips a connector edge when nothing is prunable (the connector
+/// provides every field) or when the landing node has no `KeyResolution` re-entry
+/// (pruning would only turn today's over-merge into a planning error). Only
+/// source-aware raw graphs contain unexpanded connectors, so the expansion path
+/// never reaches the mutation.
+///
+/// Returns whether the graph was mutated. On mutation, recomputes the
+/// traversal-layer maps (`non_trivial_followup_edges`,
+/// `non_local_selection_metadata`) that were precomputed at the end of graph
+/// building — traversal hard-errors on edges missing from the former and would
+/// never consider new edges absent from its followup lists.
+pub(crate) fn restrict_connector_reachability(
+    query_graph: &mut QueryGraph,
+    connectors: &[Connector],
+) -> Result<bool, FederationError> {
+    if connectors.is_empty() {
+        return Ok(false);
+    }
+
+    struct Candidate {
+        edge: EdgeIndex,
+        landing: NodeIndex,
+        provided: HashSet<String>,
+    }
+    let mut candidates: Vec<Candidate> = Vec::new();
+    for edge in query_graph.graph.edge_indices() {
+        let edge_weight = query_graph.edge_weight(edge)?;
+        let QueryGraphEdgeTransition::FieldCollection {
+            source,
+            field_definition_position,
+            ..
+        } = &edge_weight.transition
+        else {
+            continue;
+        };
+        let simple_name = format!(
+            "{}.{}",
+            field_definition_position.type_name(),
+            field_definition_position.field_name()
+        );
+        // All connectors on this field in this subgraph. With several connectors
+        // on one field ([0], [1], ...) prune only what *no* variant provides
+        // (the union) — conservative, since the planner cannot distinguish them.
+        let mut provided: HashSet<String> = HashSet::new();
+        let mut found = false;
+        for connector in connectors {
+            if connector.id.subgraph_name.as_str() != source.as_ref()
+                || connector.id.directive.simple_name() != simple_name
+            {
+                continue;
+            }
+            let Some(fields) = connector_provided_fields(connector) else {
+                // Non-object output shape (e.g. a scalar field connector) — not
+                // the root/entity over-merge case this pass guards.
+                found = false;
+                break;
+            };
+            provided.extend(fields);
+            found = true;
+        }
+        if !found {
+            continue;
+        }
+
+        let (_, landing) = query_graph.edge_endpoints(edge)?;
+        let landing_weight = query_graph.node_weight(landing)?;
+        if landing_weight.source != *source
+            || !matches!(landing_weight.type_, QueryGraphNodeType::SchemaType(_))
+        {
+            continue;
+        }
+
+        let mut has_prunable_field = false;
+        let mut has_reentry = false;
+        for out_edge in query_graph
+            .graph
+            .edges_directed(landing, Direction::Outgoing)
+        {
+            match &out_edge.weight().transition {
+                QueryGraphEdgeTransition::FieldCollection {
+                    field_definition_position,
+                    ..
+                } => {
+                    let name = field_definition_position.field_name();
+                    if name.as_str() != "__typename" && !provided.contains(name.as_str()) {
+                        has_prunable_field = true;
+                    }
+                }
+                QueryGraphEdgeTransition::KeyResolution => has_reentry = true,
+                _ => {}
+            }
+        }
+        if has_prunable_field && has_reentry {
+            candidates.push(Candidate {
+                edge,
+                landing,
+                provided,
+            });
+        }
+    }
+
+    if candidates.is_empty() {
+        return Ok(false);
+    }
+
+    for Candidate {
+        edge,
+        landing,
+        provided,
+    } in candidates
+    {
+        let landing_weight = query_graph.node_weight(landing)?.clone();
+        let QueryGraphNodeType::SchemaType(type_pos) = &landing_weight.type_ else {
+            continue; // filtered during candidate collection
+        };
+
+        // 1. Copy the landing-type node.
+        let copy = query_graph.graph.add_node(QueryGraphNode {
+            type_: landing_weight.type_.clone(),
+            source: landing_weight.source.clone(),
+            has_reachable_cross_subgraph_edges: landing_weight.has_reachable_cross_subgraph_edges,
+            provide_id: None,
+            root_kind: None,
+            connector_boundary_copy: true,
+        });
+        query_graph
+            .types_to_nodes_by_source
+            .get_mut(&landing_weight.source)
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "Types-to-nodes map unexpectedly missing for source \"{}\"",
+                    landing_weight.source
+                ))
+            })?
+            .entry(type_pos.type_name().clone())
+            .or_default()
+            .insert(copy);
+
+        // 2. Clone out-edges onto the copy, pruning non-provided field edges.
+        let out_edges: Vec<(NodeIndex, QueryGraphEdge)> = query_graph
+            .graph
+            .edges_directed(landing, Direction::Outgoing)
+            .map(|edge_ref| (edge_ref.target(), edge_ref.weight().clone()))
+            .collect();
+        for (target, weight) in out_edges {
+            if let QueryGraphEdgeTransition::FieldCollection {
+                field_definition_position,
+                ..
+            } = &weight.transition
+            {
+                let name = field_definition_position.field_name();
+                if name.as_str() != "__typename" && !provided.contains(name.as_str()) {
+                    continue;
+                }
+            }
+            query_graph.graph.add_edge(copy, target, weight);
+        }
+
+        // 3. Re-point the connector's field edge to the copy.
+        let (head, _) = query_graph.edge_endpoints(edge)?;
+        let weight = query_graph.edge_weight(edge)?.clone();
+        query_graph.graph.add_edge(head, copy, weight);
+        query_graph.graph.remove_edge(edge);
+    }
+
+    precompute_non_trivial_followup_edges(query_graph)?;
+    query_graph.non_local_selection_metadata =
+        precompute_non_local_selection_metadata(query_graph)?;
+    Ok(true)
 }
 
 #[cfg(test)]

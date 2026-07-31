@@ -299,25 +299,22 @@ async fn source_aware_entity_plus_requires_end_to_end() {
     );
 }
 
-/// Step 3 repro (ignored): `username` comes back `null` under source-aware —
-/// but the root cause is a **planning over-merge**, not a stamping/dispatch gap.
+/// Step 3 — entity-resolver connectors, end to end. `username` is not provided
+/// by the `Query.users` connector (`selection: "id name"`); it's served by
+/// resolving the whole `User` entity through `Query.user @connect(entity:
+/// true)`. Historically source-aware returned `username: null`: the collapsed
+/// graph didn't encode per-connector field availability, so the planner
+/// over-merged `username` into the root `users` fetch (a planning over-merge,
+/// side-effect #3 in `SOURCE_AWARE_EXPANSION_SIDE_EFFECTS.md` — not a
+/// stamping/dispatch gap).
 ///
-/// The raw-graph plan for this query is a single `connectors` fetch
-/// `{ users { … username } }`: because the collapsed graph doesn't encode
-/// per-connector field availability, the planner merges `username` into the
-/// root `users` fetch. But the `Query.users` connector's `selection` is only
-/// `id name`, so `username` is never fetched → `null`. There is *no* separate
-/// `_entities` fetch to stamp; the entity-resolver stamping (match by output
-/// type) is in place as the dispatch half, but it only fires once the planner
-/// actually emits that fetch.
-///
-/// The fix (side-effect #3 in `SOURCE_AWARE_EXPANSION_SIDE_EFFECTS.md`) is to
-/// restrict raw-graph reachability by each connector's output shape (via
-/// `connector_provided_fields` / `SelectionAnalysis`) so the planner emits a
-/// valid `_entities` fetch — reconstructing the boundary expansion got from its
-/// minimal synthetic subgraphs. Un-`ignore` when that lands.
+/// Fixed by the "restrictive provides" pass
+/// (`connect_graph::restrict_connector_reachability`): each connector's
+/// landing-type node is copied and pruned to the fields its `selection`
+/// returns, so the planner emits a valid `_entities` fetch for `username`; the
+/// entity-resolver stamping (match by output type) then dispatches it via
+/// `Query.user`.
 #[tokio::test]
-#[ignore = "step 3 (b): planner over-merges username into the root fetch (Query.users selection lacks it); needs output-shape reachability restriction in the raw graph"]
 async fn source_aware_entity_resolver_connector_gap() {
     let query = "query { users { __typename id name username d } }";
 
@@ -373,8 +370,6 @@ async fn source_aware_entity_resolver_connector_gap() {
     )
     .await;
 
-    // Currently fails: source-aware returns username=null. This is the assertion
-    // step 3 must make pass.
     assert_eq!(
         source_aware, expanded,
         "source-aware entity-resolver dispatch must match the expansion path"

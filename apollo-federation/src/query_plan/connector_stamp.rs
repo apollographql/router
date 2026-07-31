@@ -166,7 +166,11 @@ fn stamp_fetch(fetch: &mut FetchNode, connectors: &[Connector], schema: &Schema)
     };
 
     let mut targets: Vec<(String, String)> = Vec::new();
-    collect_targets(op.selection_set.ty.as_str(), &op.selection_set, &mut targets);
+    collect_targets(
+        op.selection_set.ty.as_str(),
+        &op.selection_set,
+        &mut targets,
+    );
 
     // Match targets against connectors in *this* fetch's subgraph.
     let subgraph = fetch.subgraph_name.as_ref();
@@ -176,7 +180,9 @@ fn stamp_fetch(fetch: &mut FetchNode, connectors: &[Connector], schema: &Schema)
         for connector in connectors {
             if connector.id.subgraph_name.as_str() == subgraph
                 && connector.id.directive.simple_name() == simple
-                && !matched.iter().any(|m| m.id.coordinate() == connector.id.coordinate())
+                && !matched
+                    .iter()
+                    .any(|m| m.id.coordinate() == connector.id.coordinate())
             {
                 matched.push(connector);
             }
@@ -245,7 +251,7 @@ fn stamp_fetch(fetch: &mut FetchNode, connectors: &[Connector], schema: &Schema)
 /// `__typename` is excluded (always implicitly available). Returns `None` when
 /// the output shape is not an object (e.g. a field connector returning a scalar)
 /// — those are not the root/entity over-merge case this guards.
-fn connector_provided_fields(connector: &Connector) -> Option<HashSet<String>> {
+pub(crate) fn connector_provided_fields(connector: &Connector) -> Option<HashSet<String>> {
     let analysis = SelectionAnalysis::new(connector.selection.clone());
     let shape = analysis.output_shape();
     match shape.case() {
@@ -268,9 +274,9 @@ fn connector_for<'a>(
     connectors: &'a [Connector],
 ) -> Option<&'a Connector> {
     let simple = format!("{parent_type}.{field}");
-    connectors.iter().find(|c| {
-        c.id.subgraph_name.as_str() == subgraph && c.id.directive.simple_name() == simple
-    })
+    connectors
+        .iter()
+        .find(|c| c.id.subgraph_name.as_str() == subgraph && c.id.directive.simple_name() == simple)
 }
 
 /// If `fetch` is a **multi-connector root-field merge**, return one single-
@@ -332,9 +338,11 @@ fn split_root_field_fetch(fetch: &FetchNode, connectors: &[Connector]) -> Option
         // Sub-operation: the merged operation with only this connector's fields.
         let mut doc = base.clone();
         let op_node = doc.operations.anonymous.as_mut()?;
-        op_node.make_mut().selection_set.selections.retain(|s| {
-            matches!(s, Selection::Field(f) if keep.contains(&f.name))
-        });
+        op_node
+            .make_mut()
+            .selection_set
+            .selections
+            .retain(|s| matches!(s, Selection::Field(f) if keep.contains(&f.name)));
         // A subset of an already-valid operation is still valid; keep both the
         // parsed and serialized forms so the plan's `Display` (which reads the
         // parsed doc) and the router's later re-parse both work.
@@ -386,7 +394,11 @@ fn rewrite_targets_kept_field(rewrite: &FetchDataRewrite, keep: &HashSet<Name>) 
 /// fields yield `(root_type, field)`; an `_entities` field descends into its
 /// inline fragments, yielding `(fragment_type, field)` for each non-`__typename`
 /// field.
-fn collect_targets(parent_type: &str, selection_set: &SelectionSet, out: &mut Vec<(String, String)>) {
+fn collect_targets(
+    parent_type: &str,
+    selection_set: &SelectionSet,
+    out: &mut Vec<(String, String)>,
+) {
     for selection in &selection_set.selections {
         match selection {
             Selection::Field(field) => {
@@ -403,10 +415,10 @@ fn collect_targets(parent_type: &str, selection_set: &SelectionSet, out: &mut Ve
                     .map(|t| t.as_str())
                     .unwrap_or(parent_type);
                 for inner in &fragment.selection_set.selections {
-                    if let Selection::Field(field) = inner {
-                        if field.name.as_str() != "__typename" {
-                            out.push((ty.to_string(), field.name.to_string()));
-                        }
+                    if let Selection::Field(field) = inner
+                        && field.name.as_str() != "__typename"
+                    {
+                        out.push((ty.to_string(), field.name.to_string()));
                     }
                 }
             }
@@ -423,9 +435,9 @@ mod tests {
     use super::*;
     use crate::ApiSchemaOptions;
     use crate::Supergraph;
+    use crate::query_graph::build_federated_query_graph;
     use crate::query_plan::query_planner::QueryPlanner;
     use crate::query_plan::query_planner::QueryPlannerConfig;
-    use crate::query_graph::build_federated_query_graph;
     use crate::schema::FederationSchema;
     use crate::supergraph::extract_subgraphs_from_supergraph;
 
@@ -434,9 +446,7 @@ mod tests {
     fn fetch_stamps(plan: &QueryPlan) -> Vec<(String, Option<String>)> {
         fn walk(node: &PlanNode, out: &mut Vec<(String, Option<String>)>) {
             match node {
-                PlanNode::Fetch(f) => {
-                    out.push((f.subgraph_name.to_string(), f.connector.clone()))
-                }
+                PlanNode::Fetch(f) => out.push((f.subgraph_name.to_string(), f.connector.clone())),
                 PlanNode::Sequence(s) => s.nodes.iter().for_each(|n| walk(n, out)),
                 PlanNode::Parallel(p) => p.nodes.iter().for_each(|n| walk(n, out)),
                 PlanNode::Flatten(fl) => walk(&fl.node, out),
@@ -462,7 +472,9 @@ mod tests {
 
         // Raw-graph planner (connectors treated as one ordinary subgraph).
         let supergraph = Supergraph::new_with_router_specs(sdl).unwrap();
-        let api = supergraph.to_api_schema(ApiSchemaOptions::default()).unwrap();
+        let api = supergraph
+            .to_api_schema(ApiSchemaOptions::default())
+            .unwrap();
         let graph = build_federated_query_graph(
             supergraph.schema.clone(),
             api.clone(),
@@ -497,8 +509,14 @@ mod tests {
                 "q.graphql",
             )
             .unwrap();
-            let mut plan = planner.build_query_plan(&doc, None, Default::default()).unwrap();
-            stamp_connector_coordinates(&mut plan, &connectors, planner.supergraph_schema().schema());
+            let mut plan = planner
+                .build_query_plan(&doc, None, Default::default())
+                .unwrap();
+            stamp_connector_coordinates(
+                &mut plan,
+                &connectors,
+                planner.supergraph_schema().schema(),
+            );
             let stamps = fetch_stamps(&plan);
             let connector_stamp = stamps
                 .iter()
@@ -523,30 +541,35 @@ mod tests {
                 "q.graphql",
             )
             .unwrap();
-            let mut plan = planner.build_query_plan(&doc, None, Default::default()).unwrap();
-            stamp_connector_coordinates(&mut plan, &connectors, planner.supergraph_schema().schema());
+            let mut plan = planner
+                .build_query_plan(&doc, None, Default::default())
+                .unwrap();
+            stamp_connector_coordinates(
+                &mut plan,
+                &connectors,
+                planner.supergraph_schema().schema(),
+            );
             let stamps = fetch_stamps(&plan);
 
             // Every graphql fetch is left unstamped (not a connector).
             for (sg, coord) in &stamps {
                 if sg == "graphql" {
-                    assert_eq!(coord, &None, "graphql fetch must not be stamped: {stamps:?}");
+                    assert_eq!(
+                        coord, &None,
+                        "graphql fetch must not be stamped: {stamps:?}"
+                    );
                 }
             }
             // The connector entity fetch for `d` is stamped with User.d.
             assert!(
-                stamps
-                    .iter()
-                    .any(|(sg, c)| sg == "connectors"
-                        && c.as_deref().is_some_and(|c| c.contains("User.d"))),
+                stamps.iter().any(|(sg, c)| sg == "connectors"
+                    && c.as_deref().is_some_and(|c| c.contains("User.d"))),
                 "connector entity fetch stamped with User.d coordinate, got {stamps:?}"
             );
             // And the connectors root fetch for `user` is stamped with Query.user.
             assert!(
-                stamps
-                    .iter()
-                    .any(|(sg, c)| sg == "connectors"
-                        && c.as_deref().is_some_and(|c| c.contains("Query.user["))),
+                stamps.iter().any(|(sg, c)| sg == "connectors"
+                    && c.as_deref().is_some_and(|c| c.contains("Query.user["))),
                 "connectors root fetch stamped with Query.user coordinate, got {stamps:?}"
             );
         }

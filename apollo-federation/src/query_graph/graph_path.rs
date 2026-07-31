@@ -1485,6 +1485,15 @@ where
             None
         };
         let original_source = tail_weight.source.clone();
+        // A source-aware "restrictive provides" copy prunes field edges the
+        // entry connector doesn't provide, leaving those fields reachable only
+        // through the copy's same-source `KeyResolution` re-entry edges. The
+        // usual "an edge back to our original source is never useful" shortcut
+        // below assumes the direct transition was already checked — false on
+        // such a copy, where it was pruned — so allow same-source re-entry for
+        // searches starting there. Nodes outside source-aware raw graphs never
+        // set this flag, so this changes nothing for ordinary planning.
+        let starts_on_connector_boundary_copy = tail_weight.connector_boundary_copy;
         // For each source, we store the best path we find for that source with the score, or `None`
         // if we can decide that we should not try going to that source (typically because we can
         // prove that this create an inefficient detour for which a more direct path exists and will
@@ -1535,7 +1544,9 @@ where
                 // interested (we've already checked for a direct transition from that original
                 // subgraph). One exception though is if we're just after a @defer, in which case
                 // re-entering the current subgraph is actually useful.
-                if edge_tail_weight.source == original_source && to_advance.defer_on_tail.is_none()
+                if edge_tail_weight.source == original_source
+                    && to_advance.defer_on_tail.is_none()
+                    && !starts_on_connector_boundary_copy
                 {
                     debug!("Ignored: edge get us back to our original source");
                     continue;
@@ -1795,6 +1806,20 @@ where
                             } else {
                                 None
                             };
+
+                        // A "direct path" ending on a source-aware restricted
+                        // copy is not evidence the edge is a useless detour:
+                        // the copy's field edges are pruned to what its entry
+                        // connector provides, so unlike ordinary nodes, its
+                        // type doesn't imply the same fields are reachable
+                        // there (indeed this search typically exists because
+                        // they are not). Never eliminate based on such a path.
+                        let direct_path_end_node = match direct_path_end_node {
+                            Some(node) if self.graph.node_weight(node)?.connector_boundary_copy => {
+                                None
+                            }
+                            other => other,
+                        };
 
                         if let Some(direct_path_end_node) = direct_path_end_node {
                             let direct_key_edge_max_cost = last_subgraph_entering_edge_info

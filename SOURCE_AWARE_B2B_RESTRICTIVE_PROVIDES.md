@@ -1,5 +1,27 @@
 # B-2b via "restrictive provides" — fixing the over-merge (side-effect #3)
 
+> **STATUS: IMPLEMENTED.** `connect_graph::restrict_connector_reachability`,
+> wired into `SourceAwareQueryPlanner::new`. The router repro
+> `source_aware_entity_resolver_connector_gap` is un-ignored and green; the full
+> federation corpus and connectors suite pass unchanged. Two planner-side
+> obstacles beyond this design surfaced during implementation (both fixes
+> self-gated on the new `QueryGraphNode::connector_boundary_copy` marker, so
+> ordinary planning is untouched):
+>
+> 1. **Precomputed traversal maps.** Post-build mutation invalidates
+>    `non_trivial_followup_edges` (traversal hard-errors on missing entries and
+>    would never consider new edges) and `non_local_selection_metadata`; the
+>    pass recomputes both (the former via a refactored `pub(crate)`
+>    `precompute_non_trivial_followup_edges`).
+> 2. **Two traversal shortcuts assume "same type ⇒ same fields reachable."**
+>    (a) The indirect-search guard skipping edges back to the original source
+>    ("direct transition already checked" — false on a pruned copy) now admits
+>    same-source re-entry when the search starts on a boundary copy.
+>    (b) The detour-elimination optimization (`check_direct_path_from_node`)
+>    found a "direct path" ending on the pruned copy itself and discarded the
+>    re-entry as a useless detour; a direct path ending on a boundary copy no
+>    longer justifies elimination.
+
 > **Goal.** Make the source-aware planner emit a valid `_entities` fetch for a
 > connector field the entry connector doesn't provide (e.g. `username` on a
 > `Query.users` result), instead of over-merging it into a fetch that returns

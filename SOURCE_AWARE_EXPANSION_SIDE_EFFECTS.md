@@ -39,7 +39,17 @@ fetches. **Evidence:** `source_aware_multi_connector_merged_fetch_end_to_end`.
 **Scope gap:** only **root-field** merges; entity-field merges (shared
 representations) and variable-bearing merges are deliberately left unsplit.
 
-### 3. Per-connector field availability (output-shape boundaries) — ❌ confirmed gap
+### 3. Per-connector field availability (output-shape boundaries) — ✅ handled (root/entity field connectors)
+
+> **UPDATE: fixed** by the restrictive-provides graph pass
+> (`connect_graph::restrict_connector_reachability`, see
+> `SOURCE_AWARE_B2B_RESTRICTIVE_PROVIDES.md`). `{ users { username } }` now
+> plans as `Sequence[users-fetch, Flatten(_entities username)]`, stamped and
+> dispatched via the `Query.user` entity resolver; the repro
+> `source_aware_entity_resolver_connector_gap` is un-ignored and green.
+> First-slice scope: top-level provided fields of object-shaped connectors with
+> a `KeyResolution` re-entry available; nested output shapes and no-key cases
+> conservatively keep today's behavior. Original analysis below.
 **Expansion:** the minimal subgraph exposed *only* the connector's provided
 fields, so the planner physically could not route a field to a connector that
 doesn't return it — and was forced to resolve such a field via a *separate*
@@ -65,7 +75,9 @@ addressed by the step-3 stamping change (match by entity **output type**) — bu
 that only bites once #3 forces a separate entity fetch to exist. Entity **keys**
 themselves *are* preserved (they're on the raw schema: `User @join__type(key: "id")`).
 **Evidence:** `stamps_connector_coordinates_over_raw_graph_plans` (User.d entity
-fetch → `User.d`); step-3 stamping implemented but blocked on #3.
+fetch → `User.d`); step-3 stamping implemented — and now exercised, since the
+#3 fix makes the planner emit the entity-resolver `_entities` fetch it stamps
+(`plans_entity_resolver_fetch_for_unprovided_field`).
 
 ### 5. Input-dependency sequencing (`@requires` / entity inputs) — ✅ handled (so far)
 **Expansion:** encoded each connector's input requirements so the planner ordered

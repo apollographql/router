@@ -75,6 +75,17 @@ pub(crate) struct QueryGraphNode {
     pub(crate) provide_id: Option<u32>,
     // If present, this node represents a root node of the corresponding kind.
     pub(crate) root_kind: Option<SchemaRootDefinitionKind>,
+    /// True for a node created by the source-aware "restrictive provides" pass
+    /// ([`connect_graph::restrict_connector_reachability`]): a copy of a connector's
+    /// landing-type node whose field edges are pruned to the fields the connector's
+    /// `selection` actually returns. Fields pruned from such a copy remain reachable
+    /// only through its `KeyResolution` re-entry edges — which stay within the same
+    /// (collapsed `connectors`) source — so path traversal must allow same-source
+    /// re-entry when a path stands on one of these nodes (see the guard in
+    /// `graph_path.rs` that normally ignores edges back to the original source).
+    /// Always false outside source-aware raw graphs, making that relaxation
+    /// self-gating.
+    pub(crate) connector_boundary_copy: bool,
 }
 
 impl QueryGraphNode {

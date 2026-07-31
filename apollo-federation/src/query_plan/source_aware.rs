@@ -30,6 +30,7 @@ use crate::Supergraph;
 use crate::connectors::Connector;
 use crate::error::FederationError;
 use crate::query_graph::build_federated_query_graph;
+use crate::query_graph::connect_graph::restrict_connector_reachability;
 use crate::query_plan::QueryPlan;
 use crate::query_plan::connector_stamp::stamp_connector_coordinates;
 use crate::query_plan::query_planner::QueryPlanner;
@@ -61,22 +62,9 @@ impl SourceAwareQueryPlanner {
             ..Default::default()
         })?;
 
-        // Raw graph: connectors are one ordinary subgraph, not expanded.
-        let query_graph = build_federated_query_graph(
-            supergraph.schema.clone(),
-            api_schema.clone(),
-            Some(false),
-            Some(true),
-        )?;
-        let planner = QueryPlanner::from_query_graph(
-            config,
-            query_graph,
-            supergraph.schema.clone(),
-            api_schema,
-        )?;
-
         // Ground-truth connectors, built directly from the raw subgraphs — the
-        // authoritative source for coordinate stamping.
+        // authoritative source for coordinate stamping and for the reachability
+        // restriction below.
         let fed = FederationSchema::new(Schema::parse(supergraph_sdl, "supergraph.graphql")?)?;
         let subgraphs = extract_subgraphs_from_supergraph(&fed, Some(false))?;
         let connectors: Vec<Connector> = subgraphs
@@ -84,6 +72,25 @@ impl SourceAwareQueryPlanner {
             .values()
             .flat_map(|sg| Connector::from_schema(sg.schema.schema(), &sg.name).unwrap_or_default())
             .collect();
+
+        // Raw graph: connectors are one ordinary subgraph, not expanded.
+        let mut query_graph = build_federated_query_graph(
+            supergraph.schema.clone(),
+            api_schema.clone(),
+            Some(false),
+            Some(true),
+        )?;
+        // Restrictive-provides pass: prune each connector's landing-type copy to
+        // the fields its `selection` returns, so the planner emits `_entities`
+        // fetches (via entity-resolver connectors) instead of over-merging
+        // fields into a fetch the entry connector cannot serve.
+        restrict_connector_reachability(&mut query_graph, &connectors)?;
+        let planner = QueryPlanner::from_query_graph(
+            config,
+            query_graph,
+            supergraph.schema.clone(),
+            api_schema,
+        )?;
 
         Ok(Self {
             planner,
@@ -162,6 +169,85 @@ mod tests {
         out
     }
 
+    /// The restrictive-provides pass (`restrict_connector_reachability`) makes
+    /// the planner emit a proper `_entities` fetch for a field the entry
+    /// connector doesn't provide: `username` is absent from the `Query.users`
+    /// connector's `selection`, so `{ users { username } }` must plan as
+    /// `Sequence[ users-fetch, Flatten(_entities username) ]` — with the entity
+    /// fetch stamped to the `Query.user` entity-resolver connector — instead of
+    /// over-merging `username` into the root fetch (which returned `null` at
+    /// execution). Queries the entry connector *can* serve alone must keep
+    /// planning as a single fetch.
+    #[test]
+    fn plans_entity_resolver_fetch_for_unprovided_field() {
+        let sdl = include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
+        let planner = SourceAwareQueryPlanner::new(sdl, QueryPlannerConfig::default()).unwrap();
+
+        // The over-merge shape: username must get its own entity fetch.
+        {
+            let doc = ExecutableDocument::parse_and_validate(
+                planner.api_schema().schema(),
+                "{ users { username } }",
+                "q.graphql",
+            )
+            .unwrap();
+            let plan = planner.plan(&doc).unwrap();
+            let stamps = fetch_stamps(&plan);
+            assert_eq!(stamps.len(), 2, "root fetch + entity fetch, got {plan}");
+            assert!(
+                stamps[0].0 == "connectors"
+                    && stamps[0]
+                        .1
+                        .as_deref()
+                        .is_some_and(|c| c.contains("Query.users")),
+                "root fetch stamped Query.users, got {stamps:?}"
+            );
+            assert!(
+                stamps[1].0 == "connectors"
+                    && stamps[1]
+                        .1
+                        .as_deref()
+                        .is_some_and(|c| c.contains("Query.user[")),
+                "entity fetch stamped with the Query.user entity resolver, got {stamps:?}"
+            );
+            // The username selection really moved into the follow-up entity
+            // fetch (rendered `{ ... on User { __typename id } } => { ... on
+            // User { username } }` under a Flatten), and out of the root fetch.
+            let rendered = plan.to_string();
+            assert!(
+                rendered.contains("Flatten(path: \"users.@\")"),
+                "expected a flattened entity fetch in {plan}"
+            );
+            let root_fetch_end = rendered.find("Flatten").unwrap();
+            assert!(
+                !rendered[..root_fetch_end].contains("username"),
+                "username must not remain in the root fetch: {plan}"
+            );
+            assert!(
+                rendered[root_fetch_end..].contains("username"),
+                "username must be selected by the entity fetch: {plan}"
+            );
+        }
+
+        // Fields the entry connector provides still plan as one fetch — the
+        // restriction must not manufacture unnecessary entity fetches.
+        {
+            let doc = ExecutableDocument::parse_and_validate(
+                planner.api_schema().schema(),
+                "{ users { id name } }",
+                "q.graphql",
+            )
+            .unwrap();
+            let plan = planner.plan(&doc).unwrap();
+            let stamps = fetch_stamps(&plan);
+            assert_eq!(
+                stamps.len(),
+                1,
+                "provided-only selection stays a single fetch, got {plan}"
+            );
+        }
+    }
+
     /// The entry point produces a stamped raw-graph plan end to end: build once
     /// from SDL, plan operations, and every connector fetch carries its
     /// coordinate. This is the same evidence as
@@ -207,7 +293,10 @@ mod tests {
             let stamps = fetch_stamps(&plan);
             for (sg, coord) in &stamps {
                 if sg == "graphql" {
-                    assert_eq!(coord, &None, "graphql fetch must not be stamped: {stamps:?}");
+                    assert_eq!(
+                        coord, &None,
+                        "graphql fetch must not be stamped: {stamps:?}"
+                    );
                 }
             }
             assert!(
