@@ -1,6 +1,5 @@
 ---
 source: apollo-federation/src/connectors/expand/tests/mod.rs
-assertion_line: 26
 expression: connectors.by_service_name
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.graphql
 ---
@@ -230,6 +229,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             connect_extensions: None,
             connect_is_success: None,
         },
+        methods: None,
         label: Label(
             "one. http: GET http://localhost/ts/{$args.id}",
         ),
@@ -519,6 +519,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             connect_extensions: None,
             connect_is_success: None,
         },
+        methods: None,
         label: Label(
             "one. http: GET http://localhost/ts/{$args.id}?id2={$args.id2}",
         ),
@@ -748,6 +749,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             connect_extensions: None,
             connect_is_success: None,
         },
+        methods: None,
         label: Label(
             "one. http: GET http://localhost/ts/{$args.unselected}",
         ),
@@ -944,6 +946,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             connect_extensions: None,
             connect_is_success: None,
         },
+        methods: None,
         label: Label(
             "one. http: GET http://localhost/rs/{$this.id}",
         ),
@@ -1200,6 +1203,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             connect_extensions: None,
             connect_is_success: None,
         },
+        methods: None,
         label: Label(
             "one. http: GET http://localhost/rs/{$this.id}?id2={$this.id2}",
         ),
@@ -1427,6 +1431,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             connect_extensions: None,
             connect_is_success: None,
         },
+        methods: None,
         label: Label(
             "one. http: GET http://localhost/rs/{$this.id}",
         ),
@@ -1643,6 +1648,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             connect_extensions: None,
             connect_is_success: None,
         },
+        methods: None,
         label: Label(
             "one. http: POST http://localhost/rs",
         ),
@@ -1890,6 +1896,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             connect_extensions: None,
             connect_is_success: None,
         },
+        methods: None,
         label: Label(
             "one. http: POST http://localhost/rs",
         ),

@@ -30,6 +30,7 @@ pub use self::problem_location::ProblemLocation;
 pub use self::source::SourceName;
 use super::ConnectId;
 use super::JSONSelection;
+use super::MethodRegistry;
 use super::PathSelection;
 use super::id::ConnectorPosition;
 use super::json_selection::VarPaths;
@@ -76,6 +77,17 @@ pub struct Connector {
     pub batch_settings: Option<ConnectBatchArguments>,
 
     pub error_settings: ConnectorErrorsSettings,
+
+    /// The global registry of custom `->` method definitions, merged from every
+    /// `@source(methods:)`, every `@connect(methods:)`, and every `@method` in the
+    /// subgraph, and shared (cheap `Arc` clone) by every connector in it.
+    /// `None` when no methods are declared. Threaded into JSONSelection evaluation
+    /// at request time.
+    ///
+    /// Every connector gets the *same* registry regardless of where a method was
+    /// declared — see the `connectors::spec::methods` module docs on colocation vs.
+    /// scoping.
+    pub methods: Option<Arc<MethodRegistry>>,
 
     /// A label for use in debugging and logging. Includes ID, transport method, and path.
     pub label: Label,
@@ -201,10 +213,54 @@ impl Connector {
         let connect_arguments =
             extract_connect_directive_arguments(schema, &link.connect_directive_name)?;
 
+        // Merge every `methods:` block in the subgraph into one global registry,
+        // shared (via `Arc`) by all connectors. Built once here rather than
+        // per-connector.
+        //
+        // Note that `@connect(methods:)` entries go into the *same* registry as
+        // `@source(methods:)` ones: declaring a method on a connector is colocation
+        // for the reader's benefit, not a scoping mechanism. See
+        // [`crate::connectors::spec::methods`].
+        //
+        // Validation has already rejected duplicates, builtin shadows, and
+        // cycles, so a build error here is internal.
+        let mut all_methods: Vec<_> = source_arguments
+            .iter()
+            .flat_map(|source| source.methods.iter().cloned())
+            .chain(
+                connect_arguments
+                    .iter()
+                    .flat_map(|connect| connect.methods.iter().cloned()),
+            )
+            .collect();
+        // `@method` on a type desugars to a nullary method in the same registry.
+        all_methods.extend(crate::connectors::spec::method::compiled_derived_methods(
+            schema,
+            &link.method_directive_name,
+            link.spec,
+        ));
+        let methods = if all_methods.is_empty() {
+            None
+        } else {
+            Some(Arc::new(MethodRegistry::build(all_methods).map_err(|errors| {
+                FederationError::internal(format!(
+                    "invalid `methods:` registry ({} error(s)) reached extraction; should have been caught in validation",
+                    errors.len()
+                ))
+            })?))
+        };
+
         connect_arguments
             .into_iter()
             .map(|args| {
-                Self::from_directives(schema, subgraph_name, link.spec, args, &source_arguments)
+                Self::from_directives(
+                    schema,
+                    subgraph_name,
+                    link.spec,
+                    args,
+                    &source_arguments,
+                    methods.clone(),
+                )
             })
             .collect::<Result<Vec<_>, _>>()
     }
@@ -215,6 +271,7 @@ impl Connector {
         spec: ConnectSpec,
         connect: ConnectDirectiveArguments,
         source_arguments: &[SourceDirectiveArguments],
+        methods: Option<Arc<MethodRegistry>>,
     ) -> Result<Self, FederationError> {
         let source = connect
             .source
@@ -298,6 +355,7 @@ impl Connector {
             response_variable_keys,
             batch_settings,
             error_settings,
+            methods,
             label,
         })
     }
@@ -754,6 +812,7 @@ mod tests {
                     connect_extensions: None,
                     connect_is_success: None,
                 },
+                methods: None,
                 label: Label(
                     "connectors.json http: GET /users",
                 ),
@@ -961,6 +1020,7 @@ mod tests {
                     connect_extensions: None,
                     connect_is_success: None,
                 },
+                methods: None,
                 label: Label(
                     "connectors.json http: GET /posts",
                 ),

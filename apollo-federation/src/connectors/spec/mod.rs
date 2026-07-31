@@ -2,6 +2,8 @@
 pub(crate) mod connect;
 pub(crate) mod errors;
 pub(crate) mod http;
+pub(crate) mod method;
+pub(crate) mod methods;
 pub(crate) mod source;
 mod type_and_directive_specifications;
 
@@ -23,6 +25,7 @@ use strum_macros::EnumIter;
 
 use self::connect::CONNECT_DIRECTIVE_NAME_IN_SPEC;
 use self::source::SOURCE_DIRECTIVE_NAME_IN_SPEC;
+use crate::connectors::spec::type_and_directive_specifications::METHOD_DIRECTIVE_NAME_IN_SPEC;
 use crate::connectors::spec::type_and_directive_specifications::directive_specifications;
 use crate::connectors::spec::type_and_directive_specifications::type_specifications;
 use crate::connectors::validation::Code;
@@ -46,6 +49,7 @@ pub(crate) struct ConnectLink {
     pub(crate) spec: ConnectSpec,
     pub(crate) source_directive_name: Name,
     pub(crate) connect_directive_name: Name,
+    pub(crate) method_directive_name: Name,
     pub(crate) directive: Component<Directive>,
     pub(crate) link: Link,
 }
@@ -78,10 +82,12 @@ impl<'schema> ConnectLink {
         };
         let source_directive_name = link.directive_name_in_schema(&SOURCE_DIRECTIVE_NAME_IN_SPEC);
         let connect_directive_name = link.directive_name_in_schema(&CONNECT_DIRECTIVE_NAME_IN_SPEC);
+        let method_directive_name = link.directive_name_in_schema(&METHOD_DIRECTIVE_NAME_IN_SPEC);
         Some(Ok(Self {
             spec,
             source_directive_name,
             connect_directive_name,
+            method_directive_name,
             directive: directive.clone(),
             link,
         }))

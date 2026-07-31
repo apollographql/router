@@ -2035,6 +2035,7 @@ mod test {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,

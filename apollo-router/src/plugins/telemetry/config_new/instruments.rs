@@ -3369,6 +3369,7 @@ mod tests {
                                         entity_resolver: None,
                                         spec: DEFAULT_CONNECT_SPEC,
                                         schema_subtypes_map: Default::default(),
+                                        methods: None,
                                         batch_settings: None,
                                         request_headers: Default::default(),
                                         response_headers: Default::default(),
