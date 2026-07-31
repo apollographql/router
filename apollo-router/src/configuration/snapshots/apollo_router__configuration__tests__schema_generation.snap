@@ -12841,10 +12841,7 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "execution_timeout": {
-          "default": {
-            "nanos": 10000000,
-            "secs": 0
-          },
+          "default": "10ms",
           "type": "string"
         },
         "max_concurrency": {
@@ -12872,10 +12869,7 @@ expression: "&schema"
           "type": "integer"
         },
         "queue_timeout": {
-          "default": {
-            "nanos": 5000000,
-            "secs": 0
-          },
+          "default": "5ms",
           "type": "string"
         }
       },

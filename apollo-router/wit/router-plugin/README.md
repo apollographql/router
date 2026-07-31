@@ -24,6 +24,6 @@ Each plugin has bounded execution time, queue wait, linear memory, concurrency, 
 3. Add OCI and HTTPS source variants under the existing tagged `source` object, with source-specific immutable references and verification metadata.
 4. Add host capabilities as explicit WIT imports and matching YAML permissions; do not inherit ambient WASI access.
 5. Support a newer WIT package alongside `0.1.0` before removing an old ABI, with startup diagnostics for unsupported component worlds.
-6. Add compiled-component caching, pooling, lifecycle hooks, metrics, and tracing without changing extension configuration.
+6. Add pooling, lifecycle hooks, metrics, and tracing without changing extension configuration. Compiled-component caching is already an internal host concern and does not affect extension configuration.
 
 These rules reserve the public shape needed for expansion while keeping the first implementation small enough to validate with real guest toolchains.

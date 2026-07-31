@@ -1,1 +1,13 @@
 /node_modules/
+/*-header/plugin.wasm
+/go-header/generated/
+/go-header/wasi_snapshot_preview1.reactor.wasm
+/python-header/.venv/
+/python-header/__pycache__/
+/python-header/componentize_py_async_support/
+/python-header/componentize_py_runtime.pyi
+/python-header/componentize_py_types.py
+/python-header/poll_loop.py
+/python-header/wit_world/
+/scala-header/.bsp/
+/scala-header/.scala-build/

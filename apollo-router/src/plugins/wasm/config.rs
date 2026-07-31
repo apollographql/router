@@ -86,6 +86,17 @@ impl WasmHookSelector {
     }
 }
 
+impl WasmHookConfig {
+    pub(super) fn validate(&self, plugin_name: &str) -> Result<(), String> {
+        if self.hook == WasmHook::SupergraphRequest && !self.selector.service_names.is_empty() {
+            return Err(format!(
+                "wasm plugin `{plugin_name}` cannot select services for `supergraph.request`"
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct WasmPermissions {
@@ -141,10 +152,10 @@ pub(super) enum WasmGraphqlAccess {
 #[serde(default, deny_unknown_fields)]
 pub(super) struct WasmLimits {
     #[serde(deserialize_with = "humantime_serde::deserialize")]
-    #[schemars(with = "String")]
+    #[schemars(with = "String", default = "schema_default_execution_timeout")]
     pub(super) execution_timeout: Duration,
     #[serde(deserialize_with = "humantime_serde::deserialize")]
-    #[schemars(with = "String")]
+    #[schemars(with = "String", default = "schema_default_queue_timeout")]
     pub(super) queue_timeout: Duration,
     #[schemars(with = "String")]
     pub(super) max_memory_per_instance: ByteSize,
@@ -154,6 +165,14 @@ pub(super) struct WasmLimits {
     pub(super) max_input_size: ByteSize,
     #[schemars(with = "String")]
     pub(super) max_output_size: ByteSize,
+}
+
+const fn schema_default_execution_timeout() -> &'static str {
+    "10ms"
+}
+
+const fn schema_default_queue_timeout() -> &'static str {
+    "5ms"
 }
 
 impl Default for WasmLimits {

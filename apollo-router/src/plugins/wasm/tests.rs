@@ -6,8 +6,11 @@ use bytesize::ByteSize;
 use sha2::Digest;
 
 use super::config::WasmConfig;
+use super::config::WasmHook;
+use super::config::WasmHookConfig;
 use super::config::WasmHookSelector;
 use super::config::WasmNameMatcher;
+use super::config::WasmPermissions;
 use super::config::WasmSource;
 use super::hooks::apply_header_mutations;
 use super::runtime::load_source;
@@ -121,4 +124,21 @@ fn empty_selector_matches_every_service() {
     };
     assert!(selector.matches_service("inventory"));
     assert!(!selector.matches_service("products"));
+}
+
+#[test]
+fn supergraph_hooks_reject_service_selectors() {
+    let hook = WasmHookConfig {
+        hook: WasmHook::SupergraphRequest,
+        selector: WasmHookSelector {
+            service_names: HashSet::from(["products".to_string()]),
+        },
+        permissions: WasmPermissions::default(),
+        failure: None,
+    };
+
+    assert_eq!(
+        hook.validate("policy").unwrap_err(),
+        "wasm plugin `policy` cannot select services for `supergraph.request`"
+    );
 }

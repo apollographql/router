@@ -45,12 +45,11 @@ impl WasiView for StoreData {
     }
 }
 
-#[derive(Clone)]
 struct LoadedPlugin {
-    name: Arc<str>,
+    name: String,
     component: Component,
-    configuration: Arc<str>,
-    hooks: Arc<Vec<WasmHookConfig>>,
+    configuration: String,
+    hooks: Vec<WasmHookConfig>,
     limits: WasmLimits,
     failure: WasmFailure,
     concurrency: Arc<tokio::sync::Semaphore>,
@@ -91,6 +90,9 @@ impl Runtime {
                 )
                 .into());
             }
+            for hook in &plugin.hooks {
+                hook.validate(&plugin.name)?;
+            }
 
             let limits = plugin.limits.apply_to(defaults.limits.clone());
             validate_limits(&plugin.name, &limits)?;
@@ -101,10 +103,10 @@ impl Runtime {
             })?;
             let configuration = serde_json::to_string(&plugin.configuration)?;
             plugins.push(LoadedPlugin {
-                name: Arc::from(plugin.name),
+                name: plugin.name,
                 component,
-                configuration: Arc::from(configuration),
-                hooks: Arc::new(plugin.hooks),
+                configuration,
+                hooks: plugin.hooks,
                 concurrency: Arc::new(tokio::sync::Semaphore::new(limits.max_concurrency)),
                 queue: Arc::new(tokio::sync::Semaphore::new(limits.max_queue_size)),
                 limits,
