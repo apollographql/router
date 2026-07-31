@@ -884,28 +884,6 @@ where
         }
     }
 
-    /// Record a single state transition: fire the test signal, emit the tracing
-    /// span, and bump the `apollo.router.state.change.total` counter.
-    fn record_transition(&self, event_name: String, previous_state: String, state: &State<FA>) {
-        #[cfg(test)]
-        self.notify_updated.notify_one();
-
-        tracing::info!(
-            event = event_name,
-            state = ?state,
-            previous_state,
-            "state machine transitioned"
-        );
-        u64_counter!(
-            "apollo.router.state.change.total",
-            "Router state changes",
-            1,
-            event = event_name,
-            state = format!("{state:?}"),
-            previous_state = previous_state
-        );
-    }
-
     pub(crate) async fn process_events(
         mut self,
         messages: impl Stream<Item = Event> + Unpin,
@@ -942,24 +920,25 @@ where
                 futures::future::Either::Right(std::future::pending())
             };
 
-            tokio::select! {
+            let (event_name, previous_state) = tokio::select! {
                 biased;
 
                 event = messages.next() => {
                     let Some(event) = event else { break };
 
-                    // Consider whether to skip this event in favor of the next one. If another event
-                    // of the *same kind* is already queued right behind it, skip the reload —
-                    // the next event will supersede this target.
+                    // Consider whether to skip this event in favor of the next one. If
+                    // another event of the *same kind* is already queued right behind it,
+                    // skip building this one — the next event will supersede it.
                     //
-                    // We only coalesce same-kind updates so that, say, a failing license or config
-                    // publish queued alongside a schema publish can't prevent the
-                    // schema from being applied (they build separately).
+                    // We only coalesce same-kind updates so that, say, a failing license
+                    // or config publish queued alongside a schema publish can't prevent
+                    // the schema from being applied (they build separately).
                     if can_be_superseded(&event) && consecutive_coalesced < MAX_COALESCED_RELOADS {
                         let next_event = Pin::new(&mut messages).peek().now_or_never();
                         if let Some(Some(next_event)) = next_event
-                            && std::mem::discriminant(&event) == std::mem::discriminant(next_event) {
-                            // A queued input supersedes this target; skip building it.
+                            && std::mem::discriminant(&event) == std::mem::discriminant(next_event)
+                        {
+                            // A queued update supersedes this target; skip building it.
                             consecutive_coalesced += 1;
                             u64_counter_with_unit!(
                                 "apollo.router.state.reload.coalesced",
@@ -971,8 +950,6 @@ where
                         }
                     }
 
-                    // Captured before `event` is consumed below so we can compare it
-                    // against the next queued event's variant when deciding to coalesce.
                     let event_name = event.to_string();
                     let previous_state = format!("{state:?}");
 
@@ -996,17 +973,36 @@ where
 
                     state = state.attempt_reload(&mut self).await;
                     consecutive_coalesced = 0;
-
-                    self.record_transition(event_name, previous_state, &state);
+                    (event_name, previous_state)
                 }
                 _ = retry_future => {
                     let previous_state = format!("{state:?}");
                     state = state.attempt_reload(&mut self).await;
                     consecutive_coalesced = 0;
-                    self.record_transition("retry".to_string(), previous_state, &state);
+                    (String::from("retry"), previous_state)
                 }
-            }
+            };
 
+            // Update the shared state
+            #[cfg(test)]
+            self.notify_updated.notify_one();
+
+            tracing::info!(
+                event = event_name,
+                state = ?state,
+                previous_state,
+                "state machine transitioned"
+            );
+            u64_counter!(
+                "apollo.router.state.change.total",
+                "Router state changes",
+                1,
+                event = event_name,
+                state = format!("{state:?}"),
+                previous_state = previous_state
+            );
+
+            // If we've errored then exit even if there are potentially more messages
             if matches!(&state, Stopped | Errored(_)) {
                 break;
             }
