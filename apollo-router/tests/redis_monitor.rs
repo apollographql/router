@@ -147,6 +147,15 @@ impl MonitorOutput {
         cmd_sent_to_replica && !cmd_sent_to_primary
     }
 
+    /// Whether any monitored node saw `cmd` invoked with `arg` among its arguments. Useful for
+    /// attributing an otherwise-ambiguous command (e.g. a `PING` that container health probes
+    /// also emit) to a specific caller via a sentinel argument.
+    pub fn command_with_arg_sent_to_any(&self, cmd: &str, arg: &str) -> bool {
+        self.0
+            .iter()
+            .any(|output| output.command_with_arg_sent(cmd, arg))
+    }
+
     pub fn num_nodes(&self) -> usize {
         self.0.len()
     }
@@ -161,6 +170,12 @@ struct SingleMonitorOutput {
 impl SingleMonitorOutput {
     fn command_sent(&self, cmd: &str) -> bool {
         self.commands.iter().any(|command| command.command == cmd)
+    }
+
+    fn command_with_arg_sent(&self, cmd: &str, arg: &str) -> bool {
+        self.commands
+            .iter()
+            .any(|command| command.command == cmd && command.args.iter().any(|a| a == arg))
     }
 }
 
