@@ -128,11 +128,7 @@ impl Monitor {
         while self.monitor_tasks.join_next().await.is_some() {}
         while self.collection_tasks.join_next().await.is_some() {}
 
-        let mut outputs = Vec::with_capacity(self.outputs.len());
-        for output in &self.outputs {
-            outputs.push(output.read().await.clone());
-        }
-        MonitorOutput(outputs)
+        self.snapshot().await
     }
 }
 
