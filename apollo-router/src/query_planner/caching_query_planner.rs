@@ -1847,6 +1847,155 @@ mod tests {
         crate::plugin::test::await_mock_driver(driver).await;
     }
 
+    /// Drives the planner mock, counting requests and answering each with `content`.
+    fn spawn_counting_planner(
+        mut handle: tower_test::mock::Handle<QueryPlannerRequest, QueryPlannerResponse>,
+        content: QueryPlannerContent,
+    ) -> (tokio::task::JoinHandle<()>, Arc<AtomicUsize>) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = calls.clone();
+        let driver = tokio::task::spawn(async move {
+            while let Some((_request, responder)) = handle.next_request().await {
+                calls_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                responder.send_response(
+                    QueryPlannerResponse::builder()
+                        .content(content.clone())
+                        .build(),
+                );
+            }
+        });
+        (driver, calls)
+    }
+
+    async fn caching_planner_for_test(
+        mock: tower_test::mock::Mock<QueryPlannerRequest, QueryPlannerResponse>,
+        schema: &Arc<Schema>,
+        configuration: &Configuration,
+    ) -> impl Service<query_planner::CachingRequest, Error = CacheResolverError> {
+        CachingQueryPlanner::for_test(
+            mock.map_err(|err| panic!("tower-test errored: {err}")),
+            schema.clone(),
+            Default::default(),
+            configuration,
+        )
+        .await
+        .unwrap()
+    }
+
+    fn caching_request_with_metadata(
+        query: &str,
+        doc: &ParsedDocument,
+        metadata: CacheKeyMetadata,
+    ) -> query_planner::CachingRequest {
+        let context = Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert::<ParsedDocument>(doc.clone());
+            lock.insert(metadata);
+        });
+        query_planner::CachingRequest::new(query.to_string(), None, context)
+    }
+
+    /// `CacheKeyMetadata` is part of `CachingQueryKey`'s `Hash`/`Eq`, so the same query
+    /// under different authorization state reaches the inner planner again. That keeps an
+    /// unauthenticated request from receiving a plan built for an authenticated one.
+    #[test(tokio::test)]
+    async fn plan_cache_is_segmented_by_authorization_metadata() {
+        let (mock, handle) = tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
+        let (driver, planner_calls) = spawn_counting_planner(
+            handle,
+            QueryPlannerContent::Plan {
+                plan: Arc::new(QueryPlan::fake_new(None, None)),
+            },
+        );
+
+        let configuration: Configuration = Default::default();
+        let schema = include_str!("../testdata/starstuff@current.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+        let mut service = caching_planner_for_test(mock, &schema, &configuration).await;
+
+        let query = "query ExampleQuery { me { name } }";
+        let doc = Query::parse_document(query, None, &schema, &configuration).unwrap();
+
+        let unauthenticated = CacheKeyMetadata::default();
+        let authenticated = CacheKeyMetadata {
+            is_authenticated: true,
+            ..Default::default()
+        };
+
+        for metadata in [
+            unauthenticated.clone(),
+            authenticated,
+            // Repeats the first key, which must now hit the cache.
+            unauthenticated,
+        ] {
+            service
+                .ready()
+                .await
+                .unwrap()
+                .call(caching_request_with_metadata(query, &doc, metadata))
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(
+            planner_calls.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "each distinct authorization state must be planned separately, \
+             and a repeated state must be served from cache"
+        );
+
+        drop(service);
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    /// `entry.insert` does not discriminate on the `QueryPlannerContent` variant, so the
+    /// cache stores an authorization rejection like any other planner output.
+    #[test(tokio::test)]
+    async fn rejection_response_is_cached() {
+        let (mock, handle) = tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
+        let (driver, planner_calls) = spawn_counting_planner(
+            handle,
+            QueryPlannerContent::Response {
+                response: Box::new(
+                    crate::graphql::Response::builder()
+                        .data(crate::json_ext::Value::Null)
+                        .build(),
+                ),
+            },
+        );
+
+        let configuration: Configuration = Default::default();
+        let schema = include_str!("../testdata/starstuff@current.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+        let mut service = caching_planner_for_test(mock, &schema, &configuration).await;
+
+        let query = "query ExampleQuery { me { name } }";
+        let doc = Query::parse_document(query, None, &schema, &configuration).unwrap();
+
+        for _ in 0..2 {
+            service
+                .ready()
+                .await
+                .unwrap()
+                .call(caching_request_with_metadata(
+                    query,
+                    &doc,
+                    CacheKeyMetadata::default(),
+                ))
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(
+            planner_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the second identical request must be served from cache"
+        );
+
+        drop(service);
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
     #[test(tokio::test)]
     async fn test_temporary_errors_arent_cached() {
         let (mock, mut handle) =
