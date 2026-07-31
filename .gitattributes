@@ -2,3 +2,6 @@
 
 licenses.html linguist-vendored
 Cargo.lock linguist-generated=false
+examples/wasm-extensions/package-lock.json linguist-generated=true
+examples/wasm-extensions/rust-header/Cargo.lock linguist-generated=true
+apollo-router/src/configuration/snapshots/apollo_router__configuration__tests__schema_generation.snap linguist-generated=true

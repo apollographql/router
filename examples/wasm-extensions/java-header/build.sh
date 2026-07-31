@@ -8,13 +8,13 @@ if [[ ! -d "${JAVA_HOME:-}" && -x /usr/libexec/java_home ]]; then
 fi
 
 mvn --quiet package
-../node-header/node_modules/.bin/esbuild wrapper.js \
+../node_modules/.bin/esbuild wrapper.js \
   --bundle \
   --format=esm \
   --platform=neutral \
   --target=es2022 \
   --outfile=target/plugin.bundle.js
-../node-header/node_modules/.bin/jco componentize \
+../node_modules/.bin/jco componentize \
   target/plugin.bundle.js \
   --wit ../../../apollo-router/wit/router-plugin \
   --world-name router-plugin \

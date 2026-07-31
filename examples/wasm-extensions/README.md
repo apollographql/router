@@ -45,7 +45,18 @@ wasm:
 
 Unknown host-owned fields are rejected so mistakes fail at startup. The value under `configuration` is owned by the component and can evolve without changing the Router schema. Permissions default to no access, while selectors and tagged source variants leave room for additional hooks, source transports, signature metadata, and capabilities later.
 
-## Build the guests
+## Build and verify all guests
+
+Install the prerequisites listed below, then use the shared entry points from the repository root:
+
+```sh
+examples/wasm-extensions/build-all.sh
+examples/wasm-extensions/verify.sh
+```
+
+The build script produces all six components and the Router binary. The verification script validates each component and its WIT export, starts the example subgraph and Router, and checks the end-to-end response.
+
+## Build individual guests
 
 Rust requires the `wasm32-wasip2` target:
 
@@ -55,12 +66,12 @@ cd examples/wasm-extensions/rust-header
 cargo build --release --target wasm32-wasip2
 ```
 
-Node.js uses Jco and ComponentizeJS. Its local tools are also shared by the Java and Scala examples:
+Node.js uses Jco and ComponentizeJS. Dependencies are installed once at the example root and shared by the Node.js, Java, and Scala builds:
 
 ```sh
-cd examples/wasm-extensions/node-header
+cd examples/wasm-extensions
 npm install
-npm run build
+npm run build:node
 ```
 
 Python uses `componentize-py`:
@@ -96,7 +107,7 @@ cd examples/wasm-extensions/scala-header
 ./build.sh
 ```
 
-## Run the example
+## Run the example manually
 
 From the repository root, start the subgraph and Router in separate terminals:
 

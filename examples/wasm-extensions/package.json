@@ -1,0 +1,13 @@
+{
+  "name": "router-wasm-extension-examples",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:node": "esbuild node-header/plugin.js --bundle --format=esm --platform=neutral --target=es2022 --outfile=node-header/target/plugin.bundle.js && jco componentize node-header/target/plugin.bundle.js --wit ../../apollo-router/wit/router-plugin --world-name router-plugin --disable all -o node-header/plugin.wasm"
+  },
+  "devDependencies": {
+    "@bytecodealliance/componentize-js": "0.22.0",
+    "@bytecodealliance/jco": "1.26.1",
+    "esbuild": "0.25.10"
+  }
+}
