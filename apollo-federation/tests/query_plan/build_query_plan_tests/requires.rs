@@ -2034,3 +2034,37 @@ fn avoids_selecting_inapplicable_key_from_parent_node() {
       "###
     );
 }
+
+// Reproduction for RH-1390: router panics at planning time when @external
+// appears on nested @key fields combined with cross-subgraph @requires.
+// New versions of composition should reject this schema in the satisfibility check.
+#[test]
+#[should_panic(expected = "validation should have required a key to be present")]
+fn external_on_nested_key_fields_with_cross_subgraph_requires() {
+    let planner = planner!(
+        Subgraph1: include_str!(
+            "../../fixtures/external_on_nested_key_requires/subgraph1.graphql"
+        ),
+        Subgraph2: include_str!(
+            "../../fixtures/external_on_nested_key_requires/subgraph2.graphql"
+        ),
+        Subgraph3: include_str!(
+            "../../fixtures/external_on_nested_key_requires/subgraph3.graphql"
+        ),
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            t {
+              computed
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          todo
+        }
+      "###
+    );
+}

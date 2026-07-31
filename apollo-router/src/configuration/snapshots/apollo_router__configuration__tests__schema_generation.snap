@@ -2966,6 +2966,14 @@ expression: "&schema"
             "null"
           ]
         },
+        "preview_connect_v0_5": {
+          "default": null,
+          "description": "Feature gate for Connect spec v0.5. Set to `true` to enable using\nthe v0.5 spec during the preview phase.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "sources": {
           "additionalProperties": {
             "$ref": "#/definitions/SourceConfiguration"

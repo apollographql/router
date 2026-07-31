@@ -1,6 +1,7 @@
 //! Authentication plugin
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -28,6 +29,7 @@ use self::jwks::JwksManager;
 use self::subgraph::SigningParams;
 use self::subgraph::SigningParamsConfig;
 use self::subgraph::SubgraphAuth;
+use crate::Context;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
@@ -642,6 +644,24 @@ fn authenticate(
         StatusCode::UNAUTHORIZED,
         source_of_extracted_jwt,
     )
+}
+
+/// Returns whether this request presented a JWT that passed validation. This is currently
+/// equivalent to "has this request authenticated" since JWT is the router's only inbound
+/// authentication mechanism — but if another one is ever added, callers relying on this for
+/// a general "is authenticated" answer will need it updated (or a new check added) too.
+pub(crate) fn has_authenticated_jwt(context: &Context) -> bool {
+    context.contains_key(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+}
+
+/// Returns the space-delimited OAuth `scope` claim from the request's validated JWT, if any.
+pub(crate) fn jwt_scopes(context: &Context) -> Option<HashSet<String>> {
+    context
+        .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)?
+        .as_object()?
+        .get("scope")?
+        .as_str()
+        .map(|s| s.split(' ').map(|s| s.to_string()).collect())
 }
 
 // This macro allows us to use it in our plugin registry!
