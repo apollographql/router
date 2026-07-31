@@ -30,6 +30,7 @@ const SUBSCRIBE_DIRECTIVE_NAME: &str = "event__subscribe";
 
 mod nats_core;
 mod nats_jetstream;
+mod redis_pubsub;
 
 /// Opaque provider position, exposed only to telemetry and provider settlement.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -302,6 +303,17 @@ impl EventRuntime {
             "nats_jetstream" => {
                 nats_jetstream::subscribe(
                     self,
+                    provider_name,
+                    provider,
+                    source,
+                    source_name,
+                    destinations,
+                    buffer_capacity,
+                )
+                .await
+            }
+            "redis_pubsub" => {
+                redis_pubsub::subscribe(
                     provider_name,
                     provider,
                     source,
