@@ -1089,6 +1089,59 @@ mod tests {
         }
     }
 
+    /// Warm-up skips the router and supergraph pipelines and plans with
+    /// `CacheKeyMetadata::default()`, the same metadata an unauthenticated request
+    /// produces. The planner filters below the plan cache, so it rejects here rather than
+    /// caching an unfiltered plan that a later unauthenticated request could hit.
+    #[test(tokio::test)]
+    async fn planning_unauthenticated_rejects_rather_than_returning_unfiltered_plan() {
+        let configuration: Configuration = serde_json::from_value(serde_json::json!({
+            "authorization": { "directives": { "enabled": true } }
+        }))
+        .unwrap();
+        let configuration = Arc::new(configuration);
+
+        // `Query.me` requires the `profile` scope, so filtering an unauthenticated
+        // request empties the document.
+        let schema = include_str!("../../tests/fixtures/supergraph-auth.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+        let planner = QueryPlannerService::for_test(schema.clone(), configuration.clone()).unwrap();
+
+        let query = "query { me { name } }";
+        let doc = Query::parse_document(query, None, &schema, &configuration).unwrap();
+
+        let content = planner
+            .get(
+                QueryKey {
+                    original_query: query.to_string(),
+                    filtered_query: query.to_string(),
+                    operation_name: None,
+                    metadata: CacheKeyMetadata::default(),
+                    plan_options: PlanOptions::default(),
+                },
+                doc,
+                ComputeJobType::QueryPlanningWarmup,
+            )
+            .await
+            .unwrap();
+
+        match content {
+            QueryPlannerContent::Response { response } => {
+                assert_eq!(
+                    response.errors.first().map(|e| e.message.as_str()),
+                    Some("Unauthorized field or type")
+                );
+            }
+            QueryPlannerContent::Plan { .. } => {
+                panic!(
+                    "planner returned a query plan for an unauthenticated request; \
+                     an unfiltered plan cached under default metadata is reachable by \
+                     any unauthenticated request"
+                )
+            }
+        }
+    }
+
     #[tokio::test]
     async fn test_rust_mode_subgraph_operation_serialization() {
         let subgraph_queries = Arc::new(tokio::sync::Mutex::new(String::new()));
