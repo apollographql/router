@@ -2,6 +2,9 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::hash::DefaultHasher;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -28,6 +31,7 @@ use crate::spec::Schema;
 
 const SUBSCRIBE_DIRECTIVE_NAME: &str = "event__subscribe";
 
+mod kafka;
 mod nats_core;
 mod nats_jetstream;
 mod redis_pubsub;
@@ -173,6 +177,7 @@ pub(crate) struct EventRuntime {
     configuration: EventsConfiguration,
     catalog: EventCatalog,
     nats_clients: Mutex<HashMap<String, async_nats::Client>>,
+    instance_id: uuid::Uuid,
 }
 
 impl EventRuntime {
@@ -181,6 +186,7 @@ impl EventRuntime {
             configuration,
             catalog: EventCatalog::from_schema(&schema),
             nats_clients: Mutex::new(HashMap::new()),
+            instance_id: uuid::Uuid::new_v4(),
         }
     }
 
@@ -320,6 +326,22 @@ impl EventRuntime {
                     source_name,
                     destinations,
                     buffer_capacity,
+                )
+                .await
+            }
+            "kafka" => {
+                let mut hasher = DefaultHasher::new();
+                source_name.hash(&mut hasher);
+                destinations.hash(&mut hasher);
+                kafka::subscribe(
+                    provider_name,
+                    provider,
+                    source,
+                    source_name,
+                    destinations,
+                    buffer_capacity,
+                    self.instance_id,
+                    hasher.finish(),
                 )
                 .await
             }
