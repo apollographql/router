@@ -427,7 +427,7 @@ dependencies = [
  "http-body 1.1.0",
  "opentelemetry",
  "pin-project-lite",
- "thiserror 2.0.18",
+ "thiserror 2.0.19",
  "tokio",
  "tower",
  "tower-http 0.6.11",
@@ -648,7 +648,7 @@ dependencies = [
  "encoding_rs",
  "hashlink",
  "ordered-float",
- "thiserror 2.0.18",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -658,7 +658,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55907e2c3040f8243f033e61649a44ec88653cbc9e50578b5f77049d21b5201"
 dependencies = [
  "arraydeque",
- "thiserror 2.0.18",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -5121,13 +5121,8 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
-<<<<<<< HEAD
  "sha2 0.11.0",
- "thiserror 2.0.18",
-=======
- "sha2 0.10.9",
  "thiserror 2.0.19",
->>>>>>> origin/dev
  "tokio",
  "tracing",
  "unicase",
@@ -5350,27 +5345,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-=======
-name = "opentelemetry-zipkin"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f27fcd074586dab55936b003c6a499acaabd6debbd539c3f36356bca2ef2fce2"
-dependencies = [
- "http 1.4.0",
- "once_cell",
- "opentelemetry",
- "opentelemetry-http",
- "opentelemetry_sdk",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "typed-builder",
-]
-
-[[package]]
->>>>>>> origin/dev
 name = "opentelemetry_sdk"
 version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

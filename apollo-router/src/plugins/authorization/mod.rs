@@ -551,21 +551,11 @@ impl Plugin for AuthorizationPlugin {
     ) -> supergraph::BoxCloneService {
         if self.require_authentication {
             ServiceBuilder::new()
-<<<<<<< HEAD
                 .checkpoint_async(move |request: supergraph::Request| async move {
-                    // XXX(@goto-bus-stop): Why are we doing this here, as opposed to the
-                    // authentication plugin, which manages this context value?
-                    if request
-                        .context
-                        .contains_key(APOLLO_AUTHENTICATION_JWT_CLAIMS)
-                    {
-=======
-                .checkpoint(move |request: supergraph::Request| {
                     // Whether to reject unauthenticated requests is an authorization policy,
                     // same as `@authenticated`/`@requiresScopes`/`@policy` — authentication only
                     // verifies tokens, it doesn't decide this.
                     if authentication::has_authenticated_jwt(&request.context) {
->>>>>>> origin/dev
                         Ok(ControlFlow::Continue(request))
                     } else {
                         tracing::error!("rejecting unauthenticated request");
