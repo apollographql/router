@@ -71,7 +71,7 @@ async-compression = { version = "0.4.6", features = [
     "zstd",
 ] }
 async-trait.workspace = true
-async-nats = { version = "0.50.0", default-features = false, features = ["ring", "nkeys", "server_2_10", "server_2_11", "server_2_12", "server_2_14"] }
+async-nats = { version = "0.50.0", default-features = false, features = ["ring", "nkeys", "jetstream", "server_2_10", "server_2_11", "server_2_12", "server_2_14"] }
 axum = { version = "0.8.1", features = ["http2"] }
 base64 = "0.22.0"
 bloomfilter = "3.0.0"

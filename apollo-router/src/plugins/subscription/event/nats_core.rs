@@ -191,6 +191,17 @@ async fn client(
     Ok(connected)
 }
 
+pub(super) async fn shared_client(
+    runtime: &EventRuntime,
+    provider_name: &str,
+    provider: &EventProviderConfiguration,
+) -> Result<async_nats::Client, EventError> {
+    let config: NatsConfiguration =
+        serde_json::from_value(serde_json::Value::Object(provider.config.clone()))
+            .map_err(|error| invalid_config(provider_name, error))?;
+    client(runtime, provider_name, provider, &config).await
+}
+
 fn nats_metadata(message: &async_nats::Message) -> HashMap<String, String> {
     let mut metadata = HashMap::from([("subject".to_string(), message.subject.to_string())]);
     if let Some(reply) = &message.reply {
