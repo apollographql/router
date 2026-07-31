@@ -146,6 +146,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling
                 "T",
             ),
         ),
+        methods: None,
         label: Label(
             "connectors. http: GET https://my.api/t",
         ),
@@ -325,6 +326,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling
                 "String",
             ),
         ),
+        methods: None,
         label: Label(
             "connectors. http: GET https://my.api/t/{$this.k.id}",
         ),

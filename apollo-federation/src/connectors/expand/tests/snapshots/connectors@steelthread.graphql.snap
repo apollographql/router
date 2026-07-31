@@ -157,6 +157,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                 ),
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.json http: GET /users",
         ),
@@ -404,6 +405,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                 "User",
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.json http: GET /users/{$args.id}",
         ),
@@ -588,6 +590,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                 "String",
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.json http: GET /users/{$this.c}",
         ),

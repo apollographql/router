@@ -4,10 +4,10 @@ use shape::Shape;
 use super::ApplyToError;
 use super::MethodArgs;
 use super::VarsWithPathsMap;
+use super::apply_to::ApplyContext;
 use super::immutable::InputPath;
 use super::location::WithRange;
 use crate::connectors::json_selection::ShapeContext;
-use crate::connectors::spec::ConnectSpec;
 
 mod common;
 
@@ -24,6 +24,34 @@ mod public;
 
 #[cfg(test)]
 mod tests;
+
+/// Whether `name` is a built-in `->method`, public or not-yet-public.
+///
+/// A custom `methods:` method *may* reuse a built-in name and takes precedence over
+/// it (see [`crate::connectors::MethodRegistry`]); validation reports the shadowing
+/// as a warning so the author knows a built-in of that name now exists. The
+/// exception is [`is_reserved_method_name`].
+pub(crate) fn is_builtin_method_name(name: &str) -> bool {
+    ArrowMethod::lookup(name).is_some()
+}
+
+/// Whether `name` is a built-in whose meaning is fixed by the *language*, not
+/// just by a function body — and so cannot be shadowed by a custom def.
+///
+/// `->as` qualifies because `parser.rs` inspects it at **parse time** to decide
+/// that the names in `$->as($var)` become bound variables, and `apply_to.rs`
+/// special-cases it in both runtime evaluation and shape analysis. If a def
+/// could take that name, the parser would still read `->as(...)` as the binding
+/// form while dispatch routed elsewhere — parse-time and eval-time would
+/// disagree about what the syntax means.
+///
+/// Note this is *not* subject to the forward-compatibility argument that makes
+/// ordinary built-ins shadowable: reserved names already mean something today,
+/// so reserving them cannot retroactively break a schema the way newly shipping
+/// an ordinary built-in could.
+pub(crate) fn is_reserved_method_name(name: &str) -> bool {
+    matches!(ArrowMethod::lookup(name), Some(ArrowMethod::As))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ArrowMethod {
@@ -89,9 +117,9 @@ macro_rules! impl_arrow_method {
                 data: &JSON,
                 vars: &VarsWithPathsMap,
                 input_path: &InputPath<JSON>,
-                spec: $crate::connectors::spec::ConnectSpec,
+                context: &$crate::connectors::json_selection::apply_to::ApplyContext,
             ) -> (Option<JSON>, Vec<ApplyToError>) {
-                $impl_fn_name(method_name, method_args, data, vars, input_path, spec)
+                $impl_fn_name(method_name, method_args, data, vars, input_path, context)
             }
 
             fn shape(
@@ -117,7 +145,7 @@ pub(super) trait ArrowMethodImpl {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        spec: ConnectSpec,
+        context: &ApplyContext,
     ) -> (Option<JSON>, Vec<ApplyToError>);
 
     fn shape(

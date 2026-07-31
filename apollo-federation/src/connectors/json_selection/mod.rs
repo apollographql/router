@@ -1,5 +1,6 @@
 mod analysis;
 mod apply_to;
+pub(crate) mod custom_methods;
 pub(crate) mod helpers;
 /// Shared `Arc`-shaped reference alias used throughout the json_selection
 /// module — matches shape-rs's own internal `Ref<T> = Arc<T>` convention so
@@ -10,7 +11,7 @@ mod immutable;
 mod known_var;
 mod lit_expr;
 pub(crate) mod location;
-mod methods;
+pub(crate) mod methods;
 mod parser;
 mod pretty;
 mod selection_set;
@@ -22,6 +23,11 @@ mod selection_trie;
 #[allow(unused_imports)] // Consumers land in follow-up PRs.
 pub(crate) use analysis::SelectionAnalysis;
 pub use apply_to::*;
+#[allow(unused_imports)] // Some consumers land in follow-up steps.
+pub(crate) use custom_methods::CompiledMethod;
+#[allow(unused_imports)] // Some consumers land in follow-up steps.
+pub(crate) use custom_methods::MethodError;
+pub use custom_methods::MethodRegistry;
 pub(crate) use lit_expr::LitExpr;
 pub(crate) use location::Ranged;
 pub use parser::*;
