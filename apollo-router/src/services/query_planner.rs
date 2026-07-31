@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use static_assertions::assert_impl_all;
 
-use super::layers::query_analysis::ParsedDocument;
+use super::query_parsing::ParsedDocument;
 use crate::Context;
 use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;

@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -12636,14 +12637,6 @@ expression: "&schema"
             }
           ],
           "description": "Applied on specific subgraphs"
-        },
-        "deduplicate_variables": {
-          "default": null,
-          "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
-          "type": [
-            "boolean",
-            "null"
-          ]
         },
         "router": {
           "anyOf": [

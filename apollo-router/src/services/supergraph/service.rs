@@ -64,8 +64,7 @@ use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::content_negotiation;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
-use crate::services::layers::query_analysis::ParsedDocument;
-use crate::services::layers::query_analysis::QueryAnalysis;
+use crate::services::query_parsing::ParsedDocument;
 use crate::services::query_planner;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph;
@@ -472,8 +471,6 @@ pub(crate) struct PluggableSupergraphServiceBuilder {
     configuration: Option<Arc<Configuration>>,
     schema: Arc<Schema>,
     subgraph_schemas: Arc<SubgraphSchemas>,
-    /// Only for warmup. XXX(@goto-bus-stop): We should delete this when the factories are refactored!
-    query_analysis: Arc<QueryAnalysis>,
 }
 
 impl PluggableSupergraphServiceBuilder {
@@ -481,7 +478,6 @@ impl PluggableSupergraphServiceBuilder {
         query_planner_service: query_planner::BoxCloneService,
         schema: Arc<Schema>,
         subgraph_schemas: Arc<SubgraphSchemas>,
-        query_analysis: Arc<QueryAnalysis>,
     ) -> Self {
         Self {
             plugins: Arc::new(Default::default()),
@@ -492,7 +488,6 @@ impl PluggableSupergraphServiceBuilder {
             configuration: None,
             schema,
             subgraph_schemas,
-            query_analysis,
         }
     }
 
@@ -539,7 +534,10 @@ impl PluggableSupergraphServiceBuilder {
 
     pub(crate) async fn build(
         self,
-    ) -> Result<(SupergraphCreator, warmup::BoxCloneService), crate::error::ServiceBuildError> {
+    ) -> Result<
+        (SupergraphCreator, query_planner::CacheBoxCloneService),
+        crate::error::ServiceBuildError,
+    > {
         let configuration = self.configuration.unwrap_or_default();
 
         let schema = self.schema;
@@ -660,16 +658,8 @@ impl PluggableSupergraphServiceBuilder {
             ))
             .service(supergraph_service);
 
-        // XXX(@goto-bus-stop): this shouldn't really be created here, but it's the one
-        // place we have access to the caching query planner service!
-        let warmup_query_planner_service = ServiceBuilder::new()
-            .layer(warmup::WarmupParseQueryLayer::new(
-                self.query_analysis.clone(),
-            ))
-            .map_response(drop) // Ignore response
-            .service(query_planner_service)
-            .boxed_clone();
-
+        // XXX(@goto-bus-stop): caching query planner service is only returned so warmup can also
+        // use it
         Ok((
             SupergraphCreator {
                 in_memory_query_plan_cache: query_plan_cache.in_memory_cache(),
@@ -677,7 +667,7 @@ impl PluggableSupergraphServiceBuilder {
                 plugins: self.plugins,
                 sb,
             },
-            warmup_query_planner_service,
+            query_planner_service,
         ))
     }
 }
