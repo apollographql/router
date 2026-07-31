@@ -11,6 +11,7 @@ use super::errors::ErrorsArguments;
 use super::http::HTTP_ARGUMENT_NAME;
 use super::http::PATH_ARGUMENT_NAME;
 use super::http::QUERY_PARAMS_ARGUMENT_NAME;
+use crate::connectors::CompiledMethod;
 use crate::connectors::ConnectSpec;
 use crate::connectors::ConnectorPosition;
 use crate::connectors::ObjectFieldDefinitionPosition;
@@ -20,6 +21,8 @@ use crate::connectors::id::ObjectTypeDefinitionDirectivePosition;
 use crate::connectors::json_selection::JSONSelection;
 use crate::connectors::models::Header;
 use crate::connectors::spec::connect_spec_from_schema;
+use crate::connectors::spec::methods::METHODS_ARGUMENT_NAME;
+use crate::connectors::spec::methods::compile_methods_argument;
 use crate::error::FederationError;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
@@ -174,6 +177,17 @@ pub(crate) struct ConnectDirectiveArguments {
     /// Uses the JSONSelection to define a success criteria. This JSON Selection
     /// _must_ resolve to a boolean value.
     pub(crate) is_success: Option<JSONSelection>,
+
+    /// Reusable custom `->` method definitions declared via `@connect(methods:)`
+    /// (connect/v0.5+).
+    ///
+    /// Declaring a def here is **colocation only** — it does not make the def
+    /// private to this connector. These entries are merged with every
+    /// `@source(methods:)` block and `@method`-derived def into one
+    /// subgraph-wide registry, so the def is callable from any selection and
+    /// its name shares the one global namespace. See
+    /// [`crate::connectors::spec::methods`].
+    pub(crate) methods: Vec<CompiledMethod>,
 }
 
 impl ConnectDirectiveArguments {
@@ -194,6 +208,7 @@ impl ConnectDirectiveArguments {
         let mut batch = None;
         let mut errors = None;
         let mut is_success = None;
+        let mut methods = Vec::new();
         for arg in args {
             let arg_name = arg.name.as_str();
 
@@ -267,6 +282,12 @@ impl ConnectDirectiveArguments {
                     JSONSelection::parse_with_spec(selection_value, connect_spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
+            } else if arg_name == METHODS_ARGUMENT_NAME.as_str() {
+                methods.extend(compile_methods_argument(
+                    &arg.value,
+                    directive_name,
+                    connect_spec,
+                )?);
             }
         }
 
@@ -284,6 +305,7 @@ impl ConnectDirectiveArguments {
             batch,
             errors,
             is_success,
+            methods,
         })
     }
 }
@@ -480,7 +502,7 @@ mod tests {
 
         insta::assert_snapshot!(
             actual_definition.to_string(),
-            @"directive @connect(source: String, id: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection) repeatable on FIELD_DEFINITION | OBJECT"
+            @"directive @connect(source: String, id: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection, methods: connect__Methods) repeatable on FIELD_DEFINITION | OBJECT"
         );
 
         let fields = schema
@@ -623,6 +645,7 @@ mod tests {
                 batch: None,
                 errors: None,
                 is_success: None,
+                methods: [],
             },
             ConnectDirectiveArguments {
                 position: Field(
@@ -766,6 +789,7 @@ mod tests {
                 batch: None,
                 errors: None,
                 is_success: None,
+                methods: [],
             },
         ]
         "#

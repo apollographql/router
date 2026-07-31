@@ -2,6 +2,7 @@ use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
 
+use crate::connectors::json_selection::ApplyContext;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
@@ -11,6 +12,7 @@ use crate::connectors::json_selection::helpers::json_to_string;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+#[cfg(test)]
 use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
@@ -34,13 +36,14 @@ fn join_not_null_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
+    let spec = context.spec();
     let mut warnings = vec![];
 
     let Some((separator, arg_warnings)) = method_args
         .and_then(|args| args.args.first())
-        .map(|arg| arg.apply_to_path(data, vars, input_path, spec))
+        .map(|arg| arg.apply_to_path(data, vars, input_path, context))
     else {
         warnings.push(ApplyToError::new(
             format!(
