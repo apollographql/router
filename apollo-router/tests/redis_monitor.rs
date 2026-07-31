@@ -1,7 +1,10 @@
 /// Functionality to run the `MONITOR` command against Redis, to ensure specific commands are or are
 /// not sent.
 use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
+use std::time::Instant;
 
 use regex::Regex;
 use tokio::io::AsyncBufReadExt;
@@ -29,7 +32,11 @@ struct Command {
 /// in the channel, returning a `MonitorOutput`.
 pub struct Monitor {
     monitor_tasks: JoinSet<()>,
-    collection_tasks: JoinSet<SingleMonitorOutput>,
+    collection_tasks: JoinSet<()>,
+    /// Live, shared view of the commands each collection task has observed so far. Lets callers
+    /// poll for a command (see [`Monitor::wait_for`]) instead of sleeping a fixed duration before
+    /// [`Monitor::collect`].
+    outputs: Vec<Arc<Mutex<SingleMonitorOutput>>>,
 }
 
 impl Monitor {
@@ -37,6 +44,7 @@ impl Monitor {
     pub async fn new(ports: &[&str]) -> Self {
         let mut monitor_tasks = JoinSet::new();
         let mut collection_tasks = JoinSet::new();
+        let mut outputs = Vec::new();
 
         let mut initialized_channels = Vec::new();
 
@@ -54,16 +62,17 @@ impl Monitor {
                 monitor(&port, is_replica, tx, init_tx).await;
             });
 
+            let output = Arc::new(Mutex::new(SingleMonitorOutput {
+                is_replica: false,
+                commands: Vec::new(),
+            }));
+            outputs.push(output.clone());
+
             collection_tasks.spawn(async move {
-                let mut commands = Vec::default();
-                let mut is_replica = false;
                 while let Some((is_rep, command)) = rx.recv().await {
-                    commands.push(command);
-                    is_replica = is_rep;
-                }
-                SingleMonitorOutput {
-                    is_replica,
-                    commands,
+                    let mut output = output.lock().unwrap();
+                    output.is_replica = is_rep;
+                    output.commands.push(command);
                 }
             });
         }
@@ -80,6 +89,42 @@ impl Monitor {
         Self {
             monitor_tasks,
             collection_tasks,
+            outputs,
+        }
+    }
+
+    /// A snapshot of the commands observed so far, without consuming the monitor. Cloned out of the
+    /// shared per-node buffers, so it's safe to call repeatedly while monitoring continues.
+    pub fn snapshot(&self) -> MonitorOutput {
+        MonitorOutput(
+            self.outputs
+                .iter()
+                .map(|output| output.lock().unwrap().clone())
+                .collect(),
+        )
+    }
+
+    /// Poll [`Monitor::snapshot`] until `predicate` holds, returning that snapshot. Panics with
+    /// `description` if `timeout` elapses first. Prefer this over a fixed sleep before an assertion:
+    /// it returns as soon as the awaited command lands and fails loudly (rather than racing a fixed
+    /// margin) if it never does.
+    pub async fn wait_for(
+        &self,
+        timeout: Duration,
+        description: &str,
+        predicate: impl Fn(&MonitorOutput) -> bool,
+    ) -> MonitorOutput {
+        let start = Instant::now();
+        loop {
+            let snapshot = self.snapshot();
+            if predicate(&snapshot) {
+                return snapshot;
+            }
+            assert!(
+                start.elapsed() < timeout,
+                "Monitor::wait_for timed out after {timeout:?} waiting for {description}"
+            );
+            tokio::time::sleep(Duration::from_millis(200)).await;
         }
     }
 
@@ -88,12 +133,13 @@ impl Monitor {
         // sleep a bit to allow the monitor_tasks to get through any backlog of output
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        // abort monitor tasks and collect all the collection tasks
+        // abort monitor tasks, then drain the collection tasks so every observed command lands in
+        // the shared buffers before we snapshot them
         self.monitor_tasks.abort_all();
         while self.monitor_tasks.join_next().await.is_some() {}
+        while self.collection_tasks.join_next().await.is_some() {}
 
-        let commands_results = self.collection_tasks.join_all().await;
-        MonitorOutput(commands_results)
+        self.snapshot()
     }
 }
 

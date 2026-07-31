@@ -1886,23 +1886,28 @@ async fn test_redis_pings_replicas_to_keep_them_alive_when_clustered() {
     router.execute_several_default_queries(2).await;
 
     // The replica keep-alive fires one heartbeat interval (REDIS_HEARTBEAT_INTERVAL, 10s in
-    // `cache::redis`) after the pool is created, matching fred's primary heartbeat. Wait past that
-    // so the monitor captures a periodic keep-alive ping. Kept as a plain wait rather than a
-    // shorter test-only interval so production and test share the same code path.
-    tokio::time::sleep(std::time::Duration::from_secs(12)).await;
+    // `cache::redis`) after the pool is created, matching fred's primary heartbeat. Block until it
+    // reaches a replica (panics if it never does).
+    let sentinel = "apollo-router-replica-heartbeat";
+    redis_monitor
+        .wait_for(
+            std::time::Duration::from_secs(30),
+            "a keep-alive PING to a replica node",
+            |output| {
+                output
+                    .replicas(true)
+                    .command_with_arg_sent_to_any("PING", sentinel)
+            },
+        )
+        .await;
 
+    // The keep-alive is replica-only; primaries already get fred's built-in heartbeat. Check that
+    // against the final drained output.
     let redis_monitor_output = redis_monitor.collect().await;
-    assert!(
-        redis_monitor_output
-            .replicas(true)
-            .command_with_arg_sent_to_any("PING", "apollo-router-replica-heartbeat"),
-        "expected the router to send keep-alive PINGs to replica nodes"
-    );
-    // The keep-alive is replica-only; primaries already get fred's built-in heartbeat.
     assert!(
         !redis_monitor_output
             .replicas(false)
-            .command_with_arg_sent_to_any("PING", "apollo-router-replica-heartbeat"),
+            .command_with_arg_sent_to_any("PING", sentinel),
         "replica keep-alive PING should not target primary nodes"
     );
 }
