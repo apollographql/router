@@ -19,6 +19,7 @@ use hyper_util::rt::TokioTimer;
 use hyper_util::server::conn::auto::Builder;
 use hyper_util::server::conn::auto::Http1Builder;
 use hyper_util::server::graceful::GracefulConnection;
+use hyper_util::service::TowerToHyperService;
 use multimap::MultiMap;
 #[cfg(unix)]
 use tokio::net::UnixListener;
@@ -26,7 +27,9 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tokio_util::time::FutureExt;
 use tower::Layer;
-use tower_http::add_extension::AddExtension;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+use tower_http::add_extension::AddExtensionLayer;
 use tower_http::normalize_path::NormalizePathLayer;
 use tower_service::Service;
 
@@ -34,14 +37,15 @@ use crate::ListenAddr;
 use crate::axum_factory::ENDPOINT_CALLBACK;
 use crate::axum_factory::connection_handle::ConnectionHandle;
 use crate::axum_factory::utils::ConnectionInfo;
+use crate::axum_factory::utils::ConnectionRouterService;
 use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::metrics::FutureMetricsExt;
-use crate::plugins::telemetry::span_factory;
+use crate::plugins::telemetry::pipeline_bypass::record_rejected_request;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
-use crate::services::router::pipeline_handle::PipelineRef;
+use crate::services::router::pipeline_handle::PipelineHandle;
 
 static MAX_FILE_HANDLES_WARN: AtomicBool = AtomicBool::new(false);
 
@@ -226,7 +230,7 @@ async fn handle_connection<C, E: AsRef<dyn std::error::Error + Send + Sync>>(
             // emit metrics manually so they remain observable.
             if let Err(ref err) = res &&
                  let Some(status_code) = classify_hyper_rejection(err.as_ref()) {
-                    emit_connection_rejection_metrics(status_code, connection_start);
+                    record_rejected_request(status_code, connection_start);
                 }
         }
         // the shutdown receiver was triggered first,
@@ -323,9 +327,35 @@ async fn process_error(io_error: std::io::Error) {
     }
 }
 
+/// Adds the state a single connection needs to the app: its [`ConnectionInfo`], the router
+/// service its requests run through, and the flag recording whether it has seen a request.
+fn with_connection_state<S, ReqBody, ResBody>(
+    app: S,
+    connection_info: Option<ConnectionInfo>,
+    router_service: Option<ConnectionRouterService>,
+    received_first_request: Arc<AtomicBool>,
+) -> tower::util::BoxCloneService<http::Request<ReqBody>, http::Response<ResBody>, S::Error>
+where
+    S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>> + Clone + Send + 'static,
+    S::Error: 'static,
+    S::Future: Send + 'static,
+    ReqBody: 'static,
+    ResBody: 'static,
+{
+    ServiceBuilder::new()
+        .option_layer(connection_info.map(AddExtensionLayer::new))
+        .option_layer(router_service.map(AddExtensionLayer::new))
+        .layer_fn(|inner| IdleConnectionChecker::new(received_first_request.clone(), inner))
+        .service(app)
+        .boxed_clone()
+}
+
 pub(super) fn serve_router_on_listen_addr(
     router: axum::Router,
-    pipeline_ref: Arc<PipelineRef>,
+    pipeline_handle: Arc<PipelineHandle>,
+    // `None` for listeners that never serve GraphQL requests (eg. health, metrics):
+    // they never read the `ConnectionRouterService` extension.
+    router_service: Option<ConnectionRouterService>,
     address: ListenAddr,
     mut listener: Listener,
     configuration: Arc<Configuration>,
@@ -359,7 +389,7 @@ pub(super) fn serve_router_on_listen_addr(
                     let connection_shutdown = connection_shutdown.clone();
                     let connection_stop_signal = all_connections_stopped_sender.clone();
                     let address = address.clone();
-                    let pipeline_ref = pipeline_ref.clone();
+                    let pipeline_handle = pipeline_handle.clone();
 
                     match res {
                         Ok(res) => {
@@ -368,10 +398,12 @@ pub(super) fn serve_router_on_listen_addr(
                                 MAX_FILE_HANDLES_WARN.store(false, Ordering::SeqCst);
                             }
 
+                            let router_service = router_service.clone();
+
                             tokio::task::spawn(async move {
                                 // this sender must be moved into the session to track that it is still running
                                 let _connection_stop_signal = connection_stop_signal;
-                                let connection_handle = ConnectionHandle::new(pipeline_ref, address);
+                                let connection_handle = ConnectionHandle::new(pipeline_handle, address);
 
                                 // Development note: the following describes the different network
                                 // streams and how to think about them when modifying the logic
@@ -395,12 +427,15 @@ pub(super) fn serve_router_on_listen_addr(
                                     NetworkStream::Tcp(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
 
-                                        let app = AddExtension::new(app, ConnectionInfo {
-                                            peer_address: stream.peer_addr().ok(),
-                                            server_address: stream.local_addr().ok(),
-                                        });
-
-                                        let app = IdleConnectionChecker::new(received_first_request.clone(), app);
+                                        let app = with_connection_state(
+                                            app,
+                                            Some(ConnectionInfo {
+                                                peer_address: stream.peer_addr().ok(),
+                                                server_address: stream.local_addr().ok(),
+                                            }),
+                                            router_service,
+                                            received_first_request.clone(),
+                                        );
 
                                         stream
                                             .set_nodelay(true)
@@ -408,9 +443,7 @@ pub(super) fn serve_router_on_listen_addr(
                                                 "this should not fail unless the socket is invalid",
                                             );
                                         let tokio_stream = TokioIo::new(stream);
-                                        let hyper_service = hyper::service::service_fn(move |request| {
-                                            app.clone().call(request)
-                                        });
+                                        let hyper_service = TowerToHyperService::new(app);
 
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
@@ -420,11 +453,14 @@ pub(super) fn serve_router_on_listen_addr(
                                     #[cfg(unix)]
                                     NetworkStream::Unix(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
-                                        let app = IdleConnectionChecker::new(received_first_request.clone(), app);
+                                        let app = with_connection_state(
+                                            app,
+                                            None,
+                                            router_service,
+                                            received_first_request.clone(),
+                                        );
                                         let tokio_stream = TokioIo::new(stream);
-                                        let hyper_service = hyper::service::service_fn(move |request| {
-                                            app.clone().call(request)
-                                        });
+                                        let hyper_service = TowerToHyperService::new(app);
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
                                         let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
@@ -453,7 +489,12 @@ pub(super) fn serve_router_on_listen_addr(
                                         };
 
                                         let received_first_request = Arc::new(AtomicBool::new(false));
-                                        let app = IdleConnectionChecker::new(received_first_request.clone(), app);
+                                        let app = with_connection_state(
+                                            app,
+                                            None,
+                                            router_service,
+                                            received_first_request.clone(),
+                                        );
 
                                         tls_stream.get_ref().0
                                             .set_nodelay(true)
@@ -461,9 +502,7 @@ pub(super) fn serve_router_on_listen_addr(
                                                 "this should not fail unless the socket is invalid",
                                             );
 
-                                        let hyper_service = hyper::service::service_fn(move |request| {
-                                            app.clone().call(request)
-                                        });
+                                        let hyper_service = TowerToHyperService::new(app);
 
                                         let tokio_stream = TokioIo::new(tls_stream);
 
@@ -564,40 +603,6 @@ fn classify_hyper_rejection(err: &(dyn std::error::Error + Send + Sync + 'static
         source = e.source();
     }
     None
-}
-
-/// Emit metrics and a trace span for HTTP requests rejected by hyper before reaching
-/// the axum service layer (e.g. 431 Request Header Fields Too Large).
-///
-/// `start` is the `Instant` recorded immediately before `serve_connection_with_upgrades` was
-/// called. Because it is per-connection rather than per-request, the recorded duration will be
-/// inflated on keep-alive connections that served prior valid requests. In practice these
-/// rejections almost always occur on the first request of a connection.
-fn emit_connection_rejection_metrics(status_code: u16, start: Instant) {
-    let elapsed = start.elapsed();
-    let elapsed_s = elapsed.as_secs_f64();
-    let elapsed_ns = elapsed.as_nanos() as i64;
-
-    // Same name, unit, and description as the histogram created by RouterInstruments so that
-    // APM tools aggregate these rejected requests together with normal request durations.
-    f64_histogram_with_unit!(
-        "http.server.request.duration",
-        "Duration of HTTP server requests.",
-        "s",
-        elapsed_s,
-        "http.response.status_code" = status_code as i64
-    );
-
-    // Create a trace span matching the shape of a normal router span so APM tools and Apollo
-    // Studio can see the rejected request alongside normal requests. No distributed trace context
-    // is available because the headers were not successfully parsed.
-    //
-    // Enter the span before recording so that OTel-layer exporters (Datadog, OTLP, Zipkin, …)
-    // derive a non-zero wall-clock duration from on_enter/on_close. The entered guard is held
-    // until end of function, then dropped implicitly, which closes the span.
-    let entered = span_factory::create_router_rejection().entered();
-    entered.record("http.response.status_code", status_code as i64);
-    entered.record("apollo_private.duration_ns", elapsed_ns);
 }
 
 #[derive(Clone)]
@@ -837,36 +842,6 @@ mod tests {
         crate::plugin::test::await_mock_driver(router_driver).await;
 
         Ok(())
-    }
-
-    // --- Tests for HTTP 431 / 414 metric and trace emission ---
-
-    #[tokio::test]
-    async fn emit_connection_rejection_metrics_records_431() {
-        async {
-            emit_connection_rejection_metrics(431, Instant::now());
-            assert_histogram_count!(
-                "http.server.request.duration",
-                1,
-                "http.response.status_code" = 431i64
-            );
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
-    async fn emit_connection_rejection_metrics_records_414() {
-        async {
-            emit_connection_rejection_metrics(414, Instant::now());
-            assert_histogram_count!(
-                "http.server.request.duration",
-                1,
-                "http.response.status_code" = 414i64
-            );
-        }
-        .with_metrics()
-        .await;
     }
 
     #[tokio::test]
