@@ -7620,6 +7620,143 @@ fn test_query_not_named_query() {
     );
 }
 
+/// Builds a [`Query`] from a query string, as the query planner does for the original
+/// and the authorization-filtered operation.
+fn query_for_test(schema: &Schema, query: &str, is_original: bool) -> Query {
+    let ast = Parser::new().parse_ast(query, "query.graphql").unwrap();
+    let doc = ast.to_executable(schema.supergraph_schema()).unwrap();
+    let (fragments, operation, defer_stats, schema_aware_hash) =
+        Query::extract_query_information(schema, query, &doc, None).unwrap();
+    let subselections = crate::spec::query::subselections::collect_subselections(
+        &Configuration::default(),
+        &operation,
+        &fragments.map,
+        &defer_stats,
+    )
+    .unwrap();
+
+    Query {
+        string: query.to_string(),
+        fragments,
+        operation,
+        filtered_query: None,
+        subselections,
+        defer_stats,
+        is_original,
+        unauthorized: UnauthorizedPaths::default(),
+        schema_aware_hash,
+    }
+}
+
+/// Response formatting runs twice for a filtered operation: once for the filtered query,
+/// then once for the original. The filtered pass copies `__typename` through so the
+/// original pass can resolve type conditions. Without it, every field behind an inline
+/// fragment or fragment spread disappears from the response.
+#[test]
+fn filtered_query_keeps_typename_for_type_conditions() {
+    let schema = Schema::parse(
+        r#"
+        schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        {
+            query: Query
+        }
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+        directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+        scalar join__FieldSet
+        scalar link__Import
+
+        enum link__Purpose {
+          SECURITY
+          EXECUTION
+        }
+        enum join__Graph {
+            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+        }
+
+        type Query @join__type(graph: TEST) {
+            thing: Thing
+        }
+
+        interface Thing @join__type(graph: TEST) {
+            id: ID
+        }
+
+        type Foo implements Thing
+        @join__type(graph: TEST)
+        @join__implements(graph: TEST, interface: "Thing") {
+            id: ID
+            foo: String
+            secret: String
+        }
+        "#,
+        &Default::default(),
+    )
+    .unwrap();
+
+    // `secret` is the field authorization removed, so the filtered operation is the
+    // original minus that one selection.
+    let original = "{ thing { id ... on Foo { foo secret } } }";
+    let filtered = "{ thing { id ... on Foo { foo } } }";
+
+    let mut query = query_for_test(&schema, original, true);
+    query.filtered_query = Some(Arc::new(query_for_test(&schema, filtered, false)));
+
+    let mut response = crate::graphql::Response::builder()
+        .data(json! {{
+            "thing": {
+                "__typename": "Foo",
+                "id": "1",
+                "foo": "foo",
+            }
+        }})
+        .build();
+
+    query.filtered_query.as_ref().unwrap().format_response(
+        &mut response,
+        Object::new(),
+        schema.api_schema(),
+        BooleanValues { bits: 0 },
+        true,
+    );
+
+    assert_eq!(
+        response
+            .data
+            .as_ref()
+            .unwrap()
+            .get("thing")
+            .unwrap()
+            .get(TYPENAME),
+        Some(&json!("Foo")),
+        "the filtered pass must carry __typename through for the original pass to use"
+    );
+
+    query.format_response(
+        &mut response,
+        Object::new(),
+        schema.api_schema(),
+        BooleanValues { bits: 0 },
+        true,
+    );
+
+    // `foo` sits behind `... on Foo`, so it survives only if __typename did.
+    assert_eq!(
+        response
+            .data
+            .as_ref()
+            .unwrap()
+            .get("thing")
+            .unwrap()
+            .get("foo"),
+        Some(&json!("foo"))
+    );
+}
+
 #[test]
 fn filtered_defer_fragment() {
     let config = Configuration::default();
