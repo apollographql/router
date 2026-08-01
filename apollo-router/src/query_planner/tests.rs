@@ -224,7 +224,7 @@ async fn fetch_includes_operation_name() {
         "product".into(),
         mock_products_service.boxed_clone(),
     )]);
-    let sf = FetchService::new(
+    let sf = FetchService::new_for_tests(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
@@ -282,7 +282,7 @@ async fn fetch_makes_post_requests() {
         "product".into(),
         mock_products_service.boxed_clone(),
     )]);
-    let sf = FetchService::new(
+    let sf = FetchService::new_for_tests(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
@@ -426,7 +426,7 @@ async fn defer() {
         ("X".into(), mock_x_service.boxed_clone()),
         ("Y".into(), mock_y_service.boxed_clone()),
     ]);
-    let sf = FetchService::new(
+    let sf = FetchService::new_for_tests(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
@@ -528,7 +528,7 @@ async fn defer_if_condition() {
     let mut receiver_stream = ReceiverStream::new(receiver);
 
     let ssf = subgraph_service_factory(vec![("accounts".into(), mocked_accounts.boxed_clone())]);
-    let service_factory = FetchService::new(
+    let service_factory = FetchService::new_for_tests(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
@@ -687,7 +687,7 @@ async fn dependent_mutations() {
         ("A".into(), mock_a_service.boxed_clone()),
         ("B".into(), mock_b_service.boxed_clone()),
     ]);
-    let sf = FetchService::new(
+    let sf = FetchService::new_for_tests(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
@@ -2146,7 +2146,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
         ("Y".into(), mock_y_service.boxed_clone()),
         ("Z".into(), mock_z_service.boxed_clone()),
     ]);
-    let sf = FetchService::new(
+    let sf = FetchService::new_for_tests(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),

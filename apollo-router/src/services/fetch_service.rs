@@ -46,7 +46,29 @@ pub(crate) struct FetchService {
 }
 
 impl FetchService {
-    pub(crate) fn new(
+    pub(crate) fn try_new(
+        schema: Arc<Schema>,
+        subgraph_schemas: Arc<SubgraphSchemas>,
+        subgraph_service_factory: Arc<SubgraphServiceFactory>,
+        subscription_config: Option<SubscriptionConfig>,
+        connector_service_factory: Arc<ConnectorServiceFactory>,
+        hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
+        event_configuration: crate::configuration::events::EventsConfiguration,
+    ) -> Result<Self, BoxError> {
+        let event_runtime = Arc::new(EventRuntime::try_new(schema.clone(), event_configuration)?);
+        Ok(Self {
+            subgraph_service_factory,
+            event_runtime,
+            schema,
+            subgraph_schemas,
+            _subscription_config: subscription_config,
+            connector_service_factory,
+            hoist_orphan_errors,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_tests(
         schema: Arc<Schema>,
         subgraph_schemas: Arc<SubgraphSchemas>,
         subgraph_service_factory: Arc<SubgraphServiceFactory>,
@@ -54,23 +76,16 @@ impl FetchService {
         connector_service_factory: Arc<ConnectorServiceFactory>,
         hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
     ) -> Self {
-        Self {
-            subgraph_service_factory,
-            event_runtime: Arc::new(EventRuntime::new(schema.clone(), Default::default())),
+        Self::try_new(
             schema,
             subgraph_schemas,
-            _subscription_config: subscription_config,
+            subgraph_service_factory,
+            subscription_config,
             connector_service_factory,
             hoist_orphan_errors,
-        }
-    }
-
-    pub(crate) fn with_event_configuration(
-        mut self,
-        configuration: crate::configuration::events::EventsConfiguration,
-    ) -> Self {
-        self.event_runtime = Arc::new(EventRuntime::new(self.schema.clone(), configuration));
-        self
+            Default::default(),
+        )
+        .expect("default event configuration is valid")
     }
 }
 

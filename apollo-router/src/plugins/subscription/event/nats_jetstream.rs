@@ -1,6 +1,5 @@
 //! NATS JetStream pull-consumer adapter.
 
-use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::time::Duration;
 
@@ -8,30 +7,23 @@ use async_nats::jetstream;
 use async_nats::jetstream::consumer::AckPolicy;
 use async_nats::jetstream::consumer::DeliverPolicy;
 use futures::StreamExt;
-use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tokio_stream::wrappers::ReceiverStream;
 
-use super::EventCursor;
 use super::EventError;
-use super::EventRuntime;
 use super::ProviderEvent;
 use super::ProviderEventStream;
-use super::nats_core;
-use crate::configuration::events::EventProviderConfiguration;
+use super::nats::NatsProvider;
 use crate::configuration::events::EventSourceConfiguration;
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct JetStreamSourceOptions {
+pub(super) struct JetStreamSourceOptions {
     stream: String,
     domain: Option<String>,
     #[serde(with = "humantime_serde")]
-    #[schemars(with = "String")]
     ack_wait: Duration,
     #[serde(with = "humantime_serde")]
-    #[schemars(with = "String")]
     inactive_threshold: Duration,
     max_deliver: Option<NonZeroU64>,
 }
@@ -49,29 +41,20 @@ impl Default for JetStreamSourceOptions {
 }
 
 pub(super) async fn subscribe(
-    runtime: &EventRuntime,
     provider_name: &str,
-    provider: &EventProviderConfiguration,
-    source: &EventSourceConfiguration,
+    provider: &NatsProvider,
+    options: &JetStreamSourceOptions,
     source_name: &str,
     destinations: Vec<String>,
     buffer_capacity: usize,
 ) -> Result<ProviderEventStream, EventError> {
-    let options: JetStreamSourceOptions =
-        serde_json::from_value(serde_json::Value::Object(source.provider_options.clone()))
-            .map_err(|error| invalid_source(source_name, error))?;
-    if options.stream.trim().is_empty() {
-        return Err(EventError::new(format!(
-            "NATS JetStream source '{source_name}' must configure a stream"
-        )));
-    }
     if destinations.is_empty() {
         return Err(EventError::new(format!(
             "NATS JetStream source '{source_name}' must have at least one subject"
         )));
     }
 
-    let client = nats_core::shared_client(runtime, provider_name, provider).await?;
+    let client = provider.client(provider_name).await?;
     let context = match &options.domain {
         Some(domain) => jetstream::context::ContextBuilder::new()
             .domain(domain)
@@ -132,11 +115,8 @@ pub(super) async fn subscribe(
                     continue;
                 }
             };
-            let (metadata, cursor) = jetstream_metadata(&message);
             let event = ProviderEvent {
                 payload: message.payload.clone(),
-                metadata,
-                cursor,
             };
             if sender.send(Ok(event)).await.is_err() {
                 break;
@@ -149,27 +129,26 @@ pub(super) async fn subscribe(
     Ok(Box::pin(ReceiverStream::new(receiver)))
 }
 
-fn jetstream_metadata(
-    message: &jetstream::Message,
-) -> (HashMap<String, String>, Option<EventCursor>) {
-    let mut metadata = HashMap::from([("subject".to_string(), message.subject.to_string())]);
-    let cursor = message.info().ok().map(|info| {
-        metadata.insert("stream".to_string(), info.stream.to_string());
-        metadata.insert("consumer".to_string(), info.consumer.to_string());
-        metadata.insert("delivery_count".to_string(), info.delivered.to_string());
-        metadata.insert(
-            "stream_sequence".to_string(),
-            info.stream_sequence.to_string(),
-        );
-        EventCursor(format!("{}:{}", info.stream, info.stream_sequence))
-    });
-    (metadata, cursor)
-}
-
 fn invalid_source(source_name: &str, error: impl std::fmt::Display) -> EventError {
     EventError::new(format!(
         "invalid NATS JetStream source '{source_name}' configuration: {error}"
     ))
+}
+
+pub(super) fn parse_source(
+    source_name: &str,
+    source: &EventSourceConfiguration,
+) -> Result<JetStreamSourceOptions, EventError> {
+    let options = serde_json::from_value::<JetStreamSourceOptions>(serde_json::Value::Object(
+        source.provider_options.clone(),
+    ))
+    .map_err(|error| invalid_source(source_name, error))?;
+    if options.stream.trim().is_empty() {
+        return Err(EventError::new(format!(
+            "NATS JetStream source '{source_name}' must configure a stream"
+        )));
+    }
+    Ok(options)
 }
 
 #[cfg(test)]

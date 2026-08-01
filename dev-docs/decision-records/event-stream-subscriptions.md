@@ -87,6 +87,12 @@ type Subscription {
 }
 ```
 
+Destinations may interpolate scalar field arguments with the provider-neutral
+`{{ args.name }}` syntax, including nested input-object paths such as
+`tenant.{{ args.scope.id }}`. The resolved destination list is part of trigger
+identity. Authorization must therefore run before event setup, and graphs should
+not use destination templating as a substitute for field authorization.
+
 The Router config maps `product-updates` to a provider. A graph must not contain a
 broker URL, topic implementation type, consumer group, credentials, or delivery
 policy.
@@ -110,10 +116,11 @@ logical source -> provider adapter -> provider-neutral event
                                       -> client stream
 ```
 
-The provider-neutral event must retain its raw payload, metadata, opaque cursor,
-and acknowledgement handle until the configured acknowledgement point. Equivalent
-triggers may share one provider subscription inside a Router process, but trigger
-identity must include every input that affects event selection or security.
+The provider-neutral event carries the raw payload into format decoding. Provider
+adapters retain any broker-specific metadata required to settle delivery at the
+configured acknowledgement point. Equivalent triggers may share one provider
+subscription inside a Router process, but trigger identity must include every
+input that affects event selection or security.
 
 Each adapter must map common policies onto native topology. In particular,
 `every_router_instance` means every live Router process receives every matching
@@ -162,6 +169,129 @@ The provider-backed vertical slice must add:
    acknowledgements, and hydration;
 7. end-to-end tests for reconnects, duplicate delivery, slow clients, reloads, and
    Router shutdown.
+
+## Initial provider adapters
+
+The first implementation recognizes four provider type identifiers:
+`nats_core`, `nats_jetstream`, `redis_pubsub`, and `kafka`. Provider and source
+objects are validated when a Router pipeline is built, so misspelled options fail
+the reload instead of waiting for the first subscription operation.
+
+### NATS Core
+
+NATS connection options are shared by Core NATS and JetStream. They include a
+server list, connection name, ping interval, initial-connect retry, tagged
+user/password, token, credentials-file, or NKey authentication, plus CA and mTLS
+files. NATS Core has no source options. Each trigger uses ordinary subscriptions,
+never a queue group, because Core queue groups would violate
+`every_router_instance`. Delivery is therefore at-most-once and has no cursor.
+
+```yaml
+events:
+  providers:
+    core:
+      type: nats_core
+      config:
+        servers: [nats://localhost:4222]
+        auth: { type: token, token: ${env.NATS_TOKEN} }
+  sources:
+    updates: { provider: core, policy: live-updates }
+```
+
+### NATS JetStream
+
+JetStream source options require `stream` and optionally accept `domain`,
+`ack_wait`, `inactive_threshold`, and `max_deliver`. Each Router trigger creates
+an ephemeral pull consumer with `DeliverNew`, explicit acknowledgement, subject
+filters, and `max_ack_pending` aligned with the policy buffer. The Router
+acknowledges after local enqueue.
+Durable consumer names are intentionally not configurable because sharing one
+across Router instances would load-balance rather than broadcast.
+
+```yaml
+events:
+  providers:
+    durable:
+      type: nats_jetstream
+      config: { servers: [nats://localhost:4222] }
+  sources:
+    updates:
+      provider: durable
+      policy: live-updates
+      provider_options:
+        stream: PRODUCTS
+        ack_wait: 30s
+        inactive_threshold: 1m
+```
+
+### Redis Pub/Sub
+
+Redis provider options include the connection URL, username/password overrides,
+CA and mTLS material, and tagged constant, linear, or exponential reconnect
+policies. Source `mode` is `channel`, `pattern`, or `sharded`. A dedicated
+subscriber client tracks and restores subscriptions after reconnect. Redis
+Pub/Sub is at-most-once, so events published while disconnected are lost and no
+cursor or acknowledgement is available.
+
+```yaml
+events:
+  providers:
+    redis:
+      type: redis_pubsub
+      config:
+        url: rediss://redis.example.com:6379
+        username: router
+        password: ${env.REDIS_PASSWORD}
+        reconnect:
+          type: exponential
+          max_attempts: 0
+          min_delay: 100ms
+          max_delay: 30s
+          multiplier: 2
+  sources:
+    updates:
+      provider: redis
+      policy: live-updates
+      provider_options: { mode: pattern }
+```
+
+### Kafka
+
+Kafka provider options include bootstrap servers, client ID, tagged plaintext,
+TLS, SASL plaintext, or SASL TLS security, and an arbitrary string `properties`
+map for librdkafka settings that do not warrant a new Router release. Source
+options include a consumer-group prefix, session/heartbeat/poll intervals, and a
+consumer `properties` map. Policy invariants override conflicting arbitrary
+properties: offsets start at latest, automatic storage and commit are disabled,
+and every Router trigger gets an instance-unique group. The offset is committed
+only after local enqueue.
+
+```yaml
+events:
+  providers:
+    kafka:
+      type: kafka
+      config:
+        bootstrap_servers: [broker-a:9093, broker-b:9093]
+        security:
+          type: sasl_tls
+          mechanism: SCRAM-SHA-512
+          username: router
+          password: ${env.KAFKA_PASSWORD}
+        properties: { client.rack: us-west-2a }
+  sources:
+    updates:
+      provider: kafka
+      policy: live-updates
+      provider_options:
+        group_prefix: product-router
+        topic_mode: exact
+```
+
+Equivalent triggers share one provider subscription within a Router process and
+fan out through the policy-sized broadcast buffer. A lagging local subscriber
+observes `drop_oldest` semantics without creating extra broker consumers. Trigger
+identity contains the provider, logical source, and resolved destination list.
 
 ## Consequences
 

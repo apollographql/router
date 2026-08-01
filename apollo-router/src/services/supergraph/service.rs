@@ -578,7 +578,7 @@ impl PluggableSupergraphServiceBuilder {
             .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
             .map(|p| p.config.clone());
 
-        let fetch_service = FetchService::new(
+        let fetch_service = FetchService::try_new(
             schema.clone(),
             subgraph_schemas.clone(),
             Arc::new(SubgraphServiceFactory::new(
@@ -604,8 +604,8 @@ impl PluggableSupergraphServiceBuilder {
                 )),
             )),
             Arc::new(configuration.experimental_hoist_orphan_errors.clone()),
-        )
-        .with_event_configuration(configuration.events.clone());
+            configuration.events.clone(),
+        )?;
 
         let apollo_telemetry_conf = self
             .plugins

@@ -82,6 +82,57 @@ pub(crate) fn fetch_service_handle_subscription(
     }
 }
 
+pub(super) fn subscription_admission_error(
+    subscription_config: Option<&crate::plugins::subscription::SubscriptionConfig>,
+) -> Option<FetchResponse> {
+    let maximum = subscription_config?.max_opened_subscriptions?;
+    if OPENED_SUBSCRIPTIONS.load(Ordering::Relaxed) < maximum {
+        return None;
+    }
+    u64_counter!(
+        "apollo.router.operations.subscriptions.rejected",
+        "Number of subscription requests rejected",
+        1,
+        reason = "max_opened_subscriptions_limit_reached"
+    );
+    Some((
+        Value::default(),
+        vec![
+            Error::builder()
+                .message("can't open new subscription, limit reached")
+                .extension_code("SUBSCRIPTION_MAX_LIMIT")
+                .build(),
+        ],
+    ))
+}
+
+pub(super) async fn install_subscription_task(
+    mut params: SubscriptionTaskParams,
+) -> Result<(), FetchResponse> {
+    let Some(configuration_sender) = params.subscription_handle.subscription_conf_tx.take() else {
+        return Err((
+            Value::default(),
+            vec![
+                Error::builder()
+                    .message("no subscription conf sender provided for a subscription")
+                    .extension_code("NO_SUBSCRIPTION_CONF_TX")
+                    .build(),
+            ],
+        ));
+    };
+    configuration_sender.send(params).await.map_err(|error| {
+        (
+            Value::default(),
+            vec![
+                Error::builder()
+                    .message(format!("cannot send the subscription data: {error:?}"))
+                    .extension_code("SUBSCRIPTION_DATA_SEND_ERROR")
+                    .build(),
+            ],
+        )
+    })
+}
+
 fn subscription_with_subgraph_service(
     schema: Arc<Schema>,
     subgraph_service_factory: Arc<SubgraphServiceFactory>,
@@ -107,28 +158,8 @@ fn subscription_with_subgraph_service(
 
     let service_name = service_name.clone();
 
-    if let Some(max_opened_subscriptions) = subscription_config
-        .as_ref()
-        .and_then(|s| s.max_opened_subscriptions)
-        && OPENED_SUBSCRIPTIONS.load(Ordering::Relaxed) >= max_opened_subscriptions
-    {
-        u64_counter!(
-            "apollo.router.operations.subscriptions.rejected",
-            "Number of subscription requests rejected",
-            1,
-            reason = "max_opened_subscriptions_limit_reached"
-        );
-        return Box::pin(async {
-            Ok((
-                Value::default(),
-                vec![
-                    Error::builder()
-                        .message("can't open new subscription, limit reached")
-                        .extension_code("SUBSCRIPTION_MAX_LIMIT")
-                        .build(),
-                ],
-            ))
-        });
+    if let Some(error) = subscription_admission_error(subscription_config.as_ref()) {
+        return Box::pin(async move { Ok(error) });
     }
     let mode = match subscription_config.as_ref() {
         Some(config) => config
@@ -190,7 +221,7 @@ fn subscription_with_subgraph_service(
         .and_connection_closed_signal(Some(subscription_handle.closed_signal.resubscribe()))
         .build();
 
-    let mut subscription_handle = subscription_handle.clone();
+    let subscription_handle = subscription_handle.clone();
     Box::pin(async move {
         let response = match mode {
             Some((subscription_config, _mode)) => {
@@ -200,31 +231,8 @@ fn subscription_with_subgraph_service(
                     subscription_config: subscription_config.clone(),
                     stream_rx: rx_handle.into(),
                 };
-
-                let subscription_conf_tx =
-                    match subscription_handle.subscription_conf_tx.take() {
-                        Some(sc) => sc,
-                        None => {
-                            return Ok((
-                                Value::default(),
-                                vec![Error::builder()
-                            .message("no subscription conf sender provided for a subscription")
-                            .extension_code("NO_SUBSCRIPTION_CONF_TX")
-                            .build()],
-                            ));
-                        }
-                    };
-
-                if let Err(err) = subscription_conf_tx.send(subscription_params).await {
-                    return Ok((
-                        Value::default(),
-                        vec![
-                            Error::builder()
-                                .message(format!("cannot send the subscription data: {err:?}"))
-                                .extension_code("SUBSCRIPTION_DATA_SEND_ERROR")
-                                .build(),
-                        ],
-                    ));
+                if let Err(response) = install_subscription_task(subscription_params).await {
+                    return Ok(response);
                 }
 
                 match service

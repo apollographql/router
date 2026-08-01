@@ -1,6 +1,5 @@
 //! Redis Pub/Sub adapter with explicit regular, pattern, and sharded modes.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,9 +12,7 @@ use fred::types::config::Config as RedisConfig;
 use fred::types::config::ReconnectPolicy;
 use fred::types::config::TlsConfig;
 use fred::types::config::TlsHostMapping;
-use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::EventError;
@@ -26,9 +23,9 @@ use crate::configuration::events::EventProviderConfiguration;
 use crate::configuration::events::EventSourceConfiguration;
 use crate::services::subgraph::http::generate_tls_client_config;
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct RedisPubSubConfiguration {
+pub(super) struct RedisPubSubConfiguration {
     url: String,
     username: Option<String>,
     password: Option<String>,
@@ -48,34 +45,29 @@ impl Default for RedisPubSubConfiguration {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum RedisReconnectConfiguration {
     Constant {
         #[serde(default)]
         max_attempts: u32,
         #[serde(with = "humantime_serde")]
-        #[schemars(with = "String")]
         delay: Duration,
     },
     Linear {
         #[serde(default)]
         max_attempts: u32,
         #[serde(with = "humantime_serde")]
-        #[schemars(with = "String")]
         delay: Duration,
         #[serde(with = "humantime_serde")]
-        #[schemars(with = "String")]
         max_delay: Duration,
     },
     Exponential {
         #[serde(default)]
         max_attempts: u32,
         #[serde(with = "humantime_serde")]
-        #[schemars(with = "String")]
         min_delay: Duration,
         #[serde(with = "humantime_serde")]
-        #[schemars(with = "String")]
         max_delay: Duration,
         multiplier: u32,
     },
@@ -119,7 +111,7 @@ impl RedisReconnectConfiguration {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum RedisPubSubMode {
     #[default]
@@ -128,33 +120,28 @@ enum RedisPubSubMode {
     Sharded,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct RedisPubSubSourceOptions {
+pub(super) struct RedisPubSubSourceOptions {
     mode: RedisPubSubMode,
 }
 
 pub(super) async fn subscribe(
     provider_name: &str,
-    provider: &EventProviderConfiguration,
-    source: &EventSourceConfiguration,
+    config: &RedisPubSubConfiguration,
+    source_options: &RedisPubSubSourceOptions,
+    connect_timeout: Duration,
     source_name: &str,
     destinations: Vec<String>,
     buffer_capacity: usize,
 ) -> Result<ProviderEventStream, EventError> {
-    let config: RedisPubSubConfiguration =
-        serde_json::from_value(serde_json::Value::Object(provider.config.clone()))
-            .map_err(|error| invalid_provider(provider_name, error))?;
-    let source_options: RedisPubSubSourceOptions =
-        serde_json::from_value(serde_json::Value::Object(source.provider_options.clone()))
-            .map_err(|error| invalid_source(source_name, error))?;
     if destinations.is_empty() {
         return Err(EventError::new(format!(
             "Redis Pub/Sub source '{source_name}' must have at least one destination"
         )));
     }
 
-    let subscriber = build_client(provider_name, provider, &config, buffer_capacity).await?;
+    let subscriber = build_client(provider_name, config, connect_timeout, buffer_capacity).await?;
     let mut messages = subscriber.message_rx();
     let subscription_manager = subscriber.manage_subscriptions();
     match source_options.mode {
@@ -176,11 +163,6 @@ pub(super) async fn subscribe(
                 _ = sender.closed() => break,
                 result = messages.recv() => match result {
                     Ok(message) => {
-                        let metadata = HashMap::from([
-                            ("channel".to_string(), message.channel.to_string()),
-                            ("mode".to_string(), format!("{:?}", message.kind).to_lowercase()),
-                            ("server".to_string(), message.server.to_string()),
-                        ]);
                         let Some(payload) = message.value.into_bytes() else {
                             if sender.send(Err(EventError::new(format!(
                                 "Redis Pub/Sub source '{source_name}' received a non-byte payload"
@@ -191,8 +173,6 @@ pub(super) async fn subscribe(
                         };
                         if sender.send(Ok(ProviderEvent {
                             payload,
-                            metadata,
-                            cursor: None,
                         })).await.is_err() {
                             break;
                         }
@@ -212,8 +192,8 @@ pub(super) async fn subscribe(
 
 async fn build_client(
     provider_name: &str,
-    provider: &EventProviderConfiguration,
     config: &RedisPubSubConfiguration,
+    connect_timeout: Duration,
     buffer_capacity: usize,
 ) -> Result<SubscriberClient, EventError> {
     let mut redis = RedisConfig::from_url(&config.url)
@@ -250,7 +230,7 @@ async fn build_client(
     let subscriber = builder
         .build_subscriber_client()
         .map_err(|error| invalid_provider(provider_name, error))?;
-    tokio::time::timeout(provider.lifecycle.connect_timeout, subscriber.init())
+    tokio::time::timeout(connect_timeout, subscriber.init())
         .await
         .map_err(|_| {
             EventError::new(format!(
@@ -279,6 +259,28 @@ fn invalid_source(source_name: &str, error: impl std::fmt::Display) -> EventErro
     EventError::new(format!(
         "invalid Redis Pub/Sub source '{source_name}' configuration: {error}"
     ))
+}
+
+pub(super) fn parse_provider(
+    provider_name: &str,
+    provider: &EventProviderConfiguration,
+) -> Result<RedisPubSubConfiguration, EventError> {
+    let config = serde_json::from_value::<RedisPubSubConfiguration>(serde_json::Value::Object(
+        provider.config.clone(),
+    ))
+    .map_err(|error| invalid_provider(provider_name, error))?;
+    RedisConfig::from_url(&config.url).map_err(|error| invalid_provider(provider_name, error))?;
+    Ok(config)
+}
+
+pub(super) fn parse_source(
+    source_name: &str,
+    source: &EventSourceConfiguration,
+) -> Result<RedisPubSubSourceOptions, EventError> {
+    serde_json::from_value::<RedisPubSubSourceOptions>(serde_json::Value::Object(
+        source.provider_options.clone(),
+    ))
+    .map_err(|error| invalid_source(source_name, error))
 }
 
 #[cfg(test)]

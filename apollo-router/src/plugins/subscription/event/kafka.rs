@@ -1,7 +1,6 @@
 //! Kafka adapter using one instance-unique consumer group per logical trigger.
 
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -10,22 +9,18 @@ use rdkafka::Message;
 use rdkafka::consumer::CommitMode;
 use rdkafka::consumer::Consumer;
 use rdkafka::consumer::StreamConsumer;
-use rdkafka::message::Headers;
-use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tokio_stream::wrappers::ReceiverStream;
 
-use super::EventCursor;
 use super::EventError;
 use super::ProviderEvent;
 use super::ProviderEventStream;
 use crate::configuration::events::EventProviderConfiguration;
 use crate::configuration::events::EventSourceConfiguration;
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct KafkaConfiguration {
+pub(super) struct KafkaConfiguration {
     bootstrap_servers: Vec<String>,
     client_id: Option<String>,
     security: KafkaSecurityConfiguration,
@@ -44,7 +39,7 @@ impl Default for KafkaConfiguration {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum KafkaSecurityConfiguration {
     #[default]
@@ -67,7 +62,7 @@ enum KafkaSecurityConfiguration {
     },
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct KafkaTlsConfiguration {
     ca_location: Option<PathBuf>,
@@ -76,18 +71,16 @@ struct KafkaTlsConfiguration {
     key_password: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct KafkaSourceOptions {
+pub(super) struct KafkaSourceOptions {
     group_prefix: String,
+    topic_mode: KafkaTopicMode,
     #[serde(with = "humantime_serde")]
-    #[schemars(with = "String")]
     session_timeout: Duration,
     #[serde(with = "humantime_serde")]
-    #[schemars(with = "String")]
     heartbeat_interval: Duration,
     #[serde(with = "humantime_serde")]
-    #[schemars(with = "String")]
     max_poll_interval: Duration,
     /// Escape hatch for consumer options. Policy invariants override conflicts.
     properties: BTreeMap<String, String>,
@@ -97,6 +90,7 @@ impl Default for KafkaSourceOptions {
     fn default() -> Self {
         Self {
             group_prefix: "apollo-router".to_string(),
+            topic_mode: KafkaTopicMode::default(),
             session_timeout: Duration::from_secs(45),
             heartbeat_interval: Duration::from_secs(3),
             max_poll_interval: Duration::from_secs(5 * 60),
@@ -105,31 +99,35 @@ impl Default for KafkaSourceOptions {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum KafkaTopicMode {
+    #[default]
+    Exact,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn subscribe(
     provider_name: &str,
-    provider: &EventProviderConfiguration,
-    source: &EventSourceConfiguration,
+    config: &KafkaConfiguration,
+    options: &KafkaSourceOptions,
+    connect_timeout: Duration,
     source_name: &str,
     destinations: Vec<String>,
     buffer_capacity: usize,
     instance_id: uuid::Uuid,
     trigger_hash: u64,
 ) -> Result<ProviderEventStream, EventError> {
-    let config: KafkaConfiguration =
-        serde_json::from_value(serde_json::Value::Object(provider.config.clone()))
-            .map_err(|error| invalid_provider(provider_name, error))?;
-    let options: KafkaSourceOptions =
-        serde_json::from_value(serde_json::Value::Object(source.provider_options.clone()))
-            .map_err(|error| invalid_source(source_name, error))?;
-    if config.bootstrap_servers.is_empty() {
-        return Err(EventError::new(format!(
-            "Kafka provider '{provider_name}' must have at least one bootstrap server"
-        )));
-    }
     if destinations.is_empty() || destinations.iter().any(|topic| topic.trim().is_empty()) {
         return Err(EventError::new(format!(
             "Kafka source '{source_name}' must have at least one non-empty topic"
+        )));
+    }
+    if matches!(options.topic_mode, KafkaTopicMode::Exact)
+        && destinations.iter().any(|topic| topic.starts_with('^'))
+    {
+        return Err(EventError::new(format!(
+            "Kafka source '{source_name}' exact topic mode does not accept regex topics"
         )));
     }
 
@@ -157,7 +155,6 @@ pub(super) async fn subscribe(
         .set("heartbeat.interval.ms", millis(options.heartbeat_interval))
         .set("max.poll.interval.ms", millis(options.max_poll_interval));
 
-    let connection_timeout = provider.lifecycle.connect_timeout;
     let provider_label = provider_name.to_string();
     let consumer: StreamConsumer = tokio::task::spawn_blocking(move || {
         let consumer: StreamConsumer = client_config.create().map_err(|error| {
@@ -166,7 +163,7 @@ pub(super) async fn subscribe(
             ))
         })?;
         consumer
-            .fetch_metadata(None, connection_timeout)
+            .fetch_metadata(None, connect_timeout)
             .map_err(|error| {
                 EventError::new(format!(
                     "could not connect Kafka provider '{provider_label}': {error}"
@@ -201,13 +198,6 @@ pub(super) async fn subscribe(
                         };
                         let event = ProviderEvent {
                             payload: bytes::Bytes::copy_from_slice(payload),
-                            metadata: kafka_metadata(&message),
-                            cursor: Some(EventCursor(format!(
-                                "{}:{}:{}",
-                                message.topic(),
-                                message.partition(),
-                                message.offset()
-                            ))),
                         };
                         if sender.send(Ok(event)).await.is_err() {
                             break;
@@ -282,30 +272,6 @@ fn apply_tls(config: &mut ClientConfig, tls: &KafkaTlsConfiguration) {
     }
 }
 
-fn kafka_metadata(message: &rdkafka::message::BorrowedMessage<'_>) -> HashMap<String, String> {
-    let mut metadata = HashMap::from([
-        ("topic".to_string(), message.topic().to_string()),
-        ("partition".to_string(), message.partition().to_string()),
-        ("offset".to_string(), message.offset().to_string()),
-    ]);
-    if let Some(key) = message.key() {
-        metadata.insert("key".to_string(), String::from_utf8_lossy(key).into_owned());
-    }
-    if let Some(headers) = message.headers() {
-        for index in 0..headers.count() {
-            let header = headers.get(index);
-            metadata.insert(
-                format!("header.{}", header.key),
-                header
-                    .value
-                    .map(|value| String::from_utf8_lossy(value).into_owned())
-                    .unwrap_or_default(),
-            );
-        }
-    }
-    metadata
-}
-
 fn consumer_group(prefix: &str, instance_id: uuid::Uuid, trigger_hash: u64) -> String {
     let prefix = prefix
         .chars()
@@ -335,6 +301,32 @@ fn invalid_source(source_name: &str, error: impl std::fmt::Display) -> EventErro
     EventError::new(format!(
         "invalid Kafka source '{source_name}' configuration: {error}"
     ))
+}
+
+pub(super) fn parse_provider(
+    provider_name: &str,
+    provider: &EventProviderConfiguration,
+) -> Result<KafkaConfiguration, EventError> {
+    let config = serde_json::from_value::<KafkaConfiguration>(serde_json::Value::Object(
+        provider.config.clone(),
+    ))
+    .map_err(|error| invalid_provider(provider_name, error))?;
+    if config.bootstrap_servers.is_empty() {
+        return Err(EventError::new(format!(
+            "Kafka provider '{provider_name}' must have at least one bootstrap server"
+        )));
+    }
+    Ok(config)
+}
+
+pub(super) fn parse_source(
+    source_name: &str,
+    source: &EventSourceConfiguration,
+) -> Result<KafkaSourceOptions, EventError> {
+    serde_json::from_value::<KafkaSourceOptions>(serde_json::Value::Object(
+        source.provider_options.clone(),
+    ))
+    .map_err(|error| invalid_source(source_name, error))
 }
 
 #[cfg(test)]
