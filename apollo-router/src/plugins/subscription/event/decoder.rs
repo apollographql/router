@@ -2,10 +2,9 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
+use super::ProviderEvent;
 use crate::error::Error;
 use crate::graphql;
-
-use super::ProviderEvent;
 
 pub(super) fn decode_graphql_entity(
     event: ProviderEvent,

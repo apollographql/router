@@ -2,10 +2,9 @@ use std::collections::HashMap;
 
 use apollo_compiler::ast::Value;
 
+use super::EventError;
 use crate::query_planner::OperationKind;
 use crate::spec::Schema;
-
-use super::EventError;
 
 const EVENT_SPEC_URL: &str = "https://specs.apollo.dev/event/v0.1";
 const EVENT_SPEC_NAME: &str = "event";

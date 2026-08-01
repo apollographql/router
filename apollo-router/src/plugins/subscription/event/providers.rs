@@ -4,10 +4,6 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::time::Duration;
 
-use crate::configuration::events::EventProviderConfiguration;
-use crate::configuration::events::EventSourceConfiguration;
-use crate::configuration::events::EventsConfiguration;
-
 use super::EventError;
 use super::ProviderEventStream;
 use super::kafka;
@@ -15,6 +11,9 @@ use super::nats;
 use super::nats_core;
 use super::nats_jetstream;
 use super::redis_pubsub;
+use crate::configuration::events::EventProviderConfiguration;
+use crate::configuration::events::EventSourceConfiguration;
+use crate::configuration::events::EventsConfiguration;
 
 pub(super) struct ConfiguredEvents {
     pub(super) providers: BTreeMap<String, ConfiguredProvider>,

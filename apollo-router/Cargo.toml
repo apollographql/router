@@ -205,7 +205,7 @@ prost-types = "0.14.0"
 proteus = "0.5.0"
 rand = "0.10.0"
 rhai = { version = "~1.25.0", features = ["sync", "serde", "internals"] }
-rdkafka = { version = "0.39.0", features = ["ssl"] }
+rdkafka = { version = "0.39.0", default-features = false, features = ["cmake-build", "tokio"] }
 regex = "1.10.5"
 reqwest = { workspace = true, default-features = false, features = [
     "rustls",
