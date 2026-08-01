@@ -31,6 +31,7 @@ scalar link__Import
 enum join__Graph {
   EVENTS @join__graph(name: "events", url: "http://events")
   PRODUCTS @join__graph(name: "products", url: "http://products")
+  REVIEWS @join__graph(name: "reviews", url: "http://reviews")
 }
 
 enum link__Purpose {
@@ -51,7 +52,13 @@ type Subscription @join__type(graph: EVENTS) {
 type Product
   @join__type(graph: EVENTS, key: "id")
   @join__type(graph: PRODUCTS, key: "id")
+  @join__type(graph: REVIEWS, key: "id")
 {
-  id: ID! @join__field(graph: EVENTS) @join__field(graph: PRODUCTS)
+  id: ID! @join__field(graph: EVENTS) @join__field(graph: PRODUCTS) @join__field(graph: REVIEWS)
   name: String @join__field(graph: PRODUCTS)
+  reviews: [Review!]! @join__field(graph: REVIEWS)
+}
+
+type Review @join__type(graph: REVIEWS) {
+  body: String!
 }

@@ -7,7 +7,10 @@ use rdkafka::producer::FutureRecord;
 use rdkafka::util::Timeout;
 use serde_json::json;
 use tower::BoxError;
+use wiremock::Mock;
+use wiremock::MockServer;
 use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
 
 use crate::integration::common::IntegrationTest;
 use crate::integration::common::Query;
@@ -42,6 +45,52 @@ fn event_config(
 }
 
 struct BrokerContainer(String);
+
+struct HydrationServices {
+    products: MockServer,
+    reviews: MockServer,
+}
+
+impl HydrationServices {
+    async fn start() -> Self {
+        let products = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"_entities": [{"name": "Table"}]}
+            })))
+            .mount(&products)
+            .await;
+
+        let reviews = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"_entities": [{"reviews": [{"body": "Excellent"}]}]}
+            })))
+            .mount(&reviews)
+            .await;
+
+        Self { products, reviews }
+    }
+
+    fn overrides(&self) -> std::collections::HashMap<String, String> {
+        [
+            ("products".to_string(), self.products.uri()),
+            ("reviews".to_string(), self.reviews.uri()),
+        ]
+        .into()
+    }
+
+    async fn assert_both_called(&self) {
+        assert!(
+            !self.products.received_requests().await.unwrap().is_empty(),
+            "products subgraph was not called"
+        );
+        assert!(
+            !self.reviews.received_requests().await.unwrap().is_empty(),
+            "reviews subgraph was not called"
+        );
+    }
+}
 
 impl BrokerContainer {
     fn start(image: &str, options: &[String], command: &[&str]) -> Self {
@@ -78,21 +127,21 @@ impl Drop for BrokerContainer {
     }
 }
 
-async fn build_router(config: String) -> IntegrationTest {
-    IntegrationTest::builder()
+async fn build_router(config: String) -> (IntegrationTest, HydrationServices) {
+    let services = HydrationServices::start().await;
+    let router = IntegrationTest::builder()
         .supergraph("tests/integration/subscriptions/fixtures/event_stream.graphql")
         .config(config)
-        .responder(ResponseTemplate::new(200).set_body_json(json!({
-            "data": {"_entities": [{"name": "Table"}]}
-        })))
+        .subgraph_overrides(services.overrides())
         .build()
-        .await
+        .await;
+    (router, services)
 }
 
 async fn subscribe(router: &IntegrationTest) -> reqwest::Response {
     let query = Query::builder()
         .body(json!({
-            "query": "subscription ProductUpdated($id: ID!) { productUpdated(id: $id) { id name } }",
+            "query": "subscription ProductUpdated($id: ID!) { productUpdated(id: $id) { id name reviews { body } } }",
             "variables": {"id": "1"}
         }))
         .headers([(
@@ -125,7 +174,11 @@ async fn assert_hydrated_event(response: reqwest::Response) {
     .expect("timed out waiting for the federated event");
     assert_eq!(
         event.pointer("/payload/data/productUpdated"),
-        Some(&json!({"id": "1", "name": "Table"}))
+        Some(&json!({
+            "id": "1",
+            "name": "Table",
+            "reviews": [{"body": "Excellent"}]
+        }))
     );
 }
 
@@ -159,7 +212,7 @@ async fn wait_for_exec(container: &BrokerContainer, args: &[&str], service: &str
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires Docker to run a real NATS broker"]
 async fn nats_core_event_is_federated_and_hydrated() -> Result<(), BoxError> {
-    let mut router = build_router(event_config(
+    let (mut router, services) = build_router(event_config(
         "nats_core",
         json!({"servers": ["nats://127.0.0.1:{{BROKER_PORT}}"]}),
         json!({}),
@@ -179,6 +232,7 @@ async fn nats_core_event_is_federated_and_hydrated() -> Result<(), BoxError> {
     client.publish("products.1", EVENT_PAYLOAD.into()).await?;
     client.flush().await?;
     assert_hydrated_event(response).await;
+    services.assert_both_called().await;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -186,7 +240,7 @@ async fn nats_core_event_is_federated_and_hydrated() -> Result<(), BoxError> {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires Docker to run a real NATS JetStream broker"]
 async fn nats_jetstream_event_is_federated_and_hydrated() -> Result<(), BoxError> {
-    let mut router = build_router(event_config(
+    let (mut router, services) = build_router(event_config(
         "nats_jetstream",
         json!({"servers": ["nats://127.0.0.1:{{BROKER_PORT}}"]}),
         json!({"stream": "PRODUCTS"}),
@@ -216,6 +270,7 @@ async fn nats_jetstream_event_is_federated_and_hydrated() -> Result<(), BoxError
         .await?
         .await?;
     assert_hydrated_event(response).await;
+    services.assert_both_called().await;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -223,7 +278,7 @@ async fn nats_jetstream_event_is_federated_and_hydrated() -> Result<(), BoxError
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires Docker to run a real Redis broker"]
 async fn redis_pubsub_event_is_federated_and_hydrated() -> Result<(), BoxError> {
-    let mut router = build_router(event_config(
+    let (mut router, services) = build_router(event_config(
         "redis_pubsub",
         json!({"url": "redis://127.0.0.1:{{BROKER_PORT}}"}),
         json!({}),
@@ -243,6 +298,7 @@ async fn redis_pubsub_event_is_federated_and_hydrated() -> Result<(), BoxError> 
     let published = broker.exec(&["redis-cli", "PUBLISH", "products.1", EVENT_PAYLOAD]);
     assert!(published.status.success(), "Redis publish failed");
     assert_hydrated_event(response).await;
+    services.assert_both_called().await;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -250,7 +306,7 @@ async fn redis_pubsub_event_is_federated_and_hydrated() -> Result<(), BoxError> 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires Docker to run a real Kafka broker"]
 async fn kafka_event_is_federated_and_hydrated() -> Result<(), BoxError> {
-    let mut router = build_router(event_config(
+    let (mut router, services) = build_router(event_config(
         "kafka",
         json!({"bootstrap_servers": ["127.0.0.1:{{BROKER_PORT}}"]}),
         json!({}),
@@ -337,6 +393,7 @@ async fn kafka_event_is_federated_and_hydrated() -> Result<(), BoxError> {
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     assert_hydrated_event(response).await;
+    services.assert_both_called().await;
     router.graceful_shutdown().await;
     Ok(())
 }
