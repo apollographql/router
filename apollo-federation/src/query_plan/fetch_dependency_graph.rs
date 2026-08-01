@@ -86,6 +86,7 @@ use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
+use crate::utils::MultiIndexMap;
 use crate::utils::iter_into_single_item;
 use crate::utils::logging::snapshot;
 
@@ -1716,10 +1717,11 @@ impl FetchDependencyGraph {
         // iterates its keys in a `RandomState`-random order per planning call, which executes
         // the per-key merges below in a random across-key order; the merge order changes edge
         // insertion order and merge outcomes downstream, producing nondeterministic plan shapes
-        // (differing `_entities` type-condition batching) across identical calls. Keys are
-        // inserted in topological-sort order, and values pushed under the same key inherit that
-        // order too, so each key's values remain topologically sorted as well.
-        let mut by_subgraphs: IndexMap<u64, Vec<NodeIndex>> = IndexMap::default();
+        // (differing `_entities` type-condition batching) across identical calls.
+        // `MultiIndexMap` preserves insertion order for both keys and the values of each key:
+        // keys are inserted in topological-sort order, and values pushed under the same key
+        // inherit that order too, so each key's values remain topologically sorted as well.
+        let mut by_subgraphs = MultiIndexMap::new();
         let sorted_nodes = petgraph::algo::toposort(&self.graph, None)
             .map_err(|_| FederationError::internal("Failed to sort nodes due to cycle(s)"))?;
         for node_index in sorted_nodes {
@@ -1729,7 +1731,7 @@ impl FetchDependencyGraph {
             let Some(key) = node.subgraph_and_merge_at_key() else {
                 continue;
             };
-            by_subgraphs.entry(key).or_default().push(node_index);
+            by_subgraphs.insert(key, node_index);
         }
 
         for (_key, nodes) in by_subgraphs {
