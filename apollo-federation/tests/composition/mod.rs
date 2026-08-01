@@ -16,6 +16,7 @@ mod compose_validation;
 mod connectors;
 mod demand_control;
 mod directive_argument_merge_strategies;
+mod event_spec;
 mod external;
 mod fed1_shareability;
 mod hints;

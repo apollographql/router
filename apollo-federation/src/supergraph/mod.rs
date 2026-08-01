@@ -2955,8 +2955,10 @@ mod tests {
                 @link(url: "https://specs.apollo.dev/link/v1.0")
                 @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
                 @join__directive(graphs: [SUBGRAPH], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"]})
+                @join__directive(graphs: [SUBGRAPH2], name: "link", args: {url: "https://specs.apollo.dev/event/v0.1", as: "events"})
             {
                 query: Query
+                subscription: Subscription
             }
 
             directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
@@ -3018,6 +3020,14 @@ mod tests {
                     @join__field(graph: SUBGRAPH2)
             }
 
+            type Subscription
+                @join__type(graph: SUBGRAPH2)
+            {
+                productUpdated: String
+                    @join__field(graph: SUBGRAPH2)
+                    @join__directive(graphs: [SUBGRAPH2], name: "events__subscribe", args: {source: "broker", destinations: ["products"]})
+            }
+
             type T
                 @join__type(graph: SUBGRAPH)
                 @join__directive(graphs: [SUBGRAPH], name: "connect", args: {http: {GET: "http://localhost/{$batch.id}"}, selection: "$"})
@@ -3059,5 +3069,16 @@ mod tests {
         assert_snapshot!(subgraph.schema.schema().type_field("Query", "f").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/"}, selection: "$")"#);
         assert_snapshot!(subgraph.schema.schema().get_object("T").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/{$batch.id}"}, selection: "$")"#);
         assert_snapshot!(subgraph.schema.schema().get_object("I").unwrap().directives, @r#" @interfaceObject @connect(http: {GET: "http://localhost/{$this.id}"}, selection: "f")"#);
+
+        let subgraph = subgraphs.get("subgraph2").unwrap();
+        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.16", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) @link(url: "https://specs.apollo.dev/event/v0.1", as: "events")"#);
+        assert!(
+            subgraph
+                .schema
+                .schema()
+                .directive_definitions
+                .contains_key("events__subscribe")
+        );
+        assert_snapshot!(subgraph.schema.schema().type_field("Subscription", "productUpdated").unwrap().directives, @r#" @events__subscribe(source: "broker", destinations: ["products"])"#);
     }
 }

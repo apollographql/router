@@ -213,7 +213,8 @@ impl Merger {
         let fields_with_from_context = Self::get_fields_with_from_context_directive(&subgraphs);
         let fields_with_override = Self::get_fields_with_override_directive(&subgraphs);
         let merged = FederationSchema::new(Schema::new())?;
-        let join_directive_identities = HashSet::from([Identity::connect_identity()]);
+        let join_directive_identities =
+            HashSet::from([Identity::connect_identity(), Identity::event_identity()]);
 
         trace!(
             "Preparing to merge supergraph with federation {latest_federation_version_used}, join {}, and link {}",
@@ -2737,6 +2738,14 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
 
         let dest: DirectiveTargetPosition = dest.clone().try_into()?;
         for spec in latest_or_highest_link_by_identity.into_values() {
+            if self
+                .merged
+                .metadata()
+                .and_then(|metadata| metadata.for_identity(spec.identity()))
+                .is_some()
+            {
+                continue;
+            }
             // we need to manually apply `@link` for the target spec
             // we cannot use `apply_feature_to_schema` as @connect spec defines subgraph specification
             // we use the same link import in the supergraph but we don't bring in any of the types

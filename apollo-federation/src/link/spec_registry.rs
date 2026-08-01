@@ -12,6 +12,7 @@ use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
 use crate::link::cache_tag_spec_definition::CACHE_TAG_VERSIONS;
 use crate::link::context_spec_definition::CONTEXT_VERSIONS;
 use crate::link::cost_spec_definition::COST_VERSIONS;
+use crate::link::event_spec_definition::EVENT_VERSIONS;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_VERSIONS;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
@@ -85,6 +86,14 @@ impl Identity {
         }
     }
 
+    pub const EVENT_NAME: Name = name!("event");
+    pub fn event_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: Self::EVENT_NAME.into(),
+        }
+    }
+
     pub const INACCESSIBLE_NAME: Name = name!("inaccessible");
     pub fn inaccessible_identity() -> Identity {
         Identity {
@@ -149,6 +158,7 @@ pub(crate) static SPEC_REGISTRY: LazyLock<SpecRegistry> = LazyLock::new(|| {
     registry.extend(&CONNECT_VERSIONS);
     registry.extend(&CONTEXT_VERSIONS);
     registry.extend(&COST_VERSIONS);
+    registry.extend(&EVENT_VERSIONS);
     registry.extend(&FEDERATION_VERSIONS);
     registry.extend(&INACCESSIBLE_VERSIONS);
     registry.extend(&POLICY_VERSIONS);

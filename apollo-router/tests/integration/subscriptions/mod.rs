@@ -29,6 +29,7 @@ use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 
 pub mod callback;
+pub mod event_stream;
 pub mod trace_propagation;
 pub mod ws_passthrough;
 

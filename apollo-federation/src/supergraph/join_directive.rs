@@ -11,10 +11,10 @@ use itertools::Itertools;
 
 use super::get_subgraph;
 use super::subgraph::FederationSubgraphs;
-use crate::connectors::spec::ConnectSpecDefinition;
 use crate::error::FederationError;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec::Url;
+use crate::link::spec_registry::SPEC_REGISTRY;
 use crate::schema::FederationSchema;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -72,7 +72,13 @@ pub(super) fn extract(
                     Component::new(link_directive.clone()),
                 )?;
 
-                if let Some(spec) = ConnectSpecDefinition::from_directive(&link_directive)? {
+                if let Some(url) = link_directive
+                    .specified_argument_by_name("url")
+                    .and_then(|value| value.as_str())
+                    .map(str::parse::<Url>)
+                    .transpose()?
+                    && let Some(spec) = SPEC_REGISTRY.get_definition(&url)
+                {
                     spec.add_elements_to_schema(&mut subgraph.schema)?;
                 }
             }

@@ -21,6 +21,7 @@ pub(crate) mod authenticated_spec_definition;
 pub(crate) mod cache_tag_spec_definition;
 pub(crate) mod context_spec_definition;
 pub mod cost_spec_definition;
+pub(crate) mod event_spec_definition;
 pub(crate) mod federation_spec_definition;
 pub(crate) mod graphql_definition;
 pub(crate) mod inaccessible_spec_definition;

@@ -27,7 +27,6 @@ use crate::connectors::spec::type_and_directive_specifications::directive_specif
 use crate::connectors::spec::type_and_directive_specifications::type_specifications;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
-use crate::error::FederationError;
 use crate::link::Link;
 use crate::link::Purpose;
 use crate::link::spec::Identity;
@@ -202,26 +201,6 @@ impl ConnectSpecDefinition {
             },
             minimum_federation_version,
         }
-    }
-
-    pub(crate) fn from_directive(
-        directive: &Directive,
-    ) -> Result<Option<&'static Self>, FederationError> {
-        let Some(url) = directive
-            .specified_argument_by_name("url")
-            .and_then(|a| a.as_str())
-        else {
-            return Ok(None);
-        };
-
-        let url: Url = url.parse()?;
-        if url.identity.domain != APOLLO_SPEC_DOMAIN
-            || url.identity.name.as_ref() != CONNECT_IDENTITY_NAME.as_str()
-        {
-            return Ok(None);
-        }
-
-        Ok(CONNECT_VERSIONS.find(&url.version))
     }
 }
 
