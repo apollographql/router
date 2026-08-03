@@ -170,7 +170,6 @@ pub(crate) struct Merger {
     pub(in crate::merger) fields_with_override: DirectiveReferencers,
     pub(in crate::merger) inaccessible_directive_name_in_supergraph: Option<Name>,
     pub(in crate::merger) link_spec_definition: &'static LinkSpecDefinition,
-    pub(in crate::merger) join_directive_identities: HashSet<Identity>,
     /// Directives that are composed via `@join__directive` in the supergraph. Populated by
     /// `validate_and_maybe_add_specs` from composition spec `use_join_directive`. Matches JS
     /// `directivesUsingJoinDirective` (federation PR #3274).
@@ -213,9 +212,6 @@ impl Merger {
         let fields_with_from_context = Self::get_fields_with_from_context_directive(&subgraphs);
         let fields_with_override = Self::get_fields_with_override_directive(&subgraphs);
         let merged = FederationSchema::new(Schema::new())?;
-        let join_directive_identities =
-            HashSet::from([Identity::connect_identity(), Identity::event_identity()]);
-
         trace!(
             "Preparing to merge supergraph with federation {latest_federation_version_used}, join {}, and link {}",
             join_spec.version(),
@@ -236,7 +232,6 @@ impl Merger {
             fields_with_from_context,
             fields_with_override,
             link_spec_definition,
-            join_directive_identities,
             directives_using_join_directive: HashSet::new(),
             inaccessible_directive_name_in_supergraph: None,
             join_spec_definition: join_spec,
@@ -2798,7 +2793,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     }
 
     fn should_use_join_directive_for_url(&self, url: &Url) -> bool {
-        self.join_directive_identities.contains(&url.identity)
+        SPEC_REGISTRY.uses_join_directive(url)
     }
 
     /// Like Iterator::any, but for Sources<T> maps - checks if any source satisfies the predicate

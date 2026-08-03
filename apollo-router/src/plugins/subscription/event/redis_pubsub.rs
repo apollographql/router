@@ -18,6 +18,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use super::EventError;
 use super::ProviderEvent;
 use super::ProviderEventStream;
+use super::providers::ProviderSubscription;
 use crate::configuration::TlsClient;
 use crate::configuration::events::EventProviderConfiguration;
 use crate::configuration::events::EventSourceConfiguration;
@@ -127,14 +128,18 @@ pub(super) struct RedisPubSubSourceOptions {
 }
 
 pub(super) async fn subscribe(
-    provider_name: &str,
     config: &RedisPubSubConfiguration,
     source_options: &RedisPubSubSourceOptions,
     connect_timeout: Duration,
-    source_name: &str,
-    destinations: Vec<String>,
-    buffer_capacity: usize,
+    subscription: ProviderSubscription<'_>,
 ) -> Result<ProviderEventStream, EventError> {
+    let ProviderSubscription {
+        provider_name,
+        source_name,
+        destinations,
+        buffer_capacity,
+        ..
+    } = subscription;
     if destinations.is_empty() {
         return Err(EventError::new(format!(
             "Redis Pub/Sub source '{source_name}' must have at least one destination"

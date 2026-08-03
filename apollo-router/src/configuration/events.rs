@@ -88,7 +88,8 @@ fn validate_name(kind: &str, name: &str) -> Result<(), String> {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EventProviderConfiguration {
-    /// Provider implementation identifier, for example `nats` or `kafka`.
+    /// Provider implementation identifier, such as `nats_core`, `nats_jetstream`,
+    /// `redis_pubsub`, or `kafka`.
     #[serde(rename = "type")]
     pub(crate) r#type: String,
     /// Provider-owned configuration, validated by the selected provider.
@@ -259,7 +260,7 @@ mod tests {
             r#"
 providers:
   production-events:
-    type: nats
+    type: nats_core
     config:
       servers: [nats://localhost:4222]
 sources:
@@ -278,7 +279,7 @@ policies:
         .expect("configuration is valid YAML");
 
         config.validate().expect("references are valid");
-        assert_eq!(config.providers["production-events"].r#type, "nats");
+        assert_eq!(config.providers["production-events"].r#type, "nats_core");
         assert_eq!(
             config.sources["product-updates"].format.r#type,
             "graphql_entity"

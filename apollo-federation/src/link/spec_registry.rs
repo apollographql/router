@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::str;
 use std::sync::LazyLock;
 
@@ -171,6 +172,8 @@ pub(crate) static SPEC_REGISTRY: LazyLock<SpecRegistry> = LazyLock::new(|| {
 pub(crate) struct SpecRegistry {
     definitions_by_url: HashMap<Url, &'static (dyn SpecDefinition + Sync)>,
     available_versions_by_identity: HashMap<Identity, BTreeSet<Version>>,
+    /// Exact registered spec versions containing a directive composed via `@join__directive`.
+    join_directive_specs: HashSet<Url>,
 }
 
 impl SpecRegistry {
@@ -178,11 +181,15 @@ impl SpecRegistry {
         Self {
             definitions_by_url: HashMap::new(),
             available_versions_by_identity: HashMap::new(),
+            join_directive_specs: HashSet::new(),
         }
     }
 
     fn extend<T: SpecDefinition + Sync>(&mut self, definitions: &'static SpecDefinitions<T>) {
         for (v, spec) in definitions.iter() {
+            if spec.uses_join_directive() {
+                self.join_directive_specs.insert(spec.url().clone());
+            }
             self.definitions_by_url.insert(spec.url().clone(), spec);
             self.available_versions_by_identity
                 .entry(spec.url().identity.clone())
@@ -199,6 +206,11 @@ impl SpecRegistry {
         self.available_versions_by_identity.get(identity)
     }
 
+    /// Returns whether any directive in this registered spec version uses `@join__directive`.
+    pub(crate) fn uses_join_directive(&self, url: &Url) -> bool {
+        self.join_directive_specs.contains(url)
+    }
+
     /// Generates the composition spec for an imported directive. Currently, this generates the
     /// entire spec, then loops over available directive specifications and clones the applicable
     /// directive. An alternative would be to mark everything as `Sync` and store them on the
@@ -213,5 +225,17 @@ impl SpecRegistry {
         let spec = specs.iter().find(|s| s.name() == directive_name_in_spec)?;
         let directive_spec: DirectiveSpecification = spec.as_any().downcast_ref().cloned()?;
         directive_spec.composition
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn join_directive_specs_are_derived_from_composition_metadata() {
+        assert!(SPEC_REGISTRY.uses_join_directive(CONNECT_VERSIONS.latest().url()));
+        assert!(SPEC_REGISTRY.uses_join_directive(EVENT_VERSIONS.latest().url()));
+        assert!(!SPEC_REGISTRY.uses_join_directive(TAG_VERSIONS.latest().url()));
     }
 }

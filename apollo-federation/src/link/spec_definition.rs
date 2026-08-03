@@ -20,6 +20,7 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::schema::FederationSchema;
+use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) trait SpecDefinition {
@@ -32,6 +33,20 @@ pub(crate) trait SpecDefinition {
     fn minimum_federation_version(&self) -> &Version;
 
     fn purpose(&self) -> Option<Purpose>;
+
+    /// Whether applications from this spec are persisted through `@join__directive`.
+    ///
+    /// Most specs derive this from their directive composition metadata. Specifications with
+    /// legacy custom composition may override this while they migrate to generic composition.
+    fn uses_join_directive(&self) -> bool {
+        self.directive_specs().into_iter().any(|specification| {
+            specification
+                .as_any()
+                .downcast_ref::<DirectiveSpecification>()
+                .and_then(|directive| directive.composition.as_ref())
+                .is_some_and(|composition| composition.use_join_directive)
+        })
+    }
 
     fn identity(&self) -> &Identity {
         &self.url().identity

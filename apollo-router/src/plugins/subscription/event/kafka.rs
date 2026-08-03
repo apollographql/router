@@ -1,6 +1,9 @@
 //! Kafka adapter using one instance-unique consumer group per logical trigger.
 
 use std::collections::BTreeMap;
+use std::hash::DefaultHasher;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -15,6 +18,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use super::EventError;
 use super::ProviderEvent;
 use super::ProviderEventStream;
+use super::providers::ProviderSubscription;
 use crate::configuration::events::EventProviderConfiguration;
 use crate::configuration::events::EventSourceConfiguration;
 
@@ -106,18 +110,19 @@ enum KafkaTopicMode {
     Exact,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn subscribe(
-    provider_name: &str,
     config: &KafkaConfiguration,
     options: &KafkaSourceOptions,
     connect_timeout: Duration,
-    source_name: &str,
-    destinations: Vec<String>,
-    buffer_capacity: usize,
-    instance_id: uuid::Uuid,
-    trigger_hash: u64,
+    subscription: ProviderSubscription<'_>,
 ) -> Result<ProviderEventStream, EventError> {
+    let ProviderSubscription {
+        provider_name,
+        source_name,
+        destinations,
+        buffer_capacity,
+        instance_id,
+    } = subscription;
     if destinations.is_empty() || destinations.iter().any(|topic| topic.trim().is_empty()) {
         return Err(EventError::new(format!(
             "Kafka source '{source_name}' must have at least one non-empty topic"
@@ -131,7 +136,10 @@ pub(super) async fn subscribe(
         )));
     }
 
-    let group_id = consumer_group(&options.group_prefix, instance_id, trigger_hash);
+    let mut hasher = DefaultHasher::new();
+    source_name.hash(&mut hasher);
+    destinations.hash(&mut hasher);
+    let group_id = consumer_group(&options.group_prefix, instance_id, hasher.finish());
     let mut client_config = ClientConfig::new();
     for (key, value) in &config.properties {
         client_config.set(key, value);

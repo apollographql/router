@@ -1,6 +1,5 @@
 //! Provider-neutral event source integration for federated subscriptions.
 
-use std::collections::HashMap;
 use std::fmt;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -9,22 +8,11 @@ use std::time::Duration;
 use apollo_compiler::executable;
 use futures::Stream;
 use futures::StreamExt;
-use serde_json_bytes::Value;
-use tokio::sync::Mutex;
 use tokio::sync::broadcast;
-use tokio::sync::mpsc;
-use tower::BoxError;
 
 use crate::configuration::events::EventsConfiguration;
-use crate::error::Error;
 use crate::graphql;
-use crate::plugins::subscription::SubscriptionTaskParams;
-use crate::plugins::subscription::fetch::install_subscription_task;
-use crate::plugins::subscription::fetch::subscription_admission_error;
 use crate::query_planner::subscription::SubscriptionNode;
-use crate::services::FetchResponse;
-use crate::services::fetch::SubscriptionRequest;
-use crate::services::subgraph::BoxGqlStream;
 use crate::spec::Schema;
 
 mod catalog;
@@ -43,11 +31,13 @@ use catalog::EventCatalog;
 use catalog::EventField;
 use decoder::decode_graphql_entity;
 use fanout::EventTrigger;
+use fanout::TriggerAccess;
 use fanout::TriggerRegistry;
 use fanout::forward_shared_events;
 use providers::ConfiguredEvents;
 use providers::ConfiguredProvider;
 use providers::ConfiguredSource;
+use providers::ProviderSubscription;
 pub(crate) use service::EventSubscriptionLayer;
 pub(crate) use service::EventSubscriptionService;
 use template::render_destinations;
@@ -77,6 +67,9 @@ impl std::error::Error for EventError {}
 
 pub(crate) type ProviderEventStream =
     Pin<Box<dyn Stream<Item = Result<ProviderEvent, EventError>> + Send + Sync + 'static>>;
+
+pub(crate) type EventStream =
+    Pin<Box<dyn Stream<Item = Result<graphql::Response, EventError>> + Send + Sync + 'static>>;
 
 /// Owns validated schema metadata and configured provider adapters for one router pipeline.
 pub(crate) struct EventRuntime {
@@ -109,7 +102,7 @@ impl EventRuntime {
         Ok(Self {
             events,
             catalog,
-            triggers: Arc::new(Mutex::new(HashMap::new())),
+            triggers: TriggerRegistry::default(),
             instance_id: uuid::Uuid::new_v4(),
         })
     }
@@ -154,71 +147,39 @@ impl EventRuntime {
         self.event_field(node).is_some()
     }
 
-    fn subscribe(
-        self: Arc<Self>,
-        request: SubscriptionRequest,
-    ) -> futures::future::BoxFuture<'static, Result<FetchResponse, BoxError>> {
-        Box::pin(async move {
-            if let Some(error) = subscription_admission_error(request.subscription_config.as_ref())
-            {
-                return Ok(error);
-            }
-            let Some((field, response_name, operation_field)) =
-                self.event_field(&request.subscription_node)
-            else {
-                return Ok(event_error(
-                    "event subscription metadata could not be resolved",
-                ));
-            };
-            let source_name = field.source.clone();
-            let destinations = match render_destinations(
-                &field.destinations,
-                operation_field,
-                &request.variables.variables,
-            ) {
-                Ok(destinations) => destinations,
-                Err(error) => return Ok(event_error(error.to_string())),
-            };
-            let Some(source) = self.events.sources.get(&source_name) else {
-                return Ok(event_error(format!(
-                    "event source '{source_name}' is not configured"
-                )));
-            };
-            let Some(provider) = self.events.providers.get(&source.provider) else {
-                return Ok(event_error(format!(
-                    "event provider '{}' is not configured",
-                    source.provider
-                )));
-            };
+    async fn subscribe(
+        self: &Arc<Self>,
+        node: &SubscriptionNode,
+        variables: &serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value>,
+    ) -> Result<EventStream, EventError> {
+        let (field, response_name, operation_field) = self
+            .event_field(node)
+            .ok_or_else(|| EventError::new("event subscription metadata could not be resolved"))?;
+        let source_name = field.source.clone();
+        let destinations = render_destinations(&field.destinations, operation_field, variables)?;
+        let source = self.events.sources.get(&source_name).ok_or_else(|| {
+            EventError::new(format!("event source '{source_name}' is not configured"))
+        })?;
+        let provider = self.events.providers.get(&source.provider).ok_or_else(|| {
+            EventError::new(format!(
+                "event provider '{}' is not configured",
+                source.provider
+            ))
+        })?;
 
-            let stream = match self
-                .shared_provider_stream(
-                    &source.provider,
-                    provider,
-                    source,
-                    &source_name,
-                    destinations,
-                )
-                .await
-            {
-                Ok(stream) => stream,
-                Err(error) => return Ok(event_error(error.to_string())),
-            };
-            let gql_stream: BoxGqlStream = Box::pin(stream.map(move |event| {
-                match event {
-                    Ok(event) => decode_graphql_entity(event, &response_name),
-                    Err(error) => graphql::Response::builder()
-                        .error(
-                            Error::builder()
-                                .message(error.to_string())
-                                .extension_code("EVENT_STREAM_ERROR")
-                                .build(),
-                        )
-                        .build(),
-                }
-            }));
-            install_stream(request, gql_stream).await
-        })
+        let stream = self
+            .shared_provider_stream(
+                &source.provider,
+                provider,
+                source,
+                &source_name,
+                destinations,
+            )
+            .await?;
+
+        Ok(Box::pin(stream.map(move |event| {
+            event.map(|event| decode_graphql_entity(event, &response_name))
+        })))
     }
 
     async fn shared_provider_stream(
@@ -234,127 +195,79 @@ impl EventRuntime {
             source: source_name.to_string(),
             destinations: destinations.clone(),
         };
-        let mut triggers = self.triggers.lock().await;
-        if let Some(sender) = triggers.get(&trigger) {
-            u64_counter!(
-                "apollo.router.operations.subscriptions.events",
-                "Total event-backed subscription operations",
-                1,
-                event.provider.type = provider.type_name(),
-                event.source = source_name.to_string(),
-                event.trigger.shared = true
-            );
-            return Ok(forward_shared_events(
-                sender.subscribe(),
-                source.buffer_capacity,
-                trigger,
-            ));
-        }
-
-        let mut provider_events = provider
-            .subscribe(
-                provider_name,
-                source,
-                source_name,
-                destinations,
-                source.buffer_capacity,
-                self.instance_id,
-            )
-            .await?;
-        let (shared_sender, first_receiver) = broadcast::channel(source.buffer_capacity);
+        let access = self.triggers.acquire(trigger.clone()).await?;
+        let (receiver, provider_events) = match access {
+            TriggerAccess::Shared(receiver) => (receiver, None),
+            TriggerAccess::Connect(connection) => {
+                let subscription = ProviderSubscription::new(
+                    provider_name,
+                    source_name,
+                    destinations,
+                    source.buffer_capacity,
+                    self.instance_id,
+                );
+                match provider.subscribe(source, subscription).await {
+                    Ok(provider_events) => {
+                        let (sender, receiver) = broadcast::channel(source.buffer_capacity);
+                        connection.activate(sender.clone()).await;
+                        (receiver, Some((provider_events, sender)))
+                    }
+                    Err(error) => {
+                        connection.fail(error.clone()).await;
+                        return Err(error);
+                    }
+                }
+            }
+        };
+        let shared = provider_events.is_none();
         u64_counter!(
             "apollo.router.operations.subscriptions.events",
             "Total event-backed subscription operations",
             1,
             event.provider.type = provider.type_name(),
             event.source = source_name.to_string(),
-            event.trigger.shared = false
+            event.trigger.shared = shared
         );
-        triggers.insert(trigger.clone(), shared_sender.clone());
-        drop(triggers);
 
-        let trigger_registry = self.triggers.clone();
-        let pump_trigger = trigger.clone();
-        tokio::spawn(async move {
-            let mut idle_check = tokio::time::interval(Duration::from_secs(1));
-            loop {
-                tokio::select! {
-                    _ = idle_check.tick() => {
-                        if shared_sender.receiver_count() == 0 {
-                            break;
+        if let Some((mut provider_events, shared_sender)) = provider_events {
+            let trigger_registry = self.triggers.clone();
+            let pump_trigger = trigger.clone();
+            tokio::spawn(async move {
+                let mut idle_check = tokio::time::interval(Duration::from_secs(1));
+                loop {
+                    tokio::select! {
+                        _ = idle_check.tick() => {
+                            if shared_sender.receiver_count() == 0 {
+                                break;
+                            }
                         }
-                    }
-                    event = provider_events.next() => match event {
-                        Some(event) => {
-                            let outcome = if event.is_ok() { "received" } else { "error" };
-                            u64_counter!(
-                                "apollo.router.operations.subscriptions.events.provider",
-                                "Events and errors received from event providers",
-                                1,
-                                event.provider.name = pump_trigger.provider.clone(),
-                                event.source = pump_trigger.source.clone(),
-                                event.outcome = outcome
-                            );
-                            let _ = shared_sender.send(Arc::new(event));
+                        event = provider_events.next() => match event {
+                            Some(event) => {
+                                let outcome = if event.is_ok() { "received" } else { "error" };
+                                u64_counter!(
+                                    "apollo.router.operations.subscriptions.events.provider",
+                                    "Events and errors received from event providers",
+                                    1,
+                                    event.provider.name = pump_trigger.provider.clone(),
+                                    event.source = pump_trigger.source.clone(),
+                                    event.outcome = outcome
+                                );
+                                let _ = shared_sender.send(Arc::new(event));
+                            }
+                            None => break,
                         }
-                        None => break,
                     }
                 }
-            }
-            let mut triggers = trigger_registry.lock().await;
-            if triggers
-                .get(&pump_trigger)
-                .is_some_and(|current| current.same_channel(&shared_sender))
-            {
-                triggers.remove(&pump_trigger);
-            }
-        });
+                trigger_registry
+                    .remove_active(&pump_trigger, &shared_sender)
+                    .await;
+            });
+        }
 
         Ok(forward_shared_events(
-            first_receiver,
+            receiver,
             source.buffer_capacity,
             trigger,
         ))
     }
-}
-
-async fn install_stream(
-    request: SubscriptionRequest,
-    stream: BoxGqlStream,
-) -> Result<FetchResponse, BoxError> {
-    let Some(subscription_config) = request.subscription_config else {
-        return Ok(event_error("subscription support is not enabled"));
-    };
-    let Some(handle) = request.subscription_handle else {
-        return Ok(event_error("no subscription handle was provided"));
-    };
-
-    let (stream_sender, stream_receiver) = mpsc::channel(1);
-    stream_sender
-        .send(stream)
-        .await
-        .map_err(|error| EventError::new(error.to_string()))?;
-    if let Err(response) = install_subscription_task(SubscriptionTaskParams {
-        client_sender: request.sender,
-        subscription_handle: handle,
-        subscription_config,
-        stream_rx: stream_receiver.into(),
-    })
-    .await
-    {
-        return Ok(response);
-    }
-    Ok((Value::default(), Vec::new()))
-}
-
-fn event_error(message: impl Into<String>) -> FetchResponse {
-    (
-        Value::default(),
-        vec![
-            Error::builder()
-                .message(message.into())
-                .extension_code("EVENT_SUBSCRIPTION_ERROR")
-                .build(),
-        ],
-    )
 }

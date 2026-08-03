@@ -455,7 +455,6 @@ pub(crate) mod tests {
             inaccessible_directive_name_in_supergraph: None,
             link_spec_definition,
             join_spec_definition,
-            join_directive_identities: Default::default(),
             directives_using_join_directive: Default::default(),
             latest_federation_version_used: FEDERATION_VERSIONS.latest().version().clone(),
             applied_directives_to_merge: Default::default(),

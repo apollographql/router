@@ -456,16 +456,10 @@ fn connect_directive_spec() -> DirectiveSpecification {
             DirectiveLocation::FieldDefinition,
             DirectiveLocation::Object,
         ],
-        // TODO connectors use custom logic to merge them using join_directive
-        //  we should update this logic to a more generic mechanism introduced with @cacheTag
+        // Connectors still use custom composition logic to merge applications through
+        // @join__directive. `ConnectSpecDefinition::uses_join_directive` exposes that behavior
+        // to generic linked-spec persistence without enabling generic directive composition.
         None,
-        // Some(DirectiveCompositionOptions {
-        //     supergraph_specification: &|v| {
-        //         CONNECT_VERSIONS.get_dyn_minimum_required_version(v)
-        //     },
-        //     static_argument_transform: None,
-        //     use_join_directive: true,
-        // }),
     )
 }
 

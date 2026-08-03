@@ -1,7 +1,4 @@
 use std::collections::BTreeMap;
-use std::hash::DefaultHasher;
-use std::hash::Hash;
-use std::hash::Hasher;
 use std::time::Duration;
 
 use super::EventError;
@@ -67,6 +64,37 @@ pub(super) enum ConfiguredProvider {
     },
 }
 
+/// Provider-neutral context for opening a stream for one resolved event trigger.
+///
+/// Keeping the trigger identity and runtime controls together prevents provider
+/// adapters from growing a long, order-sensitive list of scalar arguments as
+/// more providers or cross-provider controls are added.
+pub(super) struct ProviderSubscription<'a> {
+    pub(super) provider_name: &'a str,
+    pub(super) source_name: &'a str,
+    pub(super) destinations: Vec<String>,
+    pub(super) buffer_capacity: usize,
+    pub(super) instance_id: uuid::Uuid,
+}
+
+impl<'a> ProviderSubscription<'a> {
+    pub(super) fn new(
+        provider_name: &'a str,
+        source_name: &'a str,
+        destinations: Vec<String>,
+        buffer_capacity: usize,
+        instance_id: uuid::Uuid,
+    ) -> Self {
+        Self {
+            provider_name,
+            source_name,
+            destinations,
+            buffer_capacity,
+            instance_id,
+        }
+    }
+}
+
 impl ConfiguredProvider {
     fn parse(
         provider_name: &str,
@@ -104,38 +132,17 @@ impl ConfiguredProvider {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) async fn subscribe(
         &self,
-        provider_name: &str,
         source: &ConfiguredSource,
-        source_name: &str,
-        destinations: Vec<String>,
-        buffer_capacity: usize,
-        instance_id: uuid::Uuid,
+        subscription: ProviderSubscription<'_>,
     ) -> Result<ProviderEventStream, EventError> {
         match (self, &source.options) {
             (Self::NatsCore(provider), SourceOptions::NatsCore(options)) => {
-                nats_core::subscribe(
-                    provider_name,
-                    provider,
-                    options,
-                    source_name,
-                    destinations,
-                    buffer_capacity,
-                )
-                .await
+                nats_core::subscribe(provider, options, subscription).await
             }
             (Self::NatsJetStream(provider), SourceOptions::NatsJetStream(options)) => {
-                nats_jetstream::subscribe(
-                    provider_name,
-                    provider,
-                    options,
-                    source_name,
-                    destinations,
-                    buffer_capacity,
-                )
-                .await
+                nats_jetstream::subscribe(provider, options, subscription).await
             }
             (
                 Self::RedisPubSub {
@@ -144,16 +151,8 @@ impl ConfiguredProvider {
                 },
                 SourceOptions::RedisPubSub(options),
             ) => {
-                redis_pubsub::subscribe(
-                    provider_name,
-                    configuration,
-                    options,
-                    *connect_timeout,
-                    source_name,
-                    destinations,
-                    buffer_capacity,
-                )
-                .await
+                redis_pubsub::subscribe(configuration, options, *connect_timeout, subscription)
+                    .await
             }
             (
                 Self::Kafka {
@@ -161,25 +160,10 @@ impl ConfiguredProvider {
                     connect_timeout,
                 },
                 SourceOptions::Kafka(options),
-            ) => {
-                let mut hasher = DefaultHasher::new();
-                source_name.hash(&mut hasher);
-                destinations.hash(&mut hasher);
-                kafka::subscribe(
-                    provider_name,
-                    configuration,
-                    options,
-                    *connect_timeout,
-                    source_name,
-                    destinations,
-                    buffer_capacity,
-                    instance_id,
-                    hasher.finish(),
-                )
-                .await
-            }
+            ) => kafka::subscribe(configuration, options, *connect_timeout, subscription).await,
             _ => Err(EventError::new(format!(
-                "event source '{source_name}' does not match provider type '{}'",
+                "event source '{}' does not match provider type '{}'",
+                subscription.source_name,
                 self.type_name()
             ))),
         }

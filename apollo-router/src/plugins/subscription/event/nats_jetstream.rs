@@ -14,6 +14,7 @@ use super::EventError;
 use super::ProviderEvent;
 use super::ProviderEventStream;
 use super::nats::NatsProvider;
+use super::providers::ProviderSubscription;
 use crate::configuration::events::EventSourceConfiguration;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -41,13 +42,17 @@ impl Default for JetStreamSourceOptions {
 }
 
 pub(super) async fn subscribe(
-    provider_name: &str,
     provider: &NatsProvider,
     options: &JetStreamSourceOptions,
-    source_name: &str,
-    destinations: Vec<String>,
-    buffer_capacity: usize,
+    subscription: ProviderSubscription<'_>,
 ) -> Result<ProviderEventStream, EventError> {
+    let ProviderSubscription {
+        provider_name,
+        source_name,
+        destinations,
+        buffer_capacity,
+        ..
+    } = subscription;
     if destinations.is_empty() {
         return Err(EventError::new(format!(
             "NATS JetStream source '{source_name}' must have at least one subject"

@@ -224,6 +224,12 @@ impl SpecDefinition for ConnectSpecDefinition {
     fn purpose(&self) -> Option<Purpose> {
         Some(Purpose::EXECUTION)
     }
+
+    fn uses_join_directive(&self) -> bool {
+        // Connectors predate generic linked-directive composition and are still merged through
+        // custom logic, but their links and applications must be persisted via @join__directive.
+        true
+    }
 }
 
 pub(crate) static CONNECT_VERSIONS: LazyLock<SpecDefinitions<ConnectSpecDefinition>> =
