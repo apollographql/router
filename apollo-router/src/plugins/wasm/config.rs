@@ -76,6 +76,16 @@ pub(super) enum WasmHook {
     Connector,
 }
 
+impl WasmHook {
+    pub(super) const fn name(self) -> &'static str {
+        match self {
+            Self::Supergraph => "supergraph.request",
+            Self::Subgraph => "subgraph.request",
+            Self::Connector => "connector.request",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct WasmHookSelector {

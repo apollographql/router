@@ -65,15 +65,11 @@ type ConnectorFuture = BoxFuture<
 #[derive(Clone)]
 pub(super) struct WasmConnectorLayer {
     runtime: Arc<Runtime>,
-    source_config_key: Arc<str>,
 }
 
 impl WasmConnectorLayer {
-    pub(super) fn new(runtime: Arc<Runtime>, source_config_key: Arc<str>) -> Self {
-        Self {
-            runtime,
-            source_config_key,
-        }
+    pub(super) fn new(runtime: Arc<Runtime>) -> Self {
+        Self { runtime }
     }
 }
 
@@ -89,16 +85,10 @@ where
 
     fn layer(&self, inner: S) -> Self::Service {
         let runtime = self.runtime.clone();
-        let source_config_key = self.source_config_key.clone();
         AsyncCheckpointService::new(
             move |request| -> ConnectorFuture {
                 let runtime = runtime.clone();
-                let source_config_key = source_config_key.clone();
-                Box::pin(async move {
-                    runtime
-                        .process_connector_request(request, &source_config_key)
-                        .await
-                })
+                Box::pin(async move { runtime.process_connector_request(request).await })
             },
             inner,
         )

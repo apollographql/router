@@ -203,6 +203,47 @@ fn non_connector_hooks_reject_method_and_uri_mutations() {
 }
 
 #[test]
+fn graphql_mutations_are_atomic() {
+    let mut permissions = WasmPermissions::default();
+    permissions
+        .headers
+        .write
+        .names
+        .insert("x-plugin".to_string());
+    permissions.context.write.names.insert("policy".to_string());
+    let hook = WasmHookConfig {
+        hook: WasmHook::Supergraph,
+        selector: Default::default(),
+        permissions,
+        failure: None,
+    };
+    let mut request = crate::services::supergraph::Request::fake_builder()
+        .build()
+        .unwrap();
+    let mutation = wit::Mutation {
+        headers: vec![wit::HeaderOperation::Set(wit::Header {
+            name: "x-plugin".to_string(),
+            values: vec!["active".to_string()],
+        })],
+        context: vec![wit::ContextOperation::Set(wit::ContextEntry {
+            name: "policy".to_string(),
+            value: "not valid JSON".to_string(),
+        })],
+        method: None,
+        uri: None,
+        body: None,
+    };
+
+    assert!(apply_supergraph_mutation(&mut request, &hook, mutation).is_err());
+    assert!(
+        !request
+            .supergraph_request
+            .headers()
+            .contains_key("x-plugin")
+    );
+}
+
+#[test]
 fn connector_http_mutation_preserves_origin_and_repairs_content_length() {
     let mut permissions = WasmPermissions::default();
     permissions.transport.method = WasmTransportAccess::ReadWrite;

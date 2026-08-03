@@ -144,24 +144,28 @@ impl Runtime {
             else {
                 continue;
             };
-            let event = hooks::supergraph_event(&request, hook, &plugin.configuration)?;
-            match self.invoke(plugin, event).await {
+            let outcome = self
+                .invoke_hook(
+                    plugin,
+                    hooks::supergraph_event(&request, hook, &plugin.configuration),
+                )
+                .await;
+            match outcome {
                 Ok(super::wit::Outcome::Proceed(mutation)) => {
-                    hooks::apply_supergraph_mutation(&mut request, hook, mutation)?;
+                    if let Err(error) =
+                        hooks::apply_supergraph_mutation(&mut request, hook, mutation)
+                    {
+                        handle_hook_error(plugin, hook, error)?;
+                    }
                 }
                 Ok(super::wit::Outcome::BreakRequest(response)) => {
-                    return Ok(ControlFlow::Break(hooks::break_supergraph_response(
-                        request.context,
-                        response,
-                    )?));
+                    match hooks::break_supergraph_response(&request.context, response) {
+                        Ok(response) => return Ok(ControlFlow::Break(response)),
+                        Err(error) => handle_hook_error(plugin, hook, error)?,
+                    }
                 }
                 Err(error) => {
-                    let failure = hook.failure.unwrap_or(plugin.failure);
-                    if matches!(failure.default, WasmFailureMode::Open) {
-                        tracing::error!(plugin = %plugin.name, %error, "wasm plugin failed open");
-                        continue;
-                    }
-                    return Err(format!("wasm plugin `{}` failed: {error}", plugin.name).into());
+                    handle_hook_error(plugin, hook, error)?;
                 }
             }
         }
@@ -179,23 +183,27 @@ impl Runtime {
             }) else {
                 continue;
             };
-            let event = hooks::subgraph_event(&request, hook, &plugin.configuration)?;
-            match self.invoke(plugin, event).await {
+            let outcome = self
+                .invoke_hook(
+                    plugin,
+                    hooks::subgraph_event(&request, hook, &plugin.configuration),
+                )
+                .await;
+            match outcome {
                 Ok(super::wit::Outcome::Proceed(mutation)) => {
-                    hooks::apply_subgraph_mutation(&mut request, hook, mutation)?;
+                    if let Err(error) = hooks::apply_subgraph_mutation(&mut request, hook, mutation)
+                    {
+                        handle_hook_error(plugin, hook, error)?;
+                    }
                 }
                 Ok(super::wit::Outcome::BreakRequest(response)) => {
-                    return Ok(ControlFlow::Break(hooks::break_subgraph_response(
-                        request, response,
-                    )?));
+                    match hooks::break_subgraph_response(&request, response) {
+                        Ok(response) => return Ok(ControlFlow::Break(response)),
+                        Err(error) => handle_hook_error(plugin, hook, error)?,
+                    }
                 }
                 Err(error) => {
-                    let failure = hook.failure.unwrap_or(plugin.failure);
-                    if matches!(failure.default, WasmFailureMode::Open) {
-                        tracing::error!(plugin = %plugin.name, %error, "wasm plugin failed open");
-                        continue;
-                    }
-                    return Err(format!("wasm plugin `{}` failed: {error}", plugin.name).into());
+                    handle_hook_error(plugin, hook, error)?;
                 }
             }
         }
@@ -205,7 +213,6 @@ impl Runtime {
     pub(super) async fn process_connector_request(
         &self,
         mut request: request_service::Request,
-        source_config_key: &str,
     ) -> Result<ControlFlow<request_service::Response, request_service::Request>, BoxError> {
         let service_name = request.connector.id.subgraph_name.clone();
         let source_name = request
@@ -226,46 +233,45 @@ impl Runtime {
             }) else {
                 continue;
             };
-            let event = hooks::connector_event(
-                &request,
-                source_name.as_deref(),
-                hook,
-                &plugin.configuration,
-            );
-            let result = match event {
-                Ok(event) => match self.invoke(plugin, event).await {
-                    Ok(super::wit::Outcome::Proceed(mutation)) => {
-                        hooks::apply_connector_mutation(
-                            &mut request.transport_request,
-                            &request.context,
-                            hook,
-                            mutation,
-                        )
+            let outcome = self
+                .invoke_hook(
+                    plugin,
+                    hooks::connector_event(
+                        &request,
+                        source_name.as_deref(),
+                        hook,
+                        &plugin.configuration,
+                    ),
+                )
+                .await;
+            match outcome {
+                Ok(super::wit::Outcome::Proceed(mutation)) => {
+                    if let Err(error) = hooks::apply_connector_mutation(
+                        &mut request.transport_request,
+                        &request.context,
+                        hook,
+                        mutation,
+                    ) {
+                        handle_hook_error(plugin, hook, error)?;
                     }
-                    Ok(super::wit::Outcome::BreakRequest(_)) => Err(format!(
-                        "wasm plugin `{}` attempted unsupported `break-request` for `connector.request`",
-                        plugin.name
-                    )
-                    .into()),
-                    Err(error) => Err(error),
-                },
-                Err(error) => Err(error),
-            };
-            if let Err(error) = result {
-                let failure = hook.failure.unwrap_or(plugin.failure);
-                if matches!(failure.default, WasmFailureMode::Open) {
-                    tracing::error!(
-                        plugin = %plugin.name,
-                        source = source_config_key,
-                        %error,
-                        "wasm connector plugin failed open"
-                    );
-                    continue;
                 }
-                return Err(format!("wasm plugin `{}` failed: {error}", plugin.name).into());
+                Ok(super::wit::Outcome::BreakRequest(_)) => handle_hook_error(
+                    plugin,
+                    hook,
+                    "connector request hooks cannot return `break-request`".into(),
+                )?,
+                Err(error) => handle_hook_error(plugin, hook, error)?,
             }
         }
         Ok(ControlFlow::Continue(request))
+    }
+
+    async fn invoke_hook(
+        &self,
+        plugin: &LoadedPlugin,
+        event: Result<super::wit::Event, BoxError>,
+    ) -> Result<super::wit::Outcome, BoxError> {
+        self.invoke(plugin, event?).await
     }
 
     async fn invoke(
@@ -328,6 +334,25 @@ impl Runtime {
             return Err(format!("output exceeded {}", plugin.limits.max_output_size).into());
         }
         Ok(outcome)
+    }
+}
+
+fn handle_hook_error(
+    plugin: &LoadedPlugin,
+    hook: &WasmHookConfig,
+    error: BoxError,
+) -> Result<(), BoxError> {
+    let failure = hook.failure.unwrap_or(plugin.failure);
+    if matches!(failure.default, WasmFailureMode::Open) {
+        tracing::error!(
+            plugin = %plugin.name,
+            hook = hook.hook.name(),
+            %error,
+            "wasm plugin failed open"
+        );
+        Ok(())
+    } else {
+        Err(format!("wasm plugin `{}` failed: {error}", plugin.name).into())
     }
 }
 

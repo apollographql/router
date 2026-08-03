@@ -71,13 +71,10 @@ impl PluginPrivate for Wasm {
     fn connector_request_service(
         &self,
         service: request_service::BoxCloneService,
-        source_name: String,
+        _source_name: String,
     ) -> request_service::BoxCloneService {
         ServiceBuilder::new()
-            .layer(WasmConnectorLayer::new(
-                self.runtime.clone(),
-                Arc::from(source_name),
-            ))
+            .layer(WasmConnectorLayer::new(self.runtime.clone()))
             .service(service)
             .boxed_clone()
     }
