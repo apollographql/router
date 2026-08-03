@@ -306,6 +306,31 @@ demand_control:
 
 ---
 
+### `events`
+
+Event providers, logical sources, and delivery policies for event-stream-backed subscriptions.
+
+- **Type:** `object`
+
+```yaml title="events"
+events:
+  providers:
+    production-events:
+      type: nats_core
+      config:
+        servers:
+          - nats://127.0.0.1:4222
+  sources:
+    product-updates:
+      provider: production-events
+      policy: live-updates
+  policies:
+    live-updates: {}
+```
+
+
+---
+
 ### `experimental_chaos`
 
 Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions. You probably don’t want this in production!

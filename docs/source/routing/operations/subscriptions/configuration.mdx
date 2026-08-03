@@ -49,6 +49,8 @@ After you complete these prerequisites, you can safely [configure your router](#
 
 After completing all [prerequisites](#prerequisites), in your router's [YAML config file](/router/configuration/overview/#yaml-config-file), you configure how the router communicates with each of your subgraphs when executing GraphQL subscriptions.
 
+If your system already publishes entity changes to NATS, Kafka, or Redis, you can use an [event-stream-backed subscription](/graphos/routing/operations/subscriptions/event-streams/overview) instead of opening a subscription connection to the originating subgraph.
+
 When communicating with subgraphs, the router will use routing URLs defined in the supergraph or, if specified, the router YAML config. The router supports two popular [WebSocket protocols](#websocket-setup) for subscriptions, and it also provides support for an [HTTP-callback-based protocol](#http-callback-setup). Your router must use whichever protocol is expected by each subgraph.
 
 <Note>

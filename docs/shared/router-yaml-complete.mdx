@@ -200,6 +200,19 @@ demand_control:
       list_size: 0
       max: 0.0
       actual_cost_mode: by_subgraph
+events:
+  providers:
+    production-events:
+      type: nats_core
+      config:
+        servers:
+          - nats://127.0.0.1:4222
+  sources:
+    product-updates:
+      provider: production-events
+      policy: live-updates
+  policies:
+    live-updates: {}
 experimental_chaos:
   force_reload: null
 experimental_hoist_orphan_errors:

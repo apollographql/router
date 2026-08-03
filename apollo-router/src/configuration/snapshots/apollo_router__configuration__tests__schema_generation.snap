@@ -4168,7 +4168,7 @@ expression: "&schema"
           "description": "Connection lifecycle behavior shared by all providers."
         },
         "type": {
-          "description": "Provider implementation identifier, for example `nats` or `kafka`.",
+          "description": "Provider implementation identifier, such as `nats_core`, `nats_jetstream`,\n`redis_pubsub`, or `kafka`.",
           "type": "string"
         }
       },

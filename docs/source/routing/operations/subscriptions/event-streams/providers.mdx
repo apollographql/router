@@ -1,0 +1,266 @@
+---
+title: Event Provider Reference
+subtitle: Configure NATS, Kafka, or Redis for event-stream-backed subscriptions
+description: Reference the provider and source options supported by event-stream-backed subscriptions in GraphOS Router.
+noIndex: true
+---
+
+Configure physical event-provider connections under `events.providers` and provider-specific source behavior under `events.sources.<name>.provider_options`.
+
+Every provider supports this common connection lifecycle setting:
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `lifecycle.connect_timeout` | `10s` | Maximum time allowed for the initial connection attempt. |
+
+Connections are opened lazily when the first matching subscription starts.
+
+## NATS Core
+
+Set the provider `type` to `nats_core`. Each destination in `@subscribe` is a NATS subject.
+
+```yaml title="router.yaml"
+events:
+  providers:
+    production-events:
+      type: nats_core
+      config:
+        servers:
+          - nats://127.0.0.1:4222
+        name: apollo-router
+        ping_interval: 60s
+        retry_on_initial_connect: false
+      lifecycle:
+        connect_timeout: 10s
+  sources:
+    product-updates:
+      provider: production-events
+      policy: live-updates
+      provider_options: {}
+  policies:
+    live-updates: {}
+```
+
+NATS Core uses ordinary subscriptions rather than queue groups. Every router instance with a matching trigger receives each live message. `provider_options` must be empty.
+
+### NATS connection options
+
+These options apply to both NATS Core and NATS JetStream.
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `servers` | `[nats://127.0.0.1:4222]` | One or more NATS server URLs. |
+| `name` | Unset | Client connection name. |
+| `ping_interval` | `60s` | Interval between client pings. |
+| `retry_on_initial_connect` | `false` | Whether the client retries its initial connection. The common connection timeout still applies. |
+| `auth` | Unset | Tagged authentication configuration. |
+| `tls` | Unset | TLS configuration. |
+
+Supported `auth.type` values are:
+
+| Type | Fields |
+| --- | --- |
+| `user_password` | `username`, `password` |
+| `token` | `token` |
+| `credentials` | `path` |
+| `nkey` | `seed` |
+
+For example, configure a credentials file and TLS:
+
+```yaml title="router.yaml"
+events:
+  providers:
+    production-events:
+      type: nats_core
+      config:
+        servers:
+          - tls://nats.example.com:4222
+        auth:
+          type: credentials
+          path: /run/secrets/nats.creds
+        tls:
+          required: true
+          ca_file: /etc/ssl/nats-ca.pem
+          client_certificate: /run/secrets/nats-client.pem
+          client_key: /run/secrets/nats-client.key
+```
+
+`tls.client_certificate` and `tls.client_key` must be configured together.
+
+## NATS JetStream
+
+Set the provider `type` to `nats_jetstream`. NATS connection options are the same as [NATS Core](#nats-connection-options).
+
+```yaml title="router.yaml"
+events:
+  providers:
+    production-events:
+      type: nats_jetstream
+      config:
+        servers:
+          - nats://127.0.0.1:4222
+  sources:
+    product-updates:
+      provider: production-events
+      policy: live-updates
+      provider_options:
+        stream: PRODUCTS
+        ack_wait: 30s
+        inactive_threshold: 60s
+  policies:
+    live-updates: {}
+```
+
+The configured stream must already exist, and its subject filters must include every resolved destination. The router creates an ephemeral pull consumer at the live edge and acknowledges each message after local enqueue. Durable consumers aren't supported. Multiple filter subjects require NATS Server 2.10 or later.
+
+### JetStream source options
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `stream` | Required | Name of the existing JetStream stream. |
+| `domain` | Unset | Optional JetStream domain. |
+| `ack_wait` | `30s` | Time JetStream waits for an acknowledgement. |
+| `inactive_threshold` | `60s` | Time before JetStream removes the inactive ephemeral consumer. |
+| `max_deliver` | Provider default | Optional nonzero maximum delivery attempts. |
+
+## Kafka
+
+Set the provider `type` to `kafka`. Each destination must be an exact Kafka topic name. Regex topics aren't supported.
+
+```yaml title="router.yaml"
+events:
+  providers:
+    production-events:
+      type: kafka
+      config:
+        bootstrap_servers:
+          - 127.0.0.1:9092
+        client_id: apollo-router
+        security:
+          type: plaintext
+      lifecycle:
+        connect_timeout: 10s
+  sources:
+    product-updates:
+      provider: production-events
+      policy: live-updates
+      provider_options:
+        group_prefix: apollo-router
+        topic_mode: exact
+        session_timeout: 45s
+        heartbeat_interval: 3s
+        max_poll_interval: 5m
+  policies:
+    live-updates: {}
+```
+
+The router creates an instance- and trigger-specific consumer group so every router instance receives each event. The group contains an ID generated for the running router process. After a router restart, a new group starts at the live edge instead of resuming from previously committed offsets. The router disables automatic commits and commits after local enqueue. Topics should already exist.
+
+<Caution>
+
+The current router build supports plaintext Kafka connections. TLS and SASL configuration isn't supported by the bundled Kafka client yet.
+
+</Caution>
+
+### Kafka provider options
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `bootstrap_servers` | `[127.0.0.1:9092]` | One or more Kafka bootstrap servers. |
+| `client_id` | Unset | Kafka client identifier. |
+| `security.type` | `plaintext` | Connection security mode. The current build supports only `plaintext`. |
+| `properties` | `{}` | String-to-string librdkafka provider properties. |
+
+### Kafka source options
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `group_prefix` | `apollo-router` | Prefix for the generated instance- and trigger-specific consumer group. |
+| `topic_mode` | `exact` | Topic matching mode. Only `exact` is supported. |
+| `session_timeout` | `45s` | Consumer session timeout. |
+| `heartbeat_interval` | `3s` | Consumer heartbeat interval. |
+| `max_poll_interval` | `5m` | Maximum interval between consumer polls. |
+| `properties` | `{}` | String-to-string librdkafka consumer properties. |
+
+Provider and source `properties` are escape hatches. The router overrides any property that conflicts with its delivery policy, including the generated group ID, latest offset, automatic commit behavior, and timeout settings.
+
+Kafka ordering follows the provider's ordering for a partition. The router doesn't provide global ordering across topics or partitions. Kafka message keys and headers aren't exposed to GraphQL, and messages with null payloads are ignored and committed.
+
+## Redis Pub/Sub
+
+Set the provider `type` to `redis_pubsub`. Destinations can be channels, patterns, or sharded channels according to the source mode.
+
+```yaml title="router.yaml"
+events:
+  providers:
+    production-events:
+      type: redis_pubsub
+      config:
+        url: redis://127.0.0.1:6379
+        reconnect:
+          type: exponential
+          max_attempts: 0
+          min_delay: 100ms
+          max_delay: 30s
+          multiplier: 2
+      lifecycle:
+        connect_timeout: 10s
+  sources:
+    product-updates:
+      provider: production-events
+      policy: live-updates
+      provider_options:
+        mode: channel
+  policies:
+    live-updates: {}
+```
+
+Redis Pub/Sub provides live, at-most-once delivery and doesn't retain events for replay.
+
+### Redis provider options
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `url` | `redis://127.0.0.1:6379` | Redis connection URL. Use `rediss://` for TLS. |
+| `username` | Unset | Redis username. |
+| `password` | Unset | Redis password. |
+| `tls` | Unset | Router TLS client configuration. |
+| `reconnect` | Exponential | Tagged reconnect policy. |
+
+Supported reconnect policies are:
+
+| Type | Fields |
+| --- | --- |
+| `constant` | `max_attempts`, `delay` |
+| `linear` | `max_attempts`, `delay`, `max_delay` |
+| `exponential` | `max_attempts`, `min_delay`, `max_delay`, `multiplier` |
+
+The default reconnect policy is exponential with `max_attempts: 0`, `min_delay: 100ms`, `max_delay: 30s`, and `multiplier: 2`. A `max_attempts` value of `0` lets the Redis client retry without an attempt limit.
+
+### Redis source options
+
+| `mode` | Behavior |
+| --- | --- |
+| `channel` | Subscribes to each destination as an ordinary channel. This is the default. |
+| `pattern` | Subscribes to each destination as a pattern. |
+| `sharded` | Subscribes to each destination using Redis sharded Pub/Sub. |
+
+Sharded Pub/Sub requires Redis 7 or later.
+
+For TLS and authentication, prefer explicit credential fields and variable expansion instead of embedding credentials in the URL:
+
+```yaml title="router.yaml"
+events:
+  providers:
+    production-events:
+      type: redis_pubsub
+      config:
+        url: rediss://redis.example.com:6379
+        username: "${env.REDIS_USERNAME}"
+        password: "${env.REDIS_PASSWORD}"
+        tls:
+          certificate_authorities: "${file./path/to/ca.crt}"
+          client_authentication:
+            certificate_chain: "${file./path/to/certificate_chain.pem}"
+            key: "${file./path/to/key.pem}"
+```

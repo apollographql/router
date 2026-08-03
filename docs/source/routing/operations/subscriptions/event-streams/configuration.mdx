@@ -1,0 +1,250 @@
+---
+title: Configure Event-Stream-Backed Subscriptions
+subtitle: Connect a federated subscription field to an event provider
+description: Add the event linked spec to a subgraph, configure an event provider in GraphOS Router, and test a hydrated subscription event.
+noIndex: true
+---
+
+This guide configures an event-stream-backed subscription for product updates. The event contains a `Product` entity representation, and the router hydrates additional fields from Products and Reviews subgraphs.
+
+## Prerequisites
+
+Before you begin, you need:
+
+- A supergraph that uses Apollo Federation 2.10 or later
+- A NATS, Kafka, or Redis instance that every router instance can reach
+- The [NATS CLI](https://docs.nats.io/using-nats/nats-tools/nats_cli) for the commands in this walkthrough
+- A client that supports [subscriptions over multipart HTTP](/graphos/routing/operations/subscriptions/multipart-protocol)
+- Entity reference resolvers in every subgraph that contributes fields to the event's entity
+
+<Note>
+
+The Event specification must be available in the composition build that produces your supergraph schema. You can also supply compatible supergraph SDL directly to the router.
+
+</Note>
+
+## 1. Define the event-backed field
+
+In the subgraph that owns the subscription field, link the Event specification and import `@subscribe`:
+
+```graphql title="events.graphql"
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.10"
+    import: ["@key"]
+  )
+  @link(
+    url: "https://specs.apollo.dev/event/v0.1"
+    import: ["@subscribe"]
+  )
+
+type Query {
+  eventServiceReady: Boolean
+}
+
+type Subscription {
+  productUpdated(id: ID!): Product!
+    @subscribe(
+      source: "product-updates"
+      destinations: ["products.{{ args.id }}"]
+    )
+}
+
+type Product @key(fields: "id") {
+  id: ID!
+}
+```
+
+The `source` value is a logical name. It must match a key under `events.sources` in `router.yaml`.
+
+Each `destinations` entry becomes a subject, topic, or channel for the selected provider. The router replaces expressions such as `{{ args.id }}` with values from the client's subscription field arguments.
+
+Destination expressions:
+
+- Every `@subscribe` directive must contain at least one destination.
+- Must begin with `args.`
+- Can select a scalar argument or a nested scalar input field, such as `{{ args.scope.id }}`
+- Can resolve to strings, numbers, enums, or booleans
+- Can't resolve to `null`, a list, or an object
+- Must produce a nonempty destination
+
+## 2. Define fields in other subgraphs
+
+Other subgraphs can contribute fields to the entity returned by the subscription:
+
+<CodeColumns>
+
+```graphql title="products.graphql"
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.10"
+    import: ["@key"]
+  )
+
+type Query {
+  product(id: ID!): Product
+}
+
+type Product @key(fields: "id") {
+  id: ID!
+  name: String
+}
+```
+
+```graphql title="reviews.graphql"
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.10"
+    import: ["@key"]
+  )
+
+type Query {
+  reviewServiceReady: Boolean
+}
+
+type Product @key(fields: "id") {
+  id: ID!
+  reviews: [Review!]!
+}
+
+type Review {
+  body: String!
+}
+```
+
+</CodeColumns>
+
+The Products and Reviews subgraphs must be able to resolve a `Product` reference from its `id`.
+
+## 3. Configure the router
+
+Enable subscriptions and configure a provider, source, and policy:
+
+```yaml title="router.yaml"
+subscription:
+  enabled: true
+
+events:
+  providers:
+    production-events:
+      type: nats_core
+      config:
+        servers:
+          - nats://127.0.0.1:4222
+      lifecycle:
+        connect_timeout: 10s
+
+  sources:
+    product-updates:
+      provider: production-events
+      policy: live-updates
+      format:
+        type: graphql_entity
+        config: {}
+      provider_options: {}
+
+  policies:
+    live-updates:
+      delivery:
+        type: live
+        start:
+          type: latest
+        acknowledgement:
+          type: on_enqueue
+      buffer:
+        capacity: 128
+        overflow:
+          type: drop_oldest
+      distribution:
+        type: every_router_instance
+      ordering:
+        type: provider
+```
+
+The common policy fields in this example are the only supported values. You can omit them to use their defaults:
+
+```yaml title="router.yaml"
+events:
+  policies:
+    live-updates: {}
+```
+
+Only the `graphql_entity` event format is currently supported, and its `config` object must be empty. Broker connections are opened lazily when the first matching subscription starts, so broker availability isn't part of router startup readiness.
+
+See the [event provider reference](/graphos/routing/operations/subscriptions/event-streams/providers) to configure NATS JetStream, Kafka, or Redis Pub/Sub.
+
+## 4. Open a client subscription
+
+Open the subscription before publishing an event because delivery begins at the live edge. Keep this command running while you publish the event from another terminal:
+
+```bash
+curl 'http://localhost:4000/' -N \
+  -H 'accept: multipart/mixed;subscriptionSpec=1.0, application/json' \
+  -H 'content-type: application/json' \
+  --data-raw '{"query":"subscription ProductUpdated($id: ID!) { productUpdated(id: $id) { id name reviews { body } } }","variables":{"id":"1"}}'
+```
+
+For this operation, `products.{{ args.id }}` resolves to `products.1`.
+
+## 5. Publish an entity event
+
+Publish the following raw JSON object to `products.1`:
+
+```json title="Event payload"
+{
+  "__typename": "Product",
+  "id": "1"
+}
+```
+
+With the NATS Core configuration from this guide, publish it with:
+
+```bash
+nats pub products.1 '{"__typename":"Product","id":"1"}'
+```
+
+The payload must contain `__typename` and the entity key fields required for hydration. Don't wrap it in a GraphQL response envelope.
+
+The router uses the entity representation to fetch `name` from Products and `reviews` from Reviews. The client receives a multipart response part similar to:
+
+```json
+{
+  "payload": {
+    "data": {
+      "productUpdated": {
+        "id": "1",
+        "name": "Table",
+        "reviews": [{ "body": "Excellent" }]
+      }
+    }
+  }
+}
+```
+
+## Security considerations
+
+<Caution>
+
+- Don't commit broker passwords, tokens, NKeys, private keys, or credential files to source control. Use [environment and file expansion](/graphos/routing/configuration/yaml#variable-expansion) with your secret manager.
+- Restrict broker credentials so the router can subscribe only to the required destinations.
+- Treat destination templates as routing, not authorization. Subscribers with the same resolved destination share a raw provider stream within one router process, although authorization and hydration still run separately. Partition sensitive event data into appropriately scoped destinations.
+- Avoid interpolating user-controlled values into broad pattern subscriptions unless your API intentionally permits that scope.
+- Use encrypted broker connections in production where the provider supports them.
+
+</Caution>
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| The router rejects configuration at startup or reload | Provider, source, and policy names must be nonempty. Every source must reference an existing provider and policy. Unknown fields are rejected. |
+| The router reports an unconfigured source | The schema's `@subscribe(source:)` value must exactly match an `events.sources` key. |
+| The subscription receives no events | Open the client subscription before publishing. Verify the rendered destination, broker address, and network access. |
+| Only some argument values receive events | Confirm that each destination template resolves to the expected subject, topic, or channel. Only scalar values can be interpolated. |
+| The router returns `EVENT_DECODE_ERROR` | Publish a valid JSON object containing `__typename` and the required entity key fields. |
+| Hydrated fields are null or return GraphQL errors | Verify that downstream subgraphs can resolve the entity representation in the event. |
+| Events disappear under load | Increase `events.policies.<name>.buffer.capacity` or address slow subscribers. Overflow drops the oldest event. |
+| Setup returns `EVENT_SUBSCRIPTION_ERROR` | Inspect the error message for configuration, connection, destination rendering, or provider subscription failures. |
+| An established stream returns `EVENT_STREAM_ERROR` | Inspect router and provider logs for a broker receive failure. |
+
+For provider-specific checks, see the [event provider reference](/graphos/routing/operations/subscriptions/event-streams/providers).

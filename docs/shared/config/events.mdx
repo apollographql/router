@@ -1,0 +1,39 @@
+### `events`
+
+Configure event providers, logical sources, and delivery policies for [event-stream-backed subscriptions](/graphos/routing/operations/subscriptions/event-streams/overview).
+
+```yaml title="events"
+events:
+  providers:
+    production-events:
+      type: nats_core
+      config:
+        servers:
+          - nats://127.0.0.1:4222
+      lifecycle:
+        connect_timeout: 10s
+  sources:
+    product-updates:
+      provider: production-events
+      policy: live-updates
+      format:
+        type: graphql_entity
+        config: {}
+      provider_options: {}
+  policies:
+    live-updates:
+      delivery:
+        type: live
+        start:
+          type: latest
+        acknowledgement:
+          type: on_enqueue
+      buffer:
+        capacity: 128
+        overflow:
+          type: drop_oldest
+      distribution:
+        type: every_router_instance
+      ordering:
+        type: provider
+```

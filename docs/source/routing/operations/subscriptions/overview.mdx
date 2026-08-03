@@ -25,7 +25,7 @@ subscription OnStockPricesChanged {
 }
 ```
 
-The router supports both the callback and multipart protocols for handling subscriptions. With subscription support enabled, you can add `Subscription` fields to the schema of any subgraph that supports common WebSocket protocols for subscription communication:
+The router sends subscription events to clients over multipart HTTP. It can receive the initial event from a subgraph over WebSocket or HTTP callbacks, or it can consume an entity event directly from a supported event provider. With subscription support enabled, you can add `Subscription` fields to your subgraph schemas:
 
 ```graphql title="stocks.graphql" showLineNumbers=false
 type Subscription {
@@ -50,5 +50,7 @@ Apollo Router does not support direct WebSocket connections from clients. Client
 ## Next steps
 
 - [Configure](/graphos/routing/operations/subscriptions/configuration) the router and update your subgraph schemas to enable and handle subscriptions.
+
+- Use [event-stream-backed subscriptions](/graphos/routing/operations/subscriptions/event-streams/overview) to consume entity events directly from NATS, Kafka, or Redis.
 
 - Learn about the [callback](/graphos/routing/operations/subscriptions/callback-protocol) and [multipart](/graphos/routing/operations/subscriptions/multipart-protocol) protocols.

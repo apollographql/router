@@ -15,6 +15,7 @@ import Coproc from '../../../shared/config/coprocessor.mdx';
 import Cors from '../../../shared/config/cors.mdx';
 import Csrf from '../../../shared/config/csrf.mdx';
 import DemandCtrl from '../../../shared/config/demand_control.mdx';
+import Events from '../../../shared/config/events.mdx';
 import ExperimentalChaos from '../../../shared/config/experimental_chaos.mdx';
 import ExperimentalHoistOrphan from '../../../shared/config/experimental_hoist_orphan_errors.mdx';
 import ExperimentalType from '../../../shared/config/experimental_type_conditioned_fetching.mdx';
@@ -132,6 +133,12 @@ Learn more in [CSRF prevention in the router](/router/configuration/csrf).
 With demand control, the router analyzes the cost of operations and rejects requests with operations that exceed customizable cost limits.
 
 Learn more in [Demand Control](/router/executing-operations/demand-control) 
+
+---
+
+<Events />
+
+Learn more in [Event stream-backed subscriptions](/graphos/routing/operations/subscriptions/event-streams/overview).
 
 ---
 

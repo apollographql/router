@@ -1,0 +1,127 @@
+---
+title: Event-Stream-Backed Subscriptions
+subtitle: Use an event provider as the source of federated subscription events
+description: Learn how GraphOS Router consumes subscription events from NATS, Kafka, or Redis and hydrates each event across your supergraph.
+noIndex: true
+---
+
+<Caution>
+
+Event-stream-backed subscriptions are currently available only in Router v3 development builds with composition support for Event v0.1. Don't use this feature in production until a supported Router and composition version is released.
+
+</Caution>
+
+Event stream-backed subscriptions let GraphOS Router consume the initial event for a federated subscription directly from an event provider. Your subgraphs continue to define the graph's types and resolve entity fields, but they don't need to maintain a WebSocket connection or send HTTP callbacks for the subscription.
+
+Use event-stream-backed subscriptions when your application already publishes entity changes to NATS, Kafka, or Redis and you want the router to turn those changes into federated GraphQL subscription responses.
+
+## How event-stream-backed subscriptions work
+
+An event-stream-backed subscription has the same client-facing behavior as any other GraphQL subscription. Clients connect to the router over [multipart HTTP](/graphos/routing/operations/subscriptions/multipart-protocol). The event provider is an internal source of the subscription's initial data.
+
+For each subscription:
+
+1. A client opens a GraphQL subscription with the router.
+2. The router resolves the field's event source and destination from the composed schema.
+3. The router subscribes to the corresponding subject, topic, or channel.
+4. The provider sends a JSON entity representation to the router.
+5. The router uses normal federated execution to hydrate any requested fields that aren't present in the event.
+6. The router sends the completed response to the client over multipart HTTP.
+
+For example, an event can contain only a product identity:
+
+```json title="Event payload"
+{
+  "__typename": "Product",
+  "id": "1"
+}
+```
+
+The router can use that representation to fetch `name` from a Products subgraph and `reviews` from a Reviews subgraph before returning the event:
+
+```json title="Multipart subscription response part"
+{
+  "payload": {
+    "data": {
+      "productUpdated": {
+        "id": "1",
+        "name": "Table",
+        "reviews": [{ "body": "Excellent" }]
+      }
+    }
+  }
+}
+```
+
+The event payload is a raw JSON object. It is not wrapped in a GraphQL `data` object. It must contain `__typename` and every entity key field needed to hydrate the requested data.
+
+## Configuration model
+
+Event stream configuration separates graph metadata from deployment details:
+
+- A **provider** defines a physical connection to NATS, Kafka, or Redis.
+- A **source** is a logical name referenced by the composed schema. It selects a provider, format, and policy.
+- A **destination** is a provider-specific subject, topic, or channel. A destination can include values from subscription field arguments.
+- A **policy** defines delivery, buffering, distribution, and ordering behavior.
+
+Your subgraph schema contains only the logical source and destinations. Broker addresses, credentials, and provider-specific options remain in `router.yaml`.
+
+## Supported providers
+
+| Provider | Destination | Provider behavior |
+| --- | --- | --- |
+| NATS Core | Subject | Uses an ordinary subscription on every router instance. Queue groups aren't used. |
+| NATS JetStream | Subject | Uses an ephemeral pull consumer on an existing stream and acknowledges after local enqueue. |
+| Kafka | Exact topic | Uses an instance- and trigger-specific consumer group and commits after local enqueue. |
+| Redis Pub/Sub | Channel, pattern, or sharded channel | Uses live, at-most-once Pub/Sub delivery. |
+
+See the [event provider reference](/graphos/routing/operations/subscriptions/event-streams/providers) for connection and source options.
+
+## Delivery behavior
+
+All supported providers expose the same initial delivery policy:
+
+- Delivery starts at the live edge. Events published before a trigger becomes active aren't replayed.
+- Retained-provider messages are acknowledged or committed after entering the router's local queue.
+- Every router instance with a matching trigger receives each event.
+- Ordering is limited to the ordering supplied by the provider for one trigger.
+- Subscriptions with the same provider, source, and ordered resolved destinations share one provider stream within a router process.
+- Each local subscriber has a bounded buffer with a default capacity of `128` events.
+- If a subscriber falls behind, the router drops the oldest buffered event.
+
+Authorization runs when each client subscription is admitted. The router performs federated hydration independently for every client and event; only the raw provider stream is shared.
+
+<Caution>
+
+Event stream-backed subscriptions don't provide end-to-end guaranteed delivery. A router process can fail after it acknowledges or commits an event but before the client receives it. Clients also can't request replay from an earlier event or cursor.
+
+</Caution>
+
+## When to use another subscription source
+
+Use [WebSocket passthrough or HTTP callbacks](/graphos/routing/operations/subscriptions/configuration) when a subgraph owns subscription execution or when your delivery requirements don't match the live event policy.
+
+Event stream-backed subscriptions are a good fit when:
+
+- Your system already publishes entity change events.
+- Each event can identify a federated entity.
+- Live updates are sufficient and client replay isn't required.
+- The provider can deliver each event to every router instance.
+
+## Monitor event subscriptions
+
+The router emits these event-stream counters:
+
+| Instrument | Description |
+| --- | --- |
+| `apollo.router.operations.subscriptions.events` | Event-backed subscription streams opened. Attributes include `event.provider.type`, `event.source`, and `event.trigger.shared`. |
+| `apollo.router.operations.subscriptions.events.provider` | Events and errors received from the provider stream. Attributes include `event.provider.name`, `event.source`, and `event.outcome`. |
+| `apollo.router.operations.subscriptions.events.dropped` | Events dropped when a local subscriber lags behind its bounded buffer. Attributes include `event.provider.name`, `event.source`, and `reason=buffer_lag`. |
+
+Event-backed subscription spans include `apollo.subscription.source=event_stream`.
+
+## Next steps
+
+- [Configure an event-stream-backed subscription](/graphos/routing/operations/subscriptions/event-streams/configuration).
+- Review the [provider-specific settings](/graphos/routing/operations/subscriptions/event-streams/providers).
+- Learn how clients [receive subscriptions over multipart HTTP](/graphos/routing/operations/subscriptions/multipart-protocol).
