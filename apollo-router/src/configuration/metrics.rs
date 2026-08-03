@@ -599,7 +599,7 @@ impl InstrumentData {
         );
         attributes.insert(
             "opt.security.recursive_selections".to_string(),
-            crate::services::layers::query_analysis::recursive_selections_check_enabled().into(),
+            crate::services::query_parsing::recursive_selections_limit::recursive_selections_check_enabled().into(),
         );
         attributes.insert(
             "opt.security.non_local_selections".to_string(),

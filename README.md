@@ -48,7 +48,7 @@ Options:
       --apollo-uplink-endpoints <APOLLO_UPLINK_ENDPOINTS>
           The endpoints (comma separated) polled to fetch the latest supergraph schema [env: APOLLO_UPLINK_ENDPOINTS=]
       --anonymous-telemetry-disabled
-          Disable sending anonymous usage information to Apollo [env: APOLLO_TELEMETRY_DISABLED=]
+          Disable the router's fully anonymous usage ping. Doesn't affect usage reporting to Apollo Studio for graphs configured with APOLLO_KEY and APOLLO_GRAPH_REF [env: APOLLO_TELEMETRY_DISABLED=]
       --apollo-uplink-timeout <APOLLO_UPLINK_TIMEOUT>
           The timeout for an http call to Apollo uplink. Defaults to 30s [env: APOLLO_UPLINK_TIMEOUT=] [default: 30s]
       --listen <LISTEN_ADDRESS>

@@ -104,6 +104,24 @@ impl<E> From<E> for MaybeBackPressureError<E> {
     }
 }
 
+impl<E: std::fmt::Display> std::fmt::Display for MaybeBackPressureError<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PermanentError(e) => write!(f, "{e}"),
+            Self::TemporaryError(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for MaybeBackPressureError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::PermanentError(e) => Some(e),
+            Self::TemporaryError(e) => Some(e),
+        }
+    }
+}
+
 impl ComputeBackPressureError {
     pub(crate) fn to_graphql_error(&self) -> crate::graphql::Error {
         crate::graphql::Error::builder()
@@ -141,12 +159,7 @@ impl From<ComputeJobType> for Priority {
     }
 }
 
-impl From<ComputeJobType> for opentelemetry::Value {
-    fn from(compute_job_type: ComputeJobType) -> Self {
-        let s: &'static str = compute_job_type.into();
-        s.into()
-    }
-}
+impl_otel_value_from_static_str!(ComputeJobType);
 
 pub(crate) struct Job {
     subscriber: Dispatch,

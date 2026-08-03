@@ -222,14 +222,45 @@ impl CostSpecDefinition {
     pub fn cost_directive_from_field(
         schema: &FederationSchema,
         field: &FieldDefinition,
-        ty: &ExtendedType,
     ) -> Option<CostDirective> {
         let directive_name = Self::cost_directive_name(schema);
         if let Some(name) = directive_name.as_ref() {
             CostDirective::from_directives(name, &field.directives)
-                .or(CostDirective::from_schema_directives(name, ty.directives()))
         } else {
             None
+        }
+    }
+
+    pub fn cost_directive_from_return_type(
+        schema: &FederationSchema,
+        ty: &ExtendedType,
+    ) -> Option<CostDirective> {
+        let directive_name = Self::cost_directive_name(schema);
+        let name = directive_name.as_ref()?;
+        match ty {
+            ExtendedType::Interface(iface) => {
+                let implementers_map = schema.schema().implementers_map();
+                implementers_map
+                    .get(&iface.name)
+                    .into_iter()
+                    .flat_map(|imp| imp.objects.iter())
+                    .filter_map(|obj_name| {
+                        let obj_type = schema.schema().types.get(obj_name)?;
+                        CostDirective::from_schema_directives(name, obj_type.directives())
+                    })
+                    .max_by(|a, b| a.weight().partial_cmp(&b.weight()).unwrap())
+            }
+            ExtendedType::Union(union_type) => union_type
+                .members
+                .iter()
+                .filter_map(|member_name| {
+                    let member_type = schema.schema().types.get(member_name.as_str())?;
+                    CostDirective::from_schema_directives(name, member_type.directives())
+                })
+                .max_by(|a, b| a.weight().partial_cmp(&b.weight()).unwrap()),
+            // NOTE: `@cost` is only applicable on ENUM, OBJECT or SCALAR, validation will already
+            // verify it is applied to correct target so below is safe
+            _ => CostDirective::from_schema_directives(name, ty.directives()),
         }
     }
 

@@ -278,9 +278,6 @@ pub(crate) struct Config {
     subgraphs: HashMap<String, SubgraphShaping>,
     /// Applied on specific subgraphs
     connector: ConnectorsShapingConfig,
-
-    /// DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
-    deduplicate_variables: Option<bool>,
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
@@ -700,7 +697,6 @@ mod test {
     use crate::services::SupergraphRequest;
     use crate::services::connector::request_service::Request as ConnectorRequest;
     use crate::services::layers::persisted_queries::PersistedQueryExpander;
-    use crate::services::layers::query_analysis::QueryAnalysis;
     use crate::services::router;
     use crate::services::router::service::RouterCreator;
     use crate::spec::Schema;
@@ -780,8 +776,6 @@ mod test {
 
         let config: Configuration = serde_yaml::from_str(
             r#"
-        traffic_shaping:
-            deduplicate_variables: true
         supergraph:
             # TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
             generate_query_fragments: false
@@ -791,19 +785,21 @@ mod test {
 
         let config = Arc::new(config);
         let schema = Arc::new(Schema::parse(schema, &config).unwrap());
-        let query_analysis = Arc::new(QueryAnalysis::new(schema.clone(), config.clone()).await);
 
         let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
         let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
-        let planner = QueryPlannerService::new(schema.clone(), config.clone(), qp_arc)
-            .unwrap()
-            .boxed_clone();
+        let query_planner_service =
+            QueryPlannerService::new(schema.clone(), config.clone(), qp_arc)
+                .unwrap()
+                .boxed_clone();
+
+        let query_parser_service =
+            crate::services::query_parsing::query_parsing_service(schema.clone(), config.clone());
 
         let mut builder = PluggableSupergraphServiceBuilder::new(
-            planner,
+            query_planner_service,
             schema.clone(),
             subgraph_schemas.clone(),
-            query_analysis.clone(),
         )
         .with_configuration(config.clone());
 
@@ -827,17 +823,13 @@ mod test {
             .with_subgraph_service("reviews", review_service.boxed_clone())
             .with_subgraph_service("products", product_service.boxed_clone());
 
-        let (supergraph_creator, _warmup) = builder.build().await.expect("should build");
+        let (supergraph_creator, _planner) = builder.build().await.expect("should build");
 
         RouterCreator::new(
-            query_analysis,
-            Arc::new(
-                PersistedQueryExpander::new(&Default::default())
-                    .await
-                    .unwrap(),
-            ),
+            Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
-            Arc::new(Configuration::default()),
+            query_parser_service,
+            config,
         )
         .await
         .unwrap()
@@ -921,12 +913,9 @@ mod test {
 
     #[tokio::test]
     async fn it_returns_valid_response_for_deduplicated_variables() {
-        let config = serde_yaml::from_str::<serde_json::Value>(
-            r#"
-        deduplicate_variables: true
-        "#,
-        )
-        .unwrap();
+        // Variable deduplication is now unconditionally enabled, so an empty
+        // traffic shaping config is sufficient.
+        let config = serde_yaml::from_str::<serde_json::Value>("{}").unwrap();
         // Build a traffic shaping plugin
         let plugin = get_traffic_shaping_plugin(&config).await;
         let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
