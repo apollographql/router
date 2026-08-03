@@ -221,6 +221,7 @@ impl InstrumentData {
             opt.main,
             "$[?(@.main)]"
         );
+        populate_config_instrument!(apollo.router.config.wasm, "$.wasm");
         populate_config_instrument!(
             apollo.router.config.persisted_queries,
             "$.persisted_queries[?(@.enabled == true)]",
@@ -714,6 +715,29 @@ mod test {
         data.populate_cli_instrument();
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
+    }
+
+    #[test]
+    fn test_wasm_config_metric_tracks_presence() {
+        let mut configured = InstrumentData::default();
+        configured.populate_config_instruments(&json!({ "wasm": {} }));
+        assert_eq!(
+            configured
+                .data
+                .get("apollo.router.config.wasm")
+                .map(|(value, _)| *value),
+            Some(1)
+        );
+
+        let mut unconfigured = InstrumentData::default();
+        unconfigured.populate_config_instruments(&json!({}));
+        assert_eq!(
+            unconfigured
+                .data
+                .get("apollo.router.config.wasm")
+                .map(|(value, _)| *value),
+            Some(0)
+        );
     }
 
     #[test]
