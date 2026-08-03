@@ -1,0 +1,34 @@
+### `wasm`
+
+Configures sandboxed WebAssembly plugins.
+
+```yaml title="wasm"
+wasm:
+  defaults:
+    limits:
+      execution_timeout: 10ms
+      queue_timeout: 5ms
+      max_memory_per_instance: 16MiB
+      max_concurrency: 128
+      max_queue_size: 256
+      max_input_size: 1MiB
+      max_output_size: 1MiB
+    failure:
+      default: closed
+  plugins:
+    - name: request-policy
+      enabled: true
+      source:
+        type: file
+        path: ./plugins/request-policy.wasm
+        # digest: sha256:<64-character-lowercase-hex-digest>
+      configuration: {}
+      hooks:
+        - hook: supergraph.request
+          permissions:
+            headers:
+              read:
+                names: [authorization]
+              write:
+                names: [x-policy-result]
+```

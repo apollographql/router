@@ -1051,4 +1051,31 @@ traffic_shaping:
       interval: 30s
     timeout: null
   subgraphs: {}
+wasm:
+  defaults:
+    failure:
+      default: closed
+    limits:
+      execution_timeout: 10ms
+      max_concurrency: 128
+      max_input_size: 1MiB
+      max_memory_per_instance: 16MiB
+      max_output_size: 1MiB
+      max_queue_size: 256
+      queue_timeout: 5ms
+  plugins:
+    - configuration: {}
+      enabled: true
+      hooks:
+        - hook: supergraph.request
+          permissions:
+            headers:
+              read:
+                names: [authorization]
+              write:
+                names: [x-policy-result]
+      name: request-policy
+      source:
+        path: ./plugins/request-policy.wasm
+        type: file
 ```

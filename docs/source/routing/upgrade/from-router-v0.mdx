@@ -157,8 +157,10 @@ Before you attempt to replicate a plugin's functionality via a router [customiza
 
 #### Supported customizations
 
-The router currently supports two types of customizations that hook into the request-handling pipeline:
+The router supports three types of customizations that hook into the request-handling pipeline:
 
+* [WebAssembly plugins](/graphos/routing/customization/wasm/)
+    * WebAssembly components run portable request logic in a capability-restricted sandbox inside the router.
 * [Rhai scripts](/graphos/routing/customization/rhai/)
     * Rhai is a scripting language designed for use with Rust applications.
 * [External coprocessing](/router/customizations/coprocessor/). 

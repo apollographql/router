@@ -1,0 +1,360 @@
+---
+title: WebAssembly Plugin Reference
+subtitle: Configure components, hooks, permissions, and limits
+description: Reference for Apollo Router WebAssembly plugin configuration and the apollo:router-plugin component contract.
+minVersion: Router v3.0.0
+releaseStage: preview
+---
+
+This reference documents the router configuration and WebAssembly Interface Type (WIT) contract for [Wasm plugins](./).
+
+## Configuration
+
+Configure Wasm plugins under the top-level `wasm` key in `router.yaml`.
+
+```yaml title="router.yaml"
+wasm:
+  defaults:
+    limits:
+      execution_timeout: 10ms
+      queue_timeout: 5ms
+      max_memory_per_instance: 16MiB
+      max_concurrency: 128
+      max_queue_size: 256
+      max_input_size: 1MiB
+      max_output_size: 1MiB
+    failure:
+      default: closed
+
+  plugins:
+    - name: request-policy
+      enabled: true
+      source:
+        type: file
+        path: ./plugins/request-policy.wasm
+        # digest: sha256:<64-character-lowercase-hex-digest>
+      configuration:
+        policy_name: checkout
+      limits:
+        execution_timeout: 25ms
+      failure:
+        default: closed
+      hooks:
+        - hook: subgraph.request
+          selector:
+            service_names: [products]
+          permissions:
+            headers:
+              read:
+                names: [authorization]
+              write:
+                names: [x-policy-result]
+            context:
+              read:
+                names: [tenant.id]
+              write:
+                names: [policy.result]
+            graphql:
+              request: read
+```
+
+Unknown router-owned fields cause configuration validation to fail. The `configuration` value is the exception: it contains arbitrary JSON-compatible data owned by the component.
+
+### `wasm.defaults`
+
+| Field | Description | Default |
+| --- | --- | --- |
+| `limits` | Resource limits inherited by every plugin. | See [Resource limits](#resource-limits). |
+| `failure.default` | Failure behavior inherited by every plugin. | `closed` |
+
+### `wasm.plugins`
+
+`wasm.plugins` is a list. The router invokes matching enabled plugins in list order.
+
+| Field | Required | Description | Default |
+| --- | --- | --- | --- |
+| `name` | Yes | A nonempty plugin name. Enabled plugin names must be unique. | None |
+| `enabled` | No | Whether the router loads and invokes the plugin. | `true` |
+| `source` | Yes | The component source and its optional integrity information. | None |
+| `configuration` | No | Arbitrary JSON-compatible data passed to the component. | `{}` |
+| `hooks` | Yes | One or more request hook declarations. | None |
+| `limits` | No | Per-plugin resource limit overrides. | `wasm.defaults.limits` |
+| `failure` | No | Per-plugin failure override. | `wasm.defaults.failure` |
+
+A disabled plugin isn't loaded or validated as a component at startup.
+
+### `source`
+
+Wasm plugins currently support local file components:
+
+```yaml
+source:
+  type: file
+  path: ./plugins/request-policy.wasm
+  # digest: sha256:<64-character-lowercase-hex-digest>
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `type` | Yes | The source type. The supported value is `file`. |
+| `path` | Yes | An absolute path or a path relative to the router's working directory. |
+| `digest` | No | Expected component digest in `sha256:<hex>` format. |
+
+When `digest` is present, the router hashes the resolved component bytes during startup and compares it with the exact lowercase `sha256:<hex>` value. The router fails to start if the value doesn't match. Omitting `digest` disables digest verification.
+
+Integrity information is part of `source` because it verifies the artifact resolved by that source. There is no separate verification policy.
+
+### `configuration`
+
+`configuration` contains plugin-owned settings:
+
+```yaml
+configuration:
+  policy_name: checkout
+  allowed_tenants:
+    - retail
+    - wholesale
+```
+
+The router serializes this value as JSON and includes it in every event sent to the component. The router doesn't interpret or validate its contents beyond requiring a JSON-compatible value.
+
+### `hooks`
+
+Each hook entry has the following fields:
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `hook` | Yes | `supergraph.request`, `subgraph.request`, or `connector.request`. |
+| `selector` | No | Restricts the services, sources, or Connectors that invoke the hook. |
+| `permissions` | No | Grants access to specific event and mutation fields. All access defaults to none. |
+| `failure` | No | Overrides failure behavior for this hook. |
+
+Within a plugin, the router uses the first declaration for a hook whose selector matches the request. Put more specific selectors before broader selectors when you configure the same hook more than once.
+
+The following selectors are valid for each hook:
+
+| Hook | Valid selectors | Invocation |
+| --- | --- | --- |
+| `supergraph.request` | None | Once per GraphQL operation, before query planning and execution. |
+| `subgraph.request` | `service_names` | Once for each ordinary outbound subgraph request. |
+| `connector.request` | `service_names`, `source_names`, `connector_names` | Once for each individual request generated by a Connector. |
+
+Selector values match exactly and are case-sensitive. Selector dimensions are combined with AND; names within one list are combined with OR. An empty list is a wildcard for that dimension.
+
+For `connector.request`:
+
+- `service_names` identifies the subgraph that contains the Connector.
+- `source_names` identifies its named `@source`. A nonempty list doesn't match a sourceless Connector.
+- `connector_names` identifies the Connector's declared name or schema coordinate.
+
+Separate subgraph and Connector requests can execute concurrently. Don't depend on context mutations from one such request becoming visible to another in a particular order.
+
+## Permissions
+
+Configurable payload permissions are independent for each hook and default to no access. Events always include the hook name, request ID, applicable routing identity, transport type, and plugin configuration. GraphQL hooks also always include their HTTP method and URI. The router filters permission-controlled fields before invoking a component and validates returned mutations before applying them.
+
+### Headers
+
+```yaml
+permissions:
+  headers:
+    read:
+      names: [authorization, x-tenant-id]
+    write:
+      names: [x-policy-result]
+```
+
+Header names are matched case-insensitively. The router doesn't expose header values that can't be represented as UTF-8 strings.
+
+A component can return `set`, `append`, and `remove` operations for allowlisted write headers. The router rejects an operation for any other header. Connector plugins can't mutate the transport-owned `content-length` header.
+
+### Context
+
+```yaml
+permissions:
+  context:
+    read:
+      names: [tenant.id]
+    write:
+      names: [policy.result]
+```
+
+Context permission allowlists are matched case-insensitively. Context operation keys retain the spelling returned by the component. Values cross the component boundary as JSON strings. A component must return valid JSON when it sets a context value.
+
+### GraphQL request
+
+GraphQL request access applies to `supergraph.request` and `subgraph.request`:
+
+```yaml
+permissions:
+  graphql:
+    request: read_write
+```
+
+| Value | Event access | Mutation access |
+| --- | --- | --- |
+| `none` | GraphQL body omitted. | GraphQL body mutation rejected. |
+| `read` | GraphQL body included. | GraphQL body mutation rejected. |
+| `read_write` | GraphQL body included. | Valid GraphQL body mutation accepted. |
+
+The default is `none`. The body is serialized as a JSON GraphQL request.
+
+### Connector transport
+
+Transport access applies to `connector.request`:
+
+```yaml
+permissions:
+  transport:
+    method: read
+    uri: read_write
+    body: read_write
+```
+
+Each field supports the following values:
+
+| Value | Event access | Mutation access |
+| --- | --- | --- |
+| `none` | Field omitted. | Field mutation rejected. |
+| `read` | Field included. | Field mutation rejected. |
+| `read_write` | Field included. | Valid field mutation accepted. |
+
+Headers remain governed by `permissions.headers`.
+
+For HTTP Connectors, `body` is the raw transport request body. URI mutations must preserve the original scheme and authority. A mapping-only Connector has no HTTP transport fields and rejects method, URI, header, and body mutations.
+
+## Failure behavior
+
+By default, Wasm plugin failures are fail-closed: the current request fails instead of continuing without the plugin result.
+
+Configure failure behavior globally, per plugin, or per hook:
+
+```yaml
+wasm:
+  defaults:
+    failure:
+      default: closed
+  plugins:
+    - name: optional-enrichment
+      failure:
+        default: open
+      source:
+        type: file
+        path: ./plugins/optional-enrichment.wasm
+      hooks:
+        - hook: connector.request
+          failure:
+            default: closed
+```
+
+The most specific setting wins:
+
+1. Hook setting
+2. Plugin setting
+3. Global default
+
+| Value | Behavior |
+| --- | --- |
+| `closed` | Return an error for the current request. This is the default. |
+| `open` | Log the error, discard the failed outcome, and continue to subsequent plugins and the wrapped router service. |
+
+Failure behavior applies when a component traps, times out, exceeds a resource limit, returns an error, or requests an invalid or unauthorized mutation. The router stages all mutations before applying them, so a rejected outcome doesn't partially modify a request.
+
+Failure behavior doesn't apply to startup errors. Invalid configuration, unreadable component files, digest mismatches, and component compilation failures prevent router initialization or configuration reload.
+
+Use `open` only when the customization is optional. Keep authentication, authorization, and other security-sensitive plugins fail-closed.
+
+## Resource limits
+
+Every plugin inherits global limits and can override individual fields under its own `limits` key.
+
+| Field | Description | Default |
+| --- | --- | --- |
+| `execution_timeout` | Maximum duration of one component invocation. | `10ms` |
+| `queue_timeout` | Maximum time an invocation waits for concurrency capacity. | `5ms` |
+| `max_memory_per_instance` | Maximum size of each component linear memory during one invocation. | `16MiB` |
+| `max_concurrency` | Maximum simultaneous invocations for the plugin. | `128` |
+| `max_queue_size` | Maximum admitted invocations waiting for concurrency capacity. A full queue rejects immediately. | `256` |
+| `max_input_size` | Maximum host-counted event string payload bytes, including plugin configuration. | `1MiB` |
+| `max_output_size` | Maximum host-counted outcome string payload bytes. | `1MiB` |
+
+`execution_timeout`, `max_concurrency`, and `max_queue_size` must be greater than zero. A queue overflow, queue timeout, execution timeout, memory limit, or input/output size violation follows the hook's configured failure behavior.
+
+## Component contract
+
+The initial WIT package is `apollo:router-plugin@0.1.0`. A component exports the `hooks` interface from the `router-plugin` world:
+
+```wit
+package apollo:router-plugin@0.1.0;
+
+world router-plugin {
+    export hooks;
+}
+```
+
+The exported interface contains one function:
+
+```wit
+handle: func(event: event) -> result<outcome, string>;
+```
+
+The [complete WIT contract](https://github.com/apollographql/router/blob/dev-v3.x/apollo-router/wit/router-plugin/world.wit) is the source of truth for generated guest bindings.
+
+### Event fields
+
+Every invocation includes an `event` record.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `hook` | `string` | Hook name that caused the invocation. |
+| `request-id` | `string` | Router request identifier. |
+| `service-name` | `option<string>` | Subgraph name for subgraph and Connector hooks. |
+| `source-name` | `option<string>` | Named Connector source, when available. |
+| `connector-name` | `option<string>` | Connector name or schema coordinate. |
+| `transport` | `option<string>` | `http` or `mapping_only` for Connector hooks. |
+| `method` | `option<string>` | HTTP method. Always present for GraphQL hooks; permission-controlled for HTTP Connector hooks. |
+| `uri` | `option<string>` | Request URI. Always present for GraphQL hooks; permission-controlled for HTTP Connector hooks. |
+| `headers` | `list<header>` | Permitted request headers. Each entry contains a name and list of values. |
+| `context` | `list<context-entry>` | Permitted context entries. Values contain JSON strings. |
+| `body` | `option<string>` | GraphQL request JSON or raw Connector body when available and permitted. |
+| `configuration` | `string` | Plugin-owned configuration serialized as JSON. |
+
+Identity fields vary by hook:
+
+| Hook | `service-name` | `source-name` | `connector-name` | `transport` |
+| --- | --- | --- | --- | --- |
+| `supergraph.request` | Absent | Absent | Absent | Absent |
+| `subgraph.request` | Subgraph | Absent | Absent | Absent |
+| `connector.request` | Originating subgraph | Named source, if present | Connector name or coordinate | `http` or `mapping_only` |
+
+### Outcomes
+
+The handler returns either an error string or an `outcome`:
+
+```wit
+variant outcome {
+    proceed(mutation),
+    break-request(break-response),
+}
+```
+
+`proceed` can return these declarative mutations:
+
+- Header `set`, `append`, and `remove` operations
+- Context `set` and `remove` operations
+- An optional replacement method, URI, or body where the hook and permissions allow it
+
+The router parses and validates an entire mutation before applying it.
+
+`break-request` contains an HTTP status code, response headers, and a JSON GraphQL response body. It is supported by `supergraph.request` and `subgraph.request`. A supergraph break ends the client operation. A subgraph break replaces only that subgraph fetch's response. Returning `break-request` from `connector.request` is a plugin failure. Break-response headers aren't restricted by request-header write permissions because an early response replaces the service response.
+
+## Sandbox
+
+Each invocation receives a new isolated component instance and store. Component global state doesn't persist across invocations. The router doesn't configure process arguments or grant inherited access to:
+
+- Environment variables
+- The filesystem
+- TCP or UDP networking
+- Standard input, output, or error streams
+
+Components communicate with the router only through the WIT event and outcome. The router validates returned HTTP and GraphQL values and enforces permissions and resource limits at the host boundary.

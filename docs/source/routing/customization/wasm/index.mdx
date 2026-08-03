@@ -1,0 +1,245 @@
+---
+title: WebAssembly Plugins
+subtitle: Run portable custom logic in the router
+description: Customize Apollo Router request handling with sandboxed WebAssembly components, explicit permissions, and resource limits.
+minVersion: Router v3.0.0
+releaseStage: preview
+---
+
+<PreviewFeature>
+
+This feature is in [preview](/resources/product-launch-stages/#product-launch-stages).
+
+</PreviewFeature>
+
+WebAssembly (Wasm) plugins let you run custom request logic in Apollo Router without compiling a custom router binary or operating an external service. A plugin is a [WebAssembly component](https://component-model.bytecodealliance.org/) that implements Apollo's WIT contract. The router invokes the component at configured request lifecycle hooks and applies the mutations it returns.
+
+Wasm plugins run in a capability-restricted sandbox. They don't inherit access to environment variables, the filesystem, the network, or standard input and output. A plugin can inspect or modify only the headers, context entries, GraphQL data, and Connector transport fields explicitly allowed in your router configuration.
+
+<Note>
+
+Wasm plugins currently support request hooks only. See [Limitations](#limitations).
+
+</Note>
+
+## When to use a Wasm plugin
+
+Wasm plugins are useful for request-local logic such as:
+
+- Adding, changing, or removing downstream request headers
+- Enforcing authorization or routing policy
+- Reading or writing selected router context entries
+- Inspecting or transforming GraphQL requests
+- Inspecting or transforming individual Connector HTTP requests
+- Returning an early GraphQL response from a supergraph or subgraph request hook
+
+Because a Wasm plugin runs in the router process, it doesn't add an external network call. Use an [external coprocessor](/graphos/routing/customization/coprocessor/) instead if your customization needs network, filesystem, or other ambient capabilities.
+
+Hooks run inline with request processing and add their execution and queue time to request latency. Benchmark components with representative traffic and limits, especially components that embed a language runtime.
+
+## Get started
+
+A Wasm plugin consists of:
+
+1. A component that exports the `router-plugin` world from the `apollo:router-plugin` WIT package.
+2. A `wasm.plugins` entry in `router.yaml`.
+3. At least one configured request hook.
+
+### Build a component
+
+The component must export this handler from the `apollo:router-plugin@0.1.0` WIT package:
+
+```wit
+handle: func(event: event) -> result<outcome, string>;
+```
+
+For each invocation, the router sends an `event`. The component returns one of the following:
+
+- `proceed(mutation)` applies permitted changes and continues the request.
+- `break-request(response)` returns an early response from hooks that support it.
+- An error string reports a plugin failure.
+
+The WIT package version identifies the component ABI. You don't configure an ABI version in `router.yaml`.
+
+Use the [complete WIT contract](https://github.com/apollographql/router/blob/dev-v3.x/apollo-router/wit/router-plugin/world.wit) to generate guest bindings. The Router repository includes a [minimal Rust implementation](https://github.com/apollographql/router/blob/dev-v3.x/examples/wasm-extensions/rust-header/src/lib.rs) and working components authored in Rust, Go, Node.js, Python, Java, and Scala. See [Language examples](#language-examples) for their toolchains and build instructions.
+
+### Configure the plugin
+
+Add a top-level `wasm` key to your router's YAML configuration:
+
+```yaml title="router.yaml"
+wasm:
+  plugins:
+    - name: request-policy
+      source:
+        type: file
+        path: ./plugins/request-policy.wasm
+        # digest: sha256:<64-character-lowercase-hex-digest>
+
+      configuration:
+        policy_name: checkout
+
+      hooks:
+        - hook: subgraph.request
+          selector:
+            service_names: [products]
+          permissions:
+            headers:
+              read:
+                names: [authorization]
+              write:
+                names: [x-policy-result]
+            context:
+              read:
+                names: [tenant.id]
+              write:
+                names: [policy.result]
+            graphql:
+              request: read
+```
+
+The router loads and compiles enabled components during startup. Startup fails if a component is missing, its configured digest doesn't match, its configuration is invalid, or it doesn't implement the expected component contract.
+
+The `configuration` object belongs to the plugin. The router passes it to the component as JSON without interpreting its contents. You can evolve this object without changing the router's configuration schema.
+
+Header, context, GraphQL-body, and Connector-transport permissions default to no access. Events always include routing metadata, and GraphQL hooks always include their HTTP method and URI. Grant only the configurable payload permissions your component requires. Learn about every option in the [Wasm plugin reference](./reference/).
+
+### Run the router
+
+Start the router with your configuration and supergraph schema:
+
+```bash
+router \
+  --config router.yaml \
+  --supergraph supergraph.graphql
+```
+
+The router applies plugins in the order they appear under `wasm.plugins`. When multiple plugins subscribe to the same event, each plugin receives the request after the router applies mutations from the preceding plugin.
+
+## Request hooks
+
+Wasm plugins can run at three request lifecycle boundaries.
+
+### `supergraph.request`
+
+Runs once after the router parses the client's request as GraphQL and before query planning and execution.
+
+Use this hook to inspect or modify the client's GraphQL request, selected headers, and selected context entries. This hook doesn't accept service, source, or connector selectors.
+
+The hook supports `break-request`. Its response body must be a valid GraphQL response.
+
+### `subgraph.request`
+
+Runs for every ordinary outbound subgraph request required by the query plan. A single client operation can invoke this hook multiple times, and separate subgraph requests can run concurrently.
+
+Use `selector.service_names` to target specific subgraphs:
+
+```yaml
+- hook: subgraph.request
+  selector:
+    service_names: [products, inventory]
+```
+
+An omitted or empty `service_names` list matches every subgraph. This hook supports `break-request`; its response body must be a valid GraphQL response for the subgraph request.
+
+### `connector.request`
+
+Runs for each individual [Connector](/graphos/schema-design/connectors/) request, including mapping-only Connectors. Connector requests use a separate router service boundary, so a `subgraph.request` hook doesn't observe a Connector transport request merely because the Connector belongs to a subgraph.
+
+Use selectors to target the originating subgraph, named source, and individual Connector:
+
+```yaml
+- hook: connector.request
+  selector:
+    service_names: [products]
+    source_names: [inventory]
+    connector_names: [inventory-by-id]
+  permissions:
+    transport:
+      method: read
+      uri: read_write
+      body: read_write
+    headers:
+      read:
+        names: [authorization]
+      write:
+        names: [x-policy-result]
+```
+
+Selector names match exactly and are case-sensitive. When you configure multiple selector dimensions, all dimensions must match. Within each list, any listed value can match. An omitted or empty list matches every value for that dimension. A nonempty `source_names` list doesn't match a Connector without a named source.
+
+For HTTP Connectors, a plugin can read or modify the method, URI, headers, and raw request body when permitted. URI mutations can change the path and query but can't change the configured scheme or authority. Plugins can't mutate `content-length`; the router removes it after a successful mutation so the HTTP client can derive the correct value.
+
+Mapping-only Connectors don't make an HTTP request. Their method, URI, headers, and body aren't available, and the router rejects transport mutations. Context mutations remain available.
+
+The `connector.request` hook doesn't support `break-request`. Returning it is a plugin failure and follows the hook's configured [failure behavior](./reference/#failure-behavior).
+
+## Language examples
+
+The [Wasm extension examples](https://github.com/apollographql/router/tree/dev-v3.x/examples/wasm-extensions) demonstrate six ways to build components against the same language-neutral WIT contract:
+
+| Language | Example toolchain |
+| --- | --- |
+| Rust | Native `wasm32-wasip2` component using `wit-bindgen` |
+| Go | Go WASI Preview 1 module adapted to a component with `wit-bindgen` and `wasm-tools` |
+| Node.js | JavaScript component built with ComponentizeJS and Jco |
+| Python | Python component built with `componentize-py` |
+| Java | Java logic compiled with TeaVM and exposed through a JavaScript WIT adapter |
+| Scala | Scala.js logic exposed through a JavaScript WIT adapter |
+
+These examples demonstrate compatible build paths, not an exhaustive list of supported languages. Any toolchain that can produce a WebAssembly component implementing the WIT contract can integrate with the router.
+
+Five examples run at `supergraph.request`. The Rust example also demonstrates a service-selected `subgraph.request` hook and a `connector.request` hook.
+
+From the repository root, build and verify all six examples:
+
+```bash
+examples/wasm-extensions/build-all.sh
+examples/wasm-extensions/verify.sh
+```
+
+The build script produces the six components and the router binary. The verification script validates the component exports, starts a local subgraph and router, and checks the combined GraphQL response. See the [example README](https://github.com/apollographql/router/blob/dev-v3.x/examples/wasm-extensions/README.md) for tool versions and per-language commands.
+
+## Verify component integrity
+
+Generate the digest after building a component:
+
+```bash
+# macOS and systems with shasum
+shasum -a 256 request-policy.wasm | awk '{ print "sha256:" $1 }'
+
+# Linux with GNU coreutils
+sha256sum request-policy.wasm | awk '{ print "sha256:" $1 }'
+```
+
+Copy the resulting value to `source.digest`. The router verifies the exact component bytes when it loads the plugin.
+
+## Security recommendations
+
+Treat Wasm components as executable deployment artifacts:
+
+- Build components in a trusted environment.
+- Configure a SHA-256 digest for every deployed component.
+- Grant the smallest practical set of permissions.
+- Use short execution and queue timeouts.
+- Keep fail-closed behavior for authentication, authorization, and other security controls.
+- Test mutations against representative GraphQL and Connector requests.
+
+The router validates every returned mutation against the hook's configured permissions before applying it. A plugin can't grant itself additional access.
+
+A component on `supergraph.request` or `subgraph.request` can return an early response without a separate permission. Treat that as control over the corresponding operation or subgraph fetch. Don't put secrets in plugin `configuration`; the router sends the complete value to the component on every matching invocation.
+
+## Limitations
+
+Wasm plugins currently have the following limitations:
+
+- Only `supergraph.request`, `subgraph.request`, and `connector.request` hooks are available. Response, execution, and router-level hooks aren't supported.
+- Only local file component sources are supported.
+- Components don't receive host capabilities for networking, the filesystem, environment variables, or router internals.
+- `connector.request` can't return an early response.
+- Mapping-only Connectors support context mutation but don't support HTTP mutations.
+- Connector URI mutation is restricted to the Connector's configured origin.
+- The router creates an isolated store and component instance for each invocation. Component lifecycle and pooling APIs aren't available.
+- Java and Scala examples use transpiled JavaScript adapters at the component boundary.
+
+For complete configuration, event, mutation, permission, failure, and resource-limit details, see the [Wasm plugin reference](./reference/).

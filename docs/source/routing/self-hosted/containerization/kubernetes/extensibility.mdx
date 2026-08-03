@@ -6,8 +6,9 @@ description: How to deploy the Apollo GraphOS Router or Apollo Router Core in Ku
 
 <ElasticNotice />
 
-The router supports two extensibility options to customize the router's behavior. The extensibility features are:
+The router supports three extensibility options to customize the router's behavior. The extensibility features are:
 
+- [WebAssembly plugins](/graphos/routing/customization/wasm)
 - [Rhai scripting](/graphos/routing/customization/rhai)
 - [External coprocessors](/router/customizations/coprocessor)
 
@@ -22,6 +23,14 @@ Enabling Rhai scripts in your deployed router requires mounting an extra volume 
 <Comment>
     Ideally this would a separate example fully within the docs, however the `in-house-router-example` is public and the example is a good one so it isn't worth duplicating the effort as of now.
 </Comment>
+
+## Deploy with WebAssembly plugins
+
+Package your WebAssembly component in the router image or mount it into the router container as a read-only file. Set each plugin's `source.path` to the component's path inside the container and configure a `source.digest` to verify the deployed bytes.
+
+The router loads and compiles enabled components when it starts or reloads its configuration. Every router replica therefore needs access to the same component files at the configured paths.
+
+See [WebAssembly plugin configuration](/graphos/routing/customization/wasm/#configure-the-plugin) for a complete example.
 
 ## Deploying with a coprocessor
 
@@ -134,5 +143,4 @@ router:
     coprocessor:
       url: http://<coprocessor-service-name>:<coprocessor-container-port>
 ```
-
 

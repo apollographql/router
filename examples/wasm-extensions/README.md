@@ -146,7 +146,7 @@ Then query the Router:
 ```sh
 curl http://127.0.0.1:4100/ \
   -H 'content-type: application/json' \
-  --data '{"query":"{ me }"}'
+  --data '{"query":"{ me connectorMessage { value } }"}'
 ```
 
 The response should be:

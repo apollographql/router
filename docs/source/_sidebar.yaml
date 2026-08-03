@@ -233,6 +233,12 @@ items:
         children:
           - label: "Overview"
             href: "./customization/overview"
+          - label: "WebAssembly Plugins"
+            children:
+              - label: "WebAssembly Configuration"
+                href: "./customization/wasm"
+              - label: "WebAssembly Reference"
+                href: "./customization/wasm/reference"
           - label: "Coprocessors"
             children:
               - label: "Coprocessor Configuration"
