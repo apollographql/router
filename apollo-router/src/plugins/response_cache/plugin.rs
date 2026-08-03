@@ -165,6 +165,12 @@ impl StorageInterface {
         storage.get()
     }
 
+    /// Whether any connector storage was configured at all. When false, connector caching can
+    /// never happen and the connector service hooks are skipped entirely.
+    pub(crate) fn has_connector_storage(&self) -> bool {
+        self.connector_all.is_some() || !self.connector_sources.is_empty()
+    }
+
     /// Activate all storages so they can start emitting metrics.
     pub(crate) fn activate(&self) {
         if let Some(all) = &self.all
@@ -622,7 +628,11 @@ impl PluginPrivate for ResponseCache {
     }
 
     fn connector_service(&self, service: connect::BoxService) -> connect::BoxService {
-        if !self.enabled {
+        // Skip wrapping entirely when the plugin is off or no connector storage is configured:
+        // caching can never happen, and the wrapper's buffering would spawn a per-pipeline
+        // worker task that keeps the service chain (and the plugins it references) alive
+        // asynchronously after teardown.
+        if !self.enabled || !self.storage.has_connector_storage() {
             return service;
         }
 
@@ -659,11 +669,14 @@ impl PluginPrivate for ResponseCache {
         if !self
             .connectors
             .is_source_enabled(self.enabled, &source_name)
+            || !self.storage.has_connector_storage()
         {
-            // Even when caching is disabled for this connector source, we still need to
-            // propagate Cache-Control headers from the connector HTTP response into the
-            // shared context. This ensures the supergraph response Cache-Control header
-            // correctly reflects all upstream responses (matching the subgraph behavior).
+            // Even when caching is disabled for this connector source (or no connector storage
+            // is configured at all), we still need to propagate Cache-Control headers from the
+            // connector HTTP response into the shared context. This ensures the supergraph
+            // response Cache-Control header correctly reflects all upstream responses (matching
+            // the subgraph behavior). Note: a headerless response contributes no-store here —
+            // the config-TTL fallback only applies to sources the router actually caches.
             let connector_ttl = self
                 .connector_ttl(&source_name)
                 .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24));
