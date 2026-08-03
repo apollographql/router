@@ -6,4 +6,4 @@ The comparison is now done by selecting the value at the path and comparing it d
 
 No shipped migration was affected, since the only existing use of `change` targets a two-segment path.
 
-By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9917
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9927
