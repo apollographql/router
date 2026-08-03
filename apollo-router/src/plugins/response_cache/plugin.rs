@@ -767,12 +767,17 @@ impl PluginPrivate for ResponseCache {
                         .unwrap_or_default()
             });
 
-        let any_connector_caching_enabled = self.connectors.all.enabled.unwrap_or(false)
-            || self
-                .connectors
-                .sources
-                .values()
-                .any(|s| s.enabled.unwrap_or(false));
+        // True when connector caching can actually happen at runtime: some connector storage is
+        // configured AND at least one scope is effectively enabled (`enabled` is default-true,
+        // matching `is_source_enabled` on the caching path — so a bare `all: {redis: ...}` block
+        // counts).
+        let any_connector_caching_enabled = self.storage.has_connector_storage()
+            && (self.connectors.all.enabled.unwrap_or(true)
+                || self
+                    .connectors
+                    .sources
+                    .keys()
+                    .any(|source_name| self.connectors.is_source_enabled(self.enabled, source_name)));
 
         let any_connector_invalidation_enabled = self
             .connectors
