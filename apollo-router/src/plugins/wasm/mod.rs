@@ -1,14 +1,14 @@
 //! Sandboxed WebAssembly extensions for the router pipeline.
 
-use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use tower::BoxError;
-use tower::Service;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::service_fn;
 
 use self::config::WasmConfig;
+use self::layer::WasmSubgraphLayer;
+use self::layer::WasmSupergraphLayer;
 use self::runtime::Runtime;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -17,6 +17,7 @@ use crate::services::supergraph;
 
 mod config;
 mod hooks;
+mod layer;
 mod runtime;
 
 wasmtime::component::bindgen!({
@@ -45,17 +46,10 @@ impl PluginPrivate for Wasm {
         &self,
         service: supergraph::BoxCloneService,
     ) -> supergraph::BoxCloneService {
-        let runtime = self.runtime.clone();
-        tower::util::BoxCloneService::new(service_fn(move |request: supergraph::Request| {
-            let runtime = runtime.clone();
-            let mut service = service.clone();
-            async move {
-                match runtime.process_supergraph_request(request).await? {
-                    ControlFlow::Continue(request) => service.ready().await?.call(request).await,
-                    ControlFlow::Break(response) => Ok(response),
-                }
-            }
-        }))
+        ServiceBuilder::new()
+            .layer(WasmSupergraphLayer::new(self.runtime.clone()))
+            .service(service)
+            .boxed_clone()
     }
 
     fn subgraph_service(
@@ -63,22 +57,13 @@ impl PluginPrivate for Wasm {
         service_name: &str,
         service: subgraph::BoxCloneService,
     ) -> subgraph::BoxCloneService {
-        let runtime = self.runtime.clone();
-        let service_name: Arc<str> = Arc::from(service_name);
-        tower::util::BoxCloneService::new(service_fn(move |request: subgraph::Request| {
-            let runtime = runtime.clone();
-            let service_name = service_name.clone();
-            let mut service = service.clone();
-            async move {
-                match runtime
-                    .process_subgraph_request(request, &service_name)
-                    .await?
-                {
-                    ControlFlow::Continue(request) => service.ready().await?.call(request).await,
-                    ControlFlow::Break(response) => Ok(response),
-                }
-            }
-        }))
+        ServiceBuilder::new()
+            .layer(WasmSubgraphLayer::new(
+                self.runtime.clone(),
+                Arc::from(service_name),
+            ))
+            .service(service)
+            .boxed_clone()
     }
 }
 
