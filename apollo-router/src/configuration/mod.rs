@@ -40,7 +40,6 @@ use thiserror::Error;
 
 use self::cors::Cors;
 use self::expansion::Expansion;
-pub(crate) use self::experimental::Discussed;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 pub(crate) use self::schema::validate_yaml_configuration;
@@ -69,7 +68,6 @@ pub(crate) mod cooperative_cancellation;
 pub(crate) mod cors;
 pub(crate) mod events;
 pub(crate) mod expansion;
-mod experimental;
 pub(crate) mod header_masking_config;
 pub(crate) mod metrics;
 pub(crate) mod mode;
