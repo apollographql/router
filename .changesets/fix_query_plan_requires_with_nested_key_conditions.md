@@ -8,6 +8,6 @@ In that situation the condition fetch sits below the key fetch, so there is no d
 - `handle_conditions_tree()` skipped its entire "merge into the grand parent" block when there was no path into the parent, silently dropping the condition fetch nodes it had just created instead of reporting them as created.
 - `create_post_requires_node()` assumed a path into the parent existed whenever there was a single parent, and aborted with `Missing path_in_parent for @require` otherwise.
 
-The first defect masked the other two: they would have ordered the `@requires` fetch *before* the fetch producing the required field, so the entity resolver would have been called without its required data. All three are fixed, and such queries now plan correctly, fetching the required field before the field that requires it.
+The first defect masked the other two, which are just as damaging on their own: with only the second unfixed, planning succeeds but the resulting plan *silently omits* the fetch that resolves the field carrying the `@requires`, so that field comes back unresolved and no error is reported; with only the third unfixed, planning aborts outright. All three are fixed, and such queries now plan correctly, fetching the required field before the field that requires it.
 
 By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/9926

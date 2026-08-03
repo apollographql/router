@@ -3974,18 +3974,21 @@ fn compute_nodes_for_key_resolution<'a>(
         // `path_in_parent` possibly followed by a deeper suffix. A non-empty suffix means
         // `condition_node` sits *below* `new_node_id` in the data, and so there is no downward
         // path from `condition_node` to `new_node_id`: the suffix describes the reverse
-        // relation and must not be used here. Only the equal-paths case gives us a usable
-        // (empty) path.
+        // relation and must not be used here. Only equal paths give us a usable (empty) path.
+        //
+        // Note that this is stricter than it strictly needs to be: if `condition_path` were a
+        // *prefix* of `path_in_parent`, then `condition_node` would sit above `new_node_id` and
+        // `path_in_parent.strip_prefix(condition_path)` would be a usable downward path. That case
+        // is not known to be reachable and was not handled before either, so we leave it out.
         let mut path = None;
         let mut iter = dependency_graph.parents_relations_of(condition_node);
         if let (Some(condition_node_parent), None) = (iter.next(), iter.next()) {
             // There is exactly one parent
             if condition_node_parent.parent_node_id == stack_item.node_id
                 && let Some(condition_path) = condition_node_parent.path_in_parent
-                && let Some(suffix) = condition_path.strip_prefix(path_in_parent)
-                && suffix.is_empty()
+                && condition_path == *path_in_parent
             {
-                path = Some(Arc::new(suffix))
+                path = Some(Arc::new(OpPath::default()))
             }
         }
         drop(iter);
