@@ -33,7 +33,6 @@ use super::router::Event::UpdateSchema;
 use super::router::Event::{self};
 use crate::ApolloRouterError::NoLicense;
 use crate::configuration::Configuration;
-use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
 use crate::configuration::metrics::Metrics;
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
@@ -723,15 +722,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         listen_addresses_guard.extra_listen_addresses = server_handle.listen_addresses().to_vec();
         listen_addresses_guard.graphql_listen_address =
             server_handle.graphql_listen_address().clone();
-
-        // Log that we are using experimental features. It is best to do this here rather than config
-        // validation as it will actually log issues rather than return structured validation errors.
-        // Logging here also means that this is actually configuration that took effect
-        if let Some(yaml) = &configuration.validated_yaml {
-            let discussed = Discussed::new();
-            discussed.log_experimental_used(yaml);
-            discussed.log_preview_used(yaml);
-        }
 
         let metrics = apollo_opentelemetry_initialized()
             .then(|| Metrics::new(&configuration, Arc::as_ref(&license)));
