@@ -182,7 +182,9 @@ impl InstrumentData {
         );
         populate_config_instrument!(
             apollo.router.config.authentication.jwt,
-            "$.authentication[?(@..jwt)]"
+            "$.authentication[?(@..jwt)]",
+            opt.on_error,
+            "$.router.jwt.on_error"
         );
         populate_config_instrument!(
             apollo.router.config.authentication.aws.sigv4,
