@@ -8,31 +8,43 @@ use serde::Deserialize;
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
+/// Configures sandboxed WebAssembly plugins for router request hooks.
 pub(super) struct WasmConfig {
+    /// Default resource limits and failure behavior for all WebAssembly plugins.
     pub(super) defaults: WasmDefaults,
+    /// WebAssembly plugins loaded by the router.
     pub(super) plugins: Vec<WasmPluginConfig>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct WasmDefaults {
+    /// Default resource limits applied to WebAssembly plugins.
     pub(super) limits: WasmLimits,
+    /// Default behavior when a WebAssembly plugin fails.
     pub(super) failure: WasmFailure,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct WasmPluginConfig {
+    /// Unique name used to identify the plugin.
     pub(super) name: String,
     #[serde(default = "default_enabled")]
+    /// Enables or disables the plugin.
     pub(super) enabled: bool,
+    /// Location and integrity information for the WebAssembly component.
     pub(super) source: WasmSource,
     #[serde(default = "empty_object")]
+    /// Plugin-defined configuration passed to the WebAssembly component.
     pub(super) configuration: serde_json::Value,
+    /// Router request hooks that invoke the plugin.
     pub(super) hooks: Vec<WasmHookConfig>,
     #[serde(default)]
+    /// Resource limit overrides for this plugin.
     pub(super) limits: WasmLimitsOverride,
     #[serde(default)]
+    /// Failure behavior override for this plugin.
     pub(super) failure: Option<WasmFailure>,
 }
 
@@ -48,8 +60,10 @@ fn empty_object() -> serde_json::Value {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum WasmSource {
     File {
+        /// Path to the WebAssembly component file.
         path: PathBuf,
         #[serde(default)]
+        /// Optional SHA-256 digest used to verify the component, formatted as `sha256:<hex>`.
         digest: Option<String>,
     },
 }
@@ -57,12 +71,16 @@ pub(super) enum WasmSource {
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct WasmHookConfig {
+    /// Request stage at which the plugin runs.
     pub(super) hook: WasmHook,
     #[serde(default)]
+    /// Services or connectors to which this hook applies.
     pub(super) selector: WasmHookSelector,
     #[serde(default)]
+    /// Router data that the plugin may read or modify.
     pub(super) permissions: WasmPermissions,
     #[serde(default)]
+    /// Failure behavior override for this hook.
     pub(super) failure: Option<WasmFailure>,
 }
 
@@ -89,8 +107,11 @@ impl WasmHook {
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct WasmHookSelector {
+    /// Subgraph or connector service names matched by this hook.
     pub(super) service_names: HashSet<String>,
+    /// Connector source names matched by this hook.
     pub(super) source_names: HashSet<String>,
+    /// Connector names matched by this hook.
     pub(super) connector_names: HashSet<String>,
 }
 
@@ -137,29 +158,38 @@ impl WasmHookConfig {
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct WasmPermissions {
+    /// HTTP header access granted to the plugin.
     pub(super) headers: WasmHeaderPermissions,
+    /// Router context access granted to the plugin.
     pub(super) context: WasmContextPermissions,
+    /// GraphQL request access granted to the plugin.
     pub(super) graphql: WasmGraphqlPermissions,
+    /// HTTP transport access granted to the plugin.
     pub(super) transport: WasmTransportPermissions,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct WasmHeaderPermissions {
+    /// Header names that the plugin may read.
     pub(super) read: WasmNameMatcher,
+    /// Header names that the plugin may write.
     pub(super) write: WasmNameMatcher,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct WasmContextPermissions {
+    /// Context keys that the plugin may read.
     pub(super) read: WasmNameMatcher,
+    /// Context keys that the plugin may write.
     pub(super) write: WasmNameMatcher,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct WasmNameMatcher {
+    /// Explicit names or keys granted to the plugin.
     pub(super) names: HashSet<String>,
 }
 
@@ -174,14 +204,18 @@ impl WasmNameMatcher {
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct WasmGraphqlPermissions {
+    /// Access granted to the GraphQL request payload.
     pub(super) request: WasmGraphqlAccess,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct WasmTransportPermissions {
+    /// Access granted to the HTTP method.
     pub(super) method: WasmTransportAccess,
+    /// Access granted to the request URI.
     pub(super) uri: WasmTransportAccess,
+    /// Access granted to the HTTP body.
     pub(super) body: WasmTransportAccess,
 }
 
@@ -208,17 +242,24 @@ pub(super) enum WasmGraphqlAccess {
 pub(super) struct WasmLimits {
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String", default = "schema_default_execution_timeout")]
+    /// Maximum execution time for one plugin invocation.
     pub(super) execution_timeout: Duration,
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String", default = "schema_default_queue_timeout")]
+    /// Maximum time an invocation may wait for an execution slot.
     pub(super) queue_timeout: Duration,
     #[schemars(with = "String")]
+    /// Maximum linear memory available to each plugin instance.
     pub(super) max_memory_per_instance: ByteSize,
+    /// Maximum number of concurrent invocations.
     pub(super) max_concurrency: usize,
+    /// Maximum number of invocations waiting for an execution slot.
     pub(super) max_queue_size: usize,
     #[schemars(with = "String")]
+    /// Maximum request payload size passed to the plugin.
     pub(super) max_input_size: ByteSize,
     #[schemars(with = "String")]
+    /// Maximum response payload size accepted from the plugin.
     pub(super) max_output_size: ByteSize,
 }
 
@@ -249,17 +290,24 @@ impl Default for WasmLimits {
 pub(super) struct WasmLimitsOverride {
     #[serde(default, deserialize_with = "deserialize_optional_duration")]
     #[schemars(with = "Option<String>")]
+    /// Maximum execution time for one plugin invocation.
     pub(super) execution_timeout: Option<Duration>,
     #[serde(default, deserialize_with = "deserialize_optional_duration")]
     #[schemars(with = "Option<String>")]
+    /// Maximum time an invocation may wait for an execution slot.
     pub(super) queue_timeout: Option<Duration>,
     #[schemars(with = "Option<String>")]
+    /// Maximum linear memory available to each plugin instance.
     pub(super) max_memory_per_instance: Option<ByteSize>,
+    /// Maximum number of concurrent invocations.
     pub(super) max_concurrency: Option<usize>,
+    /// Maximum number of invocations waiting for an execution slot.
     pub(super) max_queue_size: Option<usize>,
     #[schemars(with = "Option<String>")]
+    /// Maximum request payload size passed to the plugin.
     pub(super) max_input_size: Option<ByteSize>,
     #[schemars(with = "Option<String>")]
+    /// Maximum response payload size accepted from the plugin.
     pub(super) max_output_size: Option<ByteSize>,
 }
 
@@ -288,6 +336,7 @@ where
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct WasmFailure {
+    /// Whether plugin failures reject the request (`closed`) or allow it to continue (`open`).
     pub(super) default: WasmFailureMode,
 }
 
