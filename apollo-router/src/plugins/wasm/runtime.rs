@@ -27,6 +27,7 @@ use super::config::WasmHookConfig;
 use super::config::WasmLimits;
 use super::config::WasmSource;
 use super::hooks;
+use crate::services::connector::request_service;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -139,7 +140,7 @@ impl Runtime {
             let Some(hook) = plugin
                 .hooks
                 .iter()
-                .find(|hook| hook.hook == WasmHook::SupergraphRequest)
+                .find(|hook| hook.hook == WasmHook::Supergraph)
             else {
                 continue;
             };
@@ -174,8 +175,7 @@ impl Runtime {
     ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError> {
         for plugin in &self.plugins {
             let Some(hook) = plugin.hooks.iter().find(|hook| {
-                hook.hook == WasmHook::SubgraphRequest
-                    && hook.selector.matches_service(service_name)
+                hook.hook == WasmHook::Subgraph && hook.selector.matches_service(service_name)
             }) else {
                 continue;
             };
@@ -197,6 +197,72 @@ impl Runtime {
                     }
                     return Err(format!("wasm plugin `{}` failed: {error}", plugin.name).into());
                 }
+            }
+        }
+        Ok(ControlFlow::Continue(request))
+    }
+
+    pub(super) async fn process_connector_request(
+        &self,
+        mut request: request_service::Request,
+        source_config_key: &str,
+    ) -> Result<ControlFlow<request_service::Response, request_service::Request>, BoxError> {
+        let service_name = request.connector.id.subgraph_name.clone();
+        let source_name = request
+            .connector
+            .id
+            .source_name
+            .as_ref()
+            .map(ToString::to_string);
+        let connector_name = request.connector.id.name();
+        for plugin in &self.plugins {
+            let Some(hook) = plugin.hooks.iter().find(|hook| {
+                hook.hook == WasmHook::Connector
+                    && hook.selector.matches_connector(
+                        &service_name,
+                        source_name.as_deref(),
+                        &connector_name,
+                    )
+            }) else {
+                continue;
+            };
+            let event = hooks::connector_event(
+                &request,
+                source_name.as_deref(),
+                hook,
+                &plugin.configuration,
+            );
+            let result = match event {
+                Ok(event) => match self.invoke(plugin, event).await {
+                    Ok(super::wit::Outcome::Proceed(mutation)) => {
+                        hooks::apply_connector_mutation(
+                            &mut request.transport_request,
+                            &request.context,
+                            hook,
+                            mutation,
+                        )
+                    }
+                    Ok(super::wit::Outcome::BreakRequest(_)) => Err(format!(
+                        "wasm plugin `{}` attempted unsupported `break-request` for `connector.request`",
+                        plugin.name
+                    )
+                    .into()),
+                    Err(error) => Err(error),
+                },
+                Err(error) => Err(error),
+            };
+            if let Err(error) = result {
+                let failure = hook.failure.unwrap_or(plugin.failure);
+                if matches!(failure.default, WasmFailureMode::Open) {
+                    tracing::error!(
+                        plugin = %plugin.name,
+                        source = source_config_key,
+                        %error,
+                        "wasm connector plugin failed open"
+                    );
+                    continue;
+                }
+                return Err(format!("wasm plugin `{}` failed: {error}", plugin.name).into());
             }
         }
         Ok(ControlFlow::Continue(request))
@@ -311,6 +377,9 @@ fn event_size(event: &super::wit::Event) -> u64 {
     let fixed = event.hook.len()
         + event.request_id.len()
         + event.service_name.as_ref().map_or(0, String::len)
+        + event.source_name.as_ref().map_or(0, String::len)
+        + event.connector_name.as_ref().map_or(0, String::len)
+        + event.transport.as_ref().map_or(0, String::len)
         + event.method.as_ref().map_or(0, String::len)
         + event.uri.as_ref().map_or(0, String::len)
         + event.body.as_ref().map_or(0, String::len)
@@ -361,7 +430,11 @@ fn outcome_size(outcome: &super::wit::Outcome) -> u64 {
                     super::wit::ContextOperation::Remove(name) => name.len(),
                 })
                 .sum::<usize>();
-            headers + context + mutation.body.as_ref().map_or(0, String::len)
+            headers
+                + context
+                + mutation.method.as_ref().map_or(0, String::len)
+                + mutation.uri.as_ref().map_or(0, String::len)
+                + mutation.body.as_ref().map_or(0, String::len)
         }
         super::wit::Outcome::BreakRequest(response) => {
             headers_size(&response.headers) + response.body.len()

@@ -22,6 +22,8 @@ export function headerPlugin(language, headerValue = () => "active") {
               },
             },
           ],
+          method: undefined,
+          uri: undefined,
           body: undefined,
         },
       };

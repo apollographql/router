@@ -45,14 +45,19 @@ target/debug/router \
   >"$temporary_dir/router.log" 2>&1 &
 router_pid=$!
 
-request='{"query":"{ me }"}'
-expected='{"data":{"me":"active,active,active,active,active,active"}}'
+request='{"query":"{ me connectorMessage { value } }"}'
+expected='{"data":{"me":"active,active,active,active,active,active","connectorMessage":{"value":"active"}}}'
 response=""
 for _ in {1..600}; do
   if response="$(curl --silent --fail --max-time 1 http://127.0.0.1:4100/ \
     -H 'content-type: application/json' \
     --data "$request" 2>/dev/null)"; then
     break
+  fi
+  if ! kill -0 "$router_pid" 2>/dev/null; then
+    echo "Router exited before becoming ready:" >&2
+    sed -n '1,200p' "$temporary_dir/router.log" >&2
+    exit 1
   fi
   sleep 0.25
 done

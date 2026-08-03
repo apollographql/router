@@ -22,6 +22,8 @@ class Hooks(exports.Hooks):
                         )
                     )
                 ],
+                method=None,
+                uri=None,
                 body=None,
             )
         )

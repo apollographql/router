@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -12791,7 +12792,8 @@ expression: "&schema"
     "WasmHook": {
       "enum": [
         "supergraph.request",
-        "subgraph.request"
+        "subgraph.request",
+        "connector.request"
       ],
       "type": "string"
     },
@@ -12826,7 +12828,23 @@ expression: "&schema"
     "WasmHookSelector": {
       "additionalProperties": false,
       "properties": {
+        "connector_names": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
         "service_names": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "source_names": {
           "default": [],
           "items": {
             "type": "string"
@@ -12959,6 +12977,9 @@ expression: "&schema"
         },
         "headers": {
           "$ref": "#/definitions/WasmHeaderPermissions"
+        },
+        "transport": {
+          "$ref": "#/definitions/WasmTransportPermissions"
         }
       },
       "type": "object"
@@ -13033,6 +13054,29 @@ expression: "&schema"
           "type": "object"
         }
       ]
+    },
+    "WasmTransportAccess": {
+      "enum": [
+        "none",
+        "read",
+        "read_write"
+      ],
+      "type": "string"
+    },
+    "WasmTransportPermissions": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "$ref": "#/definitions/WasmTransportAccess"
+        },
+        "method": {
+          "$ref": "#/definitions/WasmTransportAccess"
+        },
+        "uri": {
+          "$ref": "#/definitions/WasmTransportAccess"
+        }
+      },
+      "type": "object"
     },
     "WebSocketConfiguration": {
       "additionalProperties": false,

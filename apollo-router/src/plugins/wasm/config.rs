@@ -69,28 +69,55 @@ pub(super) struct WasmHookConfig {
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
 pub(super) enum WasmHook {
     #[serde(rename = "supergraph.request")]
-    SupergraphRequest,
+    Supergraph,
     #[serde(rename = "subgraph.request")]
-    SubgraphRequest,
+    Subgraph,
+    #[serde(rename = "connector.request")]
+    Connector,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct WasmHookSelector {
     pub(super) service_names: HashSet<String>,
+    pub(super) source_names: HashSet<String>,
+    pub(super) connector_names: HashSet<String>,
 }
 
 impl WasmHookSelector {
     pub(super) fn matches_service(&self, service_name: &str) -> bool {
         self.service_names.is_empty() || self.service_names.contains(service_name)
     }
+
+    pub(super) fn matches_connector(
+        &self,
+        service_name: &str,
+        source_name: Option<&str>,
+        connector_name: &str,
+    ) -> bool {
+        self.matches_service(service_name)
+            && (self.source_names.is_empty()
+                || source_name.is_some_and(|name| self.source_names.contains(name)))
+            && (self.connector_names.is_empty() || self.connector_names.contains(connector_name))
+    }
 }
 
 impl WasmHookConfig {
     pub(super) fn validate(&self, plugin_name: &str) -> Result<(), String> {
-        if self.hook == WasmHook::SupergraphRequest && !self.selector.service_names.is_empty() {
+        if self.hook == WasmHook::Supergraph
+            && (!self.selector.service_names.is_empty()
+                || !self.selector.source_names.is_empty()
+                || !self.selector.connector_names.is_empty())
+        {
             return Err(format!(
-                "wasm plugin `{plugin_name}` cannot select services for `supergraph.request`"
+                "wasm plugin `{plugin_name}` cannot use selectors for `supergraph.request`"
+            ));
+        }
+        if self.hook == WasmHook::Subgraph
+            && (!self.selector.source_names.is_empty() || !self.selector.connector_names.is_empty())
+        {
+            return Err(format!(
+                "wasm plugin `{plugin_name}` cannot use connector selectors for `subgraph.request`"
             ));
         }
         Ok(())
@@ -103,6 +130,7 @@ pub(super) struct WasmPermissions {
     pub(super) headers: WasmHeaderPermissions,
     pub(super) context: WasmContextPermissions,
     pub(super) graphql: WasmGraphqlPermissions,
+    pub(super) transport: WasmTransportPermissions,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
@@ -137,6 +165,23 @@ impl WasmNameMatcher {
 #[serde(default, deny_unknown_fields)]
 pub(super) struct WasmGraphqlPermissions {
     pub(super) request: WasmGraphqlAccess,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct WasmTransportPermissions {
+    pub(super) method: WasmTransportAccess,
+    pub(super) uri: WasmTransportAccess,
+    pub(super) body: WasmTransportAccess,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum WasmTransportAccess {
+    #[default]
+    None,
+    Read,
+    ReadWrite,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq)]

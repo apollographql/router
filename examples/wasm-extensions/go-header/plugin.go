@@ -19,7 +19,9 @@ func Handle(Event) witTypes.Result[Outcome, string] {
 				Value: `{"language":"go"}`,
 			}),
 		},
-		Body: witTypes.None[string](),
+		Method: witTypes.None[string](),
+		Uri:    witTypes.None[string](),
+		Body:   witTypes.None[string](),
 	}
 	return witTypes.Ok[Outcome, string](MakeOutcomeProceed(mutation))
 }

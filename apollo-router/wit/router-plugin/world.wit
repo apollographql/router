@@ -15,6 +15,9 @@ interface hooks {
         hook: string,
         request-id: string,
         service-name: option<string>,
+        source-name: option<string>,
+        connector-name: option<string>,
+        transport: option<string>,
         method: option<string>,
         uri: option<string>,
         headers: list<header>,
@@ -42,6 +45,8 @@ interface hooks {
     record mutation {
         headers: list<header-operation>,
         context: list<context-operation>,
+        method: option<string>,
+        uri: option<string>,
         body: option<string>,
     }
 

@@ -24,20 +24,32 @@ impl Guest for RustHeader {
                     name: "x-wasm-rust".to_string(),
                     values: vec!["blocked".to_string()],
                 }],
-                body: r#"{"errors":[{"message":"blocked by Rust WASM plugin"}]}"#
-                    .to_string(),
+                body: r#"{"errors":[{"message":"blocked by Rust WASM plugin"}]}"#.to_string(),
             }));
         }
+
+        let header_value = if event.hook == "connector.request"
+            && (event.service_name.as_deref() != Some("connectors")
+                || event.source_name.as_deref() != Some("local")
+                || event.connector_name.as_deref() != Some("localMessage")
+                || event.transport.as_deref() != Some("http"))
+        {
+            "invalid-connector-event"
+        } else {
+            "active"
+        };
 
         Ok(Outcome::Proceed(Mutation {
             headers: vec![HeaderOperation::Set(Header {
                 name: "x-wasm-rust".to_string(),
-                values: vec!["active".to_string()],
+                values: vec![header_value.to_string()],
             })],
             context: vec![ContextOperation::Set(ContextEntry {
                 name: "wasm.rust".to_string(),
                 value: r#"{"language":"rust"}"#.to_string(),
             })],
+            method: None,
+            uri: None,
             body: None,
         }))
     }

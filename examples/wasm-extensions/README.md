@@ -4,6 +4,8 @@ This example runs six WebAssembly components authored in Java, Node.js, Python, 
 
 The shared WIT contract is in `apollo-router/wit/router-plugin/world.wit`.
 
+All six components are built against the same contract, which also supports `connector.request`. Connector events identify the originating subgraph with `service-name`, the optional connector source with `source-name`, the specific `@connect` directive with `connector-name`, and the transport as `http` or `mapping_only`. HTTP connector events expose the raw transport request through the existing method, URI, header, and body fields; mapping-only events have no HTTP request fields. The Rust component also runs at `connector.request` for the local `connectors.local` source and `localMessage` connector. Its header mutation is returned by the local connector endpoint, proving the connector layer executed.
+
 ### Language support paths
 
 | Language | Component path | Notes |
@@ -44,6 +46,27 @@ wasm:
 ```
 
 Unknown host-owned fields are rejected so mistakes fail at startup. The value under `configuration` is owned by the component and can evolve without changing the Router schema. Permissions default to no access, while selectors and tagged source variants leave room for additional hooks, source transports, signature metadata, and capabilities later.
+
+Connector hooks use a source selector independently of the originating subgraph:
+
+```yaml
+hooks:
+  - hook: connector.request
+    selector:
+      service_names: [products]
+      source_names: [inventory]
+      connector_names: [inventory-by-id]
+    permissions:
+      transport:
+        method: read
+        uri: read_write
+        body: read_write
+      headers:
+        read:
+          names: [authorization]
+        write:
+          names: [x-policy-result]
+```
 
 ## Build and verify all guests
 
@@ -129,5 +152,5 @@ curl http://127.0.0.1:4100/ \
 The response should be:
 
 ```json
-{"data":{"me":"active,active,active,active,active,active"}}
+{"data":{"me":"active,active,active,active,active,active","connectorMessage":{"value":"active"}}}
 ```

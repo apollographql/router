@@ -7,11 +7,13 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use self::config::WasmConfig;
+use self::layer::WasmConnectorLayer;
 use self::layer::WasmSubgraphLayer;
 use self::layer::WasmSupergraphLayer;
 use self::runtime::Runtime;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::services::connector::request_service;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -61,6 +63,20 @@ impl PluginPrivate for Wasm {
             .layer(WasmSubgraphLayer::new(
                 self.runtime.clone(),
                 Arc::from(service_name),
+            ))
+            .service(service)
+            .boxed_clone()
+    }
+
+    fn connector_request_service(
+        &self,
+        service: request_service::BoxCloneService,
+        source_name: String,
+    ) -> request_service::BoxCloneService {
+        ServiceBuilder::new()
+            .layer(WasmConnectorLayer::new(
+                self.runtime.clone(),
+                Arc::from(source_name),
             ))
             .service(service)
             .boxed_clone()

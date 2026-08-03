@@ -3,6 +3,20 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path != "/connector":
+            self.send_error(404)
+            return
+
+        body = json.dumps(
+            {"value": self.headers.get("x-wasm-rust", "missing")}
+        ).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_POST(self):
         length = int(self.headers.get("content-length", "0"))
         self.rfile.read(length)

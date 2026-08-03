@@ -32,6 +32,18 @@ wasm:
             context:
               write:
                 names: [wasm.rust]
+        - hook: connector.request
+          selector:
+            service_names: [connectors]
+            source_names: [local]
+            connector_names: [localMessage]
+          permissions:
+            headers:
+              write:
+                names: [x-wasm-rust]
+            context:
+              write:
+                names: [wasm.rust]
 
     - name: node-header
       source:

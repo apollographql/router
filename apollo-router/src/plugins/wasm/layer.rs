@@ -8,6 +8,7 @@ use tower::Service;
 
 use super::runtime::Runtime;
 use crate::layers::async_checkpoint::AsyncCheckpointService;
+use crate::services::connector::request_service;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -54,6 +55,54 @@ type SubgraphFuture =
 pub(super) struct WasmSubgraphLayer {
     runtime: Arc<Runtime>,
     service_name: Arc<str>,
+}
+
+type ConnectorFuture = BoxFuture<
+    'static,
+    Result<ControlFlow<request_service::Response, request_service::Request>, BoxError>,
+>;
+
+#[derive(Clone)]
+pub(super) struct WasmConnectorLayer {
+    runtime: Arc<Runtime>,
+    source_config_key: Arc<str>,
+}
+
+impl WasmConnectorLayer {
+    pub(super) fn new(runtime: Arc<Runtime>, source_config_key: Arc<str>) -> Self {
+        Self {
+            runtime,
+            source_config_key,
+        }
+    }
+}
+
+impl<S> Layer<S> for WasmConnectorLayer
+where
+    S: Service<request_service::Request, Response = request_service::Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = AsyncCheckpointService<S, ConnectorFuture, request_service::Request>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        let runtime = self.runtime.clone();
+        let source_config_key = self.source_config_key.clone();
+        AsyncCheckpointService::new(
+            move |request| -> ConnectorFuture {
+                let runtime = runtime.clone();
+                let source_config_key = source_config_key.clone();
+                Box::pin(async move {
+                    runtime
+                        .process_connector_request(request, &source_config_key)
+                        .await
+                })
+            },
+            inner,
+        )
+    }
 }
 
 impl WasmSubgraphLayer {
