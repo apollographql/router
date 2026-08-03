@@ -1,4 +1,4 @@
-### Fix query planner error on `@requires` when the key's conditions are fetched below the entity
+### Fix query planner error on `@requires` when the key's conditions are fetched below the entity ([PR #9926](https://github.com/apollographql/router/pull/9926))
 
 Planning a query could fail with the internal error `Union types don't have field "<field>", only "__typename"` when an entity's `@requires` had to be resolved through a nested `@key` whose own fields came from another subgraph. Concretely, this happens when the entity's key is nested (for example `@key(fields: "subEntity { id2 }")`) and `id2` is only resolvable elsewhere, so the key-resolution *conditions* get fetched at a path *deeper* in the response (`unionField.subEntity`) than the entity that needs them (`unionField`).
 
@@ -10,4 +10,4 @@ In that situation the condition fetch sits below the key fetch, so there is no d
 
 The first defect masked the other two: they would have ordered the `@requires` fetch *before* the fetch producing the required field, so the entity resolver would have been called without its required data. All three are fixed, and such queries now plan correctly, fetching the required field before the field that requires it.
 
-By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/XXXX
+By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/9926
