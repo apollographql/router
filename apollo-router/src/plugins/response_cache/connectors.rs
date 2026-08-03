@@ -978,8 +978,16 @@ impl ConnectorCacheService {
                     new_entities.push(entry.data);
                 }
                 None => {
-                    // Was not cached - take from response and store
-                    if let Some((entity_idx, value)) = entities_iter.next() {
+                    // Was not cached - take from response and store. A response with fewer
+                    // entities than requested representations is malformed: erroring here (like
+                    // the subgraph path) beats silently mis-merging positionally-keyed data.
+                    let (entity_idx, value) =
+                        entities_iter
+                            .next()
+                            .ok_or_else(|| FetchError::MalformedResponse {
+                                reason: "invalid number of entities".to_string(),
+                            })?;
+                    {
                         // Check for per-entity errors (matching the subgraph pattern in
                         // insert_entities_in_result). Entities with errors should not be cached
                         // to avoid persisting error data until TTL expires.
@@ -1425,20 +1433,28 @@ impl ConnectorRequestCacheService {
             "cache.key" = cache_key.as_str(),
         );
 
-        let fetch_result = storage
-            .fetch(&cache_key, &self.source_name)
-            .instrument(lookup_span.clone())
-            .await;
+        // Don't touch storage at all when the client requested no-cache: the result could never
+        // be served anyway, and the fetch would skew the lookup metrics.
+        let fetch_result = if skip_cache_lookup {
+            None
+        } else {
+            Some(
+                storage
+                    .fetch(&cache_key, &self.source_name)
+                    .instrument(lookup_span.clone())
+                    .await,
+            )
+        };
 
         // Mark span as error for non-trivial fetch failures
-        if let Err(ref err) = fetch_result
+        if let Some(Err(ref err)) = fetch_result
             && !err.is_row_not_found()
         {
             lookup_span.mark_as_error(format!("cannot get cache entry: {err}"));
         }
 
         match fetch_result {
-            Ok(entry) if entry.control.can_use() && !skip_cache_lookup => {
+            Some(Ok(entry)) if entry.control.can_use() => {
                 // Cache hit - build a response from cached data
                 lookup_span.set_span_dyn_attribute(
                     opentelemetry::Key::new("cache.status"),
