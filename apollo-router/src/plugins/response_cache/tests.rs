@@ -1427,6 +1427,7 @@ async fn no_store_from_request() {
     // Just to make sure it doesn't invalidate anything, which means nothing has been stored
     let invalidations_by_subgraph = storage
         .invalidate(
+            crate::plugins::response_cache::cache_tag::CacheScope::Subgraph,
             vec![
                 "user".to_string(),
                 "organization".to_string(),
@@ -1493,6 +1494,7 @@ async fn no_store_from_request() {
     // Just to make sure it doesn't invalidate anything, which means nothing has been stored
     let invalidations_by_subgraph = storage
         .invalidate(
+            crate::plugins::response_cache::cache_tag::CacheScope::Subgraph,
             vec![
                 "user".to_string(),
                 "organization".to_string(),
@@ -4553,6 +4555,42 @@ async fn connector_response_body(
     serde_json::from_slice(&bytes).unwrap()
 }
 
+/// Wait until the should-store cache keys recorded in the response's debug context are present in
+/// storage (cache inserts are asynchronous — see `wait_for_cache`). Requires the request to have
+/// been made with the cache debug header. Returns the storage handle (and its liveness guard) for
+/// further checks.
+async fn wait_for_connector_cache_insert(
+    namespace: &str,
+    context: &Context,
+) -> (Storage, tokio::sync::broadcast::Sender<()>) {
+    let cache_keys: CacheKeysContext = context
+        .get(super::plugin::CONTEXT_DEBUG_CACHE_KEYS)
+        .unwrap()
+        .expect("debug cache keys context missing — was the debug header set?");
+    let keys = expected_cached_keys(&cache_keys);
+    assert!(
+        !keys.is_empty(),
+        "expected at least one storable cache key, got: {cache_keys:?}"
+    );
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, namespace), drop_rx)
+        .await
+        .unwrap();
+    wait_for_cache(&storage, keys).await;
+    (storage, drop_tx)
+}
+
+/// Number of requests the wiremock server received for the given path.
+async fn mock_requests_for_path(mock_server: &MockServer, path: &str) -> usize {
+    mock_server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path() == path)
+        .count()
+}
+
 #[tokio::test]
 async fn connector_root_field_cache_miss_then_hit() {
     let mock_server = MockServer::start().await;
@@ -4577,6 +4615,7 @@ async fn connector_root_field_cache_miss_then_hit() {
     // First request: cache miss
     let request = make_connector_cache_request("query { users { id name } }");
     let response = service.oneshot(request).await.unwrap();
+    let first_context = response.context.clone();
     let body = connector_response_body(response).await;
     assert!(
         body.get("data").is_some(),
@@ -4588,8 +4627,8 @@ async fn connector_root_field_cache_miss_then_hit() {
         "mock server should have received at least 1 request"
     );
 
-    // Wait for async cache insert
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // Wait for the async cache insert to complete
+    let _storage_guard = wait_for_connector_cache_insert(&namespace, &first_context).await;
 
     // Second request: cache hit — recreate service to ensure no in-memory state
     let service = create_connector_cache_service(&uri, &namespace, None).await;
@@ -4606,6 +4645,439 @@ async fn connector_root_field_cache_miss_then_hit() {
     assert_eq!(
         received_after_first, received_after_second,
         "second request should be served from cache, but mock received new requests"
+    );
+}
+
+/// A REST response with NO Cache-Control header must be cached using the configured TTL, and the
+/// client must see a max-age header rather than no-store. This is the documented, deliberate
+/// divergence from the subgraph behavior (where a headerless response is not stored).
+#[tokio::test]
+async fn connector_root_field_no_cache_control_header_uses_config_ttl() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            // No cache-control header at all
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {"id": 1, "name": "Alice"}
+            ])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    // First request: cache miss, stored with the config TTL (10m in the test harness config)
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { users { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+
+    let cache_control_header = response
+        .response
+        .headers()
+        .get(CACHE_CONTROL)
+        .expect("response should carry a cache-control header")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        cache_control_header.contains("max-age="),
+        "client cache-control should carry the config TTL, got: {cache_control_header}"
+    );
+    assert!(
+        !cache_control_header.contains("no-store"),
+        "headerless upstream response must not become no-store, got: {cache_control_header}"
+    );
+
+    // Wait for the async cache insert to complete (fails the test if nothing is storable)
+    let _storage_guard = wait_for_connector_cache_insert(&namespace, &response.context).await;
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "first request should return data, got: {body:?}"
+    );
+    let received_after_first = mock_server.received_requests().await.unwrap().len();
+
+    // Second request: served from cache, no new REST call
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { users { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "second request should return data, got: {body:?}"
+    );
+    let received_after_second = mock_server.received_requests().await.unwrap().len();
+    assert_eq!(
+        received_after_first, received_after_second,
+        "headerless-but-TTL-configured responses should be served from cache"
+    );
+}
+
+/// Store decisions must be based on each connector response's own Cache-Control, not on the
+/// request-wide aggregate: a no-store response from one root field must not prevent a cacheable
+/// sibling root field (fetched in the same query) from being stored.
+#[tokio::test]
+async fn connector_root_fields_cache_control_isolated_per_response() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "no-store")
+                .set_body_json(serde_json::json!([
+                    {"id": 1, "name": "Alice"}
+                ])),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/users/1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!({"id": 1, "name": "Alice"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    let query = r#"query { users { id name } user(id: "1") { id name } }"#;
+
+    // First request: both fields fetched; only the max-age one may be stored
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request(query);
+    let response = service.oneshot(request).await.unwrap();
+
+    // The client header is the most-restrictive merge across both fetches
+    let cache_control_header = response
+        .response
+        .headers()
+        .get(CACHE_CONTROL)
+        .expect("response should carry a cache-control header")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        cache_control_header.contains("no-store"),
+        "aggregate client cache-control should be no-store, got: {cache_control_header}"
+    );
+
+    // Exactly one entry (the /users/1 one) must be storable, and the store must complete
+    let _storage_guard = wait_for_connector_cache_insert(&namespace, &response.context).await;
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "first request should return data, got: {body:?}"
+    );
+
+    let users_after_first = mock_requests_for_path(&mock_server, "/users").await;
+    let user1_after_first = mock_requests_for_path(&mock_server, "/users/1").await;
+
+    // Second request: /users is re-fetched (no-store), /users/1 is served from cache
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request(query);
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "second request should return data, got: {body:?}"
+    );
+
+    let users_after_second = mock_requests_for_path(&mock_server, "/users").await;
+    let user1_after_second = mock_requests_for_path(&mock_server, "/users/1").await;
+    assert!(
+        users_after_second > users_after_first,
+        "no-store root field must be re-fetched"
+    );
+    assert_eq!(
+        user1_after_first, user1_after_second,
+        "cacheable sibling root field must be served from cache despite the no-store sibling"
+    );
+}
+
+/// Helper: make a debug-enabled router request with an extra header.
+fn make_connector_cache_request_with_header(
+    query: &str,
+    header_name: &'static str,
+    header_value: &'static str,
+) -> crate::services::router::Request {
+    supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .header(
+            HeaderName::from_static(header_name),
+            HeaderValue::from_static(header_value),
+        )
+        .build()
+        .unwrap()
+        .try_into()
+        .unwrap()
+}
+
+/// Cross-user leak regression (forwarded headers): a connector using
+/// `http: {headers: [{name, from}]}` must partition its cache key by the forwarded client
+/// header's value — and must NOT partition on unrelated headers.
+#[tokio::test]
+async fn connector_forwarded_header_partitions_cache_key() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/me"))
+        .and(wiremock::matchers::header("x-user", "alice"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!({"id": "alice", "name": "Alice Anderson"})),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/me"))
+        .and(wiremock::matchers::header("x-user", "bob"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!({"id": "bob", "name": "Bob Brown"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+    let query = "query { me { id name } }";
+
+    // alice: miss + store
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request_with_header(query, "x-user", "alice");
+    let response = service.oneshot(request).await.unwrap();
+    let alice_context = response.context.clone();
+    let body = connector_response_body(response).await;
+    assert_eq!(
+        body["data"]["me"]["id"], "alice",
+        "alice should get her own data, got: {body:?}"
+    );
+    let _guard = wait_for_connector_cache_insert(&namespace, &alice_context).await;
+    let me_after_alice = mock_requests_for_path(&mock_server, "/me").await;
+
+    // bob: MUST miss (distinct key) and get bob's data — this was the F9 leak
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request_with_header(query, "x-user", "bob");
+    let response = service.oneshot(request).await.unwrap();
+    let bob_context = response.context.clone();
+    let body = connector_response_body(response).await;
+    assert_eq!(
+        body["data"]["me"]["id"], "bob",
+        "bob must NOT be served alice's cached body (forwarded-header leak), got: {body:?}"
+    );
+    let _guard2 = wait_for_connector_cache_insert(&namespace, &bob_context).await;
+    let me_after_bob = mock_requests_for_path(&mock_server, "/me").await;
+    assert!(
+        me_after_bob > me_after_alice,
+        "bob's request must reach the REST API"
+    );
+
+    // alice again, extra UNRELATED header: must be a cache hit (no REST call) — proves both
+    // per-user partitioning and no over-partitioning on unforwarded headers.
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .header(
+            HeaderName::from_static("x-user"),
+            HeaderValue::from_static("alice"),
+        )
+        .header(
+            HeaderName::from_static("x-unrelated"),
+            HeaderValue::from_static("noise"),
+        )
+        .build()
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert_eq!(body["data"]["me"]["id"], "alice");
+    assert_eq!(
+        me_after_bob,
+        mock_requests_for_path(&mock_server, "/me").await,
+        "alice's repeat request (with an unrelated extra header) must be served from cache"
+    );
+}
+
+/// The caching layer must record per-source hit/miss info in the request context — this is the
+/// data source for the `apollo.router.response.cache` telemetry instrument (the instrument's
+/// config→emit seam is unit-tested in telemetry::config_new::cache).
+#[tokio::test]
+async fn connector_cache_hit_miss_recorded_in_context() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!([{"id": 1, "name": "Alice"}])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+    let query = "query { users { id name } }";
+
+    // Miss
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request(query);
+    let response = service.oneshot(request).await.unwrap();
+    let miss_context = response.context.clone();
+    let _body = connector_response_body(response).await;
+    let info: CacheSubgraph = miss_context
+        .get(CacheMetricContextKey::new("connectors.json".to_string()))
+        .unwrap()
+        .expect("hit/miss context entry must be recorded on a miss");
+    assert_eq!(info.0.get("Query").map(|hm| (hm.hit, hm.miss)), Some((0, 1)));
+    let _guard = wait_for_connector_cache_insert(&namespace, &miss_context).await;
+
+    // Hit
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request(query);
+    let response = service.oneshot(request).await.unwrap();
+    let hit_context = response.context.clone();
+    let _body = connector_response_body(response).await;
+    let info: CacheSubgraph = hit_context
+        .get(CacheMetricContextKey::new("connectors.json".to_string()))
+        .unwrap()
+        .expect("hit/miss context entry must be recorded on a hit");
+    assert_eq!(info.0.get("Query").map(|hm| (hm.hit, hm.miss)), Some((1, 0)));
+}
+
+/// Entity path end-to-end through the real router: `products` returns stubs, `Product.title`
+/// resolves via an entity connector. Verifies full-hit ⇒ zero REST calls, and `$key`-templated
+/// `@cacheTag` invalidation deletes exactly the tagged entity, forcing a partial re-fetch.
+#[tokio::test]
+async fn connector_entity_path_with_key_cache_tag() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/products"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!([{"id": "1"}, {"id": "2"}])),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/products/1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!({"id": "1", "title": "One"})),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/products/2"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!({"id": "2", "title": "Two"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+    let query = "query { products { id title } }";
+
+    // Cold: root fetch + one entity fetch per product
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request(query);
+    let response = service.oneshot(request).await.unwrap();
+    let first_context = response.context.clone();
+    let body = connector_response_body(response).await;
+    assert_eq!(
+        body["data"]["products"],
+        serde_json::json!([
+            {"id": "1", "title": "One"},
+            {"id": "2", "title": "Two"}
+        ]),
+        "entity merge must preserve order and values, got: {body:?}"
+    );
+    assert_eq!(mock_requests_for_path(&mock_server, "/products/1").await, 1);
+    assert_eq!(mock_requests_for_path(&mock_server, "/products/2").await, 1);
+    let (storage, _drop_tx) = wait_for_connector_cache_insert(&namespace, &first_context).await;
+    let products_after_first = mock_requests_for_path(&mock_server, "/products").await;
+
+    // Warm: full hit, zero REST calls
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request(query);
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert_eq!(
+        body["data"]["products"],
+        serde_json::json!([
+            {"id": "1", "title": "One"},
+            {"id": "2", "title": "Two"}
+        ])
+    );
+    assert_eq!(
+        products_after_first,
+        mock_requests_for_path(&mock_server, "/products").await,
+        "root fetch must be served from cache"
+    );
+    assert_eq!(
+        mock_requests_for_path(&mock_server, "/products/1").await,
+        1,
+        "entity 1 must be served from cache"
+    );
+
+    // Invalidate ONLY product 1 via its $key-templated cache tag
+    let counts = storage
+        .invalidate(
+            crate::plugins::response_cache::cache_tag::CacheScope::Connector,
+            vec!["product-1".to_string()],
+            vec!["connectors.json".to_string()],
+            "cache_tag",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        counts.get("connectors.json"),
+        Some(&1),
+        "$key-templated cache tag must delete exactly the one tagged entity, got: {counts:?}"
+    );
+
+    // Partial re-fetch: only product 1 hits the REST API again
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request(query);
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert_eq!(
+        body["data"]["products"],
+        serde_json::json!([
+            {"id": "1", "title": "One"},
+            {"id": "2", "title": "Two"}
+        ])
+    );
+    assert_eq!(
+        mock_requests_for_path(&mock_server, "/products/1").await,
+        2,
+        "invalidated entity must be re-fetched"
+    );
+    assert_eq!(
+        mock_requests_for_path(&mock_server, "/products/2").await,
+        1,
+        "non-invalidated entity must still be served from cache"
     );
 }
 
@@ -4669,6 +5141,7 @@ async fn connector_entity_cache_miss_then_hit() {
     // First request: cache miss
     let request = make_connector_cache_request("query { user(id: \"1\") { id name } }");
     let response = service.oneshot(request).await.unwrap();
+    let first_context = response.context.clone();
     let body = connector_response_body(response).await;
     assert!(
         body.get("data").is_some(),
@@ -4680,8 +5153,8 @@ async fn connector_entity_cache_miss_then_hit() {
         "mock server should have received at least 1 request"
     );
 
-    // Wait for async cache insert
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // Wait for the async cache insert to complete
+    let _storage_guard = wait_for_connector_cache_insert(&namespace, &first_context).await;
 
     // Second request: cache hit
     let service = create_connector_cache_service(&uri, &namespace, None).await;
@@ -4774,14 +5247,16 @@ async fn connector_root_field_with_cache_tag() {
     // Execute query — the schema has @cacheTag(format: "users") on the users field
     let request = make_connector_cache_request("query { users { id name } }");
     let response = service.oneshot(request).await.unwrap();
+    let first_context = response.context.clone();
     let body = connector_response_body(response).await;
     assert!(
         body.get("data").is_some(),
         "request should return data, got: {body:?}"
     );
 
-    // Wait for async cache insert
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // Wait for the async cache insert to complete
+    let (storage, _drop_tx) = wait_for_connector_cache_insert(&namespace, &first_context).await;
+    let requests_after_first = mock_server.received_requests().await.unwrap().len();
 
     // Verify it was cached by checking second request doesn't hit mock
     let service = create_connector_cache_service(&uri, &namespace, None).await;
@@ -4791,6 +5266,42 @@ async fn connector_root_field_with_cache_tag() {
     assert!(
         body.get("data").is_some(),
         "cached request should return data, got: {body:?}"
+    );
+    assert_eq!(
+        requests_after_first,
+        mock_server.received_requests().await.unwrap().len(),
+        "second request should be served from cache"
+    );
+
+    // Invalidate by the user-facing cache tag: the write path must have indexed the entry under
+    // the tag rendered from @cacheTag(format: "users"), in the CONNECTOR scope namespace.
+    let counts = storage
+        .invalidate(
+            crate::plugins::response_cache::cache_tag::CacheScope::Connector,
+            vec!["users".to_string()],
+            vec!["connectors.json".to_string()],
+            "cache_tag",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        counts.get("connectors.json"),
+        Some(&1),
+        "cache-tag invalidation should delete exactly the cached entry, got: {counts:?}"
+    );
+
+    // After invalidation the next request must hit the REST API again
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { users { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "post-invalidation request should return data, got: {body:?}"
+    );
+    assert!(
+        mock_server.received_requests().await.unwrap().len() > requests_after_first,
+        "after cache-tag invalidation the REST API must be called again"
     );
 }
 

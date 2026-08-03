@@ -53,7 +53,10 @@ type Query
   @join__type(graph: CONNECTORS)
 {
   users: [User] @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users"}, selection: "id name"}) @join__directive(graphs: [CONNECTORS], name: "federation__cacheTag", args: {format: "users"})
-  user(id: ID!): User @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users/{$args.id}"}, selection: "id name", entity: true})
+  user(id: ID!): User @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users/{$args.id}"}, selection: "id name", entity: true}) @join__directive(graphs: [CONNECTORS], name: "federation__cacheTag", args: {format: "user-{$args.id}"})
+  me: User @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/me", headers: [{name: "x-user", from: "x-user"}]}, selection: "id name"})
+  products: [Product] @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/products"}, selection: "id"})
+  product(id: ID!): Product @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/products/{$args.id}"}, selection: "id title", entity: true})
 }
 
 type Mutation
@@ -67,4 +70,12 @@ type User
 {
   id: ID!
   name: String @join__field(graph: CONNECTORS)
+}
+
+type Product
+  @join__type(graph: CONNECTORS, key: "id")
+  @join__directive(graphs: [CONNECTORS], name: "federation__cacheTag", args: {format: "product-{$key.id}"})
+{
+  id: ID!
+  title: String @join__field(graph: CONNECTORS)
 }
