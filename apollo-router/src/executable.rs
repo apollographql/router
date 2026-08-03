@@ -331,23 +331,7 @@ pub fn main() -> Result<()> {
     }
 
     let runtime = builder.build()?;
-    let result = runtime.block_on(Executable::builder().start());
-
-    // Deliberately leak the runtime rather than dropping it.
-    //
-    // Dropping it marks the Tokio time driver as shut down, but OpenTelemetry's background
-    // workers are driven by `spawn_blocking` threads sitting in `Handle::block_on` (see
-    // `BlockingSafeTokioRuntime`), and those threads keep being polled through shutdown. Any
-    // worker still alive then polls a `tokio::time::Sleep` against the dead driver and trips
-    // `TimerEntry::poll_elapsed`'s "A Tokio 1.x context was found, but it is being shutdown"
-    // assert — which `setup_panic_handler` turns into `exit(1)` on an otherwise clean SIGTERM.
-    //
-    // Telemetry is shut down explicitly before we get here, so this is a backstop rather than the
-    // primary mechanism: it keeps a missed provider from escalating into a non-zero exit code.
-    // The process is about to exit, so there is nothing left to clean up.
-    std::mem::forget(runtime);
-
-    result
+    runtime.block_on(Executable::builder().start())
 }
 
 /// Entry point into creating a router executable with more customization than [`main`].
