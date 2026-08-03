@@ -8,6 +8,8 @@ use futures::future::BoxFuture;
 use serde_json_bytes::Value;
 use tokio::sync::mpsc;
 use tower::BoxError;
+use tower::Layer;
+use tower::Service;
 use tower::ServiceExt;
 use tracing::Instrument;
 use tracing::instrument::Instrumented;
@@ -16,7 +18,9 @@ use crate::error::Error;
 use crate::http_ext;
 use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
 use crate::plugins::subscription::SubscriptionTaskParams;
-use crate::plugins::subscription::event::EventRuntime;
+use crate::plugins::subscription::event::EventError;
+use crate::plugins::subscription::event::EventSubscriptionLayer;
+use crate::plugins::subscription::event::EventSubscriptionService;
 use crate::query_planner::OperationKind;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
 use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
@@ -29,56 +33,66 @@ use crate::services::fetch::SubscriptionRequest;
 use crate::services::subgraph::BoxGqlStream;
 use crate::spec::Schema;
 
-/// Execute the fetches required to fulfill a subscription query plan node.
-///
-/// Calls into the relevant subgraph service to run the actual requests. This means the
-/// [SubgraphServiceFactory] must produce services that have the [SubscriptionSubgraphLayer][]
-/// applied!
-///
-/// [SubscriptionSubgraphLayer]: super::subgraph::SubscriptionSubgraphLayer
-pub(crate) fn fetch_service_handle_subscription(
+pub(crate) type SubscriptionService = EventSubscriptionService<SubscriptionFetchService>;
+
+/// Build the Tower service that selects the source of subscription events.
+pub(crate) fn subscription_service(
     schema: Arc<Schema>,
     subgraph_service_factory: Arc<SubgraphServiceFactory>,
-    event_runtime: Arc<EventRuntime>,
-    request: SubscriptionRequest,
-) -> Instrumented<BoxFuture<'static, Result<FetchResponse, BoxError>>> {
-    let SubscriptionRequest {
-        ref context,
-        subscription_node: SubscriptionNode {
-            ref service_name, ..
-        },
-        ..
-    } = request;
+    event_configuration: crate::configuration::events::EventsConfiguration,
+) -> Result<SubscriptionService, EventError> {
+    let fallback = SubscriptionFetchService {
+        schema: schema.clone(),
+        subgraph_service_factory,
+    };
+    Ok(EventSubscriptionLayer::try_new(schema, event_configuration)?.layer(fallback))
+}
 
-    let service_name = service_name.clone();
-    let fetch_time_offset = context.created_at.elapsed().as_nanos() as i64;
+/// Executes subscription query plan nodes against subgraph transports.
+///
+/// The [SubgraphServiceFactory] must produce services with the
+/// [SubscriptionSubgraphLayer][] applied.
+///
+/// [SubscriptionSubgraphLayer]: super::subgraph::SubscriptionSubgraphLayer
+#[derive(Clone)]
+pub(crate) struct SubscriptionFetchService {
+    schema: Arc<Schema>,
+    subgraph_service_factory: Arc<SubgraphServiceFactory>,
+}
 
-    // Store the subgraph name in context so it's available for metrics at the router layer
-    let _ = context.insert(
-        SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY,
-        service_name.to_string(),
-    );
+impl Service<SubscriptionRequest> for SubscriptionFetchService {
+    type Response = FetchResponse;
+    type Error = BoxError;
+    type Future = Instrumented<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
 
-    // Subscriptions are not supported for connectors, so they always go to the subgraph service
-    if event_runtime.is_event_subscription(&request.subscription_node) {
-        event_runtime
-            .subscribe(request)
-            .instrument(tracing::info_span!(
-                SUBSCRIBE_SPAN_NAME,
-                "otel.kind" = "INTERNAL",
-                "apollo.subgraph.name" = service_name.as_ref(),
-                "apollo_private.sent_time_offset" = fetch_time_offset,
-                "apollo.subscription.source" = "event_stream"
-            ))
-    } else {
-        subscription_with_subgraph_service(schema, subgraph_service_factory, request).instrument(
-            tracing::info_span!(
-                SUBSCRIBE_SPAN_NAME,
-                "otel.kind" = "INTERNAL",
-                "apollo.subgraph.name" = service_name.as_ref(),
-                "apollo_private.sent_time_offset" = fetch_time_offset
-            ),
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: SubscriptionRequest) -> Self::Future {
+        let service_name = request.subscription_node.service_name.clone();
+        let fetch_time_offset = request.context.created_at.elapsed().as_nanos() as i64;
+
+        // Store the subgraph name in context so it's available for metrics at the router layer.
+        let _ = request.context.insert(
+            SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY,
+            service_name.to_string(),
+        );
+
+        subscription_with_subgraph_service(
+            self.schema.clone(),
+            self.subgraph_service_factory.clone(),
+            request,
         )
+        .instrument(tracing::info_span!(
+            SUBSCRIBE_SPAN_NAME,
+            "otel.kind" = "INTERNAL",
+            "apollo.subgraph.name" = service_name.as_ref(),
+            "apollo_private.sent_time_offset" = fetch_time_offset
+        ))
     }
 }
 

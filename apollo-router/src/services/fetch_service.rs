@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use futures::future::BoxFuture;
+use futures::future::Either;
 use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -20,8 +21,8 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::subscription::event::EventRuntime;
-use crate::plugins::subscription::fetch_service_handle_subscription;
+use crate::plugins::subscription::SubscriptionService;
+use crate::plugins::subscription::subscription_service;
 use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::build_operation_with_aliasing;
@@ -30,6 +31,7 @@ use crate::services::FetchResponse;
 use crate::services::SubgraphServiceFactory;
 use crate::services::fetch::ErrorMapping;
 use crate::services::fetch::Request;
+use crate::services::fetch::SubscriptionRequest;
 use crate::spec::Schema;
 
 /// The fetch service delegates to either the subgraph service or connector service depending
@@ -40,7 +42,7 @@ pub(crate) struct FetchService {
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>, // TODO: add subscription support to FetchService
-    pub(crate) event_runtime: Arc<EventRuntime>,
+    pub(crate) subscription_service: SubscriptionService,
     pub(crate) connector_service_factory: Arc<ConnectorServiceFactory>,
     pub(crate) hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
 }
@@ -55,10 +57,14 @@ impl FetchService {
         hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
         event_configuration: crate::configuration::events::EventsConfiguration,
     ) -> Result<Self, BoxError> {
-        let event_runtime = Arc::new(EventRuntime::try_new(schema.clone(), event_configuration)?);
+        let subscription_service = subscription_service(
+            schema.clone(),
+            subgraph_service_factory.clone(),
+            event_configuration,
+        )?;
         Ok(Self {
             subgraph_service_factory,
-            event_runtime,
+            subscription_service,
             schema,
             subgraph_schemas,
             _subscription_config: subscription_config,
@@ -92,7 +98,10 @@ impl FetchService {
 impl tower::Service<Request> for FetchService {
     type Response = FetchResponse;
     type Error = BoxError;
-    type Future = Instrumented<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
+    type Future = Either<
+        Instrumented<BoxFuture<'static, Result<Self::Response, Self::Error>>>,
+        tower::util::Oneshot<SubscriptionService, SubscriptionRequest>,
+    >;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -100,13 +109,10 @@ impl tower::Service<Request> for FetchService {
 
     fn call(&mut self, request: Request) -> Self::Future {
         match request {
-            Request::Fetch(request) => self.handle_fetch(request),
-            Request::Subscription(request) => fetch_service_handle_subscription(
-                self.schema.clone(),
-                self.subgraph_service_factory.clone(),
-                self.event_runtime.clone(),
-                request,
-            ),
+            Request::Fetch(request) => Either::Left(self.handle_fetch(request)),
+            Request::Subscription(request) => {
+                Either::Right(self.subscription_service.clone().oneshot(request))
+            }
         }
     }
 }
@@ -115,7 +121,7 @@ impl FetchService {
     fn handle_fetch(
         &mut self,
         request: FetchRequest,
-    ) -> <FetchService as tower::Service<Request>>::Future {
+    ) -> Instrumented<BoxFuture<'static, Result<FetchResponse, BoxError>>> {
         let FetchRequest {
             ref context,
             fetch_node: FetchNode {

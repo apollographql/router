@@ -36,6 +36,7 @@ mod nats_core;
 mod nats_jetstream;
 mod providers;
 mod redis_pubsub;
+mod service;
 mod template;
 
 use catalog::EventCatalog;
@@ -47,6 +48,8 @@ use fanout::forward_shared_events;
 use providers::ConfiguredEvents;
 use providers::ConfiguredProvider;
 use providers::ConfiguredSource;
+pub(crate) use service::EventSubscriptionLayer;
+pub(crate) use service::EventSubscriptionService;
 use template::render_destinations;
 
 /// A message before format decoding.
@@ -147,11 +150,11 @@ impl EventRuntime {
         Some((event, response_name, field))
     }
 
-    pub(crate) fn is_event_subscription(&self, node: &SubscriptionNode) -> bool {
+    fn is_event_subscription(&self, node: &SubscriptionNode) -> bool {
         self.event_field(node).is_some()
     }
 
-    pub(crate) fn subscribe(
+    fn subscribe(
         self: Arc<Self>,
         request: SubscriptionRequest,
     ) -> futures::future::BoxFuture<'static, Result<FetchResponse, BoxError>> {

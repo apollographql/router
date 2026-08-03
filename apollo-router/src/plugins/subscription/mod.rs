@@ -42,7 +42,8 @@ pub(crate) use execution::SUBSCRIPTION_MAX_LIFETIME_EXTENSION_CODE;
 pub(crate) use execution::SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE;
 pub(crate) use execution::SubscriptionExecutionLayer;
 pub(crate) use execution::SubscriptionTaskParams;
-pub(crate) use fetch::fetch_service_handle_subscription;
+pub(crate) use fetch::SubscriptionService;
+pub(crate) use fetch::subscription_service;
 
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN: &str = "apollo.subscription";
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN_NAME: &str = "subscription";
