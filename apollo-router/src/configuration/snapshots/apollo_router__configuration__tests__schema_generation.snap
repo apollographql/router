@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -12707,11 +12706,18 @@ expression: "&schema"
     },
     "WasmConfig": {
       "additionalProperties": false,
+      "description": "Configures sandboxed WebAssembly plugins for router request hooks.",
       "properties": {
         "defaults": {
-          "$ref": "#/definitions/WasmDefaults"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmDefaults"
+            }
+          ],
+          "description": "Default resource limits and failure behavior for all WebAssembly plugins."
         },
         "plugins": {
+          "description": "WebAssembly plugins loaded by the router.",
           "items": {
             "$ref": "#/definitions/WasmPluginConfig"
           },
@@ -12724,10 +12730,20 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "read": {
-          "$ref": "#/definitions/WasmNameMatcher"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmNameMatcher"
+            }
+          ],
+          "description": "Context keys that the plugin may read."
         },
         "write": {
-          "$ref": "#/definitions/WasmNameMatcher"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmNameMatcher"
+            }
+          ],
+          "description": "Context keys that the plugin may write."
         }
       },
       "type": "object"
@@ -12736,10 +12752,20 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "failure": {
-          "$ref": "#/definitions/WasmFailure"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmFailure"
+            }
+          ],
+          "description": "Default behavior when a WebAssembly plugin fails."
         },
         "limits": {
-          "$ref": "#/definitions/WasmLimits"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmLimits"
+            }
+          ],
+          "description": "Default resource limits applied to WebAssembly plugins."
         }
       },
       "type": "object"
@@ -12748,7 +12774,12 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "default": {
-          "$ref": "#/definitions/WasmFailureMode"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmFailureMode"
+            }
+          ],
+          "description": "Whether plugin failures reject the request (`closed`) or allow it to continue (`open`)."
         }
       },
       "type": "object"
@@ -12772,7 +12803,12 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "request": {
-          "$ref": "#/definitions/WasmGraphqlAccess"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmGraphqlAccess"
+            }
+          ],
+          "description": "Access granted to the GraphQL request payload."
         }
       },
       "type": "object"
@@ -12781,10 +12817,20 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "read": {
-          "$ref": "#/definitions/WasmNameMatcher"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmNameMatcher"
+            }
+          ],
+          "description": "Header names that the plugin may read."
         },
         "write": {
-          "$ref": "#/definitions/WasmNameMatcher"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmNameMatcher"
+            }
+          ],
+          "description": "Header names that the plugin may write."
         }
       },
       "type": "object"
@@ -12808,16 +12854,32 @@ expression: "&schema"
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Failure behavior override for this hook."
         },
         "hook": {
-          "$ref": "#/definitions/WasmHook"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmHook"
+            }
+          ],
+          "description": "Request stage at which the plugin runs."
         },
         "permissions": {
-          "$ref": "#/definitions/WasmPermissions"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmPermissions"
+            }
+          ],
+          "description": "Router data that the plugin may read or modify."
         },
         "selector": {
-          "$ref": "#/definitions/WasmHookSelector"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmHookSelector"
+            }
+          ],
+          "description": "Services or connectors to which this hook applies."
         }
       },
       "required": [
@@ -12830,6 +12892,7 @@ expression: "&schema"
       "properties": {
         "connector_names": {
           "default": [],
+          "description": "Connector names matched by this hook.",
           "items": {
             "type": "string"
           },
@@ -12838,6 +12901,7 @@ expression: "&schema"
         },
         "service_names": {
           "default": [],
+          "description": "Subgraph or connector service names matched by this hook.",
           "items": {
             "type": "string"
           },
@@ -12846,6 +12910,7 @@ expression: "&schema"
         },
         "source_names": {
           "default": [],
+          "description": "Connector source names matched by this hook.",
           "items": {
             "type": "string"
           },
@@ -12860,34 +12925,41 @@ expression: "&schema"
       "properties": {
         "execution_timeout": {
           "default": "10ms",
+          "description": "Maximum execution time for one plugin invocation.",
           "type": "string"
         },
         "max_concurrency": {
           "default": 128,
+          "description": "Maximum number of concurrent invocations.",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
         },
         "max_input_size": {
           "default": "1048.6 KB",
+          "description": "Maximum request payload size passed to the plugin.",
           "type": "string"
         },
         "max_memory_per_instance": {
           "default": "16.8 MB",
+          "description": "Maximum linear memory available to each plugin instance.",
           "type": "string"
         },
         "max_output_size": {
           "default": "1048.6 KB",
+          "description": "Maximum response payload size accepted from the plugin.",
           "type": "string"
         },
         "max_queue_size": {
           "default": 256,
+          "description": "Maximum number of invocations waiting for an execution slot.",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
         },
         "queue_timeout": {
           "default": "5ms",
+          "description": "Maximum time an invocation may wait for an execution slot.",
           "type": "string"
         }
       },
@@ -12898,6 +12970,7 @@ expression: "&schema"
       "properties": {
         "execution_timeout": {
           "default": null,
+          "description": "Maximum execution time for one plugin invocation.",
           "type": [
             "string",
             "null"
@@ -12905,6 +12978,7 @@ expression: "&schema"
         },
         "max_concurrency": {
           "default": null,
+          "description": "Maximum number of concurrent invocations.",
           "format": "uint",
           "minimum": 0,
           "type": [
@@ -12914,6 +12988,7 @@ expression: "&schema"
         },
         "max_input_size": {
           "default": null,
+          "description": "Maximum request payload size passed to the plugin.",
           "type": [
             "string",
             "null"
@@ -12921,6 +12996,7 @@ expression: "&schema"
         },
         "max_memory_per_instance": {
           "default": null,
+          "description": "Maximum linear memory available to each plugin instance.",
           "type": [
             "string",
             "null"
@@ -12928,6 +13004,7 @@ expression: "&schema"
         },
         "max_output_size": {
           "default": null,
+          "description": "Maximum response payload size accepted from the plugin.",
           "type": [
             "string",
             "null"
@@ -12935,6 +13012,7 @@ expression: "&schema"
         },
         "max_queue_size": {
           "default": null,
+          "description": "Maximum number of invocations waiting for an execution slot.",
           "format": "uint",
           "minimum": 0,
           "type": [
@@ -12944,6 +13022,7 @@ expression: "&schema"
         },
         "queue_timeout": {
           "default": null,
+          "description": "Maximum time an invocation may wait for an execution slot.",
           "type": [
             "string",
             "null"
@@ -12957,6 +13036,7 @@ expression: "&schema"
       "properties": {
         "names": {
           "default": [],
+          "description": "Explicit names or keys granted to the plugin.",
           "items": {
             "type": "string"
           },
@@ -12970,16 +13050,36 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "context": {
-          "$ref": "#/definitions/WasmContextPermissions"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmContextPermissions"
+            }
+          ],
+          "description": "Router context access granted to the plugin."
         },
         "graphql": {
-          "$ref": "#/definitions/WasmGraphqlPermissions"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmGraphqlPermissions"
+            }
+          ],
+          "description": "GraphQL request access granted to the plugin."
         },
         "headers": {
-          "$ref": "#/definitions/WasmHeaderPermissions"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmHeaderPermissions"
+            }
+          ],
+          "description": "HTTP header access granted to the plugin."
         },
         "transport": {
-          "$ref": "#/definitions/WasmTransportPermissions"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmTransportPermissions"
+            }
+          ],
+          "description": "HTTP transport access granted to the plugin."
         }
       },
       "type": "object"
@@ -12988,10 +13088,12 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "configuration": {
-          "default": {}
+          "default": {},
+          "description": "Plugin-defined configuration passed to the WebAssembly component."
         },
         "enabled": {
           "default": true,
+          "description": "Enables or disables the plugin.",
           "type": "boolean"
         },
         "failure": {
@@ -13002,22 +13104,35 @@ expression: "&schema"
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Failure behavior override for this plugin."
         },
         "hooks": {
+          "description": "Router request hooks that invoke the plugin.",
           "items": {
             "$ref": "#/definitions/WasmHookConfig"
           },
           "type": "array"
         },
         "limits": {
-          "$ref": "#/definitions/WasmLimitsOverride"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmLimitsOverride"
+            }
+          ],
+          "description": "Resource limit overrides for this plugin."
         },
         "name": {
+          "description": "Unique name used to identify the plugin.",
           "type": "string"
         },
         "source": {
-          "$ref": "#/definitions/WasmSource"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmSource"
+            }
+          ],
+          "description": "Location and integrity information for the WebAssembly component."
         }
       },
       "required": [
@@ -13034,12 +13149,14 @@ expression: "&schema"
           "properties": {
             "digest": {
               "default": null,
+              "description": "Optional SHA-256 digest used to verify the component, formatted as `sha256:<hex>`.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "path": {
+              "description": "Path to the WebAssembly component file.",
               "type": "string"
             },
             "type": {
@@ -13067,13 +13184,28 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "body": {
-          "$ref": "#/definitions/WasmTransportAccess"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmTransportAccess"
+            }
+          ],
+          "description": "Access granted to the HTTP body."
         },
         "method": {
-          "$ref": "#/definitions/WasmTransportAccess"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmTransportAccess"
+            }
+          ],
+          "description": "Access granted to the HTTP method."
         },
         "uri": {
-          "$ref": "#/definitions/WasmTransportAccess"
+          "allOf": [
+            {
+              "$ref": "#/definitions/WasmTransportAccess"
+            }
+          ],
+          "description": "Access granted to the request URI."
         }
       },
       "type": "object"
