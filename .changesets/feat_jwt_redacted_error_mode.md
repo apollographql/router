@@ -17,4 +17,4 @@ The details of the failure are still available to you: the `apollo::authenticati
 
 The default remains `Error`, so this change doesn't affect existing deployments.
 
-By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/TBD
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9928
