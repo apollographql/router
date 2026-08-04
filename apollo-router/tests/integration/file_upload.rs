@@ -1142,6 +1142,9 @@ mod body_limits {
     const OVERHEAD_CONFIG: &str =
         include_str!("../fixtures/file_upload/max_overhead_size.router.yaml");
     const BOUNDARY: &str = "testboundary";
+    /// Line terminator for multipart framing: boundary lines, header lines, and the blank line
+    /// that ends a part's header block.
+    const CRLF: &[u8; 2] = b"\r\n";
 
     /// Non-content regions of a `multipart/form-data` body. RFC 2046 permits all of these; the
     /// GraphQL multipart spec has no use for any of them and real clients emit none, but the
@@ -1165,45 +1168,75 @@ mod body_limits {
     }
 
     fn build_multipart_body_with(operations: &str, file_data: &[u8], framing: Framing) -> Vec<u8> {
-        let map = r#"{"0":["variables.file"]}"#;
-        let mut body = Vec::new();
-        body.extend_from_slice(&framing.preamble);
-        for (name, content) in [
-            ("operations", operations.as_bytes()),
-            ("map", map.as_bytes()),
-        ] {
-            body.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
-            body.extend_from_slice(
-                format!("Content-Disposition: form-data; name=\"{name}\"\r\n").as_bytes(),
-            );
-            if name == "operations"
-                && let Some(extra) = &framing.operations_extra_header
-            {
-                body.extend_from_slice(extra.as_bytes());
-                body.extend_from_slice(b"\r\n");
+        #[derive(Default)]
+        struct MultipartBody(Vec<u8>);
+        impl MultipartBody {
+            fn push<S: AsRef<[u8]>>(&mut self, content: S) {
+                self.0.extend_from_slice(content.as_ref());
+                self.0.extend_from_slice(CRLF);
             }
-            body.extend_from_slice(b"\r\n");
-            body.extend_from_slice(content);
-            body.extend_from_slice(b"\r\n");
+
+            fn push_boundary_start(&mut self) {
+                self.push(format!("--{BOUNDARY}"));
+            }
+
+            fn push_boundary_end(&mut self) {
+                self.push(format!("--{BOUNDARY}--"));
+            }
+
+            fn push_headers_end(&mut self) {
+                self.0.extend_from_slice(CRLF);
+            }
+
+            fn push_content_disposition(&mut self, name: &str, filename: Option<&str>) {
+                let mut disposition = format!("Content-Disposition: form-data; name=\"{name}\"");
+                if let Some(filename) = filename {
+                    disposition += &format!("; filename=\"{filename}\"");
+                }
+                self.push(disposition);
+            }
         }
+
+        let mut body = MultipartBody::default();
+
+        // preamble
+        body.push(&framing.preamble);
+
+        // operations
+        body.push_boundary_start();
+        body.push_content_disposition("operations", None);
+        if let Some(extra_header) = &framing.operations_extra_header {
+            body.push(extra_header);
+        }
+        body.push_headers_end();
+        body.push(operations);
+
+        // map
+        body.push_boundary_start();
+        body.push_content_disposition("map", None);
+        body.push_headers_end();
+        body.push(r#"{"0":["variables.file"]}"#);
+
+        // extraneous parts
         for (name, content) in &framing.extraneous_parts {
-            body.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
-            body.extend_from_slice(
-                format!("Content-Disposition: form-data; name=\"{name}\"; filename=\"{name}.bin\"\r\n\r\n")
-                    .as_bytes(),
-            );
-            body.extend_from_slice(content);
-            body.extend_from_slice(b"\r\n");
+            body.push_boundary_start();
+            body.push_content_disposition(name, Some(&format!("{name}.bin")));
+            body.push_headers_end();
+            body.push(content);
         }
-        body.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
-        body.extend_from_slice(
-            b"Content-Disposition: form-data; name=\"0\"; filename=\"test.bin\"\r\n\r\n",
-        );
-        body.extend_from_slice(file_data);
-        body.extend_from_slice(b"\r\n");
-        body.extend_from_slice(format!("--{BOUNDARY}--\r\n").as_bytes());
-        body.extend_from_slice(&framing.epilogue);
-        body
+
+        // file
+        body.push_boundary_start();
+        body.push_content_disposition("0", Some("test.bin"));
+        body.push_headers_end();
+        body.push(file_data);
+
+        // epilogue
+        body.push_boundary_end();
+        body.push(&framing.epilogue);
+
+        // all parts complete
+        body.0
     }
 
     /// Send `body_bytes` to a router backed by a real subgraph handler.
