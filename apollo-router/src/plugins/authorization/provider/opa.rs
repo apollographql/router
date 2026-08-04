@@ -30,7 +30,8 @@ use super::config::OpaConfig;
 use crate::Context;
 use crate::context::OPERATION_KIND;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
-use crate::services::http::{HttpClientService, HttpRequest};
+use crate::services::http::HttpClientService;
+use crate::services::http::HttpRequest;
 use crate::services::router;
 use crate::services::supergraph;
 

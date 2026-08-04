@@ -1,4 +1,3 @@
-use super::opa::CONTRACT_VERSION;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,6 +12,7 @@ use wiremock::matchers::body_json;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 
+use super::opa::CONTRACT_VERSION;
 use super::*;
 
 fn config(yaml: &str) -> PolicyConfig {
