@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::ops::ControlFlow;
+use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
@@ -21,6 +22,9 @@ use self::authenticated::AuthenticatedVisitor;
 use self::policy::POLICY_SPEC_VERSION_RANGE;
 use self::policy::PolicyExtractionVisitor;
 use self::policy::PolicyFilteringVisitor;
+use self::provider::PolicyConfig;
+use self::provider::PolicyProviderRegistry;
+use self::provider::ProviderPolicyDecisions;
 use self::scopes::REQUIRES_SCOPES_SPEC_VERSION_RANGE;
 use self::scopes::ScopeExtractionVisitor;
 use self::scopes::ScopeFilteringVisitor;
@@ -46,6 +50,7 @@ use crate::spec::query::traverse;
 pub(crate) mod authenticated;
 pub(crate) mod extract_authorization_checks_layer;
 pub(crate) mod policy;
+pub(crate) mod provider;
 pub(crate) mod scopes;
 
 pub(crate) const AUTHENTICATION_REQUIRED_KEY: &str =
@@ -70,6 +75,9 @@ pub(crate) struct Conf {
     /// `@authenticated`, `@requiresScopes` and `@policy` directives
     #[serde(default)]
     directives: Directives,
+    /// Native evaluation of policies referenced by `@policy`.
+    #[serde(default)]
+    policy: Option<PolicyConfig>,
 }
 
 impl Conf {
@@ -194,6 +202,8 @@ fn default_enable_directives() -> bool {
 
 pub(crate) struct AuthorizationPlugin {
     require_authentication: bool,
+    policy_providers: Option<Arc<PolicyProviderRegistry>>,
+    directives_dry_run: bool,
 }
 
 impl AuthorizationPlugin {
@@ -287,18 +297,24 @@ impl AuthorizationPlugin {
         scopes.sort();
 
         let mut policies = context
-            .get_json_value(REQUIRED_POLICIES_KEY)
-            .and_then(|v| {
-                v.as_object().map(|v| {
-                    v.iter()
-                        .filter_map(|(policy, result)| match result {
-                            Value::Bool(true) => Some(policy.as_str().to_string()),
-                            _ => None,
+            .extensions()
+            .with_lock(|lock| lock.get::<ProviderPolicyDecisions>().cloned())
+            .map(|decisions| decisions.allowed_policies())
+            .unwrap_or_else(|| {
+                context
+                    .get_json_value(REQUIRED_POLICIES_KEY)
+                    .and_then(|v| {
+                        v.as_object().map(|v| {
+                            v.iter()
+                                .filter_map(|(policy, result)| match result {
+                                    Value::Bool(true) => Some(policy.as_str().to_string()),
+                                    _ => None,
+                                })
+                                .collect::<Vec<String>>()
                         })
-                        .collect::<Vec<String>>()
-                })
-            })
-            .unwrap_or_default();
+                    })
+                    .unwrap_or_default()
+            });
         policies.sort();
 
         context.extensions().with_lock(|lock| {
@@ -540,8 +556,29 @@ impl Plugin for AuthorizationPlugin {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        if init
+            .config
+            .policy
+            .as_ref()
+            .is_some_and(|policy| policy.enabled)
+            && !init.config.directives.enabled
+        {
+            return Err(
+                "authorization.policy requires authorization.directives.enabled: true".into(),
+            );
+        }
+        let policy_providers = init
+            .config
+            .policy
+            .clone()
+            .filter(|config| config.enabled)
+            .map(PolicyProviderRegistry::new)
+            .transpose()?
+            .map(Arc::new);
         Ok(AuthorizationPlugin {
             require_authentication: init.config.require_authentication,
+            policy_providers,
+            directives_dry_run: init.config.directives.dry_run,
         })
     }
 
@@ -549,15 +586,24 @@ impl Plugin for AuthorizationPlugin {
         &self,
         service: supergraph::BoxCloneService,
     ) -> supergraph::BoxCloneService {
+        let service = match &self.policy_providers {
+            Some(policy_providers) => ServiceBuilder::new()
+                .layer(provider::PolicyProviderLayer::with_dry_run(
+                    policy_providers.clone(),
+                    self.directives_dry_run,
+                ))
+                .service(service)
+                .boxed_clone(),
+            None => service,
+        };
+
         if self.require_authentication {
             ServiceBuilder::new()
-                .checkpoint_async(move |request: supergraph::Request| async move {
+                .checkpoint_async(|request: supergraph::Request| async move {
                     // Whether to reject unauthenticated requests is an authorization policy,
                     // same as `@authenticated`/`@requiresScopes`/`@policy` — authentication only
                     // verifies tokens, it doesn't decide this.
-                    if authentication::has_authenticated_jwt(&request.context) {
-                        Ok(ControlFlow::Continue(request))
-                    } else {
+                    if !authentication::has_authenticated_jwt(&request.context) {
                         tracing::error!("rejecting unauthenticated request");
                         let response = supergraph::Response::error_builder()
                             .error(
@@ -569,8 +615,9 @@ impl Plugin for AuthorizationPlugin {
                             .status_code(StatusCode::UNAUTHORIZED)
                             .context(request.context)
                             .build()?;
-                        Ok(ControlFlow::Break(response))
+                        return Ok(ControlFlow::Break(response));
                     }
+                    Ok(ControlFlow::Continue(request))
                 })
                 .service(service)
                 .boxed_clone()

@@ -86,7 +86,7 @@ The GraphOS Router provides access controls via **authorization directives** tha
 
 - The [`@requiresScopes`](/graphos/routing/security/authorization#requiresscopes) directive allows granular access control through the scopes you define.
 - The [`@authenticated`](/graphos/routing/security/authorization#authenticated) directive allows access to the annotated field or type for _authenticated requests only_.
-- The [`@policy`](/graphos/routing/security/authorization#policy) directive offloads authorization validation to a [Rhai script](/graphos/routing/customization/rhai/) or a [coprocessor](/router/customizations/coprocessor) and integrates the result in the router. It's useful when your authorization policies go beyond simple authentication and scopes.
+- The [`@policy`](/graphos/routing/security/authorization#policy) directive evaluates policy labels with a native [Open Policy Agent (OPA) policy provider](/graphos/routing/security/opa-policy-provider), a [Rhai script](/graphos/routing/customization/rhai/), or a [coprocessor](/router/customizations/coprocessor). It's useful when your authorization policies go beyond simple authentication and scopes.
 
 For example, imagine you're building a social media platform that includes a `Users` subgraph. You can use the [`@requiresScopes`](/graphos/routing/security/authorization#requiresscopes) directive to declare that viewing other users' information requires the `read:user` scope:
 

@@ -381,6 +381,19 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
+            apollo.router.config.authorization_policy,
+            "$.authorization.policy",
+            opt.enabled,
+            "$.enabled",
+            opt.failure_mode,
+            "$.failure.mode",
+            opt.claims_input,
+            "$..input.claims.include",
+            opt.provider_type,
+            "$..providers.*.type"
+        );
+
+        populate_config_instrument!(
             apollo.router.config.file_uploads.multipart,
             "$.preview_file_uploads[?(@.enabled == true)].protocols.multipart[?(@.enabled == true)]",
             opt.limits.max_file_size,

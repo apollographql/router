@@ -401,14 +401,15 @@ The `@policy` directive includes a `policies` argument that defines an array of 
 @policy(policies: [["roles:support"]])
 ```
 
-Using the `@policy` directive requires a [Supergraph plugin](/router/customizations/overview) to evaluate the authorization policies. This is useful to bridge router authorization with an existing authorization stack or link policy execution with lookups in a database.
+You can evaluate policies with a [Rhai script](/graphos/routing/customization/rhai/) or [coprocessor](/router/customizations/coprocessor), which is useful when you need to connect the router to an existing authorization stack or database.
+
+You can also configure a native [Open Policy Agent (OPA) policy provider](/graphos/routing/security/opa-policy-provider). The router evaluates policy labels with OPA before query planning and applies OPA's atomic decisions during normal `@policy` filtering. When you don't configure a native provider, the existing Rhai and coprocessor context behavior is unchanged.
 
 An overview of how `@policy` is processed through the router's request lifecycle:
 
 - At the [`RouterService` level](/graphos/routing/request-lifecycle), the GraphOS Router extracts the list of policies relevant to a request from the schema and then stores them in the request's context in `apollo::authorization::required_policies` as a map `policy -> null|true|false`.
 
-- At the `SupergraphService` level, you must provide a Rhai script or coprocessor to evaluate the map.
-  If the policy is validated, the script or coprocessor should set its value to `true` or otherwise set it to `false`. If the value is left to `null`, it will be treated as `false` by the router. Afterward, the router filters the requests' types and fields to only those where the policy is `true`.
+- At the `SupergraphService` level, a configured native provider evaluates the map before query planning. Without a native provider, you must provide a Rhai script or coprocessor to evaluate it. If the policy is validated, the evaluator should set its value to `true` or otherwise set it to `false`. If the value is left as `null`, it is treated as `false`. Afterward, the router filters the request's types and fields to only those where the policy is `true`.
 
 - If no field of a subgraph query passes its authorization policies, the router stops further processing of the query and precludes unauthorized subgraph requests. This efficiency gain is a key benefit of the `@policy` and other authorization directives.
 
@@ -438,7 +439,7 @@ directive @policy(
 ) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
 
-Using the `@policy` directive requires a [Supergraph plugin](/router/customizations/overview) to evaluate the authorization policies. You can do this with a [Rhai script](/graphos/routing/customization/rhai/) or [coprocessor](/router/customizations/coprocessor). Refer to the following [example use case](#example-policy-use-case) for more information. (Although a [native plugin](/router/customizations/native) can also evaluate authorization policies, we don't recommend using it.)
+To evaluate `@policy` directives, use a [native Open Policy Agent (OPA) policy provider](/graphos/routing/security/opa-policy-provider), a [Rhai script](/graphos/routing/customization/rhai/), or a [coprocessor](/router/customizations/coprocessor). Refer to the following [example use case](#example-policy-use-case) for more information about using a coprocessor or Rhai. (Although a [native plugin](/router/customizations/native) can also evaluate authorization policies, we don't recommend using it.)
 
 #### Combining policies with `AND`/`OR` logic
 

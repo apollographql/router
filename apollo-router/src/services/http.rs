@@ -97,4 +97,6 @@ enum ServiceTarget {
     Subgraph { name: Arc<str> },
     /// A connector source: emits `connector.source.name = name`.
     Connector { name: Arc<str> },
+    /// A native authorization policy provider.
+    PolicyProvider { name: Arc<str> },
 }

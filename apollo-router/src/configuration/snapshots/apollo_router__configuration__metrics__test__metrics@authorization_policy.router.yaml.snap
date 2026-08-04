@@ -1,0 +1,20 @@
+---
+source: apollo-router/src/configuration/metrics.rs
+expression: "& metrics.non_zero()"
+---
+- name: apollo.router.config.authorization
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.directives: false
+          opt.require_authentication: false
+- name: apollo.router.config.authorization_policy
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.claims_input: false
+          opt.enabled: false
+          opt.failure_mode: false
+          opt.provider_type: opa

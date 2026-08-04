@@ -160,6 +160,30 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
   - `rhai.stage`: string (`RouterRequest`, `RouterResponse`, `SupergraphRequest`, `SupergraphResponse`, `ExecutionRequest`, `ExecutionResponse`, `SubgraphRequest`, `SubgraphResponse`)
   - `rhai.succeeded`: bool
 
+## Policy providers
+
+- `apollo.router.operations.policy_provider.duration` - Time in seconds for a complete native policy-provider evaluation, including retries. Attributes:
+  - `policy.provider.type`: Provider type (`opa`).
+  - `policy.provider.name`: Configured provider name.
+  - `policy.provider.outcome`: Evaluation outcome (`success`, `contract_error`, `timeout`, or `failure`).
+- `apollo.router.operations.policy_provider.allow` - Number of allowed policy decisions.
+  - `policy.provider.name`: Configured provider name.
+- `apollo.router.operations.policy_provider.deny` - Number of denied policy decisions, including omitted decisions that fail closed.
+  - `policy.provider.name`: Configured provider name.
+- `apollo.router.operations.policy_provider.failure` - Number of provider evaluation failures. Attributes:
+  - `policy.provider.name`: Configured provider name associated with the failure.
+  - `policy.provider.outcome`: Failure handling (`dry_run_failure`, `deny_failure`, or `reject_failure`).
+- `apollo.router.operations.policy_provider.retry` - Number of retry attempts that were started after retryable transport, response-body, HTTP 408, HTTP 429, or HTTP 5xx failures. Attributes:
+  - `policy.provider.name`: Configured provider name.
+  - `policy.provider.endpoint.index`: Zero-based index of the endpoint that failed.
+- `apollo.router.operations.policy_provider.retry_exhausted` - Number of evaluations that ended after all configured attempts returned retryable failures.
+  - `policy.provider.name`: Configured provider name.
+- `apollo.router.operations.policy_provider.endpoint_ejected` - Number of times an unhealthy endpoint was temporarily removed from selection. Attributes:
+  - `policy.provider.name`: Configured provider name.
+  - `policy.provider.endpoint.index`: Zero-based index of the ejected endpoint.
+- `apollo.router.operations.policy_provider.missing_result` - Number of successful OPA responses without a `result` field. These evaluations deny all requested policies.
+  - `policy.provider.name`: Configured provider name.
+
 ## Performance
 
 - `apollo_router_schema_load_duration` - Time spent loading the schema in seconds.
@@ -259,6 +283,7 @@ Similar to the initial call to Uplink, the router does not record metrics for ca
   - `subgraph.name`: name of the subgraph (subgraph connections only)
   - `connector.source.name`: name of the connector source (connector connections only)
   - `coprocessor`: `true` (coprocessor connections only)
+  - `policy.provider.name`: configured provider name (native policy-provider connections only)
 
 ## Subscriptions
 

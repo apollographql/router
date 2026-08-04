@@ -35,6 +35,8 @@ items:
             href: "./security/persisted-queries"
           - label: "Authorization"
             href: "./security/authorization"
+          - label: "Open Policy Agent"
+            href: "./security/opa-policy-provider"
           - label: "Authentication"
             children:
               - label: "JWT Authentication"

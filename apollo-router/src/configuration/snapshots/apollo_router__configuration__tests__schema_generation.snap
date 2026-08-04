@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -611,6 +610,17 @@ expression: "&schema"
             }
           ],
           "description": "`@authenticated`, `@requiresScopes` and `@policy` directives"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PolicyConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Native evaluation of policies referenced by `@policy`."
         },
         "require_authentication": {
           "default": false,
@@ -3530,6 +3540,19 @@ expression: "&schema"
       ],
       "type": "string"
     },
+    "EndpointConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "description": "OPA base URL. Supports HTTP(S) and Unix sockets (`unix:///path.sock?path=/http-base`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
     "EntityType": {
       "anyOf": [
         {
@@ -5593,6 +5616,34 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "FailureConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/FailureMode"
+            }
+          ],
+          "description": "Provider failures either reject the request or deny all policies."
+        }
+      },
+      "type": "object"
+    },
+    "FailureMode": {
+      "oneOf": [
+        {
+          "const": "reject",
+          "description": "Reject the operation with a provider evaluation error.",
+          "type": "string"
+        },
+        {
+          "const": "deny",
+          "description": "Continue authorization by denying every requested policy.",
+          "type": "string"
+        }
+      ]
+    },
     "FieldName": {
       "oneOf": [
         {
@@ -6314,6 +6365,20 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "IncludeConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "include": {
+          "default": [],
+          "description": "Explicit names to include. Values are never wildcard-expanded.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "IncludeSubgraphErrorsConfig": {
       "additionalProperties": false,
       "description": "Configuration for exposing errors that originate from subgraphs",
@@ -6334,6 +6399,44 @@ expression: "&schema"
           "default": {},
           "description": "Overrides global configuration on a per-subgraph basis",
           "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "InputConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "claims": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/IncludeConfig"
+            }
+          ],
+          "description": "Selects authenticated JWT claim names included in policy input. Empty by default."
+        },
+        "context": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/IncludeConfig"
+            }
+          ],
+          "description": "Selects router context values included in the policy input."
+        },
+        "headers": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/IncludeConfig"
+            }
+          ],
+          "description": "Selects request headers included in the policy input."
+        },
+        "variables": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/IncludeConfig"
+            }
+          ],
+          "description": "Selects GraphQL variables included in the policy input."
         }
       },
       "type": "object"
@@ -7090,6 +7193,29 @@ expression: "&schema"
       ],
       "description": "Listening address."
     },
+    "LoadBalancingConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "strategy": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/LoadBalancingStrategy"
+            }
+          ],
+          "description": "Strategy used to select an endpoint for each initial request and retry."
+        }
+      },
+      "type": "object"
+    },
+    "LoadBalancingStrategy": {
+      "oneOf": [
+        {
+          "const": "round_robin",
+          "description": "Select endpoints in sequence, skipping endpoints that are temporarily unhealthy.",
+          "type": "string"
+        }
+      ]
+    },
     "Logging": {
       "additionalProperties": false,
       "description": "Logging configuration.",
@@ -7560,6 +7686,19 @@ expression: "&schema"
       ],
       "type": "string"
     },
+    "OpaApiConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "description": "OPA Data API decision path, without `/v1/data/`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision"
+      ],
+      "type": "object"
+    },
     "Operation": {
       "oneOf": [
         {
@@ -7869,6 +8008,44 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "PolicyConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Enables native policy provider evaluation. When false, the configuration is retained but providers are not built or called.",
+          "type": "boolean"
+        },
+        "failure": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/FailureConfig"
+            }
+          ],
+          "description": "Controls behavior when a provider cannot evaluate a policy."
+        },
+        "providers": {
+          "additionalProperties": {
+            "$ref": "#/definitions/ProviderConfig"
+          },
+          "description": "Named policy providers available for evaluating `@policy` labels.",
+          "type": "object"
+        },
+        "routing": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RoutingConfig"
+            }
+          ],
+          "description": "Routes policy labels to configured providers."
+        }
+      },
+      "required": [
+        "providers",
+        "routing"
+      ],
+      "type": "object"
+    },
     "PrivateNetworkAccessPolicy": {
       "additionalProperties": false,
       "properties": {
@@ -8017,6 +8194,56 @@ expression: "&schema"
         "http"
       ],
       "type": "string"
+    },
+    "ProviderConfig": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "api": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/OpaApiConfig"
+                }
+              ],
+              "description": "Configures the OPA Data API decision queried by the router."
+            },
+            "endpoints": {
+              "description": "Equivalent OPA service endpoints used for load balancing and retries.",
+              "items": {
+                "$ref": "#/definitions/EndpointConfig"
+              },
+              "type": "array"
+            },
+            "input": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/InputConfig"
+                }
+              ],
+              "description": "Selects request data included in the OPA policy input document."
+            },
+            "transport": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/TransportConfig"
+                }
+              ],
+              "description": "Configures communication with the OPA service endpoints."
+            },
+            "type": {
+              "const": "opa",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "api",
+            "endpoints"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Query": {
       "oneOf": [
@@ -8589,6 +8816,19 @@ expression: "&schema"
         }
       ]
     },
+    "RetryConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "max_attempts": {
+          "default": 2,
+          "description": "Maximum total number of attempts, including the initial request.",
+          "format": "uint",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "RhaiConfig": {
       "additionalProperties": false,
       "description": "Configuration for the Rhai Plugin",
@@ -8613,6 +8853,67 @@ expression: "&schema"
           ]
         }
       },
+      "type": "object"
+    },
+    "RouteMatch": {
+      "additionalProperties": false,
+      "properties": {
+        "exact": {
+          "default": [],
+          "description": "Policy labels that must match exactly.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "prefix": {
+          "default": [],
+          "description": "Policy label prefixes matched using longest-prefix precedence.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RouteRule": {
+      "additionalProperties": false,
+      "properties": {
+        "match": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RouteMatch"
+            }
+          ],
+          "description": "Exact labels and prefixes matched by this rule."
+        },
+        "target": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RouteTarget"
+            }
+          ],
+          "description": "Provider that evaluates labels matched by this rule."
+        }
+      },
+      "required": [
+        "match",
+        "target"
+      ],
+      "type": "object"
+    },
+    "RouteTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "description": "Name of the provider to call.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider"
+      ],
       "type": "object"
     },
     "Router": {
@@ -9389,6 +9690,30 @@ expression: "&schema"
           "$ref": "#/definitions/RouterSelector"
         }
       ]
+    },
+    "RoutingConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RouteTarget"
+            }
+          ],
+          "description": "Provider used when no routing rule matches a policy label."
+        },
+        "rules": {
+          "description": "Ordered policy-label routing rules.",
+          "items": {
+            "$ref": "#/definitions/RouteRule"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "default"
+      ],
+      "type": "object"
     },
     "Sampler": {
       "oneOf": [
@@ -12331,6 +12656,20 @@ expression: "&schema"
       ],
       "type": "string"
     },
+    "TimeoutConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "total": {
+          "default": {
+            "nanos": 250000000,
+            "secs": 0
+          },
+          "description": "Maximum duration for the complete evaluation, including input construction and all attempts.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "Tls": {
       "additionalProperties": false,
       "description": "TLS related configuration options.",
@@ -12671,6 +13010,52 @@ expression: "&schema"
           },
           "description": "Applied on specific subgraphs",
           "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "TransportConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "client": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Client"
+            }
+          ],
+          "description": "HTTP client connection, DNS, HTTP/2, and pool settings for provider calls."
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Static HTTP headers included in every request to this provider.",
+          "type": "object"
+        },
+        "load_balancing": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/LoadBalancingConfig"
+            }
+          ],
+          "description": "Selects how requests are distributed across equivalent endpoints."
+        },
+        "retry": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RetryConfig"
+            }
+          ],
+          "description": "Controls retry attempts across equivalent endpoints."
+        },
+        "timeouts": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/TimeoutConfig"
+            }
+          ],
+          "description": "Limits the total time available for a policy evaluation."
         }
       },
       "type": "object"

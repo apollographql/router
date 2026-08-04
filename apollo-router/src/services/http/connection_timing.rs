@@ -30,6 +30,9 @@ impl<C> ConnectionTimingConnector<C> {
                 KeyValue::new("connector.source.name", name.to_string())
             }
             ServiceTarget::Coprocessor => KeyValue::new("coprocessor", true),
+            ServiceTarget::PolicyProvider { name } => {
+                KeyValue::new("policy.provider.name", name.to_string())
+            }
         };
         let metric_attributes = Arc::from(
             [

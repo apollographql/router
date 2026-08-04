@@ -42,6 +42,7 @@ use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector
 use crate::services;
 use crate::services::PATH_QUERY_PARAM;
 use crate::services::PipelineStep;
+use crate::services::UnixSocketQueryPolicy;
 use crate::services::external::Control;
 use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
@@ -596,21 +597,13 @@ fn default_response_validation() -> bool {
 /// Validate a coprocessor URL.
 /// Returns an error if the URL is invalid or if it's a Unix socket URL with an empty path.
 pub(crate) fn validate_coprocessor_url(url: &str, config_path: &str) -> Result<(), BoxError> {
+    crate::services::validate_external_service_url(
+        url,
+        config_path,
+        true,
+        UnixSocketQueryPolicy::Any,
+    )?;
     if let Some(path) = url.strip_prefix("unix://") {
-        if path.is_empty() {
-            return Err(format!(
-                "{config_path}: Unix socket URL must include a path (e.g., 'unix:///var/run/coprocessor.sock')"
-            )
-            .into());
-        }
-        // Basic sanity check - path should be absolute
-        if !path.starts_with('/') {
-            return Err(format!(
-                "{config_path}: Unix socket path should be absolute (e.g., 'unix:///var/run/coprocessor.sock'), got 'unix://{path}'"
-            )
-            .into());
-        }
-
         // WARN: this might cause us heart burn later, but since filenames can include `?` we
         // should emit a warning if we have a `?` and yet no `path=` rather than return an error
         // and hope that folks see this in their logs if they're getting a bunch of request errors
@@ -619,10 +612,6 @@ pub(crate) fn validate_coprocessor_url(url: &str, config_path: &str) -> Result<(
                 "{config_path}: Unix sockets should use valid query parameters if using `?` (e.g., 'unix:///var/run/coprocessor.sock?path=some_path'), got 'unix://{path}'"
             );
         }
-    } else {
-        // Validate HTTP/HTTPS URLs can be parsed
-        url.parse::<http::Uri>()
-            .map_err(|e| format!("{config_path}: invalid URL '{url}': {e}"))?;
     }
     Ok(())
 }

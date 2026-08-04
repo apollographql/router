@@ -1,0 +1,13 @@
+authorization:
+  policy:
+    enabled: false
+    providers:
+      primary:
+        type: opa
+        api:
+          decision: apollo/router/authorize
+        endpoints:
+          - url: http://127.0.0.1:8181
+    routing:
+      default:
+        provider: primary

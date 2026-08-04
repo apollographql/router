@@ -7,6 +7,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::Display;
+use tower::BoxError;
 
 pub(crate) use self::query_planner::*;
 pub(crate) use self::subgraph::service::*;
@@ -112,6 +113,79 @@ pub(crate) const MULTIPART_SUBSCRIPTION_SPEC_VALUE: &str = "1.0";
 #[cfg(unix)]
 pub(crate) const DEFAULT_SOCKET_PATH: &str = "/";
 pub(crate) const PATH_QUERY_PARAM: &str = "path=";
+
+/// How a caller permits query parameters on an external Unix-socket URL.
+#[derive(Clone, Copy)]
+pub(crate) enum UnixSocketQueryPolicy {
+    /// Preserve the historically permissive coprocessor query handling.
+    Any,
+    /// Accept no query, or exactly one non-empty absolute `path` parameter.
+    OptionalAbsolutePath,
+}
+
+/// Parse and validate a URL for an external HTTP service.
+///
+/// This centralizes the common HTTP(S)/Unix scheme and absolute-socket-path checks while allowing
+/// callers to choose whether ordinary HTTP queries and legacy Unix queries are accepted.
+pub(crate) fn validate_external_service_url(
+    url: &str,
+    config_path: &str,
+    allow_http_query: bool,
+    unix_query_policy: UnixSocketQueryPolicy,
+) -> Result<reqwest::Url, BoxError> {
+    if url == "unix://" {
+        return Err(format!("{config_path}: Unix socket URL must include a path").into());
+    }
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|error| format!("{config_path}: invalid URL `{url}`: {error}"))?;
+    if parsed.fragment().is_some() {
+        return Err(format!("{config_path}: URL must not contain a fragment").into());
+    }
+
+    match parsed.scheme() {
+        "http" | "https" => {
+            if !allow_http_query && parsed.query().is_some() {
+                return Err(format!("{config_path}: URL must not contain a query").into());
+            }
+        }
+        "unix" => {
+            if parsed.host_str().is_some() || !parsed.path().starts_with('/') {
+                return Err(format!(
+                    "{config_path}: Unix socket path should be absolute (for example, `unix:///var/run/service.sock`)"
+                )
+                .into());
+            }
+            if parsed.path() == "/" {
+                return Err(format!("{config_path}: Unix socket URL must include a path").into());
+            }
+            if matches!(
+                unix_query_policy,
+                UnixSocketQueryPolicy::OptionalAbsolutePath
+            ) && parsed.query().is_some()
+            {
+                let pairs = parsed.query_pairs().collect::<Vec<_>>();
+                if pairs.len() != 1
+                    || pairs[0].0 != "path"
+                    || pairs[0].1.is_empty()
+                    || !pairs[0].1.starts_with('/')
+                {
+                    return Err(format!(
+                        "{config_path}: Unix socket query must contain exactly one absolute `path` parameter"
+                    )
+                    .into());
+                }
+            }
+        }
+        scheme => {
+            return Err(format!(
+                "{config_path}: URL must use http, https, or unix, not `{scheme}`"
+            )
+            .into());
+        }
+    }
+
+    Ok(parsed)
+}
 
 /// Parse a Unix socket URL path (the part after `unix://`) and extract the socket path
 /// and HTTP path (if provided). Supports an optional `path` query parameter to specify the HTTP path.

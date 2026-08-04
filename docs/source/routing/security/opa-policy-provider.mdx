@@ -1,0 +1,251 @@
+---
+title: Open Policy Agent policy provider
+subtitle: Evaluate `@policy` directives with Open Policy Agent
+description: Configure the GraphOS Router to evaluate `@policy` directives with Open Policy Agent.
+---
+
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+</PlanRequired>
+
+Use the native Open Policy Agent (OPA) policy provider to evaluate the policy labels that you declare with the [`@policy`](/graphos/routing/security/authorization#policy) directive. The router sends those labels and an explicitly selected set of request data to OPA before query planning. OPA returns an allow or deny decision for each label, and the router applies the directive's existing authorization rules.
+
+This integration is useful when policy evaluation needs data or logic beyond JWT claims and scopes, while you want to keep policy definitions in OPA.
+
+When a native provider is configured alongside Rhai or a coprocessor, native provider decisions are authoritative and take precedence over policy values supplied by those integrations.
+
+If `authorization.policy` is omitted (or `authorization.policy.enabled: false`), the router does not
+construct or call providers and retains the legacy authorization context and query-plan cache-key
+behavior.
+
+## Prerequisites
+
+- A graph that uses the [`@policy`](/graphos/routing/security/authorization#policy) directive.
+- Authorization directives enabled in the router. They are enabled by default.
+- An OPA server that the router can reach over HTTP or HTTPS.
+- [JWT authentication](/graphos/routing/security/jwt) if your OPA policies need validated JWT claims. The policy provider doesn't authenticate requests itself.
+
+## Quickstart
+
+First, annotate a field or type in a subgraph schema with a policy label:
+
+```graphql
+type Query {
+  me: User @policy(policies: [["read_profile"]])
+}
+```
+
+The nested array syntax is part of the `@policy` directive. In this example, `read_profile` must be allowed for the field to be available. See [combining policies with `AND`/`OR` logic](/graphos/routing/security/authorization#combining-policies-with-andor-logic) for more examples.
+
+Next, configure a provider in the router:
+
+```yaml title="router.yaml"
+authorization:
+  policy:
+    providers:
+      primary:
+        type: opa
+        api:
+          decision: apollo/router/authorize
+        endpoints:
+          - url: http://127.0.0.1:8181
+    routing:
+      default:
+        provider: primary
+```
+
+The router calls OPA's Data API at `POST /v1/data/apollo/router/authorize` on the configured endpoint. To use an endpoint behind a reverse proxy, include its base path in `url`. For example, an endpoint URL of `https://policy.example.com/opa` uses `/opa/v1/data/apollo/router/authorize`. Set `api.decision` to the path after `/v1/data/`.
+
+Finally, create the OPA policy at that decision path:
+
+```rego title="primary.rego"
+package apollo.router
+
+import rego.v1
+
+authorize := {
+  "contract": input.contract,
+  "decisions": {policy: allowed(policy) | some policy in input.policies},
+}
+
+allowed(policy) := policy in {"read_profile", "read_credit_card"}
+```
+
+This policy allows `read_profile` and denies every other requested policy label.
+
+<Tip>
+
+The [multi-provider example](https://github.com/apollographql/router/tree/main/examples/opa-policy-provider) includes this Rego policy and commands to run it locally.
+
+</Tip>
+
+## OPA input and response contract
+
+For each configured provider, the router sends an OPA Data API request containing the atomic policy labels routed to that provider. OPA evaluates these labels individually; the router then applies the directive's `AND`/`OR` logic. The request body has this shape:
+
+```json title="Request to OPA"
+{
+  "input": {
+    "contract": "apollo.router.policy/v1",
+    "policies": ["read_profile"],
+    "identity": {
+      "claims": {
+        "sub": "user-1"
+      }
+    },
+    "operation": {
+      "name": "GetProfile",
+      "kind": "query",
+      "variables": {
+        "accountId": "account-1"
+      }
+    },
+    "request": {
+      "headers": {
+        "x-tenant-id": ["tenant-1"]
+      }
+    },
+    "context": {}
+  }
+}
+```
+
+When OPA supplies a result, it must use the same contract version, and each supplied decision must be a boolean:
+
+```json title="Response from OPA"
+{
+  "result": {
+    "contract": "apollo.router.policy/v1",
+    "decisions": {
+      "read_profile": true
+    }
+  }
+}
+```
+
+An OPA response can include its usual `decision_id`. The router records it in a debug log event to help correlate requests with OPA logs.
+
+<Caution>
+
+The router denies a label when OPA returns no result or omits that label from `decisions`. A response with a different contract version, or a decision for a label the router didn't request, is a policy-evaluation error. Return an explicit `true` or `false` for every supplied label.
+
+</Caution>
+
+### Select policy input
+
+The router sends no JWT claims by default. Select exact claim names with `input.claims.include`; only those names leave the router. If no selected claims are available, `identity.claims` is `null`. There is no wildcard claim selector.
+
+Headers, variables, and router context values are never included unless you explicitly allowlist them. This lets you provide the policy data it needs without sending every request value to OPA:
+
+```yaml title="router.yaml"
+authorization:
+  policy:
+    providers:
+      primary:
+        type: opa
+        api: { decision: apollo/router/authorize }
+        endpoints: [{ url: "http://127.0.0.1:8181" }]
+        input:
+          claims:
+            include: [sub, tenant]
+          headers:
+            include: [x-tenant-id]
+          variables:
+            include: [accountId]
+          context:
+            include: ["my-app::account-tier"]
+    routing:
+      default: { provider: primary }
+```
+
+Header names are normalized to lowercase and every selected header is represented as an array, preserving repeated values. Non-UTF-8 selected headers fail evaluation rather than being dropped. Forwarding headers can expose authorization or cookie credentials; prefer static provider transport credentials and allowlist only non-sensitive headers.
+
+## Configure multiple providers and endpoints
+
+An OPA provider can have multiple equivalent endpoint replicas. The router selects replicas with round-robin load balancing. Configure different policy authorities as separate named providers, then route labels to them:
+
+```yaml title="router.yaml"
+authorization:
+  policy:
+    providers:
+      primary:
+        type: opa
+        api: { decision: apollo/router/authorize }
+        endpoints:
+          - { url: "http://opa-primary-1:8181" }
+          - { url: "http://opa-primary-2:8181" }
+      finance:
+        type: opa
+        api: { decision: finance/router/authorize }
+        endpoints:
+          - { url: "http://opa-finance:8181" }
+    routing:
+      default: { provider: primary }
+      rules:
+        - match:
+            prefix: ["finance:"]
+          target: { provider: finance }
+```
+
+The router evaluates labels for distinct providers concurrently, then combines the atomic decisions before it applies the `@policy` directive's `AND`/`OR` logic. Configure only equivalent replicas in one provider. Use separate providers for distinct policy authorities or policy data.
+
+Routing rules can match `exact` labels or `prefix` namespaces. Exact matches take precedence over prefix matches. When more than one prefix matches, the longest prefix takes precedence. Rule order doesn't change this precedence.
+
+## Configure retries and failures
+
+The following configuration adds a second replica, a total evaluation timeout, a retry budget, and a static provider credential:
+
+```yaml title="router.yaml"
+authorization:
+  policy:
+    providers:
+      primary:
+        type: opa
+        api: { decision: apollo/router/authorize }
+        endpoints:
+          - { url: "https://opa-1.example.com" }
+          - { url: "https://opa-2.example.com" }
+        transport:
+          timeouts:
+            total: 250ms
+          retry:
+            max_attempts: 2
+          headers:
+            authorization: "Bearer <token>"
+    routing:
+      default: { provider: primary }
+    failure:
+      mode: reject
+```
+
+`timeouts.total` defaults to `250ms` and applies to a provider evaluation, including retries. `retry.max_attempts` defaults to `2` and can retry a single endpoint. The router retries connection errors, `408`, `429`, `5xx` responses, and responses that it can't decode as the expected JSON shape. It doesn't retry other non-success HTTP responses or a decoded response with an unsupported contract or an unrequested label.
+
+Use [variable expansion](/graphos/routing/configuration/yaml#variable-expansion) or a secrets manager to provide production credentials instead of storing them directly in `router.yaml`.
+
+The default `failure.mode: reject` stops the operation before query planning and returns HTTP `503` with the GraphQL error code `POLICY_EVALUATION_FAILED`. Set `failure.mode: deny` to deny all policies required by the operation and continue normal field filtering. Both modes fail closed.
+
+<Note>
+
+Endpoint URLs must be unique. HTTP(S) URLs cannot contain query strings or fragments. Unix sidecars use `unix:///absolute/socket.sock?path=/optional/http/base`; the query is used only to select the HTTP path. `transport.client` accepts the shared Router HTTP client settings (DNS, HTTP/2, pool, and keepalive). `transport.load_balancing.strategy` currently supports `round_robin`, which is also the default. Unhealthy replicas are temporarily ejected after repeated failures.
+
+</Note>
+
+## Validate the integration
+
+Before starting the router, send a representative request directly to the configured OPA decision path:
+
+```bash
+curl --request POST http://127.0.0.1:8181/v1/data/apollo/router/authorize \
+  --header 'content-type: application/json' \
+  --data '{"input":{"contract":"apollo.router.policy/v1","policies":["read_profile"]}}'
+```
+
+The example Rego policy returns `read_profile: true` in the `decisions` object. You can also use the repository's [multi-provider example](https://github.com/apollographql/router/tree/main/examples/opa-policy-provider) to exercise two equivalent replicas, provider routing, and fail-closed decisions locally.
+
+## Troubleshooting
+
+- **The router returns `POLICY_EVALUATION_FAILED`.** Check the OPA endpoint, its HTTP status, and the decision path. Set `api.decision` to the path after `/v1/data/`; don't include `/v1/data` itself.
+- **OPA doesn't receive expected data.** Add the required header, variable, or context key to the provider's `input` allowlist. Configure JWT authentication when the policy needs claims.
+- **A label is unexpectedly denied.** Verify that the policy returns the exact requested label with the contract `apollo.router.policy/v1`. Undefined decisions and omitted labels are denied by design.
+- **Replica behavior differs.** Make sure all endpoints within one provider run equivalent OPA bundles and policy data. Use separate providers and routing rules for different policy authorities.

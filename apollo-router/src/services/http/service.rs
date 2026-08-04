@@ -248,7 +248,9 @@ impl HttpClientService {
     ) -> Result<Self, BoxError> {
         let service_name: Arc<str> = match &service_target {
             ServiceTarget::Coprocessor => Arc::from("coprocessor"),
-            ServiceTarget::Subgraph { name } | ServiceTarget::Connector { name } => name.clone(),
+            ServiceTarget::Subgraph { name }
+            | ServiceTarget::Connector { name }
+            | ServiceTarget::PolicyProvider { name } => name.clone(),
         };
         let mut http_connector =
             new_async_http_connector(client_config.dns_resolution_strategy.unwrap_or_default())?;
@@ -427,6 +429,24 @@ impl HttpClientService {
         let tls_client_config = generate_tls_client_config(tls_root_store.clone(), None)?;
 
         Self::new(ServiceTarget::Coprocessor, tls_client_config, client_config)
+    }
+
+    /// Creates a client for a native authorization policy provider.
+    pub(crate) fn from_config_for_policy_provider(
+        name: impl Into<String>,
+        _configuration: &Configuration,
+        tls_root_store: &RootCertStore,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        let name = name.into();
+        let tls_client_config = generate_tls_client_config(tls_root_store.clone(), None)?;
+        Self::new(
+            ServiceTarget::PolicyProvider {
+                name: Arc::from(name.as_str()),
+            },
+            tls_client_config,
+            client_config,
+        )
     }
 
     /// Creates a root certificate store with native certificates. These are used for root-of-trust

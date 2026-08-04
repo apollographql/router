@@ -10,4 +10,40 @@ authorization:
       response: errors
     reject_unauthorized: false
   require_authentication: false
+  policy:
+    enabled: true
+    providers:
+      primary:
+        type: opa
+        api:
+          decision: apollo/router/authorize
+        endpoints:
+          - url: http://opa-1.example.com:8181
+          - url: http://opa-2.example.com:8181
+        transport:
+          client: {}
+          load_balancing:
+            strategy: round_robin
+          timeouts:
+            total: 250ms
+          retry:
+            max_attempts: 2
+          headers: {}
+        input:
+          claims:
+            include: []
+          headers:
+            include: []
+          variables:
+            include: []
+          context:
+            include: []
+    routing:
+      default:
+        provider: primary
+      rules: []
+    failure:
+      mode: reject
 ```
+
+Configure `policy` to evaluate [`@policy`](/graphos/routing/security/authorization#policy) labels with a native Open Policy Agent (OPA) provider. See [Open Policy Agent policy provider](/graphos/routing/security/opa-policy-provider) for configuration details, the OPA input and response contract, and examples for multiple providers.
