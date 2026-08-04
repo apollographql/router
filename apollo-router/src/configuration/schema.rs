@@ -107,12 +107,11 @@ pub(crate) fn validate_yaml_configuration(
         }
     });
 
-    const CURRENT_MAJOR_VERSION: &str = env!("CARGO_PKG_VERSION_MAJOR");
-    let current_major_version: i64 = CURRENT_MAJOR_VERSION
-        .parse()
-        .expect("CARGO_PKG_VERSION_MAJOR should be an integer");
-
     if migration == Mode::Upgrade {
+        let current_major_version: i64 = env!("CARGO_PKG_VERSION_MAJOR")
+            .parse()
+            .expect("CARGO_PKG_VERSION_MAJOR should be an integer");
+
         let upgraded =
             upgrade_configuration(&yaml, true, UpgradeMode::Minor(current_major_version))?;
         let expanded_yaml = expansion.expand(&upgraded)?;
