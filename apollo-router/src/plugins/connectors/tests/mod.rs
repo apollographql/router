@@ -305,7 +305,7 @@ async fn source_aware_entity_plus_requires_end_to_end() {
 /// true)`. Historically source-aware returned `username: null`: the collapsed
 /// graph didn't encode per-connector field availability, so the planner
 /// over-merged `username` into the root `users` fetch (a planning over-merge,
-/// side-effect #3 in `SOURCE_AWARE_EXPANSION_SIDE_EFFECTS.md` — not a
+/// side-effect #3 in `dev-docs/source-aware/SOURCE_AWARE_EXPANSION_SIDE_EFFECTS.md` — not a
 /// stamping/dispatch gap).
 ///
 /// Fixed by the "restrictive provides" pass
