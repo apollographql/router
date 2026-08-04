@@ -35,4 +35,4 @@ Default values are unchanged. Configurations using the old field and plugin
 names are migrated automatically at startup once the router reaches the next
 major version.
 
-By [@zachfetters](https://github.com/zachfetters) in https://github.com/apollographql/router/pull/1783
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/PR_NUMBER
