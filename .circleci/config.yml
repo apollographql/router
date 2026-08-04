@@ -281,8 +281,19 @@ commands:
                   iex "& {$(irm get.scoop.sh)} -RunAsAdmin"
             - run:
                 name: Install mise
+                no_output_timeout: 20m
                 command: |
-                  scoop install mise@${MISE_VERSION#v}
+                  for i in 1 2 3; do
+                    if scoop install mise@${MISE_VERSION#v}; then
+                      break
+                    fi
+                    if [ $i -eq 3 ]; then
+                      echo "scoop install mise failed after 3 attempts"
+                      exit 1
+                    fi
+                    echo "scoop install mise failed (attempt $i/3), retrying in $((i*5))s..."
+                    sleep $((i*5))
+                  done
                   for i in 1 2 3; do
                     if mise install --yes --quiet; then
                       break
