@@ -282,12 +282,13 @@ supergraph:
           - redis://localhost:6379
         ttl: 10s
 limits:
-  max_aliases: 1
+  router:
+    max_aliases: 1
+    warn_only: ${WARN_ONLY}
 "#;
 
-    let config_warn_only = format!("{base_config}\n  warn_only: true");
-
-    let config_enforce = format!("{base_config}\n  warn_only: false");
+    let config_warn_only = base_config.replace("${WARN_ONLY}", "true");
+    let config_enforce = base_config.replace("${WARN_ONLY}", "false");
 
     let mut router = IntegrationTest::builder()
         .config(config_warn_only)
