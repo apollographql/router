@@ -203,7 +203,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "811fb50d302d4bea931921bb6e2b4e144cef987785e13806930bd9906e787f56"
 dependencies = [
  "apollo-configuration-macros",
- "apollo-errors",
+ "apollo-errors 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "apollo-redaction",
  "apollo-saphyr",
  "apollo-saphyr-parser",
@@ -250,15 +250,38 @@ dependencies = [
 [[package]]
 name = "apollo-errors"
 version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f577548eb2bd2179db609f7f57a8e0e9cf3227720c33d8ca2ed526989f230a38"
 dependencies = [
- "apollo-errors-derive",
+ "apollo-errors-derive 0.5.1",
  "http 1.4.0",
  "linkme",
  "miette",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "apollo-errors"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f577548eb2bd2179db609f7f57a8e0e9cf3227720c33d8ca2ed526989f230a38"
+dependencies = [
+ "apollo-errors-derive 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "http 1.4.0",
+ "linkme",
+ "miette",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "apollo-errors-derive"
+version = "0.5.1"
+dependencies = [
+ "heck",
+ "http 1.4.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -342,13 +365,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "apollo-json"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "apollo-errors 0.7.1",
+ "bytes",
+ "memchr",
+ "serde",
+ "serde_json",
+ "serde_json_bytes",
+ "simdutf8",
+]
+
+[[package]]
 name = "apollo-opentelemetry"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08a5d28b533ba31a325d793001b33a66e3edd812bd6cc300548bb705a555e00c"
 dependencies = [
  "apollo-configuration",
- "apollo-errors",
+ "apollo-errors 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "apollo-opentelemetry-macros",
  "apollo-opentelemetry-stdout",
  "apollo-redaction",
@@ -419,7 +456,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f09a8d664a409873c45e8b690a2c27e74479072cc37a9ab0f9c17fc4dd027b2"
 dependencies = [
  "apollo-configuration",
- "apollo-errors",
+ "apollo-errors 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "apollo-opentelemetry",
  "bytes",
  "governor",
@@ -453,8 +490,9 @@ dependencies = [
  "anyhow",
  "apollo-compiler",
  "apollo-environment-detector",
- "apollo-errors",
+ "apollo-errors 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "apollo-federation",
+ "apollo-json",
  "apollo-qos",
  "astral-tokio-tar",
  "async-compression",
