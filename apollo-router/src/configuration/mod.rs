@@ -439,8 +439,8 @@ impl Configuration {
         let max_evaluated_plans = self
             .supergraph
             .query_planning
-            .experimental_plans_limit
-            // Fails if experimental_plans_limit is zero; use our default.
+            .plans_limit
+            // Fails if plans_limit is zero; use our default.
             .and_then(NonZeroU32::new)
             .unwrap_or(NonZeroU32::new(10_000).expect("it is not zero"));
 
@@ -453,7 +453,7 @@ impl Configuration {
             type_conditioned_fetching: self.experimental_type_conditioned_fetching,
             debug: QueryPlannerDebugConfig {
                 max_evaluated_plans,
-                paths_limit: self.supergraph.query_planning.experimental_paths_limit,
+                paths_limit: self.supergraph.query_planning.paths_limit,
             },
         }
     }
@@ -751,7 +751,7 @@ pub(crate) struct Supergraph {
 
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
-    pub(crate) experimental_log_on_broken_pipe: bool,
+    pub(crate) log_on_broken_pipe: bool,
 
     /// Determines how to handle queries which include additional fields of an input object.
     /// - `enforce` (default): rejects query
@@ -783,7 +783,7 @@ impl Supergraph {
         query_planning: Option<QueryPlanning>,
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
-        experimental_log_on_broken_pipe: Option<bool>,
+        log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
         strict_variable_validation: Option<Mode>,
         redact_query_validation_errors: Option<bool>,
@@ -799,7 +799,7 @@ impl Supergraph {
             generate_query_fragments: generate_query_fragments
                 .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_else(default_early_cancel),
-            experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            log_on_broken_pipe: log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
             strict_variable_validation: strict_variable_validation
                 .unwrap_or_else(default_strict_variable_validation),
@@ -821,7 +821,7 @@ impl Supergraph {
         query_planning: Option<QueryPlanning>,
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
-        experimental_log_on_broken_pipe: Option<bool>,
+        log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
         strict_variable_validation: Option<Mode>,
         redact_query_validation_errors: Option<bool>,
@@ -837,7 +837,7 @@ impl Supergraph {
             generate_query_fragments: generate_query_fragments
                 .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_else(default_early_cancel),
-            experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            log_on_broken_pipe: log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
             strict_variable_validation: strict_variable_validation
                 .unwrap_or_else(default_strict_variable_validation),
@@ -949,7 +949,7 @@ pub(crate) struct QueryPlanning {
     /// but it may not be the optimal one.
     ///
     /// The default limit is set to 10000, but it may change in the future
-    pub(crate) experimental_plans_limit: Option<u32>,
+    pub(crate) plans_limit: Option<u32>,
 
     /// Before creating query plans, for each path of fields in the query we compute all the
     /// possible options to traverse that path via the subgraphs. Multiple options can arise because
@@ -963,7 +963,7 @@ pub(crate) struct QueryPlanning {
     /// path's options exceeds this limit, query planning will abort and the operation will fail.
     ///
     /// The default value is None, which specifies no limit.
-    pub(crate) experimental_paths_limit: Option<u32>,
+    pub(crate) paths_limit: Option<u32>,
 
     /// Configures cooperative cancellation of query planning
     ///
@@ -978,15 +978,15 @@ impl QueryPlanning {
     pub(crate) fn new(
         cache: Option<QueryPlanCache>,
         warmed_up_queries: Option<usize>,
-        experimental_plans_limit: Option<u32>,
-        experimental_paths_limit: Option<u32>,
+        plans_limit: Option<u32>,
+        paths_limit: Option<u32>,
         experimental_cooperative_cancellation: Option<CooperativeCancellation>,
     ) -> Self {
         Self {
             cache: cache.unwrap_or_default(),
             warmed_up_queries,
-            experimental_plans_limit,
-            experimental_paths_limit,
+            plans_limit,
+            paths_limit,
             experimental_cooperative_cancellation: experimental_cooperative_cancellation
                 .unwrap_or_default(),
         }

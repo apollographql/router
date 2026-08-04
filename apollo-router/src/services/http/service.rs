@@ -266,7 +266,7 @@ impl HttpClientService {
             .experimental_http2_keep_alive_timeout
             .unwrap_or(DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT);
 
-        let http2 = client_config.experimental_http2.unwrap_or_default();
+        let http2 = client_config.http2.unwrap_or_default();
         let connector = match http2 {
             Http2Config::Enable => builder
                 .enable_http1()

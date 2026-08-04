@@ -185,4 +185,4 @@ impl Plugin for DiagnosticsPlugin {
     }
 }
 
-register_plugin!("apollo", "experimental_diagnostics", DiagnosticsPlugin);
+register_plugin!("apollo", "diagnostics", DiagnosticsPlugin);

@@ -161,7 +161,7 @@ impl Plugin for ExposeQueryPlan {
     }
 }
 
-register_plugin!("experimental", "expose_query_plan", ExposeQueryPlan);
+register_plugin!("apollo", "expose_query_plan", ExposeQueryPlan);
 
 #[cfg(test)]
 mod tests {
@@ -284,9 +284,7 @@ mod tests {
     #[tokio::test]
     async fn it_doesnt_expose_query_plan() {
         let supergraph = build_mock_supergraph(serde_json::json! {{
-            "plugins": {
-                "experimental.expose_query_plan": false
-            }
+            "expose_query_plan": false
         }})
         .await;
 
@@ -310,9 +308,7 @@ mod tests {
         let response = execute_supergraph_test(
             VALID_QUERY,
             build_mock_supergraph(serde_json::json! {{
-                "plugins": {
-                    "experimental.expose_query_plan": true
-                }
+                "expose_query_plan": true
             }})
             .await,
         )
@@ -333,9 +329,7 @@ mod tests {
         let response = execute_supergraph_test(
             EMPTY_QUERY,
             build_mock_supergraph(serde_json::json! {{
-                "plugins": {
-                    "experimental.expose_query_plan": true
-                }
+                "expose_query_plan": true
             }})
             .await,
         )
@@ -356,9 +350,7 @@ mod tests {
         let response = execute_supergraph_test_dry_run(
             VALID_QUERY,
             build_mock_supergraph(serde_json::json! {{
-                "plugins": {
-                    "experimental.expose_query_plan": true
-                }
+                "expose_query_plan": true
             }})
             .await,
         )

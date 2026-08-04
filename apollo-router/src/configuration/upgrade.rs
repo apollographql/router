@@ -136,6 +136,21 @@ pub(crate) fn upgrade_configuration(
         config = migrated;
     }
 
+    // Custom migration: rename `traffic_shaping.subgraphs.<name>.experimental_http2` to `http2`.
+    // Handled in Rust rather than a proteus YAML action because subgraph names are dynamic
+    // and can't be addressed with static dot-notation paths.
+    let migrated = migrate_traffic_shaping_subgraph_http2(config.clone());
+    if migrated != config {
+        if log_warnings {
+            tracing::warn!(
+                "`traffic_shaping.subgraphs.<name>.experimental_http2` has been renamed to \
+                 `traffic_shaping.subgraphs.<name>.http2`. The router has applied this change \
+                 automatically. Please update your configuration file."
+            );
+        }
+        config = migrated;
+    }
+
     if !effective_migrations.is_empty() && log_warnings {
         let descriptions: Vec<String> = effective_migrations
             .iter()
@@ -374,6 +389,28 @@ fn wrap_operations_if_array(parent: &mut Value, key: &str) {
         let arr = parent[key].take();
         parent[key] = serde_json::json!({ "operations": arr });
     }
+}
+
+/// Migrate `traffic_shaping.subgraphs.<name>.experimental_http2` to `.http2`.
+///
+/// Can't be expressed as a proteus YAML `move` action because subgraph names are dynamic
+/// and can't be addressed with static dot-notation paths.
+fn migrate_traffic_shaping_subgraph_http2(mut config: Value) -> Value {
+    let Some(traffic_shaping) = config.get_mut("traffic_shaping") else {
+        return config;
+    };
+
+    if let Some(Value::Object(subgraphs)) = traffic_shaping.get_mut("subgraphs") {
+        for shaping in subgraphs.values_mut() {
+            if let Some(obj) = shaping.as_object_mut() {
+                if let Some(v) = obj.remove("experimental_http2") {
+                    obj.entry("http2").or_insert(v);
+                }
+            }
+        }
+    }
+
+    config
 }
 
 fn migration_failure_error<T: std::fmt::Display>(error: T) -> ConfigurationError {

@@ -14,15 +14,15 @@ experimental_mock_subgraphs:
 
 traffic_shaping:
   all:
-    experimental_http2: enable
+    http2: enable
     experimental_http2_keep_alive_interval: 30s
     experimental_http2_keep_alive_timeout: 20s
 
 supergraph:
-  experimental_log_on_broken_pipe: true
+  log_on_broken_pipe: true
   query_planning:
-    experimental_plans_limit: 10
-    experimental_paths_limit: 10
+    plans_limit: 10
+    paths_limit: 10
     experimental_cooperative_cancellation:
       enabled: true
 
@@ -39,8 +39,7 @@ telemetry:
     otlp_metrics_protocol: http
   exporters:
     tracing:
-      experimental_response_trace_id:
+      response_trace_id:
         enabled: true
 
-plugins:
-  experimental.expose_query_plan: true
+expose_query_plan: true

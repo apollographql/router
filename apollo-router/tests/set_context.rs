@@ -36,9 +36,7 @@ fn get_configuration() -> serde_json::Value {
     json! {{
         "experimental_type_conditioned_fetching": true,
         // will make debugging easier
-        "plugins": {
-            "experimental.expose_query_plan": true
-        },
+        "expose_query_plan": true,
         "include_subgraph_errors": {
             "all": true
         },

@@ -151,7 +151,7 @@ Configures the externalization plugin
 coprocessor:
   client:
     dns_resolution_strategy: ipv4_only
-    experimental_http2: enable
+    http2: enable
   execution:
     request:
       body: false
@@ -676,7 +676,7 @@ Configuration options pertaining to the supergraph server component.
 supergraph:
   defer_support: true
   early_cancel: false
-  experimental_log_on_broken_pipe: false
+  log_on_broken_pipe: false
   generate_query_fragments: true
   introspection: false
   listen: example_listen
@@ -704,8 +704,8 @@ supergraph:
         urls:
         - http://example.com/urls_item
         username: example_username
-    experimental_paths_limit: null
-    experimental_plans_limit: null
+    paths_limit: null
+    plans_limit: null
     warmed_up_queries: null
 ```
 
@@ -896,7 +896,7 @@ telemetry:
           subgraph: true
           subgraph_request: true
           supergraph: true
-      experimental_response_trace_id:
+      response_trace_id:
         enabled: false
         format: hexadecimal
         header_name: example_header_name
@@ -1441,7 +1441,7 @@ traffic_shaping:
     compression: gzip
     deduplicate_query: false
     dns_resolution_strategy: ipv4_only
-    experimental_http2: enable
+    http2: enable
     experimental_http2_keep_alive_interval: null
     experimental_http2_keep_alive_timeout: null
     global_rate_limit:

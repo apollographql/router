@@ -1,0 +1,2 @@
+plugins:
+  experimental.expose_query_plan: true

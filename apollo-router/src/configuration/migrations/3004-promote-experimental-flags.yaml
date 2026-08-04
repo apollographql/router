@@ -1,0 +1,28 @@
+description: |
+  The following fields have been promoted out of experimental in Router 3.0:
+  - `supergraph.experimental_log_on_broken_pipe` -> `supergraph.log_on_broken_pipe`
+  - `supergraph.query_planning.experimental_plans_limit` -> `supergraph.query_planning.plans_limit`
+  - `supergraph.query_planning.experimental_paths_limit` -> `supergraph.query_planning.paths_limit`
+  - `traffic_shaping.all.experimental_http2` -> `traffic_shaping.all.http2`
+  - `coprocessor.client.experimental_http2` -> `coprocessor.client.http2`
+  - `telemetry.exporters.tracing.experimental_response_trace_id` -> `telemetry.exporters.tracing.response_trace_id`
+  The old names still work as deprecated aliases through the Router 3.x line.
+actions:
+  - type: move
+    from: supergraph.experimental_log_on_broken_pipe
+    to: supergraph.log_on_broken_pipe
+  - type: move
+    from: supergraph.query_planning.experimental_plans_limit
+    to: supergraph.query_planning.plans_limit
+  - type: move
+    from: supergraph.query_planning.experimental_paths_limit
+    to: supergraph.query_planning.paths_limit
+  - type: move
+    from: traffic_shaping.all.experimental_http2
+    to: traffic_shaping.all.http2
+  - type: move
+    from: coprocessor.client.experimental_http2
+    to: coprocessor.client.http2
+  - type: move
+    from: telemetry.exporters.tracing.experimental_response_trace_id
+    to: telemetry.exporters.tracing.response_trace_id

@@ -68,7 +68,7 @@ struct Shaping {
     /// Enable timeout for incoming requests
     timeout: Option<Duration>,
     /// Enable HTTP2 for subgraphs
-    experimental_http2: Option<Http2Config>,
+    http2: Option<Http2Config>,
     /// DNS resolution strategy for subgraphs
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
     /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
@@ -115,10 +115,10 @@ impl Merge for Shaping {
                     .as_ref()
                     .or(fallback.global_rate_limit.as_ref())
                     .cloned(),
-                experimental_http2: self
-                    .experimental_http2
+                http2: self
+                    .http2
                     .as_ref()
-                    .or(fallback.experimental_http2.as_ref())
+                    .or(fallback.http2.as_ref())
                     .cloned(),
                 dns_resolution_strategy: self
                     .dns_resolution_strategy
@@ -602,7 +602,7 @@ impl TrafficShaping {
             self.config.subgraphs.get(service_name),
         )
         .map(|config| crate::configuration::shared::Client {
-            experimental_http2: config.shaping.experimental_http2,
+            http2: config.shaping.http2,
             dns_resolution_strategy: config.shaping.dns_resolution_strategy,
             pool_idle_timeout: config.shaping.pool_idle_timeout,
             experimental_http2_keep_alive_interval: config
@@ -622,7 +622,7 @@ impl TrafficShaping {
         let source_config = self.config.connector.sources.get(source_name).cloned();
         Self::merge_config(self.config.connector.all.as_ref(), source_config.as_ref())
             .map(|config| crate::configuration::shared::Client {
-                experimental_http2: config.experimental_http2,
+                http2: config.experimental_http2,
                 dns_resolution_strategy: config.dns_resolution_strategy,
                 pool_idle_timeout: config.pool_idle_timeout,
                 experimental_http2_keep_alive_interval: config
@@ -1029,12 +1029,12 @@ mod test {
         let config = serde_yaml::from_str::<Config>(
             r#"
         all:
-          experimental_http2: disable
+          http2: disable
         subgraphs:
           products:
-            experimental_http2: enable
+            http2: enable
           reviews:
-            experimental_http2: disable
+            http2: disable
         router:
           timeout: 65s
         "#,
@@ -1045,7 +1045,7 @@ mod test {
             TrafficShaping::merge_config(config.all.as_ref(), config.subgraphs.get("products"))
                 .unwrap()
                 .shaping
-                .experimental_http2
+                .http2
                 .unwrap()
                 == Http2Config::Enable
         );
@@ -1053,7 +1053,7 @@ mod test {
             TrafficShaping::merge_config(config.all.as_ref(), config.subgraphs.get("reviews"))
                 .unwrap()
                 .shaping
-                .experimental_http2
+                .http2
                 .unwrap()
                 == Http2Config::Disable
         );
@@ -1061,7 +1061,7 @@ mod test {
             TrafficShaping::merge_config(config.all.as_ref(), None)
                 .unwrap()
                 .shaping
-                .experimental_http2
+                .http2
                 .unwrap()
                 == Http2Config::Disable
         );
@@ -1072,14 +1072,14 @@ mod test {
         let config = serde_yaml::from_str::<Config>(
             r#"
         all:
-          experimental_http2: disable
+          http2: disable
           dns_resolution_strategy: ipv6_only
         subgraphs:
           products:
-            experimental_http2: enable
+            http2: enable
             dns_resolution_strategy: ipv6_then_ipv4
           reviews:
-            experimental_http2: disable
+            http2: disable
             dns_resolution_strategy: ipv4_only
         router:
           timeout: 65s
@@ -1094,7 +1094,7 @@ mod test {
         assert_eq!(
             shaping_config.subgraph_client_config("products"),
             crate::configuration::shared::Client {
-                experimental_http2: Some(Http2Config::Enable),
+                http2: Some(Http2Config::Enable),
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6ThenIpv4),
                 pool_idle_timeout: default_pool_idle_timeout(),
                 ..Default::default()
@@ -1103,7 +1103,7 @@ mod test {
         assert_eq!(
             shaping_config.subgraph_client_config("reviews"),
             crate::configuration::shared::Client {
-                experimental_http2: Some(Http2Config::Disable),
+                http2: Some(Http2Config::Disable),
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv4Only),
                 pool_idle_timeout: default_pool_idle_timeout(),
                 ..Default::default()
@@ -1112,7 +1112,7 @@ mod test {
         assert_eq!(
             shaping_config.subgraph_client_config("this_doesnt_exist"),
             crate::configuration::shared::Client {
-                experimental_http2: Some(Http2Config::Disable),
+                http2: Some(Http2Config::Disable),
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6Only),
                 pool_idle_timeout: default_pool_idle_timeout(),
                 ..Default::default()
@@ -1505,7 +1505,7 @@ mod test {
         let config = serde_yaml::from_str::<Config>(
             r#"
         all:
-          experimental_http2: disable
+          http2: disable
         router:
           timeout: 65s
         "#,

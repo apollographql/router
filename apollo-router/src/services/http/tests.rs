@@ -877,7 +877,7 @@ mod h2c_cleartext {
         tokio::task::spawn(emulate_h2c_server(listener));
 
         let client_config = Client::builder()
-            .experimental_http2(Http2Config::Http2Only)
+            .http2(Http2Config::Http2Only)
             .build();
         let subgraph_service =
             HttpClientService::from_client_config(client_config).expect("can create a HttpService");
@@ -900,7 +900,7 @@ mod h2c_cleartext {
         tokio::task::spawn(emulate_h2c_server(listener));
 
         let client_config = Client::builder()
-            .experimental_http2(Http2Config::Enable)
+            .http2(Http2Config::Enable)
             .build();
         let subgraph_service =
             HttpClientService::from_client_config(client_config).expect("can create a HttpService");
@@ -1090,7 +1090,7 @@ mod h2c_keep_alive {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_keep_alive_pings_are_sent() {
         let client_config = Client::builder()
-            .experimental_http2(Http2Config::Http2Only)
+            .http2(Http2Config::Http2Only)
             .experimental_http2_keep_alive_interval(Duration::from_millis(50))
             .build();
 
@@ -1106,7 +1106,7 @@ mod h2c_keep_alive {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_no_pings_without_keep_alive() {
         let client_config = Client::builder()
-            .experimental_http2(Http2Config::Http2Only)
+            .http2(Http2Config::Http2Only)
             // no keep-alive interval configured
             .build();
 
@@ -1174,7 +1174,7 @@ mod compressed_req_res {
                 .expect("read native TLS root certificates")
                 .with_no_client_auth(),
             crate::configuration::shared::Client::builder()
-                .experimental_http2(Http2Config::Http2Only)
+                .http2(Http2Config::Http2Only)
                 .build(),
         )
         .expect("can create a HttpService");
@@ -1424,7 +1424,7 @@ mod alpn_negotiation {
             kind,
             &config,
             crate::configuration::shared::Client::builder()
-                .experimental_http2(http2_config)
+                .http2(http2_config)
                 .build(),
         );
 
@@ -1471,7 +1471,7 @@ mod http_version_negotiation {
             &Configuration::default(),
             &rustls::RootCertStore::empty(),
             crate::configuration::shared::Client::builder()
-                .experimental_http2(http2_config)
+                .http2(http2_config)
                 .build(),
         )
         .expect("created http client");

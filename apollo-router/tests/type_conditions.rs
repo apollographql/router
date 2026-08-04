@@ -63,9 +63,7 @@ async fn _test_type_conditions_enabled() -> Response {
         json! {{
             "experimental_type_conditioned_fetching": true,
             // will make debugging easier
-            "plugins": {
-                "experimental.expose_query_plan": true
-            },
+            "expose_query_plan": true,
             "include_subgraph_errors": {
                 "all": true
             }
@@ -111,9 +109,7 @@ async fn _test_type_conditions_enabled_generate_query_fragments() -> Response {
         json! {{
             "experimental_type_conditioned_fetching": true,
             // will make debugging easier
-            "plugins": {
-                "experimental.expose_query_plan": true
-            },
+            "expose_query_plan": true,
             "include_subgraph_errors": {
                 "all": true
             }
@@ -159,9 +155,7 @@ async fn _test_type_conditions_enabled_list_of_list() -> Response {
         json! {{
             "experimental_type_conditioned_fetching": true,
             // will make debugging easier
-            "plugins": {
-                "experimental.expose_query_plan": true
-            },
+            "expose_query_plan": true,
             "include_subgraph_errors": {
                 "all": true
             }
@@ -208,9 +202,7 @@ async fn _test_type_conditions_enabled_list_of_list_of_list() -> Response {
         json! {{
             "experimental_type_conditioned_fetching": true,
             // will make debugging easier
-            "plugins": {
-                "experimental.expose_query_plan": true
-            },
+            "expose_query_plan": true,
             "include_subgraph_errors": {
                 "all": true
             }
@@ -256,9 +248,7 @@ async fn _test_type_conditions_disabled() -> Response {
         json! {{
             "experimental_type_conditioned_fetching": false,
             // will make debugging easier
-            "plugins": {
-                "experimental.expose_query_plan": true
-            },
+            "expose_query_plan": true,
             "include_subgraph_errors": {
                 "all": true
             }
@@ -303,9 +293,7 @@ async fn _test_type_conditions_enabled_shouldnt_make_article_fetch() -> Response
         json! {{
             "experimental_type_conditioned_fetching": true,
             // will make debugging easier
-            "plugins": {
-                "experimental.expose_query_plan": true
-            },
+            "expose_query_plan": true,
             // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
             "supergraph": {
                 "generate_query_fragments": false,

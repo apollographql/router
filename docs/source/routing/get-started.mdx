@@ -237,9 +237,8 @@ Let's run the router in dev mode, using both the supergraph schema and YAML conf
       introspection: true
     include_subgraph_errors:
       all: true
-    plugins:
-      # Enable with the header, Apollo-Expose-Query-Plan: true
-      experimental.expose_query_plan: true
+    # Enable with the header, Apollo-Expose-Query-Plan: true
+    expose_query_plan: true
     ```
 
     [Learn more](/graphos/routing/configuration/cli#development-mode) about router dev mode.
@@ -264,7 +263,7 @@ Let's run the router in dev mode, using both the supergraph schema and YAML conf
     We may make breaking changes in future releases. To help us design the stable version we need your feedback.
     Here is a list of links where you can give your opinion:
 
-        - experimental_response_trace_id: https://github.com/apollographql/router/discussions/2147
+        - response_trace_id: https://github.com/apollographql/router/discussions/2147
 
     For more information about launch stages, please see the documentation here: https://www.apollographql.com/docs/resources/product-launch-stages/
     2025-04-25T21:54:06.406568Z INFO  state machine transitioned event="UpdateSchema(<redacted>)" state=Running previous_state="Startup"

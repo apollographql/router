@@ -867,7 +867,7 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("csrf");
     add_mandatory_apollo_plugin!("fleet_detector");
     add_mandatory_apollo_plugin!("enhanced_client_awareness");
-    add_mandatory_apollo_plugin!("experimental_diagnostics");
+    add_mandatory_apollo_plugin!("diagnostics");
 
     add_oss_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");
@@ -883,6 +883,7 @@ pub(crate) async fn create_plugins(
     add_oss_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
     add_optional_apollo_plugin!("response_cache");
+    add_oss_apollo_plugin!("expose_query_plan");
     add_user_plugins!();
 
     // Because this plugin intercepts subgraph requests

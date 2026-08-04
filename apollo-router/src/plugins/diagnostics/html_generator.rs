@@ -269,7 +269,7 @@ mod tests {
         let mock_router_config = r#"server:
   listen: 127.0.0.1:4000
 
-experimental_diagnostics:
+diagnostics:
   enabled: true
   listen: 127.0.0.1:8089
 

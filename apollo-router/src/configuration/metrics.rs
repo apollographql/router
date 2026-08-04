@@ -299,7 +299,7 @@ impl InstrumentData {
             opt.subgraph.rate_limit,
             "$[?(@.all.global_rate_limit || @.subgraphs..global_rate_limit)]",
             opt.subgraph.http2,
-            "$[?(@.all.experimental_http2 == 'enable' || @.all.experimental_http2 == 'http2only' || @.subgraphs..experimental_http2 == 'enable' || @.subgraphs..experimental_http2 == 'http2only')]",
+            "$[?(@.all.http2 == 'enable' || @.all.http2 == 'http2only' || @.subgraphs..http2 == 'enable' || @.subgraphs..http2 == 'http2only')]",
             opt.subgraph.compression,
             "$[?(@.all.compression || @.subgraphs..compression)]",
             opt.subgraph.deduplicate_query,
@@ -465,18 +465,18 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_log_on_broken_pipe,
-            "$.supergraph.experimental_log_on_broken_pipe[?(@==true)]"
+            apollo.router.config.log_on_broken_pipe,
+            "$.supergraph.log_on_broken_pipe[?(@==true)]"
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_plans_limit,
-            "$.supergraph.query_planning.experimental_plans_limit"
+            apollo.router.config.plans_limit,
+            "$.supergraph.query_planning.plans_limit"
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_paths_limit,
-            "$.supergraph.query_planning.experimental_paths_limit"
+            apollo.router.config.paths_limit,
+            "$.supergraph.query_planning.paths_limit"
         );
 
         populate_config_instrument!(
@@ -495,8 +495,8 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_response_trace_id,
-            "$.telemetry.exporters.tracing.experimental_response_trace_id[?(@.enabled==true)]"
+            apollo.router.config.response_trace_id,
+            "$.telemetry.exporters.tracing.response_trace_id[?(@.enabled==true)]"
         );
 
         populate_config_instrument!(
@@ -505,8 +505,8 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_http2,
-            "$.traffic_shaping[?(@.all.experimental_http2 == 'enable' || @.all.experimental_http2 == 'http2only' || @.subgraphs..experimental_http2 == 'enable' || @.subgraphs..experimental_http2 == 'http2only')]"
+            apollo.router.config.http2,
+            "$.traffic_shaping[?(@.all.http2 == 'enable' || @.all.http2 == 'http2only' || @.subgraphs..http2 == 'enable' || @.subgraphs..http2 == 'http2only')]"
         );
 
         populate_config_instrument!(
@@ -535,8 +535,8 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_expose_query_plan,
-            "$.plugins[?(@['experimental.expose_query_plan']==true)]"
+            apollo.router.config.expose_query_plan,
+            "$[?(@.expose_query_plan==true)]"
         );
 
         // We need to update the entry we just made because the selected strategy is a named object in the config.

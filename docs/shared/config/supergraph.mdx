@@ -6,7 +6,7 @@
 supergraph:
   defer_support: true
   early_cancel: false
-  experimental_log_on_broken_pipe: false
+  log_on_broken_pipe: false
   generate_query_fragments: true
   introspection: false
   listen: example_listen
@@ -34,8 +34,8 @@ supergraph:
         urls:
         - http://example.com/urls_item
         username: example_username
-    experimental_paths_limit: null
-    experimental_plans_limit: null
+    paths_limit: null
+    plans_limit: null
     warmed_up_queries: null
   strict_variable_validation: enforce
 ```
