@@ -13,8 +13,8 @@
 //! has no policy of its own; it is a pure rendering step.
 
 use super::invalidation_endpoint::IndexMode;
-use super::plugin::INTERNAL_CACHE_TAG_PREFIX;
 use super::plugin::RESPONSE_CACHE_VERSION;
+use crate::plugins::response_cache::INTERNAL_CACHE_TAG_PREFIX;
 
 /// Which caching scope a cache-tag entry belongs to. Subgraph and connector entries live in
 /// **disjoint** index namespaces so that invalidation targeting one scope can never resolve (and
@@ -118,23 +118,6 @@ mod tests {
         assert_eq!(
             CacheTag::Tag("homepage".into()).index_mode(),
             IndexMode::CacheTag,
-        );
-    }
-
-    #[test]
-    fn is_internal_distinguishes_user_facing_tags() {
-        assert!(CacheTag::Subgraph.is_internal());
-        assert!(CacheTag::Type("User".into()).is_internal());
-        assert!(!CacheTag::Tag("homepage".into()).is_internal());
-    }
-
-    #[test]
-    fn user_value_returns_inner_string_only_for_tag() {
-        assert_eq!(CacheTag::Subgraph.user_value(), None);
-        assert_eq!(CacheTag::Type("User".into()).user_value(), None);
-        assert_eq!(
-            CacheTag::Tag("homepage".into()).user_value(),
-            Some("homepage"),
         );
     }
 

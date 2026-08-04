@@ -22,7 +22,10 @@ expression: response
       "data": [
         {
           "key": "version:1.2:subgraph:products:type:Query:hash:[query-hash]:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
-          "invalidationKeys": [],
+          "invalidationKeys": [
+            "subgraph-products",
+            "type-products-Query"
+          ],
           "indexes": {
             "subgraph": true,
             "type": true,
@@ -75,7 +78,10 @@ expression: response
         },
         {
           "key": "version:1.2:subgraph:users:type:User:representation:e2d4bfa6d172a744110f37cd5227ffb3d146259fe84d19a6c91d8da877373f3e:hash:[query-hash]:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
-          "invalidationKeys": [],
+          "invalidationKeys": [
+            "subgraph-users",
+            "type-users-User"
+          ],
           "indexes": {
             "subgraph": true,
             "type": true,

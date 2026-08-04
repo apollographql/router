@@ -11,6 +11,12 @@ response_cache:
   invalidation:
     listen: 127.0.0.1:4000
     path: /invalidation
+  cdn_invalidation:
+    enabled: false
+    header_name: Cache-Tag
+    header_delimiter: ','
+    max_bytes: 16384
+    experimental_on_overflow: truncate
   subgraph:
     all:
       enabled: true

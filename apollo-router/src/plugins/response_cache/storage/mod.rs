@@ -3,7 +3,6 @@ mod error;
 pub(super) mod redis;
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -14,6 +13,7 @@ use super::cache_control::CacheControl;
 use crate::plugins::response_cache::cache_tag::CacheScope;
 use crate::plugins::response_cache::cache_tag::CacheTag;
 use crate::plugins::response_cache::invalidation::InvalidationKind;
+use crate::plugins::response_cache::invalidation_labels::InvalidationLabels;
 use crate::plugins::response_cache::metrics::record_fetch_duration;
 use crate::plugins::response_cache::metrics::record_fetch_error;
 use crate::plugins::response_cache::metrics::record_insert_duration;
@@ -35,8 +35,14 @@ pub(super) struct Document {
     pub(super) data: serde_json_bytes::Value,
     pub(super) control: CacheControl,
     pub(super) cache_tags: Vec<CacheTag>,
+    /// The fine-grained tag values (schema `@cacheTag` or `apolloCacheTags`/
+    /// `apolloEntityCacheTags` extensions) to persist alongside this document so a later cache
+    /// hit can rebuild the CDN `Cache-Tag` header for it, independent of `cache_tags` above.
+    /// `cache_tags` is pre-filtered by the Redis `IndexMode::CacheTag` index setting — this
+    /// field is populated whenever CDN invalidation wants it too, even if that index is off, so
+    /// enabling CDN invalidation alone never silently changes what gets `ZADD`ed into Redis.
+    pub(super) cdn_invalidation_tags: Vec<String>,
     pub(super) expire: Duration,
-    pub(super) debug: bool,
     /// Which scope's index namespace this document's cache-tag entries are written under.
     /// Defaults to [`CacheScope::Subgraph`]; connector store paths set [`CacheScope::Connector`].
     pub(super) scope: CacheScope,
@@ -49,8 +55,12 @@ pub(super) struct CacheEntry {
     pub(super) key: String,
     pub(super) data: serde_json_bytes::Value,
     pub(super) control: CacheControl,
-    // Only set in debug mode
-    pub(super) cache_tags: Option<HashSet<String>>,
+    /// Invalidation labels are those labels used to invalidate cached data; they pick out data
+    /// uniquely or, if the label applies more coarsely, to sets of data. They're used for Redis
+    /// cache invalidation through the invalidation endpoint and by CDNs through their CDN-specific
+    /// endpoints; for CDNs, they're emitted as a header and separated by a delimiter, which are
+    /// both configurable
+    pub(super) invalidation_labels: Option<InvalidationLabels>,
 }
 
 /// The `CacheStorage` trait defines an API that the backing storage layer must implement for

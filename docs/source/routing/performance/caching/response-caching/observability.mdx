@@ -74,6 +74,16 @@ telemetry:
 | `apollo.router.operations.response_cache.invalidation.request.entry` | Number of invalidated entries per invalidation request. | `{entry}` |
 | `apollo.router.operations.response_cache.invalidation.duration` | Duration of the invalidation event execution, in seconds. | `s` |
 
+### CDN invalidation
+
+These track [CDN invalidation](/router/performance/caching/response-caching/cdn-invalidation) header emission and only report when `response_cache.cdn_invalidation.enabled` is `true`.
+
+| Name | Description | Unit |
+| --- | --- | --- |
+| `apollo.router.operations.response_cache.cdn_tag_header.outcome` | Outcome of building the CDN invalidation labels (`Cache-Tag`) header for a response, labeled by `outcome`: `empty` (nothing to report), `complete_without_truncation`, `complete_with_truncation`, or `dropped_due_to_overflow` (see [Header size limits and truncation](/router/performance/caching/response-caching/cdn-invalidation#header-size-limits-and-truncation)). Use this to see what proportion of responses are being truncated or suppressed. | `{response}` |
+| `apollo.router.operations.response_cache.cdn_tag_header.untruncated_size` | Size the header would have been without `max_bytes` truncation, recorded whenever there's at least one label to report. Use this to see how much headroom you have before truncation starts happening. | `By` |
+| `apollo.router.operations.response_cache.cdn_tag_header.error` | Errors while emitting the header, labeled by `reason`: `invalid_header_name`, `invalid_header_value`, or `label_contains_delimiter` (one or more labels contained the configured `header_delimiter` and were dropped, since a delimiter inside a label would otherwise be indistinguishable from two separate labels). | `{error}` |
+
 ### Experimental maintenance metrics
 
 - `experimental.apollo.router.operations.response_cache.maintenance.commands`: Counter of Redis `ZREMRANGEBYSCORE` commands per drain cycle, split by a `deduplicated` attribute (`true` = avoided by deduplication, `false` = actually executed). Use the ratio `deduplicated=true / (true + false)` to measure how much Redis pressure the deduplication is relieving. A high ratio at scale indicates many inserts are concentrating on the same cache tags.
@@ -286,13 +296,20 @@ response_cache:
   - The `Cache-Control` header value returned by the subgraph
   - Response data from this entry
   - The entity key
-  - Corresponding cache tags for invalidation
+  - Corresponding cache tags for invalidation — every label you could invalidate this entry by, from finest to coarsest: exact `@cacheTag`/extension tag values, then the `type-{subgraph}-{type}` fallback, then the `subgraph-{name}` fallback. These are the same three tiers [CDN invalidation](/router/performance/caching/response-caching/cdn-invalidation) uses in the `Cache-Tag` header, so you can see exactly what you'd purge by at each level of granularity.
 
 <img
   className="screenshot"
   alt="Response cache debugger details in GraphOS Studio"
   src="../../../../images/response-cache/debugger-cache-details.png"
 />
+
+When [CDN invalidation](/router/performance/caching/response-caching/cdn-invalidation) is enabled, the debugger also shows CDN invalidation info for the response as a whole (distinct from the per-entry cache tags above, since header truncation depends on the combined label set across every entry the response touched):
+
+- **Outcome**: whether the `Cache-Tag` header was empty (nothing to report), sent complete, truncated to fit `max_bytes`, or dropped entirely due to `experimental_on_overflow: drop`
+- **Header value**: the actual header value sent, including truncated content
+- **Untruncated size**: how large the header would have been without the `max_bytes` limit
+- **Emitted**: whether the header actually made it onto the response
 
 - View the request pane for details about the original request sent to the subgraph to get the data, including the query and variables.
 

@@ -33,8 +33,9 @@ use jsonwebtoken::jwk::KeyOperations;
 use jsonwebtoken::jwk::PublicKeyUse;
 use mime::APPLICATION_JSON;
 use p256::ecdsa::SigningKey;
-use p256::ecdsa::signature::rand_core::OsRng;
+use p256::elliptic_curve::Generate;
 use p256::pkcs8::EncodePrivateKey;
+use rand::rngs::SysRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::ServiceExt;
@@ -49,6 +50,8 @@ use super::JWTConf;
 use super::JwtStatus;
 use super::Source;
 use super::authenticate;
+use super::has_authenticated_jwt;
+use crate::Context;
 use crate::assert_errors_eq_ignoring_id;
 use crate::assert_response_eq_ignoring_error_id;
 use crate::assert_snapshot_subscriber;
@@ -64,6 +67,17 @@ use crate::plugins::authentication::jwks::search_jwks;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::supergraph;
+
+#[test]
+fn has_authenticated_jwt_reflects_context_state() {
+    let context = Context::new();
+    assert!(!has_authenticated_jwt(&context));
+
+    context
+        .insert(APOLLO_AUTHENTICATION_JWT_CLAIMS, "placeholder".to_string())
+        .unwrap();
+    assert!(has_authenticated_jwt(&context));
+}
 
 pub(crate) fn create_an_url(filename: &str) -> String {
     let jwks_base = Path::new("tests");
@@ -979,9 +993,9 @@ fn make_manager(jwk: &Jwk, issuers: Option<Issuers>, audiences: Option<Audiences
 
 #[tokio::test]
 async fn issuer_check() {
-    let signing_key = SigningKey::random(&mut OsRng);
+    let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
     let verifying_key = signing_key.verifying_key();
-    let point = verifying_key.to_encoded_point(false);
+    let point = verifying_key.to_sec1_point(false);
 
     let encoding_key = EncodingKey::from_ec_der(&signing_key.to_pkcs8_der().unwrap().to_bytes());
 
@@ -1031,17 +1045,11 @@ async fn issuer_check() {
         value_prefix: super::default_header_value_prefix(),
     });
     match authenticate(&config, &manager, request.try_into().unwrap()) {
-        ControlFlow::Break(res) => {
-            panic!("unexpected response: {res:?}");
+        ControlFlow::Break(_res) => {
+            // Rejected: the token has no issuer but the JWKS entry configures an issuers allowlist.
         }
-        ControlFlow::Continue(req) => {
-            println!("got req with issuer check");
-            let claims: serde_json::Value = req
-                .context
-                .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
-                .unwrap()
-                .unwrap();
-            println!("claims: {claims:?}");
+        ControlFlow::Continue(_) => {
+            panic!("expected a rejection when the token has no issuer but issuers are configured");
         }
     }
 
@@ -1170,9 +1178,9 @@ async fn issuer_check() {
 
 #[tokio::test]
 async fn audience_check() {
-    let signing_key = SigningKey::random(&mut OsRng);
+    let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
     let verifying_key = signing_key.verifying_key();
-    let point = verifying_key.to_encoded_point(false);
+    let point = verifying_key.to_sec1_point(false);
 
     let encoding_key = EncodingKey::from_ec_der(&signing_key.to_pkcs8_der().unwrap().to_bytes());
 
@@ -1606,14 +1614,26 @@ mod common {
     }
 
     pub(super) fn jwk_with_kid(signing_key: &SigningKey, kid: &str) -> Jwk {
+        jwk_with_kid_and_alg(signing_key, Some(kid), Some(KeyAlgorithm::ES256))
+    }
+
+    /// Build an EC (P-256) JWK for `signing_key` with a caller-chosen `kid` and
+    /// `key_algorithm`. Omitting either lets tests reproduce JWKS entries that share
+    /// key material but differ in match specificity (a kid without a declared alg, or a
+    /// declared alg without a kid).
+    pub(super) fn jwk_with_kid_and_alg(
+        signing_key: &SigningKey,
+        kid: Option<&str>,
+        key_algorithm: Option<KeyAlgorithm>,
+    ) -> Jwk {
         let verifying_key = signing_key.verifying_key();
-        let point = verifying_key.to_encoded_point(false);
+        let point = verifying_key.to_sec1_point(false);
         Jwk {
             common: CommonParameters {
                 public_key_use: Some(PublicKeyUse::Signature),
                 key_operations: Some(vec![KeyOperations::Verify]),
-                key_algorithm: Some(KeyAlgorithm::ES256),
-                key_id: Some(kid.to_string()),
+                key_algorithm,
+                key_id: kid.map(str::to_string),
                 ..Default::default()
             },
             algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
@@ -1686,7 +1706,8 @@ mod expiry_validation {
     use jsonwebtoken::get_current_timestamp;
     use jsonwebtoken::jwk::JwkSet;
     use p256::ecdsa::SigningKey;
-    use p256::ecdsa::signature::rand_core::OsRng;
+    use p256::elliptic_curve::Generate;
+    use rand::rngs::SysRng;
     use url::Url;
 
     use super::common::build_request_with_header_token;
@@ -1707,7 +1728,7 @@ mod expiry_validation {
         token_claims: serde_json::Value,
         allow_missing_exp: bool,
     ) -> ControlFlow<router::Response, router::Request> {
-        let signing_key = SigningKey::random(&mut OsRng);
+        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let manager = if allow_missing_exp {
             make_manager_with_allow_missing_exp(&jwk(&signing_key), None, None, true)
         } else {
@@ -1792,7 +1813,7 @@ mod expiry_validation {
         audiences: Option<Audiences>,
         allow_missing_exp: bool,
     ) -> ControlFlow<router::Response, router::Request> {
-        let signing_key = SigningKey::random(&mut OsRng);
+        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let manager = make_manager_with_allow_missing_exp(
             &jwk(&signing_key),
             issuers,
@@ -1845,11 +1866,11 @@ mod expiry_validation {
     #[test]
     fn it_respects_per_jwks_allow_missing_exp_scoping() {
         // JWKS A: allow_missing_exp = true, kid = "key-a"
-        let signing_key_a = SigningKey::random(&mut OsRng);
+        let signing_key_a = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let jwk_a = jwk_with_kid(&signing_key_a, "key-a");
 
         // JWKS B: allow_missing_exp = false, kid = "key-b"
-        let signing_key_b = SigningKey::random(&mut OsRng);
+        let signing_key_b = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let jwk_b = jwk_with_kid(&signing_key_b, "key-b");
 
         let url_a = Url::from_str("file:///jwks-a.json").unwrap();
@@ -1917,7 +1938,8 @@ mod audience_validation {
     use http::StatusCode;
     use jsonwebtoken::get_current_timestamp;
     use p256::ecdsa::SigningKey;
-    use p256::ecdsa::signature::rand_core::OsRng;
+    use p256::elliptic_curve::Generate;
+    use rand::rngs::SysRng;
 
     use super::common::build_request_with_header_token;
     use super::common::jwk;
@@ -1930,7 +1952,7 @@ mod audience_validation {
         manager_aud: &[&str],
         token_aud: serde_json::Value,
     ) -> ControlFlow<router::Response, router::Request> {
-        let signing_key = SigningKey::random(&mut OsRng);
+        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let manager_audiences = if manager_aud.is_empty() {
             None
         } else {
@@ -1999,7 +2021,8 @@ mod issuer_validation {
     use http::StatusCode;
     use jsonwebtoken::get_current_timestamp;
     use p256::ecdsa::SigningKey;
-    use p256::ecdsa::signature::rand_core::OsRng;
+    use p256::elliptic_curve::Generate;
+    use rand::rngs::SysRng;
 
     use super::common::build_request_with_header_token;
     use super::common::jwk;
@@ -2012,7 +2035,7 @@ mod issuer_validation {
         manager_iss: &[&str],
         token_iss: serde_json::Value,
     ) -> ControlFlow<router::Response, router::Request> {
-        let signing_key = SigningKey::random(&mut OsRng);
+        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
 
         let manager_issuers = if manager_iss.is_empty() {
             None
@@ -2037,8 +2060,6 @@ mod issuer_validation {
     #[case::single_iss(&["hello"], serde_json::json!("hello"))]
     #[case::null_mgr_iss_with_token_iss(&[], serde_json::json!("hello"))]
     #[case::null_mgr_iss_with_empty_token_iss(&[], serde_json::Value::Null)]
-    #[case::empty_token_iss(&["hello", "world"], serde_json::Value::Null)]
-    #[case::empty_token_iss(&["hello"], serde_json::Value::Null)]
     fn it_accepts_jwt(#[case] manager_iss: &[&str], #[case] token_iss: serde_json::Value) {
         match authenticate_request(manager_iss, token_iss.clone()) {
             ControlFlow::Continue(_) => {}
@@ -2056,6 +2077,8 @@ mod issuer_validation {
     #[case::single_with_array_accepted_any_of(&["hello"], serde_json::json!(["hello", "world"]))]
     #[case::single_with_array_accepted(&["hello"], serde_json::json!(["hello"]))]
     #[case::missing_token_iss(&["hello", "world"], serde_json::json!(""))]
+    #[case::null_token_iss(&["hello", "world"], serde_json::Value::Null)]
+    #[case::null_token_iss_single(&["hello"], serde_json::Value::Null)]
     #[case::mismatched_single_iss(&["hello"], serde_json::json!("world"))]
     #[case::mismatched_single_iss_array(&["hello"], serde_json::json!(["world"]))]
     #[case::mismatched_single_iss_array(&["hello"], serde_json::json!(["world", "planet"]))]
@@ -2076,6 +2099,33 @@ mod issuer_validation {
             }
         }
     }
+
+    // The parametrized helper always inserts an `iss` key (even if null), so it can't exercise the
+    // truly-absent-claim path. This builds a token whose claims object omits `iss` entirely and
+    // asserts it is rejected when an issuers allowlist is configured.
+    #[test]
+    fn it_rejects_jwt_with_absent_iss_claim() {
+        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
+        let manager = make_manager(&jwk(&signing_key), Some(["hello".to_string()].into()), None);
+
+        let token_claims = serde_json::json!({
+            "sub": "test",
+            "exp": get_current_timestamp(),
+        });
+        let request = build_request_with_header_token(signing_key, token_claims);
+
+        match authenticate(&jwt_conf_with_header_source(), &manager, request) {
+            ControlFlow::Continue(_) => {
+                panic!("token with no `iss` claim should be rejected when issuers are configured");
+            }
+            ControlFlow::Break(response) => {
+                assert_eq!(
+                    response.response.status(),
+                    StatusCode::INTERNAL_SERVER_ERROR
+                );
+            }
+        }
+    }
 }
 
 // Tests for the case where two JWKS entries share identical key material but have different
@@ -2090,15 +2140,21 @@ mod duplicate_key_retry {
 
     use http::StatusCode;
     use jsonwebtoken::get_current_timestamp;
+    use jsonwebtoken::jwk::Jwk;
     use jsonwebtoken::jwk::JwkSet;
+    use jsonwebtoken::jwk::KeyAlgorithm;
     use p256::ecdsa::SigningKey;
-    use p256::ecdsa::signature::rand_core::OsRng;
+    use p256::elliptic_curve::Generate;
+    use rand::rngs::SysRng;
     use url::Url;
 
     use super::common::build_request_with_header_token;
+    use super::common::build_request_with_header_token_kid;
     use super::common::jwk;
+    use super::common::jwk_with_kid_and_alg;
     use super::common::jwt_conf_with_header_source;
     use crate::plugins::authentication::authenticate;
+    use crate::plugins::authentication::jwks::Issuers;
     use crate::plugins::authentication::jwks::JwksConfig;
     use crate::plugins::authentication::jwks::JwksManager;
 
@@ -2108,7 +2164,7 @@ mod duplicate_key_retry {
         // entry B (index 1) expects "tenant-b". iter_jwks uses list.pop() so entry B is tried
         // first. A token with issuer "tenant-a" fails entry B's issuer check; the retry loop
         // must continue to entry A and succeed.
-        let signing_key = SigningKey::random(&mut OsRng);
+        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let shared_jwk = JwkSet {
             keys: vec![jwk(&signing_key)],
         };
@@ -2158,7 +2214,7 @@ mod duplicate_key_retry {
     #[test]
     fn it_fails_when_no_jwks_entry_issuer_matches() {
         // Both entries have specific issuers, neither matches the token issuer.
-        let signing_key = SigningKey::random(&mut OsRng);
+        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let shared_jwk = JwkSet {
             keys: vec![jwk(&signing_key)],
         };
@@ -2216,7 +2272,7 @@ mod duplicate_key_retry {
         // entry B (index 1) expects "aud-b". iter_jwks uses list.pop() so entry B is tried
         // first. A token with audience "aud-a" fails entry B's audience check; the retry loop
         // must continue to entry A and succeed.
-        let signing_key = SigningKey::random(&mut OsRng);
+        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
         let shared_jwk = JwkSet {
             keys: vec![jwk(&signing_key)],
         };
@@ -2259,6 +2315,178 @@ mod duplicate_key_retry {
             ControlFlow::Continue(_) => {}
             ControlFlow::Break(response) => {
                 panic!("should have succeeded via second JWKS entry: {response:?}");
+            }
+        }
+    }
+
+    // A single-key JWKS entry: a `JwksConfig` paired with its `(url, JwkSet)` map entry.
+    type JwksEntry = (JwksConfig, (Url, JwkSet));
+    type JwksEntries = Vec<JwksEntry>;
+
+    const KID_SPECIFIC: &str = "tenant-a-key";
+    const SHARED_KID: &str = "shared-kid";
+
+    // A deterministic signing key, so the entry builders below can run inside rstest `#[case]`
+    // attributes (which have no access to a per-test value) while the test body signs its token
+    // with the same key.
+    fn test_signing_key() -> SigningKey {
+        SigningKey::from_slice(&[1u8; 32]).expect("valid P-256 signing key")
+    }
+
+    // Return `entries` with its order reversed, so a test can provide both orderings as cases and
+    // prove its outcome is independent of iter_jwks' pop() ordering.
+    fn reversed(mut entries: JwksEntries) -> JwksEntries {
+        entries.reverse();
+        entries
+    }
+
+    // Build a single-key JWKS entry from the deterministic test key.
+    fn jwks_entry(url: &str, jwk: Jwk, issuers: Option<Issuers>) -> JwksEntry {
+        let url = Url::from_str(url).unwrap();
+        let config = JwksConfig {
+            url: url.clone(),
+            issuers,
+            audiences: None,
+            algorithms: None,
+            poll_interval: Duration::from_secs(60),
+            allow_missing_exp: false,
+            headers: Vec::new(),
+        };
+        (config, (url, JwkSet { keys: vec![jwk] }))
+    }
+
+    fn manager_from_entries(entries: JwksEntries) -> JwksManager {
+        let list: Vec<JwksConfig> = entries.iter().map(|(config, _)| config.clone()).collect();
+        let map: HashMap<Url, JwkSet> = entries.into_iter().map(|(_, entry)| entry).collect();
+        JwksManager::new_test(list, map)
+    }
+
+    // Two JWKS entries that share the same key material but differ in match specificity. Entry A
+    // is kid-specific and issuer-constrained; entry B is alg-only and unconstrained. In [A, B]
+    // order.
+    fn kid_specific_and_unconstrained_entries() -> JwksEntries {
+        vec![
+            // Entry A: kid present, no declared algorithm -> matches on kid only.
+            jwks_entry(
+                "file:///jwks-kid-specific.json",
+                jwk_with_kid_and_alg(&test_signing_key(), Some(KID_SPECIFIC), None),
+                Some(["https://tenant-a.example.com".to_string()].into()),
+            ),
+            // Entry B: no kid, declared ES256 -> matches on algorithm only.
+            jwks_entry(
+                "file:///jwks-unconstrained.json",
+                jwk_with_kid_and_alg(&test_signing_key(), None, Some(KeyAlgorithm::ES256)),
+                None,
+            ),
+        ]
+    }
+
+    // Two JWKS entries that share the same key material and the same kid but differ in algorithm
+    // specificity. Entry A declares ES256 (constrained to tenant-a); entry B declares no algorithm
+    // (constrained to tenant-b). In [A, B] order.
+    fn kid_matched_entries_with_differing_alg() -> JwksEntries {
+        vec![
+            // Entry A: kid + explicit ES256, constrained to tenant-a.
+            jwks_entry(
+                "file:///jwks-a.json",
+                jwk_with_kid_and_alg(
+                    &test_signing_key(),
+                    Some(SHARED_KID),
+                    Some(KeyAlgorithm::ES256),
+                ),
+                Some(["https://tenant-a.example.com".to_string()].into()),
+            ),
+            // Entry B: same key + same kid but no declared algorithm, constrained to tenant-b.
+            jwks_entry(
+                "file:///jwks-b.json",
+                jwk_with_kid_and_alg(&test_signing_key(), Some(SHARED_KID), None),
+                Some(["https://tenant-b.example.com".to_string()].into()),
+            ),
+        ]
+    }
+
+    // ROUTER-1990: a token whose kid matches the kid-specific, issuer-constrained entry must
+    // not be accepted by falling through to the less-specific unconstrained entry that shares
+    // the same key material. The constrained entry is the most specific match, so it is
+    // selected authoritatively and its issuer check rejects the token.
+    #[rstest::rstest]
+    #[case::in_order(kid_specific_and_unconstrained_entries())]
+    #[case::reversed(reversed(kid_specific_and_unconstrained_entries()))]
+    fn it_rejects_kid_specific_entry_via_unconstrained_fallthrough(#[case] entries: JwksEntries) {
+        let manager = manager_from_entries(entries);
+
+        let token_claims = serde_json::json!({
+            "sub": "test",
+            "exp": get_current_timestamp(),
+            "iss": "https://attacker.example.com"
+        });
+        let request =
+            build_request_with_header_token_kid(test_signing_key(), token_claims, KID_SPECIFIC);
+
+        match authenticate(&jwt_conf_with_header_source(), &manager, request) {
+            ControlFlow::Break(response) => {
+                assert_eq!(
+                    response.response.status(),
+                    StatusCode::INTERNAL_SERVER_ERROR
+                );
+            }
+            ControlFlow::Continue(_) => {
+                panic!(
+                    "token should be rejected by the kid-specific entry's issuer constraint, \
+                     not accepted via the unconstrained entry"
+                );
+            }
+        }
+    }
+
+    // Companion to the test above: when the token's issuer matches the kid-specific entry, it
+    // is accepted via that entry.
+    #[rstest::rstest]
+    #[case::in_order(kid_specific_and_unconstrained_entries())]
+    #[case::reversed(reversed(kid_specific_and_unconstrained_entries()))]
+    fn it_accepts_kid_specific_entry_when_issuer_matches(#[case] entries: JwksEntries) {
+        let manager = manager_from_entries(entries);
+
+        let token_claims = serde_json::json!({
+            "sub": "test",
+            "exp": get_current_timestamp(),
+            "iss": "https://tenant-a.example.com"
+        });
+        let request =
+            build_request_with_header_token_kid(test_signing_key(), token_claims, KID_SPECIFIC);
+
+        match authenticate(&jwt_conf_with_header_source(), &manager, request) {
+            ControlFlow::Continue(_) => {}
+            ControlFlow::Break(response) => {
+                panic!("token should be accepted via the kid-specific entry: {response:?}");
+            }
+        }
+    }
+
+    // The ROUTER-1990 fix must not over-filter: when several entries all match the token's kid
+    // but carry different issuer/audience constraints (the same key duplicated across tenants),
+    // decode_jwt must still retry each kid-matched entry (ROUTER-1691). Here one entry declares
+    // its algorithm (a more specific match) and the other does not; both remain candidates, so
+    // a token whose issuer matches only the less-specific (kid-only) entry is still accepted.
+    #[rstest::rstest]
+    #[case::in_order(kid_matched_entries_with_differing_alg())]
+    #[case::reversed(reversed(kid_matched_entries_with_differing_alg()))]
+    fn it_retries_kid_matched_entries_with_differing_alg_specificity(#[case] entries: JwksEntries) {
+        let manager = manager_from_entries(entries);
+
+        // The token's issuer matches only entry B (the kid-only, lower-scored entry).
+        let token_claims = serde_json::json!({
+            "sub": "test",
+            "exp": get_current_timestamp(),
+            "iss": "https://tenant-b.example.com"
+        });
+        let request =
+            build_request_with_header_token_kid(test_signing_key(), token_claims, SHARED_KID);
+
+        match authenticate(&jwt_conf_with_header_source(), &manager, request) {
+            ControlFlow::Continue(_) => {}
+            ControlFlow::Break(response) => {
+                panic!("kid-matched entry B should have been retried and accepted: {response:?}");
             }
         }
     }

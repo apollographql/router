@@ -15,7 +15,7 @@ use tracing::Instrument;
 use super::plugin::StorageInterface;
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::cache_tag::CacheScope;
-use crate::plugins::response_cache::plugin::INTERNAL_CACHE_TAG_PREFIX;
+use crate::plugins::response_cache::INTERNAL_CACHE_TAG_PREFIX;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
 use crate::plugins::response_cache::storage;
 use crate::plugins::response_cache::storage::CacheStorage;

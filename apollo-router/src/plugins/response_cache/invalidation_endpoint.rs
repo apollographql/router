@@ -93,6 +93,37 @@ impl InvalidationIndexes {
             IndexMode::CacheTag => self.cache_tag,
         }
     }
+
+    /// Whether anything wants per-tag `InvalidationLabels` tracking for a subgraph: either the
+    /// Redis `cache_tag` index, or CDN invalidation header emission — two independent consumers
+    /// of the same underlying tag data. Centralizes the one gate every `InvalidationLabels`-
+    /// tracking call site must use, so the two conditions can't drift out of sync between call
+    /// sites the way they have before.
+    pub(crate) fn tracks_invalidation_labels(&self, cdn_invalidation_enabled: bool) -> bool {
+        self.is_enabled(IndexMode::CacheTag) || cdn_invalidation_enabled
+    }
+}
+
+#[cfg(test)]
+mod invalidation_indexes_tests {
+    use super::*;
+
+    #[test]
+    fn tracks_invalidation_labels_is_true_iff_either_consumer_wants_it() {
+        let cache_tag_off = InvalidationIndexes {
+            cache_tag: false,
+            ..Default::default()
+        };
+        let cache_tag_on = InvalidationIndexes {
+            cache_tag: true,
+            ..Default::default()
+        };
+
+        assert!(!cache_tag_off.tracks_invalidation_labels(false));
+        assert!(cache_tag_off.tracks_invalidation_labels(true));
+        assert!(cache_tag_on.tracks_invalidation_labels(false));
+        assert!(cache_tag_on.tracks_invalidation_labels(true));
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
