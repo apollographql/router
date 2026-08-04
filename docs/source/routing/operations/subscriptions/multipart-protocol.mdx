@@ -12,7 +12,7 @@ Use this reference if you're adding protocol support to a new GraphQL client lib
 
 To execute a subscription on the GraphOS Router, a GraphQL client sends an HTTP request with _almost_ the exact same format that it uses for query and mutation requests.
 
-Clients signal that they can accept multipart subscription by including `multipart/mixed;subscriptionSpec=1.0` in the `Accept` header:
+Clients signal that they can accept multipart subscriptions by including `multipart/mixed;subscriptionSpec=1.0` in the `Accept` header:
 
 ```text title="Example header"
 Accept: multipart/mixed;subscriptionSpec=1.0, application/json
