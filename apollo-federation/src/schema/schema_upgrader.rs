@@ -28,6 +28,7 @@ use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::schema::SchemaElement;
 use crate::schema::SubgraphMetadata;
 use crate::schema::field_set::FieldSetValidation;
@@ -759,8 +760,14 @@ impl SchemaUpgrader {
                     let Some(entries) = self.object_type_map.get(obj_name) else {
                         continue;
                     };
-                    let type_in_other_subgraphs = entries.iter().any(|(subgraph_name, _)| {
-                        let other_subgraph = self.get_subgraph_by_name(subgraph_name).unwrap();
+                    let mut type_in_other_subgraphs = false;
+                    for (subgraph_name, _) in entries.iter() {
+                        let other_subgraph =
+                            self.get_subgraph_by_name(subgraph_name).ok_or_else(|| {
+                                internal_error!(
+                                    "Type index names subgraph \"{subgraph_name}\", which the upgrader does not hold"
+                                )
+                            })?;
                         let field_exists = other_subgraph
                             .schema()
                             .schema()
@@ -773,10 +780,10 @@ impl SchemaUpgrader {
                             && (!other_metadata.is_field_external(&obj_field)
                                 || other_metadata.is_field_partially_external(&obj_field))
                         {
-                            return true;
+                            type_in_other_subgraphs = true;
+                            break;
                         }
-                        false
-                    });
+                    }
                     if type_in_other_subgraphs
                         && !obj_field.has_applied_directive(schema, &shareable_directive_name)
                     {
