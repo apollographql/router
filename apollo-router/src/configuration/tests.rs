@@ -726,6 +726,7 @@ headers:
         .expect_err("old headers config should be rejected when migration is not applied");
 }
 
+/// Sample YAML files that have minor migrations from the 2.x release cycle
 #[derive(RustEmbed)]
 #[folder = "src/configuration/testdata/migrations/minor"]
 struct AssetMinor;
@@ -741,7 +742,7 @@ fn upgrade_old_minor_configuration() {
             let new_config = crate::configuration::upgrade::upgrade_configuration(
                 &serde_yaml::from_str(&input).expect("config must be valid yaml"),
                 true,
-                upgrade::UpgradeMode::Minor,
+                upgrade::UpgradeMode::Minor(2),
             )
             .expect("configuration could not be updated");
             let new_config =
