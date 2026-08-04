@@ -4,7 +4,6 @@ use tower::BoxError;
 
 use crate::Context;
 use crate::graphql;
-use crate::json_ext::Object;
 use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::response_cache::invalidation_endpoint::InvalidationIndexes;
 use crate::plugins::response_cache::invalidation_labels::CdnHeaderBuildResult;
@@ -70,8 +69,10 @@ pub(super) struct Link {
 pub(crate) enum CacheEntryKind {
     Entity {
         typename: String,
+        // PERF(apollo-json): legacy bridge, revisit -- serde buffers untagged enums, and an
+        // apollo-json handle cannot be captured out of a buffer
         #[serde(rename = "entityKey")]
-        entity_key: Object,
+        entity_key: serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value>,
     },
     RootFields {
         #[serde(rename = "rootFields")]
@@ -339,7 +340,7 @@ mod tests {
         let mut ctx = root_fields_context(false, true, true);
         ctx.kind = CacheEntryKind::Entity {
             typename: "User".to_string(),
-            entity_key: Object::default(),
+            entity_key: Default::default(),
         };
 
         let ctx = ctx.compute_warnings();

@@ -259,7 +259,7 @@ where
         attrs: &mut Vec<KeyValue>,
         ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
-        value: &serde_json_bytes::Value,
+        value: &crate::json_ext::Value,
         ctx: &Context,
     ) {
         self.attributes

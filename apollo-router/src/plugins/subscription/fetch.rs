@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use futures::future::BoxFuture;
-use serde_json_bytes::Value;
 use tokio::sync::mpsc;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -14,6 +13,7 @@ use tracing::instrument::Instrumented;
 
 use crate::error::Error;
 use crate::http_ext;
+use crate::json_ext::Value;
 use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
 use crate::plugins::subscription::SubscriptionTaskParams;
 use crate::query_planner::OperationKind;
@@ -247,12 +247,13 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     use apollo_federation::query_plan::serializable_document::SerializableDocument;
-    use serde_json_bytes::Value;
     use tokio::sync::mpsc;
 
     use super::subscription_with_subgraph_service;
     use crate::Context;
     use crate::json_ext::Path;
+    use crate::json_ext::Value;
+    use crate::json_ext::ValueExt;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::subscription::SubscriptionConfig;
     use crate::query_planner::OperationKind;
@@ -322,7 +323,11 @@ mod tests {
                 "can't open new subscription, limit reached"
             );
             assert_eq!(
-                errors[0].extensions.get("code").and_then(|v| v.as_str()),
+                errors[0]
+                    .extensions
+                    .get("code")
+                    .and_then(|value| value.as_str_owned())
+                    .as_deref(),
                 Some("SUBSCRIPTION_MAX_LIMIT")
             );
             assert_counter!(

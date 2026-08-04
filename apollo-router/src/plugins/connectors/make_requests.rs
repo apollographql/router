@@ -13,14 +13,29 @@ use apollo_federation::connectors::runtime::http_json_transport::make_request;
 use apollo_federation::connectors::runtime::inputs::RequestInputs;
 use apollo_federation::connectors::runtime::key::ResponseKey;
 use parking_lot::Mutex;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
+use serde_json_bytes::Value as JSONValue;
 
 use crate::Context;
+use crate::json_ext;
 use crate::query_planner::fetch::Variables;
 use crate::services::connector::request_service::Request;
 
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
+
+/// The operation variables as `serde_json_bytes`, which is what connector
+/// [`RequestInputs`] hold. The whole map crosses over once per operation so
+/// that a large `representations` variable is walked a single time.
+// PERF(apollo-json): legacy bridge, revisit -- apollo-federation's connector inputs are serde_json_bytes
+fn legacy_variables(variables: &Variables) -> Map<ByteString, JSONValue> {
+    match json_ext::to_legacy(&variables.variables.clone().into_value()) {
+        JSONValue::Object(map) => map,
+        _ => Map::new(),
+    }
+}
 
 pub(crate) fn make_requests(
     operation: &Valid<ExecutableDocument>,
@@ -152,6 +167,8 @@ fn root_fields(
         .get(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
 
+    let legacy_vars = legacy_variables(variables);
+
     op.selection_set
         .selections
         .iter()
@@ -163,8 +180,8 @@ fn root_fields(
                     .unwrap_or_else(|| &field.name)
                     .to_string();
 
-                let args = graphql_utils::field_arguments_map(field, &variables.variables)
-                    .map_err(|err| {
+                let args =
+                    graphql_utils::field_arguments_map(field, &legacy_vars).map_err(|err| {
                         InvalidArguments(format!("cannot get inputs from field arguments: {err}"))
                     })?;
 
@@ -224,9 +241,13 @@ fn entities_from_request(
 ) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
 
-    let Some(representations) = variables.variables.get(REPRESENTATIONS_VAR) else {
+    if !variables.variables.contains_key(REPRESENTATIONS_VAR) {
         return root_fields(connector, operation, variables);
-    };
+    }
+    let legacy_vars = legacy_variables(variables);
+    let representations = legacy_vars
+        .get(REPRESENTATIONS_VAR)
+        .expect("the representations variable is present");
 
     let op = operation
         .operations
@@ -387,8 +408,11 @@ fn entities_with_fields_from_request(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let representations = variables
-        .variables
+    let owned_vars = legacy_variables(variables);
+    // The per-field closures below are `move`, so they capture a copied
+    // reference rather than the map itself.
+    let legacy_vars = &owned_vars;
+    let representations = legacy_vars
         .get(REPRESENTATIONS_VAR)
         .ok_or_else(|| InvalidRepresentations("missing representations variable".into()))?
         .as_array()
@@ -411,8 +435,8 @@ fn entities_with_fields_from_request(
             ));
 
             representations.iter().map(move |(i, representation)| {
-                let args = graphql_utils::field_arguments_map(field, &variables.variables)
-                    .map_err(|err| {
+                let args =
+                    graphql_utils::field_arguments_map(field, legacy_vars).map_err(|err| {
                         InvalidArguments(format!("cannot get inputs from field arguments: {err}"))
                     })?;
 
@@ -471,7 +495,8 @@ fn batch_entities_from_request(
         return Err(InvalidOperation("TODO better error type".into()));
     };
 
-    let Some(representations) = variables.variables.get(REPRESENTATIONS_VAR) else {
+    let legacy_vars = legacy_variables(variables);
+    let Some(representations) = legacy_vars.get(REPRESENTATIONS_VAR) else {
         return Err(InvalidRepresentations(
             "batch_entities_from_request called without representations".into(),
         ));
@@ -561,12 +586,16 @@ mod tests {
 
     use crate::Context;
     use crate::graphql;
+    use crate::json_ext;
+    use crate::json_ext::ValueExt;
     use crate::query_planner::fetch::Variables;
 
-    // Helper function to create test Variables directly from a serde_json Value
+    /// Test `Variables` from a `serde_json_bytes::json!` object fixture.
     fn create_test_variables(vars: serde_json_bytes::Value) -> Variables {
         Variables {
-            variables: vars.as_object().unwrap().clone(),
+            variables: json_ext::from_legacy(&vars)
+                .as_object()
+                .expect("the fixture is a JSON object"),
             inverted_paths: Default::default(),
             contextual_arguments: Default::default(),
         }
@@ -751,18 +780,11 @@ mod tests {
             "./",
         )
             .unwrap();
-        let variables = Variables {
-            variables: serde_json_bytes::json!({
-                "var1": 1, "var2": true, "var3": 0.9,
-                "var4": "123", "var5": { "a": 42 }, "var6": ["item"],
-                "var7": null
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-            inverted_paths: Default::default(),
-            contextual_arguments: Default::default(),
-        };
+        let variables = create_test_variables(serde_json_bytes::json!({
+            "var1": 1, "var2": true, "var3": 0.9,
+            "var4": "123", "var5": { "a": 42 }, "var6": ["item"],
+            "var7": null
+        }));
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -864,19 +886,12 @@ mod tests {
             "./",
         )
         .unwrap();
-        let variables = Variables {
-            variables: serde_json_bytes::json!({
-                "representations": [
-                    { "__typename": "Entity", "id": "1" },
-                    { "__typename": "Entity", "id": "2" },
-                ]
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-            inverted_paths: Default::default(),
-            contextual_arguments: Default::default(),
-        };
+        let variables = create_test_variables(serde_json_bytes::json!({
+            "representations": [
+                { "__typename": "Entity", "id": "1" },
+                { "__typename": "Entity", "id": "2" },
+            ]
+        }));
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -977,19 +992,12 @@ mod tests {
             "./",
         )
         .unwrap();
-        let variables = Variables {
-            variables: serde_json_bytes::json!({
-                "representations": [
-                    { "__typename": "Entity", "id": "1" },
-                    { "__typename": "Entity", "id": "2" },
-                ]
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-            inverted_paths: Default::default(),
-            contextual_arguments: Default::default(),
-        };
+        let variables = create_test_variables(serde_json_bytes::json!({
+            "representations": [
+                { "__typename": "Entity", "id": "1" },
+                { "__typename": "Entity", "id": "2" },
+            ]
+        }));
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -1073,17 +1081,10 @@ mod tests {
             "./",
         )
         .unwrap();
-        let variables = Variables {
-            variables: serde_json_bytes::json!({
-                "a": "1",
-                "b": "2"
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-            inverted_paths: Default::default(),
-            contextual_arguments: Default::default(),
-        };
+        let variables = create_test_variables(serde_json_bytes::json!({
+            "a": "1",
+            "b": "2"
+        }));
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -1186,20 +1187,13 @@ mod tests {
             "./",
         )
         .unwrap();
-        let variables = Variables {
-            variables: serde_json_bytes::json!({
-                "representations": [
-                    { "__typename": "Entity", "id": "1" },
-                    { "__typename": "Entity", "id": "2" },
-                ],
-                "bye": "bye"
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-            inverted_paths: Default::default(),
-            contextual_arguments: Default::default(),
-        };
+        let variables = create_test_variables(serde_json_bytes::json!({
+            "representations": [
+                { "__typename": "Entity", "id": "1" },
+                { "__typename": "Entity", "id": "2" },
+            ],
+            "bye": "bye"
+        }));
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -1337,20 +1331,13 @@ mod tests {
             "./",
         )
         .unwrap();
-        let variables = Variables {
-            variables: serde_json_bytes::json!({
-                "representations": [
-                    { "__typename": "Entity", "id": "1" },
-                    { "__typename": "Entity", "id": "2" },
-                ],
-                "bye": "bye"
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-            inverted_paths: Default::default(),
-            contextual_arguments: Default::default(),
-        };
+        let variables = create_test_variables(serde_json_bytes::json!({
+            "representations": [
+                { "__typename": "Entity", "id": "1" },
+                { "__typename": "Entity", "id": "2" },
+            ],
+            "bye": "bye"
+        }));
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -1485,20 +1472,13 @@ mod tests {
             "./",
         )
         .unwrap();
-        let variables = Variables {
-            variables: serde_json_bytes::json!({
-              "representations": [
-                  { "__typename": "Entity", "id": "1" },
-                  { "__typename": "Entity", "id": "2" },
-              ],
-              "foo": "bar"
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-            inverted_paths: Default::default(),
-            contextual_arguments: Default::default(),
-        };
+        let variables = create_test_variables(serde_json_bytes::json!({
+          "representations": [
+              { "__typename": "Entity", "id": "1" },
+              { "__typename": "Entity", "id": "2" },
+          ],
+          "foo": "bar"
+        }));
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -1605,19 +1585,12 @@ mod tests {
             "./",
         )
         .unwrap();
-        let variables = Variables {
-            variables: serde_json_bytes::json!({
-                "representations": [
-                    { "__typename": "Entity", "id": "1" },
-                    { "__typename": "Entity", "id": "2" },
-                ]
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-            inverted_paths: Default::default(),
-            contextual_arguments: Default::default(),
-        };
+        let variables = create_test_variables(serde_json_bytes::json!({
+            "representations": [
+                { "__typename": "Entity", "id": "1" },
+                { "__typename": "Entity", "id": "2" },
+            ]
+        }));
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -1704,19 +1677,12 @@ mod tests {
             "./",
         )
         .unwrap();
-        let variables = Variables {
-            variables: serde_json_bytes::json!({
-                "representations": [
-                    { "__typename": "Entity", "id": "1" },
-                    { "__typename": "Entity", "id": "2" },
-                ]
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-            inverted_paths: Default::default(),
-            contextual_arguments: Default::default(),
-        };
+        let variables = create_test_variables(serde_json_bytes::json!({
+            "representations": [
+                { "__typename": "Entity", "id": "1" },
+                { "__typename": "Entity", "id": "2" },
+            ]
+        }));
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -1803,24 +1769,17 @@ mod tests {
             "./",
         )
         .unwrap();
-        let variables = Variables {
-            variables: serde_json_bytes::json!({
-                "representations": [
-                    { "__typename": "Entity", "id": "1" },
-                    { "__typename": "Entity", "id": "2" },
-                    { "__typename": "Entity", "id": "3" },
-                    { "__typename": "Entity", "id": "4" },
-                    { "__typename": "Entity", "id": "5" },
-                    { "__typename": "Entity", "id": "6" },
-                    { "__typename": "Entity", "id": "7" },
-                ]
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-            inverted_paths: Default::default(),
-            contextual_arguments: Default::default(),
-        };
+        let variables = create_test_variables(serde_json_bytes::json!({
+            "representations": [
+                { "__typename": "Entity", "id": "1" },
+                { "__typename": "Entity", "id": "2" },
+                { "__typename": "Entity", "id": "3" },
+                { "__typename": "Entity", "id": "4" },
+                { "__typename": "Entity", "id": "5" },
+                { "__typename": "Entity", "id": "6" },
+                { "__typename": "Entity", "id": "7" },
+            ]
+        }));
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
@@ -1914,19 +1873,12 @@ mod tests {
             "./",
         )
         .unwrap();
-        let variables = Variables {
-            variables: serde_json_bytes::json!({
-                "representations": [
-                    { "__typename": "Entity", "id": "1" },
-                    { "__typename": "Entity", "id": "2" },
-                ]
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-            inverted_paths: Default::default(),
-            contextual_arguments: Default::default(),
-        };
+        let variables = create_test_variables(serde_json_bytes::json!({
+            "representations": [
+                { "__typename": "Entity", "id": "1" },
+                { "__typename": "Entity", "id": "2" },
+            ]
+        }));
 
         let connector = Connector {
             spec: DEFAULT_CONNECT_SPEC,

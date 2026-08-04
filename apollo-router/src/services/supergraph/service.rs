@@ -354,13 +354,13 @@ async fn service_call(
                         // response chunk from deferred/subscription chunks.
                         ctx.insert_json_value(
                             FIRST_EVENT_CONTEXT_KEY,
-                            serde_json_bytes::Value::Bool(true),
+                            crate::json_ext::bool_value(true),
                         );
                         first_event = false;
                     } else if !inserted {
                         ctx.insert_json_value(
                             FIRST_EVENT_CONTEXT_KEY,
-                            serde_json_bytes::Value::Bool(false),
+                            crate::json_ext::bool_value(false),
                         );
                         inserted = true;
                     }

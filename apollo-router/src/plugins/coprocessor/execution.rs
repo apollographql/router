@@ -236,7 +236,7 @@ where
 
     let body_to_send = request_config
         .body
-        .then(|| serde_json::from_slice::<Value>(&bytes))
+        .then(|| apollo_json::from_slice::<Value>(&bytes))
         .transpose()?;
     let context_to_send = request_config
         .context
@@ -303,7 +303,7 @@ where
 
         let res = {
             let graphql_response = {
-                let body_value = co_processor_output.body.unwrap_or(Value::Null);
+                let body_value = co_processor_output.body.unwrap_or_default();
                 deserialize_coprocessor_response(body_value, response_validation)
             };
 
@@ -336,7 +336,7 @@ where
     // that we replace "bits" of our incoming request with the updated bits if they
     // are present in our co_processor_output.
     let new_body: graphql::Request = match co_processor_output.body {
-        Some(value) => serde_json_bytes::from_value(value)?,
+        Some(value) => apollo_json::from_value(&value)?,
         None => body,
     };
 
@@ -630,13 +630,14 @@ mod tests {
 
     use futures::future::BoxFuture;
     use http::StatusCode;
-    use serde_json_bytes::json;
     use tower::BoxError;
     use tower::ServiceExt;
 
     use super::super::*;
     use super::*;
     use crate::json_ext::Object;
+    use crate::json_ext::ValueExt;
+    use crate::json_ext::json_value as json;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::services::execution;
@@ -897,7 +898,7 @@ mod tests {
 
         let mock_http_client = mock_with_callback(move |res: http::Request<RouterBody>| {
             Box::pin(async {
-                let deserialized_response: Externalizable<Value> = serde_json::from_slice(
+                let deserialized_response: Externalizable<Value> = apollo_json::from_slice(
                     &router::body::into_bytes(res.into_body()).await.unwrap(),
                 )
                 .unwrap();
@@ -998,7 +999,7 @@ mod tests {
         let body = res.response.body_mut().next().await.unwrap();
         // the body should have changed:
         assert_eq!(
-            serde_json_bytes::to_value(&body).unwrap(),
+            crate::json_ext::to_value(&body).unwrap(),
             json!({ "data": { "test": 42_u32 } }),
         );
         crate::plugin::test::await_mock_driver(exec_driver).await;
@@ -1050,7 +1051,7 @@ mod tests {
 
         let mock_http_client = mock_with_callback(move |res: http::Request<RouterBody>| {
             Box::pin(async {
-                let mut deserialized_response: Externalizable<Value> = serde_json::from_slice(
+                let mut deserialized_response: Externalizable<Value> = apollo_json::from_slice(
                     &router::body::into_bytes(res.into_body()).await.unwrap(),
                 )
                 .unwrap();
@@ -1061,20 +1062,17 @@ mod tests {
                 );
 
                 // Copy the has_next from the body into the data for checking later
-                deserialized_response
-                    .body
-                    .as_mut()
-                    .unwrap()
-                    .as_object_mut()
-                    .unwrap()
-                    .get_mut("data")
-                    .unwrap()
-                    .as_object_mut()
-                    .unwrap()
-                    .insert(
-                        "has_next".to_string(),
-                        Value::from(deserialized_response.has_next.unwrap_or_default()),
-                    );
+                let has_next = deserialized_response.has_next.unwrap_or_default();
+                let mut body = deserialized_response.body.take().unwrap().detach().edit();
+                body.set_path(
+                    &[
+                        apollo_json::PathSegment::Key("data"),
+                        apollo_json::PathSegment::Key("has_next"),
+                    ],
+                    has_next,
+                )
+                .unwrap();
+                deserialized_response.body = Some(body.seal().root_handle());
 
                 Ok(http::Response::builder()
                     .body(router::body::from_bytes(
@@ -1100,17 +1098,17 @@ mod tests {
 
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(
-            serde_json_bytes::to_value(&body).unwrap(),
+            crate::json_ext::to_value(&body).unwrap(),
             json!({ "data": { "test": 1, "has_next": true }, "hasNext": true }),
         );
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(
-            serde_json_bytes::to_value(&body).unwrap(),
+            crate::json_ext::to_value(&body).unwrap(),
             json!({ "data": { "test": 2, "has_next": true }, "hasNext": true }),
         );
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(
-            serde_json_bytes::to_value(&body).unwrap(),
+            crate::json_ext::to_value(&body).unwrap(),
             json!({ "data": { "test": 3, "has_next": false }, "hasNext": false }),
         );
         crate::plugin::test::await_mock_driver(exec_driver).await;
@@ -1486,7 +1484,13 @@ mod tests {
         // Should return 400 due to break with valid GraphQL response
         assert_eq!(res.response.status(), 400);
         let body = res.response.body_mut().next().await.unwrap();
-        assert_eq!(body.data.unwrap()["test"], "valid_response");
+        assert_eq!(
+            body.data
+                .unwrap()
+                .get("test")
+                .and_then(|test| test.as_str_owned()),
+            Some("valid_response".to_string())
+        );
         crate::plugin::test::assert_no_mock_calls(exec_handle).await;
     }
 
@@ -1553,7 +1557,13 @@ mod tests {
         // Should return 400 due to break with valid response preserved via permissive deserialization
         assert_eq!(res.response.status(), 400);
         let body = res.response.body_mut().next().await.unwrap();
-        assert_eq!(body.data.unwrap()["test"], "valid_response");
+        assert_eq!(
+            body.data
+                .unwrap()
+                .get("test")
+                .and_then(|test| test.as_str_owned()),
+            Some("valid_response".to_string())
+        );
         crate::plugin::test::assert_no_mock_calls(exec_handle).await;
     }
 
@@ -1616,7 +1626,13 @@ mod tests {
 
         // With validation enabled, valid GraphQL response should be processed normally
         let body = res.response.body_mut().next().await.unwrap();
-        assert_eq!(body.data.unwrap()["test"], "valid_response");
+        assert_eq!(
+            body.data
+                .unwrap()
+                .get("test")
+                .and_then(|test| test.as_str_owned()),
+            Some("valid_response".to_string())
+        );
         crate::plugin::test::await_mock_driver(exec_driver).await;
     }
 
@@ -1671,7 +1687,13 @@ mod tests {
 
         // With validation disabled, valid response processed via permissive deserialization
         let body = res.response.body_mut().next().await.unwrap();
-        assert_eq!(body.data.unwrap()["test"], "valid_response");
+        assert_eq!(
+            body.data
+                .unwrap()
+                .get("test")
+                .and_then(|test| test.as_str_owned()),
+            Some("valid_response".to_string())
+        );
         crate::plugin::test::await_mock_driver(exec_driver).await;
     }
 }

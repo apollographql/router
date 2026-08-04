@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use futures::future::BoxFuture;
-use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceExt;
 use tracing::Instrument;
@@ -19,6 +18,7 @@ use crate::configuration::HoistOrphanErrors;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
+use crate::json_ext::Value;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::fetch_service_handle_subscription;
 use crate::query_planner::FETCH_SPAN_NAME;

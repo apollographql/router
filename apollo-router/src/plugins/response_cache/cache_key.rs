@@ -1,16 +1,16 @@
 //! Describe primary cache key for both root fields and entities
 use std::fmt::Write;
 
+use apollo_json::JsonKind;
 use itertools::Itertools;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
-use serde_json_bytes::Value;
 
 use super::plugin::RESPONSE_CACHE_VERSION;
 use crate::Context;
 use crate::graphql;
 use crate::json_ext::Object;
+use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::response_cache::plugin::CONTEXT_CACHE_KEY;
 use crate::plugins::response_cache::plugin::REPRESENTATIONS;
@@ -64,7 +64,7 @@ impl<'a> PrimaryCacheKeyRoot<'a> {
 pub(super) struct PrimaryCacheKeyEntity<'a> {
     pub(super) subgraph_name: &'a str,
     pub(super) entity_type: &'a str,
-    pub(super) representation: &'a Map<ByteString, Value>,
+    pub(super) representation: &'a Object,
     /// NB: hashed before insertion into this struct, so that the hashed representation can be reused for all entities in this query
     pub(super) subgraph_query_hash: &'a str,
     pub(super) additional_data_hash: &'a str,
@@ -123,12 +123,11 @@ pub(super) fn hash_additional_data(
 ) -> String {
     let mut hasher = blake3::Hasher::new();
 
-    let repr_key = ByteString::from(REPRESENTATIONS);
     hash(
         &mut hasher,
         body.variables
             .iter()
-            .filter(|(key, _value)| key != &&repr_key),
+            .filter(|(key, _value)| key.as_str() != REPRESENTATIONS),
     );
 
     cache_key
@@ -162,31 +161,32 @@ pub(super) fn hash_additional_data(
 }
 
 // Order-insensitive structural hash of a map, ie a representation or entity key
-fn sort_and_hash_object(object: &Map<ByteString, Value>) -> String {
+fn sort_and_hash_object(object: &Object) -> String {
     let mut digest = blake3::Hasher::new();
     hash(&mut digest, object.iter());
     digest.finalize().to_hex().to_string()
 }
 
-/// Hashes elements of a serde_json_bytes::Value::Object when yielded via `map.iter()`.
-fn hash<'a, I>(state: &mut blake3::Hasher, fields: I)
+/// Hashes the members of a JSON object. Members are visited in key order, so two
+/// objects differing only in key order hash the same; arrays keep their order.
+fn hash<I>(state: &mut blake3::Hasher, fields: I)
 where
-    I: Iterator<Item = (&'a ByteString, &'a Value)>,
+    I: Iterator<Item = (String, Value)>,
 {
-    fields.sorted_by(|a, b| a.0.cmp(b.0)).for_each(|(k, v)| {
-        state.update(k.as_str().as_bytes());
+    fields.sorted_by(|a, b| a.0.cmp(&b.0)).for_each(|(k, v)| {
+        state.update(k.as_bytes());
         state.update(":".as_bytes());
-        match v {
-            Value::Object(obj) => {
+        match v.kind() {
+            JsonKind::Object => {
                 state.update("{".as_bytes());
-                hash(state, obj.iter());
+                hash(state, v.object_iter());
                 state.update("}".as_bytes());
             }
-            Value::String(s) => {
-                state.update(s.as_str().as_bytes());
+            JsonKind::String => {
+                state.update(v.as_str().unwrap_or_default().as_bytes());
             }
             _ => {
-                state.update(serde_json::to_string(v).unwrap().as_bytes());
+                state.update(v.to_string().as_bytes());
             }
         }
     });
@@ -197,13 +197,14 @@ mod tests {
     use insta::assert_snapshot;
 
     use super::*;
+    use crate::json_ext::from_legacy;
 
     #[test]
     fn test_hash_additional_data() {
         let context = Context::new();
         context.insert_json_value(
             CONTEXT_CACHE_KEY,
-            serde_json_bytes::json!({
+            from_legacy(&serde_json_bytes::json!({
                 "all": {
                   "locale": "be"
                 },
@@ -215,7 +216,7 @@ mod tests {
                         "bar": "foo"
                     }
                 }
-            }),
+            })),
         );
         let hashed_data = hash_additional_data(
             "test",
@@ -264,15 +265,16 @@ mod tests {
     fn top_level_hash_is_order_insensitive() {
         // hash should not vary based on the order that the keys are provided.
         // NB: this doesn't check any nested arrays, that's done in serde_blake3
-        let data = serde_json_bytes::json!({"hello": "world", "order": "doesn't matter"});
-        let data_obj = data.as_object().unwrap();
+        let data =
+            from_legacy(&serde_json_bytes::json!({"hello": "world", "order": "doesn't matter"}));
+        let entries: Vec<(String, Value)> = data.object_iter().collect();
 
         let mut hasher = blake3::Hasher::new();
-        super::hash(&mut hasher, data_obj.iter());
+        super::hash(&mut hasher, entries.iter().cloned());
         let value1 = hasher.finalize();
 
         let mut hasher = blake3::Hasher::new();
-        super::hash(&mut hasher, data_obj.iter().rev());
+        super::hash(&mut hasher, entries.iter().rev().cloned());
         let value2 = hasher.finalize();
 
         assert_eq!(value1, value2);
@@ -283,11 +285,11 @@ mod tests {
     fn nested_hash_is_order_sensitive() {
         // hash does vary based on the order that the vec values are provided.
         // NB: I'm not sure if this is intentional, but adding a test for the existing behavior.
-        let data = serde_json_bytes::json!({"nested": ["does", "order", "matter"]});
-        let value1 = super::sort_and_hash_object(data.as_object().unwrap());
+        let data = from_legacy(&serde_json_bytes::json!({"nested": ["does", "order", "matter"]}));
+        let value1 = super::sort_and_hash_object(&data.as_object().unwrap());
 
-        let data = serde_json_bytes::json!({"nested": ["order", "does", "matter"]});
-        let value2 = super::sort_and_hash_object(data.as_object().unwrap());
+        let data = from_legacy(&serde_json_bytes::json!({"nested": ["order", "does", "matter"]}));
+        let value2 = super::sort_and_hash_object(&data.as_object().unwrap());
 
         assert_ne!(value1, value2);
         assert_snapshot!(value1);

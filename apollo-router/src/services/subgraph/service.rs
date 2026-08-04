@@ -36,6 +36,7 @@ use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::json_ext::Object;
+use crate::json_ext::Value;
 use crate::layers::InternalServiceBuilderExt as _;
 use crate::layers::ServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
@@ -248,7 +249,7 @@ pub(crate) async fn process_batch(
         parts.status,
         parts.version,
     );
-    let value =
+    let value: Value =
         serde_json::from_slice(&body.ok_or(FetchError::SubrequestMalformedResponse {
             service: service_name.clone(),
             reason: "no body in response".to_string(),
@@ -841,7 +842,6 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use http::header::HOST;
     use mime::APPLICATION_JSON;
-    use serde_json_bytes::Value;
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
     use tokio_stream::wrappers::ReceiverStream;
@@ -855,6 +855,7 @@ mod tests {
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
+    use crate::json_ext::Value;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::limits::SubgraphResponseSizeLimit;
     use crate::plugins::subscription::CallbackMode;
@@ -1117,7 +1118,7 @@ mod tests {
 
                 socket
                     .send(Message::text(
-                        serde_json::to_string(&ServerMessage::Next { id: client_id, payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
+                        serde_json::to_string(&ServerMessage::Next { id: client_id, payload: graphql::Response::builder().data(crate::json_ext::from_legacy(&serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))).build() }).unwrap(),
                     ))
                     .await
                     .unwrap();
@@ -1184,7 +1185,7 @@ mod tests {
 
                 socket
                     .send(Message::text(
-                        serde_json::to_string(&ServerMessage::Next { id: client_id.clone(), payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
+                        serde_json::to_string(&ServerMessage::Next { id: client_id.clone(), payload: graphql::Response::builder().data(crate::json_ext::from_legacy(&serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))).build() }).unwrap(),
                     ))
                     .await
                     .unwrap();
@@ -1228,12 +1229,8 @@ mod tests {
                 .map_err(|_| "failed to parse the request body as JSON");
             let graphql_request = graphql_request.unwrap();
             assert!(graphql_request.extensions.contains_key("subscription"));
-            let subscription_extension: crate::plugins::subscription::subgraph::SubscriptionExtension = serde_json_bytes::from_value(
-                graphql_request
-                    .extensions
-                    .get("subscription")
-                    .unwrap()
-                    .clone(),
+            let subscription_extension: crate::plugins::subscription::subgraph::SubscriptionExtension = apollo_json::from_value(
+                &graphql_request.extensions.get("subscription").unwrap(),
             )
             .unwrap();
             assert_eq!(
@@ -1249,7 +1246,7 @@ mod tests {
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .status(StatusCode::OK)
                 .body(
-                    serde_json::to_string(&Response::builder().data(Value::Null).build())
+                    serde_json::to_string(&Response::builder().data(Value::default()).build())
                         .expect("always valid")
                         .into(),
                 )
@@ -1674,7 +1671,9 @@ mod tests {
             message,
             graphql::Response::builder()
                 .subscribed(true)
-                .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                .data(crate::json_ext::from_legacy(
+                    &serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}),
+                ))
                 .build()
         );
         spawned_task.abort();
@@ -1767,7 +1766,9 @@ mod tests {
                 message,
                 graphql::Response::builder()
                     .subscribed(true)
-                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .data(crate::json_ext::from_legacy(
+                        &serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}),
+                    ))
                     .build()
             );
 

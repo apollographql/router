@@ -2,7 +2,6 @@ use derivative::Derivative;
 use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json_bytes::ByteString;
 use serde_json_bytes::path::JsonPathInst;
 use sha2::Digest;
 
@@ -10,6 +9,7 @@ use crate::Context;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
+use crate::json_ext;
 use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugins::limits::operation_limits::OperationLimits;
 use crate::plugins::telemetry::config::AttributeValue;
@@ -251,7 +251,7 @@ impl Selector for SupergraphSelector {
                 .supergraph_request
                 .body()
                 .variables
-                .get(&ByteString::from(query_variable.as_str()))
+                .get(query_variable.as_str())
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
             SupergraphSelector::RequestContext {
@@ -417,7 +417,10 @@ impl Selector for SupergraphSelector {
                 default,
                 ..
             } => if let Some(data) = &response.data {
-                let val = response_data.find(data);
+                // PERF(apollo-json): legacy bridge, revisit -- the JSONPath engine walks
+                // `serde_json_bytes` values
+                let data = json_ext::to_legacy(data);
+                let val = response_data.find(&data);
                 val.maybe_to_otel_value()
             } else {
                 None
@@ -486,7 +489,8 @@ impl Selector for SupergraphSelector {
                 is_primary_response: is_primary,
             } if *is_primary => Some(opentelemetry::Value::Bool(
                 ctx.get_json_value(FIRST_EVENT_CONTEXT_KEY)
-                    == Some(serde_json_bytes::Value::Bool(true)),
+                    .and_then(|first_event| first_event.as_bool())
+                    == Some(true),
             )),
             SupergraphSelector::ResponseContext {
                 response_context,
@@ -563,7 +567,8 @@ impl Selector for SupergraphSelector {
                 is_primary_response: is_primary,
             } if *is_primary => Some(opentelemetry::Value::Bool(
                 ctx.get_json_value(FIRST_EVENT_CONTEXT_KEY)
-                    == Some(serde_json_bytes::Value::Bool(true)),
+                    .and_then(|first_event| first_event.as_bool())
+                    == Some(true),
             )),
             SupergraphSelector::ContextId { context_id } if *context_id => {
                 Some(opentelemetry::Value::from(ctx.id.clone()))
@@ -657,6 +662,7 @@ mod test {
 
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
+    use crate::json_ext;
     use crate::plugins::limits::operation_limits::OperationLimits;
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::config_new::Selector;
@@ -1256,8 +1262,6 @@ mod test {
 
     #[test]
     fn supergraph_on_graphql_error_on_response() {
-        use serde_json_bytes::Value;
-
         use crate::context::CONTAINS_GRAPHQL_ERROR;
 
         // on_graphql_error: true — returns true when errors present, false when absent
@@ -1265,7 +1269,7 @@ mod test {
             on_graphql_error: true,
         };
         let ctx_with_errors = crate::Context::default();
-        ctx_with_errors.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        ctx_with_errors.insert_json_value(CONTAINS_GRAPHQL_ERROR, json_ext::bool_value(true));
         let response_with_errors = SupergraphResponse::fake_builder()
             .context(ctx_with_errors)
             .build()
@@ -1291,7 +1295,7 @@ mod test {
         );
 
         let ctx_with_errors2 = crate::Context::default();
-        ctx_with_errors2.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        ctx_with_errors2.insert_json_value(CONTAINS_GRAPHQL_ERROR, json_ext::bool_value(true));
         let response_with_errors2 = SupergraphResponse::fake_builder()
             .context(ctx_with_errors2)
             .build()

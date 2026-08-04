@@ -1,7 +1,9 @@
-use serde_json_bytes::Value;
+use apollo_json::JsonKind;
 
 use crate::graphql::Response;
 use crate::json_ext::Object;
+use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
 
 pub(crate) trait ResponseVisitor {
     fn visit_field(
@@ -12,20 +14,21 @@ pub(crate) trait ResponseVisitor {
         field: &apollo_compiler::executable::Field,
         value: &Value,
     ) {
-        match value {
-            Value::Array(items) => {
-                for item in items {
+        match value.kind() {
+            JsonKind::Array => {
+                for item in value.array_iter() {
                     self.visit_list_item(
                         request,
                         variables,
                         field.ty().inner_named_type(),
                         field,
-                        item,
+                        &item,
                     );
                 }
             }
-            Value::Object(children) => {
-                self.visit_selections(request, variables, &field.selection_set, children);
+            JsonKind::Object => {
+                let children = Object::from(value.clone());
+                self.visit_selections(request, variables, &field.selection_set, &children);
             }
             _ => {}
         }
@@ -39,14 +42,15 @@ pub(crate) trait ResponseVisitor {
         field: &apollo_compiler::executable::Field,
         value: &Value,
     ) {
-        match value {
-            Value::Array(items) => {
-                for item in items {
-                    self.visit_list_item(request, variables, _ty, field, item);
+        match value.kind() {
+            JsonKind::Array => {
+                for item in value.array_iter() {
+                    self.visit_list_item(request, variables, _ty, field, &item);
                 }
             }
-            Value::Object(children) => {
-                self.visit_selections(request, variables, &field.selection_set, children);
+            JsonKind::Object => {
+                let children = Object::from(value.clone());
+                self.visit_selections(request, variables, &field.selection_set, &children);
             }
             _ => {}
         }
@@ -64,12 +68,12 @@ pub(crate) trait ResponseVisitor {
             return;
         }
 
-        if let Some(Value::Object(children)) = &response.data {
+        if let Some(children) = response.data.as_ref().and_then(|data| data.as_object()) {
             if let Some(operation) = &request.operations.anonymous {
-                self.visit_selections(request, variables, &operation.selection_set, children);
+                self.visit_selections(request, variables, &operation.selection_set, &children);
             }
             for operation in request.operations.named.values() {
-                self.visit_selections(request, variables, &operation.selection_set, children);
+                self.visit_selections(request, variables, &operation.selection_set, &children);
             }
         }
     }
@@ -90,7 +94,7 @@ pub(crate) trait ResponseVisitor {
                             variables,
                             &selection_set.ty,
                             inner_field.as_ref(),
-                            value,
+                            &value,
                         );
                     }
                 }
@@ -210,20 +214,21 @@ mod tests {
         ) {
             let count = self.counts.entry(field.name.to_string()).or_insert(0);
             *count += 1;
-            match value {
-                Value::Array(items) => {
-                    for item in items {
+            match value.kind() {
+                JsonKind::Array => {
+                    for item in value.array_iter() {
                         self.visit_list_item(
                             request,
                             variables,
                             field.ty().inner_named_type(),
                             field,
-                            item,
+                            &item,
                         );
                     }
                 }
-                Value::Object(children) => {
-                    self.visit_selections(request, variables, &field.selection_set, children);
+                JsonKind::Object => {
+                    let children = Object::from(value.clone());
+                    self.visit_selections(request, variables, &field.selection_set, &children);
                 }
                 _ => {}
             }

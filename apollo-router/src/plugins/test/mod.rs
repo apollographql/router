@@ -505,7 +505,7 @@ mod test_for_harness {
 
         let service = test_harness.router_service(|_req| async {
             Ok(router::Response::fake_builder()
-                .data(serde_json::json!({"data": {"field": "value"}}))
+                .data(crate::json_ext::json_value!({"data": {"field": "value"}}))
                 .header("x-custom-header", "test-value")
                 .build()
                 .unwrap())
@@ -531,7 +531,7 @@ mod test_for_harness {
         let service = test_harness.router_service(|_req| async {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             Ok(router::Response::fake_builder()
-                .data(serde_json::json!({"data": {"field": "value"}}))
+                .data(crate::json_ext::json_value!({"data": {"field": "value"}}))
                 .header("x-custom-header", "test-value")
                 .build()
                 .unwrap())
@@ -557,7 +557,7 @@ mod test_for_harness {
         let service = test_harness.supergraph_service(|_req| async {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             Ok(supergraph::Response::fake_builder()
-                .data(serde_json::json!({"data": {"field": "value"}}))
+                .data(crate::json_ext::json_value!({"data": {"field": "value"}}))
                 .header("x-custom-header", "test-value")
                 .build()
                 .unwrap())
@@ -582,7 +582,7 @@ mod test_for_harness {
 
         let service = test_harness.supergraph_service(|_req| async {
             Ok(supergraph::Response::fake_builder()
-                .data(serde_json::json!({"data": {"field": "value"}}))
+                .data(crate::json_ext::json_value!({"data": {"field": "value"}}))
                 .header("x-custom-header", "test-value")
                 .build()
                 .unwrap())
@@ -604,7 +604,7 @@ mod test_for_harness {
 
         let service = test_harness.execution_service(|_req| async {
             Ok(execution::Response::fake_builder()
-                .data(serde_json::json!({"data": {"field": "value"}}))
+                .data(crate::json_ext::json_value!({"data": {"field": "value"}}))
                 .header("x-custom-header", "test-value")
                 .build()
                 .unwrap())
@@ -628,7 +628,7 @@ mod test_for_harness {
             let mut headers = HeaderMap::new();
             headers.insert("x-custom-header", "test-value".parse().unwrap());
             Ok(subgraph::Response::fake_builder()
-                .data(serde_json::json!({"data": {"field": "value"}}))
+                .data(crate::json_ext::json_value!({"data": {"field": "value"}}))
                 .headers(headers)
                 .build())
         });
@@ -676,7 +676,7 @@ mod test_for_harness {
             let service = test_harness.router_service(|_req| async {
                 u64_counter!("test", "test", 1u64);
                 Ok(router::Response::fake_builder()
-                    .data(serde_json::json!({"data": {"field": "value"}}))
+                    .data(crate::json_ext::json_value!({"data": {"field": "value"}}))
                     .header("x-custom-header", "test-value")
                     .build()
                     .unwrap())
@@ -708,7 +708,7 @@ mod test_for_harness {
                 .insert("response-context-key", "response-context-value".to_string())
                 .expect("context");
             Ok(router::Response::fake_builder()
-                .data(serde_json::json!({"field": "value"}))
+                .data(crate::json_ext::json_value!({"field": "value"}))
                 .header("x-custom-header", "test-value")
                 .context(context)
                 .build()
@@ -759,7 +759,7 @@ mod test_for_harness {
                 .insert("response-context-key", "response-context-value".to_string())
                 .expect("context");
             Ok(supergraph::Response::fake_builder()
-                .data(serde_json::json!({"field": "value"}))
+                .data(crate::json_ext::json_value!({"field": "value"}))
                 .header("x-custom-header", "test-value")
                 .context(context)
                 .build()
@@ -812,7 +812,7 @@ mod test_for_harness {
             let mut headers = HeaderMap::new();
             headers.insert("x-custom-header", "test-value".parse().unwrap());
             Ok(subgraph::Response::fake_builder()
-                .data(serde_json::json!({"field": "value"}))
+                .data(crate::json_ext::json_value!({"field": "value"}))
                 .headers(headers)
                 .context(context)
                 .build())

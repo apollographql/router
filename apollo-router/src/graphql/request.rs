@@ -1,15 +1,18 @@
+use apollo_json::JsonKind;
+use apollo_json::NewValue;
 use bytes::Bytes;
 use derivative::Derivative;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::DeserializeSeed;
 use serde::de::Error;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map as JsonMap;
 
 use crate::configuration::BatchingMode;
+use crate::json_ext;
 use crate::json_ext::Object;
+use crate::json_ext::ObjectMap;
 use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
 
 /// A GraphQL `Request` used to represent both supergraph and subgraph requests.
 #[derive(Clone, Derivative, Serialize, Deserialize, Default)]
@@ -88,18 +91,28 @@ where
     <Option<T>>::deserialize(deserializer).map(|x| x.unwrap_or_default())
 }
 
-fn as_optional_object<E: Error>(value: Value) -> Result<Object, E> {
+/// PERF(apollo-json): legacy bridge, revisit -- `serde_json` drives request parsing,
+/// and an apollo-json value only captures a subtree from apollo-json's own
+/// deserializers, so the zero-copy `BytesSeed` reads the legacy representation and
+/// the object converts here, once per request.
+fn as_optional_object<E: Error>(value: serde_json_bytes::Value) -> Result<Object, E> {
     use serde::de::Unexpected;
 
     let exp = "a map or null";
     match value {
-        Value::Object(object) => Ok(object),
+        serde_json_bytes::Value::Object(_) => Ok(json_ext::from_legacy(&value)
+            .as_object()
+            .expect("a legacy object converts to an object")),
         // Similar to `deserialize_null_default`:
-        Value::Null => Ok(Object::default()),
-        Value::Bool(value) => Err(E::invalid_type(Unexpected::Bool(value), &exp)),
-        Value::Number(_) => Err(E::invalid_type(Unexpected::Other("a number"), &exp)),
-        Value::String(value) => Err(E::invalid_type(Unexpected::Str(value.as_str()), &exp)),
-        Value::Array(_) => Err(E::invalid_type(Unexpected::Seq, &exp)),
+        serde_json_bytes::Value::Null => Ok(Object::default()),
+        serde_json_bytes::Value::Bool(value) => Err(E::invalid_type(Unexpected::Bool(value), &exp)),
+        serde_json_bytes::Value::Number(_) => {
+            Err(E::invalid_type(Unexpected::Other("a number"), &exp))
+        }
+        serde_json_bytes::Value::String(value) => {
+            Err(E::invalid_type(Unexpected::Str(value.as_str()), &exp))
+        }
+        serde_json_bytes::Value::Array(_) => Err(E::invalid_type(Unexpected::Seq, &exp)),
     }
 }
 
@@ -117,9 +130,10 @@ impl Request {
     fn new(
         query: Option<String>,
         operation_name: Option<String>,
-        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        variables: JsonMap<ByteString, Value>,
-        extensions: JsonMap<ByteString, Value>,
+        // Spell out the map type rather than the `Object` alias so buildstructor
+        // derives `.variable(key, value)` / `.extension(key, value)` from it
+        variables: ObjectMap<String, NewValue>,
+        extensions: ObjectMap<String, NewValue>,
     ) -> Self {
         Self {
             query,
@@ -142,9 +156,10 @@ impl Request {
     fn fake_new(
         query: Option<String>,
         operation_name: Option<String>,
-        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        variables: JsonMap<ByteString, Value>,
-        extensions: JsonMap<ByteString, Value>,
+        // Spell out the map type rather than the `Object` alias so buildstructor
+        // derives `.variable(key, value)` / `.extension(key, value)` from it
+        variables: ObjectMap<String, NewValue>,
+        extensions: ObjectMap<String, NewValue>,
     ) -> Self {
         Self {
             query,
@@ -166,26 +181,27 @@ impl Request {
     /// An error will be produced in the event that the bytes array cannot be
     /// turned into a valid GraphQL `Request`.
     pub(crate) fn batch_from_bytes(bytes: &[u8]) -> Result<Vec<Request>, serde_json::Error> {
-        let value: Value = serde_json::from_slice(bytes).map_err(serde_json::Error::custom)?;
+        let document =
+            apollo_json::Document::parse(bytes.to_vec()).map_err(serde_json::Error::custom)?;
 
-        Request::process_batch_values(value)
+        Request::process_batch_values(document.root_handle())
     }
 
     fn allocate_result_array(value: &Value) -> Vec<Request> {
-        match value.as_array() {
-            Some(array) => Vec::with_capacity(array.len()),
-            None => Vec::with_capacity(1),
+        match value.kind() {
+            JsonKind::Array => Vec::with_capacity(value.len().unwrap_or(0)),
+            _ => Vec::with_capacity(1),
         }
     }
 
     fn process_batch_values(value: Value) -> Result<Vec<Request>, serde_json::Error> {
         let mut result = Request::allocate_result_array(&value);
 
-        if let Value::Array(entries) = value {
+        if value.kind() == JsonKind::Array {
             u64_histogram!(
                 "apollo.router.operations.batching.size",
                 "Number of queries contained within each query batch",
-                entries.len() as u64,
+                value.len().unwrap_or(0) as u64,
                 mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
 
@@ -195,32 +211,25 @@ impl Request {
                 1,
                 mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
-            for entry in entries {
-                let bytes = serde_json::to_vec(&entry)?;
-                result.push(Request::deserialize_from_bytes(&bytes.into())?);
+            for entry in value.array_iter() {
+                result.push(Request::deserialize_from_bytes(&entry.to_bytes())?);
             }
         } else {
-            let bytes = serde_json::to_vec(&value)?;
-            result.push(Request::deserialize_from_bytes(&bytes.into())?);
+            result.push(Request::deserialize_from_bytes(&value.to_bytes())?);
         }
         Ok(result)
     }
 
-    fn process_value(value: &Value) -> Result<Request, serde_json::Error> {
-        let operation_name = value.get("operationName").and_then(Value::as_str);
-        let query = value.get("query").and_then(Value::as_str).map(String::from);
-        let variables: Object = value
-            .get("variables")
-            .and_then(Value::as_str)
-            .map(serde_json::from_str)
-            .transpose()?
-            .unwrap_or_default();
-        let extensions: Object = value
-            .get("extensions")
-            .and_then(Value::as_str)
-            .map(serde_json::from_str)
-            .transpose()?
-            .unwrap_or_default();
+    /// PERF(apollo-json): legacy bridge, revisit -- `serde_urlencoded` cannot produce an
+    /// apollo-json value, and this reads GET query parameters rather than a response.
+    fn process_value(value: &serde_json_bytes::Value) -> Result<Request, serde_json::Error> {
+        let operation_name = value.get("operationName").and_then(|name| name.as_str());
+        let query = value
+            .get("query")
+            .and_then(|query| query.as_str())
+            .map(String::from);
+        let variables = Self::nested_object(value, "variables")?;
+        let extensions = Self::nested_object(value, "extensions")?;
 
         let request = Self::builder()
             .and_query(query)
@@ -231,14 +240,30 @@ impl Request {
         Ok(request)
     }
 
+    /// The object encoded as JSON text in `value[key]`, empty when the key is absent.
+    fn nested_object(
+        value: &serde_json_bytes::Value,
+        key: &str,
+    ) -> Result<Object, serde_json::Error> {
+        let Some(text) = value.get(key).and_then(|nested| nested.as_str()) else {
+            return Ok(Object::default());
+        };
+        let map: serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value> =
+            serde_json::from_str(text)?;
+        Ok(json_ext::from_legacy(&serde_json_bytes::Value::Object(map))
+            .as_object()
+            .expect("a legacy object converts to an object"))
+    }
+
     /// Convert encoded URL query string parameters (also known as "search
     /// params") into a GraphQL [`Request`].
     ///
     /// An error will be produced in the event that the query string parameters
     /// cannot be turned into a valid GraphQL `Request`.
     pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
-        let urldecoded: Value = serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
-            .map_err(serde_json::Error::custom)?;
+        let urldecoded: serde_json_bytes::Value =
+            serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
+                .map_err(serde_json::Error::custom)?;
 
         Request::process_value(&urldecoded)
     }
@@ -334,10 +359,10 @@ impl<'de> DeserializeSeed<'de> for RequestFromBytesSeed<'_> {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use serde_json_bytes::json as bjson;
     use test_log::test;
 
     use super::*;
+    use crate::json_ext::json_value;
 
     #[test]
     fn test_request() {
@@ -354,8 +379,8 @@ mod tests {
             Request::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
                 .operation_name("aTest")
-                .variables(bjson!({ "arg1": "me" }).as_object().unwrap().clone())
-                .extensions(bjson!({"extension": 1}).as_object().cloned().unwrap())
+                .variables(json_value!({ "arg1": "me" }).as_object().unwrap())
+                .extensions(json_value!({"extension": 1}).as_object().unwrap())
                 .build()
         );
     }
@@ -373,7 +398,7 @@ mod tests {
             Request::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
                 .operation_name("aTest")
-                .extensions(bjson!({"extension": 1}).as_object().cloned().unwrap())
+                .extensions(json_value!({"extension": 1}).as_object().unwrap())
                 .build()
         );
     }
@@ -394,7 +419,7 @@ mod tests {
             Request::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }")
                 .operation_name("aTest")
-                .extensions(bjson!({"extension": 1}).as_object().cloned().unwrap())
+                .extensions(json_value!({"extension": 1}).as_object().unwrap())
                 .build()
         );
     }
@@ -481,8 +506,8 @@ mod tests {
         // check that deserialize_from_bytes agrees with Deserialize impl
 
         let string = serde_json::to_string(&request).expect("could not serialize request");
-        let string_deserialized =
-            serde_json::from_str(&string).expect("could not deserialize string");
+        let string_deserialized: Request =
+            apollo_json::from_str(&string).expect("could not deserialize string");
         let bytes = Bytes::copy_from_slice(string.as_bytes());
         let bytes_deserialized =
             Request::deserialize_from_bytes(&bytes).expect("could not deserialize from bytes");

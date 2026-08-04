@@ -1,5 +1,6 @@
 #![allow(missing_docs)] // FIXME
 
+use apollo_json::NewValue;
 use futures::future::ready;
 use futures::stream::StreamExt;
 use futures::stream::once;
@@ -10,9 +11,6 @@ use http::header::HeaderName;
 use http::method::Method;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map as JsonMap;
-use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
@@ -24,7 +22,11 @@ use crate::graphql;
 use crate::http_ext::TryIntoHeaderName;
 use crate::http_ext::TryIntoHeaderValue;
 use crate::http_ext::header_map;
+use crate::json_ext;
+use crate::json_ext::Object;
+use crate::json_ext::ObjectMap;
 use crate::json_ext::Path;
+use crate::json_ext::Value;
 
 pub(crate) mod service;
 #[cfg(test)]
@@ -74,8 +76,8 @@ impl Request {
         query: Option<String>,
         operation_name: Option<String>,
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        variables: JsonMap<ByteString, Value>,
-        extensions: JsonMap<ByteString, Value>,
+        variables: ObjectMap<String, NewValue>,
+        extensions: ObjectMap<String, NewValue>,
         context: Context,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         uri: Uri,
@@ -110,8 +112,8 @@ impl Request {
         query: Option<String>,
         operation_name: Option<String>,
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        variables: JsonMap<ByteString, Value>,
-        extensions: JsonMap<ByteString, Value>,
+        variables: ObjectMap<String, NewValue>,
+        extensions: ObjectMap<String, NewValue>,
         context: Option<Context>,
         mut headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         method: Option<Method>,
@@ -140,7 +142,7 @@ impl Request {
         query: Option<String>,
         operation_name: Option<String>,
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        extensions: JsonMap<ByteString, Value>,
+        extensions: ObjectMap<String, NewValue>,
         context: Option<Context>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
     ) -> Result<Request, BoxError> {
@@ -158,8 +160,8 @@ impl Request {
             }
         ";
         let query = query.unwrap_or(default_query.to_string());
-        let mut variables = JsonMap::new();
-        variables.insert("first", 2_usize.into());
+        let mut variables = Object::new();
+        variables.insert("first", 2_i64);
         Self::fake_new(
             Some(query),
             operation_name,
@@ -199,16 +201,19 @@ impl Response {
         path: Option<Path>,
         errors: Vec<Error>,
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        extensions: JsonMap<ByteString, Value>,
+        extensions: ObjectMap<String, NewValue>,
         status_code: Option<StatusCode>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
     ) -> Result<Self, BoxError> {
         let has_errors = !errors.is_empty();
         if has_errors {
-            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, json_ext::bool_value(true));
         }
-        context.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(has_errors));
+        context.insert_json_value(
+            CHUNK_CONTAINS_GRAPHQL_ERROR,
+            json_ext::bool_value(has_errors),
+        );
         // Build a response
         let b = graphql::Response::builder()
             .and_label(label)
@@ -249,7 +254,7 @@ impl Response {
         path: Option<Path>,
         errors: Vec<Error>,
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        extensions: JsonMap<ByteString, Value>,
+        extensions: ObjectMap<String, NewValue>,
         status_code: Option<StatusCode>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Option<Context>,
@@ -326,16 +331,19 @@ impl Response {
         path: Option<Path>,
         errors: Vec<Error>,
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        extensions: JsonMap<ByteString, Value>,
+        extensions: ObjectMap<String, NewValue>,
         status_code: Option<StatusCode>,
         headers: MultiMap<HeaderName, HeaderValue>,
         context: Context,
     ) -> Self {
         let has_errors = !errors.is_empty();
         if has_errors {
-            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, json_ext::bool_value(true));
         }
-        context.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(has_errors));
+        context.insert_json_value(
+            CHUNK_CONTAINS_GRAPHQL_ERROR,
+            json_ext::bool_value(has_errors),
+        );
         // Build a response
         let b = graphql::Response::builder()
             .and_label(label)
@@ -363,9 +371,12 @@ impl Response {
     pub(crate) fn new_from_graphql_response(response: graphql::Response, context: Context) -> Self {
         let has_errors = !response.errors.is_empty();
         if has_errors {
-            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, json_ext::bool_value(true));
         }
-        context.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(has_errors));
+        context.insert_json_value(
+            CHUNK_CONTAINS_GRAPHQL_ERROR,
+            json_ext::bool_value(has_errors),
+        );
 
         Self {
             response: http::Response::new(once(ready(response)).boxed()),
@@ -445,9 +456,12 @@ impl Response {
         self.map_stream(move |response| {
             let has_errors = response.contains_errors();
             if has_errors {
-                context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+                context.insert_json_value(CONTAINS_GRAPHQL_ERROR, json_ext::bool_value(true));
             }
-            context.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(has_errors));
+            context.insert_json_value(
+                CHUNK_CONTAINS_GRAPHQL_ERROR,
+                json_ext::bool_value(has_errors),
+            );
             response
         })
     }
@@ -458,10 +472,16 @@ mod test {
     use http::HeaderValue;
     use http::Method;
     use http::Uri;
-    use serde_json::json;
+    use serde_json_bytes::json;
 
     use super::*;
     use crate::graphql;
+    use crate::json_ext::ValueExt;
+
+    /// A `json!` fixture in the apollo-json representation.
+    fn value(fixture: serde_json_bytes::Value) -> Value {
+        json_ext::from_legacy(&fixture)
+    }
 
     #[test]
     fn supergraph_request_builder() {
@@ -474,9 +494,9 @@ mod test {
             .operation_name("Default")
             .context(Context::new())
             // We need to follow up on this. How can users creat this easily?
-            .extension("foo", json!({}))
+            .extension("foo", value(json!({})))
             // We need to follow up on this. How can users creat this easily?
-            .variable("bar", json!({}))
+            .variable("bar", value(json!({})))
             .build()
             .unwrap();
         assert_eq!(
@@ -494,23 +514,16 @@ mod test {
         );
         assert_eq!(
             request.supergraph_request.body().extensions.get("foo"),
-            Some(&json!({}).into())
+            Some(value(json!({})))
         );
         assert_eq!(
             request.supergraph_request.body().variables.get("bar"),
-            Some(&json!({}).into())
+            Some(value(json!({})))
         );
         assert_eq!(request.supergraph_request.method(), Method::POST);
 
-        let extensions = serde_json_bytes::Value::from(json!({"foo":{}}))
-            .as_object()
-            .unwrap()
-            .clone();
-
-        let variables = serde_json_bytes::Value::from(json!({"bar":{}}))
-            .as_object()
-            .unwrap()
-            .clone();
+        let extensions = value(json!({"foo":{}})).as_object().unwrap();
+        let variables = value(json!({"bar":{}})).as_object().unwrap();
         assert_eq!(
             request.supergraph_request.body(),
             &graphql::Request::builder()
@@ -528,8 +541,8 @@ mod test {
             .header("a", "b")
             .header("a", "c")
             .context(Context::new())
-            .extension("foo", json!({}))
-            .data(json!({}))
+            .extension("foo", value(json!({})))
+            .data(value(json!({})))
             .build()
             .unwrap();
 
@@ -542,15 +555,12 @@ mod test {
                 .collect::<Vec<_>>(),
             vec![HeaderValue::from_static("b"), HeaderValue::from_static("c")]
         );
-        let extensions = serde_json_bytes::Value::from(json!({"foo":{}}))
-            .as_object()
-            .unwrap()
-            .clone();
+        let extensions = value(json!({"foo":{}})).as_object().unwrap();
         assert_eq!(
             response.next_response().await.unwrap(),
             graphql::Response::builder()
                 .extensions(extensions)
-                .data(json!({}))
+                .data(value(json!({})))
                 .build()
         );
     }

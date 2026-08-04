@@ -17,6 +17,7 @@ use crate::cache::storage::CacheStorage;
 use crate::compute_job;
 use crate::compute_job::ComputeJobType;
 use crate::graphql;
+use crate::json_ext;
 use crate::json_ext::Object;
 use crate::services::query_parsing::ParsedDocument;
 use crate::spec;
@@ -391,6 +392,12 @@ fn execute_introspection(
         }
         MaxDepth::Ignore => Ok(()),
     };
+    // PERF(apollo-json): legacy bridge, revisit -- apollo-compiler's introspection
+    // executor coerces variables out of a `serde_json_bytes` map.
+    let variables = match json_ext::to_legacy(&variables.into_value()) {
+        serde_json_bytes::Value::Object(map) => map,
+        _ => serde_json_bytes::Map::new(),
+    };
     let result = max_depth_result
         .and_then(|()| {
             apollo_compiler::request::coerce_variable_values(api_schema, operation, &variables)
@@ -440,13 +447,13 @@ mod tests {
             let (_request, responder) = handle.next_request().await.unwrap();
             responder.send_response(
                 graphql::Response::builder()
-                    .data(serde_json_bytes::json!({
+                    .data(crate::json_ext::from_legacy(&serde_json_bytes::json!({
                         "__schema": {
                             "queryType": {
                                 "name": "Query",
                             },
                         },
-                    }))
+                    })))
                     .build(),
             );
         });
@@ -508,13 +515,13 @@ mod tests {
             let (_request, responder) = handle.next_request().await.unwrap();
             responder.send_response(
                 graphql::Response::builder()
-                    .data(serde_json_bytes::json!({
+                    .data(crate::json_ext::from_legacy(&serde_json_bytes::json!({
                         "__schema": {
                             "queryType": {
                                 "name": "Query",
                             },
                         },
-                    }))
+                    })))
                     .build(),
             );
         });
@@ -587,9 +594,9 @@ mod tests {
 
         assert_eq!(
             response.data,
-            Some(serde_json_bytes::json!({
+            Some(crate::json_ext::from_legacy(&serde_json_bytes::json!({
                 "x": "Query",
-            })),
+            }))),
         );
     }
 
@@ -615,10 +622,10 @@ mod tests {
 
         assert_eq!(
             response.data,
-            Some(serde_json_bytes::json!({
+            Some(crate::json_ext::from_legacy(&serde_json_bytes::json!({
                 "x": "Query",
                 "__typename": "Query",
-            })),
+            }))),
         );
     }
 }

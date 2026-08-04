@@ -22,7 +22,6 @@ use futures::stream;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::Value;
 use thiserror::Error;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -34,6 +33,7 @@ use crate::error::Error;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
+use crate::json_ext::ValueExt;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -215,8 +215,8 @@ impl IntoGraphQLErrors for DemandControlError {
                 max_cost,
             } => {
                 let mut extensions = Object::new();
-                extensions.insert("cost.estimated", estimated_cost.into());
-                extensions.insert("cost.max", max_cost.into());
+                extensions.insert("cost.estimated", estimated_cost);
+                extensions.insert("cost.max", max_cost);
                 Ok(vec![
                     graphql::Error::builder()
                         .extension_code(self.code())
@@ -231,9 +231,9 @@ impl IntoGraphQLErrors for DemandControlError {
                 max_cost,
             } => {
                 let mut extensions = Object::new();
-                extensions.insert("cost.subgraph", subgraph.as_str().into());
-                extensions.insert("cost.subgraph.estimated", estimated_cost.into());
-                extensions.insert("cost.subgraph.max", max_cost.into());
+                extensions.insert("cost.subgraph", subgraph.as_str());
+                extensions.insert("cost.subgraph.estimated", estimated_cost);
+                extensions.insert("cost.subgraph.max", max_cost);
                 Ok(vec![
                     graphql::Error::builder()
                         .extension_code(self.code())
@@ -247,8 +247,8 @@ impl IntoGraphQLErrors for DemandControlError {
                 max_cost,
             } => {
                 let mut extensions = Object::new();
-                extensions.insert("cost.actual", actual_cost.into());
-                extensions.insert("cost.max", max_cost.into());
+                extensions.insert("cost.actual", actual_cost);
+                extensions.insert("cost.max", max_cost);
                 Ok(vec![
                     graphql::Error::builder()
                         .extension_code(self.code())
@@ -554,8 +554,10 @@ impl Plugin for DemandControl {
                                     .into_graphql_errors()
                                     .expect("must be able to convert to graphql error");
                                 graphql_errors.iter_mut().for_each(|mapped_error| {
-                                    if let Some(Value::String(error_code)) =
-                                        mapped_error.extensions.get("code")
+                                    if let Some(error_code) = mapped_error
+                                        .extensions
+                                        .get("code")
+                                        .and_then(|code| code.as_str_owned())
                                     {
                                         // Emit here so the event attaches to the demand_control
                                         // checkpoint span; mark so the centralized emit skips it.

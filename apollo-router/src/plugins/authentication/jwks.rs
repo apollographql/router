@@ -877,12 +877,17 @@ mod test {
     use std::time::Duration;
     use std::time::UNIX_EPOCH;
 
-    use serde_json_bytes::json;
-
     use super::APOLLO_AUTHENTICATION_JWT_CLAIMS;
     use super::Context;
     use super::jwt_expires_in;
     use crate::test_harness::tracing_test;
+
+    /// Builds a context value from a `serde_json_bytes::json!` fixture.
+    macro_rules! json {
+        ($($json:tt)+) => {
+            crate::json_ext::from_legacy(&serde_json_bytes::json!($($json)+))
+        };
+    }
 
     #[test]
     fn test_exp_defaults_to_max_when_no_jwt_claims_present() {

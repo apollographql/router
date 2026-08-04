@@ -332,7 +332,9 @@ where
         router::body::into_bytes(response.http_response.into_body())
             .await
             .map_err(BoxError::from)
-            .and_then(|bytes| serde_json::from_slice(&bytes).map_err(BoxError::from))
+            // A `T` holding a `json_ext::Value` captures its subtree, which only
+            // apollo-json's own deserializers can serve.
+            .and_then(|bytes| apollo_json::from_slice(&bytes).map_err(BoxError::from))
     }
 
     /// This is the constructor (or builder) to use when constructing a Connector

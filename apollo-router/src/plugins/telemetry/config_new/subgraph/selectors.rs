@@ -2,7 +2,6 @@ use derivative::Derivative;
 use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json_bytes::ByteString;
 use serde_json_bytes::path::JsonPathInst;
 use sha2::Digest;
 
@@ -10,6 +9,7 @@ use super::attributes::SubgraphRequestResendCountKey;
 use crate::Context;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
+use crate::json_ext;
 use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugins::limits::operation_limits::OperationLimits;
 use crate::plugins::response_cache;
@@ -341,7 +341,7 @@ impl Selector for SubgraphSelector {
                 .subgraph_request
                 .body()
                 .variables
-                .get(&ByteString::from(subgraph_query_variable.as_str()))
+                .get(subgraph_query_variable.as_str())
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
 
@@ -353,7 +353,7 @@ impl Selector for SubgraphSelector {
                 .supergraph_request
                 .body()
                 .variables
-                .get(&ByteString::from(supergraph_query_variable.as_str()))
+                .get(supergraph_query_variable.as_str())
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
             SubgraphSelector::SubgraphRequestHeader {
@@ -414,9 +414,7 @@ impl Selector for SubgraphSelector {
                 ..
             } => request
                 .context
-                .get::<_, serde_json_bytes::Value>(request_context)
-                .ok()
-                .flatten()
+                .get_json_value(request_context)
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
@@ -545,7 +543,8 @@ impl Selector for SubgraphSelector {
                 default,
                 ..
             } => if let Some(data) = &response.response.body().data {
-                let val = subgraph_response_data.find(data);
+                // PERF(apollo-json): legacy bridge, revisit -- JSONPath only walks serde_json_bytes
+                let val = subgraph_response_data.find(&json_ext::to_legacy(data));
 
                 val.maybe_to_otel_value()
             } else {
@@ -2001,9 +2000,9 @@ mod test {
             selector
                 .on_response(
                     &crate::services::SubgraphResponse::fake_builder()
-                        .data(serde_json_bytes::json!({
+                        .data(json_ext::from_legacy(&serde_json_bytes::json!({
                             "hello": "bonjour"
-                        }))
+                        })))
                         .build()
                 )
                 .unwrap(),
@@ -2014,9 +2013,9 @@ mod test {
             selector
                 .on_response(
                     &crate::services::SubgraphResponse::fake_builder()
-                        .data(serde_json_bytes::json!({
+                        .data(json_ext::from_legacy(&serde_json_bytes::json!({
                             "hello": ["bonjour", "hello", "ciao"]
-                        }))
+                        })))
                         .build()
                 )
                 .unwrap(),
@@ -2034,9 +2033,9 @@ mod test {
             selector
                 .on_response(
                     &crate::services::SubgraphResponse::fake_builder()
-                        .data(serde_json_bytes::json!({
+                        .data(json_ext::from_legacy(&serde_json_bytes::json!({
                             "hi": ["bonjour", "hello", "ciao"]
-                        }))
+                        })))
                         .build()
                 )
                 .is_none()
@@ -2050,7 +2049,7 @@ mod test {
             selector
                 .on_response(
                     &crate::services::SubgraphResponse::fake_builder()
-                        .data(serde_json_bytes::json!({
+                        .data(json_ext::from_legacy(&serde_json_bytes::json!({
                             "hello": {
                                 "french": {
                                     "greeting": "bonjour"
@@ -2062,7 +2061,7 @@ mod test {
                                     "greeting": "ciao"
                                 }
                             }
-                        }))
+                        })))
                         .build()
                 )
                 .unwrap(),
@@ -2091,7 +2090,9 @@ mod test {
             )
             .build();
         let response_no_error = crate::services::SubgraphResponse::fake_builder()
-            .data(serde_json_bytes::json!({"hello": ["bonjour", "hello", "ciao"]}))
+            .data(json_ext::from_legacy(
+                &serde_json_bytes::json!({"hello": ["bonjour", "hello", "ciao"]}),
+            ))
             .build();
 
         // on_graphql_error: true — true when errors present, false when not

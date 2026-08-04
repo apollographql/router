@@ -27,6 +27,7 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 use crate::Configuration;
+use crate::json_ext;
 use crate::json_ext::ValueExt;
 use crate::metrics::FutureMetricsExt;
 use crate::plugins::connectors::tests::req_asserts::Plan;
@@ -2318,9 +2319,12 @@ async fn execute(
             }
         }
     });
-    let config = if let Some(mut config) = config {
-        config.deep_merge(common_config);
-        config
+    let config = if let Some(config) = config {
+        // PERF(apollo-json): legacy bridge, revisit -- the router's merge semantics live on
+        // `json_ext::Value`, while `Configuration` deserializes from serde_json_bytes
+        let mut merged = json_ext::from_legacy(&config);
+        merged.deep_merge(json_ext::from_legacy(&common_config));
+        json_ext::to_legacy(&merged)
     } else {
         common_config
     };

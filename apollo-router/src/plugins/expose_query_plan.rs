@@ -7,13 +7,13 @@ use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use super::connectors::query_plans::replace_connector_service_names;
 use super::connectors::query_plans::replace_connector_service_names_text;
+use crate::json_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
@@ -105,58 +105,75 @@ impl Plugin for ExposeQueryPlan {
     ) -> supergraph::BoxCloneService {
         let conf_enabled = self.enabled;
         service
-            .map_future_with_request_data(move |req: &supergraph::Request| {
-                let setting = if conf_enabled {
-                    let header = req.supergraph_request.headers().get(EXPOSE_QUERY_PLAN_HEADER_NAME);
-                    if header == Some(&HeaderValue::from_static("true")) {
-                        Setting::Enabled
-                    } else if header == Some(&HeaderValue::from_static("dry-run")) {
-                        Setting::DryRun
+            .map_future_with_request_data(
+                move |req: &supergraph::Request| {
+                    let setting = if conf_enabled {
+                        let header = req
+                            .supergraph_request
+                            .headers()
+                            .get(EXPOSE_QUERY_PLAN_HEADER_NAME);
+                        if header == Some(&HeaderValue::from_static("true")) {
+                            Setting::Enabled
+                        } else if header == Some(&HeaderValue::from_static("dry-run")) {
+                            Setting::DryRun
+                        } else {
+                            Setting::Disabled
+                        }
                     } else {
                         Setting::Disabled
+                    };
+
+                    if !matches!(setting, Setting::Disabled) {
+                        req.context
+                            .insert(ENABLED_CONTEXT_KEY, setting.clone())
+                            .unwrap();
                     }
-                } else {
-                    Setting::Disabled
-                };
 
-                if !matches!(setting, Setting::Disabled) {
-                    req.context.insert(ENABLED_CONTEXT_KEY, setting.clone()).unwrap();
-                }
+                    setting
+                },
+                move |setting: Setting, f| async move {
+                    let mut res: supergraph::ServiceResult = f.await;
 
-                setting
-            }, move | setting: Setting, f| async move {
-                let mut res: supergraph::ServiceResult = f.await;
+                    res = match res {
+                        Ok(mut res) => {
+                            if !matches!(setting, Setting::Disabled) {
+                                let (parts, stream) = res.response.into_parts();
+                                let (mut first, rest) = StreamExt::into_future(stream).await;
 
-                res = match res {
-                    Ok(mut res) => {
-                        if !matches!(setting, Setting::Disabled) {
-                            let (parts, stream) = res.response.into_parts();
-                            let (mut first, rest) = StreamExt::into_future(stream).await;
-
-                            if let Some(first) = &mut first
-                                && let Some(plan) =
-                                    res.context.get_json_value(QUERY_PLAN_CONTEXT_KEY)
+                                if let Some(first) = &mut first
+                                    && let Some(plan) =
+                                        res.context.get_json_value(QUERY_PLAN_CONTEXT_KEY)
                                 {
-                                    first
-                                        .extensions
-                                        .insert("apolloQueryPlan", json!({
-                                            "object": { "kind": "QueryPlan", "node": plan },
-                                            "text": res.context.get_json_value(FORMATTED_QUERY_PLAN_CONTEXT_KEY),
-                                        }));
+                                    let object = json_ext::object([
+                                        ("kind".to_string(), json_ext::string("QueryPlan")),
+                                        ("node".to_string(), plan),
+                                    ]);
+                                    let text = res
+                                        .context
+                                        .get_json_value(FORMATTED_QUERY_PLAN_CONTEXT_KEY)
+                                        .unwrap_or_default();
+                                    first.extensions.insert(
+                                        "apolloQueryPlan",
+                                        json_ext::object([
+                                            ("object".to_string(), object),
+                                            ("text".to_string(), text),
+                                        ]),
+                                    );
                                 }
-                            res.response = http::Response::from_parts(
-                                parts,
-                                once(ready(first.unwrap_or_default())).chain(rest).boxed(),
-                            );
+                                res.response = http::Response::from_parts(
+                                    parts,
+                                    once(ready(first.unwrap_or_default())).chain(rest).boxed(),
+                                );
+                            }
+
+                            Ok(res)
                         }
+                        Err(err) => Err(err),
+                    };
 
-                        Ok(res)
-                    }
-                    Err(err) => Err(err),
-                };
-
-                res
-            })
+                    res
+                },
+            )
             .boxed_clone()
     }
 }
@@ -165,8 +182,6 @@ register_plugin!("experimental", "expose_query_plan", ExposeQueryPlan);
 
 #[cfg(test)]
 mod tests {
-    use serde_json_bytes::ByteString;
-    use serde_json_bytes::Value;
     use tower::Service;
     use tower::ServiceExt as _;
 
@@ -182,7 +197,7 @@ mod tests {
 
     async fn build_mock_supergraph(config: serde_json::Value) -> supergraph::BoxCloneService {
         let mut extensions = Object::new();
-        extensions.insert("test", Value::String(ByteString::from("value")));
+        extensions.insert("test", "value");
 
         let account_mocks = vec![
             (

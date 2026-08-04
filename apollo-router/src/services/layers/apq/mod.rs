@@ -9,11 +9,11 @@ use http::HeaderValue;
 use http::StatusCode;
 use http::header::CACHE_CONTROL;
 use serde::Deserialize;
-use serde_json_bytes::Value;
 use sha2::Digest;
 use sha2::Sha256;
 
 use crate::cache::DeduplicatingCache;
+use crate::json_ext::Value;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 
@@ -39,7 +39,7 @@ impl PersistedQuery {
             .body()
             .extensions
             .get("persistedQuery")
-            .and_then(|value| serde_json_bytes::from_value(value.clone()).ok())
+            .and_then(|value| apollo_json::from_value(&value).ok())
     }
 
     /// Attempt to decode the sha256 hash in a [`PersistedQuery`]
@@ -245,7 +245,6 @@ mod apq_tests {
     use futures::StreamExt;
     use http::StatusCode;
     use rstest::rstest;
-    use serde_json_bytes::json;
     use tower::Service;
     use tower::ServiceExt;
 
@@ -254,9 +253,18 @@ mod apq_tests {
     use crate::Context;
     use crate::assert_error_eq_ignoring_id;
     use crate::error::Error;
+    use crate::json_ext;
     use crate::services::router::ClientRequestAccepts;
     use crate::services::router::service::from_supergraph_mock;
     use crate::services::router::service::from_supergraph_mock_with_configuration;
+
+    /// The `persistedQuery` request extension carrying `sha256hash`.
+    fn persisted_query_extension(sha256hash: &str) -> Value {
+        json_ext::object([
+            ("version".to_string(), json_ext::from_i64(1)),
+            ("sha256Hash".to_string(), json_ext::string(sha256hash)),
+        ])
+    }
 
     #[tokio::test]
     async fn it_works() {
@@ -276,8 +284,7 @@ mod apq_tests {
                 let body = req.supergraph_request.body();
                 let as_json = body.extensions.get("persistedQuery").unwrap();
 
-                let persisted_query: PersistedQuery =
-                    serde_json_bytes::from_value(as_json.clone()).unwrap();
+                let persisted_query: PersistedQuery = apollo_json::from_value(&as_json).unwrap();
 
                 assert_eq!(persisted_query.sha256hash, hash2);
 
@@ -300,10 +307,9 @@ mod apq_tests {
         });
         let mut router_service = from_supergraph_mock(router_mock).await;
 
-        let persisted = json!({
-            "version" : 1,
-            "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
-        });
+        let persisted = persisted_query_extension(
+            "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38",
+        );
 
         let hash_only = SupergraphRequest::fake_builder()
             .extension("persistedQuery", persisted.clone())
@@ -406,8 +412,7 @@ mod apq_tests {
                 let body = req.supergraph_request.body();
                 let as_json = body.extensions.get("persistedQuery").unwrap();
 
-                let persisted_query: PersistedQuery =
-                    serde_json_bytes::from_value(as_json.clone()).unwrap();
+                let persisted_query: PersistedQuery = apollo_json::from_value(&as_json).unwrap();
 
                 assert_eq!(persisted_query.sha256hash, hash2);
 
@@ -423,10 +428,9 @@ mod apq_tests {
         });
         let mut router_service = from_supergraph_mock(router_mock).await;
 
-        let persisted = json!({
-            "version" : 1,
-            "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36"
-        });
+        let persisted = persisted_query_extension(
+            "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36",
+        );
 
         let request_builder =
             SupergraphRequest::fake_builder().extension("persistedQuery", persisted.clone());
@@ -573,10 +577,9 @@ mod apq_tests {
         let mut router_service =
             from_supergraph_mock_with_configuration(router_mock, Arc::new(config)).await;
 
-        let persisted = json!({
-            "version" : 1,
-            "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
-        });
+        let persisted = persisted_query_extension(
+            "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38",
+        );
 
         let hash_only = SupergraphRequest::fake_builder()
             .extension("persistedQuery", persisted.clone())

@@ -16,6 +16,7 @@ use crate::context::OPERATION_NAME;
 use crate::context::ROUTER_RESPONSE_ERRORS;
 use crate::graphql;
 use crate::graphql::Error;
+use crate::json_ext::ValueExt;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
@@ -209,10 +210,12 @@ fn count_operation_errors<'a>(
         let service = error
             .extensions
             .get("service")
-            .and_then(|s| s.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let severity = error.extensions.get("severity").and_then(|s| s.as_str());
+            .and_then(|s| s.as_str_owned())
+            .unwrap_or_default();
+        let severity = error
+            .extensions
+            .get("severity")
+            .and_then(|s| s.as_str_owned());
         let path = match &error.path {
             None => "".into(),
             Some(path) => path.to_string(),
@@ -245,9 +248,8 @@ fn count_operation_errors<'a>(
                 );
             }
 
-            let severity_str = severity
-                .unwrap_or(tracing::Level::ERROR.as_str())
-                .to_string();
+            let severity_str =
+                severity.unwrap_or_else(|| tracing::Level::ERROR.as_str().to_string());
             u64_counter!(
                 "apollo.router.operations.error",
                 "Number of errors returned by operation",

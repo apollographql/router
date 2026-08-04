@@ -810,7 +810,9 @@ connector:
                     .header("custom-header", "val1")
                     .header(CONTENT_LENGTH, "25")
                     .header("x-log-request", HeaderValue::from_static("log"))
-                    .data(serde_json_bytes::json!({"data": "res"}))
+                    .data(crate::json_ext::from_legacy(
+                        &serde_json_bytes::json!({"data": "res"}),
+                    ))
                     .build()
                     .expect("expecting valid response");
                 router_events.on_response(&router_resp);
@@ -1172,7 +1174,9 @@ subgraph:
                 supergraph_events.on_response(&supergraph_resp);
 
                 let router_resp = router::Response::fake_builder()
-                    .data(serde_json_bytes::json!({"data": "res"}))
+                    .data(crate::json_ext::from_legacy(
+                        &serde_json_bytes::json!({"data": "res"}),
+                    ))
                     .build()
                     .expect("expecting valid response");
                 router_events.on_response(&router_resp);
@@ -1250,7 +1254,9 @@ subgraph:
                     .header("custom-header", "val1")
                     .header(CONTENT_LENGTH, "25")
                     .header("x-log-request", HeaderValue::from_static("log"))
-                    .data(serde_json_bytes::json!({"data": "res"}))
+                    .data(crate::json_ext::from_legacy(
+                        &serde_json_bytes::json!({"data": "res"}),
+                    ))
                     .context(ctx)
                     .build()
                     .expect("expecting valid response");

@@ -6,11 +6,10 @@ use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
+use apollo_json::JsonKind;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
 use tokio::sync::broadcast::Sender;
 use tower::ServiceExt;
 use tracing::Instrument;
@@ -150,6 +149,18 @@ pub(crate) struct Variables {
     pub(crate) contextual_arguments: Option<ContextualArguments>,
 }
 
+/// The entries of `body_variables` that this fetch declares a usage of.
+fn used_variables<'a>(
+    variable_usages: &'a [Arc<str>],
+    body_variables: &'a Object,
+) -> impl Iterator<Item = (String, Value)> + 'a {
+    variable_usages.iter().filter_map(move |key| {
+        body_variables
+            .get(key.as_ref())
+            .map(|value| (key.to_string(), value))
+    })
+}
+
 impl Variables {
     #[instrument(skip_all, level = "debug", name = "make_variables")]
     #[allow(clippy::too_many_arguments)]
@@ -166,13 +177,9 @@ impl Variables {
         let body = request.body();
         let mut subgraph_context = SubgraphContext::new(data, schema, context_rewrites);
         if !requires.is_empty() {
-            let mut variables = Object::with_capacity(1 + variable_usages.len());
+            let mut variables = Object::new();
 
-            variables.extend(variable_usages.iter().filter_map(|key| {
-                body.variables
-                    .get_key_value(key.as_ref())
-                    .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
-            }));
+            variables.extend(used_variables(variable_usages, &body.variables));
 
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
             let mut values: IndexSet<Value> = IndexSet::default();
@@ -182,7 +189,7 @@ impl Variables {
                     context.execute_on_path(path);
                 }
 
-                let mut value = execute_selection_set(value, requires, schema, None);
+                let mut value = execute_selection_set(&value, requires, schema, None);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                     rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                     match values.get_index_of(&value) {
@@ -202,7 +209,7 @@ impl Variables {
                 return None;
             }
 
-            let representations = Value::Array(Vec::from_iter(values));
+            let representations = json_ext::array(values);
             let contextual_arguments = match subgraph_context.as_mut() {
                 Some(context) => context.add_variables_and_get_args(&mut variables),
                 None => None,
@@ -230,14 +237,7 @@ impl Variables {
             }
 
             Some(Variables {
-                variables: variable_usages
-                    .iter()
-                    .filter_map(|key| {
-                        body.variables
-                            .get_key_value(key.as_ref())
-                            .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
-                    })
-                    .collect::<Object>(),
+                variables: used_variables(variable_usages, &body.variables).collect::<Object>(),
                 inverted_paths: Vec::new(),
                 contextual_arguments: None,
             })
@@ -255,7 +255,7 @@ impl FetchNode {
         schema: &Schema,
         paths: Vec<Vec<Path>>,
         operation_str: &str,
-        variables: Map<ByteString, Value>,
+        variables: Object,
         hoist_orphan_errors: bool,
     ) -> (Value, Vec<Error>) {
         let (_parts, response) = match service
@@ -404,17 +404,17 @@ impl FetchNode {
                 }
             }
 
-            // we have to nest conditions and do early returns here
-            // because we need to take ownership of the inner value
-            if let Some(Value::Object(mut map)) = response.data
-                && let Some(entities) = map.remove("_entities")
+            if let Some(entities) = response
+                .data
+                .as_ref()
+                .and_then(|data| data.get("_entities"))
             {
                 tracing::trace!("received entities: {:?}", &entities);
 
-                if let Value::Array(array) = entities {
+                if entities.kind() == JsonKind::Array {
                     let mut value = Value::default();
 
-                    for (index, mut entity) in array.into_iter().enumerate() {
+                    for (index, mut entity) in entities.array_iter().enumerate() {
                         rewrites::apply_rewrites(schema, &mut entity, &self.output_rewrites);
 
                         if let Some(paths) = inverted_paths.get(index) {
@@ -444,7 +444,7 @@ impl FetchNode {
                 );
             }
 
-            (Value::Null, errors)
+            (Value::default(), errors)
         } else {
             let current_slice =
                 if matches!(current_dir.last(), Some(&json_ext::PathElement::Flatten(_))) {
@@ -546,10 +546,16 @@ mod tests {
     use apollo_federation::query_plan::requires_selection;
     use apollo_federation::query_plan::serializable_document::SerializableDocument;
     use rstest::rstest;
-    use serde_json_bytes::json;
 
     use super::*;
     use crate::Configuration;
+
+    /// Builds a [`Value`] from a `serde_json_bytes::json!` fixture.
+    macro_rules! json {
+        ($($json:tt)+) => {
+            apollo_json::Document::from_legacy(&serde_json_bytes::json!($($json)+)).root_handle()
+        };
+    }
 
     fn test_schema() -> Schema {
         let sdl = r#"
@@ -1148,7 +1154,7 @@ mod tests {
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
-        assert_eq!(value, Value::Null);
+        assert_eq!(value, Value::default());
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].message, "permission denied");
     }
@@ -1164,7 +1170,7 @@ mod tests {
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
-        assert_eq!(value, Value::Null);
+        assert_eq!(value, Value::default());
         assert!(errors.is_empty());
     }
 
@@ -1179,7 +1185,7 @@ mod tests {
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
-        assert_eq!(value, Value::Null);
+        assert_eq!(value, Value::default());
         assert_eq!(errors.len(), 1);
     }
 
@@ -1207,7 +1213,7 @@ mod tests {
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
 
-        assert_eq!(value, Value::Null);
+        assert_eq!(value, Value::default());
         assert_eq!(errors.len(), 3);
         for error in &errors {
             assert_eq!(
@@ -1242,7 +1248,7 @@ mod tests {
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
 
-        assert_eq!(value, Value::Null);
+        assert_eq!(value, Value::default());
         assert_eq!(errors.len(), 2);
         for error in &errors {
             assert_eq!(
@@ -1265,7 +1271,7 @@ mod tests {
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
-        assert_eq!(value, Value::Null);
+        assert_eq!(value, Value::default());
         assert!(errors.is_empty());
     }
 
@@ -1282,7 +1288,7 @@ mod tests {
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
 
-        assert_eq!(value, Value::Null);
+        assert_eq!(value, Value::default());
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].path.as_ref().unwrap(), &expected_fallback);
     }
@@ -1294,14 +1300,14 @@ mod tests {
         let current_dir = Path(vec![key("orders"), flatten(), key("items")]);
         let expected_fallback = Path(vec![key("orders")]);
         let response = graphql::Response {
-            data: Some(Value::Null),
+            data: Some(Value::default()),
             errors: vec![graphql::Error::builder().message("null data error").build()],
             ..Default::default()
         };
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
 
-        assert_eq!(value, Value::Null);
+        assert_eq!(value, Value::default());
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].path.as_ref().unwrap(), &expected_fallback);
     }

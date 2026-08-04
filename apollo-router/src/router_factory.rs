@@ -1774,7 +1774,6 @@ mod create_subgraph_services_tests {
     use http::header::CONTENT_TYPE;
     use indexmap::IndexMap;
     use mime::APPLICATION_JSON;
-    use serde_json_bytes::ByteString;
     use tokio::net::TcpListener;
     use tower::ServiceExt;
 
@@ -1867,7 +1866,7 @@ mod create_subgraph_services_tests {
                     .status(StatusCode::OK)
                     .body(
                         serde_json::to_string(&Response {
-                            data: Some(serde_json_bytes::Value::String(ByteString::from("test"))),
+                            data: Some(crate::json_ext::string("test")),
                             ..Response::default()
                         })
                         .unwrap()
@@ -1903,10 +1902,7 @@ mod create_subgraph_services_tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            resp.response.body().data,
-            Some(serde_json_bytes::Value::String(ByteString::from("test")))
-        );
+        assert_eq!(resp.response.body().data, Some(crate::json_ext::string("test")));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1923,7 +1919,7 @@ mod create_subgraph_services_tests {
                     .status(StatusCode::OK)
                     .body(
                         serde_json::to_string(&Response {
-                            data: Some(serde_json_bytes::Value::String(ByteString::from("test"))),
+                            data: Some(crate::json_ext::string("test")),
                             ..Response::default()
                         })
                         .unwrap()
@@ -1991,7 +1987,7 @@ mod create_subgraph_services_tests {
                     .status(StatusCode::OK)
                     .body(
                         serde_json::to_string(&Response {
-                            data: Some(serde_json_bytes::Value::String(ByteString::from("test"))),
+                            data: Some(crate::json_ext::string("test")),
                             ..Response::default()
                         })
                         .unwrap()

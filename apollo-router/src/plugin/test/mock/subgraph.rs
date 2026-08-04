@@ -8,6 +8,7 @@ use std::task::Poll;
 
 use apollo_compiler::ast::Definition;
 use apollo_compiler::ast::Document;
+use apollo_json::JsonKind;
 use futures::future;
 use http::HeaderMap;
 use http::HeaderName;
@@ -101,10 +102,9 @@ impl MockSubgraphBuilder {
     ///
     /// the arguments must deserialize to `crate::graphql::Request` and `crate::graphql::Response`
     pub fn with_json(mut self, request: serde_json::Value, response: serde_json::Value) -> Self {
-        let mut request = serde_json::from_value(request).unwrap();
+        let mut request = deserialize_fixture(request);
         normalize(&mut request);
-        self.mocks
-            .insert(request, serde_json::from_value(response).unwrap());
+        self.mocks.insert(request, deserialize_fixture(response));
         self
     }
 
@@ -130,6 +130,15 @@ impl MockSubgraphBuilder {
             headers: self.headers,
         }
     }
+}
+
+/// Deserializes a `serde_json` fixture. A [`crate::json_ext::Value`] inside `T`
+/// can only be captured from apollo-json's own deserializers, so the fixture
+/// crosses over as a document first.
+// PERF(apollo-json): legacy bridge, revisit -- test fixtures arrive as `serde_json::Value`.
+fn deserialize_fixture<T: serde::de::DeserializeOwned>(fixture: serde_json::Value) -> T {
+    let value = crate::json_ext::from_legacy(&fixture.into());
+    apollo_json::from_value(&value).unwrap()
 }
 
 // Normalize queries so that spaces and operation names
@@ -177,25 +186,36 @@ impl Service<SubgraphRequest> for MockSubgraph {
         }
 
         // Redact the callbackUrl and subscriptionId because it generates a subscription uuid
-        if let Some(serde_json_bytes::Value::Object(subscription_ext)) =
-            body.extensions.get_mut("subscription")
+        if let Some(subscription_ext) = body
+            .extensions
+            .get("subscription")
+            .filter(|extension| extension.kind() == JsonKind::Object)
         {
-            if let Some(callback_url) = subscription_ext.get_mut("callbackUrl") {
-                let mut cb_url = url::Url::parse(
-                    callback_url
-                        .as_str()
-                        .expect("callbackUrl extension must be a string"),
-                )
-                .expect("callbackUrl must be a valid URL");
+            let mut subscription_ext = subscription_ext.detach().edit();
+
+            let callback_url = subscription_ext.value().get("callbackUrl").map(|url| {
+                url.as_str()
+                    .expect("callbackUrl extension must be a string")
+                    .into_owned()
+            });
+            if let Some(callback_url) = callback_url {
+                let mut cb_url =
+                    url::Url::parse(&callback_url).expect("callbackUrl must be a valid URL");
                 cb_url.path_segments_mut().unwrap().pop();
                 cb_url.path_segments_mut().unwrap().push("subscription_id");
 
-                *callback_url = serde_json_bytes::Value::String(cb_url.to_string().into());
+                subscription_ext
+                    .set("callbackUrl", cb_url.to_string())
+                    .expect("the subscription extension is an object");
             }
-            if let Some(subscription_id) = subscription_ext.get_mut("subscriptionId") {
-                *subscription_id =
-                    serde_json_bytes::Value::String("subscriptionId".to_string().into());
+            if subscription_ext.value().get("subscriptionId").is_some() {
+                subscription_ext
+                    .set("subscriptionId", "subscriptionId")
+                    .expect("the subscription extension is an object");
             }
+
+            body.extensions
+                .insert("subscription", subscription_ext.seal().root_handle());
         }
 
         normalize(body);

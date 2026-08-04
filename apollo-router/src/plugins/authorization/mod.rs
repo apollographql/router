@@ -10,7 +10,6 @@ use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -29,7 +28,9 @@ use crate::Context;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
+use crate::json_ext;
 use crate::json_ext::Path;
+use crate::json_ext::ValueExt;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -173,15 +174,15 @@ impl UnauthorizedPaths {
                 response.errors.extend(unauthorized_path_errors);
             }
             ErrorLocation::Extensions => {
-                let serialized_auth_errors = unauthorized_path_errors
-                    .map(|err| {
-                        serde_json_bytes::to_value(err)
-                            .expect("error serialization should not fail")
-                    })
-                    .collect();
-                response
-                    .extensions
-                    .insert("authorizationErrors", Value::Array(serialized_auth_errors));
+                let serialized_auth_errors = unauthorized_path_errors.map(|err| {
+                    apollo_json::to_document(&err)
+                        .expect("error serialization should not fail")
+                        .root_handle()
+                });
+                response.extensions.insert(
+                    "authorizationErrors",
+                    json_ext::array(serialized_auth_errors),
+                );
             }
             ErrorLocation::Disabled => {}
         }
@@ -291,9 +292,8 @@ impl AuthorizationPlugin {
             .and_then(|v| {
                 v.as_object().map(|v| {
                     v.iter()
-                        .filter_map(|(policy, result)| match result {
-                            Value::Bool(true) => Some(policy.as_str().to_string()),
-                            _ => None,
+                        .filter_map(|(policy, result)| {
+                            (result.as_bool() == Some(true)).then_some(policy)
                         })
                         .collect::<Vec<String>>()
                 })

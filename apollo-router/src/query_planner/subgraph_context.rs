@@ -13,11 +13,12 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
+use apollo_json::JsonKind;
 
 use super::rewrites::DataKeyRenamer;
 use super::rewrites::DataRewrite;
+use crate::json_ext;
+use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::Value;
@@ -115,28 +116,24 @@ impl<'a> SubgraphContext<'a> {
                             if let Ok(data_path) = wrapped_data_path {
                                 let val = self.data.get_path(self.schema, &data_path);
 
-                                if let Ok(v) = val {
+                                if let Ok(mut new_value) = val {
                                     // add to found
                                     found_rewrites.insert(item.rename_key_to.clone().to_string());
-                                    // TODO: not great
-                                    let mut new_value = v.clone();
-                                    if let Some(values) = new_value.as_array_mut() {
-                                        for v in values {
-                                            let data_rewrite = DataRewrite::KeyRenamer({
-                                                DataKeyRenamer {
-                                                    path: data_path.clone(),
-                                                    rename_key_to: item.rename_key_to.clone(),
-                                                }
-                                            });
-                                            data_rewrite.maybe_apply(self.schema, v);
-                                        }
+                                    let data_rewrite = DataRewrite::KeyRenamer(DataKeyRenamer {
+                                        path: data_path.clone(),
+                                        rename_key_to: item.rename_key_to.clone(),
+                                    });
+                                    // the rewrite addresses a single entity, so a list of them is
+                                    // rewritten element by element
+                                    if new_value.kind() == JsonKind::Array {
+                                        let rewritten = json_ext::array(
+                                            new_value.array_iter().map(|mut element| {
+                                                data_rewrite.maybe_apply(self.schema, &mut element);
+                                                element
+                                            }),
+                                        );
+                                        new_value = rewritten;
                                     } else {
-                                        let data_rewrite = DataRewrite::KeyRenamer({
-                                            DataKeyRenamer {
-                                                path: data_path.clone(),
-                                                rename_key_to: item.rename_key_to.clone(),
-                                            }
-                                        });
                                         data_rewrite.maybe_apply(self.schema, &mut new_value);
                                     }
                                     return Some((item.rename_key_to.to_string(), new_value));
@@ -157,17 +154,11 @@ impl<'a> SubgraphContext<'a> {
     // values of variables are entity dependent
     pub(crate) fn add_variables_and_get_args(
         &self,
-        variables: &mut Map<ByteString, Value>,
+        variables: &mut Object,
     ) -> Option<ContextualArguments> {
         let (extended_vars, contextual_args) = if let Some(first_map) = self.named_args.first() {
             if self.named_args.iter().all(|map| map == first_map) {
-                (
-                    first_map
-                        .iter()
-                        .map(|(k, v)| (k.as_str().into(), v.clone()))
-                        .collect(),
-                    None,
-                )
+                (first_map.clone(), None)
             } else {
                 let mut hash_map: HashMap<String, Value> = HashMap::new();
                 let arg_names: HashSet<_> = first_map.keys().cloned().collect();
@@ -191,11 +182,7 @@ impl<'a> SubgraphContext<'a> {
             (HashMap::new(), None)
         };
 
-        variables.extend(
-            extended_vars
-                .iter()
-                .map(|(key, value)| (key.as_str().into(), value.clone())),
-        );
+        variables.extend(extended_vars);
 
         contextual_args
     }

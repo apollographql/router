@@ -16,7 +16,6 @@ use futures::future::BoxFuture;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
-use serde_json_bytes::Value;
 use tower::Service;
 
 use super::PlanNode;
@@ -32,6 +31,7 @@ use crate::error::ServiceBuildError;
 use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::json_ext::Path;
+use crate::json_ext::Value;
 use crate::metrics::meter_provider;
 use crate::plugins::authorization;
 use crate::plugins::authorization::AuthorizationPlugin;
@@ -464,7 +464,7 @@ impl QueryPlannerService {
             match AuthorizationPlugin::filter_query(&self.authorization_config, &key, &self.schema)
             {
                 Err(QueryPlannerError::Unauthorized(paths)) => {
-                    let mut response = graphql::Response::builder().data(Value::Null).build();
+                    let mut response = graphql::Response::builder().data(Value::default()).build();
 
                     if !paths.is_empty() {
                         let unauthorized = UnauthorizedPaths {

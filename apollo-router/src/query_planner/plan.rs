@@ -17,7 +17,6 @@ use crate::error::CacheResolverError;
 use crate::error::ValidationErrors;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
-use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::HashedSubgraphSchemas;
 use crate::query_planner::SubgraphSchemas;
@@ -193,7 +192,7 @@ impl PlanNode {
             } => {
                 if query
                     .variable_value(condition.as_str(), variables)
-                    .map(|v| *v == Value::Bool(true))
+                    .map(|v| v.as_bool() == Some(true))
                     .unwrap_or(true)
                 {
                     // right now ConditionNode is only used with defer, but it might be used
@@ -275,7 +274,7 @@ impl PlanNode {
                     } => {
                         if query
                             .variable_value(condition.as_str(), variables)
-                            .map(|v| *v == Value::Bool(true))
+                            .map(|v| v.as_bool() == Some(true))
                             .unwrap_or(true)
                         {
                             if let Some(node) = if_clause {

@@ -673,8 +673,6 @@ mod test {
     use http::HeaderMap;
     use maplit::hashmap;
     use once_cell::sync::Lazy;
-    use serde_json_bytes::ByteString;
-    use serde_json_bytes::Value;
     use serde_json_bytes::json;
     use tokio::task::JoinSet;
     use tokio::time::sleep;
@@ -684,6 +682,7 @@ mod test {
     use super::*;
     use crate::Configuration;
     use crate::Context;
+    use crate::json_ext;
     use crate::json_ext::Object;
     use crate::plugin::DynPlugin;
     use crate::plugin::test::MockConnector;
@@ -739,7 +738,7 @@ mod test {
         plugin: Box<dyn DynPlugin>,
     ) -> router::BoxCloneService {
         let mut extensions = Object::new();
-        extensions.insert("test", Value::String(ByteString::from("value")));
+        extensions.insert("test", "value");
 
         let account_mocks = vec![
             (
@@ -1271,7 +1270,7 @@ mod test {
                 let (_req, responder) = handle.next_request().await.unwrap();
                 responder.send_response(
                     RouterResponse::fake_builder()
-                        .data(json!({ "test": 1234_u32 }))
+                        .data(json_ext::from_legacy(&json!({ "test": 1234_u32 })))
                         .build()
                         .unwrap(),
                 );
@@ -1337,7 +1336,7 @@ mod test {
             .service_fn(move |_req: router::Request| async {
                 tokio::time::sleep(std::time::Duration::from_millis(300)).await;
                 RouterResponse::fake_builder()
-                    .data(json!({ "test": 1234_u32 }))
+                    .data(json_ext::from_legacy(&json!({ "test": 1234_u32 })))
                     .build()
             })
             .boxed_clone();

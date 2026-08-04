@@ -24,8 +24,8 @@ fn canned_request_query() -> &'static str {
     "query SimpleQuery {\ntopProducts {\n  name\n  price\n   \n}\n}"
 }
 
-fn canned_response_body() -> Value {
-    json!({
+fn canned_response_body() -> crate::json_ext::Value {
+    crate::json_ext::json_value!({
             "field": "value"
     })
 }

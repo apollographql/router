@@ -19,6 +19,7 @@ use tower::ServiceExt;
 
 use super::recording::Recording;
 use crate::context::Context;
+use crate::json_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -64,7 +65,9 @@ impl Replay {
         let req = supergraph::Request::builder()
             .query(client_request.query.unwrap().clone())
             .and_operation_name(client_request.operation_name.clone())
-            .variables(client_request.variables.clone())
+            // PERF(apollo-json): legacy bridge, revisit -- a recording is read back
+            // from a JSON file, so it holds the legacy type
+            .variables(json_ext::object_from_legacy(&client_request.variables))
             .headers(request_headers)
             .context(Context::default())
             .uri(client_request.uri.parse::<Uri>().expect("uri is valid"))
@@ -224,7 +227,11 @@ impl Plugin for Replay {
                             req.id.clone(),
                         );
 
-                        let runtime_variables = req.subgraph_request.body().variables.clone();
+                        // PERF(apollo-json): legacy bridge, revisit -- the recorded
+                        // variables come back from a JSON file as the legacy type, and
+                        // the diff report prints both sides with `serde_json`
+                        let runtime_variables =
+                            json_ext::object_to_legacy(&req.subgraph_request.body().variables);
                         let recorded_variables = fetch.request.variables.clone();
 
                         if runtime_variables != recorded_variables {

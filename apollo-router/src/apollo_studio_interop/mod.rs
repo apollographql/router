@@ -26,6 +26,7 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use apollo_json::JsonKind;
 use serde::Deserialize;
 use serde::Serialize;
 use sha2::Digest;
@@ -402,8 +403,9 @@ fn add_enum_value_to_map(
     enum_value: &JsonValue,
     referenced_enums: &mut ReferencedEnums,
 ) {
-    match enum_value {
-        JsonValue::String(val_str) => {
+    match enum_value.kind() {
+        JsonKind::String => {
+            let val_str = enum_value.as_str().expect("the value is a string");
             // Not using entry API here due to performance impact
             let enum_name_stats = match referenced_enums.get_mut(enum_name.as_str()) {
                 Some(existing_stats) => existing_stats,
@@ -415,11 +417,11 @@ fn add_enum_value_to_map(
                 }
             };
 
-            enum_name_stats.insert(val_str.as_str().to_string());
+            enum_name_stats.insert(val_str.to_string());
         }
-        JsonValue::Array(val_list) => {
-            for val in val_list {
-                add_enum_value_to_map(enum_name, val, referenced_enums);
+        JsonKind::Array => {
+            for val in enum_value.array_iter() {
+                add_enum_value_to_map(enum_name, &val, referenced_enums);
             }
         }
         _ => {}
@@ -433,8 +435,9 @@ fn extract_enums_from_selection_set(
     selection_response: &Object,
     result_set: &mut ReferencedEnums,
 ) {
-    let mut stack: Vec<(&[SpecSelection], &Object)> = vec![(selection_set, selection_response)];
-    let mut visited_fragments: HashSet<(&str, &Object)> = HashSet::new();
+    let mut stack: Vec<(&[SpecSelection], Object)> =
+        vec![(selection_set, selection_response.clone())];
+    let mut visited_fragments: HashSet<(&str, Object)> = HashSet::new();
 
     while let Some((selections, response)) = stack.pop() {
         for selection in selections.iter() {
@@ -451,25 +454,25 @@ fn extract_enums_from_selection_set(
                         let field_type_def = schema.types.get(field_type.0.inner_named_type());
                         // If the value is an enum, we want to add all values to the map
                         if let Some(ExtendedType::Enum(enum_type)) = field_type_def {
-                            add_enum_value_to_map(&enum_type.name, field_value, result_set);
+                            add_enum_value_to_map(&enum_type.name, &field_value, result_set);
                         }
                         // Otherwise if the response value is an object, add any enums from the field's selection set
-                        else if let JsonValue::Object(value_object) = field_value
+                        else if field_value.kind() == JsonKind::Object
                             && let Some(selection_set) = selection_set
                         {
-                            stack.push((selection_set, value_object));
+                            stack.push((selection_set, Object::from(field_value)));
                         }
                     }
                 }
                 SpecSelection::InlineFragment { selection_set, .. } => {
-                    stack.push((selection_set, response));
+                    stack.push((selection_set, response.clone()));
                 }
                 SpecSelection::FragmentSpread { name, .. } => {
-                    let key = (name.as_str(), response);
+                    let key = (name.as_str(), response.clone());
                     if visited_fragments.insert(key)
                         && let Some(fragment) = fragments.get(name)
                     {
-                        stack.push((&fragment.selection_set, response));
+                        stack.push((&fragment.selection_set, response.clone()));
                     }
                 }
             }
@@ -786,7 +789,7 @@ impl UsageGenerator<'_> {
             }
             Value::Variable(var_name) => {
                 let var_value = self.variables.get(var_name.to_string().as_str());
-                self.process_extended_refs_for_variable(type_name.to_string(), var_value);
+                self.process_extended_refs_for_variable(type_name.to_string(), var_value.as_ref());
             }
             _ => (),
         }
@@ -828,15 +831,16 @@ impl UsageGenerator<'_> {
         type_name: String,
         var_value: Option<&JsonValue>,
     ) {
+        let Some(var_value) = var_value else {
+            return;
+        };
         match self.schema.types.get(type_name.to_string().as_str()) {
             Some(ExtendedType::InputObject(input_object_type)) => {
-                match var_value {
+                match var_value.kind() {
                     // For input objects, we store input object references and process each of the field variables
-                    Some(JsonValue::Object(json_obj)) => {
-                        let var_value_map: HashMap<String, &JsonValue> = json_obj
-                            .iter()
-                            .map(|(name, val)| (name.as_str().to_string(), val))
-                            .collect();
+                    JsonKind::Object => {
+                        let var_value_map: HashMap<String, JsonValue> =
+                            var_value.object_iter().collect();
 
                         for (field_name, field_def) in &input_object_type.fields {
                             let field_type = field_def.ty.inner_named_type().to_string();
@@ -849,7 +853,7 @@ impl UsageGenerator<'_> {
                                 maybe_field_val.is_some_and(|v| v.is_null()),
                             );
 
-                            if let Some(&field_val) = maybe_field_val {
+                            if let Some(field_val) = maybe_field_val {
                                 self.process_extended_refs_for_variable(
                                     field_type,
                                     Some(field_val),
@@ -858,27 +862,28 @@ impl UsageGenerator<'_> {
                         }
                     }
                     // For arrays of objects, we process each array value separately
-                    Some(JsonValue::Array(json_array)) => {
-                        for array_val in json_array {
+                    JsonKind::Array => {
+                        for array_val in var_value.array_iter() {
                             self.process_extended_refs_for_variable(
                                 type_name.clone(),
-                                Some(array_val),
+                                Some(&array_val),
                             );
                         }
                     }
                     _ => {}
                 }
             }
-            Some(ExtendedType::Enum(enum_type)) => match var_value {
-                Some(JsonValue::String(enum_value)) => {
-                    self.add_enum_reference(
-                        enum_type.name.to_string(),
-                        enum_value.as_str().to_string(),
-                    );
+            Some(ExtendedType::Enum(enum_type)) => match var_value.kind() {
+                JsonKind::String => {
+                    let enum_value = var_value.as_str().expect("the value is a string");
+                    self.add_enum_reference(enum_type.name.to_string(), enum_value.to_string());
                 }
-                Some(JsonValue::Array(array_values)) => {
-                    for array_val in array_values {
-                        self.process_extended_refs_for_variable(type_name.clone(), Some(array_val));
+                JsonKind::Array => {
+                    for array_val in var_value.array_iter() {
+                        self.process_extended_refs_for_variable(
+                            type_name.clone(),
+                            Some(&array_val),
+                        );
                     }
                 }
                 _ => {}

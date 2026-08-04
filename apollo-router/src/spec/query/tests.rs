@@ -6,6 +6,11 @@ use test_log::test;
 use super::*;
 use crate::json_ext::ValueExt;
 
+/// Bridges a `serde_json_bytes::json!` fixture into this crate's [`Value`].
+fn value(fixture: &serde_json_bytes::Value) -> Value {
+    crate::json_ext::from_legacy(fixture)
+}
+
 macro_rules! assert_eq_and_ordered {
     ($a:expr, $b:expr $(,)?) => {
         assert_eq!($a, $b,);
@@ -20,23 +25,25 @@ macro_rules! assert_eq_and_ordered {
 }
 
 macro_rules! assert_eq_and_ordered_json {
-    ($a:expr, $b:expr $(,)?) => {
+    ($a:expr, $b:expr $(,)?) => {{
+        let left = value(&$a);
+        let right = value(&$b);
         assert_eq!(
-            $a,
-            $b,
+            left,
+            right,
             "assertion failed: objects are not the same:\
             \n  left: `{}`\n right: `{}`",
             serde_json::to_string(&$a).unwrap(),
             serde_json::to_string(&$b).unwrap()
         );
         assert!(
-            $a.eq_and_ordered(&$b),
+            left.eq_and_ordered(&right),
             "assertion failed: objects are not ordered the same:\
             \n  left: `{}`\n right: `{}`",
             serde_json::to_string(&$a).unwrap(),
             serde_json::to_string(&$b).unwrap(),
         );
-    };
+    }};
 }
 
 #[derive(Default)]
@@ -133,15 +140,17 @@ impl FormatTest {
         let api_schema = schema.api_schema();
         let query =
             Query::parse(query, None, &schema, &Default::default()).expect("could not parse query");
-        let mut response = Response::builder().data(response).build();
+        let mut response = Response::builder().data(value(&response)).build();
+
+        let variables = self
+            .variables
+            .as_ref()
+            .and_then(|variables| value(variables).as_object())
+            .unwrap_or_default();
 
         query.format_response(
             &mut response,
-            self.variables
-                .unwrap_or_else(|| Value::Object(Object::default()))
-                .as_object()
-                .unwrap()
-                .clone(),
+            variables,
             api_schema,
             BooleanValues { bits: 0 },
             true,
@@ -3107,9 +3116,9 @@ fn run_validation(
     variables: serde_json_bytes::Value,
     mode: Mode,
 ) -> Result<(), Response> {
-    let variables = match variables {
-        Value::Object(object) => object,
-        _ => unreachable!("variables must be an object"),
+    let variables = match value(&variables).as_object() {
+        Some(object) => object,
+        None => unreachable!("variables must be an object"),
     };
     let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
     let request = Request::builder()
@@ -3627,7 +3636,7 @@ fn variable_validation_enforce_mode() {
     Err("VALIDATION_INVALID_TYPE_VARIABLE")
 )]
 fn variable_validation_measure_mode(
-    #[case] msg_variables: Value,
+    #[case] msg_variables: serde_json_bytes::Value,
     #[case] expected_result: Result<(), &str>,
 ) {
     let schema = "
@@ -3693,7 +3702,7 @@ fn filter_root_errors() {
         .response(json! {{
             "getNonNullString": 1,
         }})
-        .expected(Value::Null)
+        .expected(serde_json_bytes::Value::Null)
         .test();
 }
 
@@ -7015,13 +7024,13 @@ fn fragment_on_interface_on_query() {
     let query =
         Query::parse(query, None, &schema, &Default::default()).expect("could not parse query");
     let mut response = Response::builder()
-        .data(json! {{
+        .data(value(&json! {{
             "object": {
                 "__typename": "MyObject",
                 "data": "a",
                 "foo": "bar"
             }
-        }})
+        }}))
         .build();
 
     query.format_response(
@@ -7033,11 +7042,11 @@ fn fragment_on_interface_on_query() {
     );
     assert_eq_and_ordered!(
         response.data.as_ref().unwrap(),
-        &json! {{
+        &value(&json! {{
             "object": {
                 "data": "a"
             }
-        }}
+        }})
     );
 }
 
@@ -7447,7 +7456,7 @@ fn query_operation_nullification() {
         }",
         )
         .response(json! {{ }})
-        .expected(Value::Null)
+        .expected(serde_json_bytes::Value::Null)
         .test();
 }
 
@@ -7729,11 +7738,11 @@ fn filtered_defer_fragment() {
     query.filtered_query = Some(Arc::new(filtered));
 
     let mut response = crate::graphql::Response::builder()
-        .data(json! {{
+        .data(value(&json! {{
             "a": {
                 "b": "b",
               }
-        }})
+        }}))
         .build();
 
     query.filtered_query.as_ref().unwrap().format_response(

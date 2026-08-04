@@ -109,11 +109,11 @@ impl ErrorExtension for SpecError {
         let mut obj = Object::new();
         match self {
             SpecError::InvalidType(ty) => {
-                obj.insert("type", ty.clone().into());
+                obj.insert("type", ty.clone());
             }
             SpecError::InvalidField(field, ty) => {
-                obj.insert("type", ty.clone().into());
-                obj.insert("field", field.clone().into());
+                obj.insert("type", ty.clone());
+                obj.insert("field", field.clone());
             }
             _ => (),
         }

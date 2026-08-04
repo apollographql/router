@@ -783,6 +783,20 @@ fn default_thrown_status_code() -> StatusCode {
     StatusCode::INTERNAL_SERVER_ERROR
 }
 
+/// Deserializes a `T` from a value a script produced. A `T` holding a
+/// [`crate::json_ext::Value`] needs this rather than
+/// [`rhai::serde::from_dynamic`] directly.
+// PERF(apollo-json): legacy bridge, revisit -- an apollo-json subtree can only be
+// captured from apollo-json's own deserializers, and rhai hands over a `Dynamic`.
+fn json_from_rhai<T>(value: &Dynamic) -> Result<T, Box<EvalAltResult>>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let legacy: serde_json_bytes::Value = rhai::serde::from_dynamic(value)?;
+    apollo_json::from_value(&crate::json_ext::from_legacy(&legacy))
+        .map_err(|error| error.to_string().into())
+}
+
 fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
     let mut error_details = ErrorDetails {
         status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -794,7 +808,7 @@ fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
     let inner_error = error.unwrap_inner();
     // We only want to process runtime errors
     if let EvalAltResult::ErrorRuntime(obj, pos) = inner_error {
-        if let Ok(temp_error_details) = rhai::serde::from_dynamic::<ErrorDetails>(obj) {
+        if let Ok(temp_error_details) = json_from_rhai::<ErrorDetails>(obj) {
             if temp_error_details.message.is_some() || temp_error_details.body.is_some() {
                 error_details = temp_error_details;
             } else {

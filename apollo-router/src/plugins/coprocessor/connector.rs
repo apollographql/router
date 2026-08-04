@@ -13,6 +13,10 @@ use apollo_federation::connectors::runtime::responses::MappedResponse;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::ByteString;
+// PERF(apollo-json): legacy bridge, revisit -- the connectors runtime hands this
+// stage `serde_json_bytes` values (`MappedResponse::Data`, `RuntimeError`
+// extensions), so the whole stage speaks that type rather than converting twice.
+use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
@@ -27,7 +31,6 @@ use super::record_coprocessor_operation;
 use super::update_context_from_coprocessor;
 use super::validate_coprocessor_output;
 use crate::Context;
-use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;

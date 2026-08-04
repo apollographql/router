@@ -5,6 +5,7 @@ use tower::BoxError;
 
 use super::Stage;
 use crate::Context;
+use crate::json_ext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
 
@@ -386,7 +387,7 @@ where
         &self,
         ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
-        value: &serde_json_bytes::Value,
+        value: &json_ext::Value,
         ctx: &Context,
     ) -> bool {
         match self {
@@ -556,7 +557,7 @@ where
         &self,
         ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
-        value: &serde_json_bytes::Value,
+        value: &json_ext::Value,
         ctx: &Context,
     ) -> Option<Value> {
         match self {
@@ -587,11 +588,13 @@ mod test {
     use TestSelector::Req;
     use TestSelector::Resp;
     use TestSelector::Static;
+    use apollo_json::JsonKind;
     use opentelemetry::Value;
     use serde_json_bytes::json;
     use tower::BoxError;
 
     use crate::Context;
+    use crate::json_ext;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::config_new::Stage;
     use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -655,11 +658,11 @@ mod test {
             &self,
             _ty: &apollo_compiler::executable::NamedType,
             _field: &apollo_compiler::executable::Field,
-            value: &serde_json_bytes::Value,
+            value: &json_ext::Value,
             _ctx: &Context,
         ) -> Option<Value> {
-            if let serde_json_bytes::Value::Number(val) = value {
-                Some(Value::I64(val.as_i64().expect("mut be i64")))
+            if value.kind() == JsonKind::Number {
+                Some(Value::I64(value.as_i64().expect("mut be i64")))
             } else {
                 None
             }
@@ -1013,12 +1016,18 @@ where {
         }
         fn field(&mut self, value: Option<i64>) -> bool {
             match value {
-                None => {
-                    self.evaluate_response_field(&ty(), field(), &json!(false), &Context::new())
-                }
-                Some(value) => {
-                    self.evaluate_response_field(&ty(), field(), &json!(value), &Context::new())
-                }
+                None => self.evaluate_response_field(
+                    &ty(),
+                    field(),
+                    &json_ext::from_legacy(&json!(false)),
+                    &Context::new(),
+                ),
+                Some(value) => self.evaluate_response_field(
+                    &ty(),
+                    field(),
+                    &json_ext::from_legacy(&json!(value)),
+                    &Context::new(),
+                ),
             }
         }
     }

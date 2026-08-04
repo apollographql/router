@@ -7,15 +7,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use apollo_compiler::validation::Valid;
+use apollo_json::NewValue;
 use http::StatusCode;
 use http::Version;
 use itertools::Itertools;
 use multimap::MultiMap;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map as JsonMap;
-use serde_json_bytes::Value;
 use sha2::Digest;
 use sha2::Sha256;
 use static_assertions::assert_impl_all;
@@ -32,7 +30,9 @@ use crate::http_ext::TryIntoHeaderName;
 use crate::http_ext::TryIntoHeaderValue;
 use crate::http_ext::header_map;
 use crate::json_ext::Object;
+use crate::json_ext::ObjectMap;
 use crate::json_ext::Path;
+use crate::json_ext::Value;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -342,7 +342,7 @@ impl Response {
         path: Option<Path>,
         errors: Vec<Error>,
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        extensions: JsonMap<ByteString, Value>,
+        extensions: ObjectMap<String, NewValue>,
         status_code: Option<StatusCode>,
         context: Option<Context>,
         headers: Option<http::HeaderMap<http::HeaderValue>>,
@@ -376,7 +376,7 @@ impl Response {
         path: Option<Path>,
         errors: Vec<Error>,
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        extensions: JsonMap<ByteString, Value>,
+        extensions: ObjectMap<String, NewValue>,
         status_code: Option<StatusCode>,
         context: Option<Context>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
@@ -429,7 +429,7 @@ impl Response {
         Ok(CacheControl::try_from(self.response.headers())?.with_default_ttl(default_ttl))
     }
 
-    pub(crate) fn get_from_extensions(&self, key: &str) -> Option<&Value> {
+    pub(crate) fn get_from_extensions(&self, key: &str) -> Option<Value> {
         self.response.body().extensions.get(key)
     }
 }
@@ -517,16 +517,12 @@ impl Request {
         hasher.update(b"\0V");
         sort_and_hash(
             &mut hasher,
-            body.variables
-                .iter()
-                .map(|(k, v)| (k.inner(), v.to_bytes())),
+            body.variables.iter().map(|(k, v)| (k, v.to_bytes())),
         );
         hasher.update(b"\0E");
         sort_and_hash(
             &mut hasher,
-            body.extensions
-                .iter()
-                .map(|(k, v)| (k.inner(), v.to_bytes())),
+            body.extensions.iter().map(|(k, v)| (k, v.to_bytes())),
         );
 
         hex::encode(hasher.finalize())
@@ -751,16 +747,14 @@ mod tests {
 
     #[test]
     fn test_subgraph_request_hash_variables_order_independence() {
-        use serde_json_bytes::json;
-
-        let mut vars_a = JsonMap::new();
-        vars_a.insert("a", json!(1));
-        vars_a.insert("b", json!(2));
-        vars_a.insert("c", json!(3));
-        let mut vars_b = JsonMap::new();
-        vars_b.insert("c", json!(3));
-        vars_b.insert("a", json!(1));
-        vars_b.insert("b", json!(2));
+        let mut vars_a = Object::new();
+        vars_a.insert("a", NewValue::Int(1));
+        vars_a.insert("b", NewValue::Int(2));
+        vars_a.insert("c", NewValue::Int(3));
+        let mut vars_b = Object::new();
+        vars_b.insert("c", NewValue::Int(3));
+        vars_b.insert("a", NewValue::Int(1));
+        vars_b.insert("b", NewValue::Int(2));
 
         let req_a = Request::fake_builder()
             .subgraph_request(
@@ -786,18 +780,16 @@ mod tests {
 
     #[test]
     fn test_subgraph_request_hash_variables_no_delimiter_collision() {
-        use serde_json_bytes::json;
-
         // Without delimiters between concatenated (name, value) bytes, these
         // two requests would feed the hasher the same `"key1value2null"` byte
         // sequence: `{"key": 1, "value2": null}` flattens to "key" + "1" +
         // "value2" + "null", and `{"key1value2": null}` flattens to
         // "key1value2" + "null".
-        let mut vars_two = JsonMap::new();
-        vars_two.insert("key", json!(1));
-        vars_two.insert("value2", json!(null));
-        let mut vars_one = JsonMap::new();
-        vars_one.insert("key1value2", json!(null));
+        let mut vars_two = Object::new();
+        vars_two.insert("key", NewValue::Int(1));
+        vars_two.insert("value2", NewValue::Null);
+        let mut vars_one = Object::new();
+        vars_one.insert("key1value2", NewValue::Null);
 
         let req_two = Request::fake_builder()
             .subgraph_request(
@@ -823,18 +815,16 @@ mod tests {
 
     #[test]
     fn test_subgraph_request_hash_no_cross_section_collision_variables_vs_extensions() {
-        use serde_json_bytes::json;
-
         // Without per-section tags, these two requests would feed the hasher
         // the same byte stream (`"k\01\0"`), because `sort_and_hash` emits no
         // bytes for an empty iterator and no terminator for the section as a
         // whole. A swap between variables and extensions would then produce
         // identical hashes — letting the subgraph dedup cache return request
         // A's response to request B.
-        let mut vars = JsonMap::new();
-        vars.insert("k", json!(1));
-        let mut exts = JsonMap::new();
-        exts.insert("k", json!(1));
+        let mut vars = Object::new();
+        vars.insert("k", NewValue::Int(1));
+        let mut exts = Object::new();
+        exts.insert("k", NewValue::Int(1));
 
         let req_vars_only = Request::fake_builder()
             .subgraph_request(
@@ -898,14 +888,12 @@ mod tests {
 
     #[test]
     fn test_subgraph_request_hash_extensions_order_independence() {
-        use serde_json_bytes::json;
-
-        let mut ext_a = JsonMap::new();
-        ext_a.insert("alpha", json!("x"));
-        ext_a.insert("beta", json!("y"));
-        let mut ext_b = JsonMap::new();
-        ext_b.insert("beta", json!("y"));
-        ext_b.insert("alpha", json!("x"));
+        let mut ext_a = Object::new();
+        ext_a.insert("alpha", "x");
+        ext_a.insert("beta", "y");
+        let mut ext_b = Object::new();
+        ext_b.insert("beta", "y");
+        ext_b.insert("alpha", "x");
 
         let req_a = Request::fake_builder()
             .subgraph_request(

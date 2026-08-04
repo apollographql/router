@@ -16,7 +16,6 @@ use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
-use serde_json_bytes::Entry;
 use tracing::level_filters::LevelFilter;
 
 use self::subselections::BooleanValues;
@@ -30,10 +29,12 @@ use crate::error::FetchError;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
+use crate::json_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::fetch::OperationKind;
 use crate::services::query_parsing::ParsedDocument;
@@ -137,8 +138,8 @@ impl Query {
     ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
 
-        match data {
-            Some(Value::Object(mut input)) => {
+        match data.map(Object::try_from_value) {
+            Some(Ok(input)) => {
                 if self.is_deferred(defer_conditions) {
                     // Get subselection from hashmap
                     match self.subselections.get(&SubSelectionKey {
@@ -146,8 +147,7 @@ impl Query {
                         defer_conditions,
                     }) {
                         Some(subselection) => {
-                            let mut output =
-                                Object::with_capacity(subselection.selection_set.len());
+                            let mut output = Object::new();
                             let mut parameters = FormatParameters {
                                 variables: &variables,
                                 schema,
@@ -161,21 +161,22 @@ impl Query {
                                     &subselection.type_name,
                                     &subselection.selection_set,
                                     &mut parameters,
-                                    &mut input,
+                                    &input,
                                     &mut output,
                                     &mut Vec::new(),
                                 ) {
                                     Ok(()) => output.into(),
-                                    Err(InvalidValue) => Value::Null,
+                                    Err(InvalidValue) => json_ext::null(),
                                 },
                             );
 
                             if !parameters.errors.is_empty()
-                                && let Ok(value) = serde_json_bytes::to_value(&parameters.errors)
+                                && let Ok(document) = apollo_json::to_document(&parameters.errors)
                             {
-                                response
-                                    .extensions
-                                    .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
+                                response.extensions.insert(
+                                    EXTENSIONS_VALUE_COMPLETION_KEY,
+                                    document.root_handle(),
+                                );
                             }
 
                             if let Some(errors) = parameters.coercion_errors.as_mut()
@@ -187,24 +188,25 @@ impl Query {
                             return parameters.nullified;
                         }
                         None => {
-                            response.data = Some(Value::Object(Object::default()));
+                            response.data = Some(Object::default().into());
                             return vec![];
                         }
                     }
                 } else {
-                    let mut output = Object::with_capacity(self.operation.selection_set.len());
+                    let mut output = Object::new();
 
-                    let all_variables = if self.operation.variables.is_empty() {
+                    let all_variables: Object = if self.operation.variables.is_empty() {
                         variables
                     } else {
                         self.operation
                             .variables
                             .iter()
                             .filter_map(|(k, Variable { default_value, .. })| {
-                                default_value.as_ref().map(|v| (k, v))
+                                default_value
+                                    .as_ref()
+                                    .map(|v| (k.as_str().to_owned(), v.clone()))
                             })
                             .chain(variables.iter())
-                            .map(|(k, v)| (k.clone(), v.clone()))
                             .collect()
                     };
 
@@ -225,20 +227,20 @@ impl Query {
                             operation_type_name,
                             &self.operation.selection_set,
                             &mut parameters,
-                            &mut input,
+                            &input,
                             &mut output,
                             &mut Vec::new(),
                         ) {
                             Ok(()) => output.into(),
-                            Err(InvalidValue) => Value::Null,
+                            Err(InvalidValue) => json_ext::null(),
                         },
                     );
                     if !parameters.errors.is_empty()
-                        && let Ok(value) = serde_json_bytes::to_value(&parameters.errors)
+                        && let Ok(document) = apollo_json::to_document(&parameters.errors)
                     {
                         response
                             .extensions
-                            .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
+                            .insert(EXTENSIONS_VALUE_COMPLETION_KEY, document.root_handle());
                     }
 
                     if let Some(errors) = parameters.coercion_errors.as_mut()
@@ -250,16 +252,16 @@ impl Query {
                     return parameters.nullified;
                 }
             }
-            Some(Value::Null) => {
-                response.data = Some(Value::Null);
+            Some(Err(value)) if value.is_null() => {
+                response.data = Some(json_ext::null());
                 return vec![];
             }
-            _ => {
-                failfast_debug!("invalid type for data in response. data: {:#?}", data);
+            other => {
+                failfast_debug!("invalid type for data in response. data: {:#?}", other);
             }
         }
 
-        response.data = Some(Value::Null);
+        response.data = Some(json_ext::null());
 
         vec![]
     }
@@ -357,7 +359,7 @@ impl Query {
         &'a self,
         parameters: &mut FormatParameters,
         field_type: &executable::Type,
-        input: &mut Value,
+        input: &Value,
         output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
@@ -413,7 +415,7 @@ impl Query {
         &'a self,
         parameters: &mut FormatParameters,
         field_type: &executable::Type,
-        input: &mut Value,
+        input: &Value,
         output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
@@ -492,43 +494,42 @@ impl Query {
     fn format_list<'a: 'b, 'b>(
         &'a self,
         parameters: &mut FormatParameters,
-        input: &mut Value,
+        input: &Value,
         inner_type: &executable::Type,
         output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
-        let Value::Array(input_array) = input else {
+        let Some(input_array) = input.as_array() else {
             return Ok(());
         };
-        if output.is_null() {
-            *output = Value::Array(vec![Value::Null; input_array.len()]);
-        }
-        let output_array = output.as_array_mut().ok_or(InvalidValue)?;
-        if let Err(InvalidValue) =
-            input_array
-                .iter_mut()
-                .enumerate()
-                .try_for_each(|(i, element)| {
-                    path.push(ResponsePathElement::Index(i));
-                    let res = self.format_value(
-                        parameters,
-                        inner_type,
-                        element,
-                        &mut output_array[i],
-                        path,
-                        selection_set,
-                    );
-                    path.pop();
-                    // Type-aware Err handling: non-null inner type propagates (whole list
-                    // nullifies per spec). Nullable inner type swallows the error (element already
-                    // nullified by child).
-                    if res.is_err() && inner_type.is_non_null() {
-                        return Err(InvalidValue);
-                    }
-                    Ok(())
-                })
-        {
+        // Elements are formatted into this vector and written back as one array,
+        // since an apollo-json value cannot be mutated through a handle.
+        let mut output_array = if output.is_null() {
+            vec![json_ext::null(); input_array.len()]
+        } else {
+            output.as_array().ok_or(InvalidValue)?
+        };
+        let result = input_array.iter().enumerate().try_for_each(|(i, element)| {
+            path.push(ResponsePathElement::Index(i));
+            let res = self.format_value(
+                parameters,
+                inner_type,
+                element,
+                &mut output_array[i],
+                path,
+                selection_set,
+            );
+            path.pop();
+            // Type-aware Err handling: non-null inner type propagates (whole list
+            // nullifies per spec). Nullable inner type swallows the error (element already
+            // nullified by child).
+            if res.is_err() && inner_type.is_non_null() {
+                return Err(InvalidValue);
+            }
+            Ok(())
+        });
+        if let Err(InvalidValue) = result {
             parameters.nullified.push(Path::from_response_slice(path));
             // Emit only at the innermost list level (when inner_type is not a list).
             // We don't want to emit multiple errors for a nested list type like [[Int!]!]!.
@@ -543,9 +544,10 @@ impl Query {
                         .build(),
                 );
             }
-            *output = Value::Null;
+            *output = json_ext::null();
             return Err(InvalidValue);
         }
+        *output = json_ext::array(output_array);
         Ok(())
     }
 
@@ -555,7 +557,7 @@ impl Query {
         &'a self,
         parameters: &mut FormatParameters,
         field_type: &executable::Type,
-        input: &mut Value,
+        input: &Value,
         type_name: &Name,
         output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
@@ -570,8 +572,8 @@ impl Query {
             }
             Some(ExtendedType::Enum(enum_type)) => {
                 *output = input
-                    .as_str()
-                    .filter(|s| enum_type.values.contains_key(*s))
+                    .as_str_owned()
+                    .filter(|s| enum_type.values.contains_key(s.as_str()))
                     .map(|_| input.clone())
                     .unwrap_or_default();
                 return Ok(());
@@ -579,8 +581,11 @@ impl Query {
             _ => {}
         }
 
-        if let Value::Object(input_object) = input {
-            if let Some(input_type) = input_object.get(TYPENAME).and_then(|val| val.as_str()) {
+        if let Some(input_object) = input.as_object() {
+            if let Some(input_type) = input_object
+                .get(TYPENAME)
+                .and_then(|val| val.as_str_owned())
+            {
                 // If there is a __typename, make sure the pointed type is a valid type of the
                 // schema. Otherwise, something is wrong, and in case we might be inadvertently
                 // leaking some data for an @inacessible type or something, nullify the whole
@@ -590,23 +595,24 @@ impl Query {
                 // as long as it's not returned, having it in the internal data is ok and sometimes
                 // expected).
                 let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
-                    parameters.schema.types.get(input_type)
+                    parameters.schema.types.get(input_type.as_str())
                 else {
                     parameters.nullified.push(Path::from_response_slice(path));
-                    *output = Value::Null;
+                    *output = json_ext::null();
                     return Ok(());
                 };
             }
 
-            if output.is_null() {
-                *output = Value::Object(Object::with_capacity(selection_set.len()));
-            }
-            let output_object = output.as_object_mut().ok_or(InvalidValue)?;
+            let mut output_object = if output.is_null() {
+                Object::new()
+            } else {
+                output.as_object().ok_or(InvalidValue)?
+            };
 
             let typename = input_object
                 .get(TYPENAME)
-                .and_then(|val| val.as_str())
-                .and_then(|s| apollo_compiler::ast::NamedType::new(s).ok())
+                .and_then(|val| val.as_str_owned())
+                .and_then(|s| apollo_compiler::ast::NamedType::new(&s).ok())
                 .map(apollo_compiler::ast::Type::Named);
 
             let current_type = match parameters.schema.types.get(field_type.inner_named_type()) {
@@ -619,19 +625,20 @@ impl Query {
             if let Err(err) = self.apply_selection_set(
                 selection_set,
                 parameters,
-                input_object,
-                output_object,
+                &input_object,
+                &mut output_object,
                 path,
                 current_type,
             ) {
                 parameters.nullified.push(Path::from_response_slice(path));
-                *output = Value::Null;
+                *output = json_ext::null();
                 // Propagate the Err, since `apply_selection_set` already emitted an error.
                 return Err(err);
             }
+            *output = output_object.into();
         } else {
             parameters.nullified.push(Path::from_response_slice(path));
-            *output = Value::Null;
+            *output = json_ext::null();
             // We don't emit errors for null object value nor propagate Err.
             // Note: `format_non_nullable_value` will emit an error if this object's type is
             //       non-nullable.
@@ -645,18 +652,16 @@ impl Query {
         &self,
         parameters: &mut FormatParameters,
         path: &[ResponsePathElement<'_>],
-        input: &mut Value,
+        input: &Value,
         output: &mut Value,
     ) -> Result<(), InvalidValue> {
         // if the value is invalid, we do not insert it in the output object
         // which is equivalent to inserting null
-        if input.as_i64().is_some_and(|i| i32::try_from(i).is_ok())
-            || input.as_i64().is_some_and(|i| i32::try_from(i).is_ok())
-        {
+        if input.is_valid_int_input() {
             *output = input.clone();
             Ok(())
         } else {
-            *output = Value::Null;
+            *output = json_ext::null();
             if input.is_null() {
                 Ok(())
             } else {
@@ -677,14 +682,14 @@ impl Query {
         &self,
         parameters: &mut FormatParameters,
         path: &[ResponsePathElement<'_>],
-        input: &mut Value,
+        input: &Value,
         output: &mut Value,
     ) -> Result<(), InvalidValue> {
-        if input.as_f64().is_some() {
+        if input.is_valid_float_input() {
             *output = input.clone();
             Ok(())
         } else {
-            *output = Value::Null;
+            *output = json_ext::null();
             if input.is_null() {
                 Ok(())
             } else {
@@ -705,14 +710,14 @@ impl Query {
         &self,
         parameters: &mut FormatParameters,
         path: &[ResponsePathElement<'_>],
-        input: &mut Value,
+        input: &Value,
         output: &mut Value,
     ) -> Result<(), InvalidValue> {
         if input.as_bool().is_some() {
             *output = input.clone();
             Ok(())
         } else {
-            *output = Value::Null;
+            *output = json_ext::null();
             if input.is_null() {
                 Ok(())
             } else {
@@ -733,14 +738,14 @@ impl Query {
         &self,
         parameters: &mut FormatParameters,
         path: &[ResponsePathElement<'_>],
-        input: &mut Value,
+        input: &Value,
         output: &mut Value,
     ) -> Result<(), InvalidValue> {
         if input.as_str().is_some() {
             *output = input.clone();
             Ok(())
         } else {
-            *output = Value::Null;
+            *output = json_ext::null();
             if input.is_null() {
                 Ok(())
             } else {
@@ -761,14 +766,14 @@ impl Query {
         &self,
         parameters: &mut FormatParameters,
         path: &[ResponsePathElement<'_>],
-        input: &mut Value,
+        input: &Value,
         output: &mut Value,
     ) -> Result<(), InvalidValue> {
-        if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
+        if input.is_string() || input.is_number() {
             *output = input.clone();
             Ok(())
         } else {
-            *output = Value::Null;
+            *output = json_ext::null();
             if input.is_null() {
                 Ok(())
             } else {
@@ -788,7 +793,7 @@ impl Query {
         &'a self,
         selection_set: &'a [Selection],
         parameters: &mut FormatParameters,
-        input: &mut Object,
+        input: &Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
         // the type under which we apply selections
@@ -816,12 +821,12 @@ impl Query {
                             .schema
                             .get_object(current_type.inner_named_type())
                             .or_else(|| {
-                                let input_value = input.get(field_name.as_str())?.as_str()?;
-                                parameters.schema.get_object(input_value)
+                                let input_value = input.get(field_name.as_str())?.as_str_owned()?;
+                                parameters.schema.get_object(&input_value)
                             });
 
                         if let Some(object_type) = object_type {
-                            output.insert((*field_name).clone(), object_type.name.as_str().into());
+                            output.insert(field_name.as_str(), object_type.name.as_str());
                         } else {
                             // If the __typename value does not resolve to a known object type in
                             // the schema nor the current_type is an object type, emit an error.
@@ -833,26 +838,25 @@ impl Query {
                         continue;
                     }
 
-                    if let Some(input_value) = input.get_mut(field_name.as_str()) {
-                        let output_value = match output.entry((*field_name).clone()) {
-                            Entry::Occupied(entry) => {
+                    if let Some(input_value) = input.get(field_name.as_str()) {
+                        let mut output_value = match output.get(field_name.as_str()) {
+                            Some(existing) => {
                                 // if there's already a value for that key in the output it means either:
-                                // - the value is a scalar and was moved into output using take(), replacing
-                                // the input value with Null
+                                // - the value is a scalar and was already copied into output
                                 // - the value was already null and is already present in output
                                 // if we expect an object or list at that key, output will already contain
                                 // an object or list and then input_value cannot be null
 
                                 // A prior fragment spread may have nullified this field due to a non-null
-                                // constraint violation.  Object-typed inputs are never take()n so
+                                // constraint violation. Object-typed inputs keep their value, so
                                 // input_value stays non-null even after nullification; without this guard
                                 // a later fragment would re-enter format_value and overwrite the null.
-                                if input_value.is_null() || entry.get().is_null() {
+                                if input_value.is_null() || existing.is_null() {
                                     continue;
                                 }
-                                entry.into_mut()
+                                existing
                             }
-                            Entry::Vacant(entry) => entry.insert(Value::Null),
+                            None => json_ext::null(),
                         };
 
                         let selection_set = selection_set.as_deref().unwrap_or_default();
@@ -860,12 +864,13 @@ impl Query {
                         let res = self.format_value(
                             parameters,
                             &field_type.0,
-                            input_value,
-                            output_value,
+                            &input_value,
+                            &mut output_value,
                             path,
                             selection_set,
                         );
                         path.pop();
+                        output.insert(field_name.as_str(), output_value);
                         // Type-aware Err handling: non-null fields propagate Err to continue the
                         // bubble; nullable fields swallow (the child already reported, the field
                         // is already nullified).
@@ -874,7 +879,7 @@ impl Query {
                         }
                     } else {
                         if !output.contains_key(field_name.as_str()) {
-                            output.insert((*field_name).clone(), Value::Null);
+                            output.insert(field_name.as_str(), ());
                         }
                         // Emit error for missing field
                         emit_missing_field(parameters, field_type, field_name.as_str(), path);
@@ -925,7 +930,7 @@ impl Query {
                         if !self.is_original
                             && let Some(input_type) = input.get(TYPENAME)
                         {
-                            output.insert(TYPENAME, input_type.clone());
+                            output.insert(TYPENAME, input_type);
                         }
 
                         self.apply_selection_set(
@@ -968,7 +973,7 @@ impl Query {
                             if !self.is_original
                                 && let Some(input_type) = input.get(TYPENAME)
                             {
-                                output.insert(TYPENAME, input_type.clone());
+                                output.insert(TYPENAME, input_type);
                             }
 
                             self.apply_selection_set(
@@ -996,7 +1001,7 @@ impl Query {
         root_type_name: &str,
         selection_set: &'a [Selection],
         parameters: &mut FormatParameters,
-        input: &mut Object,
+        input: &Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
     ) -> Result<(), InvalidValue> {
@@ -1024,7 +1029,7 @@ impl Query {
         root_type_name: &str,
         selection_set: &'a [Selection],
         parameters: &mut FormatParameters,
-        input: &mut Object,
+        input: &Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
         applied_fragments: &mut HashSet<&'a str>,
@@ -1047,28 +1052,27 @@ impl Query {
 
                     if name.as_str() == TYPENAME {
                         if !output.contains_key(field_name_str) {
-                            output.insert(field_name.clone(), Value::String(root_type_name.into()));
+                            output.insert(field_name_str, root_type_name);
                         }
-                    } else if let Some(input_value) = input.get_mut(field_name_str) {
-                        let output_value = match output.entry((*field_name).clone()) {
-                            Entry::Occupied(entry) => {
+                    } else if let Some(input_value) = input.get(field_name_str) {
+                        let mut output_value = match output.get(field_name_str) {
+                            Some(existing) => {
                                 // if there's already a value for that key in the output it means either:
-                                // - the value is a scalar and was moved into output using take(), replacing
-                                // the input value with Null
+                                // - the value is a scalar and was already copied into output
                                 // - the value was already null and is already present in output
                                 // if we expect an object or list at that key, output will already contain
                                 // an object or list and then input_value cannot be null
 
                                 // A prior fragment spread may have nullified this field due to a non-null
-                                // constraint violation.  Object-typed inputs are never take()n so
+                                // constraint violation. Object-typed inputs keep their value, so
                                 // input_value stays non-null even after nullification; without this guard
                                 // a later fragment would re-enter format_value and overwrite the null.
-                                if input_value.is_null() || entry.get().is_null() {
+                                if input_value.is_null() || existing.is_null() {
                                     continue;
                                 }
-                                entry.into_mut()
+                                existing
                             }
-                            Entry::Vacant(entry) => entry.insert(Value::Null),
+                            None => json_ext::null(),
                         };
 
                         let selection_set = selection_set.as_deref().unwrap_or_default();
@@ -1076,12 +1080,13 @@ impl Query {
                         let res = self.format_value(
                             parameters,
                             &field_type.0,
-                            input_value,
-                            output_value,
+                            &input_value,
+                            &mut output_value,
                             path,
                             selection_set,
                         );
                         path.pop();
+                        output.insert(field_name_str, output_value);
                         // Type-aware Err handling (mirrors `apply_selection_set`): non-null fields
                         // propagate Err to continue the bubble; nullable fields swallow (child
                         // already reported, field is already nullified).
@@ -1089,7 +1094,7 @@ impl Query {
                             return Err(InvalidValue);
                         }
                     } else {
-                        output.insert(field_name.clone(), Value::Null);
+                        output.insert(field_name_str, ());
                         emit_missing_field(parameters, field_type, field_name_str, path);
                         if field_type.is_non_null() {
                             return Err(InvalidValue);
@@ -1193,14 +1198,11 @@ impl Query {
                 .variables
                 .keys()
                 .map(|k| k.as_str())
-                .collect();
-            let provided_variables = request
+                .collect::<HashSet<_>>();
+            let unknown_variables = request
                 .variables
                 .keys()
-                .map(|k| k.as_str())
-                .collect::<HashSet<_>>();
-            let unknown_variables = provided_variables
-                .difference(&known_variables)
+                .filter(|name| !known_variables.contains(name.as_str()))
                 .collect::<Vec<_>>();
             if !unknown_variables.is_empty() {
                 failfast_debug!(
@@ -1225,19 +1227,24 @@ impl Query {
                     let value = request
                         .variables
                         .get(name.as_str())
-                        .or(default_value.as_ref());
+                        .or_else(|| default_value.clone());
                     let path = super::JsonValuePath::Variable {
                         name: name.as_str(),
                     };
-                    ty.validate_input_value(value, schema, &path, strict_variable_validation)
-                        .err()
-                        .map(|message| {
-                            FetchError::ValidationInvalidTypeVariable {
-                                name: name.clone(),
-                                message,
-                            }
-                            .to_graphql_error(None)
-                        })
+                    ty.validate_input_value(
+                        value.as_ref(),
+                        schema,
+                        &path,
+                        strict_variable_validation,
+                    )
+                    .err()
+                    .map(|message| {
+                        FetchError::ValidationInvalidTypeVariable {
+                            name: name.clone(),
+                            message,
+                        }
+                        .to_graphql_error(None)
+                    })
                 },
             )
             .collect::<Vec<_>>();
@@ -1249,14 +1256,13 @@ impl Query {
         }
     }
 
-    pub(crate) fn variable_value<'a>(
-        &'a self,
-        variable_name: &str,
-        variables: &'a Object,
-    ) -> Option<&'a Value> {
+    /// The value a variable holds for this request, falling back to the operation's
+    /// declared default. An apollo-json value is a handle rather than a place, so
+    /// this hands back an owned handle sharing the caller's arena.
+    pub(crate) fn variable_value(&self, variable_name: &str, variables: &Object) -> Option<Value> {
         variables
             .get(variable_name)
-            .or_else(|| self.default_variable_value(variable_name))
+            .or_else(|| self.default_variable_value(variable_name).cloned())
     }
 
     pub(crate) fn default_variable_value(&self, variable_name: &str) -> Option<&Value> {
@@ -1304,11 +1310,9 @@ impl Query {
             .iter()
             .enumerate()
         {
-            let value = variables
-                .get(variable.as_str())
-                .or_else(|| self.default_variable_value(variable));
+            let value = self.variable_value(variable.as_str(), variables);
 
-            if matches!(value, Some(serde_json_bytes::Value::Bool(true))) {
+            if value.and_then(|value| value.as_bool()) == Some(true) {
                 bits |= 1 << i;
             }
         }
@@ -1470,17 +1474,28 @@ impl Operation {
 pub(crate) fn parse_hir_value(value: &executable::Value) -> Option<Value> {
     match value {
         executable::Value::Variable(_) => None,
-        executable::Value::Int(value) => Some(value.as_str().parse::<i64>().ok()?.into()),
-        executable::Value::Float(value) => Some(value.try_to_f64().ok()?.into()),
-        executable::Value::Null => Some(Value::Null),
-        executable::Value::String(value) => Some(value.as_str().into()),
-        executable::Value::Boolean(value) => Some((*value).into()),
-        executable::Value::Enum(value) => Some(value.as_str().into()),
-        executable::Value::List(value) => value.iter().map(|v| parse_hir_value(v)).collect(),
-        executable::Value::Object(value) => value
-            .iter()
-            .map(|(k, v)| Some((k.as_str(), parse_hir_value(v)?)))
-            .collect(),
+        executable::Value::Int(value) => {
+            Some(json_ext::from_i64(value.as_str().parse::<i64>().ok()?))
+        }
+        executable::Value::Float(value) => Some(json_ext::from_f64(value.try_to_f64().ok()?)),
+        executable::Value::Null => Some(json_ext::null()),
+        executable::Value::String(value) => Some(json_ext::string(value.as_str())),
+        executable::Value::Boolean(value) => Some(json_ext::bool_value(*value)),
+        executable::Value::Enum(value) => Some(json_ext::string(value.as_str())),
+        executable::Value::List(value) => {
+            let items = value
+                .iter()
+                .map(|v| parse_hir_value(v))
+                .collect::<Option<Vec<_>>>()?;
+            Some(json_ext::array(items))
+        }
+        executable::Value::Object(value) => {
+            let entries = value
+                .iter()
+                .map(|(k, v)| Some((k.as_str().to_owned(), parse_hir_value(v)?)))
+                .collect::<Option<Vec<_>>>()?;
+            Some(json_ext::object(entries))
+        }
     }
 }
 

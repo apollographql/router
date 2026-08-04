@@ -4,6 +4,7 @@ use std::any::Any;
 use std::mem;
 
 use ahash::HashMap;
+use apollo_json::NewValue;
 use bytes::Bytes;
 use displaydoc::Display;
 use futures::Stream;
@@ -17,9 +18,6 @@ use http::header::HeaderName;
 use http_body_util::BodyExt;
 use multer::Multipart;
 use multimap::MultiMap;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map as JsonMap;
-use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use thiserror::Error;
 use tower::BoxError;
@@ -35,7 +33,10 @@ use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::ROUTER_RESPONSE_ERRORS;
 use crate::graphql;
 use crate::http_ext::header_map;
+use crate::json_ext;
+use crate::json_ext::ObjectMap;
 use crate::json_ext::Path;
+use crate::json_ext::Value;
 use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
 use crate::services::TryIntoHeaderName;
 use crate::services::TryIntoHeaderValue;
@@ -232,11 +233,11 @@ impl Response {
     #[builder(visibility = "pub")]
     fn new(
         label: Option<String>,
-        data: Option<serde_json_bytes::Value>,
+        data: Option<Value>,
         path: Option<Path>,
         errors: Vec<graphql::Error>,
-        // Skip the `Object` type alias to use buildstructor’s map special-casing
-        extensions: JsonMap<ByteString, serde_json_bytes::Value>,
+        // Spelled out rather than as `Object` so buildstructor derives the `extension` setter
+        extensions: ObjectMap<String, NewValue>,
         status_code: Option<StatusCode>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
@@ -327,11 +328,11 @@ impl Response {
     #[builder(visibility = "pub(crate)")]
     fn infallible_new(
         label: Option<String>,
-        data: Option<serde_json_bytes::Value>,
+        data: Option<Value>,
         path: Option<Path>,
         errors: Vec<graphql::Error>,
-        // Skip the `Object` type alias to use buildstructor’s map special-casing
-        extensions: JsonMap<ByteString, serde_json_bytes::Value>,
+        // Spelled out rather than as `Object` so buildstructor derives the `extension` setter
+        extensions: ObjectMap<String, NewValue>,
         status_code: Option<StatusCode>,
         headers: MultiMap<HeaderName, HeaderValue>,
         context: Context,
@@ -368,8 +369,8 @@ impl Response {
     }
 
     fn add_errors_to_context(errors: &[graphql::Error], context: &Context) {
-        context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
-        context.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        context.insert_json_value(CONTAINS_GRAPHQL_ERROR, json_ext::bool_value(true));
+        context.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, json_ext::bool_value(true));
         // This is ONLY guaranteed to capture errors if any were added during router service
         // processing. We will sometimes avoid this path if no router service errors exist, even
         // if errors were passed from the supergraph service, because that path builds the
@@ -435,11 +436,11 @@ impl Response {
     #[builder(visibility = "pub")]
     fn fake_new(
         label: Option<String>,
-        data: Option<serde_json_bytes::Value>,
+        data: Option<Value>,
         path: Option<Path>,
         errors: Vec<graphql::Error>,
-        // Skip the `Object` type alias to use buildstructor’s map special-casing
-        extensions: JsonMap<ByteString, serde_json_bytes::Value>,
+        // Spelled out rather than as `Object` so buildstructor derives the `extension` setter
+        extensions: ObjectMap<String, NewValue>,
         status_code: Option<StatusCode>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Option<Context>,

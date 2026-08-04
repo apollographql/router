@@ -29,6 +29,7 @@ use tracing::Span;
 
 use crate::Context;
 use crate::graphql;
+use crate::json_ext;
 use crate::json_ext::Path;
 use crate::plugins::limits::ConnectorResponseSizeLimit;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
@@ -53,7 +54,9 @@ impl From<RuntimeError> for graphql::Error {
 
         let mut err = graphql::Error::builder()
             .message(&error.message)
-            .extensions(error.extensions())
+            // PERF(apollo-json): legacy bridge, revisit -- apollo-federation builds
+            // connector error extensions as a `serde_json_bytes` map.
+            .extensions(json_ext::object_from_legacy(&error.extensions()))
             .extension_code(error.code())
             .path(path)
             .build();
@@ -275,9 +278,11 @@ pub(crate) fn aggregate_responses(
     }
 
     let data = if data.is_empty() {
-        Value::Null
+        json_ext::null()
     } else {
-        Value::Object(data)
+        // PERF(apollo-json): legacy bridge, revisit -- `MappedResponse::add_to_data` accumulates
+        // into a `serde_json_bytes::Map` owned by apollo-federation
+        json_ext::from_legacy(&Value::Object(data))
     };
 
     Span::current().record(
@@ -385,7 +390,6 @@ mod tests {
     use apollo_compiler::Schema;
     use apollo_compiler::collections::IndexMap;
     use apollo_compiler::name;
-    use apollo_compiler::response::JsonValue;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
@@ -405,6 +409,8 @@ mod tests {
 
     use crate::Context;
     use crate::graphql;
+    use crate::json_ext;
+    use crate::json_ext::ValueExt;
     use crate::plugins::connectors::handle_responses::process_response;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
@@ -1389,7 +1395,7 @@ mod tests {
         )
         .unwrap()
         .response;
-        assert_eq!(res_expect_fail.body().data, Some(JsonValue::Null));
+        assert_eq!(res_expect_fail.body().data, Some(json_ext::null()));
         assert_eq!(res_expect_fail.body().errors.len(), 1);
 
         // Make succeeding request
@@ -1415,7 +1421,7 @@ mod tests {
         assert!(res_expect_success.body().errors.is_empty());
         assert_eq!(
             &res_expect_success.body().data,
-            &Some(json!({"hello": json!(400)}))
+            &Some(json_ext::from_legacy(&json!({"hello": 400})))
         );
     }
 
@@ -1642,7 +1648,7 @@ mod tests {
         let code = error
             .extensions
             .get("code")
-            .and_then(|v| v.as_str())
+            .and_then(|v| v.as_str_owned())
             .unwrap_or_default();
         assert_eq!(
             code, "BAD_THING",
@@ -1652,7 +1658,7 @@ mod tests {
         let hint = error
             .extensions
             .get("hint")
-            .and_then(|v| v.as_str())
+            .and_then(|v| v.as_str_owned())
             .unwrap_or_default();
         assert_eq!(
             hint, "try again",
@@ -1767,7 +1773,9 @@ mod tests {
             .expect("extensions.http should be an object");
 
         assert_eq!(
-            http.get("myField").and_then(|v| v.as_str()),
+            http.get("myField")
+                .and_then(|v| v.as_str_owned())
+                .as_deref(),
             Some("literal Value"),
             "user-supplied extensions.http.myField should appear in the response"
         );
@@ -1877,12 +1885,16 @@ mod tests {
             "default extensions.http.status should be preserved alongside source- and connect-supplied siblings"
         );
         assert_eq!(
-            http.get("fromSource").and_then(|v| v.as_str()),
+            http.get("fromSource")
+                .and_then(|v| v.as_str_owned())
+                .as_deref(),
             Some("a"),
             "source_extensions sibling under extensions.http should survive the connect_extensions merge"
         );
         assert_eq!(
-            http.get("fromConnect").and_then(|v| v.as_str()),
+            http.get("fromConnect")
+                .and_then(|v| v.as_str_owned())
+                .as_deref(),
             Some("b"),
             "connect_extensions sibling under extensions.http should appear alongside the source sibling"
         );

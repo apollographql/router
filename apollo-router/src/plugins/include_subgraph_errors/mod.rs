@@ -141,8 +141,7 @@ impl IncludeSubgraphErrors {
                 if !is_service_denied && is_service_allowed {
                     error
                         .extensions
-                        .entry(service_key)
-                        .or_insert(subgraph_name.clone().into());
+                        .insert_if_absent(service_key, subgraph_name.clone());
                 }
 
                 // 3. Filter extensions based on allow list

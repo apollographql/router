@@ -4,10 +4,10 @@ use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json_bytes::Value;
 use tower::BoxError;
 
 use crate::Context;
+use crate::json_ext::Value;
 use crate::plugins::telemetry::config_new::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
@@ -146,6 +146,7 @@ mod test {
 
     use crate::Context;
     use crate::context::OPERATION_NAME;
+    use crate::json_ext;
     use crate::plugins::telemetry::config_new::DefaultForLevel;
     use crate::plugins::telemetry::config_new::Selectors;
     use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
@@ -178,7 +179,13 @@ mod test {
         let ctx = Context::default();
         let _ = ctx.insert(OPERATION_NAME, "operation_name".to_string());
         let mut result = Default::default();
-        attributes.on_response_field(&mut result, &ty(), field(), &json!(true), &ctx);
+        attributes.on_response_field(
+            &mut result,
+            &ty(),
+            field(),
+            &json_ext::from_legacy(&json!(true)),
+            &ctx,
+        );
         assert_eq!(result.len(), 4);
         assert_eq!(result[0].key.as_str(), "graphql.field.name");
         assert_eq!(result[0].value.as_str(), "field_name");
@@ -206,7 +213,7 @@ mod test {
             &mut result,
             &ty(),
             field(),
-            &json!(vec![true, true, true]),
+            &json_ext::from_legacy(&json!(vec![true, true, true])),
             &ctx,
         );
         assert_eq!(result.len(), 5);

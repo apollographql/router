@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use ::tracing::Span;
 use ::tracing::info_span;
+use apollo_json::JsonKind;
 use config_new::Selectors;
 use config_new::cache::CacheInstruments;
 use config_new::connector::instruments::ConnectorInstruments;
@@ -50,9 +51,6 @@ use regex::Regex;
 use reload::activation::Activation;
 use reload::tracing::TracingConfigurator;
 use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
-use serde_json_bytes::Value;
-use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -84,6 +82,9 @@ use crate::apollo_studio_interop::UsageReporting;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::ResponseVisitor;
+use crate::json_ext;
+use crate::json_ext::Object;
+use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::instrument::InstrumentLayer;
 use crate::metrics::meter_provider;
@@ -1299,24 +1300,20 @@ impl PluginPrivate for Telemetry {
 }
 
 impl Telemetry {
-    fn filter_variables_values(
-        variables: &Map<ByteString, Value>,
-        forward_rules: &ForwardValues,
-    ) -> String {
+    fn filter_variables_values(variables: &Object, forward_rules: &ForwardValues) -> String {
         let nb_var = variables.len();
-        #[allow(clippy::mutable_key_type)] // False positive lint
         let variables = variables
             .iter()
             .map(|(name, value)| {
                 if match &forward_rules {
                     ForwardValues::None => false,
                     ForwardValues::All => true,
-                    ForwardValues::Only(only) => only.contains(&name.as_str().to_string()),
-                    ForwardValues::Except(except) => !except.contains(&name.as_str().to_string()),
+                    ForwardValues::Only(only) => only.contains(&name),
+                    ForwardValues::Except(except) => !except.contains(&name),
                 } {
                     (
                         name,
-                        serde_json::to_string(value).unwrap_or_else(|_| "<unknown>".to_string()),
+                        serde_json::to_string(&value).unwrap_or_else(|_| "<unknown>".to_string()),
                     )
                 } else {
                     (name, "".to_string())
@@ -1705,19 +1702,24 @@ impl Telemetry {
 
     /// Returns `[(subgraph_name, trace), …]`
     fn subgraph_ftv1_traces(context: &Context) -> Vec<(ByteString, proto::reports::Trace)> {
-        if let Some(Value::Array(array)) = context.get_json_value(SUBGRAPH_FTV1) {
-            array
-                .iter()
-                .filter_map(|value| match value.as_array()?.as_slice() {
-                    [Value::String(subgraph_name), trace] => {
-                        Some((subgraph_name.clone(), decode_ftv1_trace(trace.as_str()?)?))
-                    }
-                    _ => None,
-                })
-                .collect()
-        } else {
-            Vec::new()
-        }
+        let Some(array) = context.get_json_value(SUBGRAPH_FTV1) else {
+            return Vec::new();
+        };
+        // `array_iter` yields nothing unless the entry really is an array.
+        array
+            .array_iter()
+            .filter_map(|value| {
+                if value.kind() != JsonKind::Array || value.len() != Some(2) {
+                    return None;
+                }
+                let subgraph_name = value.index(0)?.as_str()?.into_owned();
+                let trace = value.index(1)?;
+                Some((
+                    ByteString::from(subgraph_name),
+                    decode_ftv1_trace(trace.as_str()?.as_ref())?,
+                ))
+            })
+            .collect()
     }
 
     // https://github.com/apollographql/apollo-server/blob/6ff88e87c52/packages/server/src/plugin/usageReporting/stats.ts#L283
@@ -1969,21 +1971,28 @@ fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphRes
         .context
         .extensions()
         .with_lock(|lock| lock.contains_key::<EnableSubgraphFtv1>())
-        && let Some(serde_json_bytes::Value::String(ftv1)) =
-            resp.response.body().extensions.get("ftv1")
+        && let Some(ftv1) = resp
+            .response
+            .body()
+            .extensions
+            .get("ftv1")
+            .and_then(|ftv1| ftv1.as_str().map(|ftv1| ftv1.into_owned()))
     {
         // Record the ftv1 trace for processing later
         Span::current().record("apollo_private.ftv1", ftv1.as_str());
         resp.context
             .upsert_json_value(SUBGRAPH_FTV1, move |value: Value| {
-                let mut vec = match value {
-                    Value::Array(array) => array,
+                let mut entries: Vec<Value> = match value.kind() {
+                    JsonKind::Array => value.array_iter().collect(),
                     // upsert_json_value populate the entry with null if it was vacant
-                    Value::Null => Vec::new(),
+                    JsonKind::Null => Vec::new(),
                     _ => panic!("unexpected JSON value kind"),
                 };
-                vec.push(json!([subgraph_name, ftv1]));
-                Value::Array(vec)
+                entries.push(json_ext::array([
+                    json_ext::string(subgraph_name.as_str()),
+                    json_ext::string(ftv1),
+                ]));
+                json_ext::array(entries)
             })
     }
     resp
@@ -2108,7 +2117,6 @@ mod tests {
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
     use serde_json::Value;
-    use serde_json_bytes::ByteString;
     use serde_json_bytes::json;
     use tower::Service;
     use tower::ServiceExt;
@@ -2123,6 +2131,7 @@ mod tests {
     use crate::graphql::IntoGraphQLErrors;
     use crate::graphql::Request;
     use crate::http_ext;
+    use crate::json_ext;
     use crate::json_ext::Object;
     use crate::metrics::FutureMetricsExt;
     use crate::plugin::DynPlugin;
@@ -2235,7 +2244,9 @@ mod tests {
                 SupergraphResponse::fake_builder()
                     .context(req.context)
                     .header("x-custom", "coming_from_header")
-                    .data(json!({"data": {"my_value": 2usize}}))
+                    .data(json_ext::from_legacy(
+                        &json!({"data": {"my_value": 2usize}}),
+                    ))
                     .build()
                     .unwrap(),
             );
@@ -2476,7 +2487,9 @@ mod tests {
                             .context(req.context)
                             .status_code(StatusCode::BAD_REQUEST)
                             .header("content-type", "application/json")
-                            .data(json!({"errors": [{"message": "nope"}]}))
+                            .data(json_ext::from_legacy(
+                                &json!({"errors": [{"message": "nope"}]}),
+                            ))
                             .build()
                             .unwrap(),
                     );
@@ -2558,7 +2571,9 @@ mod tests {
                             .context(req.context)
                             .status_code(StatusCode::BAD_REQUEST)
                             .header("content-type", "application/json")
-                            .data(json!({"errors": [{"message": "nope"}]}))
+                            .data(json_ext::from_legacy(
+                                &json!({"errors": [{"message": "nope"}]}),
+                            ))
                             .build()
                             .unwrap(),
                     );
@@ -2651,7 +2666,9 @@ mod tests {
                             .context(req.context)
                             .status_code(StatusCode::BAD_REQUEST)
                             .header("content-type", "application/json")
-                            .data(json!({"errors": [{"message": "nope"}]}))
+                            .data(json_ext::from_legacy(
+                                &json!({"errors": [{"message": "nope"}]}),
+                            ))
                             .build()
                             .unwrap(),
                     );
@@ -2986,7 +3003,9 @@ mod tests {
                         .context(req.context)
                         .status_code(StatusCode::OK)
                         .header("content-type", "application/json")
-                        .data(json!({"errors": [{"message": "nope"}]}))
+                        .data(json_ext::from_legacy(
+                            &json!({"errors": [{"message": "nope"}]}),
+                        ))
                         .build()
                         .unwrap(),
                 );
@@ -3033,12 +3052,7 @@ mod tests {
             let driver = tokio::spawn(async move {
                 let (req, responder) = handle.next_request().await.unwrap();
                 let mut extension = Object::new();
-                extension.insert(
-                    serde_json_bytes::ByteString::from("status"),
-                    serde_json_bytes::Value::String(ByteString::from(
-                        "custom_error_for_propagation",
-                    )),
-                );
+                extension.insert("status", "custom_error_for_propagation");
                 let _ = req
                     .context
                     .insert("my_key", "my_custom_attribute_from_context".to_string())

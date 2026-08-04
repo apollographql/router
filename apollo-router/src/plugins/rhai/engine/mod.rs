@@ -24,6 +24,7 @@ use uuid::Uuid;
 use super::Rhai;
 use super::ServiceStep;
 use super::execution;
+use super::json_from_rhai;
 use super::router;
 use super::subgraph;
 use super::supergraph;
@@ -1061,7 +1062,7 @@ mod router_plugin {
         x: &mut Request,
         om: Map,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.variables = from_dynamic(&om.into())?;
+        x.variables = json_from_rhai(&om.into())?;
         Ok(())
     }
 
@@ -1076,7 +1077,7 @@ mod router_plugin {
         x: &mut Request,
         om: Map,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.extensions = from_dynamic(&om.into())?;
+        x.extensions = json_from_rhai(&om.into())?;
         Ok(())
     }
 
@@ -1197,7 +1198,7 @@ mod router_plugin {
 
     #[rhai_fn(set = "data", return_raw)]
     pub(crate) fn response_data_set(x: &mut Response, om: Map) -> Result<(), Box<EvalAltResult>> {
-        x.data = from_dynamic(&om.into())?;
+        x.data = json_from_rhai(&om.into())?;
         Ok(())
     }
 
@@ -1213,7 +1214,7 @@ mod router_plugin {
         x: &mut Response,
         value: Dynamic,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.errors = from_dynamic(&value)?;
+        x.errors = json_from_rhai(&value)?;
         Ok(())
     }
 
@@ -1228,7 +1229,7 @@ mod router_plugin {
         x: &mut Response,
         om: Map,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.extensions = from_dynamic(&om.into())?;
+        x.extensions = json_from_rhai(&om.into())?;
         Ok(())
     }
 

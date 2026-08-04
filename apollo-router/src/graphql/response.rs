@@ -2,18 +2,21 @@
 use std::time::Instant;
 
 use apollo_compiler::response::ExecutionResponse;
+use apollo_json::JsonKind;
+use apollo_json::NewValue;
 use bytes::Bytes;
 use displaydoc::Display;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
 
 use crate::error::Error;
 use crate::graphql::IntoGraphQLErrors;
+use crate::json_ext;
 use crate::json_ext::Object;
+use crate::json_ext::ObjectMap;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
 
 #[derive(thiserror::Error, Display, Debug, Eq, PartialEq)]
 #[error("GraphQL response was malformed: {reason}")]
@@ -71,7 +74,7 @@ impl Response {
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
-        extensions: Map<ByteString, Value>,
+        extensions: ObjectMap<String, NewValue>,
         _subselection: Option<String>,
         has_next: Option<bool>,
         subscribed: Option<bool>,
@@ -105,25 +108,11 @@ impl Response {
     ///
     /// This will return an error (identifying the faulty service) if the input is invalid.
     pub(crate) fn from_bytes(b: Bytes) -> Result<Response, MalformedResponseError> {
-        let value = Value::from_bytes(b).map_err(|error| {
-            let mut reason = error.to_string();
-
-            // RFC 8259 §7 requires that non-BMP characters encoded as \uXXXX escapes use
-            // a surrogate pair: a high surrogate (\uD800–\uDBFF) immediately followed by a
-            // low surrogate (\uDC00–\uDFFF). A lone high surrogate is invalid JSON.
-            // https://www.rfc-editor.org/rfc/rfc8259#section-7
-            //
-            // In serde_json, `UnexpectedEndOfHexEscape` is only reachable from the
-            // surrogate-parsing code path, so this message string uniquely identifies a
-            // lone-surrogate error — no additional byte-level check is needed.
-            if error.classify() == serde_json::error::Category::Syntax
-                && reason.contains("unexpected end of hex escape")
-            {
-                reason.push_str("; the response contains an unpaired Unicode surrogate");
-            }
-            MalformedResponseError { reason }
-        })?;
-        Response::from_value(value)
+        let document =
+            apollo_json::Document::parse(b.to_vec()).map_err(|error| MalformedResponseError {
+                reason: error.to_string(),
+            })?;
+        Response::from_value(document.root_handle())
     }
 
     pub(crate) fn from_value(value: Value) -> Result<Response, MalformedResponseError> {
@@ -131,45 +120,46 @@ impl Response {
             reason: error.to_string(),
         })?;
         let data = object.remove("data");
-        let errors = extract_key_value_from_object!(object, "errors", Value::Array(v) => v)
+        let errors = match extract_key_value_from_object!(object, "errors", JsonKind::Array)
+            .map_err(|err| MalformedResponseError {
+                reason: err.to_string(),
+            })? {
+            Some(errors) => errors
+                .array_iter()
+                .map(Error::from_value)
+                .collect::<Result<Vec<Error>, MalformedResponseError>>()?,
+            None => Vec::new(),
+        };
+        let extensions = extract_key_value_from_object!(object, "extensions", JsonKind::Object)
             .map_err(|err| MalformedResponseError {
                 reason: err.to_string(),
             })?
-            .into_iter()
-            .flatten()
-            .map(Error::from_value)
-            .collect::<Result<Vec<Error>, MalformedResponseError>>()?;
-        let extensions =
-            extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
-                .map_err(|err| MalformedResponseError {
-                    reason: err.to_string(),
-                })?
-                .unwrap_or_default();
-        let label = extract_key_value_from_object!(object, "label", Value::String(s) => s)
+            .and_then(|extensions| extensions.as_object())
+            .unwrap_or_default();
+        let label = extract_key_value_from_object!(object, "label", JsonKind::String)
             .map_err(|err| MalformedResponseError {
                 reason: err.to_string(),
             })?
-            .map(|s| s.as_str().to_string());
+            .and_then(|label| label.as_str_owned());
         let path = extract_key_value_from_object!(object, "path")
-            .map(serde_json_bytes::from_value)
+            .map(|path| apollo_json::from_value(&path))
             .transpose()
             .map_err(|err| MalformedResponseError {
                 reason: err.to_string(),
             })?;
-        let has_next = extract_key_value_from_object!(object, "hasNext", Value::Bool(b) => b)
+        let has_next = extract_key_value_from_object!(object, "hasNext", JsonKind::Bool)
+            .map_err(|err| MalformedResponseError {
+                reason: err.to_string(),
+            })?
+            .and_then(|has_next| has_next.as_bool());
+        let incremental = extract_key_value_from_object!(object, "incremental", JsonKind::Array)
             .map_err(|err| MalformedResponseError {
                 reason: err.to_string(),
             })?;
-        let incremental =
-            extract_key_value_from_object!(object, "incremental", Value::Array(a) => a).map_err(
-                |err| MalformedResponseError {
-                    reason: err.to_string(),
-                },
-            )?;
         let incremental: Vec<IncrementalResponse> = match incremental {
             Some(v) => v
-                .into_iter()
-                .map(serde_json_bytes::from_value)
+                .array_iter()
+                .map(|value| apollo_json::from_value(&value))
                 .collect::<Result<Vec<IncrementalResponse>, _>>()
                 .map_err(|err| MalformedResponseError {
                     reason: err.to_string(),
@@ -235,7 +225,7 @@ impl IncrementalResponse {
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
-        extensions: Map<ByteString, Value>,
+        extensions: ObjectMap<String, NewValue>,
     ) -> Self {
         Self {
             label,
@@ -257,7 +247,9 @@ impl From<ExecutionResponse> for Response {
         let ExecutionResponse { errors, data } = response;
         Self {
             errors: errors.into_graphql_errors().unwrap(),
-            data: data.map(serde_json_bytes::Value::Object),
+            // PERF(apollo-json): legacy bridge, revisit -- apollo-compiler hands back
+            // introspection data as `serde_json_bytes`
+            data: data.map(|data| json_ext::from_legacy(&serde_json_bytes::Value::Object(data))),
             extensions: Default::default(),
             label: None,
             path: None,
@@ -297,7 +289,6 @@ impl Response {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use serde_json_bytes::json as bjson;
     use uuid::Uuid;
 
     use super::*;
@@ -306,6 +297,7 @@ mod tests {
     use crate::graphql::Error;
     use crate::graphql::Location;
     use crate::graphql::Response;
+    use crate::json_ext::json_value;
 
     #[test]
     fn test_append_errors_path_fallback_and_override() {
@@ -342,7 +334,7 @@ mod tests {
 
     #[test]
     fn test_response() {
-        let result = serde_json::from_str::<Response>(
+        let result = apollo_json::from_str::<Response>(
             json!(
             {
               "errors": [
@@ -385,7 +377,7 @@ mod tests {
         assert_response_eq_ignoring_error_id!(
             response,
             Response::builder()
-                .data(json!({
+                .data(json_value!({
                   "hero": {
                     "name": "R2-D2",
                     "heroFriends": [
@@ -409,21 +401,13 @@ mod tests {
                         .message("Name for character with ID 1002 could not be fetched.")
                         .locations(vec!(Location { line: 6, column: 7 }))
                         .path(Path::from("hero/heroFriends/1/name"))
-                        .extensions(
-                            bjson!({ "error-extension": 5, })
-                                .as_object()
-                                .cloned()
-                                .unwrap()
-                        )
+                        .extensions(json_value!({ "error-extension": 5 }).as_object().unwrap())
                         .build()
                 ])
                 .extensions(
-                    bjson!({
-                        "response-extension": 3,
-                    })
-                    .as_object()
-                    .cloned()
-                    .unwrap()
+                    json_value!({ "response-extension": 3 })
+                        .as_object()
+                        .unwrap()
                 )
                 .build()
         );
@@ -431,7 +415,7 @@ mod tests {
 
     #[test]
     fn test_patch_response() {
-        let result = serde_json::from_str::<Response>(
+        let result = apollo_json::from_str::<Response>(
             json!(
             {
               "label": "part",
@@ -478,7 +462,7 @@ mod tests {
             response,
             Response::builder()
                 .label("part".to_owned())
-                .data(json!({
+                .data(json_value!({
                   "hero": {
                     "name": "R2-D2",
                     "heroFriends": [
@@ -503,21 +487,13 @@ mod tests {
                         .message("Name for character with ID 1002 could not be fetched.")
                         .locations(vec!(Location { line: 6, column: 7 }))
                         .path(Path::from("hero/heroFriends/1/name"))
-                        .extensions(
-                            bjson!({ "error-extension": 5, })
-                                .as_object()
-                                .cloned()
-                                .unwrap()
-                        )
+                        .extensions(json_value!({ "error-extension": 5 }).as_object().unwrap())
                         .build()
                 ])
                 .extensions(
-                    bjson!({
-                        "response-extension": 3,
-                    })
-                    .as_object()
-                    .cloned()
-                    .unwrap()
+                    json_value!({ "response-extension": 3 })
+                        .as_object()
+                        .unwrap()
                 )
                 .has_next(true)
                 .build()
@@ -538,18 +514,15 @@ mod tests {
     #[test]
     fn test_data_null() {
         let response = Response::from_bytes("{\"data\":null}".into()).unwrap();
-        assert_eq!(
-            response,
-            Response::builder().data(Some(Value::Null)).build(),
-        );
+        assert_eq!(response, Response::builder().data(json_ext::null()).build(),);
     }
 
     /// Tests for Unicode / emoji handling in subgraph responses.
     ///
     /// Non-BMP characters (U+10000 and above, e.g. 💰 U+1F4B0) require two UTF-16 code units
     /// when encoded as \uXXXX JSON escapes: a high surrogate (\uD800–\uDBFF) followed immediately
-    /// by a low surrogate (\uDC00–\uDFFF). serde_json enforces this strictly; a lone high
-    /// surrogate is rejected as malformed JSON (RFC 8259 §7).
+    /// by a low surrogate (\uDC00–\uDFFF). A lone high surrogate is malformed JSON
+    /// (RFC 8259 §7, <https://www.rfc-editor.org/rfc/rfc8259#section-7>).
     mod unicode {
         use rstest::rstest;
 
@@ -558,32 +531,27 @@ mod tests {
         // Valid encodings — all should parse successfully and round-trip to the same data.
         #[rstest]
         // Raw UTF-8 bytes: the most common and correct encoding.
-        #[case::raw_utf8("{ \"data\": { \"greeting\": \"hello 💰💕\" } }", bjson!({ "greeting": "hello 💰💕" }))]
+        #[case::raw_utf8("{ \"data\": { \"greeting\": \"hello 💰💕\" } }", json_value!({ "greeting": "hello 💰💕" }))]
         // \uD83D\uDCB0 = 💰, \uD83D\uDC95 = 💕: valid surrogate pairs as emitted by Java's Jackson
         // (ensure_ascii=true) or Python's json.dumps(ensure_ascii=True).
-        #[case::surrogate_pairs(r#"{"data":{"greeting":"hello \uD83D\uDCB0\uD83D\uDC95"}}"#, bjson!({ "greeting": "hello 💰💕" }))]
+        #[case::surrogate_pairs(r#"{"data":{"greeting":"hello \uD83D\uDCB0\uD83D\uDC95"}}"#, json_value!({ "greeting": "hello 💰💕" }))]
         // ❤ is U+2764 (BMP, single \uXXXX); 😀 is U+1F600 (non-BMP, surrogate pair \uD83D\uDE00).
-        #[case::bmp_and_surrogate_pair(r#"{"data":{"greeting":"\u2764 \uD83D\uDE00"}}"#, bjson!({ "greeting": "❤ 😀" }))]
+        #[case::bmp_and_surrogate_pair(r#"{"data":{"greeting":"\u2764 \uD83D\uDE00"}}"#, json_value!({ "greeting": "❤ 😀" }))]
         fn valid_emoji(#[case] json: &str, #[case] expected: Value) {
             let resp = Response::from_bytes(Bytes::copy_from_slice(json.as_bytes())).unwrap();
             assert_eq!(resp.data, Some(expected));
         }
 
-        // Invalid encodings — lone high surrogates must be rejected with a helpful hint.
         #[rstest]
-        // \uD83D followed by a space: high surrogate with no following \uDCxx (first serde_json branch).
+        // \uD83D followed by a space: high surrogate with no following \uDCxx.
         #[case::lone_surrogate_space(r#"{"data":{"greeting":"hello \uD83D end"}}"#)]
-        // \uD83D\n: high surrogate followed by a valid escape that isn't \u (second branch).
+        // \uD83D\n: high surrogate followed by a valid escape that isn't \u.
         #[case::lone_surrogate_non_u_escape(r#"{"data":{"greeting":"hello \uD83D\n end"}}"#)]
         fn lone_surrogate_rejected(#[case] json: &str) {
             let err = Response::from_bytes(Bytes::copy_from_slice(json.as_bytes())).unwrap_err();
             assert!(
-                err.reason.contains("unexpected end of hex escape"),
-                "expected base serde_json error, got: {err}"
-            );
-            assert!(
-                err.reason.contains("unpaired Unicode surrogate"),
-                "expected surrogate hint in error, got: {err}"
+                err.reason.contains("unpaired surrogate escape"),
+                "expected an unpaired-surrogate error, got: {err}"
             );
         }
     }

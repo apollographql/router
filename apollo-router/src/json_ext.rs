@@ -20,6 +20,19 @@ use crate::error::FetchError;
 use crate::spec::Schema;
 use crate::spec::TYPENAME;
 
+/// A JSON object, spelled with key and value type arguments so that
+/// `buildstructor` recognizes a constructor parameter of this type as a map and
+/// derives the `.extension(key, value)` / `.extensions(map)` pair from it. The
+/// two arguments name what such a setter accepts — `K` its key and `V` its
+/// value — and carry no data; [`Object`] is the only inhabited spelling.
+pub(crate) struct ObjectMap<K, V>(Value, std::marker::PhantomData<fn() -> (K, V)>);
+
+impl<K, V> Clone for ObjectMap<K, V> {
+    fn clone(&self) -> Self {
+        ObjectMap(self.0.clone(), self.1)
+    }
+}
+
 /// A JSON object.
 ///
 /// Object membership only exists inside an apollo-json document, so this
@@ -30,12 +43,17 @@ use crate::spec::TYPENAME;
 /// and reseals it, which is cheap at these sizes but is not the zero-copy
 /// path this crate exists for — response bodies build through
 /// [`DocumentBuilder`] directly instead of through `Object`.
-#[derive(Clone)]
-pub(crate) struct Object(Value);
+pub(crate) type Object = ObjectMap<String, NewValue>;
+
+/// Wraps `value` without checking its shape; the checked entry points are
+/// [`Object::try_from_value`] and `From<Value>`.
+fn wrap_object(value: Value) -> Object {
+    ObjectMap(value, std::marker::PhantomData)
+}
 
 impl Object {
     pub(crate) fn new() -> Self {
-        Object(DocumentBuilder::new().seal().root_handle())
+        wrap_object(DocumentBuilder::new().seal().root_handle())
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -124,7 +142,7 @@ impl From<Value> for Object {
             JsonKind::Object,
             "Object::from requires an object-shaped Value"
         );
-        Object(value)
+        wrap_object(value)
     }
 }
 
@@ -136,7 +154,7 @@ impl Serialize for Object {
 
 impl<'de> Deserialize<'de> for Object {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Value::deserialize(deserializer).map(Object)
+        Value::deserialize(deserializer).map(wrap_object)
     }
 }
 
@@ -260,6 +278,28 @@ pub(crate) trait ValueExt {
     fn is_object_of_type(&self, schema: &Schema, maybe_type: &str) -> bool;
 
     fn as_i32(&self) -> Option<i32>;
+
+    /// The value as an object, or `None` when it holds any other shape.
+    fn as_object(&self) -> Option<Object>;
+
+    /// The array's elements. This materializes a `Vec` of handles;
+    /// [`Value::array_iter`] walks the same elements without one.
+    fn as_array(&self) -> Option<Vec<Value>>;
+
+    fn is_object(&self) -> bool;
+
+    fn is_array(&self) -> bool;
+
+    fn is_string(&self) -> bool;
+
+    fn is_number(&self) -> bool;
+
+    fn is_boolean(&self) -> bool;
+
+    /// The string value, owned. [`Value::as_str`] borrows from `self`, so it
+    /// cannot be used on a temporary — `v.get(k).and_then(|v| v.as_str())`
+    /// does not compile; this copies the string instead.
+    fn as_str_owned(&self) -> Option<String>;
 }
 
 impl ValueExt for Value {
@@ -539,6 +579,38 @@ impl ValueExt for Value {
 
     fn as_i32(&self) -> Option<i32> {
         self.as_i64()?.to_i32()
+    }
+
+    fn as_object(&self) -> Option<Object> {
+        (self.kind() == JsonKind::Object).then(|| wrap_object(self.clone()))
+    }
+
+    fn as_array(&self) -> Option<Vec<Value>> {
+        (self.kind() == JsonKind::Array).then(|| self.array_iter().collect())
+    }
+
+    fn is_object(&self) -> bool {
+        self.kind() == JsonKind::Object
+    }
+
+    fn is_array(&self) -> bool {
+        self.kind() == JsonKind::Array
+    }
+
+    fn is_string(&self) -> bool {
+        self.kind() == JsonKind::String
+    }
+
+    fn is_number(&self) -> bool {
+        self.kind() == JsonKind::Number
+    }
+
+    fn is_boolean(&self) -> bool {
+        self.kind() == JsonKind::Bool
+    }
+
+    fn as_str_owned(&self) -> Option<String> {
+        self.as_str().map(|value| value.into_owned())
     }
 }
 
@@ -852,8 +924,8 @@ fn filter_type_conditions(value: Value, type_conditions: &Option<TypeConditions>
     if let Some(tc) = type_conditions {
         match value.kind() {
             JsonKind::Object => {
-                if let Some(type_name) = value.get("__typename").and_then(|v| v.as_str())
-                    && !tc.iter().any(|tc| tc.as_str() == type_name.as_ref())
+                if let Some(type_name) = value.get("__typename").and_then(|v| v.as_str_owned())
+                    && !tc.iter().any(|tc| tc.as_str() == type_name.as_str())
                 {
                     return Value::default();
                 }
@@ -889,8 +961,8 @@ where
                         if !tc.is_empty() {
                             if value.kind() == JsonKind::Object
                                 && let Some(type_name) =
-                                    value.get("__typename").and_then(|v| v.as_str())
-                                && tc.iter().any(|tc| tc.as_str() == type_name.as_ref())
+                                    value.get("__typename").and_then(|v| v.as_str_owned())
+                                && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
                             {
                                 parent.push(PathElement::Index(i));
                                 iterate_path(schema, parent, &path[1..], value.clone(), f);
@@ -901,8 +973,8 @@ where
                                 for (i, value) in value.array_iter().enumerate() {
                                     if value.kind() == JsonKind::Object
                                         && let Some(type_name) =
-                                            value.get("__typename").and_then(|v| v.as_str())
-                                        && tc.iter().any(|tc| tc.as_str() == type_name.as_ref())
+                                            value.get("__typename").and_then(|v| v.as_str_owned())
+                                        && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
                                     {
                                         parent.push(PathElement::Index(i));
                                         iterate_path(schema, parent, &path[1..], value, f);
@@ -933,8 +1005,9 @@ where
                 if !tc.is_empty() {
                     if data.kind() == JsonKind::Object {
                         if let Some(value) = data.get(k.as_str())
-                            && let Some(type_name) = value.get("__typename").and_then(|v| v.as_str())
-                            && tc.iter().any(|tc| tc.as_str() == type_name.as_ref())
+                            && let Some(type_name) =
+                                value.get("__typename").and_then(|v| v.as_str_owned())
+                            && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
                         {
                             parent.push(PathElement::Key(k.to_string(), None));
                             iterate_path(schema, parent, &path[1..], value, f);
@@ -944,8 +1017,8 @@ where
                         for (i, value) in data.array_iter().enumerate() {
                             if value.kind() == JsonKind::Object
                                 && let Some(type_name) =
-                                    value.get("__typename").and_then(|v| v.as_str())
-                                && tc.iter().any(|tc| tc.as_str() == type_name.as_ref())
+                                    value.get("__typename").and_then(|v| v.as_str_owned())
+                                && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
                             {
                                 parent.push(PathElement::Index(i));
                                 iterate_path(schema, parent, path, value, f);
@@ -1481,6 +1554,316 @@ impl fmt::Display for Path {
         Ok(())
     }
 }
+
+/// A document whose root is `value`. A container passed as
+/// [`NewValue::Node`] is adopted by reference, sharing its arena rather than
+/// being copied.
+fn rooted_document(value: impl Into<NewValue>) -> apollo_json::Document {
+    let mut builder = DocumentBuilder::new();
+    builder
+        .set_path(&[], value)
+        .expect("an empty path replaces the builder root");
+    builder.seal()
+}
+
+/// A standalone [`Value`] holding `value`.
+fn rooted_value(value: impl Into<NewValue>) -> Value {
+    rooted_document(value).root_handle()
+}
+
+/// A JSON `null`.
+#[allow(dead_code)]
+pub(crate) fn null() -> Value {
+    Value::default()
+}
+
+/// A JSON string.
+#[allow(dead_code)]
+pub(crate) fn string(value: impl Into<String>) -> Value {
+    rooted_value(NewValue::String(value.into()))
+}
+
+/// A JSON boolean.
+#[allow(dead_code)]
+pub(crate) fn bool_value(value: bool) -> Value {
+    rooted_value(NewValue::Bool(value))
+}
+
+/// A JSON number holding a signed integer.
+#[allow(dead_code)]
+pub(crate) fn from_i64(value: i64) -> Value {
+    rooted_value(NewValue::Int(value))
+}
+
+/// A JSON number holding an unsigned integer, keeping every digit of values
+/// above [`i64::MAX`].
+#[allow(dead_code)]
+pub(crate) fn from_u64(value: u64) -> Value {
+    match i64::try_from(value) {
+        Ok(value) => from_i64(value),
+        Err(_) => apollo_json::Document::parse(value.to_string().into_bytes())
+            .expect("a decimal integer literal is valid JSON")
+            .root_handle(),
+    }
+}
+
+/// A JSON number holding a float. Infinity and NaN have no JSON form and come
+/// back as `null`.
+#[allow(dead_code)]
+pub(crate) fn from_f64(value: f64) -> Value {
+    if value.is_finite() {
+        rooted_value(NewValue::Float(value))
+    } else {
+        null()
+    }
+}
+
+/// A JSON array of `items`, each adopted by reference.
+#[allow(dead_code)]
+pub(crate) fn array(items: impl IntoIterator<Item = Value>) -> Value {
+    let mut builder = empty_array().detach().edit();
+    for item in items {
+        builder
+            .push(item)
+            .expect("the builder root is an array, which accepts elements");
+    }
+    builder.seal().root_handle()
+}
+
+/// A JSON object of `entries`, each value adopted by reference. A repeated key
+/// keeps the value that came last.
+#[allow(dead_code)]
+pub(crate) fn object(entries: impl IntoIterator<Item = (String, Value)>) -> Value {
+    let mut builder = DocumentBuilder::new();
+    for (key, value) in entries {
+        builder
+            .set(key.as_str(), value)
+            .expect("a fresh object root accepts any key");
+    }
+    builder.seal().root_handle()
+}
+
+/// Converts to `serde_json_bytes::Value` for the call sites that still speak
+/// the legacy type. This walks and copies the whole value, so it belongs on
+/// cold paths only — never on the response path.
+#[allow(dead_code)]
+pub(crate) fn to_legacy(value: &Value) -> serde_json_bytes::Value {
+    rooted_document(value.clone()).to_legacy()
+}
+
+/// Converts from `serde_json_bytes::Value`. This walks and copies the whole
+/// value, so it belongs on cold paths only — never on the response path.
+#[allow(dead_code)]
+pub(crate) fn from_legacy(value: &serde_json_bytes::Value) -> Value {
+    apollo_json::Document::from_legacy(value).root_handle()
+}
+
+/// The members of `object` as a `serde_json_bytes` map, for the call sites that
+/// still speak the legacy type. This walks and copies every member, so it
+/// belongs on cold paths only — never on the response path.
+pub(crate) fn object_to_legacy(object: &Object) -> LegacyMap {
+    object
+        .iter()
+        .map(|(key, value)| (key.into(), to_legacy(&value)))
+        .collect()
+}
+
+/// An [`Object`] holding the members of a `serde_json_bytes` map. This walks and
+/// copies every member, so it belongs on cold paths only — never on the response
+/// path.
+pub(crate) fn object_from_legacy(map: &LegacyMap) -> Object {
+    map.iter()
+        .map(|(key, value)| (key.as_str().to_string(), from_legacy(value)))
+        .collect()
+}
+
+/// The `serde_json_bytes` spelling of a JSON object, as the legacy call sites
+/// name it.
+pub(crate) type LegacyMap =
+    serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value>;
+
+/// Serializes any [`Serialize`] type into a [`Value`], the counterpart of
+/// [`apollo_json::from_value`]. Nested [`Value`]s are adopted by reference.
+///
+/// # Errors
+/// Returns [`apollo_json::JsonError`] when the type serializes something JSON
+/// cannot hold, such as a non-string map key.
+#[allow(dead_code)]
+pub(crate) fn to_value<T>(value: &T) -> Result<Value, apollo_json::JsonError>
+where
+    T: Serialize + ?Sized,
+{
+    apollo_json::to_document(value).map(|document| document.root_handle())
+}
+
+impl Object {
+    /// The value at `key`, inserting `default()` first when the key is absent.
+    #[allow(dead_code)]
+    pub(crate) fn get_or_insert_with(
+        &mut self,
+        key: impl Into<String>,
+        default: impl FnOnce() -> Value,
+    ) -> Value {
+        let key = key.into();
+        if let Some(existing) = self.0.get(&key) {
+            return existing;
+        }
+        self.insert(key.clone(), default());
+        self.0.get(&key).expect("just inserted at that key")
+    }
+
+    /// Inserts `value` at `key` only when the key is absent, reporting whether
+    /// it inserted.
+    #[allow(dead_code)]
+    pub(crate) fn insert_if_absent(
+        &mut self,
+        key: impl Into<String>,
+        value: impl Into<NewValue>,
+    ) -> bool {
+        let key = key.into();
+        if self.0.get(&key).is_some() {
+            return false;
+        }
+        self.insert(key, value);
+        true
+    }
+
+    /// Removes `key`, returning it together with its value.
+    #[allow(dead_code)]
+    pub(crate) fn remove_entry(&mut self, key: &str) -> Option<(String, Value)> {
+        self.remove(key).map(|value| (key.to_string(), value))
+    }
+
+    /// Wraps an object-shaped value, handing `value` back unchanged when it
+    /// holds any other shape. The `From<Value>` conversion panics instead;
+    /// reach for this where the shape is not guaranteed.
+    #[allow(dead_code)]
+    pub(crate) fn try_from_value(value: Value) -> Result<Object, Value> {
+        if value.kind() == JsonKind::Object {
+            Ok(wrap_object(value))
+        } else {
+            Err(value)
+        }
+    }
+
+    /// Reorders the members by key, ascending. Nested objects keep their own
+    /// order.
+    #[allow(dead_code)]
+    pub(crate) fn sort_keys(&mut self) {
+        let mut entries: Vec<(String, Value)> = self.0.object_iter().collect();
+        entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+        self.0 = object(entries);
+    }
+}
+
+impl std::hash::Hash for Object {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::hash::Hash::hash(&self.0, state);
+    }
+}
+
+impl FromIterator<(String, Value)> for Object {
+    fn from_iter<T: IntoIterator<Item = (String, Value)>>(entries: T) -> Self {
+        wrap_object(object(entries))
+    }
+}
+
+impl Extend<(String, Value)> for Object {
+    fn extend<T: IntoIterator<Item = (String, Value)>>(&mut self, entries: T) {
+        let mut builder = self.0.detach().edit();
+        for (key, value) in entries {
+            builder
+                .set(key.as_str(), value)
+                .expect("the root of a freshly detached object always accepts a key");
+        }
+        self.0 = builder.seal().root_handle();
+    }
+}
+
+impl IntoIterator for Object {
+    type Item = (String, Value);
+    type IntoIter = std::vec::IntoIter<(String, Value)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.object_iter().collect::<Vec<_>>().into_iter()
+    }
+}
+
+impl IntoIterator for &Object {
+    type Item = (String, Value);
+    type IntoIter = std::vec::IntoIter<(String, Value)>;
+
+    /// Collects the members into a `Vec`; [`Object::iter`] walks them without
+    /// one.
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.object_iter().collect::<Vec<_>>().into_iter()
+    }
+}
+
+impl From<Object> for Value {
+    fn from(object: Object) -> Self {
+        object.into_value()
+    }
+}
+
+/// Copies a value read out of a document under construction into a standalone
+/// handle. A builder's arena is not shareable, so the subtree is copied rather
+/// than adopted by reference — reach for this only where a value has to survive
+/// the next edit at the cursor it came from.
+pub(crate) fn owned_copy(value: apollo_json::ValueRef<'_>) -> Value {
+    value_from_ref(value)
+}
+
+/// The value as an [`Object`], or a message naming the expected shape.
+macro_rules! ensure_object {
+    ($value:expr) => {{
+        $crate::json_ext::Object::try_from_value($value)
+            .map_err(|_| "invalid type, expected an object")
+    }};
+}
+
+/// The value's elements, or a message naming the expected shape.
+macro_rules! ensure_array {
+    ($value:expr) => {{
+        let value = &$value;
+        $crate::json_ext::ValueExt::as_array(value).ok_or("invalid type, expected an array")
+    }};
+}
+
+/// Removes `$key` from `$object`. An absent key and an explicit `null` are both
+/// `None`; with a [`JsonKind`](apollo_json::JsonKind) given, any other shape is
+/// an error naming the key.
+macro_rules! extract_key_value_from_object {
+    ($object:expr, $key:literal, $kind:expr) => {{
+        match $object.remove($key) {
+            None => Ok(None),
+            Some(value) if value.is_null() => Ok(None),
+            Some(value) if value.kind() == $kind => Ok(Some(value)),
+            Some(_) => Err(concat!("invalid type for key: ", $key)),
+        }
+    }};
+    ($object:expr, $key:literal) => {{
+        match $object.remove($key) {
+            None => None,
+            Some(value) if value.is_null() => None,
+            Some(value) => Some(value),
+        }
+    }};
+}
+
+/// Builds a [`Value`] from `serde_json_bytes::json!` syntax, for test fixtures.
+///
+/// Import it under the name the fixtures already use:
+/// `use crate::json_ext::json_value as json;`
+#[cfg(test)]
+macro_rules! json_value {
+    ($($tokens:tt)*) => {
+        $crate::json_ext::from_legacy(&::serde_json_bytes::json!($($tokens)*))
+    };
+}
+
+#[cfg(test)]
+pub(crate) use json_value;
 
 #[cfg(test)]
 mod tests {

@@ -7,12 +7,13 @@ use futures::Stream;
 use futures::stream::StreamExt;
 use futures::stream::select;
 use serde::Serialize;
-use serde_json_bytes::Value;
 use tokio_stream::once;
 use tokio_stream::wrappers::IntervalStream;
 use tracing::Span;
 
 use crate::graphql;
+use crate::json_ext;
+use crate::json_ext::ValueExt;
 use crate::plugins::subscription::SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE;
 use crate::plugins::subscription::SUBSCRIPTION_ERROR_EXTENSION_KEY;
 use crate::plugins::subscription::SUBSCRIPTION_MAX_LIFETIME_EXTENSION_CODE;
@@ -115,7 +116,7 @@ impl Multipart {
     /// Checks if the errors indicate a router-initiated termination and returns the appropriate end reason
     fn detect_subscription_end_reason(errors: &[graphql::Error]) -> Option<SubscriptionEndReason> {
         for error in errors {
-            match error.extensions.get("code").and_then(|v| v.as_str()) {
+            match error.extensions.get("code").and_then(|v| v.as_str_owned()) {
                 Some(code) if code == SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE => {
                     return Some(SubscriptionEndReason::SchemaReload);
                 }
@@ -317,7 +318,7 @@ impl Stream for Multipart {
                         ProtocolMode::Subscription => {
                             let is_transport_error =
                                 response.extensions.remove(SUBSCRIPTION_ERROR_EXTENSION_KEY)
-                                    == Some(true.into());
+                                    == Some(json_ext::bool_value(true));
                             // Magic empty response (that we create internally) means the connection was gracefully closed at the server side
                             if !is_still_open
                                 && response.data.is_none()
@@ -338,15 +339,14 @@ impl Stream for Multipart {
                                 !response.errors.is_empty() && !is_transport_error;
 
                             let response = if is_transport_error {
+                                let carries_nothing = response.extensions.is_empty()
+                                    && response.data.as_ref().is_none_or(|data| data.is_null());
                                 SubscriptionPayload {
                                     errors: std::mem::take(&mut response.errors),
-                                    payload: match response.data {
-                                        None | Some(Value::Null)
-                                            if response.extensions.is_empty() =>
-                                        {
-                                            None
-                                        }
-                                        _ => (*response).into(),
+                                    payload: if carries_nothing {
+                                        None
+                                    } else {
+                                        Some(*response)
                                     },
                                 }
                             } else {
@@ -440,7 +440,6 @@ mod tests {
     use opentelemetry::KeyValue;
     use opentelemetry::trace::TracerProvider as _;
     use opentelemetry_sdk::trace::SdkTracerProvider;
-    use serde_json_bytes::ByteString;
     use tracing_subscriber::Layer;
     use tracing_subscriber::layer::Context;
     use tracing_subscriber::layer::SubscriberExt;
@@ -544,7 +543,7 @@ mod tests {
 
             let responses = vec![
                 graphql::Response::builder()
-                    .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                    .data(json_ext::string("data"))
                     .subscribed(true)
                     .build(),
                 // Empty response signals server-side close
@@ -591,11 +590,11 @@ mod tests {
             let _span_guard = span.enter();
             let responses = vec![
                 graphql::Response::builder()
-                    .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                    .data(json_ext::string("data"))
                     .subscribed(true)
                     .build(),
                 graphql::Response::builder()
-                    .data(serde_json_bytes::Value::String(ByteString::from("final")))
+                    .data(json_ext::string("final"))
                     .subscribed(false) // Server close with final data
                     .build(),
             ];
@@ -744,7 +743,7 @@ mod tests {
             let _span_guard = span.enter();
             let responses = vec![
                 graphql::Response::builder()
-                    .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                    .data(json_ext::string("data"))
                     .subscribed(true)
                     .build(),
             ];
@@ -797,7 +796,7 @@ mod tests {
             let _span_guard = span.enter();
             let responses = vec![
                 graphql::Response::builder()
-                    .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                    .data(json_ext::string("data"))
                     .subscribed(true)
                     .build(),
                 graphql::Response::builder()
@@ -849,7 +848,7 @@ mod tests {
             let _span_guard = span.enter();
             let responses = vec![
                 graphql::Response::builder()
-                    .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                    .data(json_ext::string("data"))
                     .subscribed(true)
                     .build(),
                 // Config reload error response
@@ -902,7 +901,7 @@ mod tests {
             let _span_guard = span.enter();
             let responses = vec![
                 graphql::Response::builder()
-                    .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                    .data(json_ext::string("data"))
                     .subscribed(true)
                     .build(),
                 graphql::Response::builder()
@@ -956,13 +955,11 @@ mod tests {
         let _span_guard = span.enter();
         let responses = vec![
             graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from("initial")))
+                .data(json_ext::string("initial"))
                 .has_next(true)
                 .build(),
             graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from(
-                    "deferred",
-                )))
+                .data(json_ext::string("deferred"))
                 .has_next(false)
                 .build(),
         ];
@@ -994,7 +991,7 @@ mod tests {
         let _span_guard = span.enter();
         let responses = vec![
             graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                .data(json_ext::string("data"))
                 .has_next(false)
                 .build(),
         ];
@@ -1052,13 +1049,11 @@ mod tests {
         let _span_guard = span.enter();
         let responses = vec![
             graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from("initial")))
+                .data(json_ext::string("initial"))
                 .has_next(true) // More data expected
                 .build(),
             graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from(
-                    "deferred1",
-                )))
+                .data(json_ext::string("deferred1"))
                 .has_next(true) // Still more data expected
                 .build(),
         ];
@@ -1095,7 +1090,7 @@ mod tests {
         let _span_guard = span.enter();
         let responses = vec![
             graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from("initial")))
+                .data(json_ext::string("initial"))
                 .has_next(true)
                 .build(),
             graphql::Response::builder()
@@ -1172,7 +1167,7 @@ mod tests {
         let _span_guard = span.enter();
         let responses = vec![
             graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from("initial")))
+                .data(json_ext::string("initial"))
                 .has_next(true)
                 .build(),
             // Final chunk with no data and no errors — abnormal termination
@@ -1207,7 +1202,7 @@ mod tests {
         let _span_guard = span.enter();
         let responses = vec![
             graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from("partial")))
+                .data(json_ext::string("partial"))
                 .error(
                     graphql::Error::builder()
                         .message("HTTP fetch failed from 'inventory': 500 Internal Server Error")
@@ -1320,29 +1315,20 @@ mod tests {
     async fn test_heartbeat_and_boundaries() {
         let responses = vec![
             graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from(
-                    String::from("foo"),
-                )))
+                .data(json_ext::string("foo"))
                 .subscribed(true)
                 .build(),
             graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from(
-                    String::from("bar"),
-                )))
+                .data(json_ext::string("bar"))
                 .subscribed(true)
                 .build(),
             graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from(
-                    String::from("foobar"),
-                )))
+                .data(json_ext::string("foobar"))
                 .subscribed(true)
                 .build(),
             graphql::Response::builder()
-                .data(serde_json_bytes::Value::Null)
-                .extension(
-                    "test",
-                    serde_json_bytes::Value::String("test_extension".into()),
-                )
+                .data(json_ext::null())
+                .extension("test", json_ext::string("test_extension"))
                 .subscribed(true)
                 .build(),
             graphql::Response::builder().build(),
@@ -1445,9 +1431,7 @@ mod tests {
             let _ = tx
                 .send(
                     graphql::Response::builder()
-                        .data(serde_json_bytes::Value::String(ByteString::from(
-                            String::from("test"),
-                        )))
+                        .data(json_ext::string("test"))
                         .subscribed(false)
                         .build(),
                 )
@@ -1650,7 +1634,7 @@ mod tests {
             let _span_guard = span.enter();
             let responses = vec![
                 graphql::Response::builder()
-                    .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                    .data(json_ext::string("data"))
                     .subscribed(true)
                     .build(),
             ];

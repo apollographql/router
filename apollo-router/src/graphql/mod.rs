@@ -10,6 +10,8 @@ use std::str::FromStr;
 
 use apollo_compiler::response::GraphQLError as CompilerExecutionError;
 use apollo_compiler::response::ResponseDataPathSegment;
+use apollo_json::JsonKind;
+use apollo_json::NewValue;
 use futures::Stream;
 use heck::ToShoutySnakeCase;
 pub use request::Request;
@@ -18,16 +20,17 @@ use response::MalformedResponseError;
 pub use response::Response;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map as JsonMap;
-use serde_json_bytes::Value;
 use uuid::Uuid;
 pub(crate) use visitor::ResponseVisitor;
 
+use crate::json_ext;
 use crate::json_ext::Object;
+use crate::json_ext::ObjectMap;
 use crate::json_ext::Path;
 pub use crate::json_ext::Path as JsonPath;
 pub use crate::json_ext::PathElement as JsonPathElement;
+use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
 use crate::spec::query::ERROR_CODE_RESPONSE_VALIDATION;
 
 /// An asynchronous [`Stream`] of GraphQL [`Response`]s.
@@ -121,11 +124,11 @@ impl Error {
     ///   Optional.
     ///   Sets [`Error::path`].
     ///
-    /// * `.extensions(impl Into<`[`serde_json_bytes::Map`]`<`[`ByteString`]`, `[`Value`]`>>)`
+    /// * `.extensions(json_ext::Object)`
     ///   Optional.
     ///   Sets the entire [`Error::extensions`] map, which defaults to empty.
     ///
-    /// * `.extension(impl Into<`[`ByteString`]`>, impl Into<`[`Value`]`>)`
+    /// * `.extension(impl Into<`[`String`]`>, impl Into<`[`NewValue`]`>)`
     ///   Optional, may be called multiple times.
     ///   Adds one item to the [`Error::extensions`] map.
     ///
@@ -147,14 +150,13 @@ impl Error {
         locations: Vec<Location>,
         path: Option<Path>,
         extension_code: Option<String>,
-        // Skip the `Object` type alias in order to use buildstructor's map special-casing
-        mut extensions: JsonMap<ByteString, Value>,
+        // Spell out the map type rather than the `Object` alias so buildstructor
+        // derives `.extension(key, value)` from it
+        mut extensions: ObjectMap<String, NewValue>,
         apollo_id: Option<Uuid>,
     ) -> Self {
         if let Some(code) = extension_code {
-            extensions
-                .entry("code")
-                .or_insert(Value::String(ByteString::from(code)));
+            extensions.insert_if_absent("code", code);
         }
         Self {
             message,
@@ -171,15 +173,14 @@ impl Error {
             reason: format!("invalid error within `errors`: {error}"),
         })?;
 
-        let extensions =
-            extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
-                .map_err(|err| MalformedResponseError {
-                    reason: format!("invalid `extensions` within error: {err}"),
-                })?
-                .unwrap_or_default();
-        let message = match extract_key_value_from_object!(object, "message", Value::String(s) => s)
-        {
-            Ok(Some(s)) => Ok(s.as_str().to_string()),
+        let extensions = extract_key_value_from_object!(object, "extensions", JsonKind::Object)
+            .map_err(|err| MalformedResponseError {
+                reason: format!("invalid `extensions` within error: {err}"),
+            })?
+            .and_then(|extensions| extensions.as_object())
+            .unwrap_or_default();
+        let message = match extract_key_value_from_object!(object, "message", JsonKind::String) {
+            Ok(Some(message)) => Ok(message.as_str_owned().unwrap_or_default()),
             Ok(None) => Err(MalformedResponseError {
                 reason: "missing required `message` property within error".to_owned(),
             }),
@@ -189,32 +190,30 @@ impl Error {
         }?;
         let locations = extract_key_value_from_object!(object, "locations")
             .map(skip_invalid_locations)
-            .map(serde_json_bytes::from_value)
+            .map(|locations| apollo_json::from_value(&locations))
             .transpose()
             .map_err(|err| MalformedResponseError {
                 reason: format!("invalid `locations` within error: {err}"),
             })?
             .unwrap_or_default();
         let path = extract_key_value_from_object!(object, "path")
-            .map(serde_json_bytes::from_value)
+            .map(|path| apollo_json::from_value(&path))
             .transpose()
             .map_err(|err| MalformedResponseError {
                 reason: format!("invalid `path` within error: {err}"),
             })?;
-        let apollo_id: Option<Uuid> = extract_key_value_from_object!(
-            object,
-            "apolloId",
-            Value::String(s) => s
-        )
-        .map_err(|err| MalformedResponseError {
-            reason: format!("invalid `apolloId` within error: {err}"),
-        })?
-        .map(|s| {
-            Uuid::from_str(s.as_str()).map_err(|err| MalformedResponseError {
-                reason: format!("invalid `apolloId` within error: {err}"),
-            })
-        })
-        .transpose()?;
+        let apollo_id: Option<Uuid> =
+            extract_key_value_from_object!(object, "apolloId", JsonKind::String)
+                .map_err(|err| MalformedResponseError {
+                    reason: format!("invalid `apolloId` within error: {err}"),
+                })?
+                .and_then(|id| id.as_str_owned())
+                .map(|id| {
+                    Uuid::from_str(&id).map_err(|err| MalformedResponseError {
+                        reason: format!("invalid `apolloId` within error: {err}"),
+                    })
+                })
+                .transpose()?;
 
         Ok(Self::new(
             message, locations, path, None, extensions, apollo_id,
@@ -222,32 +221,26 @@ impl Error {
     }
 
     pub(crate) fn from_value_completion_value(value: &Value) -> Option<Error> {
-        let value_completion = ensure_object!(value).ok()?;
+        let value_completion = value.as_object()?;
         let mut extensions = value_completion
             .get("extensions")
-            .and_then(|e: &Value| -> Option<Object> {
-                serde_json_bytes::from_value(e.clone()).ok()
-            })
+            .and_then(|extensions| extensions.as_object())
             .unwrap_or_default();
-        extensions.insert("code", ERROR_CODE_RESPONSE_VALIDATION.into());
-        extensions.insert("severity", tracing::Level::WARN.as_str().into());
+        extensions.insert("code", ERROR_CODE_RESPONSE_VALIDATION);
+        extensions.insert("severity", tracing::Level::WARN.as_str());
 
         let message = value_completion
             .get("message")
-            .and_then(|m| m.as_str())
-            .map(|m| m.to_string())
+            .and_then(|message| message.as_str_owned())
             .unwrap_or_default();
         let locations = value_completion
             .get("locations")
-            .map(|l: &Value| skip_invalid_locations(l.clone()))
-            .map(|l: Value| serde_json_bytes::from_value(l).unwrap_or_default())
+            .map(skip_invalid_locations)
+            .map(|locations| apollo_json::from_value(&locations).unwrap_or_default())
             .unwrap_or_default();
-        let path =
-            value_completion
-                .get("path")
-                .and_then(|p: &serde_json_bytes::Value| -> Option<Path> {
-                    serde_json_bytes::from_value(p.clone()).ok()
-                });
+        let path = value_completion
+            .get("path")
+            .and_then(|path| apollo_json::from_value(&path).ok());
 
         Some(Self::new(
             message, locations, path, None, extensions,
@@ -257,11 +250,13 @@ impl Error {
 
     /// Extract the error code from [`Error::extensions`] as a String if it is set.
     pub fn extension_code(&self) -> Option<String> {
-        self.extensions.get("code").and_then(|c| match c {
-            Value::String(s) => Some(s.as_str().to_owned()),
-            Value::Number(n) => Some(n.to_string()),
-            Value::Null | Value::Array(_) | Value::Object(_) | Value::Bool(_) => None,
-        })
+        self.extensions
+            .get("code")
+            .and_then(|code| match code.kind() {
+                JsonKind::String => code.as_str_owned(),
+                JsonKind::Number => code.raw_number().map(str::to_owned),
+                _ => None,
+            })
     }
 
     /// Retrieve the internal Apollo unique ID for this error
@@ -302,14 +297,18 @@ fn generate_uuid() -> Uuid {
 /// However GraphQL Java and GraphQL Kotlin return `{ "line": -1, "column": -1 }`
 /// if they can't determine error location inside query.
 /// This function removes such locations from supplied value.
-fn skip_invalid_locations(mut value: Value) -> Value {
-    if let Some(array) = value.as_array_mut() {
-        array.retain(|location| {
-            location.get("line") != Some(&Value::from(-1))
-                || location.get("column") != Some(&Value::from(-1))
-        })
+fn skip_invalid_locations(value: Value) -> Value {
+    if value.kind() != JsonKind::Array {
+        return value;
     }
-    value
+    let is_minus_one = |location: &Value, key: &str| {
+        location.get(key).and_then(|number| number.as_i64()) == Some(-1)
+    };
+    json_ext::array(
+        value.array_iter().filter(|location| {
+            !(is_minus_one(location, "line") && is_minus_one(location, "column"))
+        }),
+    )
 }
 
 /// Displays (only) the error message.
@@ -374,7 +373,11 @@ impl From<CompilerExecutionError> for Error {
             message,
             locations,
             path,
-            extensions,
+            // PERF(apollo-json): legacy bridge, revisit -- apollo-compiler reports
+            // error extensions as `serde_json_bytes`
+            extensions: json_ext::from_legacy(&serde_json_bytes::Value::Object(extensions))
+                .as_object()
+                .unwrap_or_default(),
             apollo_id: Uuid::new_v4(),
             span_event_emitted: false,
         }

@@ -12,11 +12,12 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::validation::Valid;
 use apollo_federation::link::cost_spec_definition::ListSizeDirective as ParsedListSizeDirective;
+use apollo_json::JsonKind;
 use indexmap::IndexSet;
-use serde_json_bytes::Value as JsonValue;
 use tower::BoxError;
 
 use crate::json_ext::Object;
+use crate::json_ext::Value as JsonValue;
 use crate::json_ext::ValueExt;
 use crate::plugins::demand_control::DemandControlError;
 
@@ -34,7 +35,7 @@ fn traverse_ast_value<'a>(value: &'a AstValue, path: &[&str]) -> Option<&'a AstV
 }
 
 // Traverses a nested JSON value by path segments.
-fn traverse_json_value<'a>(value: &'a JsonValue, path: &[&str]) -> Option<&'a JsonValue> {
+fn traverse_json_value(value: JsonValue, path: &[&str]) -> Option<JsonValue> {
     path.iter()
         .try_fold(value, |current, segment| current.get(segment))
 }
@@ -59,11 +60,12 @@ fn infer_size_from_argument(value: Option<&AstValue>, variables: &Object) -> Opt
 }
 
 // Infers a size value from a JSON variable value.
-fn infer_size_from_variable(value: Option<&JsonValue>) -> Option<i32> {
-    match value? {
-        JsonValue::Array(items) => Some(items.len() as i32),
+fn infer_size_from_variable(value: Option<JsonValue>) -> Option<i32> {
+    let value = value?;
+    match value.kind() {
+        JsonKind::Array => value.len().map(|len| len as i32),
         // Clamp to a non-negative lower bound for the same reason as literal integer arguments.
-        other => other.as_i32().map(|n| n.max(0)),
+        _ => value.as_i32().map(|n| n.max(0)),
     }
 }
 
@@ -414,6 +416,7 @@ mod tests {
         use serde_json_bytes::json;
 
         use super::*;
+        use crate::json_ext::from_legacy;
 
         #[rstest::rstest]
         #[case::integer_value(json!(42), Some(42))]
@@ -427,8 +430,11 @@ mod tests {
         #[case::boolean_value(json!(true), None)]
         #[case::object_value(json!({"key": "value"}), None)]
         #[case::float_value(json!(1.5), None)]
-        fn test_infer_size(#[case] input: JsonValue, #[case] expected: Option<i32>) {
-            assert_eq!(infer_size_from_variable(Some(&input)), expected);
+        fn test_infer_size(#[case] input: serde_json_bytes::Value, #[case] expected: Option<i32>) {
+            assert_eq!(
+                infer_size_from_variable(Some(from_legacy(&input))),
+                expected
+            );
         }
 
         #[test]
@@ -490,7 +496,7 @@ mod tests {
         ) {
             let value = AstValue::Variable(apollo_compiler::Name::new_unchecked(var_name));
             let mut variables = Object::new();
-            variables.insert(var_name, var_value);
+            variables.insert(var_name, crate::json_ext::from_legacy(&var_value));
             assert_eq!(infer_size_from_argument(Some(&value), &variables), expected);
         }
 
@@ -598,86 +604,99 @@ mod tests {
         use serde_json_bytes::json;
 
         use super::traverse_json_value;
+        use crate::json_ext::Value;
+        use crate::json_ext::from_legacy;
+
+        /// Builds the fixture from a `serde_json_bytes::json!` literal, since
+        /// apollo-json has no literal macro of its own.
+        macro_rules! value {
+            ($($json:tt)+) => {
+                from_legacy(&json!($($json)+))
+            };
+        }
+
+        fn traverse(value: &Value, path: &[&str]) -> Option<Value> {
+            traverse_json_value(value.clone(), path)
+        }
 
         #[test]
         fn empty_path_returns_value() {
-            let value = json!(42);
-            assert_eq!(traverse_json_value(&value, &[]), Some(&value));
+            let value = value!(42);
+            assert_eq!(traverse(&value, &[]), Some(value));
         }
 
         #[test]
         fn single_level_traversal() {
-            let value = json!({"count": 10});
-            let result = traverse_json_value(&value, ["count"].as_slice());
-            assert_eq!(result, Some(&json!(10)));
+            let value = value!({"count": 10});
+            let result = traverse(&value, ["count"].as_slice());
+            assert_eq!(result, Some(value!(10)));
         }
 
         #[test]
         fn nested_traversal() {
-            let value = json!({"pagination": {"first": 5}});
-            let result = traverse_json_value(&value, ["pagination", "first"].as_slice());
-            assert_eq!(result, Some(&json!(5)));
+            let value = value!({"pagination": {"first": 5}});
+            let result = traverse(&value, ["pagination", "first"].as_slice());
+            assert_eq!(result, Some(value!(5)));
         }
 
         #[test]
         fn deeply_nested_traversal() {
-            let value = json!({"level1": {"level2": {"level3": {"count": 99}}}});
-            let result =
-                traverse_json_value(&value, ["level1", "level2", "level3", "count"].as_slice());
-            assert_eq!(result, Some(&json!(99)));
+            let value = value!({"level1": {"level2": {"level3": {"count": 99}}}});
+            let result = traverse(&value, ["level1", "level2", "level3", "count"].as_slice());
+            assert_eq!(result, Some(value!(99)));
         }
 
         #[test]
         fn missing_field_returns_none() {
-            let value = json!({"other": 10});
-            assert!(traverse_json_value(&value, &["missing"]).is_none());
+            let value = value!({"other": 10});
+            assert!(traverse(&value, &["missing"]).is_none());
         }
 
         #[test]
         fn non_object_with_path_returns_none() {
-            let value = json!(42);
-            assert!(traverse_json_value(&value, &["field"]).is_none());
+            let value = value!(42);
+            assert!(traverse(&value, &["field"]).is_none());
         }
 
         #[test]
         fn partial_path_missing_returns_none() {
-            let value = json!({"level1": {"other": 5}});
-            assert!(traverse_json_value(&value, &["level1", "level2", "count"]).is_none());
+            let value = value!({"level1": {"other": 5}});
+            assert!(traverse(&value, &["level1", "level2", "count"]).is_none());
         }
 
         /// Edge case: empty segment won't match any field
         #[test]
         fn empty_segment_returns_none() {
-            let value = json!({"count": 10});
-            assert!(traverse_json_value(&value, &[""]).is_none());
+            let value = value!({"count": 10});
+            assert!(traverse(&value, &[""]).is_none());
         }
 
         /// Edge case: path with empty segment in middle fails at that point
         #[test]
         fn empty_segment_in_middle_returns_none() {
-            let value = json!({"pagination": {"first": 5}});
-            assert!(traverse_json_value(&value, &["pagination", "", "first"]).is_none());
+            let value = value!({"pagination": {"first": 5}});
+            assert!(traverse(&value, &["pagination", "", "first"]).is_none());
         }
 
         /// Edge case: whitespace in segment name won't match trimmed field names
         #[test]
         fn whitespace_segment_returns_none() {
-            let value = json!({"count": 10});
-            assert!(traverse_json_value(&value, &[" count"]).is_none());
+            let value = value!({"count": 10});
+            assert!(traverse(&value, &[" count"]).is_none());
         }
 
         /// Edge case: null values in the path
         #[test]
         fn null_value_in_path_returns_none() {
-            let value = json!({"pagination": null});
-            assert!(traverse_json_value(&value, &["pagination", "first"]).is_none());
+            let value = value!({"pagination": null});
+            assert!(traverse(&value, &["pagination", "first"]).is_none());
         }
 
         /// Edge case: array in the path (not supported for simple traversal)
         #[test]
         fn array_value_in_path_returns_none() {
-            let value = json!({"items": [{"first": 5}]});
-            assert!(traverse_json_value(&value, &["items", "first"]).is_none());
+            let value = value!({"items": [{"first": 5}]});
+            assert!(traverse(&value, &["items", "first"]).is_none());
         }
     }
 }

@@ -8,11 +8,11 @@ use std::task::Poll;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use apollo_json::JsonKind;
 use futures::Stream;
 use futures::StreamExt as _;
 use futures::future::BoxFuture;
 use futures::stream::once;
-use serde_json_bytes::Value;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Receiver;
@@ -31,9 +31,11 @@ use crate::apollo_studio_interop::extract_enums_from_response;
 use crate::graphql::Error;
 use crate::graphql::IncrementalResponse;
 use crate::graphql::Response;
+use crate::json_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
+use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -338,13 +340,14 @@ impl ExecutionService {
                 .extensions()
                 .with_lock(|lock| lock.get::<ReferencedEnums>().cloned())
                 .unwrap_or_default();
-            if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) =
-                (metrics_ref_mode, &response.data)
+            if matches!(metrics_ref_mode, ApolloMetricsReferenceMode::Extended)
+                && let Some(response_body) =
+                    response.data.as_ref().and_then(|data| data.as_object())
             {
                 extract_enums_from_response(
                     query.clone(),
                     schema.api_schema(),
-                    response_body,
+                    &response_body,
                     &mut referenced_enums,
                 )
             };
@@ -398,15 +401,15 @@ impl ExecutionService {
                 response_data.select_values_and_paths(schema, response_path, |path, value| {
                     // if the deferred path points to an array, split it into multiple subresponses
                     // because the root must be an object
-                    if let Value::Array(array) = value {
+                    if value.kind() == JsonKind::Array {
                         let mut parent = path.clone();
-                        for (i, value) in array.iter().enumerate() {
+                        for (i, item) in value.array_iter().enumerate() {
                             parent.push(PathElement::Index(i));
-                            sub_responses.push((parent.clone(), value.clone()));
+                            sub_responses.push((parent.clone(), item));
                             parent.pop();
                         }
                     } else {
-                        sub_responses.push((path.clone(), value.clone()));
+                        sub_responses.push((path.clone(), value));
                     }
                 });
 
@@ -454,27 +457,19 @@ impl ExecutionService {
                     .map(|(key, value)| {
                         if key.as_str() == EXTENSIONS_VALUE_COMPLETION_KEY {
                             let value = match value.as_array() {
-                                None => Value::Null,
-                                Some(v) => Value::Array(
-                                    v.iter()
-                                        .filter(|ext| {
-                                            ext.as_object()
-                                                .and_then(|ext| ext.get("path"))
-                                                .and_then(|v| {
-                                                    serde_json_bytes::from_value::<Path>(v.clone())
-                                                        .ok()
-                                                })
-                                                .map(|ext_path| ext_path.starts_with(&path))
-                                                .unwrap_or(false)
-                                        })
-                                        .cloned()
-                                        .collect(),
-                                ),
+                                None => json_ext::null(),
+                                Some(v) => json_ext::array(v.into_iter().filter(|ext| {
+                                    ext.as_object()
+                                        .and_then(|ext| ext.get("path"))
+                                        .and_then(|v| apollo_json::from_value::<Path>(&v).ok())
+                                        .map(|ext_path| ext_path.starts_with(&path))
+                                        .unwrap_or(false)
+                                })),
                             };
 
-                            (key.clone(), value)
+                            (key, value)
                         } else {
-                            (key.clone(), value.clone())
+                            (key, value)
                         }
                     })
                     .collect();
@@ -764,7 +759,7 @@ mod tests {
     #[rstest]
     #[case::exact_path(
         vec![make_error_at(path(vec![key("topProducts"), index(0)]), "err")],
-        vec![(path(vec![key("topProducts"), index(0)]), Value::Object(Object::default()))],
+        vec![(path(vec![key("topProducts"), index(0)]), Object::default().into_value())],
         vec![1],
         vec![vec!["err"]]
     )]
@@ -773,35 +768,35 @@ mod tests {
             path(vec![key("topProducts"), index(0), key("reviews"), index(0), key("author")]),
             "deep err",
         )],
-        vec![(path(vec![key("topProducts"), index(0)]), Value::Object(Object::default()))],
+        vec![(path(vec![key("topProducts"), index(0)]), Object::default().into_value())],
         vec![1],
         vec![vec!["deep err"]]
     )]
     #[case::parent_error(
         vec![make_error_at(path(vec![key("topProducts")]), "parent err")],
-        vec![(path(vec![key("topProducts"), index(0)]), Value::Object(Object::default()))],
+        vec![(path(vec![key("topProducts"), index(0)]), Object::default().into_value())],
         vec![1],
         vec![vec!["parent err"]]
     )]
     #[case::parent_fans_out(
         vec![make_error_at(path(vec![key("topProducts")]), "parent err")],
         vec![
-            (path(vec![key("topProducts"), index(0)]), Value::Object(Object::default())),
-            (path(vec![key("topProducts"), index(1)]), Value::Object(Object::default())),
-            (path(vec![key("topProducts"), index(2)]), Value::Object(Object::default())),
+            (path(vec![key("topProducts"), index(0)]), Object::default().into_value()),
+            (path(vec![key("topProducts"), index(1)]), Object::default().into_value()),
+            (path(vec![key("topProducts"), index(2)]), Object::default().into_value()),
         ],
         vec![1, 1, 1],
         vec![vec!["parent err"], vec!["parent err"], vec!["parent err"]]
     )]
     #[case::no_path(
         vec![make_error_no_path("no path")],
-        vec![(path(vec![key("topProducts"), index(0)]), Value::Object(Object::default()))],
+        vec![(path(vec![key("topProducts"), index(0)]), Object::default().into_value())],
         vec![0],
         vec![vec![]]
     )]
     #[case::wrong_index(
         vec![make_error_at(path(vec![key("topProducts"), index(1), key("name")]), "wrong index")],
-        vec![(path(vec![key("topProducts"), index(0)]), Value::Object(Object::default()))],
+        vec![(path(vec![key("topProducts"), index(0)]), Object::default().into_value())],
         vec![0],
         vec![vec![]]
     )]
@@ -811,8 +806,8 @@ mod tests {
             make_error_at(path(vec![key("topProducts"), index(1), key("name")]), "err for 1"),
         ],
         vec![
-            (path(vec![key("topProducts"), index(0)]), Value::Object(Object::default())),
-            (path(vec![key("topProducts"), index(1)]), Value::Object(Object::default())),
+            (path(vec![key("topProducts"), index(0)]), Object::default().into_value()),
+            (path(vec![key("topProducts"), index(1)]), Object::default().into_value()),
         ],
         vec![1, 1],
         vec![vec!["err for 0"], vec!["err for 1"]]
@@ -854,7 +849,7 @@ mod tests {
     fn null_data_sub_response_with_no_errors_is_filtered_out() {
         let query = make_test_query();
         let response = Response::builder().build();
-        let sub_responses = vec![(path(vec![key("topProducts"), index(0)]), Value::Null)];
+        let sub_responses = vec![(path(vec![key("topProducts"), index(0)]), Value::default())];
 
         let result = ExecutionService::split_incremental_response(
             &query,
@@ -877,7 +872,7 @@ mod tests {
                 "err",
             )])
             .build();
-        let sub_responses = vec![(path(vec![key("topProducts"), index(0)]), Value::Null)];
+        let sub_responses = vec![(path(vec![key("topProducts"), index(0)]), Value::default())];
 
         let result = ExecutionService::split_incremental_response(
             &query,
@@ -898,7 +893,7 @@ mod tests {
         let response = Response::builder().build();
         let sub_responses = vec![(
             path(vec![key("topProducts"), index(0)]),
-            Value::Object(Object::default()),
+            Object::default().into_value(),
         )];
 
         let result = ExecutionService::split_incremental_response(

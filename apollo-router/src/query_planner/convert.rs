@@ -230,7 +230,9 @@ impl From<&'_ next::FetchDataValueSetter> for rewrites::DataValueSetter {
         let next::FetchDataValueSetter { path, set_value_to } = value;
         Self {
             path: crate::json_ext::Path(vec(path)),
-            set_value_to: set_value_to.clone(),
+            // The federation query plan holds the legacy type. Converting once per plan
+            // conversion keeps the rewrite itself on the native representation.
+            set_value_to: crate::json_ext::from_legacy(set_value_to),
         }
     }
 }

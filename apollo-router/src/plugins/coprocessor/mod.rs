@@ -31,6 +31,7 @@ use crate::Context;
 use crate::configuration::shared::Client;
 use crate::error::Error;
 use crate::graphql;
+use crate::json_ext;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
@@ -1069,20 +1070,21 @@ where
         let body_as_value = co_processor_output
             .body
             .as_ref()
-            .and_then(|b| serde_json::from_str(b).ok())
-            .unwrap_or(Value::Null);
+            .and_then(|b| apollo_json::from_str::<Value>(b).ok())
+            .unwrap_or_default();
         // Now we have some JSON, let's see if it's the right "shape" to create a graphql_response.
         // If it isn't, we create a graphql error response
-        let graphql_response = match body_as_value {
-            Value::Null => graphql::Response::builder()
+        let graphql_response = if body_as_value.is_null() {
+            graphql::Response::builder()
                 .errors(vec![
                     Error::builder()
                         .message(co_processor_output.body.take().unwrap_or_default())
                         .extension_code(COPROCESSOR_ERROR_EXTENSION)
                         .build(),
                 ])
-                .build(),
-            _ => deserialize_coprocessor_response(body_as_value, response_validation),
+                .build()
+        } else {
+            deserialize_coprocessor_response(body_as_value, response_validation)
         };
 
         let res = router::Response::builder()
@@ -1457,7 +1459,7 @@ where
 
     let body_to_send = request_config
         .body
-        .then(|| serde_json_bytes::to_value(&body))
+        .then(|| json_ext::to_value(&body))
         .transpose()?;
     let context_to_send = request_config
         .context
@@ -1525,16 +1527,18 @@ where
         let code = control.get_http_status()?;
 
         let res = {
-            let graphql_response = match co_processor_output.body.unwrap_or(Value::Null) {
-                Value::String(s) => graphql::Response::builder()
+            let body = co_processor_output.body.unwrap_or_default();
+            let string_body = body.as_str().map(|s| s.into_owned());
+            let graphql_response = match string_body {
+                Some(message) => graphql::Response::builder()
                     .errors(vec![
                         Error::builder()
-                            .message(s.as_str().to_owned())
+                            .message(message)
                             .extension_code(COPROCESSOR_ERROR_EXTENSION)
                             .build(),
                     ])
                     .build(),
-                value => deserialize_coprocessor_response(value, response_validation),
+                None => deserialize_coprocessor_response(body, response_validation),
             };
 
             let mut http_response = http::Response::builder()
@@ -1568,7 +1572,7 @@ where
     // that we replace "bits" of our incoming request with the updated bits if they
     // are present in our co_processor_output.
     let new_body: graphql::Request = match co_processor_output.body {
-        Some(value) => serde_json_bytes::from_value(value)?,
+        Some(value) => apollo_json::from_value(&value)?,
         None => body,
     };
 
@@ -1814,11 +1818,14 @@ fn apply_response_post_processing(
 
     // Required because for subscription if data is Some(Null) it won't cut the subscription
     // And in some languages they don't have any differences between Some(Null) and Null
-    if original_response_body.data == Some(Value::Null)
+    if original_response_body
+        .data
+        .as_ref()
+        .is_some_and(Value::is_null)
         && new_body.data.is_none()
         && new_body.subscribed == Some(true)
     {
-        new_body.data = Some(Value::Null);
+        new_body.data = Some(Value::default());
     }
     new_body
 }
@@ -1855,31 +1862,32 @@ pub(super) fn filter_graphql_response_body(
     match body_conf {
         BodyConf::All(false) => None,
         BodyConf::All(true) => {
-            Some(serde_json_bytes::to_value(response).expect("serialization will not fail"))
+            Some(json_ext::to_value(response).expect("serialization will not fail"))
         }
         BodyConf::Selective(fields) => {
             if !fields.data && !fields.errors && !fields.extensions {
                 return None;
             }
-            let mut obj = serde_json_bytes::Map::new();
+            let mut entries: Vec<(String, Value)> = Vec::new();
             if fields.data {
-                if let Some(data) = &response.data {
-                    obj.insert("data", data.clone());
-                } else {
-                    obj.insert("data", Value::Null);
-                }
+                entries.push((
+                    "data".to_string(),
+                    response.data.clone().unwrap_or_default(),
+                ));
             }
             if fields.errors {
-                obj.insert(
-                    "errors",
-                    serde_json_bytes::to_value(&response.errors)
-                        .expect("serialization will not fail"),
-                );
+                entries.push((
+                    "errors".to_string(),
+                    json_ext::to_value(&response.errors).expect("serialization will not fail"),
+                ));
             }
             if fields.extensions {
-                obj.insert("extensions", Value::Object(response.extensions.clone()));
+                entries.push((
+                    "extensions".to_string(),
+                    response.extensions.clone().into_value(),
+                ));
             }
-            Some(Value::Object(obj))
+            Some(json_ext::object(entries))
         }
     }
 }
@@ -1904,7 +1912,7 @@ pub(super) fn deserialize_coprocessor_response(
         })
     } else {
         // When validation is disabled, use the old behavior - just deserialize without GraphQL validation
-        serde_json_bytes::from_value(body_as_value).unwrap_or_else(|error| {
+        apollo_json::from_value(&body_as_value).unwrap_or_else(|error| {
             graphql::Response::builder()
                 .errors(vec![
                     Error::builder()
@@ -1944,7 +1952,7 @@ pub(super) fn handle_graphql_response(
                 apply_response_post_processing(new_body, &original_response_body, body_conf)
             } else {
                 // When validation is disabled, use the old behavior - just deserialize without GraphQL validation
-                match serde_json_bytes::from_value::<graphql::Response>(value) {
+                match apollo_json::from_value::<graphql::Response>(&value) {
                     Ok(new_body) => {
                         apply_response_post_processing(new_body, &original_response_body, body_conf)
                     }

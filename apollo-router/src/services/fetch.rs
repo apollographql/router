@@ -2,8 +2,6 @@
 
 use std::sync::Arc;
 
-use serde_json_bytes::Value;
-use serde_json_bytes::json;
 use tokio::sync::mpsc;
 use tower::BoxError;
 
@@ -12,6 +10,7 @@ use crate::error::Error;
 use crate::error::FetchError;
 use crate::graphql::Request as GraphQLRequest;
 use crate::json_ext::Path;
+use crate::json_ext::Value;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::Variables;
@@ -154,7 +153,7 @@ impl AddSubgraphNameExt for Error {
 
     fn add_subgraph_name(&mut self, subgraph_name: &str) {
         self.extensions
-            .insert(SUBGRAPH_NAME_EXTENSION_KEY, json!(subgraph_name));
+            .insert(SUBGRAPH_NAME_EXTENSION_KEY, subgraph_name);
     }
 }
 

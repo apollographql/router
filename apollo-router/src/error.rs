@@ -19,8 +19,9 @@ use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Location as ErrorLocation;
 use crate::graphql::Response;
+use crate::json_ext;
 use crate::json_ext::Path;
-use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
 use crate::spec::SpecError;
 
 /// Return up to this many GraphQL parsing or validation errors.
@@ -118,7 +119,11 @@ impl FetchError {
     pub(crate) fn to_graphql_error(&self, path: Option<Path>) -> Error {
         // FIXME(SimonSapin): this causes every Rust field to be included in `extensions`,
         // do we really want that?
-        let mut value: Value = serde_json_bytes::to_value(self).unwrap_or_default();
+        //
+        // PERF(apollo-json): legacy bridge, revisit -- the serde-derived extensions are
+        // patched in place before the one conversion below
+        let mut value: serde_json_bytes::Value =
+            serde_json_bytes::to_value(self).unwrap_or_default();
         if let Some(extensions) = value.as_object_mut() {
             extensions
                 .entry("code")
@@ -150,7 +155,7 @@ impl FetchError {
                     extensions.remove("message");
                     extensions
                         .entry("name")
-                        .or_insert_with(|| Value::String(name.clone()));
+                        .or_insert_with(|| serde_json_bytes::Value::String(name.clone()));
                 }
                 _ => (),
             }
@@ -160,7 +165,11 @@ impl FetchError {
             .message(self.to_string())
             .locations(Vec::default())
             .and_path(path)
-            .extensions(value.as_object().unwrap().to_owned())
+            .extensions(
+                json_ext::from_legacy(&value)
+                    .as_object()
+                    .unwrap_or_default(),
+            )
             .build()
     }
 
@@ -612,11 +621,11 @@ mod tests {
         let expected_gql_error = graphql::Error::builder()
             .message("HTTP fetch failed: invalid request")
             .extension_code("SUBREQUEST_HTTP_ERROR")
-            .extension("reason", Value::String("invalid request".into()))
-            .extension("service", Value::String("my_service".into()))
+            .extension("reason", json_ext::string("invalid request"))
+            .extension("service", json_ext::string("my_service"))
             .extension(
                 "http",
-                serde_json_bytes::json!({"status": Value::Number(400.into())}),
+                json_ext::from_legacy(&serde_json_bytes::json!({"status": 400})),
             )
             .build();
 

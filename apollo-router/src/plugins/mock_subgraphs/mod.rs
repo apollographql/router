@@ -205,15 +205,25 @@ fn subgraph_call(
         entities: &config.entities,
         response_extensions: &response_extensions,
     };
+    // PERF(apollo-json): legacy bridge, revisit -- apollo-compiler's execution engine
+    // reads variables and produces data as `serde_json_bytes` values.
+    let variables = crate::json_ext::to_legacy(&request.variables.clone().into_value());
+    let variables = variables
+        .as_object()
+        .expect("an object value converts to an object");
     let result = Execution::new(subgraph_schema, &doc)
         .operation(operation)
-        .raw_variable_values(&request.variables)
+        .raw_variable_values(variables)
         .execute_sync(&initial_value);
     match result {
         Ok(response) => Ok(graphql::Response::builder()
-            .data(Some(JsonValue::from(response.data)))
+            .data(crate::json_ext::from_legacy(&JsonValue::from(
+                response.data,
+            )))
             .errors(response.errors.into_iter().map(Into::into).collect())
-            .extensions(response_extensions.into_inner())
+            .extensions(crate::json_ext::Object::from(crate::json_ext::from_legacy(
+                &JsonValue::Object(response_extensions.into_inner()),
+            )))
             .build()),
         Err(request_error) => Err(vec![request_error.to_graphql_error(&doc.sources)]),
     }

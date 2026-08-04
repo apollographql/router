@@ -2,32 +2,46 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_federation::query_plan::requires_selection::Field;
 use apollo_federation::query_plan::requires_selection::InlineFragment;
 use apollo_federation::query_plan::requires_selection::Selection;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Entry;
+use apollo_json::JsonKind;
 
-use crate::json_ext::Object;
+use crate::json_ext;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::spec::Schema;
 use crate::spec::TYPENAME;
 
-pub(crate) fn execute_selection_set<'a>(
-    input_content: &'a Value,
+/// The output member at `key`, for the callers that either overwrite or merge
+/// into whatever an earlier selection already wrote there.
+fn member_mut<'m>(members: &'m mut [(String, Value)], key: &str) -> Option<&'m mut Value> {
+    members
+        .iter_mut()
+        .find(|(member, _)| member == key)
+        .map(|(_, value)| value)
+}
+
+/// Writes `value` at `key`, keeping the position of an entry an earlier
+/// selection already wrote there.
+fn set_member(members: &mut Vec<(String, Value)>, key: &str, value: Value) {
+    match member_mut(members, key) {
+        Some(existing) => *existing = value,
+        None => members.push((key.to_owned(), value)),
+    }
+}
+
+pub(crate) fn execute_selection_set(
+    input_content: &Value,
     selections: &[Selection],
     schema: &Schema,
-    mut current_type: Option<&'a str>,
+    current_type: Option<&str>,
 ) -> Value {
-    let content = match input_content.as_object() {
-        Some(o) => o,
-        None => return Value::Null,
-    };
+    if input_content.kind() != JsonKind::Object {
+        return Value::default();
+    }
 
-    current_type = content
-        .get(TYPENAME)
-        .and_then(|v| v.as_str())
-        .or(current_type);
+    let own_type = input_content.get(TYPENAME).and_then(|v| v.as_str_owned());
+    let current_type = own_type.as_deref().or(current_type);
 
-    let mut output = Object::with_capacity(selections.len());
+    let mut output: Vec<(String, Value)> = Vec::with_capacity(selections.len());
     for selection in selections {
         match selection {
             Selection::Field(Field {
@@ -52,15 +66,12 @@ pub(crate) fn execute_selection_set<'a>(
                         })
                 });
 
-                match content.get_key_value(selection_name) {
+                match input_content.get(selection_name) {
                     None => {
                         if name == TYPENAME {
                             // if the __typename field was missing but we can infer it, fill it
                             if let Some(ty) = current_type {
-                                output.insert(
-                                    ByteString::from(selection_name.to_owned()),
-                                    Value::String(ByteString::from(ty.to_owned())),
-                                );
+                                set_member(&mut output, selection_name, json_ext::string(ty));
                                 continue;
                             }
                         }
@@ -74,44 +85,26 @@ pub(crate) fn execute_selection_set<'a>(
                             .map(|ty| !ty.is_non_null())
                             .unwrap_or(false)
                         {
-                            output.insert(ByteString::from(selection_name.to_owned()), Value::Null);
+                            set_member(&mut output, selection_name, Value::default());
                         } else {
-                            return Value::Null;
+                            return Value::default();
                         }
                     }
-                    Some((key, value)) => {
-                        if let Some(elements) = value.as_array() {
-                            let selected = elements
-                                .iter()
-                                .map(|element| {
-                                    if !selections.is_empty() {
-                                        execute_selection_set(
-                                            element,
-                                            selections,
-                                            schema,
-                                            field_type
-                                                .as_ref()
-                                                .map(|ty| ty.inner_named_type().as_str()),
-                                        )
-                                    } else {
-                                        element.clone()
-                                    }
-                                })
-                                .collect::<Vec<_>>();
-                            output.insert(key.clone(), Value::Array(selected));
-                        } else if !selections.is_empty() {
-                            output.insert(
-                                key.clone(),
-                                execute_selection_set(
-                                    value,
-                                    selections,
-                                    schema,
-                                    field_type.as_ref().map(|ty| ty.inner_named_type().as_str()),
-                                ),
-                            );
+                    Some(value) => {
+                        let selected = if selections.is_empty() {
+                            value
                         } else {
-                            output.insert(key.clone(), value.clone());
-                        }
+                            let inner_type =
+                                field_type.as_ref().map(|ty| ty.inner_named_type().as_str());
+                            if value.kind() == JsonKind::Array {
+                                json_ext::array(value.array_iter().map(|element| {
+                                    execute_selection_set(&element, selections, schema, inner_type)
+                                }))
+                            } else {
+                                execute_selection_set(&value, selections, schema, inner_type)
+                            }
+                        };
+                        set_member(&mut output, selection_name, selected);
                     }
                 }
             }
@@ -121,19 +114,18 @@ pub(crate) fn execute_selection_set<'a>(
             }) => match type_condition {
                 None => continue,
                 Some(condition) => {
-                    if type_condition_matches(schema, current_type, condition)
-                        && let Value::Object(selected) =
-                            execute_selection_set(input_content, selections, schema, current_type)
-                    {
-                        for (key, value) in selected.into_iter() {
-                            match output.entry(key) {
-                                Entry::Vacant(e) => {
-                                    e.insert(value);
-                                }
-                                Entry::Occupied(e) => {
-                                    e.into_mut().type_aware_deep_merge(value, schema);
-                                }
-                            }
+                    if !type_condition_matches(schema, current_type, condition) {
+                        continue;
+                    }
+                    let selected =
+                        execute_selection_set(input_content, selections, schema, current_type);
+                    if selected.kind() != JsonKind::Object {
+                        continue;
+                    }
+                    for (key, value) in selected.object_iter() {
+                        match member_mut(&mut output, &key) {
+                            Some(existing) => existing.type_aware_deep_merge(value, schema),
+                            None => output.push((key, value)),
                         }
                     }
                 }
@@ -141,7 +133,7 @@ pub(crate) fn execute_selection_set<'a>(
         }
     }
 
-    Value::Object(output)
+    json_ext::object(output)
 }
 
 /// This is similar to DoesFragmentTypeApply from the GraphQL spec, but the
@@ -214,13 +206,19 @@ fn type_condition_matches(
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use serde_json_bytes::json as bjson;
 
     use super::Selection;
     use super::*;
     use crate::error::FetchError;
     use crate::graphql::Response;
     use crate::json_ext::Path;
+
+    /// Builds a [`Value`] from a `serde_json_bytes::json!` fixture.
+    macro_rules! bjson {
+        ($($json:tt)+) => {
+            apollo_json::Document::from_legacy(&serde_json_bytes::json!($($json)+)).root_handle()
+        };
+    }
 
     fn select(
         response: &Response,
@@ -237,12 +235,9 @@ mod tests {
                 values.push(value);
             });
 
-        Ok(Value::Array(
-            values
-                .into_iter()
-                .map(|value| execute_selection_set(value, selections, schema, None))
-                .collect::<Vec<_>>(),
-        ))
+        Ok(json_ext::array(values.iter().map(|value| {
+            execute_selection_set(value, selections, schema, None)
+        })))
     }
 
     macro_rules! select {
@@ -334,7 +329,7 @@ mod tests {
         assert_eq!(
             select!(
                 include_str!("testdata/schema.graphql"),
-                json!({"__typename": "User", "name":"Bob", "job":{"name":"astronaut"}}),
+                bjson!({"__typename": "User", "name":"Bob", "job":{"name":"astronaut"}}),
             )
             .unwrap(),
             bjson!([{}])

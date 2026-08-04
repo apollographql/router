@@ -96,10 +96,7 @@ impl HashedSubgraphSchema {
 // separately from the query planner logs, as follows:
 // `router -s supergraph.graphql --log info,crate::query_planner::log=trace`
 mod log {
-    use serde_json_bytes::ByteString;
-    use serde_json_bytes::Map;
-    use serde_json_bytes::Value;
-
+    use crate::json_ext::Object;
     use crate::query_planner::PlanNode;
 
     pub(crate) fn trace_query_plan(plan: Option<&PlanNode>) {
@@ -109,7 +106,7 @@ mod log {
     pub(crate) fn trace_subfetch(
         service_name: &str,
         operation: &str,
-        variables: &Map<ByteString, Value>,
+        variables: &Object,
         response: &crate::graphql::Response,
     ) {
         tracing::trace!(

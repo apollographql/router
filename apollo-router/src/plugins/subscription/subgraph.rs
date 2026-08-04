@@ -25,6 +25,7 @@ use crate::Context;
 use crate::context::OPERATION_NAME;
 use crate::error::FetchError;
 use crate::graphql;
+use crate::json_ext;
 use crate::json_ext::Object;
 use crate::metrics::FutureMetricsExt;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
@@ -213,7 +214,9 @@ async fn call_websocket(
             .get(http::header::AUTHORIZATION)
             .and_then(|auth| auth.to_str().ok()),
     ) {
-        (Some(connection_params), _) => Some(connection_params),
+        // PERF(apollo-json): legacy bridge, revisit -- the WebSocket protocol layer
+        // speaks `serde_json_bytes`, and this runs once per subscription handshake.
+        (Some(connection_params), _) => Some(json_ext::to_legacy(&connection_params)),
         (None, Some(authorization)) => Some(serde_json_bytes::json!({ "token": authorization })),
         _ => None,
     };
@@ -573,7 +576,7 @@ async fn setup_callback(
     };
     request.subgraph_request.body_mut().extensions.insert(
         "subscription",
-        serde_json_bytes::to_value(subscription_extension).map_err(|err| {
+        json_ext::to_value(&subscription_extension).map_err(|err| {
             FetchError::SubrequestHttpError {
                 service: service_name.to_string(),
                 reason: format!("cannot serialize the subscription extension: {err:?}",),

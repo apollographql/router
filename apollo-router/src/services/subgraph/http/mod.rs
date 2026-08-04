@@ -10,8 +10,6 @@ use http::response::Parts;
 use http_body_util::LengthLimitError;
 use hyper_rustls::ConfigBuilderExt;
 use rustls::RootCertStore;
-use serde_json_bytes::Entry;
-use serde_json_bytes::json;
 use tower::BoxError;
 use tower::Service;
 use tracing::Instrument;
@@ -132,9 +130,7 @@ pub(super) fn http_response_to_graphql_response(
     // Any errors directly parsed from the response likely won't yet have the service name set,
     // but we need it for telemetry error counting
     for err in &mut graphql_response.errors {
-        if let Entry::Vacant(v) = err.extensions.entry("service") {
-            v.insert(json!(service_name));
-        }
+        err.extensions.insert_if_absent("service", service_name);
     }
 
     // Add an error for response codes that are not 2xx
