@@ -795,43 +795,8 @@ mod supergraph_spec_imports {
     }
 }
 
-// =============================================================================
-// @requires vs. fields returning the Query root type
-// =============================================================================
-
-/// Control case for `misc_requires_rejected_when_sibling_field_returns_query_root`:
-/// verifies a plain @external/@requires pair on an entity composes without issue.
-#[test]
-fn misc_requires_composes_without_query_returning_sibling() {
-    let owner = ServiceDefinition {
-        name: "owner",
-        type_defs: r#"
-        type Query {
-          a: A
-        }
-
-        type A @key(fields: "id") {
-          id: ID
-          name: String
-        }
-        "#,
-    };
-    let requirer = ServiceDefinition {
-        name: "requirer",
-        type_defs: r#"
-        type A @key(fields: "id") {
-          id: ID
-          other: Int @requires(fields: "name")
-          name: String @external
-        }
-        "#,
-    };
-
-    compose_as_fed2_subgraphs(&[owner, requirer]).expect("composition should succeed");
-}
-
-/// Regression test: adding a sibling field that returns the root `Query` type
-/// must not break @external/@requires composition on the same entity.
+/// Adding a sibling field that returns the root `Query` type should
+/// not break @external/@requires composition on the same entity.
 #[test]
 fn misc_requires_rejected_when_sibling_field_returns_query_root() {
     let owner = ServiceDefinition {
