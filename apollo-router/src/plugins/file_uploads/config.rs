@@ -25,6 +25,30 @@ pub(crate) struct MultipartRequestLimits {
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
     pub(crate) operation_body_timeout: Option<Duration>,
+
+    /// The maximum amount of multipart framing — the preamble, part headers, boundary delimiters,
+    /// and transport padding — permitted in a single upload request.
+    ///
+    /// This allowance is added to the content the other limits permit, and the sum is enforced
+    /// as a limit on the total request. Requests exceeding it are rejected with
+    /// `413 Payload Too Large`.
+    #[serde(
+        deserialize_with = "bytesize::ByteSize::deserialize",
+        default = "default_max_overhead_size"
+    )]
+    #[schemars(with = "String", default = "default_max_overhead_size")]
+    pub(crate) max_overhead_size: ByteSize,
+}
+
+/// Deliberately generous. This allowance sets the floor on the total-request budget, and that
+/// budget is counted at a different point in the pipeline than `max_file_size`: multer counts bytes
+/// as they arrive off the socket, before parsing, while `max_file_size` counts a file's bytes as
+/// they are handed to the subgraph after parsing. The arriving count therefore runs ahead, and
+/// below a small enough budget it trips first. That answer isn't wrong — the body really is over
+/// the total — but "request too large" tells a client less than being pointed at `max_file_size`
+/// does. A megabyte-scale allowance keeps the two apart.
+fn default_max_overhead_size() -> ByteSize {
+    ByteSize::mb(2)
 }
 
 impl Default for MultipartRequestLimits {
@@ -33,6 +57,7 @@ impl Default for MultipartRequestLimits {
             max_files: 5,
             max_file_size: ByteSize::mb(1),
             operation_body_timeout: None,
+            max_overhead_size: default_max_overhead_size(),
         }
     }
 }

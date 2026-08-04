@@ -405,7 +405,9 @@ impl InstrumentData {
             opt.limits.max_file_size,
             "$.limits.max_file_size",
             opt.limits.max_files,
-            "$.limits.max_files"
+            "$.limits.max_files",
+            opt.limits.max_overhead_size,
+            "$.limits.max_overhead_size"
         );
 
         populate_config_instrument!(

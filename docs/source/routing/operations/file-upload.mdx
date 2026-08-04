@@ -130,6 +130,8 @@ If a request exceeds a limit, the router rejects the request.
 The `limits.router.http_max_request_bytes` setting applies to the GraphQL operations field (the query and variables) of the multipart request, not to the uploaded file data itself.
 Limit file data using `protocols.multipart.limits.max_file_size`.
 
+A `multipart/form-data` body also carries framing that is neither file data nor the GraphQL operation: a preamble before the first boundary, a header block for each part, boundary delimiters, and transport padding. The router has to buffer some of that framing to parse the request, so `protocols.multipart.limits.max_overhead_size` bounds how much of it a single request may contain. Because the parser cannot tell a framing byte from a content byte, the router adds this allowance to the content the other limits permit and enforces the sum as a limit on the total request. Raising `max_file_size` or `max_files` therefore raises the total size a request may reach.
+
 Unlike other GraphQL requests, file upload requests stream their body through the router's plugin layer so the multipart body can be parsed before query planning begins. This means a slow or stalled client can hold a connection open until the global router `timeout` fires. Use `operation_body_timeout` to set a tighter deadline specifically for receiving the GraphQL operation (query and variables) at the start of the upload, while still allowing the full router `timeout` for subgraph round-trips. `operation_body_timeout` covers only the time to receive the operation — it does not apply to the time taken to upload the files themselves.
 
 #### Configuration reference
@@ -250,6 +252,27 @@ unset
 <td>
 
 duration string, for example `5s` or `30s`
+
+</td>
+</tr>
+<tr>
+<td>
+
+##### `protocols.multipart.limits.max_overhead_size`
+
+The maximum amount of multipart framing to accept in a single request: the preamble, part headers, boundary delimiters, and transport padding.
+
+This allowance is added to the content the other limits permit, and the router enforces the sum as a limit on the total request. If a request exceeds that total, the router rejects it with a `413 Payload Too Large` error.
+
+</td>
+<td>
+
+`2mb`
+
+</td>
+<td>
+
+values in a [human-readable format](https://crates.io/crates/bytesize), for example, `5kb` and `99mb`
 
 </td>
 </tr>

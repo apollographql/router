@@ -1139,18 +1139,58 @@ mod body_limits {
     use crate::integration::common::graph_os_enabled;
 
     const CONFIG: &str = include_str!("../fixtures/file_upload/small_body_limit.router.yaml");
+    const OVERHEAD_CONFIG: &str =
+        include_str!("../fixtures/file_upload/max_overhead_size.router.yaml");
     const BOUNDARY: &str = "testboundary";
 
+    /// Non-content regions of a `multipart/form-data` body. RFC 2046 permits all of these; the
+    /// GraphQL multipart spec has no use for any of them and real clients emit none, but the
+    /// router still has to bound them because the parser buffers them.
+    #[derive(Default)]
+    struct Framing {
+        /// Bytes before the first boundary delimiter.
+        preamble: Vec<u8>,
+        /// Bytes after the closing boundary delimiter.
+        epilogue: Vec<u8>,
+        /// Extra header line injected into the `operations` part's header block, without the
+        /// trailing CRLF. Used to grow a single part's header section.
+        operations_extra_header: Option<String>,
+        /// Parts that the `map` field never references. The router skips these by name
+        /// (see `SubgraphFileProxyStream::poll_next_field`) but still reads their bytes.
+        extraneous_parts: Vec<(String, Vec<u8>)>,
+    }
+
     fn build_multipart_body(operations: &str, file_data: &[u8]) -> Vec<u8> {
+        build_multipart_body_with(operations, file_data, Framing::default())
+    }
+
+    fn build_multipart_body_with(operations: &str, file_data: &[u8], framing: Framing) -> Vec<u8> {
         let map = r#"{"0":["variables.file"]}"#;
         let mut body = Vec::new();
+        body.extend_from_slice(&framing.preamble);
         for (name, content) in [
             ("operations", operations.as_bytes()),
             ("map", map.as_bytes()),
         ] {
             body.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
             body.extend_from_slice(
-                format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes(),
+                format!("Content-Disposition: form-data; name=\"{name}\"\r\n").as_bytes(),
+            );
+            if name == "operations"
+                && let Some(extra) = &framing.operations_extra_header
+            {
+                body.extend_from_slice(extra.as_bytes());
+                body.extend_from_slice(b"\r\n");
+            }
+            body.extend_from_slice(b"\r\n");
+            body.extend_from_slice(content);
+            body.extend_from_slice(b"\r\n");
+        }
+        for (name, content) in &framing.extraneous_parts {
+            body.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
+            body.extend_from_slice(
+                format!("Content-Disposition: form-data; name=\"{name}\"; filename=\"{name}.bin\"\r\n\r\n")
+                    .as_bytes(),
             );
             body.extend_from_slice(content);
             body.extend_from_slice(b"\r\n");
@@ -1162,6 +1202,7 @@ mod body_limits {
         body.extend_from_slice(file_data);
         body.extend_from_slice(b"\r\n");
         body.extend_from_slice(format!("--{BOUNDARY}--\r\n").as_bytes());
+        body.extend_from_slice(&framing.epilogue);
         body
     }
 
@@ -1169,12 +1210,20 @@ mod body_limits {
     /// `chunk_size` controls HTTP chunking: `None` sends the entire body as one frame
     /// (reproducing curl's default chunked-upload behavior), `Some(n)` splits into n-byte chunks.
     async fn run(body_bytes: Vec<u8>, chunk_size: Option<usize>) -> (StatusCode, Value) {
+        run_with_config(CONFIG, body_bytes, chunk_size).await
+    }
+
+    async fn run_with_config(
+        config: &str,
+        body_bytes: Vec<u8>,
+        chunk_size: Option<usize>,
+    ) -> (StatusCode, Value) {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
         let bound = TcpListener::bind(addr).await.unwrap();
         let bound_url = format!("http://{}", bound.local_addr().unwrap());
 
         let mut router = IntegrationTest::builder()
-            .config(CONFIG)
+            .config(config)
             .subgraph_overrides([("uploads".to_string(), format!("{bound_url}/"))].into())
             .supergraph(PathBuf::from_iter([
                 "tests",
@@ -1318,6 +1367,134 @@ mod body_limits {
         let (status, _body) = run(body_bytes, chunk_size).await;
 
         assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+
+        Ok(())
+    }
+
+    /// A multipart preamble is buffered by the parser while it hunts for the first boundary, and
+    /// charges against no per-field limit. Without a whole-stream budget it grows router memory
+    /// without bound; with one it is a 413.
+    ///
+    /// These tests assert on the status only, not on the error extension code. The limits plugin
+    /// wraps the file uploads plugin and rewrites the body of *any* downstream 413 into its own
+    /// `INVALID_GRAPHQL_REQUEST` / "Request body payload too large" error
+    /// (`plugins::limits::LimitsPlugin::map_error_to_graphql`), so file-uploads-specific codes for
+    /// 413s are not observable at the edge. `rejects_oversized_operations_field` above is limited
+    /// the same way.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rejects_oversized_preamble(
+        #[values(None, Some(100))] chunk_size: Option<usize>,
+    ) -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let body_bytes = build_multipart_body_with(
+            OPS,
+            b"tiny",
+            Framing {
+                // Comfortably past the ~20kb budget the fixture derives, but small enough that a
+                // router without the limit merely accepts it rather than exhausting the test host.
+                preamble: vec![b'A'; 64 * 1024],
+                ..Default::default()
+            },
+        );
+        let (status, body) = run_with_config(OVERHEAD_CONFIG, body_bytes, chunk_size).await;
+
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "body: {body}");
+
+        Ok(())
+    }
+
+    /// A part's header block is buffered whole before it is parsed, so an enormous
+    /// `Content-Disposition` is the same memory-exhaustion vector as a preamble.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rejects_oversized_part_headers(
+        #[values(None, Some(100))] chunk_size: Option<usize>,
+    ) -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let body_bytes = build_multipart_body_with(
+            OPS,
+            b"tiny",
+            Framing {
+                operations_extra_header: Some(format!("X-Padding: {}", "A".repeat(64 * 1024))),
+                ..Default::default()
+            },
+        );
+        let (status, body) = run_with_config(OVERHEAD_CONFIG, body_bytes, chunk_size).await;
+
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "body: {body}");
+
+        Ok(())
+    }
+
+    /// Parts the `map` never references are skipped by name rather than rejected, and no per-field
+    /// limit applies to them — so before the whole-stream budget existed, a client could stream
+    /// unbounded data through the router under cover of a small, valid upload.
+    ///
+    /// This is a deliberate consequence of budgeting the whole stream rather than the framing
+    /// alone. It cannot fire for a legitimate request: real content is bounded by
+    /// `http_max_request_bytes + map cap + max_files * max_file_size`, which is the budget minus
+    /// the framing allowance.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rejects_extraneous_parts_beyond_total_budget(
+        #[values(None, Some(100))] chunk_size: Option<usize>,
+    ) -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let body_bytes = build_multipart_body_with(
+            OPS,
+            b"tiny",
+            Framing {
+                extraneous_parts: vec![("unreferenced".to_string(), vec![b'C'; 64 * 1024])],
+                ..Default::default()
+            },
+        );
+        let (status, body) = run_with_config(OVERHEAD_CONFIG, body_bytes, chunk_size).await;
+
+        // The extraneous part is consumed while streaming to the subgraph, i.e. after the router
+        // has already committed to a 200 GraphQL response, so this surfaces as a GraphQL error
+        // rather than a 413 — the same way `max_file_size` violations do mid-stream.
+        assert!(
+            status == StatusCode::PAYLOAD_TOO_LARGE || !body["errors"].is_null(),
+            "expected the request to be rejected, got {status}: {body}"
+        );
+
+        Ok(())
+    }
+
+    /// Guards against over-rejection: framing that RFC 2046 permits and that fits inside the
+    /// allowance must still upload successfully.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn succeeds_with_small_preamble_and_epilogue(
+        #[values(None, Some(100))] chunk_size: Option<usize>,
+    ) -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let body_bytes = build_multipart_body_with(
+            OPS,
+            &vec![0xBBu8; 500],
+            Framing {
+                preamble: b"this is a legal preamble\r\n".to_vec(),
+                epilogue: b"this is a legal epilogue\r\n".to_vec(),
+                ..Default::default()
+            },
+        );
+        let (status, body) = run_with_config(OVERHEAD_CONFIG, body_bytes, chunk_size).await;
+
+        assert_eq!(status, StatusCode::OK, "body: {body}");
+        assert!(body["errors"].is_null(), "body: {body}");
 
         Ok(())
     }
