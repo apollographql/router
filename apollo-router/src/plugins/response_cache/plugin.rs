@@ -927,11 +927,9 @@ impl PluginPrivate for ResponseCache {
         // counts).
         let any_connector_caching_enabled = self.storage.has_connector_storage()
             && (self.connectors.all.enabled.unwrap_or(true)
-                || self
-                    .connectors
-                    .sources
-                    .keys()
-                    .any(|source_name| self.connectors.is_source_enabled(self.enabled, source_name)));
+                || self.connectors.sources.keys().any(|source_name| {
+                    self.connectors.is_source_enabled(self.enabled, source_name)
+                }));
 
         let any_connector_invalidation_enabled = self
             .connectors

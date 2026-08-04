@@ -755,7 +755,10 @@ indexes:
         let body = vec![InvalidationRequest::Subgraph {
             subgraph: "users".to_string(),
         }];
-        assert_eq!(find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body), None);
+        assert_eq!(
+            find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body),
+            None
+        );
     }
 
     #[test]
@@ -795,7 +798,8 @@ indexes:
             subgraphs,
             cache_tag: "homepage".to_string(),
         }];
-        let rejection = find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body);
+        let rejection =
+            find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body);
         assert_eq!(rejection, Some(("users".to_string(), "cache_tag")));
     }
 
@@ -836,7 +840,8 @@ indexes:
             cache_tag: "homepage".to_string(),
         }];
         // The disabled subgraph is "users"; should be returned reliably.
-        let rejection = find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body);
+        let rejection =
+            find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body);
         assert_eq!(rejection, Some(("users".to_string(), "cache_tag")));
     }
 
@@ -1504,8 +1509,7 @@ mod tests {
     #[tokio::test]
     async fn connector_shared_key_does_not_authorize_subgraph_kinds() {
         let service =
-            service_with_split_keys("connector_shared_key_does_not_authorize_subgraph_kinds")
-                .await;
+            service_with_split_keys("connector_shared_key_does_not_authorize_subgraph_kinds").await;
         for body_json in [
             serde_json::json!([{"kind": "subgraph", "subgraph": "accounts"}]),
             serde_json::json!([{"kind": "type", "subgraph": "accounts", "type": "User"}]),
@@ -1529,8 +1533,7 @@ mod tests {
     #[tokio::test]
     async fn subgraph_shared_key_does_not_authorize_connector_kinds() {
         let service =
-            service_with_split_keys("subgraph_shared_key_does_not_authorize_connector_kinds")
-                .await;
+            service_with_split_keys("subgraph_shared_key_does_not_authorize_connector_kinds").await;
         for body_json in [
             serde_json::json!([{"kind": "connector", "source": "graph.api"}]),
             serde_json::json!([{"kind": "type", "source": "graph.api", "type": "User"}]),

@@ -283,8 +283,7 @@ impl ConnectorCacheService {
             .headers()
             .contains_key(&CACHE_CONTROL)
         {
-            let cache_control = match CacheControl::try_from(request.supergraph_request.headers())
-            {
+            let cache_control = match CacheControl::try_from(request.supergraph_request.headers()) {
                 Ok(cache_control) => cache_control,
                 Err(err) => {
                     return Ok(connect::Response {
@@ -590,33 +589,31 @@ impl ConnectorCacheService {
         // Batch fetch from cache
         // Skip cache lookup if request had no-cache — we have no means of revalidating entries
         // without just performing the query, so there's no benefit to hitting the cache
-        let cache_result: Vec<Option<CacheEntry>> = if request_cache_control
-            .as_ref()
-            .is_some_and(|c| c.no_cache())
-        {
-            std::iter::repeat_n(None, cache_keys.len()).collect()
-        } else {
-            let keys_for_fetch: Vec<&str> =
-                cache_keys.iter().map(|k| k.cache_key.as_str()).collect();
-            let cache_result = storage.fetch_multiple(&keys_for_fetch, &source_name).await;
+        let cache_result: Vec<Option<CacheEntry>> =
+            if request_cache_control.as_ref().is_some_and(|c| c.no_cache()) {
+                std::iter::repeat_n(None, cache_keys.len()).collect()
+            } else {
+                let keys_for_fetch: Vec<&str> =
+                    cache_keys.iter().map(|k| k.cache_key.as_str()).collect();
+                let cache_result = storage.fetch_multiple(&keys_for_fetch, &source_name).await;
 
-            match cache_result {
-                Ok(res) => res
-                    .into_iter()
-                    .map(|v| match v {
-                        Some(v) if v.control.can_use() => Some(v),
-                        _ => None,
-                    })
-                    .collect(),
-                Err(err) => {
-                    if !err.is_row_not_found() {
-                        Span::current().mark_as_error(format!("cannot get cache entry: {err}"));
-                        tracing::warn!(error = %err, "cannot get connector cache entries");
+                match cache_result {
+                    Ok(res) => res
+                        .into_iter()
+                        .map(|v| match v {
+                            Some(v) if v.control.can_use() => Some(v),
+                            _ => None,
+                        })
+                        .collect(),
+                    Err(err) => {
+                        if !err.is_row_not_found() {
+                            Span::current().mark_as_error(format!("cannot get cache entry: {err}"));
+                            tracing::warn!(error = %err, "cannot get connector cache entries");
+                        }
+                        std::iter::repeat_n(None, cache_keys.len()).collect()
                     }
-                    std::iter::repeat_n(None, cache_keys.len()).collect()
                 }
-            }
-        };
+            };
 
         // Filter representations: remove cached ones
         let mut new_representations: Vec<Value> = Vec::new();
@@ -1252,8 +1249,7 @@ impl ConnectorRequestCacheService {
             .headers()
             .contains_key(&CACHE_CONTROL)
         {
-            let cache_control = match CacheControl::try_from(request.supergraph_request.headers())
-            {
+            let cache_control = match CacheControl::try_from(request.supergraph_request.headers()) {
                 Ok(cache_control) => cache_control,
                 Err(err) => {
                     let message = format!("cannot get cache-control header: {err}");
@@ -1434,9 +1430,7 @@ impl ConnectorRequestCacheService {
         // Try cache lookup
         // Skip cache lookup if request had no-cache — we have no means of revalidating entries
         // without just performing the query, so there's no benefit to hitting the cache
-        let skip_cache_lookup = request_cache_control
-            .as_ref()
-            .is_some_and(|c| c.no_cache());
+        let skip_cache_lookup = request_cache_control.as_ref().is_some_and(|c| c.no_cache());
 
         let lookup_span = tracing::info_span!(
             "response_cache.lookup",
@@ -1738,7 +1732,10 @@ fn record_connector_cache_control(
     });
 }
 
-fn get_connector_cache_control(context: &Context, connector_synthetic_name: &str) -> Option<CacheControl> {
+fn get_connector_cache_control(
+    context: &Context,
+    connector_synthetic_name: &str,
+) -> Option<CacheControl> {
     context.extensions().with_lock(|lock| {
         lock.get::<ConnectorCacheControls>()
             .and_then(|map| map.0.get(connector_synthetic_name).cloned())
@@ -1756,11 +1753,9 @@ fn connector_response_cache_control(
     response: &connector::request_service::Response,
     connector_ttl: Duration,
 ) -> Option<CacheControl> {
-    let Ok(
-        apollo_federation::connectors::runtime::http_json_transport::TransportResponse::Http(
-            http_response,
-        ),
-    ) = &response.transport_result
+    let Ok(apollo_federation::connectors::runtime::http_json_transport::TransportResponse::Http(
+        http_response,
+    )) = &response.transport_result
     else {
         return None;
     };
@@ -1937,7 +1932,12 @@ fn connector_key_inputs(
         values.sort();
         headers_obj.insert(
             ByteString::from(name.as_str()),
-            Value::Array(values.into_iter().map(|v| Value::String(v.into())).collect()),
+            Value::Array(
+                values
+                    .into_iter()
+                    .map(|v| Value::String(v.into()))
+                    .collect(),
+            ),
         );
     }
 

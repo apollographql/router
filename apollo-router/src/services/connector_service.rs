@@ -267,9 +267,11 @@ impl ConnectorServiceFactory {
         }
         .boxed();
         let service = tower::ServiceBuilder::new()
-            .layer(crate::layers::unconstrained_buffer::UnconstrainedBufferLayer::new(
-                crate::layers::DEFAULT_BUFFER_SIZE,
-            ))
+            .layer(
+                crate::layers::unconstrained_buffer::UnconstrainedBufferLayer::new(
+                    crate::layers::DEFAULT_BUFFER_SIZE,
+                ),
+            )
             .service(
                 plugins
                     .iter()

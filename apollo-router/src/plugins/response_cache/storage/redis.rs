@@ -1408,13 +1408,17 @@ mod tests {
             storage.insert(document3.clone(), "S2").await?;
 
             // invalidate just subgraph1
-            let num_invalidated = storage.invalidate_by_subgraph(CacheScope::Subgraph, "S1", "subgraph").await?;
+            let num_invalidated = storage
+                .invalidate_by_subgraph(CacheScope::Subgraph, "S1", "subgraph")
+                .await?;
             assert_eq!(num_invalidated, 1);
             assert!(!storage.exists("key1").await?);
             assert!(storage.exists("key2").await?);
 
             // invalidate subgraph2
-            let num_invalidated = storage.invalidate_by_subgraph(CacheScope::Subgraph, "S2", "subgraph").await?;
+            let num_invalidated = storage
+                .invalidate_by_subgraph(CacheScope::Subgraph, "S2", "subgraph")
+                .await?;
             assert_eq!(num_invalidated, 2);
             assert!(!storage.exists("key2").await?);
             assert!(!storage.exists("key3").await?);
@@ -1453,7 +1457,10 @@ mod tests {
             let n = storage
                 .invalidate_by_subgraph(CacheScope::Subgraph, name, "subgraph")
                 .await?;
-            assert_eq!(n, 1, "subgraph invalidation should delete exactly its own doc");
+            assert_eq!(
+                n, 1,
+                "subgraph invalidation should delete exactly its own doc"
+            );
             assert!(!storage.exists("subgraph-doc").await?);
             assert!(
                 storage.exists("connector-doc").await?,
@@ -1464,7 +1471,10 @@ mod tests {
             let n = storage
                 .invalidate_by_subgraph(CacheScope::Connector, name, "connector")
                 .await?;
-            assert_eq!(n, 1, "connector invalidation should delete exactly its own doc");
+            assert_eq!(
+                n, 1,
+                "connector invalidation should delete exactly its own doc"
+            );
             assert!(!storage.exists("connector-doc").await?);
 
             Ok(())
@@ -1501,7 +1511,9 @@ mod tests {
             // Subgraph type invalidation renders the subgraph-scoped internal type key.
             let subgraph_type_key = CacheTag::Type("User".to_string())
                 .to_redis_key(CacheScope::Subgraph, name)
-                .strip_prefix(&format!("version:{RESPONSE_CACHE_VERSION}:cache-tag:subgraph-{name}:key-"))
+                .strip_prefix(&format!(
+                    "version:{RESPONSE_CACHE_VERSION}:cache-tag:subgraph-{name}:key-"
+                ))
                 .unwrap()
                 .to_string();
             let counts = storage
@@ -1557,7 +1569,12 @@ mod tests {
 
             // invalidate(A, S2) will invalidate key2, NOT key1 or key3
             let invalidated = storage
-                .invalidate(CacheScope::Subgraph, vec!["A".to_string()], vec!["S2".to_string()], "cache_tag")
+                .invalidate(
+                    CacheScope::Subgraph,
+                    vec!["A".to_string()],
+                    vec!["S2".to_string()],
+                    "cache_tag",
+                )
                 .await?;
             assert_eq!(invalidated.len(), 1);
             assert_eq!(*invalidated.get("S2").unwrap(), 1);
@@ -1579,11 +1596,18 @@ mod tests {
 
             storage.insert(common_document(), "S1").await?;
 
-            let invalidated = storage.invalidate_by_subgraph(CacheScope::Subgraph, "S2", "subgraph").await?;
+            let invalidated = storage
+                .invalidate_by_subgraph(CacheScope::Subgraph, "S2", "subgraph")
+                .await?;
             assert_eq!(invalidated, 0);
 
             let invalidated = storage
-                .invalidate(CacheScope::Subgraph, vec!["key".to_string()], vec!["S2".to_string()], "cache_tag")
+                .invalidate(
+                    CacheScope::Subgraph,
+                    vec!["key".to_string()],
+                    vec!["S2".to_string()],
+                    "cache_tag",
+                )
                 .await?;
             assert_eq!(invalidated.len(), 1);
             assert_eq!(*invalidated.get("S2").unwrap(), 0);
@@ -1603,7 +1627,12 @@ mod tests {
             storage.insert(common_document(), "S1").await?;
 
             let invalidated = storage
-                .invalidate(CacheScope::Subgraph, vec!["key".to_string()], vec!["S1".to_string()], "cache_tag")
+                .invalidate(
+                    CacheScope::Subgraph,
+                    vec!["key".to_string()],
+                    vec!["S1".to_string()],
+                    "cache_tag",
+                )
                 .await?;
             assert_eq!(invalidated.len(), 1);
             assert_eq!(*invalidated.get("S1").unwrap(), 0);
@@ -1626,14 +1655,18 @@ mod tests {
             storage.insert(document, "S1").await?;
             assert!(storage.exists(&document_key).await?);
 
-            let invalidated = storage.invalidate_by_subgraph(CacheScope::Subgraph, "S1", "subgraph").await?;
+            let invalidated = storage
+                .invalidate_by_subgraph(CacheScope::Subgraph, "S1", "subgraph")
+                .await?;
             assert_eq!(invalidated, 1);
 
             assert!(!storage.exists(&document_key).await?);
 
             // re-invalidate - storage still shouldn't have the key in it, and it shouldn't
             // encounter an error
-            let invalidated = storage.invalidate_by_subgraph(CacheScope::Subgraph, "S1", "subgraph").await?;
+            let invalidated = storage
+                .invalidate_by_subgraph(CacheScope::Subgraph, "S1", "subgraph")
+                .await?;
             assert_eq!(invalidated, 0);
             assert!(!storage.exists(&document_key).await?);
 

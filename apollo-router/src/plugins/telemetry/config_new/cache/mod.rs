@@ -421,7 +421,10 @@ mod tests {
             let static_instruments = Arc::new(config.new_builtin_cache_instruments());
             let context = Context::new();
             let mut hit_miss = HashMap::new();
-            hit_miss.insert("Query".to_string(), ResponseCacheHitMiss { hit: 1, miss: 0 });
+            hit_miss.insert(
+                "Query".to_string(),
+                ResponseCacheHitMiss { hit: 1, miss: 0 },
+            );
             let _ = context.insert(
                 ResponseCacheMetricContextKey::new("connectors.api".to_string()),
                 ResponseCacheSubgraph(hit_miss),

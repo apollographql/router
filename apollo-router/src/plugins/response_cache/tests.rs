@@ -5974,7 +5974,10 @@ async fn connector_cache_hit_miss_recorded_in_context() {
         .get(CacheMetricContextKey::new("connectors.json".to_string()))
         .unwrap()
         .expect("hit/miss context entry must be recorded on a miss");
-    assert_eq!(info.0.get("Query").map(|hm| (hm.hit, hm.miss)), Some((0, 1)));
+    assert_eq!(
+        info.0.get("Query").map(|hm| (hm.hit, hm.miss)),
+        Some((0, 1))
+    );
     let _guard = wait_for_connector_cache_insert(&namespace, &miss_context).await;
 
     // Hit
@@ -5987,7 +5990,10 @@ async fn connector_cache_hit_miss_recorded_in_context() {
         .get(CacheMetricContextKey::new("connectors.json".to_string()))
         .unwrap()
         .expect("hit/miss context entry must be recorded on a hit");
-    assert_eq!(info.0.get("Query").map(|hm| (hm.hit, hm.miss)), Some((1, 0)));
+    assert_eq!(
+        info.0.get("Query").map(|hm| (hm.hit, hm.miss)),
+        Some((1, 0))
+    );
 }
 
 /// Entity path end-to-end through the real router: `products` returns stubs, `Product.title`
