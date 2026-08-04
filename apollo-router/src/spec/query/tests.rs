@@ -8620,3 +8620,136 @@ fn reformat_response_parent_fragment_does_not_contaminate_child_dedup() {
         }))
         .test();
 }
+
+// ---------------------------------------------------------------------------
+// Deterministic fragment-visit assertions.
+//
+// The tests above assert only on output, so they would still pass if the
+// deduplication cache were removed. These count fragment *applications*
+// instead, and fail if the cache stops working.
+//
+// The counter is `response.errors`: a nullable field that the fragment selects
+// but the response omits pushes exactly one "Missing field" coercion error per
+// visit (see `emit_missing_field`), and unlike a written field that error is
+// not idempotent. So `errors.len()` is the number of times the fragment body
+// was actually applied.
+// ---------------------------------------------------------------------------
+
+const VISIT_COUNT_SCHEMA: &str = "
+    type Query {
+        node: Node
+        nodes: [Node]
+        absent: String
+    }
+    type Node {
+        a: String  b: String  c: String
+    }
+";
+
+#[test]
+fn fragment_applied_once_per_frame_root() {
+    // Three spreads of F at the root, F selects `c` which the response omits.
+    // Cached: one application, one error. Uncached: three errors.
+    FormatTest::builder()
+        .schema(VISIT_COUNT_SCHEMA)
+        .query(
+            "query { ...F ...F ...F }
+            fragment F on Query { node { a } absent }",
+        )
+        .response(json!({ "node": {"a": "1"} }))
+        .expected(json!({ "node": {"a": "1"}, "absent": null }))
+        .expected_errors(json!([{
+            "message": "Missing field",
+            "path": ["absent"],
+            "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+        }]))
+        .test();
+}
+
+#[test]
+fn fragment_applied_once_per_frame_nested() {
+    // Same, one level down: exercises `apply_selection_set_cached` rather than
+    // `apply_root_selection_set_cached`.
+    FormatTest::builder()
+        .schema(VISIT_COUNT_SCHEMA)
+        .query(
+            "query { node { ...F ...F ...F } }
+            fragment F on Node { a c }",
+        )
+        .response(json!({ "node": {"a": "1"} }))
+        .expected(json!({ "node": {"a": "1", "c": null} }))
+        .expected_errors(json!([{
+            "message": "Missing field",
+            "path": ["node", "c"],
+            "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+        }]))
+        .test();
+}
+
+#[test]
+fn exponential_fragment_chain_applies_leaf_once() {
+    // L0 is reachable by 2^9 = 512 distinct spread paths. Cached, the leaf body
+    // runs once and emits one error; uncached it would emit 512.
+    FormatTest::builder()
+        .schema(VISIT_COUNT_SCHEMA)
+        .query(
+            "fragment L0 on Node { a c }
+            fragment L1 on Node { ...L0 ...L0 }
+            fragment L2 on Node { ...L1 ...L1 }
+            fragment L3 on Node { ...L2 ...L2 }
+            fragment L4 on Node { ...L3 ...L3 }
+            fragment L5 on Node { ...L4 ...L4 }
+            fragment L6 on Node { ...L5 ...L5 }
+            fragment L7 on Node { ...L6 ...L6 }
+            fragment L8 on Node { ...L7 ...L7 }
+            fragment L9 on Node { ...L8 ...L8 }
+            query { node { ...L9 } }",
+        )
+        .response(json!({ "node": {"a": "1"} }))
+        .expected(json!({ "node": {"a": "1", "c": null} }))
+        .expected_errors(json!([{
+            "message": "Missing field",
+            "path": ["node", "c"],
+            "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+        }]))
+        .test();
+}
+
+#[test]
+fn fragment_applied_once_per_list_element() {
+    // Each list element is its own frame: the fragment must be applied exactly
+    // once per element (3 errors), not once for the whole list (1) and not
+    // twice per element (6).
+    FormatTest::builder()
+        .schema(VISIT_COUNT_SCHEMA)
+        .query(
+            "query { nodes { ...F ...F } }
+            fragment F on Node { a c }",
+        )
+        .response(json!({ "nodes": [{"a": "1"}, {"a": "2"}, {"a": "3"}] }))
+        .expected(json!({
+            "nodes": [
+                {"a": "1", "c": null},
+                {"a": "2", "c": null},
+                {"a": "3", "c": null}
+            ]
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Missing field",
+                "path": ["nodes", 0, "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Missing field",
+                "path": ["nodes", 1, "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Missing field",
+                "path": ["nodes", 2, "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        ]))
+        .test();
+}

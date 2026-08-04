@@ -155,6 +155,7 @@ impl Query {
                                 coercion_errors: include_coercion_errors.then(Vec::new),
                                 nullified: Vec::new(),
                                 applied_fragments: HashSet::new(),
+                                spare_fragment_set: None,
                             };
 
                             response.data = Some(
@@ -220,6 +221,7 @@ impl Query {
                         coercion_errors: include_coercion_errors.then(Vec::new),
                         nullified: Vec::new(),
                         applied_fragments: HashSet::new(),
+                        spare_fragment_set: None,
                     };
 
                     response.data = Some(
@@ -796,13 +798,20 @@ impl Query {
         // the type under which we apply selections
         current_type: &executable::Type,
     ) -> Result<(), InvalidValue> {
-        // Snapshot the caller's applied_fragments state and give this frame a
-        // fresh empty set. Without this, a nested object's apply_selection_set
-        // call (reached via format_value → format_named_type) would clear the
-        // parent frame's dedup state mid-traversal, causing the parent to
-        // re-apply fragments it already recorded (or skip ones it hasn't seen
-        // yet because the child's entries leaked into the parent's set).
-        let saved = std::mem::take(&mut parameters.applied_fragments);
+        // Snapshot the caller's applied_fragments state and give this frame an
+        // empty set. Without this, a nested object's apply_selection_set call
+        // (reached via format_value → format_named_type) would clear the parent
+        // frame's dedup state mid-traversal, causing the parent to re-apply
+        // fragments it already recorded (or skip ones it hasn't seen yet
+        // because the child's entries leaked into the parent's set).
+        //
+        // The empty set is recycled from `spare_fragment_set` rather than freshly
+        // allocated, so a list of N sibling objects that each spread a fragment
+        // costs one allocation instead of N. A single slot (rather than one per
+        // depth) is enough for that case and, unlike a pool, never allocates any
+        // backing storage of its own.
+        let recycled = parameters.spare_fragment_set.take().unwrap_or_default();
+        let saved = std::mem::replace(&mut parameters.applied_fragments, recycled);
         let result = self.apply_selection_set_cached(
             selection_set,
             parameters,
@@ -811,7 +820,14 @@ impl Query {
             path,
             current_type,
         );
-        parameters.applied_fragments = saved;
+        let mut used = std::mem::replace(&mut parameters.applied_fragments, saved);
+        // `clear()` is O(capacity), so don't retain a set that one pathological
+        // frame grew huge — that would tax every later frame. Dropping it just
+        // restores the un-recycled behaviour for the next frame.
+        if used.capacity() <= MAX_RECYCLED_FRAGMENT_SET_CAPACITY {
+            used.clear();
+            parameters.spare_fragment_set = Some(used);
+        }
         result
     }
 
@@ -1416,6 +1432,12 @@ fn emit_missing_field<'b>(
     }
 }
 
+/// Upper bound on the capacity of an `applied_fragments` set kept in
+/// `FormatParameters::spare_fragment_set`. Real selection sets spread a handful of
+/// named fragments; anything past this is a pathological query whose oversized
+/// table we'd rather free than clear once per frame.
+const MAX_RECYCLED_FRAGMENT_SET_CAPACITY: usize = 64;
+
 /// Intermediate structure for arguments passed through the entire formatting
 struct FormatParameters<'a, 'q> {
     variables: &'a Object,
@@ -1424,10 +1446,14 @@ struct FormatParameters<'a, 'q> {
     nullified: Vec<Path>,
     schema: &'a ApiSchema,
     /// Named fragments already applied during the current selection-set frame.
-    /// Scoped per object via take/restore in `apply_selection_set`; cleared at
+    /// Scoped per object via swap/restore in `apply_selection_set`; cleared at
     /// root entry. Always consulted so convergent spreads (`...Leaf` +
     /// `...ChainA` that spreads Leaf) still deduplicate.
     applied_fragments: HashSet<&'q str>,
+    /// An emptied `applied_fragments` allocation, handed to the next frame that
+    /// needs one so that formatting a list of objects doesn't allocate a set per
+    /// element.
+    spare_fragment_set: Option<HashSet<&'q str>>,
 }
 
 impl FormatParameters<'_, '_> {
