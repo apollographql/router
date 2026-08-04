@@ -2042,15 +2042,43 @@ fn avoids_selecting_inapplicable_key_from_parent_node() {
 #[should_panic(expected = "validation should have required a key to be present")]
 fn external_on_nested_key_fields_with_cross_subgraph_requires() {
     let planner = planner!(
-        Subgraph1: include_str!(
-            "../../fixtures/external_on_nested_key_requires/subgraph1.graphql"
-        ),
-        Subgraph2: include_str!(
-            "../../fixtures/external_on_nested_key_requires/subgraph2.graphql"
-        ),
-        Subgraph3: include_str!(
-            "../../fixtures/external_on_nested_key_requires/subgraph3.graphql"
-        ),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            u: U @shareable
+          }
+
+          type U @shareable {
+            x: String
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            u: U @shareable
+          }
+
+          type U @shareable {
+            x: String
+            w: Int
+          }
+        "#,
+        Subgraph3: r#"
+          type T @key(fields: "id u { x }") {
+            id: ID!
+            u: U
+            computed: String @requires(fields: "u { w }")
+          }
+
+          type U {
+            x: String @external
+            w: Int @external
+          }
+        "#,
     );
     assert_plan!(
         &planner,
