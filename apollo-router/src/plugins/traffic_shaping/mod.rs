@@ -115,11 +115,7 @@ impl Merge for Shaping {
                     .as_ref()
                     .or(fallback.global_rate_limit.as_ref())
                     .cloned(),
-                http2: self
-                    .http2
-                    .as_ref()
-                    .or(fallback.http2.as_ref())
-                    .cloned(),
+                http2: self.http2.as_ref().or(fallback.http2.as_ref()).cloned(),
                 dns_resolution_strategy: self
                     .dns_resolution_strategy
                     .as_ref()

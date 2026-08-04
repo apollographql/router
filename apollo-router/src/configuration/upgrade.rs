@@ -401,10 +401,10 @@ fn migrate_traffic_shaping_subgraph_http2(mut config: Value) -> Value {
 
     if let Some(Value::Object(subgraphs)) = traffic_shaping.get_mut("subgraphs") {
         for shaping in subgraphs.values_mut() {
-            if let Some(obj) = shaping.as_object_mut() {
-                if let Some(v) = obj.remove("experimental_http2") {
-                    obj.entry("http2").or_insert(v);
-                }
+            if let Some(obj) = shaping.as_object_mut()
+                && let Some(v) = obj.remove("experimental_http2")
+            {
+                obj.entry("http2").or_insert(v);
             }
         }
     }

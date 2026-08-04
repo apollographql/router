@@ -876,9 +876,7 @@ mod h2c_cleartext {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_h2c_server(listener));
 
-        let client_config = Client::builder()
-            .http2(Http2Config::Http2Only)
-            .build();
+        let client_config = Client::builder().http2(Http2Config::Http2Only).build();
         let subgraph_service =
             HttpClientService::from_client_config(client_config).expect("can create a HttpService");
 
@@ -899,9 +897,7 @@ mod h2c_cleartext {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_h2c_server(listener));
 
-        let client_config = Client::builder()
-            .http2(Http2Config::Enable)
-            .build();
+        let client_config = Client::builder().http2(Http2Config::Enable).build();
         let subgraph_service =
             HttpClientService::from_client_config(client_config).expect("can create a HttpService");
 
