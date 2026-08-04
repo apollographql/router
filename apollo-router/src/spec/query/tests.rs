@@ -8273,6 +8273,51 @@ fn reformat_response_root_fragment_chain_with_distinct_leaves() {
 }
 
 #[test]
+fn reformat_response_root_direct_leaf_then_chain_deduplicated() {
+    // Regression: unique spread names at the root (`Leaf`, `ChainA`) must still
+    // record Leaf so ChainA's nested `...Leaf` is skipped. Gating dedup on
+    // "duplicate spread names in this selection set" would re-apply Leaf.
+    FormatTest::builder()
+        .schema(FRAGMENT_CACHE_SCHEMA)
+        .query(
+            "fragment Leaf on Query { a { x y } }
+            fragment ChainA on Query { ...Leaf }
+            query { ...Leaf ...ChainA c { x } }",
+        )
+        .response(json!({
+            "a": {"x": "1", "y": "2"},
+            "c": {"x": "3"}
+        }))
+        .expected(json!({
+            "a": {"x": "1", "y": "2"},
+            "c": {"x": "3"}
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_root_chain_then_direct_leaf_deduplicated() {
+    // Symmetric ordering: ChainA applies Leaf first; the later direct `...Leaf`
+    // must be skipped.
+    FormatTest::builder()
+        .schema(FRAGMENT_CACHE_SCHEMA)
+        .query(
+            "fragment Leaf on Query { a { x y } }
+            fragment ChainA on Query { ...Leaf }
+            query { ...ChainA ...Leaf c { x } }",
+        )
+        .response(json!({
+            "a": {"x": "1", "y": "2"},
+            "c": {"x": "3"}
+        }))
+        .expected(json!({
+            "a": {"x": "1", "y": "2"},
+            "c": {"x": "3"}
+        }))
+        .test();
+}
+
+#[test]
 fn reformat_response_root_fragment_non_null_field_missing() {
     // When a cached fragment selects a non-null field that is missing from
     // the response, the error propagation must still happen correctly.
@@ -8322,6 +8367,256 @@ fn reformat_response_root_fragment_mixed_with_direct_fields() {
             "c": {"x": "4"},
             "a": {"x": "1", "y": "2"},
             "b": {"x": "3"}
+        }))
+        .test();
+}
+
+// ---------------------------------------------------------------------------
+// Fragment-caching tests for `apply_selection_set`
+//
+// These validate that the named-fragment deduplication cache in
+// `apply_selection_set_cached` produces correct results on nested objects.
+// ---------------------------------------------------------------------------
+
+const NESTED_FRAGMENT_CACHE_SCHEMA: &str = "
+    type Query {
+        node: Node
+    }
+    type Node {
+        a: String  b: String  c: String
+    }
+";
+
+#[test]
+fn reformat_response_nested_fragment_spread_twice_is_idempotent() {
+    // Spreading the same fragment twice inside a nested object must produce
+    // the same result as spreading it once.
+    FormatTest::builder()
+        .schema(NESTED_FRAGMENT_CACHE_SCHEMA)
+        .query(
+            "query {
+                node { ...F ...F }
+            }
+            fragment F on Node { a b }",
+        )
+        .response(json!({
+            "node": {"a": "1", "b": "2"}
+        }))
+        .expected(json!({
+            "node": {"a": "1", "b": "2"}
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_nested_distinct_fragments_both_applied() {
+    // Two *different* named fragments inside a nested object must both be applied.
+    FormatTest::builder()
+        .schema(NESTED_FRAGMENT_CACHE_SCHEMA)
+        .query(
+            "query {
+                node { ...FA ...FB }
+            }
+            fragment FA on Node { a }
+            fragment FB on Node { b }",
+        )
+        .response(json!({
+            "node": {"a": "1", "b": "2"}
+        }))
+        .expected(json!({
+            "node": {"a": "1", "b": "2"}
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_nested_fragment_inside_inline_fragment_deduplicated() {
+    // A named fragment spread inside an inline fragment wrapper at a nested
+    // level shares the same deduplication cache.
+    FormatTest::builder()
+        .schema(NESTED_FRAGMENT_CACHE_SCHEMA)
+        .query(
+            "query {
+                node {
+                    ...F
+                    ... on Node { ...F }
+                    ... on Node { ...F }
+                }
+            }
+            fragment F on Node { a b }",
+        )
+        .response(json!({
+            "node": {"a": "1", "b": "2"}
+        }))
+        .expected(json!({
+            "node": {"a": "1", "b": "2"}
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_nested_exponential_fragment_chain_correct_output() {
+    // Chains like L0, L1 = ...L0 ...L0, L2 = ...L1 ...L1 etc. on a nested
+    // object cause exponential expansion without caching.
+    FormatTest::builder()
+        .schema(NESTED_FRAGMENT_CACHE_SCHEMA)
+        .query(
+            "fragment L0 on Node { a b }
+            fragment L1 on Node { ...L0 ...L0 }
+            fragment L2 on Node { ...L1 ...L1 }
+            fragment L3 on Node { ...L2 ...L2 }
+            fragment L4 on Node { ...L3 ...L3 }
+            query { node { ...L4 } }",
+        )
+        .response(json!({
+            "node": {"a": "av", "b": "bv"}
+        }))
+        .expected(json!({
+            "node": {"a": "av", "b": "bv"}
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_nested_fragment_mixed_with_direct_fields() {
+    // Direct field selections mixed with deduplicated fragment spreads on a
+    // nested object must all appear in output.
+    FormatTest::builder()
+        .schema(NESTED_FRAGMENT_CACHE_SCHEMA)
+        .query(
+            "query {
+                node {
+                    c
+                    ...F
+                    ...F
+                }
+            }
+            fragment F on Node { a b }",
+        )
+        .response(json!({
+            "node": {"a": "1", "b": "2", "c": "3"}
+        }))
+        .expected(json!({
+            "node": {"c": "3", "a": "1", "b": "2"}
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_nested_direct_leaf_then_chain_deduplicated() {
+    // Nested equivalent of the root Leaf+ChainA regression: unique spread
+    // names on a nested object must still record Leaf for ChainA to skip.
+    FormatTest::builder()
+        .schema(NESTED_FRAGMENT_CACHE_SCHEMA)
+        .query(
+            "fragment Leaf on Node { a b }
+            fragment ChainA on Node { ...Leaf }
+            query { node { ...Leaf ...ChainA c } }",
+        )
+        .response(json!({
+            "node": {"a": "1", "b": "2", "c": "3"}
+        }))
+        .expected(json!({
+            "node": {"a": "1", "b": "2", "c": "3"}
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_nested_chain_then_direct_leaf_deduplicated() {
+    FormatTest::builder()
+        .schema(NESTED_FRAGMENT_CACHE_SCHEMA)
+        .query(
+            "fragment Leaf on Node { a b }
+            fragment ChainA on Node { ...Leaf }
+            query { node { ...ChainA ...Leaf c } }",
+        )
+        .response(json!({
+            "node": {"a": "1", "b": "2", "c": "3"}
+        }))
+        .expected(json!({
+            "node": {"a": "1", "b": "2", "c": "3"}
+        }))
+        .test();
+}
+
+// Schema with a recursive Node type for cross-frame fragment-dedup tests.
+const RECURSIVE_NODE_SCHEMA: &str = "
+    type Query {
+        node: Node
+    }
+    type Node {
+        a: String
+        b: String
+        node: Node
+    }
+";
+
+#[test]
+fn reformat_response_child_fragment_does_not_contaminate_parent_dedup() {
+    // Regression: a nested field that spreads fragment F must not leave F
+    // recorded in the parent frame's applied_fragments set. Without the
+    // snapshot/restore fix in apply_selection_set the parent's second ...F
+    // (and the first, depending on ordering) would be silently skipped.
+    FormatTest::builder()
+        .schema(RECURSIVE_NODE_SCHEMA)
+        .query(
+            "query {
+                node {
+                    node { ...F ...F }
+                    ...F
+                    ...F
+                }
+            }
+            fragment F on Node { a b }",
+        )
+        .response(json!({
+            "node": {
+                "a": "parent-a",
+                "b": "parent-b",
+                "node": {"a": "child-a", "b": "child-b"}
+            }
+        }))
+        .expected(json!({
+            "node": {
+                "node": {"a": "child-a", "b": "child-b"},
+                "a": "parent-a",
+                "b": "parent-b"
+            }
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_parent_fragment_does_not_contaminate_child_dedup() {
+    // Regression: a parent that already inserted F into its applied_fragments
+    // before recursing into a nested field must not cause the child's ...F
+    // spread to be skipped (the child gets its own clean frame).
+    FormatTest::builder()
+        .schema(RECURSIVE_NODE_SCHEMA)
+        .query(
+            "query {
+                node {
+                    ...F
+                    ...F
+                    node { ...F ...F }
+                }
+            }
+            fragment F on Node { a b }",
+        )
+        .response(json!({
+            "node": {
+                "a": "parent-a",
+                "b": "parent-b",
+                "node": {"a": "child-a", "b": "child-b"}
+            }
+        }))
+        .expected(json!({
+            "node": {
+                "a": "parent-a",
+                "b": "parent-b",
+                "node": {"a": "child-a", "b": "child-b"}
+            }
         }))
         .test();
 }

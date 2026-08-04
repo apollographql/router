@@ -154,6 +154,7 @@ impl Query {
                                 errors: Vec::new(),
                                 coercion_errors: include_coercion_errors.then(Vec::new),
                                 nullified: Vec::new(),
+                                applied_fragments: HashSet::new(),
                             };
 
                             response.data = Some(
@@ -218,6 +219,7 @@ impl Query {
                         errors: Vec::new(),
                         coercion_errors: include_coercion_errors.then(Vec::new),
                         nullified: Vec::new(),
+                        applied_fragments: HashSet::new(),
                     };
 
                     response.data = Some(
@@ -355,7 +357,7 @@ impl Query {
     /// - Returns Err(InvalidValue) if formatting fails and error(s) have been emitted.
     fn format_value<'a: 'b, 'b>(
         &'a self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_, 'a>,
         field_type: &executable::Type,
         input: &mut Value,
         output: &mut Value,
@@ -411,7 +413,7 @@ impl Query {
     #[inline]
     fn format_non_nullable_value<'a: 'b, 'b>(
         &'a self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_, 'a>,
         field_type: &executable::Type,
         input: &mut Value,
         output: &mut Value,
@@ -491,7 +493,7 @@ impl Query {
     #[inline]
     fn format_list<'a: 'b, 'b>(
         &'a self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_, 'a>,
         input: &mut Value,
         inner_type: &executable::Type,
         output: &mut Value,
@@ -553,7 +555,7 @@ impl Query {
     #[allow(clippy::too_many_arguments)]
     fn format_named_type<'a: 'b, 'b>(
         &'a self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_, 'a>,
         field_type: &executable::Type,
         input: &mut Value,
         type_name: &Name,
@@ -787,7 +789,36 @@ impl Query {
     fn apply_selection_set<'a: 'b, 'b>(
         &'a self,
         selection_set: &'a [Selection],
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_, 'a>,
+        input: &mut Object,
+        output: &mut Object,
+        path: &mut Vec<ResponsePathElement<'b>>,
+        // the type under which we apply selections
+        current_type: &executable::Type,
+    ) -> Result<(), InvalidValue> {
+        // Snapshot the caller's applied_fragments state and give this frame a
+        // fresh empty set. Without this, a nested object's apply_selection_set
+        // call (reached via format_value → format_named_type) would clear the
+        // parent frame's dedup state mid-traversal, causing the parent to
+        // re-apply fragments it already recorded (or skip ones it hasn't seen
+        // yet because the child's entries leaked into the parent's set).
+        let saved = std::mem::take(&mut parameters.applied_fragments);
+        let result = self.apply_selection_set_cached(
+            selection_set,
+            parameters,
+            input,
+            output,
+            path,
+            current_type,
+        );
+        parameters.applied_fragments = saved;
+        result
+    }
+
+    fn apply_selection_set_cached<'a: 'b, 'b>(
+        &'a self,
+        selection_set: &'a [Selection],
+        parameters: &mut FormatParameters<'_, 'a>,
         input: &mut Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
@@ -928,7 +959,10 @@ impl Query {
                             output.insert(TYPENAME, input_type.clone());
                         }
 
-                        self.apply_selection_set(
+                        // Inline fragments share the named-fragment cache with their
+                        // parent so an anonymous `... on T { ...Frag }` wrapper still
+                        // benefits from de-duplication of `...Frag`.
+                        self.apply_selection_set_cached(
                             selection_set,
                             parameters,
                             input,
@@ -946,6 +980,16 @@ impl Query {
                     defer_label: _,
                 } => {
                     if include_skip.should_skip(parameters.variables) {
+                        continue;
+                    }
+
+                    // Skip if we have already applied this named fragment during the
+                    // current selection-set traversal. The first application wrote
+                    // every reachable field; a second application would write the
+                    // same values, so it is safe to omit. Always record — including
+                    // when the same leaf is reached via distinct chain names
+                    // (`...Leaf` then `...ChainA` where ChainA spreads Leaf).
+                    if !parameters.applied_fragments.insert(name.as_str()) {
                         continue;
                     }
 
@@ -971,7 +1015,7 @@ impl Query {
                                 output.insert(TYPENAME, input_type.clone());
                             }
 
-                            self.apply_selection_set(
+                            self.apply_selection_set_cached(
                                 selection_set,
                                 parameters,
                                 input,
@@ -995,7 +1039,7 @@ impl Query {
         &'a self,
         root_type_name: &str,
         selection_set: &'a [Selection],
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_, 'a>,
         input: &mut Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
@@ -1006,7 +1050,7 @@ impl Query {
         // written from the same input — so the second application can be skipped.
         // This collapses exponential fragment-of-fragment blowups (e.g. `L1 = ...L0
         // ...L0`, `L2 = ...L1 ...L1`, ...) into linear work.
-        let mut applied_fragments: HashSet<&'a str> = HashSet::new();
+        parameters.applied_fragments.clear();
         self.apply_root_selection_set_cached(
             root_type_name,
             selection_set,
@@ -1014,20 +1058,17 @@ impl Query {
             input,
             output,
             path,
-            &mut applied_fragments,
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn apply_root_selection_set_cached<'a: 'b, 'b>(
         &'a self,
         root_type_name: &str,
         selection_set: &'a [Selection],
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_, 'a>,
         input: &mut Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
-        applied_fragments: &mut HashSet<&'a str>,
     ) -> Result<(), InvalidValue> {
         for selection in selection_set {
             match selection {
@@ -1122,7 +1163,6 @@ impl Query {
                             input,
                             output,
                             path,
-                            applied_fragments,
                         )?;
                     }
                 }
@@ -1140,8 +1180,10 @@ impl Query {
                     // Skip if we have already applied this named fragment during the
                     // current root-selection-set traversal. The first application
                     // wrote every reachable field; a second application would write
-                    // the same values, so it is safe to omit.
-                    if !applied_fragments.insert(name.as_str()) {
+                    // the same values, so it is safe to omit. Always record — including
+                    // when the same leaf is reached via distinct chain names
+                    // (`...Leaf` then `...ChainA` where ChainA spreads Leaf).
+                    if !parameters.applied_fragments.insert(name.as_str()) {
                         continue;
                     }
 
@@ -1163,7 +1205,6 @@ impl Query {
                                 input,
                                 output,
                                 path,
-                                applied_fragments,
                             )?;
                         }
                     } else {
@@ -1376,15 +1417,20 @@ fn emit_missing_field<'b>(
 }
 
 /// Intermediate structure for arguments passed through the entire formatting
-struct FormatParameters<'a> {
+struct FormatParameters<'a, 'q> {
     variables: &'a Object,
     errors: Vec<Error>,
     coercion_errors: Option<Vec<Error>>,
     nullified: Vec<Path>,
     schema: &'a ApiSchema,
+    /// Named fragments already applied during the current selection-set frame.
+    /// Scoped per object via take/restore in `apply_selection_set`; cleared at
+    /// root entry. Always consulted so convergent spreads (`...Leaf` +
+    /// `...ChainA` that spreads Leaf) still deduplicate.
+    applied_fragments: HashSet<&'q str>,
 }
 
-impl FormatParameters<'_> {
+impl FormatParameters<'_, '_> {
     fn insert_coercion_error(&mut self, error: Error) {
         if let Some(errors) = self.coercion_errors.as_mut() {
             errors.push(error)
