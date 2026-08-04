@@ -4,7 +4,7 @@ rust = { version = "1.96.1", profile = "default" }
 "aqua:cargo-bins/cargo-binstall" = "1.21.0"
 "cargo:cargo-nextest" = "0.9.140"
 "cargo:cargo-deny" = "0.20.2"
-"cargo:cargo-edit" = "0.13.0"
+"cargo:cargo-edit" = "0.13.13"
 "cargo:cargo-about" = "0.9.1"
 "cargo:cargo-insta" = "1.38.0"
 "cargo:htmlq" = "0.4.0"
