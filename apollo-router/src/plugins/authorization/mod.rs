@@ -632,15 +632,17 @@ impl Plugin for AuthorizationPlugin {
                 let filtered = !request.query_plan.query.unauthorized.paths.is_empty();
                 let needs_authenticated = request.context.contains_key(AUTHENTICATION_REQUIRED_KEY);
                 let needs_requires_scopes = request.context.contains_key(REQUIRED_SCOPES_KEY);
+                let needs_policies = request.context.contains_key(REQUIRED_POLICIES_KEY);
 
-                if needs_authenticated || needs_requires_scopes {
+                if needs_authenticated || needs_requires_scopes || needs_policies {
                     u64_counter!(
                         "apollo.router.operations.authorization",
                         "Number of subgraph requests requiring authorization",
                         1,
                         authorization.filtered = filtered,
                         authorization.needs_authenticated = needs_authenticated,
-                        authorization.needs_requires_scopes = needs_requires_scopes
+                        authorization.needs_requires_scopes = needs_requires_scopes,
+                        authorization.needs_policies = needs_policies
                     );
                 }
 
