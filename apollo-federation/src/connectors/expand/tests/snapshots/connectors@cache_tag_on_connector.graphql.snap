@@ -19,91 +19,107 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/cache_t
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_template: Some(
-                StringTemplate {
+        transport: Some(
+            HttpJsonTransport {
+                source_template: Some(
+                    StringTemplate {
+                        parts: [
+                            Constant(
+                                Constant {
+                                    value: "http://example",
+                                    location: 0..14,
+                                },
+                            ),
+                        ],
+                    },
+                ),
+                connect_template: StringTemplate {
                     parts: [
                         Constant(
                             Constant {
-                                value: "http://example",
-                                location: 0..14,
+                                value: "/users",
+                                location: 0..6,
                             },
                         ),
                     ],
                 },
-            ),
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "/users",
-                            location: 0..6,
-                        },
-                    ),
-                ],
+                method: Get,
+                headers: [],
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: [],
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
                     selections: [
                         NamedSelection {
                             prefix: None,
-                            path: PathSelection {
-                                path: WithRange {
-                                    node: Key(
-                                        WithRange {
-                                            node: Field(
-                                                "id",
+                            path: WithRange {
+                                node: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Key(
+                                                WithRange {
+                                                    node: Field(
+                                                        "id",
+                                                    ),
+                                                    range: Some(
+                                                        0..2,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        2..2,
+                                                    ),
+                                                },
                                             ),
                                             range: Some(
                                                 0..2,
                                             ),
                                         },
-                                        WithRange {
-                                            node: Empty,
-                                            range: Some(
-                                                2..2,
-                                            ),
-                                        },
-                                    ),
-                                    range: Some(
-                                        0..2,
-                                    ),
-                                },
+                                    },
+                                ),
+                                range: Some(
+                                    0..2,
+                                ),
                             },
                         },
                         NamedSelection {
                             prefix: None,
-                            path: PathSelection {
-                                path: WithRange {
-                                    node: Key(
-                                        WithRange {
-                                            node: Field(
-                                                "name",
+                            path: WithRange {
+                                node: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Key(
+                                                WithRange {
+                                                    node: Field(
+                                                        "name",
+                                                    ),
+                                                    range: Some(
+                                                        3..7,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        7..7,
+                                                    ),
+                                                },
                                             ),
                                             range: Some(
                                                 3..7,
                                             ),
                                         },
-                                        WithRange {
-                                            node: Empty,
-                                            range: Some(
-                                                7..7,
-                                            ),
-                                        },
-                                    ),
-                                    range: Some(
-                                        3..7,
-                                    ),
-                                },
+                                    },
+                                ),
+                                range: Some(
+                                    3..7,
+                                ),
                             },
                         },
                     ],
@@ -154,91 +170,107 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/cache_t
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_template: Some(
-                StringTemplate {
+        transport: Some(
+            HttpJsonTransport {
+                source_template: Some(
+                    StringTemplate {
+                        parts: [
+                            Constant(
+                                Constant {
+                                    value: "http://example",
+                                    location: 0..14,
+                                },
+                            ),
+                        ],
+                    },
+                ),
+                connect_template: StringTemplate {
                     parts: [
                         Constant(
                             Constant {
-                                value: "http://example",
-                                location: 0..14,
+                                value: "/products",
+                                location: 0..9,
                             },
                         ),
                     ],
                 },
-            ),
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "/products",
-                            location: 0..9,
-                        },
-                    ),
-                ],
+                method: Get,
+                headers: [],
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: [],
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
                     selections: [
                         NamedSelection {
                             prefix: None,
-                            path: PathSelection {
-                                path: WithRange {
-                                    node: Key(
-                                        WithRange {
-                                            node: Field(
-                                                "id",
+                            path: WithRange {
+                                node: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Key(
+                                                WithRange {
+                                                    node: Field(
+                                                        "id",
+                                                    ),
+                                                    range: Some(
+                                                        0..2,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        2..2,
+                                                    ),
+                                                },
                                             ),
                                             range: Some(
                                                 0..2,
                                             ),
                                         },
-                                        WithRange {
-                                            node: Empty,
-                                            range: Some(
-                                                2..2,
-                                            ),
-                                        },
-                                    ),
-                                    range: Some(
-                                        0..2,
-                                    ),
-                                },
+                                    },
+                                ),
+                                range: Some(
+                                    0..2,
+                                ),
                             },
                         },
                         NamedSelection {
                             prefix: None,
-                            path: PathSelection {
-                                path: WithRange {
-                                    node: Key(
-                                        WithRange {
-                                            node: Field(
-                                                "title",
+                            path: WithRange {
+                                node: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Key(
+                                                WithRange {
+                                                    node: Field(
+                                                        "title",
+                                                    ),
+                                                    range: Some(
+                                                        3..8,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        8..8,
+                                                    ),
+                                                },
                                             ),
                                             range: Some(
                                                 3..8,
                                             ),
                                         },
-                                        WithRange {
-                                            node: Empty,
-                                            range: Some(
-                                                8..8,
-                                            ),
-                                        },
-                                    ),
-                                    range: Some(
-                                        3..8,
-                                    ),
-                                },
+                                    },
+                                ),
+                                range: Some(
+                                    3..8,
+                                ),
                             },
                         },
                     ],
