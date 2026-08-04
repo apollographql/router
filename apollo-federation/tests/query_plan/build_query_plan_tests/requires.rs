@@ -2034,3 +2034,219 @@ fn avoids_selecting_inapplicable_key_from_parent_node() {
       "###
     );
 }
+<<<<<<< HEAD
+=======
+
+// Reproduction for RH-1390: router panics at planning time when @external
+// appears on nested @key fields combined with cross-subgraph @requires.
+// New versions of composition should reject this schema in the satisfibility check.
+#[test]
+#[should_panic(expected = "validation should have required a key to be present")]
+fn external_on_nested_key_fields_with_cross_subgraph_requires() {
+    let planner = planner!(
+        Subgraph1: include_str!(
+            "../../fixtures/external_on_nested_key_requires/subgraph1.graphql"
+        ),
+        Subgraph2: include_str!(
+            "../../fixtures/external_on_nested_key_requires/subgraph2.graphql"
+        ),
+        Subgraph3: include_str!(
+            "../../fixtures/external_on_nested_key_requires/subgraph3.graphql"
+        ),
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            t {
+              computed
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          todo
+        }
+      "###
+    );
+}
+
+/// The @requires here can only be resolved by first jumping to Subgraph2 to translate
+/// `SubEntity.id1` into `id2`, because Subgraph3's `Entity` key is `subEntity { id2 }`. That makes
+/// the key-resolution *conditions* get fetched at `unionField.subEntity`, which is *deeper* in the
+/// response than the `Entity` needing the @requires (at `unionField`). The key fetch node therefore
+/// has no derivable "path in parent" relative to that condition node, and several places used to
+/// mishandle the resulting absent path: the planner first computed a reversed (and invalid) path,
+/// then silently dropped the condition fetch nodes, which ordered the @requires fetch before the
+/// fetch producing the required field.
+///
+/// The expected plan below bounces Subgraph2 -> Subgraph3 -> Subgraph2 -> Subgraph3, which looks
+/// redundant but is the minimum this schema allows. Each hop unlocks the next, in a strictly linear
+/// chain (this is the same shape as `it_handles_simple_require_chain`, just spread over more
+/// subgraphs):
+///   1. Subgraph1 is the only subgraph with `Query.unionField`, and gives us `subEntity { id1 }`.
+///   2. Subgraph2 turns `id1` into `id2`: Subgraph3's `Entity` key is `subEntity { id2 }`, Subgraph1
+///      only knows `id1`, and Subgraph2 is the only subgraph declaring both keys.
+///   3. Subgraph3 gives us `requiredSubEntity { id2 }`. `requiredSubEntity` is declared *only* in
+///      Subgraph3, so there is no way to know *which* `SubEntity` the @requires refers to without
+///      first asking Subgraph3 -- hence the jump into Subgraph3 before the required field exists.
+///   4. Subgraph2 resolves `requiredField` on it. Subgraph3 declares that field `@external` on a
+///      `resolvable: false` key, so Subgraph3 cannot resolve it itself.
+///   5. Subgraph3 finally resolves `requiringField`, now that it has both the key (2) and the
+///      @requires data (4).
+///
+/// Note also that fetch 3 re-selects `subEntity { id2 }` in its output even though fetch 2 already
+/// fetched exactly that at `unionField.subEntity`. That is `add_post_require_inputs()` adding the
+/// key needed to resume after the @requires to the pre-@requires node unconditionally: as its
+/// comment notes, it cannot cheaply prove the key is already selected, so it adds it and accepts a
+/// no-op when it was. It costs no extra round trip, only a slightly larger response.
+#[test]
+fn handles_requires_when_key_conditions_are_fetched_below_the_entity() {
+    let planner = planner!(
+        Subgraph1: r#"
+            union Union = Entity | Dummy
+
+            type Dummy {
+              dummy: Boolean!
+            }
+
+            type Entity @key(fields: "subEntity { id1 }") {
+              subEntity: SubEntity!
+            }
+
+            type SubEntity @key(fields: "id1") {
+              id1: ID!
+            }
+
+            type Query {
+              unionField: Union
+            }
+        "#,
+        Subgraph2: r#"
+            type SubEntity @key(fields: "id1") @key(fields: "id2") {
+              id1: ID!
+              id2: ID!
+              requiredField: Boolean!
+            }
+        "#,
+        Subgraph3: r#"
+            type Entity @key(fields: "subEntity { id2 }") {
+              subEntity: SubEntity!
+              requiredSubEntity: SubEntity!
+              requiringField: Boolean @requires(fields: "requiredSubEntity { requiredField }")
+            }
+
+            type SubEntity @key(fields: "id2", resolvable: false) {
+              id2: ID!
+              requiredField: Boolean! @external
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+            query {
+              unionField {
+                ... on Entity {
+                  requiringField
+                }
+              }
+            }
+        "#,
+        @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            unionField {
+              __typename
+              ... on Entity {
+                __typename
+                subEntity {
+                  __typename
+                  id1
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "unionField.subEntity") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on SubEntity {
+                __typename
+                id1
+              }
+            } =>
+            {
+              ... on SubEntity {
+                id2
+              }
+            }
+          },
+        },
+        Flatten(path: "unionField") {
+          Fetch(service: "Subgraph3") {
+            {
+              ... on Entity {
+                __typename
+                subEntity {
+                  id2
+                }
+              }
+            } =>
+            {
+              ... on Entity {
+                __typename
+                requiredSubEntity {
+                  __typename
+                  id2
+                }
+                subEntity {
+                  id2
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "unionField.requiredSubEntity") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on SubEntity {
+                __typename
+                id2
+              }
+            } =>
+            {
+              ... on SubEntity {
+                requiredField
+              }
+            }
+          },
+        },
+        Flatten(path: "unionField") {
+          Fetch(service: "Subgraph3") {
+            {
+              ... on Entity {
+                __typename
+                requiredSubEntity {
+                  requiredField
+                }
+                subEntity {
+                  id2
+                }
+              }
+            } =>
+            {
+              ... on Entity {
+                requiringField
+              }
+            }
+          },
+        },
+      },
+    }
+    "#
+    );
+}
+>>>>>>> 13c9e699f (fix(query-planner): handle @requires when key conditions are fetched below the entity (#9926))
