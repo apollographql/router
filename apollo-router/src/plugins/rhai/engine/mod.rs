@@ -1068,7 +1068,7 @@ mod router_plugin {
         x: &mut Request,
         om: Map,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.variables = from_dynamic(&om.into())?;
+        x.variables = from_dynamic(&om.into()).map_err(internal_error)?;
         Ok(())
     }
 
@@ -1083,7 +1083,7 @@ mod router_plugin {
         x: &mut Request,
         om: Map,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.extensions = from_dynamic(&om.into())?;
+        x.extensions = from_dynamic(&om.into()).map_err(internal_error)?;
         Ok(())
     }
 
@@ -1204,7 +1204,7 @@ mod router_plugin {
 
     #[rhai_fn(set = "data", return_raw)]
     pub(crate) fn response_data_set(x: &mut Response, om: Map) -> Result<(), Box<EvalAltResult>> {
-        x.data = from_dynamic(&om.into())?;
+        x.data = from_dynamic(&om.into()).map_err(internal_error)?;
         Ok(())
     }
 
@@ -1220,7 +1220,7 @@ mod router_plugin {
         x: &mut Response,
         value: Dynamic,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.errors = from_dynamic(&value)?;
+        x.errors = from_dynamic(&value).map_err(internal_error)?;
         Ok(())
     }
 
@@ -1235,7 +1235,7 @@ mod router_plugin {
         x: &mut Response,
         om: Map,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.extensions = from_dynamic(&om.into())?;
+        x.extensions = from_dynamic(&om.into()).map_err(internal_error)?;
         Ok(())
     }
 

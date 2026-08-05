@@ -810,9 +810,10 @@ fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
     // recursion limit - whose text describes the script's internals, so those stay redacted.
     //
     // Rhai raises `ErrorRuntime` with a string of its own in two places - a `sort` comparer that
-    // fails, and a serialization failure - and nothing in the value distinguishes those from a
-    // `throw`, so they are returned like one. Router bindings, which we do control, mark their
-    // errors instead: see `engine::internal_error`.
+    // fails, and a serialization failure in `to_dynamic` - and nothing in the value distinguishes
+    // those from a `throw`, so they are returned like one. (Its deserialization failures in
+    // `from_dynamic` are `ErrorParsing`, so they stay redacted here.) Router bindings, which we do
+    // control, mark their errors instead: see `engine::internal_error`.
     if let EvalAltResult::ErrorRuntime(thrown, pos) = inner_error {
         error_details.position = Some(pos.into());
 

@@ -27,9 +27,11 @@ struct RouterInternalError {
 
 /// Build the Rhai error to return from a failure inside the router's own Rhai bindings.
 ///
-/// Every binding must raise its errors through this helper rather than converting a string into
-/// `Box<EvalAltResult>` directly, otherwise the error text ends up in client-facing responses.
-/// `tests::bindings_raise_their_errors_through_internal_error` enforces that.
+/// Every binding must raise its errors through this helper - both the ones it builds itself, rather
+/// than converting a string into `Box<EvalAltResult>` directly, and the ones rhai's own conversions
+/// hand it already built, rather than propagating those unchanged - otherwise the error text ends up
+/// in client-facing responses. `tests::bindings_raise_their_errors_through_internal_error` enforces
+/// that.
 ///
 /// Scripts can still `catch` these errors. The caught value stringifies to the message, so
 /// `${err}` in an interpolated string reads as it always has, and exposes it as `err.message`.

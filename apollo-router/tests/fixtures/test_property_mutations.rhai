@@ -81,3 +81,11 @@ fn test_complex_property_chain(request) {
     let first = cookies[0];
     let first_cookie = first.trim();
 }
+
+// Assigns an error whose `path` is neither a key nor an index, so the router's own deserialization
+// of the script's value fails. The failure text names Rust types, so it must not reach a client.
+fn test_malformed_response_errors(response) {
+    let body = response.body;
+    body.errors = [#{ message: "boom", path: [#{}] }];
+    response.body = body;
+}

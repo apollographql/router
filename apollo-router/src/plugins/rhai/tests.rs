@@ -1351,18 +1351,72 @@ fn bindings_raise_their_errors_through_internal_error() {
         );
 
         for (index, line) in source.lines().enumerate() {
-            let produces_an_error = ["Err(", "map_err(", "ok_or(", "ok_or_else("]
+            // The `.into()` has to come after the producer to be the thing the producer is raising:
+            // an earlier one is converting an argument, as in `from_dynamic(&om.into())`.
+            let converts_into_an_error = ["Err(", "map_err(", "ok_or(", "ok_or_else("]
                 .iter()
-                .any(|producer| line.contains(producer));
+                .filter_map(|producer| line.find(producer))
+                .min()
+                .zip(line.rfind(".into()"))
+                .is_some_and(|(producer, conversion)| conversion > producer);
             assert!(
-                !(produces_an_error && line.contains(".into()")),
+                !converts_into_an_error,
                 "{path}:{} converts a value into a Rhai error. Raise it with \
                  `engine::internal_error` instead, or `process_error` will return its text to \
                  clients:\n{line}",
                 index + 1
             );
+
+            // Rhai's own conversions fail with a `Box<EvalAltResult>` already built, so a bare `?`
+            // on one raises an unmarked error without naming `EvalAltResult` or `.into()` - neither
+            // rule above sees it.
+            let converts_from_rhai = ["from_dynamic(", "to_dynamic("]
+                .iter()
+                .any(|conversion| line.contains(conversion))
+                && !line.contains("internal_error");
+            assert!(
+                !(converts_from_rhai && line.contains(")?")),
+                "{path}:{} propagates a Rhai conversion failure unchanged. Add \
+                 `.map_err(internal_error)` before the `?`, or `process_error` may return its text \
+                 to clients:\n{line}",
+                index + 1
+            );
         }
     }
+}
+
+// A setter that deserializes a script's value - `response.body.errors` here, given a path element
+// that is neither a key nor an index - fails with an error rhai built rather than one the binding
+// wrote, and its text names Rust types (`untagged enum PathElement`).
+//
+// Rhai's two serde directions do not agree on which error they raise: its serializer's
+// `Error::custom` builds `ErrorRuntime` from a plain string, which `process_error` cannot tell from
+// a `throw` and would return, while its deserializer's builds `ErrorParsing`, which stays redacted
+// whether or not the binding marks it. So the `to_dynamic` getters are the leak and the
+// `from_dynamic` setters are safe by rhai's choice rather than by ours - a choice this test pins, so
+// that if rhai aligns the two directions the setters are already marked.
+#[tokio::test]
+async fn it_redacts_deserialization_failures_in_binding_setters() {
+    let error = call_property_mutation_test(
+        "test_malformed_response_errors",
+        RhaiSupergraphResponse::default(),
+    )
+    .await
+    .expect_err("deserializing the malformed error path fails");
+
+    let processed_error = process_error(error);
+    let message = processed_error.message.expect("the failure has a message");
+    assert_eq!(message, "Internal Server Error");
+    assert_message_discloses_nothing(&message);
+
+    // The other half: what the client no longer sees still has to be available to an operator.
+    let internal_detail = processed_error
+        .internal_detail
+        .expect("the unredacted failure is kept for the logs");
+    assert!(
+        internal_detail.contains("untagged enum PathElement"),
+        "the unredacted failure has to reach the logs: {internal_detail}"
+    );
 }
 
 // Helper for calling property mutation test functions
