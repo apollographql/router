@@ -1768,7 +1768,6 @@ mod create_subgraph_services_tests {
     use std::sync::Arc;
 
     use axum::body::Body;
-    use bytes::Buf;
     use http::StatusCode;
     use http::Uri;
     use http::header::CONTENT_TYPE;
@@ -1822,7 +1821,7 @@ mod create_subgraph_services_tests {
         let bytes = router::body::into_bytes(body)
             .await
             .expect("can read request body");
-        serde_json::from_reader(bytes.reader()).expect("valid graphql request")
+        crate::graphql::Request::deserialize_from_bytes(&bytes).expect("valid graphql request")
     }
 
     fn subgraph_request(uri: Uri, subgraph_name: &str, query: &str) -> SubgraphRequest {

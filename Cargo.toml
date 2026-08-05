@@ -78,3 +78,12 @@ sha1 = "0.10.6"
 tempfile = "3.10.1"
 tokio = { version = "1.36.0", features = ["full"] }
 tower = { version = "0.5.1", features = ["full"] }
+
+# The spike's apollo-json path dependency pulls apollo-errors from its own
+# workspace by path, while this workspace pulls it from crates.io. Cargo
+# treats those as two distinct crates, so the ERROR_REGISTRY distributed
+# slice is linked twice and linkme aborts at first use. Point the registry
+# dependency at the same copy.
+[patch.crates-io]
+apollo-errors = { path = "/Users/bryn/git/apollo-platform-rs/.worktrees/RR-1055/apollo-errors/crates/apollo-errors" }
+apollo-errors-derive = { path = "/Users/bryn/git/apollo-platform-rs/.worktrees/RR-1055/apollo-errors/crates/apollo-errors-derive" }

@@ -625,7 +625,7 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
     decoder.write_all(&body_bytes).await.unwrap();
     decoder.shutdown().await.unwrap();
     let response = decoder.into_inner();
-    let graphql_resp: graphql::Response = serde_json::from_slice(&response).unwrap();
+    let graphql_resp: graphql::Response = apollo_json::from_slice(&response).unwrap();
     assert_eq!(graphql_resp, expected_response);
 
     // Get query
@@ -654,7 +654,7 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
     decoder.write_all(&body_bytes).await.unwrap();
     decoder.shutdown().await.unwrap();
     let response = decoder.into_inner();
-    let graphql_resp: graphql::Response = serde_json::from_slice(&response).unwrap();
+    let graphql_resp: graphql::Response = apollo_json::from_slice(&response).unwrap();
     assert_eq!(graphql_resp, expected_response);
 
     server.shutdown().await?;
@@ -2650,7 +2650,7 @@ async fn listening_to_unix_socket() {
     .await;
 
     assert_eq!(
-        serde_json::from_str::<graphql::Response>(&output).unwrap(),
+        apollo_json::from_str::<graphql::Response>(&output).unwrap(),
         expected_response,
     );
 
@@ -2663,7 +2663,7 @@ async fn listening_to_unix_socket() {
     .await;
 
     assert_eq!(
-        serde_json::from_str::<graphql::Response>(&output).unwrap(),
+        apollo_json::from_str::<graphql::Response>(&output).unwrap(),
         expected_response,
     );
 

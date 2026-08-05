@@ -30,40 +30,40 @@ pub struct MalformedResponseError {
 /// A graphql primary response.
 /// Used for federated and subgraph queries.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 #[non_exhaustive]
 pub struct Response {
     /// The label that was passed to the defer or stream directive for this patch.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 
     /// The response data.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<Value>,
 
     /// The path that the data should be merged at.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<Path>,
 
     /// The optional graphql errors encountered.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub errors: Vec<Error>,
 
     /// The optional graphql extensions.
-    #[serde(skip_serializing_if = "is_empty_object", default = "empty_object")]
+    #[serde(skip_serializing_if = "is_empty_object")]
     pub extensions: Value,
 
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub has_next: Option<bool>,
 
-    #[serde(skip, default)]
+    #[serde(skip)]
     pub subscribed: Option<bool>,
 
     /// Used for subscription event to compute the duration of a subscription event
-    #[serde(skip, default)]
+    #[serde(skip)]
     pub created_at: Option<Instant>,
 
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub incremental: Vec<IncrementalResponse>,
 }
 
@@ -329,27 +329,27 @@ impl Response {
 /// A graphql incremental response.
 /// Used with `@defer`
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 #[non_exhaustive]
 pub struct IncrementalResponse {
     /// The label that was passed to the defer or stream directive for this patch.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 
     /// The response data.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<Value>,
 
     /// The path that the data should be merged at.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<Path>,
 
     /// The optional graphql errors encountered.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub errors: Vec<Error>,
 
     /// The optional graphql extensions.
-    #[serde(skip_serializing_if = "is_empty_object", default = "empty_object")]
+    #[serde(skip_serializing_if = "is_empty_object")]
     pub extensions: Value,
 }
 

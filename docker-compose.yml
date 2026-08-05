@@ -17,6 +17,12 @@ services:
     security_opt:
       - no-new-privileges:true
     read_only: true
+    # The root filesystem is read-only, so give /data a tmpfs and turn off
+    # RDB snapshots: a failed background save flips Redis into MISCONF and
+    # every write is rejected until it recovers. Tests need no persistence.
+    command: ["redis-server", "--save", ""]
+    tmpfs:
+      - /data
     ports:
       - 6379:6379
 
