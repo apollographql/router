@@ -33,8 +33,8 @@ fn it_expand_supergraph() {
 /// coordinates are unique per connector, so the two indices cover exactly the
 /// same connector set, and every connector is reachable by its
 /// `ConnectId::coordinate()`. This is the index the source-aware dispatch path
-/// (`resolve_connector`, B-3) resolves against, so parity with the
-/// service-name-keyed set is load-bearing.
+/// (`resolve_connector`, B-3) resolves against, so it must stay in parity with
+/// the service-name-keyed set.
 #[test]
 fn by_coordinate_is_a_lossless_reindex() {
     glob!("schemas/expand", "*.graphql", |path| {
