@@ -1,31 +1,17 @@
 ---
 source: apollo-router/src/services/router/tests.rs
+assertion_line: 667
 expression: "(graphql_response, &subgraph_query_log)"
 ---
 (
     Response {
         label: None,
         data: Some(
-            Object({
-                "topProducts": Array([
-                    Object({
-                        "name": String(
-                            "Table",
-                        ),
-                        "reviewsForAuthor": Null,
-                    }),
-                    Object({
-                        "name": String(
-                            "Couch",
-                        ),
-                        "reviewsForAuthor": Null,
-                    }),
-                ]),
-            }),
+            Value({"topProducts":[{"name":"Table","reviewsForAuthor":null},{"name":"Couch","reviewsForAuthor":null}]}),
         ),
         path: None,
         errors: [],
-        extensions: {},
+        extensions: Value({}),
         has_next: None,
         subscribed: None,
         created_at: None,
