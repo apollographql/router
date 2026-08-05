@@ -129,23 +129,51 @@ mod requires_tests {
     fn fails_when_external_on_nested_key_fields_with_cross_subgraph_requires() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
-            type_defs: include_str!(
-                "../fixtures/external_on_nested_key_requires/subgraph1.graphql"
-            ),
+            type_defs: r#"
+              type Query {
+                t: T
+              }
+
+              type T @key(fields: "id") {
+                id: ID!
+                u: U @shareable
+              }
+
+              type U @shareable {
+                x: String
+              }
+            "#,
         };
 
         let subgraph2 = ServiceDefinition {
             name: "Subgraph2",
-            type_defs: include_str!(
-                "../fixtures/external_on_nested_key_requires/subgraph2.graphql"
-            ),
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID!
+                u: U @shareable
+              }
+
+              type U @shareable {
+                x: String
+                w: Int
+              }
+            "#,
         };
 
         let subgraph3 = ServiceDefinition {
             name: "Subgraph3",
-            type_defs: include_str!(
-                "../fixtures/external_on_nested_key_requires/subgraph3.graphql"
-            ),
+            type_defs: r#"
+              type T @key(fields: "id u { x }") {
+                id: ID!
+                u: U
+                computed: String @requires(fields: "u { w }")
+              }
+
+              type U {
+                x: String @external
+                w: Int @external
+              }
+            "#,
         };
 
         let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]);
