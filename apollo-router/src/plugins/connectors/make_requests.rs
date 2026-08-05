@@ -2486,7 +2486,14 @@ mod tests {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
-            id: ConnectId::new("connectors".into(), None, name!(Query), name!(users), None, 0),
+            id: ConnectId::new(
+                "connectors".into(),
+                None,
+                name!(Query),
+                name!(users),
+                None,
+                0,
+            ),
             transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/users".parse().unwrap(),

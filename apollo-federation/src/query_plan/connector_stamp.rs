@@ -31,8 +31,8 @@
 //! `Parallel` of per-connector fetches, each with its own sub-operation and
 //! stamped coordinate — reconstructing, in the plan, the fetch decomposition
 //! expansion used to get structurally. The unchanged Parallel/Sequence executor
-//! then fans them out. See [`split_root_field_fetch`] for the (deliberately
-//! bounded) shapes handled.
+//! then fans them out. See `split_root_field_fetch` in this module for the
+//! (deliberately bounded) shapes handled.
 //!
 //! **Scope.** Handled: root-field connectors, single field-connector entity
 //! fetches, multi-connector *root-field* merges (the split above), and
@@ -54,7 +54,6 @@ use apollo_compiler::executable::OperationType;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
-
 use shape::ShapeCase;
 
 use crate::connectors::Connector;

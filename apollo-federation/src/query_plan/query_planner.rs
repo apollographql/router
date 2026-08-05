@@ -1500,9 +1500,7 @@ type User
         use crate::Supergraph;
         use crate::query_graph::build_federated_query_graph;
 
-        let sdl = include_str!(
-            "../connectors/expand/tests/schemas/expand/steelthread.graphql"
-        );
+        let sdl = include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
 
         let supergraph = match Supergraph::new_with_router_specs(sdl) {
             Ok(s) => s,
@@ -1569,15 +1567,17 @@ type User
     /// Run: `cargo test -p apollo-federation mirage_check -- --nocapture`
     #[test]
     fn mirage_check_entity_queries_over_raw_graph() {
+        use apollo_compiler::ExecutableDocument;
+
         use crate::ApiSchemaOptions;
         use crate::Supergraph;
         use crate::query_graph::build_federated_query_graph;
-        use apollo_compiler::ExecutableDocument;
 
-        let sdl =
-            include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
+        let sdl = include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
         let supergraph = Supergraph::new_with_router_specs(sdl).unwrap();
-        let api = supergraph.to_api_schema(ApiSchemaOptions::default()).unwrap();
+        let api = supergraph
+            .to_api_schema(ApiSchemaOptions::default())
+            .unwrap();
         let graph = build_federated_query_graph(
             supergraph.schema.clone(),
             api.clone(),
@@ -1595,7 +1595,7 @@ type User
 
         // Correctness oracle: is each raw-graph plan actually semantically
         // correct, or just plausible-looking (the real mirage)?
-        let subgraphs_by_name: apollo_compiler::collections::IndexMap<_, _> = supergraph
+        let subgraphs_by_name: IndexMap<_, _> = supergraph
             .extract_subgraphs()
             .unwrap()
             .into_iter()
@@ -1603,10 +1603,10 @@ type User
             .collect();
 
         for q in [
-            "{ user(id: \"1\") { name } }",     // key: id (declared) — should plan
-            "{ user(id: \"1\") { c } }",        // c resolved by GRAPHQL via key id
-            "{ user(id: \"1\") { d } }",        // d @requires(c); key c only expansion fabricates
-            "{ user(id: \"1\") { name d } }",   // mix
+            "{ user(id: \"1\") { name } }",   // key: id (declared) — should plan
+            "{ user(id: \"1\") { c } }",      // c resolved by GRAPHQL via key id
+            "{ user(id: \"1\") { d } }",      // d @requires(c); key c only expansion fabricates
+            "{ user(id: \"1\") { name d } }", // mix
         ] {
             let doc = ExecutableDocument::parse_and_validate(
                 planner.api_schema().schema(),
@@ -1652,7 +1652,9 @@ type User
 
         let sdl = include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
         let supergraph = Supergraph::new_with_router_specs(sdl).unwrap();
-        let api = supergraph.to_api_schema(ApiSchemaOptions::default()).unwrap();
+        let api = supergraph
+            .to_api_schema(ApiSchemaOptions::default())
+            .unwrap();
         let graph = build_federated_query_graph(
             supergraph.schema.clone(),
             api.clone(),
@@ -1675,9 +1677,10 @@ type User
         use crate::query_plan::TopLevelPlanNode;
         fn collect(node: &PlanNode, out: &mut Vec<(String, String)>) {
             match node {
-                PlanNode::Fetch(f) => {
-                    out.push((f.subgraph_name.to_string(), f.operation_document.to_string()))
-                }
+                PlanNode::Fetch(f) => out.push((
+                    f.subgraph_name.to_string(),
+                    f.operation_document.to_string(),
+                )),
                 PlanNode::Sequence(s) => s.nodes.iter().for_each(|n| collect(n, out)),
                 PlanNode::Parallel(p) => p.nodes.iter().for_each(|n| collect(n, out)),
                 PlanNode::Flatten(fl) => collect(&fl.node, out),
@@ -1686,20 +1689,26 @@ type User
         }
 
         for q in [
-            "{ user(id: \"1\") { c } }",      // cross-source: needs an _entities re-entry
+            "{ user(id: \"1\") { c } }", // cross-source: needs an _entities re-entry
             "{ user(id: \"1\") { name d } }", // d @requires(c): another _entities re-entry
         ] {
-            let doc =
-                ExecutableDocument::parse_and_validate(planner.api_schema().schema(), q, "q.graphql")
-                    .unwrap();
-            let plan = planner.build_query_plan(&doc, None, Default::default()).unwrap();
+            let doc = ExecutableDocument::parse_and_validate(
+                planner.api_schema().schema(),
+                q,
+                "q.graphql",
+            )
+            .unwrap();
+            let plan = planner
+                .build_query_plan(&doc, None, Default::default())
+                .unwrap();
             eprintln!("\n===== RAW-GRAPH PLAN for {q} =====\n{plan}");
 
             let mut fetches = Vec::new();
             match &plan.node {
-                Some(TopLevelPlanNode::Fetch(f)) => {
-                    fetches.push((f.subgraph_name.to_string(), f.operation_document.to_string()))
-                }
+                Some(TopLevelPlanNode::Fetch(f)) => fetches.push((
+                    f.subgraph_name.to_string(),
+                    f.operation_document.to_string(),
+                )),
                 Some(TopLevelPlanNode::Sequence(s)) => {
                     s.nodes.iter().for_each(|n| collect(n, &mut fetches))
                 }
@@ -1743,12 +1752,13 @@ type User
         use crate::schema::FederationSchema;
         use crate::supergraph::extract_subgraphs_from_supergraph;
 
-        let sdl =
-            include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
+        let sdl = include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
 
         // (1) PLAN — over the raw, non-expanded connector graph.
         let supergraph = Supergraph::new_with_router_specs(sdl).unwrap();
-        let api = supergraph.to_api_schema(ApiSchemaOptions::default()).unwrap();
+        let api = supergraph
+            .to_api_schema(ApiSchemaOptions::default())
+            .unwrap();
         let graph = build_federated_query_graph(
             supergraph.schema.clone(),
             api.clone(),
@@ -1784,18 +1794,20 @@ type User
         let connectors: Vec<Connector> = subgraphs
             .subgraphs
             .values()
-            .flat_map(|sg| {
-                Connector::from_schema(sg.schema.schema(), &sg.name).unwrap_or_default()
-            })
+            .flat_map(|sg| Connector::from_schema(sg.schema.schema(), &sg.name).unwrap_or_default())
             .collect();
         let connector = connectors
             .iter()
             .find(|c| c.id.coordinate().contains("Query.users["))
             .expect("a connector for Query.users");
         let transport = connector.transport.as_ref().expect("http transport");
-        let (request, _problems) =
-            make_request(transport, IndexMap::default(), &http::HeaderMap::new(), &None)
-                .unwrap();
+        let (request, _problems) = make_request(
+            transport,
+            IndexMap::default(),
+            &http::HeaderMap::new(),
+            &None,
+        )
+        .unwrap();
         let TransportRequest::Http(http_req) = request else {
             panic!("expected an HTTP request");
         };
@@ -1832,13 +1844,13 @@ type User
     /// Each plan is checked for correctness against *its own* supergraph +
     /// subgraphs (the raw plan names `connectors`; the expanded plan names
     /// synthetic subgraphs), then classified:
-    ///   - `Identical`   — byte-identical plan text (won't fire across modes: the
-    ///                     two name different subgraphs; kept for completeness).
-    ///   - `Equivalent`  — text differs, but *both* plans are correct against the
-    ///                     operation → interchangeable at execution. **This is the
-    ///                     signal we want: source-aware ≡ expansion.**
-    ///   - `Different`   — plans differ and their correctness verdicts diverge.
-    ///   - `Error`       — a mode failed to produce a plan.
+    ///   - `Identical` — byte-identical plan text (won't fire across modes: the
+    ///     two name different subgraphs; kept for completeness).
+    ///   - `Equivalent` — text differs, but *both* plans are correct against the
+    ///     operation → interchangeable at execution. **This is the signal we
+    ///     want: source-aware ≡ expansion.**
+    ///   - `Different` — plans differ and their correctness verdicts diverge.
+    ///   - `Error` — a mode failed to produce a plan.
     ///
     /// This is the "option 1" evidence run: if every operation lands on
     /// `Equivalent`, that is the strongest evidence the correctness engine can
@@ -1873,11 +1885,11 @@ type User
                 "steelthread",
                 include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql"),
                 &[
-                    "{ users { id name } }",           // root-field (non-entity)
-                    "{ user(id: \"1\") { name } }",    // entity, key: id
-                    "{ user(id: \"1\") { c } }",       // cross-source resolution
-                    "{ user(id: \"1\") { d } }",       // d @requires(c)
-                    "{ user(id: \"1\") { name d } }",  // mix
+                    "{ users { id name } }",          // root-field (non-entity)
+                    "{ user(id: \"1\") { name } }",   // entity, key: id
+                    "{ user(id: \"1\") { c } }",      // cross-source resolution
+                    "{ user(id: \"1\") { d } }",      // d @requires(c)
+                    "{ user(id: \"1\") { name d } }", // mix
                 ],
             ),
             (
@@ -1957,7 +1969,9 @@ type User
             ),
             (
                 "chained_methods_v0_4",
-                include_str!("../connectors/expand/tests/schemas/expand/chained_methods_v0_4.graphql"),
+                include_str!(
+                    "../connectors/expand/tests/schemas/expand/chained_methods_v0_4.graphql"
+                ),
                 &[
                     "{ mappedActive { things { id name } } }",
                     "{ firstActive { thing { id name } } }",
@@ -1966,7 +1980,9 @@ type User
             ),
             (
                 "chained_filter_v0_4",
-                include_str!("../connectors/expand/tests/schemas/expand/chained_filter_v0_4.graphql"),
+                include_str!(
+                    "../connectors/expand/tests/schemas/expand/chained_filter_v0_4.graphql"
+                ),
                 &[
                     "{ things { things { id name } } }",
                     "{ activeThings { things { id name } } }",
@@ -1981,10 +1997,10 @@ type User
             q: &str,
             raw_planner: &QueryPlanner,
             raw_supergraph: &Supergraph,
-            raw_subgraphs: &IndexMap<std::sync::Arc<str>, crate::schema::ValidFederationSchema>,
+            raw_subgraphs: &IndexMap<Arc<str>, ValidFederationSchema>,
             exp_planner: &QueryPlanner,
             expanded_supergraph: &Supergraph,
-            exp_subgraphs: &IndexMap<std::sync::Arc<str>, crate::schema::ValidFederationSchema>,
+            exp_subgraphs: &IndexMap<Arc<str>, ValidFederationSchema>,
         ) -> Verdict {
             let doc = match ExecutableDocument::parse_and_validate(
                 raw_planner.api_schema().schema(),

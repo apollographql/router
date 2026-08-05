@@ -8,7 +8,7 @@
 //!
 //! 1. Build a query graph that treats `connectors` as **one ordinary subgraph**
 //!    (no expansion into synthetic per-connector subgraphs), and a planner over
-//!    it via [`QueryPlanner::from_query_graph`] — the spike seam that accepts a
+//!    it via `QueryPlanner::from_query_graph`, the spike seam that accepts a
 //!    pre-built graph.
 //! 2. Extract the **ground-truth connector set** from the raw subgraphs
 //!    ([`Connector::from_schema`]), so coordinates are determined authoritatively

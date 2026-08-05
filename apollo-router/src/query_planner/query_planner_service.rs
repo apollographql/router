@@ -122,13 +122,18 @@ fn federation_version_instrument(federation_version: Option<i64>) -> ObservableG
         .build()
 }
 
+/// The federation query planner, paired with the connector set that source-aware
+/// mode stamps onto plans. `None` in the default (expansion) mode, where fetches
+/// are resolved by synthetic subgraph name instead.
+type PlannerWithConnectors = (Arc<QueryPlanner>, Option<Arc<Vec<Connector>>>);
+
 impl QueryPlannerService {
     /// Build the federation query planner, plus (source-aware only) the
     /// connector set to stamp onto plans.
     fn create_planner(
         schema: &Schema,
         configuration: &Configuration,
-    ) -> Result<(Arc<QueryPlanner>, Option<Arc<Vec<Connector>>>), ServiceBuildError> {
+    ) -> Result<PlannerWithConnectors, ServiceBuildError> {
         let config = configuration.rust_query_planner_config();
 
         // Source-aware: the stored SDL is the *raw* (non-expanded) supergraph
@@ -1250,10 +1255,8 @@ mod tests {
     #[test(tokio::test)]
     async fn source_aware_planner_service_stamps_connector_fetches() {
         let sdl = include_str!("../plugins/connectors/testdata/steelthread.graphql");
-        let mut configuration = Configuration::from_str(
-            "experimental_connectors_source_aware: true",
-        )
-        .unwrap();
+        let mut configuration =
+            Configuration::from_str("experimental_connectors_source_aware: true").unwrap();
         configuration.supergraph.introspection = true;
         let configuration = Arc::new(configuration);
 

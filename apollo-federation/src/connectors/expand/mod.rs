@@ -181,9 +181,7 @@ pub fn expand_connectors(
 ///
 /// Returns `Ok(None)` when the supergraph has no connectors (mirroring
 /// [`ExpansionResult::Unchanged`]).
-pub fn unexpanded_connectors(
-    supergraph_str: &str,
-) -> Result<Option<Connectors>, FederationError> {
+pub fn unexpanded_connectors(supergraph_str: &str) -> Result<Option<Connectors>, FederationError> {
     // Same cheap short-circuit `expand_connectors` uses to skip non-connector
     // supergraphs before the expensive parse.
     let connect_url = ConnectSpec::identity();

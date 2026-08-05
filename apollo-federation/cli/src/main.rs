@@ -613,8 +613,10 @@ fn diff_operation(
             },
         )
     } else {
-        let mut config = QueryPlannerConfig::default();
-        config.generate_query_fragments = true;
+        let config = QueryPlannerConfig {
+            generate_query_fragments: true,
+            ..Default::default()
+        };
         (
             PlanMode::Expansion,
             plan_once(supergraph, subgraphs_by_name, query_doc, config),
@@ -702,11 +704,7 @@ fn cmd_plan_diff(
         } else {
             println!(
                 "corpus: {} operations — identical={} equivalent={} different={} error={}",
-                report.total,
-                report.identical,
-                report.equivalent,
-                report.different,
-                report.error
+                report.total, report.identical, report.equivalent, report.different, report.error
             );
             for diff in &report.diffs {
                 println!("  {:?}\t{}", diff.verdict, diff.operation);
@@ -732,9 +730,8 @@ fn cmd_plan_diff(
         .unwrap_or("operation")
         .to_string();
     let text = read_input(query_path);
-    let query_doc =
-        ExecutableDocument::parse_and_validate(api_schema.schema(), text, query_path)
-            .map_err(FederationError::from)?;
+    let query_doc = ExecutableDocument::parse_and_validate(api_schema.schema(), text, query_path)
+        .map_err(FederationError::from)?;
 
     let diff = diff_operation(
         &supergraph,

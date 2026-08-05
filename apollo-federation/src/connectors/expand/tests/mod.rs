@@ -61,10 +61,16 @@ fn by_coordinate_is_a_lossless_reindex() {
         // found there is the same connector (same id) as in by_service_name.
         for connector in connectors.by_service_name.values() {
             let coordinate = connector.id.coordinate();
-            let found = connectors.by_coordinate.get(&coordinate).unwrap_or_else(|| {
-                panic!("connector {coordinate} missing from by_coordinate for {path:?}")
-            });
-            assert_eq!(found.id, connector.id, "coordinate {coordinate} resolved to the wrong connector for {path:?}");
+            let found = connectors
+                .by_coordinate
+                .get(&coordinate)
+                .unwrap_or_else(|| {
+                    panic!("connector {coordinate} missing from by_coordinate for {path:?}")
+                });
+            assert_eq!(
+                found.id, connector.id,
+                "coordinate {coordinate} resolved to the wrong connector for {path:?}"
+            );
         }
     });
 }
@@ -93,7 +99,10 @@ fn unexpanded_connectors_indexes_by_coordinate_and_subgraph_name() {
     assert!(!connectors.by_coordinate.is_empty());
     for connector in connectors.by_coordinate.values() {
         assert_eq!(
-            connectors.by_coordinate.get(&connector.id.coordinate()).map(|c| &c.id),
+            connectors
+                .by_coordinate
+                .get(&connector.id.coordinate())
+                .map(|c| &c.id),
             Some(&connector.id),
         );
         assert!(

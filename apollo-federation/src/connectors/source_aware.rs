@@ -138,10 +138,19 @@ pub(crate) fn derive_condition(
     // Namespace whose references carry the key, and the type the key is rooted
     // on — identical to the mapping in `Connector::resolvable_key`.
     let (namespace, key_type_name) = match resolver {
-        EntityResolver::Explicit => (Namespace::Args, connector.id.directive.base_type_name(schema)),
+        EntityResolver::Explicit => (
+            Namespace::Args,
+            connector.id.directive.base_type_name(schema),
+        ),
         EntityResolver::Implicit => (Namespace::This, connector.id.directive.parent_type_name()),
-        EntityResolver::TypeSingle => (Namespace::This, connector.id.directive.base_type_name(schema)),
-        EntityResolver::TypeBatch => (Namespace::Batch, connector.id.directive.base_type_name(schema)),
+        EntityResolver::TypeSingle => (
+            Namespace::This,
+            connector.id.directive.base_type_name(schema),
+        ),
+        EntityResolver::TypeBatch => (
+            Namespace::Batch,
+            connector.id.directive.base_type_name(schema),
+        ),
     };
     let key_type_name = key_type_name.ok_or_else(|| {
         format!(
@@ -267,7 +276,9 @@ mod tests {
     use crate::schema::FederationSchema;
     use crate::supergraph::extract_subgraphs_from_supergraph;
 
-    fn serialize(field_set: &apollo_compiler::validation::Valid<apollo_compiler::executable::FieldSet>) -> String {
+    fn serialize(
+        field_set: &apollo_compiler::validation::Valid<apollo_compiler::executable::FieldSet>,
+    ) -> String {
         field_set.serialize().no_indent().to_string()
     }
 
@@ -504,6 +515,9 @@ mod tests {
                 }
             });
         });
-        assert!(built > 0, "no descriptors built — did the fixture glob match?");
+        assert!(
+            built > 0,
+            "no descriptors built — did the fixture glob match?"
+        );
     }
 }

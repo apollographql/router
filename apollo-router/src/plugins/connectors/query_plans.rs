@@ -305,8 +305,13 @@ mod tests {
 
         // Unknown coordinate → no connector (no silent mis-dispatch).
         assert!(
-            resolve_connector(Some("connectors:Query.missing[0]"), "connectors", &by_coordinate, &by_service_name)
-                .is_none()
+            resolve_connector(
+                Some("connectors:Query.missing[0]"),
+                "connectors",
+                &by_coordinate,
+                &by_service_name
+            )
+            .is_none()
         );
     }
 }

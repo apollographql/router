@@ -25,8 +25,8 @@
 //! Equivalence uses the `apollo-federation` `correctness` engine
 //! (`check_plan`): a plan is "correct" when its response shape is a subset of
 //! the operation's. The caller runs that check per mode and passes the result
-//! in as [`ModeOutcome::correctness`]; the classifier stays free of federation
-//! internals and thus trivially testable.
+//! in as the `correctness` field of [`ModeOutcome::Planned`]; the classifier
+//! stays free of federation internals and thus trivially testable.
 
 use serde::Serialize;
 
@@ -164,12 +164,16 @@ pub fn classify(
             )),
             None,
         ),
-        (ModeOutcome::Failed { reason }, _) => {
-            base(Verdict::Error, Some(format!("{left_mode} failed: {reason}")), None)
-        }
-        (_, ModeOutcome::Failed { reason }) => {
-            base(Verdict::Error, Some(format!("{right_mode} failed: {reason}")), None)
-        }
+        (ModeOutcome::Failed { reason }, _) => base(
+            Verdict::Error,
+            Some(format!("{left_mode} failed: {reason}")),
+            None,
+        ),
+        (_, ModeOutcome::Failed { reason }) => base(
+            Verdict::Error,
+            Some(format!("{right_mode} failed: {reason}")),
+            None,
+        ),
         (
             ModeOutcome::Planned {
                 rendered: left_plan,
@@ -200,7 +204,11 @@ pub fn classify(
                             "plans differ and could not be confirmed equivalent by the correctness engine",
                         );
                     }
-                    base(Verdict::Different, Some(detail.trim_end().to_string()), Some(diff))
+                    base(
+                        Verdict::Different,
+                        Some(detail.trim_end().to_string()),
+                        Some(diff),
+                    )
                 }
             }
         }
@@ -336,14 +344,34 @@ mod tests {
     #[test]
     fn corpus_report_tallies_verdicts() {
         let diffs = vec![
-            classify("op1", PlanMode::Expansion, PlanMode::Expansion,
-                &planned("P", Ok(())), &planned("P", Ok(()))),          // identical
-            classify("op2", PlanMode::Expansion, PlanMode::Expansion,
-                &planned("P", Ok(())), &planned("Q", Ok(()))),          // equivalent
-            classify("op3", PlanMode::Expansion, PlanMode::Expansion,
-                &planned("P", Ok(())), &planned("Q", Err("mismatch"))), // different
-            classify("op4", PlanMode::Expansion, PlanMode::SourceAware,
-                &planned("P", Ok(())), &ModeOutcome::Failed { reason: "x".into() }), // error
+            classify(
+                "op1",
+                PlanMode::Expansion,
+                PlanMode::Expansion,
+                &planned("P", Ok(())),
+                &planned("P", Ok(())),
+            ), // identical
+            classify(
+                "op2",
+                PlanMode::Expansion,
+                PlanMode::Expansion,
+                &planned("P", Ok(())),
+                &planned("Q", Ok(())),
+            ), // equivalent
+            classify(
+                "op3",
+                PlanMode::Expansion,
+                PlanMode::Expansion,
+                &planned("P", Ok(())),
+                &planned("Q", Err("mismatch")),
+            ), // different
+            classify(
+                "op4",
+                PlanMode::Expansion,
+                PlanMode::SourceAware,
+                &planned("P", Ok(())),
+                &ModeOutcome::Failed { reason: "x".into() },
+            ), // error
         ];
         let report = CorpusReport::from_diffs(diffs);
         assert_eq!(report.total, 4);
@@ -353,10 +381,13 @@ mod tests {
         assert_eq!(report.error, 1);
         assert!(!report.all_ok());
 
-        let clean = CorpusReport::from_diffs(vec![
-            classify("op", PlanMode::Expansion, PlanMode::Expansion,
-                &planned("P", Ok(())), &planned("P", Ok(()))),
-        ]);
+        let clean = CorpusReport::from_diffs(vec![classify(
+            "op",
+            PlanMode::Expansion,
+            PlanMode::Expansion,
+            &planned("P", Ok(())),
+            &planned("P", Ok(())),
+        )]);
         assert!(clean.all_ok());
     }
 }

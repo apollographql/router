@@ -642,10 +642,12 @@ mod tests {
         );
 
         // Flag on: expansion is skipped.
-        let config =
-            Configuration::from_str("experimental_connectors_source_aware: true").unwrap();
+        let config = Configuration::from_str("experimental_connectors_source_aware: true").unwrap();
         let source_aware = Schema::parse(sdl, &config).unwrap();
-        let sa_connectors = source_aware.connectors.as_ref().expect("connectors present");
+        let sa_connectors = source_aware
+            .connectors
+            .as_ref()
+            .expect("connectors present");
 
         // The raw SDL is preserved verbatim — the source-aware planner plans
         // over the original, non-expanded supergraph.
