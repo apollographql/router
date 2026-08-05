@@ -24,6 +24,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::context::PERSISTED_QUERY_ID;
 use crate::graphql::Error as GraphQLError;
+use crate::json_ext::ObjectExt;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
@@ -174,7 +175,7 @@ impl PersistedQueryExpander {
             ) {
                 let body = request.supergraph_request.body_mut();
                 body.query = Some(persisted_query_body);
-                body.extensions.remove("persistedQuery");
+                body.extensions.object_remove("persistedQuery");
                 request.context.extensions().with_lock(|lock| {
                     // Record that we actually used our ID, so we can skip the
                     // safelist check later.

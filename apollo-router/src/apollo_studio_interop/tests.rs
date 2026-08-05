@@ -50,9 +50,9 @@ fn generate_extended_refs(
     doc: &Valid<ExecutableDocument>,
     operation_name: Option<String>,
     schema: &Valid<Schema>,
-    variables: Option<&Object>,
+    variables: Option<&JsonValue>,
 ) -> ExtendedReferenceStats {
-    let default_vars = Object::new();
+    let default_vars = object([]);
     generate_extended_references(
         Arc::new(doc.clone()),
         operation_name,
@@ -70,7 +70,7 @@ fn enums_from_response(
     let config = Configuration::default();
     let schema = crate::spec::Schema::parse(schema_str, &config).unwrap();
     let query = Query::parse(query_str, operation_name, &schema, &config).unwrap();
-    let response_body: Object = serde_json::from_str(response_body_str).unwrap();
+    let response_body: JsonValue = apollo_json::from_str(response_body_str).unwrap();
 
     let mut result = ReferencedEnums::new();
     extract_enums_from_response(
@@ -168,7 +168,7 @@ async fn test_extended_references_var_enums() {
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
-    let vars: Object = serde_json::from_str(query_vars_str).unwrap();
+    let vars: JsonValue = apollo_json::from_str(query_vars_str).unwrap();
 
     let generated = generate_extended_refs(&doc, Some("EnumVarQuery".into()), &schema, Some(&vars));
     assert_extended_references!(&generated);
@@ -199,7 +199,7 @@ async fn test_extended_references_fragment_var_enums() {
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
-    let vars: Object = serde_json::from_str(query_vars_str).unwrap();
+    let vars: JsonValue = apollo_json::from_str(query_vars_str).unwrap();
 
     let generated = generate_extended_refs(
         &doc,
@@ -231,7 +231,7 @@ async fn test_extended_references_var_type() {
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
-    let vars: Object = serde_json::from_str(query_vars_str).unwrap();
+    let vars: JsonValue = apollo_json::from_str(query_vars_str).unwrap();
 
     let generated = generate_extended_refs(
         &doc,
@@ -267,7 +267,7 @@ async fn test_extended_references_var_nested_type() {
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
-    let vars: Object = serde_json::from_str(query_vars_str).unwrap();
+    let vars: JsonValue = apollo_json::from_str(query_vars_str).unwrap();
 
     let generated = generate_extended_refs(
         &doc,
@@ -286,7 +286,7 @@ async fn test_extended_references_nested_query() {
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
-    let vars: Object = serde_json::from_str(query_vars_str).unwrap();
+    let vars: JsonValue = apollo_json::from_str(query_vars_str).unwrap();
 
     let generated = generate_extended_refs(
         &doc,

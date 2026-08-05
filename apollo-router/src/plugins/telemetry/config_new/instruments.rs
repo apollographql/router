@@ -2697,10 +2697,6 @@ mod tests {
         json_ext::from_legacy(&value.into())
     }
 
-    fn json_object(map: JsonMap) -> json_ext::Object {
-        json_ext::Object::from(json_value(map))
-    }
-
     #[derive(RustEmbed)]
     #[folder = "src/plugins/telemetry/config_new/fixtures"]
     struct Asset;
@@ -2749,7 +2745,6 @@ mod tests {
             #[serde(default)]
             #[schemars(with = "Vec<serde_json::Value>")]
             errors: Vec<Error>,
-            // Skip the `Object` type alias in order to use buildstructor’s map special-casing
             #[serde(default)]
             #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
             extensions: JsonMap,
@@ -2793,7 +2788,6 @@ mod tests {
             #[serde(default)]
             #[schemars(with = "Vec<serde_json::Value>")]
             errors: Vec<Error>,
-            // Skip the `Object` type alias in order to use buildstructor’s map special-casing
             #[serde(default)]
             #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
             extensions: JsonMap,
@@ -3107,7 +3101,7 @@ mod tests {
                                         .and_label(label)
                                         .and_path(path)
                                         .errors(errors)
-                                        .extensions(json_object(extensions))
+                                        .extensions(json_value(extensions))
                                         .and_data(data.map(json_value))
                                         .headers(convert_headers(headers))
                                         .build()
@@ -3140,8 +3134,8 @@ mod tests {
                                     let graphql_request = graphql::Request::fake_builder()
                                         .query(query)
                                         .and_operation_name(operation_name)
-                                        .variables(json_object(variables))
-                                        .extensions(json_object(extensions))
+                                        .variables(json_value(variables))
+                                        .extensions(json_value(extensions))
                                         .build();
                                     let mut http_request = http::Request::new(graphql_request);
                                     *http_request.headers_mut() = convert_http_headers(headers);
@@ -3178,7 +3172,7 @@ mod tests {
                                         .status_code(StatusCode::from_u16(status).expect("status"))
                                         .and_data(data.map(json_value))
                                         .errors(errors)
-                                        .extensions(json_object(extensions))
+                                        .extensions(json_value(extensions))
                                         .headers(convert_headers(headers))
                                         .build()
                                         .unwrap();
@@ -3219,7 +3213,7 @@ mod tests {
                                         .and_data(data.map(json_value))
                                         .and_path(path)
                                         .errors(errors)
-                                        .extensions(json_object(extensions))
+                                        .extensions(json_value(extensions))
                                         .build();
                                     supergraph_instruments
                                         .as_mut()

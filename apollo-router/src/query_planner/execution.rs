@@ -20,7 +20,7 @@ use crate::axum_factory::CanceledRequest;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
-use crate::json_ext::Object;
+use crate::json_ext;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::Value;
@@ -95,7 +95,7 @@ impl QueryPlan {
                     )
                     .await
             }
-            None => (Object::default().into_value(), vec![]),
+            None => (json_ext::object([]), vec![]),
         };
         if !deferred_fetches.is_empty() {
             u64_counter!(
@@ -274,7 +274,7 @@ impl PlanNode {
                                     };
                             }
                             None => {
-                                value = Object::default().into_value();
+                                value = json_ext::object([]);
                                 errors = Vec::new();
                             }
                         };
@@ -288,7 +288,7 @@ impl PlanNode {
                         .extensions()
                         .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
                     {
-                        value = Object::default().into_value();
+                        value = json_ext::object([]);
                         errors = Vec::new();
                     } else {
                         match Variables::new(
@@ -357,7 +357,7 @@ impl PlanNode {
                                 );
                             }
                             None => {
-                                value = Object::default().into_value();
+                                value = json_ext::object([]);
                                 errors = Vec::new();
                             }
                         };
@@ -428,7 +428,7 @@ impl PlanNode {
                         } else {
                             let _ = primary_sender.send((value.clone(), errors.clone()));
                             // primary response should be an empty object
-                            value.deep_merge(Object::default().into_value());
+                            value.deep_merge(json_ext::object([]));
                         }
                     }
                     .instrument(tracing::info_span!(
@@ -475,7 +475,7 @@ impl PlanNode {
                             } else if current_dir.is_empty() {
                                 // If the condition is on the root selection set and it's the only one
                                 // For queries like {get @skip(if: true) {id name}}
-                                value.deep_merge(Object::default().into_value());
+                                value.deep_merge(json_ext::object([]));
                             }
                         } else if let Some(node) = else_clause {
                             let (v, err) = node
@@ -495,7 +495,7 @@ impl PlanNode {
                         } else if current_dir.is_empty() {
                             // If the condition is on the root selection set and it's the only one
                             // For queries like {get @include(if: false) {id name}}
-                            value.deep_merge(Object::default().into_value());
+                            value.deep_merge(json_ext::object([]));
                         }
                     }
                     .instrument(tracing::info_span!(

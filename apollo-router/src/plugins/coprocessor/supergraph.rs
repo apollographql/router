@@ -657,9 +657,9 @@ mod tests {
 
     use super::super::*;
     use super::*;
-    use crate::json_ext::Object;
     use crate::json_ext::ValueExt;
     use crate::json_ext::json_value as json;
+    use crate::json_ext::object;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
@@ -739,7 +739,7 @@ mod tests {
                 supergraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(Object::new())
+                    .extensions(object([]))
                     .context(req.context)
                     .build()
                     .unwrap(),
@@ -923,7 +923,7 @@ mod tests {
                 supergraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(Object::new())
+                    .extensions(object([]))
                     .context(req.context)
                     .build()
                     .unwrap(),
@@ -1000,7 +1000,7 @@ mod tests {
                 supergraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(Object::new())
+                    .extensions(object([]))
                     .context(req.context)
                     .build()
                     .unwrap(),

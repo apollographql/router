@@ -14,6 +14,7 @@ use tower::ServiceExt;
 use super::calculate_hash_for_query;
 use crate::graphql;
 use crate::json_ext;
+use crate::json_ext::ObjectExt;
 use crate::json_ext::ValueExt;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
@@ -131,7 +132,7 @@ where
             let original_query = body.query.take();
             let hash_value =
                 calculate_hash_for_query(original_query.as_deref().unwrap_or_default());
-            body.extensions.insert(
+            body.extensions.object_insert(
                 PERSISTED_QUERY_KEY,
                 json_ext::object([
                     (
@@ -149,7 +150,7 @@ where
                     enabled.store(false, Relaxed);
                     let body = request.subgraph_request.body_mut();
                     body.query = original_query;
-                    body.extensions.remove(PERSISTED_QUERY_KEY);
+                    body.extensions.object_remove(PERSISTED_QUERY_KEY);
                     inner.ready().await?.call(request).await
                 }
                 ApqError::PersistedQueryNotFound => {
@@ -172,7 +173,6 @@ mod tests {
     use super::*;
     use crate::Context;
     use crate::graphql::Error;
-    use crate::json_ext::Object;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
 
@@ -253,7 +253,7 @@ mod tests {
                 !req.subgraph_request
                     .body()
                     .extensions
-                    .contains_key(PERSISTED_QUERY_KEY),
+                    .object_contains_key(PERSISTED_QUERY_KEY),
                 "no persistedQuery extension expected when APQ is disabled"
             );
             responder.send_response(success_response(req.context));
@@ -278,7 +278,7 @@ mod tests {
                 req.subgraph_request
                     .body()
                     .extensions
-                    .contains_key(PERSISTED_QUERY_KEY),
+                    .object_contains_key(PERSISTED_QUERY_KEY),
                 "persistedQuery hash should be present"
             );
             responder.send_response(success_response(req.context));
@@ -306,7 +306,7 @@ mod tests {
                 req.subgraph_request
                     .body()
                     .extensions
-                    .contains_key(PERSISTED_QUERY_KEY),
+                    .object_contains_key(PERSISTED_QUERY_KEY),
                 "retry should keep the persistedQuery hash"
             );
             responder.send_response(success_response(req.context));
@@ -352,7 +352,7 @@ mod tests {
                 !req.subgraph_request
                     .body()
                     .extensions
-                    .contains_key(PERSISTED_QUERY_KEY),
+                    .object_contains_key(PERSISTED_QUERY_KEY),
                 "persistedQuery extension should be removed for PQNS retry"
             );
             responder.send_response(success_response(req.context));
@@ -384,7 +384,7 @@ mod tests {
                 !req.subgraph_request
                     .body()
                     .extensions
-                    .contains_key(PERSISTED_QUERY_KEY)
+                    .object_contains_key(PERSISTED_QUERY_KEY)
             );
             responder.send_response(success_response(req.context));
         });
@@ -403,10 +403,10 @@ mod tests {
 
     /// A request body carrying every field the APQ layer must preserve.
     fn apq_test_body() -> crate::graphql::Request {
-        let mut variables = Object::new();
-        variables.insert("id", "42");
-        let mut extensions = Object::new();
-        extensions.insert("myExt", "value");
+        let mut variables = json_ext::object([]);
+        variables.object_insert("id", "42");
+        let mut extensions = json_ext::object([]);
+        extensions.object_insert("myExt", "value");
         crate::graphql::Request {
             query: Some(APQ_TEST_QUERY.to_string()),
             operation_name: Some("MyOp".to_string()),
@@ -427,9 +427,9 @@ mod tests {
             );
             assert_eq!(body.operation_name.as_deref(), Some("MyOp"));
             assert_eq!(body.variables.get("id"), Some(json_ext::string("42")));
-            assert!(body.extensions.contains_key(PERSISTED_QUERY_KEY));
+            assert!(body.extensions.object_contains_key(PERSISTED_QUERY_KEY));
             assert!(
-                body.extensions.contains_key("myExt"),
+                body.extensions.object_contains_key("myExt"),
                 "custom extensions should be preserved alongside persistedQuery"
             );
             responder.send_response(success_response(req.context));
@@ -455,7 +455,7 @@ mod tests {
                 req.subgraph_request
                     .body()
                     .extensions
-                    .contains_key(PERSISTED_QUERY_KEY),
+                    .object_contains_key(PERSISTED_QUERY_KEY),
                 "both attempts should include the persistedQuery hash"
             );
             responder.send_response(pqnf_message_response(req.context));
@@ -463,7 +463,7 @@ mod tests {
             let (req, responder) = handle.next_request().await.unwrap();
             let body = req.subgraph_request.body();
             assert!(
-                body.extensions.contains_key(PERSISTED_QUERY_KEY),
+                body.extensions.object_contains_key(PERSISTED_QUERY_KEY),
                 "both attempts should include the persistedQuery hash"
             );
             assert_eq!(
@@ -510,11 +510,11 @@ mod tests {
                 "retry should send the original query string"
             );
             assert!(
-                !body.extensions.contains_key(PERSISTED_QUERY_KEY),
+                !body.extensions.object_contains_key(PERSISTED_QUERY_KEY),
                 "persistedQuery extension should be removed on PQNS retry"
             );
             assert!(
-                body.extensions.contains_key("myExt"),
+                body.extensions.object_contains_key("myExt"),
                 "other extensions should be preserved on retry"
             );
             responder.send_response(success_response(req.context));
@@ -645,7 +645,7 @@ mod tests {
                 serve(listener, |request| async move {
                     let graphql_request = parse_graphql_request(request.into_body()).await;
                     assert!(
-                        graphql_request.extensions.contains_key(PERSISTED_QUERY_KEY),
+                        graphql_request.extensions.object_contains_key(PERSISTED_QUERY_KEY),
                         "persistedQuery expected when APQ is enabled"
                     );
                     assert!(
@@ -675,7 +675,7 @@ mod tests {
                 serve(listener, |request| async move {
                     let graphql_request = parse_graphql_request(request.into_body()).await;
                     assert!(
-                        !graphql_request.extensions.contains_key(PERSISTED_QUERY_KEY),
+                        !graphql_request.extensions.object_contains_key(PERSISTED_QUERY_KEY),
                         "persistedQuery not expected when APQ is disabled"
                     );
                     assert!(
@@ -710,7 +710,7 @@ mod tests {
                         let n = call_count.fetch_add(1, Relaxed);
                         let graphql_request = parse_graphql_request(request.into_body()).await;
                         assert!(
-                            graphql_request.extensions.contains_key(PERSISTED_QUERY_KEY),
+                            graphql_request.extensions.object_contains_key(PERSISTED_QUERY_KEY),
                             "both attempts should include the persistedQuery hash"
                         );
 

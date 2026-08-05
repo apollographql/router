@@ -3,7 +3,8 @@ use tower::ServiceExt;
 
 use super::EnhancedClientAwareness;
 use crate::Context;
-use crate::json_ext::Object;
+use crate::json_ext::ObjectExt;
+use crate::json_ext::object;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::enhanced_client_awareness::CLIENT_LIBRARY_KEY;
@@ -45,11 +46,11 @@ async fn given_client_library_metadata_adds_values_to_context() {
         responder.send_response(SupergraphResponse::fake_builder().build().unwrap());
     });
 
-    let mut clients_map = Object::new();
-    clients_map.insert(CLIENT_LIBRARY_NAME_KEY, "apollo-general-client-library");
-    clients_map.insert(CLIENT_LIBRARY_VERSION_KEY, "0.1.0");
-    let mut extensions_map = Object::new();
-    extensions_map.insert(CLIENT_LIBRARY_KEY, clients_map.into_value());
+    let mut clients_map = object([]);
+    clients_map.object_insert(CLIENT_LIBRARY_NAME_KEY, "apollo-general-client-library");
+    clients_map.object_insert(CLIENT_LIBRARY_VERSION_KEY, "0.1.0");
+    let mut extensions_map = object([]);
+    extensions_map.object_insert(CLIENT_LIBRARY_KEY, clients_map);
 
     EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
         .await
@@ -105,10 +106,10 @@ async fn invalid_library_name_returns_bad_request() {
             .unwrap()
             .supergraph_service(mock.boxed_clone());
 
-    let mut clients_map = Object::new();
-    clients_map.insert(CLIENT_LIBRARY_NAME_KEY, r#"invalid";||"#);
-    let mut extensions_map = Object::new();
-    extensions_map.insert(CLIENT_LIBRARY_KEY, clients_map.into_value());
+    let mut clients_map = object([]);
+    clients_map.object_insert(CLIENT_LIBRARY_NAME_KEY, r#"invalid";||"#);
+    let mut extensions_map = object([]);
+    extensions_map.object_insert(CLIENT_LIBRARY_KEY, clients_map);
 
     let request = supergraph::Request::fake_builder()
         .context(Context::default())
@@ -132,10 +133,10 @@ async fn invalid_library_version_returns_bad_request() {
             .unwrap()
             .supergraph_service(mock.boxed_clone());
 
-    let mut clients_map = Object::new();
-    clients_map.insert(CLIENT_LIBRARY_VERSION_KEY, r#"invalid";||"#);
-    let mut extensions_map = Object::new();
-    extensions_map.insert(CLIENT_LIBRARY_KEY, clients_map.into_value());
+    let mut clients_map = object([]);
+    clients_map.object_insert(CLIENT_LIBRARY_VERSION_KEY, r#"invalid";||"#);
+    let mut extensions_map = object([]);
+    extensions_map.object_insert(CLIENT_LIBRARY_KEY, clients_map);
 
     let request = supergraph::Request::fake_builder()
         .context(Context::default())

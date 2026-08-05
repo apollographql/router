@@ -347,13 +347,13 @@ impl<'a> SerializeStructVariant for Blake3Serializer<'a> {
 mod tests {
     use super::*;
     use crate::json_ext;
-    use crate::json_ext::Object;
+    use crate::json_ext::ObjectExt;
 
     #[test]
     fn test_bytestring_map() {
-        let mut obj = Object::new();
-        obj.insert("test", "test");
-        obj.insert(
+        let mut obj = json_ext::object([]);
+        obj.object_insert("test", "test");
+        obj.object_insert(
             "representations",
             json_ext::array([json_ext::string("test_value"), json_ext::from_f64(1.5)]),
         );
@@ -365,9 +365,9 @@ mod tests {
         let first_hash = hasher.finalize().to_hex().to_string();
         insta::assert_snapshot!(first_hash);
 
-        let mut obj = Object::new();
-        obj.insert("test", "test");
-        obj.insert(
+        let mut obj = json_ext::object([]);
+        obj.object_insert("test", "test");
+        obj.object_insert(
             "representations",
             // Change order
             json_ext::array([json_ext::from_f64(1.5), json_ext::string("test_value")]),

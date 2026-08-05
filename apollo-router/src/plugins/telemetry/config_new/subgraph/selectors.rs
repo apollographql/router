@@ -848,6 +848,7 @@ mod test {
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
     use crate::graphql;
+    use crate::json_ext;
     use crate::plugins::response_cache;
     use crate::plugins::response_cache::plugin::CacheControls;
     use crate::plugins::telemetry::config::AttributeValue;

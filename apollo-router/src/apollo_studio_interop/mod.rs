@@ -31,8 +31,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use sha2::Digest;
 
-use crate::json_ext::Object;
 use crate::json_ext::Value as JsonValue;
+use crate::json_ext::object;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::QueryMetadata;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::spec::Fragments;
@@ -347,7 +347,7 @@ pub(crate) fn generate_usage_reporting(
         operation_name,
         schema,
         normalization_algorithm,
-        variables: &Object::new(),
+        variables: &object([]),
         fragments_map: HashMap::new(),
         fields_by_type: HashMap::new(),
         fields_by_interface: HashMap::new(),
@@ -363,7 +363,7 @@ pub(crate) fn generate_extended_references(
     doc: Arc<Valid<ExecutableDocument>>,
     operation_name: Option<String>,
     schema: &Valid<Schema>,
-    variables: &Object,
+    variables: &JsonValue,
 ) -> ExtendedReferenceStats {
     let mut generator = UsageGenerator {
         signature_doc: &doc,
@@ -386,7 +386,7 @@ pub(crate) fn generate_extended_references(
 pub(crate) fn extract_enums_from_response(
     query: Arc<Query>,
     schema: &Valid<Schema>,
-    response_body: &Object,
+    response_body: &JsonValue,
     existing_refs: &mut ReferencedEnums,
 ) {
     extract_enums_from_selection_set(
@@ -432,12 +432,12 @@ fn extract_enums_from_selection_set(
     selection_set: &[SpecSelection],
     fragments: &Fragments,
     schema: &Valid<Schema>,
-    selection_response: &Object,
+    selection_response: &JsonValue,
     result_set: &mut ReferencedEnums,
 ) {
-    let mut stack: Vec<(&[SpecSelection], Object)> =
+    let mut stack: Vec<(&[SpecSelection], JsonValue)> =
         vec![(selection_set, selection_response.clone())];
-    let mut visited_fragments: HashSet<(&str, Object)> = HashSet::new();
+    let mut visited_fragments: HashSet<(&str, JsonValue)> = HashSet::new();
 
     while let Some((selections, response)) = stack.pop() {
         for selection in selections.iter() {
@@ -460,7 +460,7 @@ fn extract_enums_from_selection_set(
                         else if field_value.kind() == JsonKind::Object
                             && let Some(selection_set) = selection_set
                         {
-                            stack.push((selection_set, Object::from(field_value)));
+                            stack.push((selection_set, field_value));
                         }
                     }
                 }
@@ -486,7 +486,7 @@ struct UsageGenerator<'a> {
     operation_name: &'a Option<String>,
     schema: &'a Valid<Schema>,
     normalization_algorithm: &'a ApolloSignatureNormalizationAlgorithm,
-    variables: &'a Object,
+    variables: &'a JsonValue,
     fragments_map: HashMap<String, Node<Fragment>>,
     fields_by_type: HashMap<String, HashSet<String>>,
     fields_by_interface: HashMap<String, bool>,

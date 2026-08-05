@@ -2133,7 +2133,7 @@ mod tests {
     use crate::graphql::Request;
     use crate::http_ext;
     use crate::json_ext;
-    use crate::json_ext::Object;
+    use crate::json_ext::ObjectExt;
     use crate::metrics::FutureMetricsExt;
     use crate::plugin::DynPlugin;
     use crate::plugin::PluginInit;
@@ -3052,8 +3052,8 @@ mod tests {
                 tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
             let driver = tokio::spawn(async move {
                 let (req, responder) = handle.next_request().await.unwrap();
-                let mut extension = Object::new();
-                extension.insert("status", "custom_error_for_propagation");
+                let mut extension = json_ext::object([]);
+                extension.object_insert("status", "custom_error_for_propagation");
                 let _ = req
                     .context
                     .insert("my_key", "my_custom_attribute_from_context".to_string())
@@ -3462,7 +3462,7 @@ mod tests {
                 SupergraphResponse::fake_builder()
                     .context(req.context)
                     .data(
-                        serde_json::to_value(graphql::Response::builder().errors(errors).build())
+                        json_ext::to_value(&graphql::Response::builder().errors(errors).build())
                             .unwrap(),
                     )
                     .build()

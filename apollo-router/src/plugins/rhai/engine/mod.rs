@@ -142,13 +142,7 @@ mod router_base64 {
 
 #[export_module]
 mod router_json {
-    pub(crate) type Object = crate::json_ext::Object;
     pub(crate) type Value = crate::json_ext::Value;
-
-    #[rhai_fn(name = "to_string", pure)]
-    pub(crate) fn object_to_string(x: &mut Object) -> String {
-        format!("{x:?}")
-    }
 
     #[rhai_fn(name = "to_string", pure)]
     pub(crate) fn value_to_string(x: &mut Value) -> String {

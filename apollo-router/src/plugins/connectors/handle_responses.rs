@@ -1668,8 +1668,7 @@ mod tests {
         let http_status = error
             .extensions
             .get("http")
-            .and_then(|v| v.as_object())
-            .and_then(|m| m.get("status"))
+            .and_then(|v| v.get("status"))
             .and_then(|v| v.as_i64());
         assert_eq!(
             http_status,
@@ -1769,7 +1768,7 @@ mod tests {
         let http = errors[0]
             .extensions
             .get("http")
-            .and_then(|v| v.as_object())
+            .filter(|http| http.is_object())
             .expect("extensions.http should be an object");
 
         assert_eq!(
@@ -1876,7 +1875,7 @@ mod tests {
         let http = errors[0]
             .extensions
             .get("http")
-            .and_then(|v| v.as_object())
+            .filter(|http| http.is_object())
             .expect("extensions.http should be an object");
 
         assert_eq!(

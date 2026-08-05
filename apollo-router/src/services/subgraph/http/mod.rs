@@ -18,6 +18,7 @@ use crate::Context;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::graphql;
+use crate::json_ext::ObjectExt;
 use crate::plugins::limits::SubgraphResponseSizeLimit;
 use crate::services::http::HttpRequest;
 use crate::services::layers::content_negotiation::ContentType;
@@ -130,7 +131,7 @@ pub(super) fn http_response_to_graphql_response(
     // Any errors directly parsed from the response likely won't yet have the service name set,
     // but we need it for telemetry error counting
     for err in &mut graphql_response.errors {
-        err.extensions.insert_if_absent("service", service_name);
+        err.extensions.object_insert_if_absent("service", service_name);
     }
 
     // Add an error for response codes that are not 2xx

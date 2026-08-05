@@ -35,7 +35,7 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
-use crate::json_ext::Object;
+use crate::json_ext;
 use crate::json_ext::Value;
 use crate::layers::InternalServiceBuilderExt as _;
 use crate::layers::ServiceBuilderExt as _;
@@ -672,7 +672,7 @@ async fn call_single_http(
                 .error(err.to_graphql_error(None))
                 .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                 .context(context)
-                .extensions(Object::default())
+                .extensions(json_ext::object([]))
                 .build());
         }
     };
@@ -855,7 +855,9 @@ mod tests {
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
+    use crate::json_ext::ObjectExt;
     use crate::json_ext::Value;
+    use crate::json_ext::ValueExt;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::limits::SubgraphResponseSizeLimit;
     use crate::plugins::subscription::CallbackMode;
@@ -1228,7 +1230,7 @@ mod tests {
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
                 .map_err(|_| "failed to parse the request body as JSON");
             let graphql_request = graphql_request.unwrap();
-            assert!(graphql_request.extensions.contains_key("subscription"));
+            assert!(graphql_request.extensions.object_contains_key("subscription"));
             let subscription_extension: crate::plugins::subscription::subgraph::SubscriptionExtension = apollo_json::from_value(
                 &graphql_request.extensions.get("subscription").unwrap(),
             )
@@ -1521,7 +1523,11 @@ mod tests {
             errors[0].message
         );
         assert_eq!(
-            errors[0].extensions.get("code").and_then(|v| v.as_str()),
+            errors[0]
+                .extensions
+                .get("code")
+                .and_then(|value| value.as_str_owned())
+                .as_deref(),
             Some("SUBREQUEST_HTTP_ERROR")
         );
     }

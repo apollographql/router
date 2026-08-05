@@ -32,7 +32,7 @@ use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::graphql::json_object::insert_member;
 use crate::json_ext;
-use crate::json_ext::Object;
+use crate::json_ext::ObjectExt;
 use crate::json_ext::Path;
 use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
@@ -140,8 +140,8 @@ impl Query {
     ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
 
-        match data.map(Object::try_from_value) {
-            Some(Ok(input)) => {
+        match data {
+            Some(input) if input.is_object() => {
                 if self.is_deferred(defer_conditions) {
                     // Get subselection from hashmap
                     match self.subselections.get(&SubSelectionKey {
@@ -149,7 +149,7 @@ impl Query {
                         defer_conditions,
                     }) {
                         Some(subselection) => {
-                            let mut output = Object::new();
+                            let mut output = json_ext::object([]);
                             let mut parameters = FormatParameters {
                                 variables: &variables,
                                 schema,
@@ -167,7 +167,7 @@ impl Query {
                                     &mut output,
                                     &mut Vec::new(),
                                 ) {
-                                    Ok(()) => output.into(),
+                                    Ok(()) => output,
                                     Err(InvalidValue) => json_ext::null(),
                                 },
                             );
@@ -191,12 +191,12 @@ impl Query {
                             return parameters.nullified;
                         }
                         None => {
-                            response.data = Some(Object::default().into());
+                            response.data = Some(json_ext::object([]));
                             return vec![];
                         }
                     }
                 } else {
-                    let mut output = Object::new();
+                    let mut output = json_ext::object([]);
 
                     let all_variables: Value = if self.operation.variables.is_empty() {
                         variables
@@ -240,7 +240,7 @@ impl Query {
                             &mut output,
                             &mut Vec::new(),
                         ) {
-                            Ok(()) => output.into(),
+                            Ok(()) => output,
                             Err(InvalidValue) => json_ext::null(),
                         },
                     );
@@ -263,7 +263,7 @@ impl Query {
                     return parameters.nullified;
                 }
             }
-            Some(Err(value)) if value.is_null() => {
+            Some(value) if value.is_null() => {
                 response.data = Some(json_ext::null());
                 return vec![];
             }
@@ -592,11 +592,8 @@ impl Query {
             _ => {}
         }
 
-        if let Ok(input_object) = Object::try_from_value(input.clone()) {
-            if let Some(input_type) = input_object
-                .get(TYPENAME)
-                .and_then(|val| val.as_str_owned())
-            {
+        if input.is_object() {
+            if let Some(input_type) = input.get(TYPENAME).and_then(|val| val.as_str_owned()) {
                 // If there is a __typename, make sure the pointed type is a valid type of the
                 // schema. Otherwise, something is wrong, and in case we might be inadvertently
                 // leaking some data for an @inacessible type or something, nullify the whole
@@ -615,12 +612,14 @@ impl Query {
             }
 
             let mut output_object = if output.is_null() {
-                Object::new()
+                json_ext::object([])
+            } else if output.is_object() {
+                output.clone()
             } else {
-                Object::try_from_value(output.clone()).map_err(|_| InvalidValue)?
+                return Err(InvalidValue);
             };
 
-            let typename = input_object
+            let typename = input
                 .get(TYPENAME)
                 .and_then(|val| val.as_str_owned())
                 .and_then(|s| apollo_compiler::ast::NamedType::new(&s).ok())
@@ -636,7 +635,7 @@ impl Query {
             if let Err(err) = self.apply_selection_set(
                 selection_set,
                 parameters,
-                &input_object,
+                input,
                 &mut output_object,
                 path,
                 current_type,
@@ -646,7 +645,7 @@ impl Query {
                 // Propagate the Err, since `apply_selection_set` already emitted an error.
                 return Err(err);
             }
-            *output = output_object.into();
+            *output = output_object;
         } else {
             parameters.nullified.push(Path::from_response_slice(path));
             *output = json_ext::null();
@@ -804,8 +803,8 @@ impl Query {
         &'a self,
         selection_set: &'a [Selection],
         parameters: &mut FormatParameters,
-        input: &Object,
-        output: &mut Object,
+        input: &Value,
+        output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
         // the type under which we apply selections
         current_type: &executable::Type,
@@ -837,7 +836,7 @@ impl Query {
                             });
 
                         if let Some(object_type) = object_type {
-                            output.insert(field_name.as_str(), object_type.name.as_str());
+                            output.object_insert(field_name.as_str(), object_type.name.as_str());
                         } else {
                             // If the __typename value does not resolve to a known object type in
                             // the schema nor the current_type is an object type, emit an error.
@@ -881,7 +880,7 @@ impl Query {
                             selection_set,
                         );
                         path.pop();
-                        output.insert(field_name.as_str(), output_value);
+                        output.object_insert(field_name.as_str(), output_value);
                         // Type-aware Err handling: non-null fields propagate Err to continue the
                         // bubble; nullable fields swallow (the child already reported, the field
                         // is already nullified).
@@ -889,8 +888,8 @@ impl Query {
                             return Err(InvalidValue);
                         }
                     } else {
-                        if !output.contains_key(field_name.as_str()) {
-                            output.insert(field_name.as_str(), ());
+                        if !output.object_contains_key(field_name.as_str()) {
+                            output.object_insert(field_name.as_str(), ());
                         }
                         // Emit error for missing field
                         emit_missing_field(parameters, field_type, field_name.as_str(), path);
@@ -941,7 +940,7 @@ impl Query {
                         if !self.is_original
                             && let Some(input_type) = input.get(TYPENAME)
                         {
-                            output.insert(TYPENAME, input_type);
+                            output.object_insert(TYPENAME, input_type);
                         }
 
                         self.apply_selection_set(
@@ -984,7 +983,7 @@ impl Query {
                             if !self.is_original
                                 && let Some(input_type) = input.get(TYPENAME)
                             {
-                                output.insert(TYPENAME, input_type);
+                                output.object_insert(TYPENAME, input_type);
                             }
 
                             self.apply_selection_set(
@@ -1012,8 +1011,8 @@ impl Query {
         root_type_name: &str,
         selection_set: &'a [Selection],
         parameters: &mut FormatParameters,
-        input: &Object,
-        output: &mut Object,
+        input: &Value,
+        output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
     ) -> Result<(), InvalidValue> {
         // Track which named fragments have already been applied during this root
@@ -1040,8 +1039,8 @@ impl Query {
         root_type_name: &str,
         selection_set: &'a [Selection],
         parameters: &mut FormatParameters,
-        input: &Object,
-        output: &mut Object,
+        input: &Value,
+        output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
         applied_fragments: &mut HashSet<&'a str>,
     ) -> Result<(), InvalidValue> {
@@ -1062,8 +1061,8 @@ impl Query {
                     let field_name_str = field_name.as_str();
 
                     if name.as_str() == TYPENAME {
-                        if !output.contains_key(field_name_str) {
-                            output.insert(field_name_str, root_type_name);
+                        if !output.object_contains_key(field_name_str) {
+                            output.object_insert(field_name_str, root_type_name);
                         }
                     } else if let Some(input_value) = input.get(field_name_str) {
                         let mut output_value = match output.get(field_name_str) {
@@ -1097,7 +1096,7 @@ impl Query {
                             selection_set,
                         );
                         path.pop();
-                        output.insert(field_name_str, output_value);
+                        output.object_insert(field_name_str, output_value);
                         // Type-aware Err handling (mirrors `apply_selection_set`): non-null fields
                         // propagate Err to continue the bubble; nullable fields swallow (child
                         // already reported, field is already nullified).
@@ -1105,7 +1104,7 @@ impl Query {
                             return Err(InvalidValue);
                         }
                     } else {
-                        output.insert(field_name_str, ());
+                        output.object_insert(field_name_str, ());
                         emit_missing_field(parameters, field_type, field_name_str, path);
                         if field_type.is_non_null() {
                             return Err(InvalidValue);
