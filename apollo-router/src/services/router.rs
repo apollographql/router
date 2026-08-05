@@ -356,7 +356,12 @@ pub struct Response {
 /// `Response` omits `data` when serializing `None`, so keeping the `null` here
 /// would add a `data` member to bodies that previously had none.
 fn response_from_chunk(bytes: Bytes) -> Result<graphql::Response, graphql::MalformedResponseError> {
-    let mut response = graphql::Response::from_bytes(bytes)?;
+    let document = apollo_json::Document::parse(bytes.to_vec()).map_err(|error| {
+        graphql::MalformedResponseError {
+            reason: error.to_string(),
+        }
+    })?;
+    let mut response = graphql::Response::from_value_lenient(document.root_handle())?;
     if response.data.as_ref().is_some_and(|data| data.is_null()) {
         response.data = None;
     }

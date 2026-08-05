@@ -245,6 +245,23 @@ impl Response {
     }
 
     pub(crate) fn from_value(value: Value) -> Result<Response, MalformedResponseError> {
+        let response = Response::from_value_lenient(value)?;
+        // Graphql spec says:
+        // If the data entry in the response is not present, the errors entry in the response must not be empty.
+        // It must contain at least one error. The errors it contains should indicate why no data was able to be returned.
+        if response.data.is_none() && response.errors.is_empty() {
+            return Err(MalformedResponseError {
+                reason: "graphql response without data must contain at least one error".to_string(),
+            });
+        }
+        Ok(response)
+    }
+
+    /// Like [`Response::from_value`] without the spec rule that a response
+    /// missing `data` carries at least one error. The response stream reads
+    /// with this: it used to read with serde, which never enforced that rule,
+    /// and tests drive it with deliberately empty fake responses.
+    pub(crate) fn from_value_lenient(value: Value) -> Result<Response, MalformedResponseError> {
         let mut object = ensure_object!(value).map_err(|error| MalformedResponseError {
             reason: error.to_string(),
         })?;
@@ -294,14 +311,6 @@ impl Response {
                 })?,
             None => vec![],
         };
-        // Graphql spec says:
-        // If the data entry in the response is not present, the errors entry in the response must not be empty.
-        // It must contain at least one error. The errors it contains should indicate why no data was able to be returned.
-        if data.is_none() && errors.is_empty() {
-            return Err(MalformedResponseError {
-                reason: "graphql response without data must contain at least one error".to_string(),
-            });
-        }
 
         Ok(Response {
             label,

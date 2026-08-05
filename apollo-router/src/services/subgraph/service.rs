@@ -249,11 +249,12 @@ pub(crate) async fn process_batch(
         parts.status,
         parts.version,
     );
-    let value: Value =
-        serde_json::from_slice(&body.ok_or(FetchError::SubrequestMalformedResponse {
-            service: service_name.clone(),
-            reason: "no body in response".to_string(),
-        })??)
+    let body = body.ok_or(FetchError::SubrequestMalformedResponse {
+        service: service_name.clone(),
+        reason: "no body in response".to_string(),
+    })??;
+    let value: Value = apollo_json::Document::parse(body.to_vec())
+        .map(|document| document.root_handle())
         .map_err(|error| FetchError::SubrequestMalformedResponse {
             service: service_name.clone(),
             reason: error.to_string(),
@@ -273,16 +274,9 @@ pub(crate) async fn process_batch(
                 reason: error.to_string(),
             })?;
 
-        // Map our Vec<u8> into Bytes
-        // Map our serde conversion error to a FetchError
-        let body = Some(
-            serde_json::to_vec(&object)
-                .map(|v| v.into())
-                .map_err(|error| FetchError::SubrequestMalformedResponse {
-                    service: service_name.clone(),
-                    reason: error.to_string(),
-                }),
-        );
+        // Each element serializes back to its own body; untouched spans are
+        // emitted verbatim.
+        let body = Some(Ok(object.to_bytes()));
 
         let graphql_response =
             http_response_to_graphql_response(service, content_type.clone(), body, &parts);
