@@ -153,43 +153,11 @@ pub(crate) trait ValueExt {
 
 impl ValueExt for Value {
     fn deep_merge(&mut self, other: Self) {
-        match (self.kind(), other.kind()) {
-            (JsonKind::Object, JsonKind::Object) | (JsonKind::Array, JsonKind::Array) => {
-                let mut builder = self.detach().edit();
-                merge_builder_root(&mut builder, other.value());
-                *self = builder.seal().root_handle();
-            }
-            (_, JsonKind::Null) => {}
-            (JsonKind::Object, JsonKind::Array) => {
-                failfast_debug!("trying to replace an object with an array");
-            }
-            (JsonKind::Array, JsonKind::Object) => {
-                failfast_debug!("trying to replace an array with an object");
-            }
-            (_, _) => {
-                *self = other;
-            }
-        }
+        *self = merge_values(self, &other, None);
     }
 
     fn type_aware_deep_merge(&mut self, other: Self, schema: &Schema) {
-        match (self.kind(), other.kind()) {
-            (JsonKind::Object, JsonKind::Object) | (JsonKind::Array, JsonKind::Array) => {
-                let mut builder = self.detach().edit();
-                type_aware_merge_builder_root(&mut builder, other.value(), schema);
-                *self = builder.seal().root_handle();
-            }
-            (_, JsonKind::Null) => {}
-            (JsonKind::Object, JsonKind::Array) => {
-                failfast_debug!("trying to replace an object with an array");
-            }
-            (JsonKind::Array, JsonKind::Object) => {
-                failfast_debug!("trying to replace an array with an object");
-            }
-            (_, _) => {
-                *self = other;
-            }
-        }
+        *self = merge_values(self, &other, Some(schema));
     }
 
     #[cfg(test)]
@@ -235,28 +203,12 @@ impl ValueExt for Value {
     #[track_caller]
     fn from_path(path: &Path, value: Value) -> Value {
         let (segments, truncated) = addressing_segments(path);
-        // A flatten cuts the path short: the original walked down leaving a null
-        // placeholder at each key and returned before writing anything, so the
-        // deepest key it reached holds null rather than `value`.
-        let leaf = if truncated {
-            NewValue::Null
-        } else {
-            NewValue::Node(value)
-        };
-        let Some(root_shape) = segments.first().map(|segment| shape_for(segment)) else {
-            // Nothing addresses a position, so the leaf is the whole value.
-            return match leaf {
-                NewValue::Node(value) => value,
-                _ => Value::default(),
-            };
-        };
-        let mut builder = match root_shape {
-            Shape::Array => DocumentBuilder::new_array(),
-            Shape::Object => DocumentBuilder::new(),
-        };
-        write_at_segments(&mut builder, &segments, leaf)
-            .expect("a freshly built container accepts the path that shaped it");
-        builder.seal().root_handle()
+        // A flatten cuts the path short: the walk left a null placeholder at
+        // each key and returned before writing, so the deepest key it reached
+        // holds null rather than `value`.
+        let leaf = if truncated { Value::default() } else { value };
+        value_with_path(&Value::default(), &segments, leaf)
+            .expect("a value built from nothing has no conflicting shape")
     }
 
     #[track_caller]
@@ -269,25 +221,7 @@ impl ValueExt for Value {
                 value = filter_type_conditions(value, conditions);
             }
         }
-
-        let segments = insert_segments(path);
-        let Some(&first) = segments.first() else {
-            *self = value;
-            return Ok(());
-        };
-
-        let root_shape = shape_for(first);
-        let mut builder = match (self.kind(), root_shape) {
-            (JsonKind::Object, Shape::Object) | (JsonKind::Array, Shape::Array) => {
-                self.detach().edit()
-            }
-            (JsonKind::Null, Shape::Object) => DocumentBuilder::new(),
-            (JsonKind::Null, Shape::Array) => DocumentBuilder::new_array(),
-            (_, shape) => return Err(shape_mismatch(shape)),
-        };
-
-        insert_at_segments(&mut builder, &segments, NewValue::Node(value))?;
-        *self = builder.seal().root_handle();
+        *self = value_with_path(self, &insert_segments(path), value)?;
         Ok(())
     }
 
@@ -512,13 +446,6 @@ enum Shape {
     Array,
 }
 
-fn shape_for(segment: &PathElement) -> Shape {
-    match segment {
-        PathElement::Index(_) => Shape::Array,
-        _ => Shape::Object,
-    }
-}
-
 /// The path elements that address a position, and whether a flatten cut the
 /// walk short. Fragments narrow a type rather than addressing a position, so
 /// they contribute nothing.
@@ -552,54 +479,6 @@ fn insert_segments(path: &Path) -> Vec<&PathElement> {
         .collect()
 }
 
-/// Writes `leaf` at `segments`, creating each missing container with the shape
-/// the following segment needs. Arrays grow with nulls up to an index that is
-/// past the end, matching what a caller merging this value into a larger
-/// response expects to find.
-///
-/// The write lands *at the last segment of its parent* rather than by
-/// descending onto the leaf and overwriting it: a cursor addresses its
-/// children, so a node cannot be made to change its own kind.
-fn write_at_segments(
-    builder: &mut DocumentBuilder,
-    segments: &[&PathElement],
-    leaf: NewValue,
-) -> Result<(), apollo_json::JsonError> {
-    let Some((&last, parents)) = segments.split_last() else {
-        return Ok(());
-    };
-    let mut cursor = builder.root_mut();
-    for (position, &segment) in parents.iter().enumerate() {
-        let next_shape = shape_for(segments[position + 1]);
-        let child = match next_shape {
-            Shape::Array => NewValue::Node(empty_array()),
-            Shape::Object => NewValue::Node(object([])),
-        };
-        cursor = match segment {
-            PathElement::Key(key, _) => {
-                if cursor.value().get(key.as_str()).is_none() {
-                    cursor.set(key.as_str(), child)?;
-                }
-                cursor.get_mut(key.as_str())?
-            }
-            &PathElement::Index(index) => {
-                grow_to(&mut cursor, index)?;
-                cursor.set(index, child)?;
-                cursor.get_mut(index)?
-            }
-            _ => unreachable!("addressing_segments yields only keys and indexes"),
-        };
-    }
-    match last {
-        PathElement::Key(key, _) => cursor.set(key.as_str(), leaf),
-        &PathElement::Index(index) => {
-            grow_to(&mut cursor, index)?;
-            cursor.set(index, leaf)
-        }
-        _ => unreachable!("addressing_segments yields only keys and indexes"),
-    }
-}
-
 /// The error a path walk reports when an existing value is the wrong shape to
 /// descend into.
 fn shape_mismatch(shape: Shape) -> FetchError {
@@ -611,282 +490,134 @@ fn shape_mismatch(shape: Shape) -> FetchError {
     }
 }
 
-/// Writes `leaf` at `segments` inside a document that already holds data.
+/// Returns `base` with `leaf` written at `segments`.
 ///
-/// Unlike [`write_at_segments`], which builds a chain from nothing, this keeps
-/// what is already there: an existing container of the needed shape is
-/// descended into, an absent or `null` slot is created, and a scalar where a
-/// container is needed is an error rather than something to overwrite.
-fn insert_at_segments(
-    builder: &mut DocumentBuilder,
+/// Every read here is on a sealed value. Writing through a
+/// [`DocumentBuilder`] would mean reading the document back as it is built,
+/// and a container that has grown is a `MutObject`/`MutArray` overlay that
+/// `ValueRef`'s `get`, `index` and `len` do not see -- lookups report members
+/// absent and lengths zero, so a write overwrites a sibling or pads an array
+/// that was already populated.
+///
+/// A missing container is created with the shape its segment addresses, an
+/// array grows with nulls up to an index past its end, and a scalar where a
+/// container is needed is an error.
+fn value_with_path(
+    base: &Value,
     segments: &[&PathElement],
-    leaf: NewValue,
-) -> Result<(), FetchError> {
-    let Some((&last, parents)) = segments.split_last() else {
-        return Ok(());
+    leaf: Value,
+) -> Result<Value, FetchError> {
+    let Some((&first, rest)) = segments.split_first() else {
+        return Ok(leaf);
     };
-    let mut cursor = builder.root_mut();
-    for (position, &segment) in parents.iter().enumerate() {
-        let needed = shape_for(segments[position + 1]);
-        let existing = match segment {
-            PathElement::Key(key, _) => cursor.value().get(key.as_str()).map(|child| child.kind()),
-            &PathElement::Index(index) => cursor.value().index(index).map(|child| child.kind()),
-            _ => unreachable!("addressing_segments yields only keys and indexes"),
-        };
-        let fresh = match (existing, needed) {
-            (Some(JsonKind::Object), Shape::Object) | (Some(JsonKind::Array), Shape::Array) => None,
-            (None | Some(JsonKind::Null), Shape::Object) => Some(NewValue::Node(object([]))),
-            (None | Some(JsonKind::Null), Shape::Array) => Some(NewValue::Node(empty_array())),
-            (Some(_), shape) => return Err(shape_mismatch(shape)),
-        };
-        cursor = match segment {
-            PathElement::Key(key, _) => {
-                if let Some(fresh) = fresh {
-                    cursor
-                        .set(key.as_str(), fresh)
-                        .map_err(|_| shape_mismatch(needed))?;
+    match first {
+        PathElement::Key(key, _) => match base.kind() {
+            JsonKind::Object => {
+                let child = base.get(key.as_str()).unwrap_or_default();
+                let mut written = Some(value_with_path(&child, rest, leaf)?);
+                let mut members = Vec::with_capacity(base.len().unwrap_or(0) + 1);
+                for (existing, value) in base.object_iter() {
+                    if existing == *key {
+                        members.push((existing, written.take().expect("a key matches once")));
+                    } else {
+                        members.push((existing, value));
+                    }
                 }
-                cursor
-                    .get_mut(key.as_str())
-                    .map_err(|_| shape_mismatch(needed))?
-            }
-            &PathElement::Index(index) => {
-                grow_to(&mut cursor, index).map_err(|_| shape_mismatch(Shape::Array))?;
-                if let Some(fresh) = fresh {
-                    cursor.set(index, fresh).map_err(|_| shape_mismatch(needed))?;
+                if let Some(appended) = written {
+                    members.push((key.clone(), appended));
                 }
-                cursor.get_mut(index).map_err(|_| shape_mismatch(needed))?
+                Ok(object(members))
             }
-            _ => unreachable!("addressing_segments yields only keys and indexes"),
-        };
-    }
-    match last {
-        PathElement::Key(key, _) => cursor
-            .set(key.as_str(), leaf)
-            .map_err(|_| shape_mismatch(Shape::Object)),
-        &PathElement::Index(index) => {
-            grow_to(&mut cursor, index).map_err(|_| shape_mismatch(Shape::Array))?;
-            cursor.set(index, leaf).map_err(|_| shape_mismatch(Shape::Array))
-        }
+            JsonKind::Null => Ok(object([(
+                key.clone(),
+                value_with_path(&Value::default(), rest, leaf)?,
+            )])),
+            _ => Err(shape_mismatch(Shape::Object)),
+        },
+        &PathElement::Index(index) => match base.kind() {
+            JsonKind::Array | JsonKind::Null => {
+                let mut items: Vec<Value> = base.array_iter().collect();
+                if items.len() <= index {
+                    items.resize_with(index + 1, Value::default);
+                }
+                let child = items[index].clone();
+                items[index] = value_with_path(&child, rest, leaf)?;
+                Ok(array(items))
+            }
+            _ => Err(shape_mismatch(Shape::Array)),
+        },
         _ => unreachable!("addressing_segments yields only keys and indexes"),
     }
 }
 
-/// Extends an array with nulls until `index` addresses an element.
-fn grow_to(cursor: &mut ValueMut<'_>, index: usize) -> Result<(), apollo_json::JsonError> {
-    for _ in cursor.value().len().unwrap_or(0)..=index {
-        cursor.push(())?;
-    }
-    Ok(())
-}
-
-/// A freshly built empty array.
-fn empty_array() -> Value {
-    DocumentBuilder::new_array().seal().root_handle()
-}
-
-fn merge_builder_root(builder: &mut DocumentBuilder, other: ValueRefLike) {
-    merge_children(&mut RootTarget(builder), other);
-}
-
-fn type_aware_merge_builder_root<'a>(
-    builder: &mut DocumentBuilder,
-    other: ValueRefLike<'a>,
-    schema: &Schema,
-) {
-    type_aware_merge_children(&mut RootTarget(builder), other, schema);
-}
-
-/// A read-only, allocation-free view of an apollo-json value; alias kept
-/// local so the merge helpers below read the same regardless of whether
-/// they came from a [`Value`] or a live cursor.
-type ValueRefLike<'a> = apollo_json::ValueRef<'a>;
-
-/// Unifies `DocumentBuilder` and `ValueMut` under the handful of
-/// operations the merge walk needs, so the recursive merge logic is
-/// written once instead of duplicated for the root and for nested cursors.
-trait MergeTarget {
-    fn peek(&self) -> apollo_json::ValueRef<'_>;
-    fn descend(&mut self, segment: PathSeg<'_>) -> Option<ValueMut<'_>>;
-    fn write(&mut self, segment: PathSeg<'_>, value: NewValue);
-    fn append(&mut self, value: NewValue);
-}
-
-enum PathSeg<'a> {
-    Key(&'a str),
-    Index(usize),
-}
-
-impl<'a> From<PathSeg<'a>> for apollo_json::PathSegment<'a> {
-    fn from(seg: PathSeg<'a>) -> Self {
-        match seg {
-            PathSeg::Key(k) => apollo_json::PathSegment::Key(k),
-            PathSeg::Index(i) => apollo_json::PathSegment::Index(i),
-        }
-    }
-}
-
-struct RootTarget<'b>(&'b mut DocumentBuilder);
-
-impl MergeTarget for RootTarget<'_> {
-    fn peek(&self) -> apollo_json::ValueRef<'_> {
-        self.0.value()
-    }
-
-    fn descend(&mut self, segment: PathSeg<'_>) -> Option<ValueMut<'_>> {
-        self.0.get_mut(segment).ok()
-    }
-
-    fn write(&mut self, segment: PathSeg<'_>, value: NewValue) {
-        let _ = self.0.set(segment, value);
-    }
-
-    fn append(&mut self, value: NewValue) {
-        let _ = self.0.push(value);
-    }
-}
-
-impl MergeTarget for ValueMut<'_> {
-    fn peek(&self) -> apollo_json::ValueRef<'_> {
-        self.value()
-    }
-
-    fn descend(&mut self, segment: PathSeg<'_>) -> Option<ValueMut<'_>> {
-        self.child_mut(segment).ok()
-    }
-
-    fn write(&mut self, segment: PathSeg<'_>, value: NewValue) {
-        let _ = self.set(segment, value);
-    }
-
-    fn append(&mut self, value: NewValue) {
-        let _ = self.push(value);
-    }
-}
-
-fn merge_children<T: MergeTarget>(target: &mut T, other: apollo_json::ValueRef<'_>) {
-    match other.kind() {
-        JsonKind::Object => {
-            for (key, incoming) in other.object_iter() {
-                merge_one(target, PathSeg::Key(&key), incoming);
+/// Deep-merges `other` into `base`, returning the result.
+///
+/// Both inputs are sealed, and the result is built bottom-up so a value is
+/// read only once it is sealed. Merging into a builder is not possible: `set`
+/// on a container that grows leaves it a `MutObject`/`MutArray` overlay, and
+/// `ValueRef`'s `get`/`index`/`len` match only the sealed forms, so reading
+/// back mid-build reports every member absent and turns a merge into an
+/// overwrite.
+///
+/// Object keys union, keeping `base`'s order and appending keys only `other`
+/// has; array elements merge index-wise with extras appended; a `null` in
+/// `other` leaves `base` alone; a container meeting the other container kind
+/// keeps `base`.
+fn merge_values(base: &Value, other: &Value, schema: Option<&Schema>) -> Value {
+    match (base.kind(), other.kind()) {
+        (JsonKind::Object, JsonKind::Object) => {
+            let mut members: Vec<(String, Value)> = Vec::new();
+            for (key, from_base) in base.object_iter() {
+                let merged = match other.get(&key) {
+                    Some(from_other) => merge_member(&key, &from_base, &from_other, schema),
+                    None => from_base,
+                };
+                members.push((key, merged));
             }
-        }
-        JsonKind::Array => {
-            let target_len = target.peek().len().unwrap_or(0);
-            for (i, incoming) in other.array_iter().enumerate() {
-                if i < target_len {
-                    merge_one(target, PathSeg::Index(i), incoming);
-                } else {
-                    target.append(to_new_value_ref(incoming));
+            for (key, from_other) in other.object_iter() {
+                if base.get(&key).is_none() {
+                    members.push((key, from_other));
                 }
             }
+            object(members)
         }
-        _ => unreachable!("caller matched Object/Array shapes"),
-    }
-}
-
-fn merge_one<T: MergeTarget>(
-    target: &mut T,
-    segment: PathSeg<'_>,
-    incoming: apollo_json::ValueRef<'_>,
-) {
-    let existing_kind = match &segment {
-        PathSeg::Key(key) => target.peek().get(key).map(|v| v.kind()),
-        PathSeg::Index(i) => target.peek().index(*i).map(|v| v.kind()),
-    };
-    match (existing_kind, incoming.kind()) {
-        (Some(JsonKind::Object), JsonKind::Object) | (Some(JsonKind::Array), JsonKind::Array) => {
-            if let Some(mut child) = target.descend(segment) {
-                merge_children(&mut child, incoming);
+        (JsonKind::Array, JsonKind::Array) => {
+            let mut items: Vec<Value> = Vec::new();
+            for (index, from_base) in base.array_iter().enumerate() {
+                items.push(match other.index(index) {
+                    Some(from_other) => merge_values(&from_base, &from_other, schema),
+                    None => from_base,
+                });
             }
+            items.extend(other.array_iter().skip(base.len().unwrap_or(0)));
+            array(items)
         }
-        (_, JsonKind::Null) => {}
-        (Some(JsonKind::Object), JsonKind::Array) => {
+        (_, JsonKind::Null) => base.clone(),
+        (JsonKind::Object, JsonKind::Array) => {
             failfast_debug!("trying to replace an object with an array");
+            base.clone()
         }
-        (Some(JsonKind::Array), JsonKind::Object) => {
+        (JsonKind::Array, JsonKind::Object) => {
             failfast_debug!("trying to replace an array with an object");
+            base.clone()
         }
-        _ => target.write(segment, to_new_value_ref(incoming)),
+        _ => other.clone(),
     }
 }
 
-fn type_aware_merge_children<T: MergeTarget>(
-    target: &mut T,
-    other: apollo_json::ValueRef<'_>,
-    schema: &Schema,
-) {
-    match other.kind() {
-        JsonKind::Object => {
-            for (key, incoming) in other.object_iter() {
-                if key == TYPENAME
-                    && incoming.kind() == JsonKind::String
-                    && let Some(existing) = target.peek().get(&key)
-                    && existing.kind() == JsonKind::String
-                    && let (Some(type1), Some(type2)) = (existing.as_str(), incoming.as_str())
-                    && schema.is_subtype(&type2, &type1)
-                {
-                    // type1 is a subtype of type2: keep the more specific
-                    // `__typename` already present rather than overwriting it.
-                    continue;
-                }
-                type_aware_merge_one(target, PathSeg::Key(&key), incoming, schema);
-            }
-        }
-        JsonKind::Array => {
-            let target_len = target.peek().len().unwrap_or(0);
-            for (i, incoming) in other.array_iter().enumerate() {
-                if i < target_len {
-                    type_aware_merge_one(target, PathSeg::Index(i), incoming, schema);
-                } else {
-                    target.append(to_new_value_ref(incoming));
-                }
-            }
-        }
-        _ => unreachable!("caller matched Object/Array shapes"),
+/// Merges one member, keeping the more specific `__typename` when the schema
+/// says the incoming one names a supertype of what is already there.
+fn merge_member(key: &str, base: &Value, other: &Value, schema: Option<&Schema>) -> Value {
+    if key == TYPENAME
+        && let Some(schema) = schema
+        && let (Some(existing), Some(incoming)) = (base.as_str_owned(), other.as_str_owned())
+        && schema.is_subtype(&incoming, &existing)
+    {
+        return base.clone();
     }
+    merge_values(base, other, schema)
 }
 
-fn type_aware_merge_one<T: MergeTarget>(
-    target: &mut T,
-    segment: PathSeg<'_>,
-    incoming: apollo_json::ValueRef<'_>,
-    schema: &Schema,
-) {
-    let existing_kind = match &segment {
-        PathSeg::Key(key) => target.peek().get(key).map(|v| v.kind()),
-        PathSeg::Index(i) => target.peek().index(*i).map(|v| v.kind()),
-    };
-    match (existing_kind, incoming.kind()) {
-        (Some(JsonKind::Object), JsonKind::Object) | (Some(JsonKind::Array), JsonKind::Array) => {
-            if let Some(mut child) = target.descend(segment) {
-                type_aware_merge_children(&mut child, incoming, schema);
-            }
-        }
-        (_, JsonKind::Null) => {}
-        (Some(JsonKind::Object), JsonKind::Array) => {
-            failfast_debug!("trying to replace an object with an array");
-        }
-        (Some(JsonKind::Array), JsonKind::Object) => {
-            failfast_debug!("trying to replace an array with an object");
-        }
-        _ => target.write(segment, to_new_value_ref(incoming)),
-    }
-}
-
-fn to_new_value_ref(value: apollo_json::ValueRef<'_>) -> NewValue {
-    match value.kind() {
-        JsonKind::Null => NewValue::Null,
-        JsonKind::Bool => NewValue::Bool(value.as_bool().unwrap_or_default()),
-        JsonKind::Number => value
-            .as_i64()
-            .map(NewValue::Int)
-            .or_else(|| value.as_f64().map(NewValue::Float))
-            .unwrap_or(NewValue::Null),
-        JsonKind::String => NewValue::String(value.as_str().unwrap_or_default().into_owned()),
-        JsonKind::Array | JsonKind::Object => NewValue::Node(value_from_ref(value)),
-    }
-}
 
 /// Materializes an owned [`Value`] handle from a borrowed [`ValueRef`],
 /// sharing the source arena by reference rather than copying — the same
