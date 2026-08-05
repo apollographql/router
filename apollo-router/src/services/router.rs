@@ -349,6 +349,20 @@ pub struct Response {
     pub context: Context,
 }
 
+/// Parses one GraphQL response from a stream chunk.
+///
+/// An explicit `"data": null` collapses to `None`, because this stream used to
+/// be read with serde, which maps a JSON `null` onto `Option::None` — and
+/// `Response` omits `data` when serializing `None`, so keeping the `null` here
+/// would add a `data` member to bodies that previously had none.
+fn response_from_chunk(bytes: Bytes) -> Result<graphql::Response, graphql::MalformedResponseError> {
+    let mut response = graphql::Response::from_bytes(bytes)?;
+    if response.data.as_ref().is_some_and(|data| data.is_null()) {
+        response.data = None;
+    }
+    Ok(response)
+}
+
 impl Response {
     /// Starts building a response for the router service, serializing a single GraphQL
     /// response into the body.
@@ -575,7 +589,7 @@ impl Response {
                     if let Ok(Some(response)) = m.next_field().await
                         && let Ok(bytes) = response.bytes().await
                     {
-                        return Some((graphql::Response::from_bytes(bytes), m));
+                        return Some((response_from_chunk(bytes), m));
                     }
                     None
                 }))
@@ -584,7 +598,7 @@ impl Response {
                 let res = body.next().await.and_then(|res| res.ok());
 
                 Either::Right(
-                    futures::stream::iter(res).map(graphql::Response::from_bytes),
+                    futures::stream::iter(res).map(response_from_chunk),
                 )
             },
         )
