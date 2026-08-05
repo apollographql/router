@@ -52,6 +52,7 @@ mod test {
     use super::RouterSpans;
     use crate::Context;
     use crate::context::CONTAINS_GRAPHQL_ERROR;
+    use crate::json_ext::Value;
     use crate::plugins::telemetry::OTEL_NAME;
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::config_new::DefaultForLevel;
@@ -192,7 +193,7 @@ mod test {
             },
         );
         let context = Context::new();
-        context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+        context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::from(true));
         let values = spans.attributes.on_response(
             &router::Response::fake_builder()
                 .header("my-header", "test_val")
@@ -227,7 +228,7 @@ mod test {
             },
         );
         let context = Context::new();
-        context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+        context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::from(true));
         let values = spans.attributes.on_response(
             &router::Response::fake_builder()
                 .header("my-header", "test_val")

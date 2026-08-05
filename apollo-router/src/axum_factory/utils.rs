@@ -159,6 +159,7 @@ mod tests {
     use tower::Service;
 
     use super::*;
+    use crate::json_ext::ValueExt;
     use crate::metrics::FutureMetricsExt;
 
     /// An unready pipeline must not stall readiness, because hyper awaits `poll_ready` inside
@@ -199,13 +200,16 @@ mod tests {
         let body = router::body::into_bytes(response.response.into_body())
             .await
             .expect("the body should be readable");
-        let body: graphql::Response =
-            serde_json::from_slice(&body).expect("the body should be a GraphQL response");
+        let body =
+            graphql::Response::from_bytes(body).expect("the body should be a GraphQL response");
 
         let error = body.errors.first().expect("a GraphQL error is expected");
         assert_eq!(
-            error.extensions.get("code").and_then(|code| code.as_str()),
-            Some("REQUEST_CONCURRENCY_LIMITED")
+            error
+                .extensions
+                .get("code")
+                .and_then(|code| code.as_str_owned()),
+            Some("REQUEST_CONCURRENCY_LIMITED".to_string())
         );
         assert_eq!(
             error.message,

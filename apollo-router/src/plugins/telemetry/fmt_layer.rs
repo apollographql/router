@@ -295,6 +295,7 @@ mod tests {
 
     use super::*;
     use crate::graphql;
+    use crate::json_ext::json_value as json;
     use crate::plugins::telemetry::config_new::events;
     use crate::plugins::telemetry::config_new::events::log_event;
     use crate::plugins::telemetry::config_new::logging::JsonFormat;
@@ -852,7 +853,7 @@ connector:
                 let subgraph_resp = subgraph::Response::fake2_builder()
                     .header("custom-header", "val1")
                     .header("x-log-request", HeaderValue::from_static("log"))
-                    .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}]}))
+                    .data(json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}]}))
                     .subgraph_name("subgraph")
                     .build()
                     .expect("expecting valid response");
@@ -877,7 +878,7 @@ connector:
                 let subgraph_resp = subgraph::Response::fake2_builder()
                     .header("custom-header", "val1")
                     .header("x-log-request", HeaderValue::from_static("log"))
-                    .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}], "other": {"foo": "bar"}}))
+                    .data(json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}], "other": {"foo": "bar"}}))
                     .subgraph_name("subgraph_bis")
                     .build()
                     .expect("expecting valid response");
@@ -1156,13 +1157,13 @@ subgraph:
 
                 // Out: Subgraphs -> Supergraph -> Router
                 let subgraph_resp_1 = subgraph::Response::fake2_builder()
-                    .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}]}))
+                    .data(json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}]}))
                     .build()
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp_1);
 
                 let subgraph_resp_2 = subgraph::Response::fake2_builder()
-                    .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}], "other": {"foo": "bar"}}))
+                    .data(json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}], "other": {"foo": "bar"}}))
                     .build()
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp_2);
@@ -1297,7 +1298,7 @@ subgraph:
                 let subgraph_resp = subgraph::Response::fake2_builder()
                     .header("custom-header", "val1")
                     .header("x-log-request", HeaderValue::from_static("log"))
-                    .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}]}))
+                    .data(json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}]}))
                     .subgraph_name("subgraph")
                     .build()
                     .expect("expecting valid response");
@@ -1322,7 +1323,7 @@ subgraph:
                 let subgraph_resp = subgraph::Response::fake2_builder()
                     .header("custom-header", "val1")
                     .header("x-log-request", HeaderValue::from_static("log"))
-                    .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}], "other": {"foo": "bar"}}))
+                    .data(json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}], "other": {"foo": "bar"}}))
                     .subgraph_name("subgraph_bis")
                     .build()
                     .expect("expecting valid response");

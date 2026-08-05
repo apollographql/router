@@ -236,6 +236,7 @@ mod csrf_tests {
 
     use super::*;
     use crate::graphql;
+    use crate::json_ext::ValueExt;
     use crate::plugins::test::PluginTestHarness;
 
     #[tokio::test]
@@ -367,7 +368,7 @@ mod csrf_tests {
             .await
             .expect("expected body");
 
-        let response: graphql::Response = serde_json::from_slice(&body.to_bytes()).unwrap();
+        let response = graphql::Response::from_bytes(body.to_bytes()).unwrap();
         assert_eq!(response.errors.len(), 0);
     }
 
@@ -391,15 +392,15 @@ mod csrf_tests {
             .await
             .expect("expected body");
 
-        let response: graphql::Response = serde_json::from_slice(&body.to_bytes()).unwrap();
+        let response = graphql::Response::from_bytes(body.to_bytes()).unwrap();
         assert_eq!(response.errors.len(), 1);
         assert_eq!(
             response.errors[0]
                 .extensions
                 .get("code")
                 .expect("error code")
-                .as_str(),
-            Some("CSRF_ERROR")
+                .as_str_owned(),
+            Some("CSRF_ERROR".to_string())
         );
     }
 }

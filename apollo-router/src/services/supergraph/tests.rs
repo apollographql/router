@@ -12,6 +12,8 @@ use crate::Context;
 use crate::Notify;
 use crate::TestHarness;
 use crate::graphql;
+use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
 use crate::json_ext::json_value;
 use crate::plugin::test::MockSubgraph;
 use crate::services::router::ClientRequestAccepts;
@@ -965,7 +967,7 @@ async fn root_typename_with_defer() {
     let res = stream.next_response().await.unwrap();
     assert_eq!(
         res.data.as_ref().unwrap().get("__typename"),
-        Some(&serde_json_bytes::Value::String("Query".into()))
+        Some(Value::from("Query"))
     );
     insta::assert_json_snapshot!(res);
 
@@ -1323,7 +1325,11 @@ async fn subscription_max_lifetime_exceeded() {
         timeout_response
             .errors
             .iter()
-            .any(|e| e.extensions.get("code").and_then(|v| v.as_str())
+            .any(|e| e
+                .extensions
+                .get("code")
+                .and_then(|v| v.as_str_owned())
+                .as_deref()
                 == Some("SUBSCRIPTION_MAX_LIFETIME_EXCEEDED")),
         "expected SUBSCRIPTION_MAX_LIFETIME_EXCEEDED error, got: {timeout_response:?}"
     );
@@ -1609,7 +1615,7 @@ async fn root_typename_with_defer_in_defer() {
             .as_ref()
             .unwrap()
             .get("__typename"),
-        Some(&serde_json_bytes::Value::String("Query".into()))
+        Some(Value::from("Query"))
     );
 }
 
@@ -3348,18 +3354,13 @@ async fn multiple_interface_types() {
     let request = supergraph::Request::fake_builder()
         .context(defer_context())
         .query(query)
-        .variables(
-            serde_json_bytes::json! {{ "id": "1234", "a": 1, "b": 2}}
-                .as_object()
-                .unwrap()
-                .clone(),
-        )
+        .variables(json_value!({ "id": "1234", "a": 1, "b": 2}))
         .build()
         .unwrap();
 
     let mut stream = service.clone().oneshot(request).await.unwrap();
     let response = stream.next_response().await.unwrap();
-    assert_eq!(serde_json_bytes::Value::Null, response.data.unwrap());
+    assert_eq!(Value::null(), response.data.unwrap());
 }
 
 #[tokio::test]
@@ -3379,7 +3380,13 @@ async fn id_scalar_can_overflow_i32() {
         .schema(&schema)
         .subgraph_hook(|_subgraph_name, _service| {
             tower::service_fn(|request: subgraph::Request| async move {
-                let id = &request.subgraph_request.body().variables["id"];
+                let id = request
+                    .subgraph_request
+                    .body()
+                    .variables
+                    .get("id")
+                    .expect("the operation passes an $id variable")
+                    .to_string();
                 Err(format!("$id = {id}").into())
             })
             .boxed_clone()
@@ -3410,7 +3417,11 @@ async fn id_scalar_can_overflow_i32() {
     // The router did not panic or respond with an early validation error.
     // Instead it did a subgraph fetch, which received the correct ID variable without rounding:
     assert_eq!(
-        response.errors[0].extensions["reason"].as_str().unwrap(),
+        response.errors[0]
+            .extensions
+            .get("reason")
+            .and_then(|reason| reason.as_str_owned())
+            .unwrap(),
         "$id = 9007199254740993"
     );
     assert_eq!(large_plus_one.to_string(), "9007199254740993");
@@ -4083,7 +4094,7 @@ async fn invalid_input_object_unknown_field(
         .query("mutation($input: RegisterPartnerInput!) { registerPartner(input: $input) }")
         .variable(
             "input",
-            serde_json::json!({"email": "a@example.com", "password": "x", "invalidField": "x"}),
+            json_value!({"email": "a@example.com", "password": "x", "invalidField": "x"}),
         )
         .context(defer_context())
         .build()?;
@@ -4147,7 +4158,7 @@ async fn invalid_input_object_inaccessible_field(
         .query("mutation($input: RegisterPartnerInput!) { registerPartner(input: $input) }")
         .variable(
             "input",
-            serde_json::json!({"email": "a@example.com", "password": "x", "internalNotes": "leaked"}),
+            json_value!({"email": "a@example.com", "password": "x", "internalNotes": "leaked"}),
         )
         .context(defer_context())
         .build()?;
@@ -4192,7 +4203,7 @@ async fn invalid_input_enum_inaccessible_value() -> Result<(), BoxError> {
 
     let request = supergraph::Request::fake_builder()
         .query("mutation($tier: PartnerTier!) { setPartnerTier(tier: $tier) }")
-        .variable("tier", serde_json::json!("INTERNAL_ONLY"))
+        .variable("tier", "INTERNAL_ONLY")
         .context(defer_context())
         .build()?;
 

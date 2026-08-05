@@ -189,6 +189,7 @@ mod tests {
     use super::*;
     use crate::MockedSubgraphs;
     use crate::graphql::Response;
+    use crate::graphql::json_object::is_empty_object;
     use crate::json_ext::Value;
     use crate::plugin::test::MockSubgraph;
 
@@ -312,12 +313,11 @@ mod tests {
         // populated (like in the following tests when we're testing that the query plan is
         // output), it's populated with _only_ the query plan (meaning we won't be experiencing
         // false positives)
-        assert!(
-            execute_supergraph_test(VALID_QUERY, supergraph)
+        assert!(is_empty_object(
+            &execute_supergraph_test(VALID_QUERY, supergraph)
                 .await
                 .extensions
-                .is_empty()
-        )
+        ))
     }
 
     #[tokio::test]
@@ -336,7 +336,7 @@ mod tests {
         // Since we're exposing the query plan, the extensions better not be empty! See the test
         // for not exposing query plans to know why the assumption that a non-empty extension means
         // we have a query plan
-        assert!(!response.extensions.is_empty());
+        assert!(!is_empty_object(&response.extensions));
 
         // Since this is a full-run (ie, not a dry-run), we should have data
         assert!(response.data.is_some());
@@ -359,7 +359,7 @@ mod tests {
         // Since we're exposing the query plan, the extensions better not be empty! See the test
         // for not exposing query plans to know why the assumption that a non-empty extension means
         // we have a query plan
-        assert!(!response.extensions.is_empty());
+        assert!(!is_empty_object(&response.extensions));
 
         // Since this is a full-run (ie, not a dry-run), we should have data
         assert!(response.data.is_some());
@@ -382,7 +382,7 @@ mod tests {
         // Since we're exposing the query plan, the extensions better not be empty! See the test
         // for not exposing query plans to know why the assumption that a non-empty extension means
         // we have a query plan
-        assert!(!response.extensions.is_empty());
+        assert!(!is_empty_object(&response.extensions));
 
         // Since this is a dry-run, we shouldn't have any data
         assert!(response.data.is_none());

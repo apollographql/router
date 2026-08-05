@@ -5,6 +5,7 @@ mod test {
 
     use crate::assert_snapshot_subscriber;
     use crate::graphql;
+    use crate::json_ext::json_value as json;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::router;
@@ -24,7 +25,7 @@ mod test {
                     tracing::info!("response");
                     Ok(router::Response::fake_builder()
                         .header("custom-header", "val1")
-                        .data(serde_json::json!({"data": "res"}))
+                        .data(json!({"data": "res"}))
                         .build()
                         .expect("expecting valid response"))
                 })
@@ -56,7 +57,7 @@ mod test {
                     tracing::info!("response");
                     supergraph::Response::fake_builder()
                         .header("custom-header", "val1")
-                        .data(serde_json::json!({"data": "res"}))
+                        .data(json!({"data": "res"}))
                         .build()
                 })
                 .call(

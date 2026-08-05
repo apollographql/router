@@ -245,6 +245,7 @@ mod tests {
 
     use super::*;
     use crate::assert_response_eq_ignoring_error_id;
+    use crate::json_ext::json_value as json;
 
     #[test]
     fn it_gets_uri_details() {
@@ -303,7 +304,7 @@ mod tests {
 
     #[test]
     fn it_converts_http_with_body_to_graphql() {
-        let mut json = serde_json::json!({
+        let json = json!({
             "data": {
                 "some_field": "some_value"
             }
@@ -323,7 +324,7 @@ mod tests {
         );
 
         let expected = graphql::Response::builder()
-            .data(json["data"].take())
+            .data(json.get("data").expect("fixture holds a data member"))
             .build();
         assert_eq!(actual, expected);
     }
@@ -335,7 +336,7 @@ mod tests {
             .extension_code("SOME_EXTENSION")
             .extension("service", "test_service")
             .build();
-        let mut json = serde_json::json!({
+        let json = json!({
             "data": {
                 "some_field": "some_value",
                 "error_field": null,
@@ -357,7 +358,7 @@ mod tests {
         );
 
         let expected = graphql::Response::builder()
-            .data(json["data"].take())
+            .data(json.get("data").expect("fixture holds a data member"))
             .error(error)
             .build();
         assert_response_eq_ignoring_error_id!(actual, expected);
@@ -370,7 +371,7 @@ mod tests {
             .extension_code("SOME_EXTENSION")
             .extension("service", "test_service")
             .build();
-        let mut json = serde_json::json!({
+        let json = json!({
             "data": {
                 "some_field": "some_value",
                 "error_field": null,
@@ -392,7 +393,7 @@ mod tests {
         );
 
         let expected = graphql::Response::builder()
-            .data(json["data"].take())
+            .data(json.get("data").expect("fixture holds a data member"))
             .error(
                 super::FetchError::SubrequestHttpError {
                     status_code: Some(418),

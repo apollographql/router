@@ -122,6 +122,7 @@ mod tests {
     use crate::batching::BatchQuery;
     use crate::compute_job::ComputeJobType;
     use crate::graphql;
+    use crate::json_ext::json_value as json;
     use crate::query_planner::QueryPlan;
     use crate::query_planner::QueryPlannerService;
     use crate::services::QueryPlannerContent;
@@ -257,7 +258,7 @@ mod tests {
             // Succeed the request
             responder.send_response(
                 execution::Response::builder()
-                    .data(serde_json_bytes::json!({
+                    .data(json!({
                         "entryA": [{ "index": 20 }],
                         "entryB": [{ "index": 30 }],
                     }))

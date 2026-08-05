@@ -22,6 +22,7 @@ use crate::TestHarness;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::json_ext;
+use crate::json_ext::ObjectExt;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
 use crate::plugins::response_cache::debugger::CacheKeysContext;
@@ -183,7 +184,7 @@ fn cache_control_contains_max_age(cache_control_header: &[String]) -> bool {
 fn remove_debug_extensions_key(response: &mut graphql::Response) -> bool {
     response
         .extensions
-        .remove(super::plugin::CACHE_DEBUG_EXTENSIONS_KEY)
+        .object_remove(super::plugin::CACHE_DEBUG_EXTENSIONS_KEY)
         .is_some()
 }
 

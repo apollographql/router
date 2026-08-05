@@ -588,15 +588,12 @@ mod tests {
     use crate::Context;
     use crate::graphql;
     use crate::json_ext;
-    use crate::json_ext::ValueExt;
     use crate::query_planner::fetch::Variables;
 
     /// Test `Variables` from a `serde_json_bytes::json!` object fixture.
     fn create_test_variables(vars: serde_json_bytes::Value) -> Variables {
         Variables {
-            variables: json_ext::from_legacy(&vars)
-                .as_object()
-                .expect("the fixture is a JSON object"),
+            variables: json_ext::from_legacy(&vars),
             inverted_paths: Default::default(),
             contextual_arguments: Default::default(),
         }

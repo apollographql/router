@@ -98,6 +98,7 @@ mod test {
     use std::time::Duration;
 
     use super::*;
+    use crate::json_ext::json_value as json;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
@@ -129,7 +130,7 @@ mod test {
         let service = test_harness.router_service(|_req| async {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             Ok(router::Response::fake_builder()
-                .data(serde_json::json!({"data": {"field": "value"}}))
+                .data(json!({"data": {"field": "value"}}))
                 .header("x-custom-header", "test-value")
                 .build()
                 .unwrap())
@@ -184,7 +185,7 @@ mod test {
                 .unwrap()
                 .router_service(|req| async {
                     Ok(router::Response::fake_builder()
-                        .data(serde_json::json!({"data": {"field": "value"}}))
+                        .data(json!({"data": {"field": "value"}}))
                         .header("x-custom-header", "test-value")
                         .context(req.context)
                         .build()

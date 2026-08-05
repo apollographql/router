@@ -291,8 +291,9 @@ impl AuthorizationPlugin {
         let mut policies = context
             .get_json_value(REQUIRED_POLICIES_KEY)
             .and_then(|v| {
-                v.as_object().map(|v| {
-                    v.iter()
+                v.as_object().map(|entries| {
+                    entries
+                        .into_iter()
                         .filter_map(|(policy, result)| {
                             (result.as_bool() == Some(true)).then_some(policy)
                         })
