@@ -530,7 +530,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(res.response, @r#"
+        assert_debug_snapshot!(res.response, @r###"
         Response {
             status: 200,
             version: HTTP/1.1,
@@ -538,25 +538,18 @@ mod tests {
             body: Response {
                 label: None,
                 data: Some(
-                    Object({
-                        "hello": String(
-                            "world",
-                        ),
-                        "hello2": String(
-                            "world",
-                        ),
-                    }),
+                    Value({"hello":"world","hello2":"world"}),
                 ),
                 path: None,
                 errors: [],
-                extensions: {},
+                extensions: Value({}),
                 has_next: None,
                 subscribed: None,
                 created_at: None,
                 incremental: [],
             },
         }
-        "#);
+        "###);
     }
 
     #[tokio::test]
@@ -645,7 +638,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(res.response, @r#"
+        assert_debug_snapshot!(res.response, @r###"
         Response {
             status: 200,
             version: HTTP/1.1,
@@ -653,31 +646,18 @@ mod tests {
             body: Response {
                 label: None,
                 data: Some(
-                    Object({
-                        "_entities": Array([
-                            Object({
-                                "id": String(
-                                    "1",
-                                ),
-                            }),
-                            Object({
-                                "id": String(
-                                    "2",
-                                ),
-                            }),
-                        ]),
-                    }),
+                    Value({"_entities":[{"id":"1"},{"id":"2"}]}),
                 ),
                 path: None,
                 errors: [],
-                extensions: {},
+                extensions: Value({}),
                 has_next: None,
                 subscribed: None,
                 created_at: None,
                 incremental: [],
             },
         }
-        "#);
+        "###);
     }
 
     #[tokio::test]
@@ -761,7 +741,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(res.response, @r#"
+        assert_debug_snapshot!(res.response, @r###"
         Response {
             status: 200,
             version: HTTP/1.1,
@@ -769,37 +749,18 @@ mod tests {
             body: Response {
                 label: None,
                 data: Some(
-                    Object({
-                        "_entities": Array([
-                            Object({
-                                "id": String(
-                                    "1",
-                                ),
-                                "name": String(
-                                    "A",
-                                ),
-                            }),
-                            Object({
-                                "id": String(
-                                    "2",
-                                ),
-                                "name": String(
-                                    "B",
-                                ),
-                            }),
-                        ]),
-                    }),
+                    Value({"_entities":[{"id":"1","name":"A"},{"id":"2","name":"B"}]}),
                 ),
                 path: None,
                 errors: [],
-                extensions: {},
+                extensions: Value({}),
                 has_next: None,
                 subscribed: None,
                 created_at: None,
                 incremental: [],
             },
         }
-        "#);
+        "###);
     }
 
     #[tokio::test]
@@ -892,7 +853,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(res.response, @r#"
+        assert_debug_snapshot!(res.response, @r###"
         Response {
             status: 200,
             version: HTTP/1.1,
@@ -900,37 +861,18 @@ mod tests {
             body: Response {
                 label: None,
                 data: Some(
-                    Object({
-                        "_entities": Array([
-                            Object({
-                                "__typename": String(
-                                    "User",
-                                ),
-                                "field": String(
-                                    "value1",
-                                ),
-                            }),
-                            Object({
-                                "__typename": String(
-                                    "User",
-                                ),
-                                "field": String(
-                                    "value2",
-                                ),
-                            }),
-                        ]),
-                    }),
+                    Value({"_entities":[{"__typename":"User","field":"value1"},{"__typename":"User","field":"value2"}]}),
                 ),
                 path: None,
                 errors: [],
-                extensions: {},
+                extensions: Value({}),
                 has_next: None,
                 subscribed: None,
                 created_at: None,
                 incremental: [],
             },
         }
-        "#);
+        "###);
     }
 
     #[tokio::test]
@@ -1069,7 +1011,7 @@ mod tests {
         let body = res.response.body_mut();
         body.errors = body.errors.iter_mut().map(|e| e.with_null_id()).collect();
 
-        assert_debug_snapshot!(res.response, @r#"
+        assert_debug_snapshot!(res.response, @r###"
         Response {
             status: 200,
             version: HTTP/1.1,
@@ -1077,18 +1019,7 @@ mod tests {
             body: Response {
                 label: None,
                 data: Some(
-                    Object({
-                        "_entities": Array([
-                            Null,
-                            Null,
-                            Object({
-                                "id": String(
-                                    "2",
-                                ),
-                            }),
-                            Null,
-                        ]),
-                    }),
+                    Value({"_entities":[null,null,{"id":"2"},null]}),
                 ),
                 path: None,
                 errors: [
@@ -1108,25 +1039,7 @@ mod tests {
                                 ],
                             ),
                         ),
-                        extensions: {
-                            "code": String(
-                                "CONNECTOR_RESPONSE_INVALID",
-                            ),
-                            "service": String(
-                                "subgraph_name",
-                            ),
-                            "connector": Object({
-                                "coordinate": String(
-                                    "subgraph_name:Query.user[0]",
-                                ),
-                            }),
-                            "http": Object({
-                                "status": Number(200),
-                            }),
-                            "apollo.private.subgraph.name": String(
-                                "subgraph_name",
-                            ),
-                        },
+                        extensions: Value({"code":"CONNECTOR_RESPONSE_INVALID","service":"subgraph_name","connector":{"coordinate":"subgraph_name:Query.user[0]"},"http":{"status":200},"apollo.private.subgraph.name":"subgraph_name"}),
                         apollo_id: 00000000-0000-0000-0000-000000000000,
                         span_event_emitted: true,
                     },
@@ -1146,25 +1059,7 @@ mod tests {
                                 ],
                             ),
                         ),
-                        extensions: {
-                            "code": String(
-                                "CONNECTOR_FETCH",
-                            ),
-                            "service": String(
-                                "subgraph_name",
-                            ),
-                            "connector": Object({
-                                "coordinate": String(
-                                    "subgraph_name:Query.user[0]",
-                                ),
-                            }),
-                            "http": Object({
-                                "status": Number(404),
-                            }),
-                            "apollo.private.subgraph.name": String(
-                                "subgraph_name",
-                            ),
-                        },
+                        extensions: Value({"code":"CONNECTOR_FETCH","service":"subgraph_name","connector":{"coordinate":"subgraph_name:Query.user[0]"},"http":{"status":404},"apollo.private.subgraph.name":"subgraph_name"}),
                         apollo_id: 00000000-0000-0000-0000-000000000000,
                         span_event_emitted: true,
                     },
@@ -1184,37 +1079,19 @@ mod tests {
                                 ],
                             ),
                         ),
-                        extensions: {
-                            "code": String(
-                                "CONNECTOR_FETCH",
-                            ),
-                            "service": String(
-                                "subgraph_name",
-                            ),
-                            "connector": Object({
-                                "coordinate": String(
-                                    "subgraph_name:Query.user[0]",
-                                ),
-                            }),
-                            "http": Object({
-                                "status": Number(500),
-                            }),
-                            "apollo.private.subgraph.name": String(
-                                "subgraph_name",
-                            ),
-                        },
+                        extensions: Value({"code":"CONNECTOR_FETCH","service":"subgraph_name","connector":{"coordinate":"subgraph_name:Query.user[0]"},"http":{"status":500},"apollo.private.subgraph.name":"subgraph_name"}),
                         apollo_id: 00000000-0000-0000-0000-000000000000,
                         span_event_emitted: true,
                     },
                 ],
-                extensions: {},
+                extensions: Value({}),
                 has_next: None,
                 subscribed: None,
                 created_at: None,
                 incremental: [],
             },
         }
-        "#);
+        "###);
     }
 
     #[tokio::test]
@@ -1284,7 +1161,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(res.response, @r#"
+        assert_debug_snapshot!(res.response, @r###"
         Response {
             status: 200,
             version: HTTP/1.1,
@@ -1292,20 +1169,18 @@ mod tests {
             body: Response {
                 label: None,
                 data: Some(
-                    Object({
-                        "hello": Number(201),
-                    }),
+                    Value({"hello":201}),
                 ),
                 path: None,
                 errors: [],
-                extensions: {},
+                extensions: Value({}),
                 has_next: None,
                 subscribed: None,
                 created_at: None,
                 incremental: [],
             },
         }
-        "#);
+        "###);
     }
 
     #[tokio::test]
