@@ -504,7 +504,6 @@ fn supergraph_err(
 mod tests {
     use std::time::Duration;
 
-    use serde_json::json;
     use tower::Service as _;
     use tower::ServiceBuilder;
     use tower::ServiceExt as _;
@@ -519,6 +518,7 @@ mod tests {
     use crate::configuration::PersistedQueriesSafelist;
     use crate::configuration::Supergraph;
     use crate::graphql;
+    use crate::json_ext::json_value as json;
     use crate::metrics::FutureMetricsExt;
     use crate::services::layers::persisted_queries::freeform_graphql_behavior::FreeformGraphQLBehavior;
     use crate::services::query_parsing;

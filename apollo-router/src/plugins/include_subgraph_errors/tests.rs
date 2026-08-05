@@ -46,7 +46,7 @@ async fn run_test_case(
     let mock_response_elements = mock_responses
         .iter()
         .map(|response| {
-            serde_json::from_str(response).expect("Failed to parse mock response bytes")
+            apollo_json::from_str(response).expect("Failed to parse mock response bytes")
         })
         .collect::<Vec<_>>();
 

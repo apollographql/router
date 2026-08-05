@@ -7,8 +7,6 @@ use http::Uri;
 use http::header::CONTENT_TYPE;
 use mime::APPLICATION_JSON;
 use opentelemetry::KeyValue;
-use serde_json_bytes::Value;
-use serde_json_bytes::json;
 use uuid::Uuid;
 
 use crate::Context;
@@ -17,6 +15,7 @@ use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql;
 use crate::json_ext::Path;
+use crate::json_ext::json_value as json;
 use crate::metrics::FutureMetricsExt;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
@@ -679,7 +678,7 @@ async fn test_count_operation_errors_with_all_json_types_and_extended_config_ena
             json!("VALID_ERROR_CODE"),
             json!(400),
             json!(true),
-            Value::Null,
+            json!(null),
             json!(["code1", "code2"]),
             json!({"inner": "myCode"}),
         ];
@@ -772,9 +771,9 @@ async fn test_count_operation_errors_with_duplicate_errors_and_extended_config_e
 
         let codes = [
             json!("VALID_ERROR_CODE"),
-            Value::Null,
+            json!(null),
             json!("VALID_ERROR_CODE"),
-            Value::Null,
+            json!(null),
         ];
 
         let errors = codes.map(|code| {

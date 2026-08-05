@@ -2345,7 +2345,9 @@ async fn execute(
 
     let mut request = supergraph::Request::fake_builder()
         .query(query)
-        .variables(variables)
+        .variables(json_ext::from_legacy(&serde_json_bytes::Value::Object(
+            variables,
+        )))
         .header("x-client-header", "client-header-value")
         .build()
         .unwrap()

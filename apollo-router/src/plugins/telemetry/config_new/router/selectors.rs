@@ -644,7 +644,6 @@ mod test {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use serde_json::json;
     use serde_json_bytes::path::JsonPathInst;
     use tower::BoxError;
     use tracing::span;
@@ -652,6 +651,7 @@ mod test {
     use tracing_subscriber::layer::SubscriberExt;
 
     use crate::context::OPERATION_NAME;
+    use crate::json_ext::json_value as json;
     use crate::plugins::telemetry::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;

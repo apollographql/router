@@ -423,6 +423,7 @@ mod tests {
     use test_log::test;
 
     use super::*;
+    use crate::json_ext::json_value;
 
     #[test]
     fn test_request() {

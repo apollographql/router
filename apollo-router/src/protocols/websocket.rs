@@ -728,6 +728,7 @@ mod tests {
     use super::*;
     use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Request;
+    use crate::json_ext::json_value;
     use crate::metrics::FutureMetricsExt;
 
     async fn emulate_correct_websocket_server_new_protocol(
@@ -818,7 +819,7 @@ mod tests {
 
                 socket
                     .send(AxumWsMessage::text(
-                        serde_json::to_string(&ServerMessage::Next { id: client_id.clone().unwrap(), payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
+                        serde_json::to_string(&ServerMessage::Next { id: client_id.clone().unwrap(), payload: graphql::Response::builder().data(json_value!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
                     ))
                     .await
                     .unwrap();
@@ -921,7 +922,7 @@ mod tests {
 
                 socket
                     .send(AxumWsMessage::text(
-                        serde_json::to_string(&ServerMessage::Next { id: client_id.clone().unwrap(), payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
+                        serde_json::to_string(&ServerMessage::Next { id: client_id.clone().unwrap(), payload: graphql::Response::builder().data(json_value!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
                     ))
                     .await
                     .unwrap();
@@ -1040,7 +1041,7 @@ mod tests {
                 next_payload,
                 graphql::Response::builder()
                     .subscribed(true)
-                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .data(json_value!({"userWasCreated": {"username": "ada_lovelace"}}))
                     .build()
             );
             // Increments to 3 for the next message
@@ -1130,7 +1131,10 @@ mod tests {
                 .as_str()
                 .contains(r#"Error(Error { message: "PAYLOAD_MESSAGE_ERROR"#)
         );
-        assert_eq!(err.extensions.get("code").unwrap(), "WEBSOCKET_ACK_ERROR");
+        assert_eq!(
+            err.extensions.get("code").unwrap(),
+            "WEBSOCKET_ACK_ERROR".into()
+        );
     }
 
     #[tokio::test]
@@ -1200,7 +1204,7 @@ mod tests {
                 next_payload,
                 graphql::Response::builder()
                     .subscribed(true)
-                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .data(json_value!({"userWasCreated": {"username": "ada_lovelace"}}))
                     .build()
             );
             // Increments to 4 for the next message

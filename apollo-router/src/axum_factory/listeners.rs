@@ -660,6 +660,7 @@ mod tests {
 
     use super::*;
     use crate::axum_factory::tests::init_with_config;
+    use crate::axum_factory::tests::json_data;
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
     use crate::graphql;
@@ -802,7 +803,7 @@ mod tests {
             let (req, responder) = router_handle.next_request().await.unwrap();
             responder.send_response(SupergraphResponse::new_from_graphql_response(
                 graphql::Response::builder()
-                    .data(json!({"response": "yay"}))
+                    .data(json_data(json!({"response": "yay"})))
                     .build(),
                 req.context,
             ));

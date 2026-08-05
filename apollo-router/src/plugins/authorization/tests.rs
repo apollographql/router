@@ -5,7 +5,6 @@ use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use regex::Regex;
-use serde_json_bytes::json;
 use tokio::task::JoinHandle;
 use tower::ServiceExt;
 
@@ -13,6 +12,7 @@ use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::graphql;
+use crate::json_ext::json_value as json;
 use crate::plugin::test::MockSubgraph;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -100,12 +100,7 @@ async fn authenticated_request() {
         .unwrap();
     let request = supergraph::Request::fake_builder()
         .query("query { orga(id: 1) { id creatorUser { id name phone } } }")
-        .variables(
-            json! {{ "isAuthenticated": true }}
-                .as_object()
-                .unwrap()
-                .clone(),
-        )
+        .variables(json! {{ "isAuthenticated": true }})
         .context(context)
         .build()
         .unwrap();
@@ -166,12 +161,7 @@ async fn unauthenticated_request() {
     let context = Context::new();
     let request = supergraph::Request::fake_builder()
         .query("query { orga(id: 1) { id creatorUser { id name phone } } }")
-        .variables(
-            json! {{ "isAuthenticated": false }}
-                .as_object()
-                .unwrap()
-                .clone(),
-        )
+        .variables(json! {{ "isAuthenticated": false }})
         .context(context)
         // Request building here
         .build()
@@ -298,10 +288,7 @@ async fn authenticated_directive() {
 
     let req = graphql::Request {
         query: Some("query { orga(id: 1) { id creatorUser { id name phone } } }".to_string()),
-        variables: json! {{ "isAuthenticated": false }}
-            .as_object()
-            .unwrap()
-            .clone(),
+        variables: json! {{ "isAuthenticated": false }},
         ..Default::default()
     };
 
@@ -418,10 +405,7 @@ async fn authenticated_directive_reject_unauthorized() {
 
     let req = graphql::Request {
         query: Some("query { orga(id: 1) { id creatorUser { id name phone } } }".to_string()),
-        variables: json! {{ "isAuthenticated": false }}
-            .as_object()
-            .unwrap()
-            .clone(),
+        variables: json! {{ "isAuthenticated": false }},
         ..Default::default()
     };
 
@@ -505,10 +489,7 @@ async fn authenticated_directive_dry_run() {
 
     let req = graphql::Request {
         query: Some("query { orga(id: 1) { id creatorUser { id name phone } } }".to_string()),
-        variables: json! {{ "isAuthenticated": false }}
-            .as_object()
-            .unwrap()
-            .clone(),
+        variables: json! {{ "isAuthenticated": false }},
         ..Default::default()
     };
 
@@ -1123,7 +1104,7 @@ async fn cache_key_metadata() {
                     responder.send_response(
                         subgraph::Response::fake_builder()
                             .context(req.context)
-                            .data(serde_json::json! {{
+                            .data(json! {{
                                 "currentUser": {
                                     "id": 1,
                                     "name": "A",

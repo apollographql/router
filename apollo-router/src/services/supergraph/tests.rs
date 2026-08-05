@@ -12,6 +12,7 @@ use crate::Context;
 use crate::Notify;
 use crate::TestHarness;
 use crate::graphql;
+use crate::json_ext::json_value;
 use crate::plugin::test::MockSubgraph;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph;
@@ -1033,7 +1034,7 @@ async fn subscription_with_callback() {
     let mut stream = service.oneshot(request).await.unwrap();
     let res = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(res);
-    notify.broadcast(graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": { "name": "test", "activeOrganization": { "__typename": "Organization", "id": "0" }}})).build()).await.unwrap();
+    notify.broadcast(graphql::Response::builder().data(json_value!({"userWasCreated": { "name": "test", "activeOrganization": { "__typename": "Organization", "id": "0" }}})).build()).await.unwrap();
     insta::assert_json_snapshot!(stream.next_response().await.unwrap());
     // error happened
     notify
@@ -1126,7 +1127,7 @@ async fn subscription_callback_schema_reload() {
     let mut stream = service.oneshot(request).await.unwrap();
     let res = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(res);
-    notify.broadcast(graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": { "name": "test", "activeOrganization": { "__typename": "Organization", "id": "0" }}})).build()).await.unwrap();
+    notify.broadcast(graphql::Response::builder().data(json_value!({"userWasCreated": { "name": "test", "activeOrganization": { "__typename": "Organization", "id": "0" }}})).build()).await.unwrap();
     insta::assert_json_snapshot!(stream.next_response().await.unwrap());
 
     let new_schema = format!("{SCHEMA}  ");
@@ -1204,7 +1205,7 @@ async fn subscription_with_callback_with_limit() {
     let mut stream = service.ready().await.unwrap().call(request).await.unwrap();
     let res = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(res);
-    notify.broadcast(graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": { "name": "test", "activeOrganization": { "__typename": "Organization", "id": "0" }}})).build()).await.unwrap();
+    notify.broadcast(graphql::Response::builder().data(json_value!({"userWasCreated": { "name": "test", "activeOrganization": { "__typename": "Organization", "id": "0" }}})).build()).await.unwrap();
     insta::assert_json_snapshot!(stream.next_response().await.unwrap());
     // error happened
     notify

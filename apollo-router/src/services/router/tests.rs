@@ -10,13 +10,13 @@ use http::header::CONTENT_TYPE;
 use http::header::VARY;
 use mime::APPLICATION_JSON;
 use parking_lot::Mutex;
-use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::Context;
 use crate::graphql;
+use crate::json_ext::json_value as json;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::assert_no_mock_calls;
 use crate::plugin::test::await_mock_driver;
@@ -272,7 +272,7 @@ async fn test_http_max_request_bytes_get() {
         ";
         supergraph::Request::fake_builder()
             .query(canned_query.to_string())
-            .variables(json!({"first": 2}).as_object().cloned().unwrap())
+            .variables(json!({"first": 2}))
             .method(Method::GET)
             .build()
             .unwrap()
@@ -647,7 +647,7 @@ async fn escaped_quotes_in_string_literal() {
                         // Replace "couldn't find mock for query" error with empty data
                         let graphql_response = response.response.body_mut();
                         graphql_response.errors.clear();
-                        graphql_response.data = Some(serde_json_bytes::json!({
+                        graphql_response.data = Some(json!({
                             "_entities": {"reviews": []},
                         }));
                     }

@@ -511,6 +511,7 @@ mod tests {
     use crate::TestHarness;
     use crate::graphql;
     use crate::graphql::Request;
+    use crate::json_ext::json_value;
     use crate::layers::ServiceExt as LayerExt;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
@@ -593,7 +594,7 @@ mod tests {
         // Note: We reverse the senders since they should be in reverse order when assembled
         assert_eq!(txs.len(), receivers.len());
         for (index, (tx, rx)) in Iterator::zip(txs.into_iter(), receivers).enumerate() {
-            let data = serde_json_bytes::json!({
+            let data = json_value!({
                 "data": {
                     format!("slot{index}"): "valid"
                 }
@@ -963,20 +964,14 @@ mod tests {
             .expect("channel should be open")
             .expect("successful response");
         let response1 = response1.response.into_body();
-        assert_eq!(
-            response1.data,
-            Some(serde_json_bytes::json!({ "field1": "value1" }))
-        );
+        assert_eq!(response1.data, Some(json_value!({ "field1": "value1" })));
 
         let response2 = response2
             .await
             .expect("channel should be open")
             .expect("successful response");
         let response2 = response2.response.into_body();
-        assert_eq!(
-            response2.data,
-            Some(serde_json_bytes::json!({ "field2": "value2" }))
-        );
+        assert_eq!(response2.data, Some(json_value!({ "field2": "value2" })));
 
         // Only 1 call is expected
         drop(http_client);

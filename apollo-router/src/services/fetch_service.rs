@@ -274,7 +274,8 @@ impl FetchService {
                             .build(),
                     )
                     .build()
-                    .expect("it won't fail because the url is correct and already checked; qed"),
+                    .expect("it won't fail because the url is correct and already checked; qed")
+                    .into(),
             )
             .subgraph_name(service_name.to_string())
             .operation_kind(*operation_kind)
