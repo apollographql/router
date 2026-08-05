@@ -5,7 +5,6 @@ use apollo_compiler::response::ExecutionResponse;
 use apollo_json::JsonKind;
 use apollo_json::NewValue;
 use bytes::Bytes;
-use displaydoc::Display;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -18,11 +17,14 @@ use crate::json_ext;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 
-#[derive(thiserror::Error, Display, Debug, Eq, PartialEq)]
+/// A body that was not a well-formed GraphQL response.
+// `Display` comes from the `#[error]` message, so `displaydoc::Display` is not
+// derived here -- it would read the doc comment above and collide with it.
+#[derive(thiserror::Error, Debug, Eq, PartialEq)]
 #[error("GraphQL response was malformed: {reason}")]
-pub(crate) struct MalformedResponseError {
+pub struct MalformedResponseError {
     /// The reason the deserialization failed.
-    pub(crate) reason: String,
+    pub reason: String,
 }
 
 /// A graphql primary response.

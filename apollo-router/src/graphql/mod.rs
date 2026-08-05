@@ -17,7 +17,7 @@ use futures::Stream;
 use heck::ToShoutySnakeCase;
 pub use request::Request;
 pub use response::IncrementalResponse;
-use response::MalformedResponseError;
+pub use response::MalformedResponseError;
 pub use response::Response;
 use serde::Deserialize;
 use serde::Serialize;

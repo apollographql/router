@@ -549,9 +549,12 @@ impl Response {
     }
 
     /// EXPERIMENTAL: THIS FUNCTION IS EXPERIMENTAL AND SUBJECT TO POTENTIAL CHANGE.
+    ///
+    /// Each item is one GraphQL response parsed from the body, or the reason
+    /// that part of the body was not a GraphQL response.
     pub async fn into_graphql_response_stream(
         self,
-    ) -> impl Stream<Item = Result<graphql::Response, serde_json::Error>> {
+    ) -> impl Stream<Item = Result<graphql::Response, graphql::MalformedResponseError>> {
         Box::pin(
             if self
                 .response
@@ -572,7 +575,7 @@ impl Response {
                     if let Ok(Some(response)) = m.next_field().await
                         && let Ok(bytes) = response.bytes().await
                     {
-                        return Some((serde_json::from_slice::<graphql::Response>(&bytes), m));
+                        return Some((graphql::Response::from_bytes(bytes), m));
                     }
                     None
                 }))
@@ -581,8 +584,7 @@ impl Response {
                 let res = body.next().await.and_then(|res| res.ok());
 
                 Either::Right(
-                    futures::stream::iter(res)
-                        .map(|bytes| serde_json::from_slice::<graphql::Response>(&bytes)),
+                    futures::stream::iter(res).map(graphql::Response::from_bytes),
                 )
             },
         )
