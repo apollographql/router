@@ -29,7 +29,6 @@ use crate::graphql::json_object::empty_object;
 use crate::graphql::json_object::insert_member;
 use crate::graphql::json_object::is_empty_object;
 use crate::json_ext;
-use crate::json_ext::Object;
 use crate::json_ext::Path;
 pub use crate::json_ext::Path as JsonPath;
 pub use crate::json_ext::PathElement as JsonPathElement;
@@ -420,7 +419,9 @@ where
         std::any::type_name::<Self>().to_shouty_snake_case()
     }
 
-    fn custom_extension_details(&self) -> Option<Object> {
+    /// Extra members to merge into the error's `extensions`, or `None` to add
+    /// none. The value must be object-shaped.
+    fn custom_extension_details(&self) -> Option<Value> {
         None
     }
 }

@@ -24,7 +24,7 @@ use thiserror::Error;
 use crate::error::ValidationErrors;
 use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
-use crate::json_ext::Object;
+use crate::json_ext::Value;
 
 pub(crate) const LINK_DIRECTIVE_NAME: &str = "link";
 pub(crate) const LINK_URL_ARGUMENT: &str = "url";
@@ -105,20 +105,17 @@ impl ErrorExtension for SpecError {
         .to_string()
     }
 
-    fn custom_extension_details(&self) -> Option<Object> {
-        let mut obj = Object::new();
-        match self {
-            SpecError::InvalidType(ty) => {
-                obj.insert("type", ty.clone());
-            }
-            SpecError::InvalidField(field, ty) => {
-                obj.insert("type", ty.clone());
-                obj.insert("field", field.clone());
-            }
-            _ => (),
-        }
+    fn custom_extension_details(&self) -> Option<Value> {
+        let members: Vec<(String, Value)> = match self {
+            SpecError::InvalidType(ty) => vec![("type".to_string(), ty.clone().into())],
+            SpecError::InvalidField(field, ty) => vec![
+                ("type".to_string(), ty.clone().into()),
+                ("field".to_string(), field.clone().into()),
+            ],
+            _ => Vec::new(),
+        };
 
-        (!obj.is_empty()).then_some(obj)
+        (!members.is_empty()).then(|| crate::json_ext::object(members))
     }
 }
 
