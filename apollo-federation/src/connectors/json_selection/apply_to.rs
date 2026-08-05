@@ -2025,6 +2025,47 @@ mod tests {
     }
 
     #[test]
+    fn a_method_body_can_fold_with_reduce() {
+        // `->reduce` is the reason a hand-written method wants the array whole.
+        // The fold runs inside the method body, against the method's receiver.
+        let (out, errors) = apply_with_methods(
+            "$->sum",
+            &[("sum", "@->reduce($acc, 0, @->add($acc))")],
+            json!([1, 2, 3, 4]),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(out, Some(json!(10)));
+    }
+
+    #[test]
+    fn a_reducing_method_can_take_its_seed_as_a_parameter() {
+        // The parameter is a caller-scope `Local`, and the fold's own `$acc`
+        // binding must not disturb it — both are visible in the update.
+        let (out, errors) = apply_with_methods(
+            "$->sumFrom(100)",
+            &[(
+                "sumFrom",
+                "($start) => @->reduce($acc, $start, @->add($acc))",
+            )],
+            json!([1, 2, 3]),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(out, Some(json!(106)));
+    }
+
+    #[test]
+    fn a_reducing_method_folds_over_a_field_of_each_element() {
+        // `@` inside the update is the element, so the fold can reach into it.
+        let (out, errors) = apply_with_methods(
+            "$->orderTotal",
+            &[("orderTotal", "@->reduce($acc, 0, @.total->add($acc))")],
+            json!([{ "total": 10 }, { "total": 20 }, { "total": 5 }]),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(out, Some(json!(35)));
+    }
+
+    #[test]
     fn min_and_max_are_expressible_as_methods() {
         for (input, other, min, max) in [(5, 3, 3, 5), (2, 3, 2, 3), (4, 4, 4, 4)] {
             let (out, errors) =

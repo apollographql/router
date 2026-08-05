@@ -881,6 +881,24 @@ typeOfValue: value->typeof
 doubled: numbers->map(@->mul(2))
 types: values->map(@->typeof)
 
+# ->reduce folds an array into a single value, left to right. The first
+# argument names the accumulator variable, the second is its starting
+# value, and the third runs once per element with `@` bound to that
+# element and the named variable bound to the accumulator so far.
+total: numbers->reduce($acc, 0, @->add($acc))
+orderTotal: orders->reduce($acc, 0, @.total->add($acc))
+#
+# The starting value is also the result for an empty array, so a fold
+# always produces an answer. The accumulator variable is visible only
+# inside the third argument — unlike ->as, it does not remain bound
+# after the method.
+#
+# Mind the order: `@->add($acc)` is correct, but `$acc->add(@)` is not,
+# and it fails quietly. Leading a path with $acc moves `@` onto the
+# accumulator, so both operands become the accumulator, the array is
+# never read, and the result is whatever folding the starting value into
+# itself produces.
+
 # Returns true if the data is deeply equal to the first argument, false
 # otherwise. Equality is solely value-based (all JSON), no references.
 isObject: value->typeof->eq("object")
@@ -974,6 +992,15 @@ arguments. Because argument `LitExpr`s are positional and many of them
 any syntactic delimiter, whitespace-only separation would be ambiguous for
 positional arguments in a way it is not for named object members or array
 elements.
+
+Arguments are ordinarily parsed in the scope of the surrounding selection, but
+`->reduce` is an exception: its first argument declares a variable that is in
+scope for its third argument, and nowhere else. The declaration therefore
+affects how later arguments in the same list parse, and it is discarded at the
+closing parenthesis, so an accumulator can shadow an outer variable of the same
+name without disturbing it. This is also why `reduce`, like `as`, cannot be
+redefined by a `methods:` entry — the parser has to decide what the syntax
+binds before it can know which definition a name resolves to.
 
 ### `Key ::= Identifier | LitString`
 

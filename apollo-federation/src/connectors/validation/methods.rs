@@ -461,6 +461,22 @@ pub(super) fn validate_method_calls(schema: &SchemaInfo) -> Vec<Message> {
                 locations: locations.clone(),
             });
         }
+
+        // A per-element argument that never reads its element is nearly always
+        // the cursor trap: leading a path with `$acc` (or any variable) moves
+        // `@` off the element, so the array goes unread and the result looks
+        // plausible. Reported wherever a mapping can appear, including method
+        // bodies, since a fold is exactly what a hand-written method is for.
+        for method in parsed.element_ignoring_calls() {
+            let name = method.as_ref().as_str();
+            messages.push(Message {
+                code: Code::ElementIgnoredByMethodArgument,
+                message: format!(
+                    "`{coordinate}` calls `->{name}` with an argument that writes `@` but never reaches the element, so the input is ignored. Leading a path with something else moves `@` onto that value instead — `$acc->add(@)` adds the accumulator to itself, and `$args.ids->contains(@)` asks whether a list contains itself. Put the element first: `@->add($acc)`, `@->in($args.ids)`."
+                ),
+                locations: locations.clone(),
+            });
+        }
     };
 
     for (directive_name, arg_name, value) in selections {
@@ -753,6 +769,139 @@ type Query {
         assert!(
             codes(schema).contains(&Code::MethodShadowsReserved),
             "expected MethodShadowsReserved for a method named `as`"
+        );
+    }
+
+    #[test]
+    fn shadowing_reduce_is_an_error_for_the_same_reason_as_as() {
+        // `->reduce($acc, ...)` is the other method the parser reads at parse
+        // time, to scope `$acc` to the update expression. A custom `reduce`
+        // would leave the parser binding a variable for a body that never
+        // receives it.
+        let schema = schema_with_methods("0.5", r#"{ reduce: "id" }"#);
+        assert!(
+            codes(schema).contains(&Code::MethodShadowsReserved),
+            "expected MethodShadowsReserved for a method named `reduce`"
+        );
+    }
+
+    /// A `@connect(selection:)` carrying `mapping`, for exercising checks that
+    /// look at selection contents rather than at `methods:` entries.
+    fn schema_with_selection(mapping: &str) -> String {
+        format!(
+            r#"extend schema
+@link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@connect", "@source"])
+@source(name: "v", http: {{ baseURL: "http://localhost" }})
+
+type Query {{
+  f: JSON @connect(source: "v", http: {{ GET: "/" }}, selection: "{mapping}")
+}}
+
+scalar JSON
+"#
+        )
+    }
+
+    #[test]
+    fn a_fold_that_leads_with_the_accumulator_is_reported() {
+        // The cursor trap: `$acc` retargets `@` onto itself, so the array is
+        // never read and the fold returns the seed folded into the seed.
+        let schema = schema_with_selection("$->reduce($acc, 0, $acc->add(@))");
+        let codes = codes(schema);
+        assert!(
+            codes.contains(&Code::ElementIgnoredByMethodArgument),
+            "expected the element-ignored warning, got {codes:?}"
+        );
+        assert_eq!(
+            Code::ElementIgnoredByMethodArgument.severity(),
+            Severity::Warning,
+            "ignoring the element is sometimes deliberate, so this must not fail composition"
+        );
+    }
+
+    #[test]
+    fn a_fold_that_reads_the_element_is_not_reported() {
+        // The correct spelling of the same fold, and the variants that reach
+        // into the element or wrap the whole thing in another method.
+        for mapping in [
+            "$->reduce($acc, 0, @->add($acc))",
+            "$.orders->reduce($acc, 0, @.total->add($acc))",
+            "$.rows->map(@.name)->filter(@->eq('x'))",
+            "$.rows->find(@.active)",
+        ] {
+            let codes = codes(schema_with_selection(mapping));
+            assert!(
+                !codes.contains(&Code::ElementIgnoredByMethodArgument),
+                "`{mapping}` reads its element, but was reported: {codes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_argument_that_never_mentions_the_cursor_is_left_alone() {
+        // Ignoring the element without writing `@` is a design choice, not a
+        // mistaken one: the first counts elements, the second keeps or drops
+        // the whole list. Neither claims to use an element it does not use.
+        for mapping in [
+            "$->reduce($acc, 0, $acc->add(1))",
+            "$.rows->filter($args.showAll)",
+            "$.rows->map('x')",
+        ] {
+            let codes = codes(schema_with_selection(mapping));
+            assert!(
+                !codes.contains(&Code::ElementIgnoredByMethodArgument),
+                "`{mapping}` never mentions `@`, so it must not be reported: {codes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_inner_callback_does_not_excuse_an_outer_one() {
+        // The outer fold ignores its element; the inner `->map` reads its own.
+        // Judging each call against its own element is what makes the outer one
+        // visible here.
+        let schema = schema_with_selection("$->reduce($acc, 0, $acc->map(@->add(1)))");
+        let codes = codes(schema);
+        assert!(
+            codes.contains(&Code::ElementIgnoredByMethodArgument),
+            "expected the outer fold to be reported, got {codes:?}"
+        );
+    }
+
+    #[test]
+    fn the_check_reaches_inside_method_bodies() {
+        // A fold written inside a `methods:` entry is exactly where this is
+        // most likely to hide.
+        let schema = schema_with_methods("0.5", r#"{ sum: "@->reduce($acc, 0, $acc->add(@))" }"#);
+        let codes = codes(schema);
+        assert!(
+            codes.contains(&Code::ElementIgnoredByMethodArgument),
+            "expected the warning for a fold inside a method body, got {codes:?}"
+        );
+    }
+
+    #[test]
+    fn a_method_body_may_fold_its_input_with_reduce() {
+        // The composition this branch exists for: a hand-written method that
+        // takes the array whole and reduces it. Note the receiver is a list and
+        // that is fine — only type-derived methods reject a list receiver.
+        let schema = r#"extend schema
+@link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@connect", "@source"])
+@source(name: "v", http: { baseURL: "http://localhost" }, methods: { sum: "$->reduce($acc, 0, @->add($acc))" })
+
+type Query {
+  total: Float @connect(source: "v", http: { GET: "/" }, selection: "$.prices->sum")
+}
+"#
+        .to_string();
+        let codes = codes(schema);
+        assert!(
+            !codes.contains(&Code::UnknownMethod),
+            "->reduce must resolve inside a method body, got {codes:?}"
+        );
+        assert!(
+            codes.is_empty(),
+            "a folding method should compose cleanly, got {codes:?}"
         );
     }
 

@@ -45,12 +45,21 @@ pub(crate) fn is_builtin_method_name(name: &str) -> bool {
 /// form while dispatch routed elsewhere — parse-time and eval-time would
 /// disagree about what the syntax means.
 ///
+/// `->reduce` qualifies for the same reason and no other: the parser rewrites
+/// `$acc` to a `Local` binding scoped to the update expression, so the binding
+/// form is decided before dispatch ever happens. Note it is the *binding*, not
+/// the iteration, that reserves the name — `->map` and `->filter` bind nothing
+/// and stay shadowable.
+///
 /// Note this is *not* subject to the forward-compatibility argument that makes
 /// ordinary built-ins shadowable: reserved names already mean something today,
 /// so reserving them cannot retroactively break a schema the way newly shipping
 /// an ordinary built-in could.
 pub(crate) fn is_reserved_method_name(name: &str) -> bool {
-    matches!(ArrowMethod::lookup(name), Some(ArrowMethod::As))
+    matches!(
+        ArrowMethod::lookup(name),
+        Some(ArrowMethod::As | ArrowMethod::Reduce)
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +68,7 @@ pub(super) enum ArrowMethod {
     As,
     Echo,
     Map,
+    Reduce,
     Match,
     First,
     Last,
@@ -180,6 +190,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::As => &public::AsMethod,
             Self::Echo => &public::EchoMethod,
             Self::Map => &public::MapMethod,
+            Self::Reduce => &public::ReduceMethod,
             Self::Match => &public::MatchMethod,
             Self::First => &public::FirstMethod,
             Self::Last => &public::LastMethod,
@@ -236,6 +247,7 @@ impl ArrowMethod {
             "as" => Some(Self::As),
             "echo" => Some(Self::Echo),
             "map" => Some(Self::Map),
+            "reduce" => Some(Self::Reduce),
             "eq" => Some(Self::Eq),
             "match" => Some(Self::Match),
             // As this case suggests, we can't necessarily provide a name()
@@ -298,6 +310,7 @@ impl ArrowMethod {
             Self::As
                 | Self::Echo
                 | Self::Map
+                | Self::Reduce
                 | Self::Match
                 | Self::First
                 | Self::Last
