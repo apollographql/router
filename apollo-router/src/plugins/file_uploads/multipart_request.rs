@@ -73,17 +73,17 @@ impl Drop for MultipartRequestState {
 /// delimiters and transport padding. multer's per-field limits count content bytes only, so
 /// without this those regions are unbounded and a single request can exhaust router memory.
 ///
-/// Budgeted as "everything the other limits already permit, plus the configured framing
-/// allowance", since multer cannot tell a framing byte from a content byte. See
-/// `max_overhead_size` in config.rs for what that does and does not guarantee.
+/// The budget is the content the other limits already permit, plus `max_overhead_size`. multer
+/// cannot tell a framing byte from a content byte, so the two cannot be limited separately. See
+/// `max_overhead_size` in config.rs for what this does and does not guarantee.
 ///
-/// Saturating throughout, because `max_files * max_file_size` overflows `u64` for configurations
-/// operators plausibly write — `max_file_size` is legitimately set in gigabytes. Saturating is a
-/// real loss of enforcement rather than a sentinel: multer compares `bytes_pulled > limit`, and
-/// `multer::constants::DEFAULT_WHOLE_STREAM_SIZE_LIMIT` is itself `u64::MAX`, so a saturated budget
-/// is simply unreachable and the limit stops applying. It takes an absurd configuration to get
-/// there — see the unit tests below, which pin both that `large.router.yaml`-scale limits do *not*
-/// saturate and that extreme ones degrade to unlimited rather than wrapping to a tiny budget.
+/// The arithmetic saturates. `max_files * max_file_size` overflows `u64` for limits operators
+/// really write, because `max_file_size` is often set in gigabytes.
+///
+/// A saturated budget is `u64::MAX`, which is not a sentinel for "no limit". multer tests
+/// `bytes_pulled > limit`, so the test never passes and the limit stops working. Only an absurd
+/// configuration saturates. The unit tests below pin both halves: `large.router.yaml`-scale limits
+/// must not saturate, and extreme ones must degrade to no limit rather than wrap to a tiny budget.
 fn whole_stream_size_limit(limits: &MultipartRequestLimits, operations_size_limit: u64) -> u64 {
     operations_size_limit
         .saturating_add(MAP_SIZE_LIMIT)

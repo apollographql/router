@@ -29,9 +29,10 @@ pub(crate) struct MultipartRequestLimits {
     /// The maximum amount of multipart framing — the preamble, part headers, boundary delimiters,
     /// and transport padding — permitted in a single upload request.
     ///
-    /// This allowance is added to the content the other limits permit, and the sum is enforced
-    /// as a limit on the total request. Requests exceeding it are rejected with
-    /// `413 Payload Too Large`.
+    /// The parser cannot tell a framing byte from a content byte. The router therefore adds this
+    /// allowance to the content the other limits already permit. It enforces the sum as a limit on
+    /// the whole request. A request over that sum gets a `413 Payload Too Large`. The sum grows
+    /// with `max_files` and `max_file_size`.
     #[serde(
         deserialize_with = "bytesize::ByteSize::deserialize",
         default = "default_max_overhead_size"
@@ -40,13 +41,19 @@ pub(crate) struct MultipartRequestLimits {
     pub(crate) max_overhead_size: ByteSize,
 }
 
-/// Deliberately generous. This allowance sets the floor on the total-request budget, and that
-/// budget is counted at a different point in the pipeline than `max_file_size`: multer counts bytes
-/// as they arrive off the socket, before parsing, while `max_file_size` counts a file's bytes as
-/// they are handed to the subgraph after parsing. The arriving count therefore runs ahead, and
-/// below a small enough budget it trips first. That answer isn't wrong — the body really is over
-/// the total — but "request too large" tells a client less than being pointed at `max_file_size`
-/// does. A megabyte-scale allowance keeps the two apart.
+/// Deliberately generous. The whole-request budget this allowance feeds and `max_file_size` count
+/// bytes at different points:
+///
+/// - multer counts every byte as it arrives off the socket, before it parses anything.
+/// - `max_file_size` counts a file's bytes as the router hands them to the subgraph.
+///
+/// The first count leads the second by whatever multer holds in its buffer. A single read of the
+/// connection can deliver ~400 KB, the default for `limits.router.http1_max_request_buf_size`.
+/// multer keeps reading until the body gives it nothing, so the gap can reach several times that.
+///
+/// With a budget that small, one oversized file breaks the whole-request budget before it breaks
+/// `max_file_size`. The client gets a "request too large" error instead of a "max file size
+/// exceeded" error. A megabyte-scale allowance keeps the budget clear of the gap.
 fn default_max_overhead_size() -> ByteSize {
     ByteSize::mb(2)
 }

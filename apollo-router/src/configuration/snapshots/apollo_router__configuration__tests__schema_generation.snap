@@ -7546,7 +7546,7 @@ expression: "&schema"
         },
         "max_overhead_size": {
           "default": "2.0 MB",
-          "description": "The maximum amount of multipart framing — the preamble, part headers, boundary delimiters,\nand transport padding — permitted in a single upload request.\n\nThis allowance is added to the content the other limits permit, and the sum is enforced\nas a limit on the total request. Requests exceeding it are rejected with\n`413 Payload Too Large`.",
+          "description": "The maximum amount of multipart framing — the preamble, part headers, boundary delimiters,\nand transport padding — permitted in a single upload request.\n\nThe parser cannot tell a framing byte from a content byte. The router therefore adds this\nallowance to the content the other limits already permit. It enforces the sum as a limit on\nthe whole request. A request over that sum gets a `413 Payload Too Large`. The sum grows\nwith `max_files` and `max_file_size`.",
           "type": "string"
         },
         "operation_body_timeout": {
