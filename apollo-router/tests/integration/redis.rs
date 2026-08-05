@@ -728,6 +728,57 @@ async fn test_redis_uses_replicas_when_clustered() {
     router.assert_metrics_does_not_contain(parse_error).await;
 }
 
+/// A clustered router must keep its eager replica connections warm by PINGing them, otherwise a
+/// server-side idle timeout reaps them and triggers a self-sustaining pool-reconnect loop (RH-1402,
+/// regression from #9589's switch to eager `lazy_connections = false`). We assert the keep-alive
+/// PING actually reaches replica nodes; the sentinel argument attributes the PING to the router so
+/// unrelated PINGs (e.g. container health probes) can't cause a false pass. Before the fix the
+/// router never pinged replicas, so this PING is absent.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_pings_replicas_to_keep_them_alive_when_clustered() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let namespace = Uuid::new_v4().to_string();
+    let redis_monitor = RedisMonitor::new(&REDIS_CLUSTER_PORTS).await;
+
+    let router_config = include_str!("fixtures/clustered_redis_query_planning.router.yaml");
+    let mut router = IntegrationTest::builder()
+        .config(router_config)
+        .redis_namespace(&namespace)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Establish the redis connection pool, including the replica connections.
+    router.execute_several_default_queries(2).await;
+
+    // The replica keep-alive fires one heartbeat interval (REDIS_HEARTBEAT_INTERVAL, 10s in
+    // `cache::redis`) after the pool is created, matching fred's primary heartbeat. Block until it
+    // reaches a replica (panics if it never does).
+    let sentinel = "apollo-router-replica-heartbeat";
+    redis_monitor
+        .wait_for(std::time::Duration::from_secs(30), |output| {
+            output
+                .replicas(true)
+                .command_with_arg_sent_to_any("PING", sentinel)
+        })
+        .await;
+
+    // The keep-alive is replica-only; primaries already get fred's built-in heartbeat. Check that
+    // against the final drained output.
+    let redis_monitor_output = redis_monitor.collect().await;
+    assert!(
+        !redis_monitor_output
+            .replicas(false)
+            .command_with_arg_sent_to_any("PING", sentinel),
+        "replica keep-alive PING should not target primary nodes"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
     if !graph_os_enabled() {
