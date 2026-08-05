@@ -3,6 +3,7 @@
 //! Parsing, formatting and manipulation of queries.
 #![allow(clippy::mutable_key_type)]
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -12,6 +13,7 @@ use apollo_compiler::Name;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
 use apollo_json::DocumentBuilder;
+use apollo_json::NewValue;
 use derivative::Derivative;
 use indexmap::IndexSet;
 use serde::Deserialize;
@@ -32,7 +34,6 @@ use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::graphql::json_object::insert_member;
 use crate::json_ext;
-use crate::json_ext::ObjectExt;
 use crate::json_ext::Path;
 use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
@@ -149,7 +150,7 @@ impl Query {
                         defer_conditions,
                     }) {
                         Some(subselection) => {
-                            let mut output = json_ext::object([]);
+                            let mut output = OutputObject::new();
                             let mut parameters = FormatParameters {
                                 variables: &variables,
                                 schema,
@@ -167,7 +168,7 @@ impl Query {
                                     &mut output,
                                     &mut Vec::new(),
                                 ) {
-                                    Ok(()) => output,
+                                    Ok(()) => output.into_value(),
                                     Err(InvalidValue) => json_ext::null(),
                                 },
                             );
@@ -196,7 +197,7 @@ impl Query {
                         }
                     }
                 } else {
-                    let mut output = json_ext::object([]);
+                    let mut output = OutputObject::new();
 
                     let all_variables: Value = if self.operation.variables.is_empty() {
                         variables
@@ -240,7 +241,7 @@ impl Query {
                             &mut output,
                             &mut Vec::new(),
                         ) {
-                            Ok(()) => output,
+                            Ok(()) => output.into_value(),
                             Err(InvalidValue) => json_ext::null(),
                         },
                     );
@@ -612,9 +613,9 @@ impl Query {
             }
 
             let mut output_object = if output.is_null() {
-                json_ext::object([])
+                OutputObject::new()
             } else if output.is_object() {
-                output.clone()
+                OutputObject::from_value(output)
             } else {
                 return Err(InvalidValue);
             };
@@ -645,7 +646,7 @@ impl Query {
                 // Propagate the Err, since `apply_selection_set` already emitted an error.
                 return Err(err);
             }
-            *output = output_object;
+            *output = output_object.into_value();
         } else {
             parameters.nullified.push(Path::from_response_slice(path));
             *output = json_ext::null();
@@ -804,7 +805,7 @@ impl Query {
         selection_set: &'a [Selection],
         parameters: &mut FormatParameters,
         input: &Value,
-        output: &mut Value,
+        output: &mut OutputObject<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
         // the type under which we apply selections
         current_type: &executable::Type,
@@ -836,7 +837,7 @@ impl Query {
                             });
 
                         if let Some(object_type) = object_type {
-                            output.object_insert(field_name.as_str(), object_type.name.as_str());
+                            output.insert(field_name.as_str(), object_type.name.as_str());
                         } else {
                             // If the __typename value does not resolve to a known object type in
                             // the schema nor the current_type is an object type, emit an error.
@@ -880,7 +881,7 @@ impl Query {
                             selection_set,
                         );
                         path.pop();
-                        output.object_insert(field_name.as_str(), output_value);
+                        output.insert(field_name.as_str(), output_value);
                         // Type-aware Err handling: non-null fields propagate Err to continue the
                         // bubble; nullable fields swallow (the child already reported, the field
                         // is already nullified).
@@ -888,8 +889,8 @@ impl Query {
                             return Err(InvalidValue);
                         }
                     } else {
-                        if !output.object_contains_key(field_name.as_str()) {
-                            output.object_insert(field_name.as_str(), ());
+                        if !output.contains_key(field_name.as_str()) {
+                            output.insert(field_name.as_str(), ());
                         }
                         // Emit error for missing field
                         emit_missing_field(parameters, field_type, field_name.as_str(), path);
@@ -940,7 +941,7 @@ impl Query {
                         if !self.is_original
                             && let Some(input_type) = input.get(TYPENAME)
                         {
-                            output.object_insert(TYPENAME, input_type);
+                            output.insert(TYPENAME, input_type);
                         }
 
                         self.apply_selection_set(
@@ -983,7 +984,7 @@ impl Query {
                             if !self.is_original
                                 && let Some(input_type) = input.get(TYPENAME)
                             {
-                                output.object_insert(TYPENAME, input_type);
+                                output.insert(TYPENAME, input_type);
                             }
 
                             self.apply_selection_set(
@@ -1012,7 +1013,7 @@ impl Query {
         selection_set: &'a [Selection],
         parameters: &mut FormatParameters,
         input: &Value,
-        output: &mut Value,
+        output: &mut OutputObject<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
     ) -> Result<(), InvalidValue> {
         // Track which named fragments have already been applied during this root
@@ -1040,7 +1041,7 @@ impl Query {
         selection_set: &'a [Selection],
         parameters: &mut FormatParameters,
         input: &Value,
-        output: &mut Value,
+        output: &mut OutputObject<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
         applied_fragments: &mut HashSet<&'a str>,
     ) -> Result<(), InvalidValue> {
@@ -1061,8 +1062,8 @@ impl Query {
                     let field_name_str = field_name.as_str();
 
                     if name.as_str() == TYPENAME {
-                        if !output.object_contains_key(field_name_str) {
-                            output.object_insert(field_name_str, root_type_name);
+                        if !output.contains_key(field_name_str) {
+                            output.insert(field_name_str, root_type_name);
                         }
                     } else if let Some(input_value) = input.get(field_name_str) {
                         let mut output_value = match output.get(field_name_str) {
@@ -1096,7 +1097,7 @@ impl Query {
                             selection_set,
                         );
                         path.pop();
-                        output.object_insert(field_name_str, output_value);
+                        output.insert(field_name_str, output_value);
                         // Type-aware Err handling (mirrors `apply_selection_set`): non-null fields
                         // propagate Err to continue the bubble; nullable fields swallow (child
                         // already reported, field is already nullified).
@@ -1104,7 +1105,7 @@ impl Query {
                             return Err(InvalidValue);
                         }
                     } else {
-                        output.object_insert(field_name_str, ());
+                        output.insert(field_name_str, ());
                         emit_missing_field(parameters, field_type, field_name_str, path);
                         if field_type.is_non_null() {
                             return Err(InvalidValue);
@@ -1387,6 +1388,75 @@ fn emit_missing_field<'b>(
                 .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
                 .build(),
         );
+    }
+}
+
+/// One output object under construction, holding its members in the order the
+/// query requested them.
+///
+/// [`OutputObject::into_value`] seals the members into a value in one pass,
+/// adopting each member by reference, so a subtree that passed through
+/// formatting unchanged keeps sharing the arena it came from.
+struct OutputObject<'a> {
+    members: Vec<(Cow<'a, str>, NewValue)>,
+}
+
+impl<'a> OutputObject<'a> {
+    fn new() -> Self {
+        OutputObject {
+            members: Vec::new(),
+        }
+    }
+
+    /// Reopens an object value for further members, adopting each by reference.
+    fn from_value(value: &Value) -> Self {
+        OutputObject {
+            members: value
+                .object_iter()
+                .map(|(key, member)| (Cow::Owned(key), NewValue::Node(member)))
+                .collect(),
+        }
+    }
+
+    fn position(&self, key: &str) -> Option<usize> {
+        self.members.iter().position(|(member, _)| &**member == key)
+    }
+
+    fn contains_key(&self, key: &str) -> bool {
+        self.position(key).is_some()
+    }
+
+    /// A handle to the member already written at `key`.
+    fn get(&self, key: &str) -> Option<Value> {
+        let (_, member) = &self.members[self.position(key)?];
+        Some(match member {
+            NewValue::Node(handle) => handle.clone(),
+            NewValue::Null => json_ext::null(),
+            NewValue::Bool(value) => json_ext::bool_value(*value),
+            NewValue::Int(value) => json_ext::from_i64(*value),
+            NewValue::Float(value) => json_ext::from_f64(*value),
+            NewValue::String(value) => json_ext::string(value.as_str()),
+        })
+    }
+
+    /// Writes `value` at `key`, keeping the position of a key already present.
+    fn insert(&mut self, key: impl Into<Cow<'a, str>>, value: impl Into<NewValue>) {
+        let key = key.into();
+        let existing = self.position(&key);
+        match existing {
+            Some(index) => self.members[index].1 = value.into(),
+            None => self.members.push((key, value.into())),
+        }
+    }
+
+    fn into_value(self) -> Value {
+        let mut builder = DocumentBuilder::new();
+        for (key, member) in self.members {
+            builder
+                .set(&*key, member)
+                .expect("a fresh object root accepts any key");
+        }
+        builder.seal().root_handle()
     }
 }
 

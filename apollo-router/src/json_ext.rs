@@ -737,14 +737,7 @@ impl ObjectExt for Value {
 
 /// A freshly built empty array.
 fn empty_array() -> Value {
-    let mut builder = DocumentBuilder::new();
-    builder.remove(0usize);
-    // `DocumentBuilder::new()` starts as an empty object; there is no
-    // direct "empty array" constructor, so build one via a document that
-    // parses to `[]` instead.
-    apollo_json::Document::parse(b"[]".to_vec())
-        .expect("`[]` is valid JSON")
-        .root_handle()
+    DocumentBuilder::new_array().seal().root_handle()
 }
 
 /// Overwrites the value a cursor points at, by replacing it in its parent.
@@ -1752,7 +1745,7 @@ pub(crate) fn from_f64(value: f64) -> Value {
 /// A JSON array of `items`, each adopted by reference.
 #[allow(dead_code)]
 pub(crate) fn array(items: impl IntoIterator<Item = Value>) -> Value {
-    let mut builder = empty_array().detach().edit();
+    let mut builder = DocumentBuilder::new_array();
     for item in items {
         builder
             .push(item)
