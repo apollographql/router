@@ -450,11 +450,6 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_chaos,
-            "$.experimental_chaos[?(@.force_schema_reload || @.force_config_reload)]"
-        );
-
-        populate_config_instrument!(
             apollo.router.config.experimental_type_conditioned_fetching,
             "$.experimental_type_conditioned_fetching[?(@==true)]"
         );
