@@ -7647,7 +7647,6 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.61.0",
-<<<<<<< HEAD
 ]
 
 [[package]]
@@ -7658,8 +7657,6 @@ checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix",
  "windows-sys 0.59.0",
-=======
->>>>>>> origin/dev
 ]
 
 [[package]]
