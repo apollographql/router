@@ -7,8 +7,8 @@ use std::fmt;
 use apollo_json::DocumentBuilder;
 use apollo_json::JsonKind;
 use apollo_json::NewValue;
-use apollo_json::ValueMut;
 pub(crate) use apollo_json::Value;
+use apollo_json::ValueMut;
 use num_traits::ToPrimitive;
 use once_cell::sync::Lazy;
 use regex::Captures;
@@ -432,9 +432,7 @@ impl ValueExt for Value {
                             // next path element without descending into an index,
                             // matching the pre-apollo-json behavior.
                             let mut new_builder = DocumentBuilder::new();
-                            new_builder
-                                .set(0usize, ())
-                                .ok();
+                            new_builder.set(0usize, ()).ok();
                             let _ = new_builder;
                             set_cursor_to(&mut cursor, empty_array());
                         }
@@ -771,7 +769,11 @@ fn merge_children<T: MergeTarget>(target: &mut T, other: apollo_json::ValueRef<'
     }
 }
 
-fn merge_one<T: MergeTarget>(target: &mut T, segment: PathSeg<'_>, incoming: apollo_json::ValueRef<'_>) {
+fn merge_one<T: MergeTarget>(
+    target: &mut T,
+    segment: PathSeg<'_>,
+    incoming: apollo_json::ValueRef<'_>,
+) {
     let existing_kind = match &segment {
         PathSeg::Key(key) => target.peek().get(key).map(|v| v.kind()),
         PathSeg::Index(i) => target.peek().index(*i).map(|v| v.kind()),
@@ -1170,12 +1172,18 @@ fn value_matches_type_conditions(value: apollo_json::ValueRef<'_>, tc: &[String]
             .is_some_and(|type_name| tc.iter().any(|tc| tc.as_str() == type_name.as_ref()))
 }
 
-fn is_value_ref_object_of_type(value: apollo_json::ValueRef<'_>, schema: &Schema, maybe_type: &str) -> bool {
+fn is_value_ref_object_of_type(
+    value: apollo_json::ValueRef<'_>,
+    schema: &Schema,
+    maybe_type: &str,
+) -> bool {
     value.kind() == JsonKind::Object
         && value
             .get(TYPENAME)
             .and_then(|v| v.as_str().map(|s| s.into_owned()))
-            .is_none_or(|typename| typename == maybe_type || schema.is_subtype(maybe_type, &typename))
+            .is_none_or(|typename| {
+                typename == maybe_type || schema.is_subtype(maybe_type, &typename)
+            })
 }
 
 /// A GraphQL path element that is composes of strings or numbers.

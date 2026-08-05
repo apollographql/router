@@ -176,7 +176,8 @@ impl Context {
     {
         // A stored handle pins its whole source arena, so detaching stops a context entry from
         // holding an entire response document alive for the rest of the request.
-        self.entries.insert(key.into(), value.detach().root_handle())
+        self.entries
+            .insert(key.into(), value.detach().root_handle())
     }
 
     /// Get a json value from the context using the provided key.

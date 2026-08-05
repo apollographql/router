@@ -16,7 +16,6 @@ use apollo_json::JsonKind;
 use indexmap::IndexSet;
 use tower::BoxError;
 
-use crate::json_ext::Object;
 use crate::json_ext::Value as JsonValue;
 use crate::json_ext::ValueExt;
 use crate::plugins::demand_control::DemandControlError;
@@ -47,7 +46,7 @@ fn traverse_json_value(value: JsonValue, path: &[&str]) -> Option<JsonValue> {
 // - `Some(len)` for array values (e.g., `ids: ["a", "b"]` → 2)
 // - Resolves variable references through the provided variables map
 // - `None` for null, missing, or unsupported value types
-fn infer_size_from_argument(value: Option<&AstValue>, variables: &Object) -> Option<i32> {
+fn infer_size_from_argument(value: Option<&AstValue>, variables: &JsonValue) -> Option<i32> {
     match value? {
         // A slicing argument is a count of elements, so it can never be negative. Clamp to a
         // non-negative lower bound: a negative value would otherwise contribute negative cost
@@ -69,7 +68,7 @@ fn infer_size_from_variable(value: Option<JsonValue>) -> Option<i32> {
     }
 }
 
-fn resolve_nested_size(value: &AstValue, path: &[&str], variables: &Object) -> Option<i32> {
+fn resolve_nested_size(value: &AstValue, path: &[&str], variables: &JsonValue) -> Option<i32> {
     match value {
         AstValue::Object(_) => infer_size_from_argument(traverse_ast_value(value, path), variables),
         AstValue::Variable(var_name) => infer_size_from_variable(
@@ -86,7 +85,7 @@ fn resolve_nested_size(value: &AstValue, path: &[&str], variables: &Object) -> O
 fn resolve_slicing_value(
     args: &HashMap<&str, &AstValue>,
     slicing_path: &str,
-    variables: &Object,
+    variables: &JsonValue,
 ) -> Option<i32> {
     let segments: Vec<&str> = slicing_path.split('.').collect();
     let (arg_name, nested_path) = segments.split_first()?;
@@ -104,7 +103,7 @@ fn resolve_slicing_value(
 fn collect_slicing_sizes<'a>(
     field: &Field,
     slicing_argument_names: &'a IndexSet<String>,
-    variables: &Object,
+    variables: &JsonValue,
 ) -> HashMap<&'a str, i32> {
     // Merge default and actual argument values (actuals take precedence)
     let defaults = field
@@ -313,7 +312,7 @@ impl ListSizeDirective {
     pub(in crate::plugins::demand_control) fn new(
         parsed: &ParsedListSizeDirective,
         field: &Field,
-        variables: &Object,
+        variables: &JsonValue,
         pre_parsed_sized_fields: Option<Arc<SizedFields>>,
     ) -> Result<Self, DemandControlError> {
         let expected_size = match parsed.slicing_argument_names.as_ref() {
@@ -466,7 +465,7 @@ mod tests {
         fn integer_values(#[case] input: &str, #[case] expected: Option<i32>) {
             let value = AstValue::Int(IntValue::new_parsed(input));
             assert_eq!(
-                infer_size_from_argument(Some(&value), &Object::new()),
+                infer_size_from_argument(Some(&value), &JsonValue::default()),
                 expected
             );
         }
@@ -478,7 +477,7 @@ mod tests {
         fn list_values(#[case] size: usize, #[case] expected: Option<i32>) {
             let value = list_of_size(size);
             assert_eq!(
-                infer_size_from_argument(Some(&value), &Object::new()),
+                infer_size_from_argument(Some(&value), &JsonValue::default()),
                 expected
             );
         }
@@ -495,8 +494,8 @@ mod tests {
             #[case] expected: Option<i32>,
         ) {
             let value = AstValue::Variable(apollo_compiler::Name::new_unchecked(var_name));
-            let mut variables = Object::new();
-            variables.insert(var_name, crate::json_ext::from_legacy(&var_value));
+            let variables =
+                JsonValue::object([(var_name, crate::json_ext::from_legacy(&var_value))]);
             assert_eq!(infer_size_from_argument(Some(&value), &variables), expected);
         }
 
@@ -509,7 +508,7 @@ mod tests {
         ))))]
         fn unsupported_values_return_none(#[case] value: Option<AstValue>) {
             assert_eq!(
-                infer_size_from_argument(value.as_ref(), &Object::new()),
+                infer_size_from_argument(value.as_ref(), &JsonValue::default()),
                 None
             );
         }

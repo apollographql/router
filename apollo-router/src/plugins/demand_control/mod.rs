@@ -15,6 +15,7 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use apollo_federation::error::FederationError;
 use apollo_federation::query_plan::serializable_document::SerializableDocumentNotInitialized;
+use apollo_json::Value;
 use displaydoc::Display;
 use futures::StreamExt;
 use futures::future::Either;
@@ -32,7 +33,7 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::error::Error;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
-use crate::json_ext::Object;
+use crate::graphql::json_object::empty_object;
 use crate::json_ext::ValueExt;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -213,50 +214,38 @@ impl IntoGraphQLErrors for DemandControlError {
             DemandControlError::EstimatedCostTooExpensive {
                 estimated_cost,
                 max_cost,
-            } => {
-                let mut extensions = Object::new();
-                extensions.insert("cost.estimated", estimated_cost);
-                extensions.insert("cost.max", max_cost);
-                Ok(vec![
-                    graphql::Error::builder()
-                        .extension_code(self.code())
-                        .extensions(extensions)
-                        .message(self.to_string())
-                        .build(),
-                ])
-            }
+            } => Ok(vec![
+                graphql::Error::builder()
+                    .extension_code(self.code())
+                    .extension("cost.estimated", estimated_cost)
+                    .extension("cost.max", max_cost)
+                    .message(self.to_string())
+                    .build(),
+            ]),
             DemandControlError::EstimatedSubgraphCostTooExpensive {
                 ref subgraph,
                 estimated_cost,
                 max_cost,
-            } => {
-                let mut extensions = Object::new();
-                extensions.insert("cost.subgraph", subgraph.as_str());
-                extensions.insert("cost.subgraph.estimated", estimated_cost);
-                extensions.insert("cost.subgraph.max", max_cost);
-                Ok(vec![
-                    graphql::Error::builder()
-                        .extension_code(self.code())
-                        .extensions(extensions)
-                        .message(self.to_string())
-                        .build(),
-                ])
-            }
+            } => Ok(vec![
+                graphql::Error::builder()
+                    .extension_code(self.code())
+                    .extension("cost.subgraph", subgraph.as_str())
+                    .extension("cost.subgraph.estimated", estimated_cost)
+                    .extension("cost.subgraph.max", max_cost)
+                    .message(self.to_string())
+                    .build(),
+            ]),
             DemandControlError::ActualCostTooExpensive {
                 actual_cost,
                 max_cost,
-            } => {
-                let mut extensions = Object::new();
-                extensions.insert("cost.actual", actual_cost);
-                extensions.insert("cost.max", max_cost);
-                Ok(vec![
-                    graphql::Error::builder()
-                        .extension_code(self.code())
-                        .extensions(extensions)
-                        .message(self.to_string())
-                        .build(),
-                ])
-            }
+            } => Ok(vec![
+                graphql::Error::builder()
+                    .extension_code(self.code())
+                    .extension("cost.actual", actual_cost)
+                    .extension("cost.max", max_cost)
+                    .message(self.to_string())
+                    .build(),
+            ]),
             DemandControlError::QueryParseFailure(_) => Ok(vec![
                 graphql::Error::builder()
                     .extension_code(self.code())
@@ -333,7 +322,7 @@ impl From<FederationError> for DemandControlError {
 #[derive(Clone)]
 pub(crate) struct DemandControlContext {
     pub(crate) strategy: Strategy,
-    pub(crate) variables: Object,
+    pub(crate) variables: Value,
 }
 
 impl Context {
@@ -616,7 +605,7 @@ impl Plugin for DemandControl {
                                                     "must be able to convert to graphql error",
                                                 ),
                                             )
-                                            .extensions(crate::json_ext::Object::new())
+                                            .extensions(empty_object())
                                             .build()),
                                         // This will terminate the stream
                                         Err(()),
@@ -665,7 +654,7 @@ impl Plugin for DemandControl {
                                     )
                                     .id(req.id)
                                     .context(req.context.clone())
-                                    .extensions(crate::json_ext::Object::new())
+                                    .extensions(empty_object())
                                     .subgraph_name(subgraph_name.clone())
                                     .build(),
                             ),
@@ -695,7 +684,7 @@ impl Plugin for DemandControl {
                                 .id(resp.id)
                                 .subgraph_name(subgraph_name)
                                 .context(resp.context.clone())
-                                .extensions(Object::new())
+                                .extensions(empty_object())
                                 .build(),
                         })
                     },

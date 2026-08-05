@@ -3,9 +3,7 @@ use std::collections::HashMap;
 use apollo_json::JsonKind;
 
 use crate::graphql::ResponseVisitor;
-use crate::json_ext::Object;
 use crate::json_ext::Value;
-use crate::json_ext::ValueExt;
 use crate::plugins::telemetry::metrics::apollo::histogram::ListLengthHistogram;
 use crate::plugins::telemetry::metrics::apollo::studio::LocalFieldStat;
 use crate::plugins::telemetry::metrics::apollo::studio::LocalTypeStat;
@@ -27,7 +25,7 @@ impl ResponseVisitor for LocalTypeStatRecorder {
     fn visit_field(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
-        variables: &Object,
+        variables: &Value,
         ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &Value,
@@ -77,9 +75,7 @@ impl ResponseVisitor for LocalTypeStatRecorder {
                 }
             }
             JsonKind::Object => {
-                if let Some(children) = value.as_object() {
-                    self.visit_selections(request, variables, &field.selection_set, &children);
-                }
+                self.visit_selections(request, variables, &field.selection_set, value);
             }
             _ => {}
         }

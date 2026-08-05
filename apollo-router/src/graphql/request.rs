@@ -8,14 +8,14 @@ use serde::de::DeserializeSeed;
 use serde::de::Error;
 
 use crate::configuration::BatchingMode;
+use crate::graphql::json_object::ObjectAccumulator;
+use crate::graphql::json_object::empty_object;
+use crate::graphql::json_object::is_empty_object;
 use crate::json_ext;
-use crate::json_ext::Object;
-use crate::json_ext::ObjectMap;
 use crate::json_ext::Value;
-use crate::json_ext::ValueExt;
 
 /// A GraphQL `Request` used to represent both supergraph and subgraph requests.
-#[derive(Clone, Derivative, Serialize, Deserialize, Default)]
+#[derive(Clone, Derivative, Serialize, Deserialize)]
 // Note: if adding #[serde(deny_unknown_fields)],
 // also remove `Fields::Other` in `DeserializeSeed` impl.
 #[serde(rename_all = "camelCase")]
@@ -44,11 +44,11 @@ pub struct Request {
     /// using `$variableName` syntax, where `{"variableName": "value"}` has been
     /// specified as this `variables` value.
     #[serde(
-        skip_serializing_if = "Object::is_empty",
-        default,
-        deserialize_with = "deserialize_null_default"
+        skip_serializing_if = "is_empty_object",
+        default = "empty_object",
+        deserialize_with = "deserialize_object_or_null"
     )]
-    pub variables: Object,
+    pub variables: Value,
 
     /// The (optional) GraphQL `extensions` of a GraphQL request.
     ///
@@ -74,37 +74,47 @@ pub struct Request {
     /// [APQ]: https://www.apollographql.com/docs/apollo-server/performance/apq/
     /// Note we allow null when deserializing as per [graphql-over-http spec](https://graphql.github.io/graphql-over-http/draft/#sel-EALFPCCBCEtC37P)
     #[serde(
-        skip_serializing_if = "Object::is_empty",
-        default,
-        deserialize_with = "deserialize_null_default"
+        skip_serializing_if = "is_empty_object",
+        default = "empty_object",
+        deserialize_with = "deserialize_object_or_null"
     )]
-    pub extensions: Object,
+    pub extensions: Value,
 }
 
-// NOTE: this deserialize helper is used to transform `null` to Default::default()
-fn deserialize_null_default<'de, D, T: Default + Deserialize<'de>>(
-    deserializer: D,
-) -> Result<T, D::Error>
+impl Default for Request {
+    fn default() -> Self {
+        Self {
+            query: None,
+            operation_name: None,
+            variables: empty_object(),
+            extensions: empty_object(),
+        }
+    }
+}
+
+/// Reads a JSON object, mapping an explicit `null` to an empty object.
+fn deserialize_object_or_null<'de, D>(deserializer: D) -> Result<Value, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    <Option<T>>::deserialize(deserializer).map(|x| x.unwrap_or_default())
+    let value = <Option<Value>>::deserialize(deserializer)?;
+    Ok(value
+        .filter(|value| !value.is_null())
+        .unwrap_or_else(empty_object))
 }
 
 /// PERF(apollo-json): legacy bridge, revisit -- `serde_json` drives request parsing,
 /// and an apollo-json value only captures a subtree from apollo-json's own
 /// deserializers, so the zero-copy `BytesSeed` reads the legacy representation and
 /// the object converts here, once per request.
-fn as_optional_object<E: Error>(value: serde_json_bytes::Value) -> Result<Object, E> {
+fn as_optional_object<E: Error>(value: serde_json_bytes::Value) -> Result<Value, E> {
     use serde::de::Unexpected;
 
     let exp = "a map or null";
     match value {
-        serde_json_bytes::Value::Object(_) => Ok(json_ext::from_legacy(&value)
-            .as_object()
-            .expect("a legacy object converts to an object")),
-        // Similar to `deserialize_null_default`:
-        serde_json_bytes::Value::Null => Ok(Object::default()),
+        serde_json_bytes::Value::Object(_) => Ok(json_ext::from_legacy(&value)),
+        // Similar to `deserialize_object_or_null`:
+        serde_json_bytes::Value::Null => Ok(empty_object()),
         serde_json_bytes::Value::Bool(value) => Err(E::invalid_type(Unexpected::Bool(value), &exp)),
         serde_json_bytes::Value::Number(_) => {
             Err(E::invalid_type(Unexpected::Other("a number"), &exp))
@@ -116,57 +126,110 @@ fn as_optional_object<E: Error>(value: serde_json_bytes::Value) -> Result<Object
     }
 }
 
-#[buildstructor::buildstructor]
-impl Request {
-    #[builder(visibility = "pub")]
-    /// This is the constructor (or builder) to use when constructing a GraphQL
-    /// `Request`.
-    ///
-    /// The optionality of parameters on this constructor match the runtime
-    /// requirements which are necessary to create a valid GraphQL `Request`.
-    /// (This contrasts against the `fake_new` constructor which may be more
-    /// tolerant to missing properties which are only necessary for testing
-    /// purposes.  If you are writing tests, you may want to use `Self::fake_new()`.)
-    fn new(
-        query: Option<String>,
-        operation_name: Option<String>,
-        // Spell out the map type rather than the `Object` alias so buildstructor
-        // derives `.variable(key, value)` / `.extension(key, value)` from it
-        variables: ObjectMap<String, NewValue>,
-        extensions: ObjectMap<String, NewValue>,
-    ) -> Self {
-        Self {
-            query,
-            operation_name,
-            variables,
-            extensions,
-        }
+/// Builds a GraphQL [`Request`]. Every part of a request is optional; an empty builder
+/// yields a request with no query, no operation name, and no variables or extensions.
+///
+/// ```
+/// # use apollo_router::graphql::Request;
+/// let request = Request::builder()
+///     .query("query Me($id: ID!) { user(id: $id) { name } }")
+///     .operation_name("Me")
+///     .variable("id", "1")
+///     .build();
+/// ```
+#[derive(Default)]
+pub struct RequestBuilder {
+    query: Option<String>,
+    operation_name: Option<String>,
+    variables: ObjectAccumulator,
+    extensions: ObjectAccumulator,
+}
+
+impl RequestBuilder {
+    /// Sets the GraphQL operation string.
+    #[must_use]
+    pub fn query(self, query: impl Into<String>) -> Self {
+        self.and_query(Some(query))
     }
 
-    #[builder(visibility = "pub")]
-    /// This is the constructor (or builder) to use when constructing a **fake**
-    /// GraphQL `Request`.  Use `Self::new()` to construct a _real_ request.
-    ///
-    /// This is offered for testing purposes and it relaxes the requirements
-    /// of some parameters to be specified that would be otherwise required
-    /// for a real request.  It's usually enough for most testing purposes,
-    /// especially when a fully constructed `Request` is difficult to construct.
-    /// While today, its parameters have the same optionality as its `new`
-    /// counterpart, that may change in future versions.
-    fn fake_new(
-        query: Option<String>,
-        operation_name: Option<String>,
-        // Spell out the map type rather than the `Object` alias so buildstructor
-        // derives `.variable(key, value)` / `.extension(key, value)` from it
-        variables: ObjectMap<String, NewValue>,
-        extensions: ObjectMap<String, NewValue>,
-    ) -> Self {
-        Self {
-            query,
-            operation_name,
-            variables,
-            extensions,
+    /// Sets the GraphQL operation string when `query` is `Some`.
+    #[must_use]
+    pub fn and_query(mut self, query: Option<impl Into<String>>) -> Self {
+        self.query = query.map(Into::into);
+        self
+    }
+
+    /// Sets the name of the operation to run, which must match an operation in the query.
+    #[must_use]
+    pub fn operation_name(self, operation_name: impl Into<String>) -> Self {
+        self.and_operation_name(Some(operation_name))
+    }
+
+    /// Sets the name of the operation to run when `operation_name` is `Some`.
+    #[must_use]
+    pub fn and_operation_name(mut self, operation_name: Option<impl Into<String>>) -> Self {
+        self.operation_name = operation_name.map(Into::into);
+        self
+    }
+
+    /// Adds every member of the JSON object `variables`, replacing variables of the same name.
+    #[must_use]
+    pub fn variables(mut self, variables: impl Into<Value>) -> Self {
+        self.variables.extend(variables.into());
+        self
+    }
+
+    /// Adds one variable, replacing any variable of the same name.
+    #[must_use]
+    pub fn variable(mut self, name: impl Into<String>, value: impl Into<NewValue>) -> Self {
+        self.variables.insert(name, value);
+        self
+    }
+
+    /// Adds every member of the JSON object `extensions`, replacing extensions under the
+    /// same keys.
+    #[must_use]
+    pub fn extensions(mut self, extensions: impl Into<Value>) -> Self {
+        self.extensions.extend(extensions.into());
+        self
+    }
+
+    /// Adds one extension, replacing any extension under the same key.
+    #[must_use]
+    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+        self.extensions.insert(key, value);
+        self
+    }
+
+    /// Finishes the builder and returns the [`Request`].
+    pub fn build(self) -> Request {
+        Request {
+            query: self.query,
+            operation_name: self.operation_name,
+            variables: self.variables.build(),
+            extensions: self.extensions.build(),
         }
+    }
+}
+
+impl Request {
+    /// Returns a builder that builds a GraphQL [`Request`] from its parts.
+    ///
+    /// The optionality of the builder's setters matches what a valid GraphQL request
+    /// requires at runtime. Tests that need a request without caring about its contents
+    /// can use [`Request::fake_builder`] instead.
+    pub fn builder() -> RequestBuilder {
+        RequestBuilder::default()
+    }
+
+    /// Returns a builder that builds a **fake** GraphQL [`Request`] for testing, where a
+    /// fully populated request is awkward to assemble. Use [`Request::builder`] for a real
+    /// request.
+    ///
+    /// The setters relax requirements that a real request would impose. Today they match
+    /// [`Request::builder`]; that may change in future versions.
+    pub fn fake_builder() -> RequestBuilder {
+        RequestBuilder::default()
     }
 
     /// Deserialize as JSON from `&Bytes`, avoiding string copies where possible
@@ -244,15 +307,13 @@ impl Request {
     fn nested_object(
         value: &serde_json_bytes::Value,
         key: &str,
-    ) -> Result<Object, serde_json::Error> {
+    ) -> Result<Value, serde_json::Error> {
         let Some(text) = value.get(key).and_then(|nested| nested.as_str()) else {
-            return Ok(Object::default());
+            return Ok(empty_object());
         };
         let map: serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value> =
             serde_json::from_str(text)?;
-        Ok(json_ext::from_legacy(&serde_json_bytes::Value::Object(map))
-            .as_object()
-            .expect("a legacy object converts to an object"))
+        Ok(json_ext::from_legacy(&serde_json_bytes::Value::Object(map)))
     }
 
     /// Convert encoded URL query string parameters (also known as "search
@@ -346,8 +407,8 @@ impl<'de> DeserializeSeed<'de> for RequestFromBytesSeed<'_> {
                 Ok(Request {
                     query: query.unwrap_or_default(),
                     operation_name: operation_name.unwrap_or_default(),
-                    variables: variables.unwrap_or_default(),
-                    extensions: extensions.unwrap_or_default(),
+                    variables: variables.unwrap_or_else(empty_object),
+                    extensions: extensions.unwrap_or_else(empty_object),
                 })
             }
         }
@@ -362,7 +423,6 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use crate::json_ext::json_value;
 
     #[test]
     fn test_request() {
@@ -379,8 +439,8 @@ mod tests {
             Request::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
                 .operation_name("aTest")
-                .variables(json_value!({ "arg1": "me" }).as_object().unwrap())
-                .extensions(json_value!({"extension": 1}).as_object().unwrap())
+                .variables(json_value!({ "arg1": "me" }))
+                .extensions(json_value!({"extension": 1}))
                 .build()
         );
     }
@@ -398,7 +458,7 @@ mod tests {
             Request::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
                 .operation_name("aTest")
-                .extensions(json_value!({"extension": 1}).as_object().unwrap())
+                .extensions(json_value!({"extension": 1}))
                 .build()
         );
     }
@@ -419,7 +479,7 @@ mod tests {
             Request::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }")
                 .operation_name("aTest")
-                .extensions(json_value!({"extension": 1}).as_object().unwrap())
+                .extensions(json_value!({"extension": 1}))
                 .build()
         );
     }

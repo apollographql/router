@@ -23,7 +23,6 @@ use super::schema::InputDefinition;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql::Response;
 use crate::graphql::ResponseVisitor;
-use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::plugins::demand_control::cost_calculator::directives::ListSizeDirective;
 use crate::query_planner::DeferredNode;
@@ -42,7 +41,7 @@ pub(crate) struct StaticCostCalculator {
 struct ScoringContext<'a> {
     schema: &'a DemandControlledSchema,
     query: &'a ExecutableDocument,
-    variables: &'a Object,
+    variables: &'a Value,
     should_estimate_requires: bool,
 }
 
@@ -50,7 +49,7 @@ fn score_argument(
     argument: &apollo_compiler::ast::Value,
     argument_definition: &InputDefinition,
     schema: &DemandControlledSchema,
-    variables: &Object,
+    variables: &Value,
 ) -> Result<f64, DemandControlError> {
     match (argument, argument_definition.ty()) {
         (_, ExtendedType::Interface(_))
@@ -506,7 +505,7 @@ impl StaticCostCalculator {
     fn score_plan_node(
         &self,
         plan_node: &PlanNode,
-        variables: &Object,
+        variables: &Value,
     ) -> Result<CostBySubgraph, DemandControlError> {
         match plan_node {
             PlanNode::Sequence { nodes } => self.summed_score_of_nodes(nodes, variables),
@@ -537,7 +536,7 @@ impl StaticCostCalculator {
         &self,
         subgraph: &str,
         operation: &SerializableDocument,
-        variables: &Object,
+        variables: &Value,
     ) -> Result<CostBySubgraph, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
 
@@ -558,7 +557,7 @@ impl StaticCostCalculator {
         &self,
         left: &Option<Box<PlanNode>>,
         right: &Option<Box<PlanNode>>,
-        variables: &Object,
+        variables: &Value,
     ) -> Result<CostBySubgraph, DemandControlError> {
         match (left, right) {
             (None, None) => Ok(CostBySubgraph::default()),
@@ -576,7 +575,7 @@ impl StaticCostCalculator {
         &self,
         primary: &Primary,
         deferred: &Vec<DeferredNode>,
-        variables: &Object,
+        variables: &Value,
     ) -> Result<CostBySubgraph, DemandControlError> {
         let mut score = CostBySubgraph::default();
         if let Some(node) = &primary.node {
@@ -593,7 +592,7 @@ impl StaticCostCalculator {
     fn summed_score_of_nodes(
         &self,
         nodes: &Vec<PlanNode>,
-        variables: &Object,
+        variables: &Value,
     ) -> Result<CostBySubgraph, DemandControlError> {
         let mut sum = CostBySubgraph::default();
         for node in nodes {
@@ -607,7 +606,7 @@ impl StaticCostCalculator {
         &self,
         query: &ExecutableDocument,
         schema: &DemandControlledSchema,
-        variables: &Object,
+        variables: &Value,
         should_estimate_requires: bool,
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
@@ -631,7 +630,7 @@ impl StaticCostCalculator {
     pub(crate) fn planned(
         &self,
         query_plan: &QueryPlan,
-        variables: &Object,
+        variables: &Value,
     ) -> Result<CostBySubgraph, DemandControlError> {
         if let Some(plan) = query_plan.root.as_ref() {
             self.score_plan_node(plan, variables)
@@ -644,7 +643,7 @@ impl StaticCostCalculator {
         &self,
         request: &ExecutableDocument,
         response: &Response,
-        variables: &Object,
+        variables: &Value,
     ) -> Result<f64, DemandControlError> {
         let mut visitor = ResponseCostCalculator::new(&self.supergraph_schema);
         visitor.visit(request, response, variables);
@@ -665,7 +664,7 @@ impl<'schema> ResponseCostCalculator<'schema> {
     fn score_response_field(
         &mut self,
         request: &ExecutableDocument,
-        variables: &Object,
+        variables: &Value,
         parent_ty: &NamedType,
         field: &Field,
         value: &Value,
@@ -738,8 +737,7 @@ impl<'schema> ResponseCostCalculator<'schema> {
                 response_field_cost += definition
                     .and_then(|d| d.type_cost_directive())
                     .map_or(1.0, |cost| cost.weight());
-                let children = Object::from(value.clone());
-                self.visit_selections(request, variables, &field.selection_set, &children);
+                self.visit_selections(request, variables, &field.selection_set, value);
             }
         }
 
@@ -752,7 +750,7 @@ impl ResponseVisitor for ResponseCostCalculator<'_> {
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,
-        variables: &Object,
+        variables: &Value,
         parent_ty: &NamedType,
         field: &Field,
         value: &Value,
@@ -763,7 +761,7 @@ impl ResponseVisitor for ResponseCostCalculator<'_> {
     fn visit_list_item(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
-        variables: &Object,
+        variables: &Value,
         parent_ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &Value,
@@ -788,7 +786,6 @@ mod tests {
     use crate::Context;
     use crate::assert_snapshot_subscriber;
     use crate::compute_job::ComputeJobType;
-    use crate::json_ext::ValueExt;
     use crate::plugins::authorization::CacheKeyMetadata;
     use crate::query_planner::QueryPlannerService;
     use crate::services::QueryPlannerContent;
@@ -802,21 +799,17 @@ mod tests {
         fn rust_planned(
             &self,
             query_plan: &apollo_federation::query_plan::QueryPlan,
-            variables: &Object,
+            variables: &Value,
         ) -> Result<f64, DemandControlError> {
             let js_planner_node: PlanNode = query_plan.node.as_ref().unwrap().into();
             Ok(self.score_plan_node(&js_planner_node, variables)?.total())
         }
     }
 
-    /// The operation variables, dropped when the literal is not an object —
-    /// matching what the request path hands the calculators.
-    fn parse_variables(variables_str: &str) -> Object {
+    fn parse_variables(variables_str: &str) -> Value {
         apollo_json::Document::parse(variables_str.as_bytes().to_vec())
             .expect("test variables are valid JSON")
             .root_handle()
-            .as_object()
-            .unwrap_or_default()
     }
 
     fn parse_schema_and_operation(

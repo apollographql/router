@@ -3,6 +3,7 @@ use std::future::Ready;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use apollo_json::Value;
 use futures::future::BoxFuture;
 use futures::future::Either;
 use sha2::Digest;
@@ -18,7 +19,6 @@ use crate::compute_job;
 use crate::compute_job::ComputeJobType;
 use crate::graphql;
 use crate::json_ext;
-use crate::json_ext::Object;
 use crate::services::query_parsing::ParsedDocument;
 use crate::spec;
 use crate::spec::QueryHash;
@@ -32,7 +32,7 @@ pub(crate) struct IntrospectionRequest {
     /// Document representing the introspection operation to execute.
     pub(crate) document: ParsedDocument,
     /// JSON variable values used to execute the query.
-    pub(crate) variables: Object,
+    pub(crate) variables: Value,
 }
 
 /// In-memory cache storage for introspection.
@@ -307,20 +307,11 @@ where
         let cache = self.cache.clone();
 
         Box::pin(async move {
-            let cache_key = if let Ok(variable_key) = serde_json::to_string(&req.variables) {
-                let mut hasher = Sha256::new();
-                hasher.update(variable_key);
-                IntrospectionCacheKey {
-                    operation: req.document.hash.clone(),
-                    variables: hasher.finalize(),
-                }
-            } else {
-                tracing::warn!(
-                    "Failed to serialize variables for introspection cache key, skipping cache: {:?}",
-                    req.variables
-                );
-
-                return inner.ready().await?.call(req).await;
+            let mut hasher = Sha256::new();
+            hasher.update(req.variables.to_vec());
+            let cache_key = IntrospectionCacheKey {
+                operation: req.document.hash.clone(),
+                variables: hasher.finalize(),
             };
 
             if let Some(response) = cache.get(&cache_key, |_| unreachable!()).await {
@@ -382,7 +373,7 @@ fn execute_introspection(
     max_depth: MaxDepth,
     schema: &spec::Schema,
     doc: &ParsedDocument,
-    variables: Object,
+    variables: Value,
 ) -> graphql::Response {
     let api_schema = schema.api_schema();
     let operation = &doc.operation;
@@ -394,7 +385,7 @@ fn execute_introspection(
     };
     // PERF(apollo-json): legacy bridge, revisit -- apollo-compiler's introspection
     // executor coerces variables out of a `serde_json_bytes` map.
-    let variables = match json_ext::to_legacy(&variables.into_value()) {
+    let variables = match json_ext::to_legacy(&variables) {
         serde_json_bytes::Value::Object(map) => map,
         _ => serde_json_bytes::Map::new(),
     };

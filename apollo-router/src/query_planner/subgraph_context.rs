@@ -13,12 +13,12 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
+use apollo_json::DocumentBuilder;
 use apollo_json::JsonKind;
 
 use super::rewrites::DataKeyRenamer;
 use super::rewrites::DataRewrite;
 use crate::json_ext;
-use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::Value;
@@ -154,7 +154,7 @@ impl<'a> SubgraphContext<'a> {
     // values of variables are entity dependent
     pub(crate) fn add_variables_and_get_args(
         &self,
-        variables: &mut Object,
+        variables: &mut DocumentBuilder,
     ) -> Option<ContextualArguments> {
         let (extended_vars, contextual_args) = if let Some(first_map) = self.named_args.first() {
             if self.named_args.iter().all(|map| map == first_map) {
@@ -182,7 +182,11 @@ impl<'a> SubgraphContext<'a> {
             (HashMap::new(), None)
         };
 
-        variables.extend(extended_vars);
+        for (name, value) in extended_vars {
+            variables
+                .set(name.as_str(), value)
+                .expect("the variables builder always has an object root");
+        }
 
         contextual_args
     }

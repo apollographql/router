@@ -8,7 +8,9 @@ use std::task::Poll;
 
 use apollo_compiler::ast::Definition;
 use apollo_compiler::ast::Document;
+use apollo_json::DocumentBuilder;
 use apollo_json::JsonKind;
+use apollo_json::Value;
 use futures::future;
 use http::HeaderMap;
 use http::HeaderName;
@@ -20,7 +22,6 @@ use tower::Service;
 use crate::graphql;
 use crate::graphql::Request;
 use crate::graphql::Response;
-use crate::json_ext::Object;
 use crate::plugins::subscription::notification::Handle;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
@@ -31,7 +32,7 @@ type MockResponses = HashMap<Request, Response>;
 pub struct MockSubgraph {
     // using an arc to improve efficiency when service is cloned
     mocks: Arc<MockResponses>,
-    extensions: Option<Object>,
+    extensions: Option<Value>,
     subscription_stream: Option<Handle<String, graphql::Response>>,
     map_request_fn:
         Option<Arc<dyn (Fn(SubgraphRequest) -> SubgraphRequest) + Send + Sync + 'static>>,
@@ -57,11 +58,14 @@ impl MockSubgraph {
         }
     }
 
+    /// Starts building a mock subgraph, one mocked request/response pair at a time.
     pub fn builder() -> MockSubgraphBuilder {
         MockSubgraphBuilder::default()
     }
 
-    pub fn with_extensions(mut self, extensions: Object) -> Self {
+    /// Sets the GraphQL error extensions the mock answers with when no mocked
+    /// response matches the incoming request. `extensions` must be an object.
+    pub fn with_extensions(mut self, extensions: Value) -> Self {
         self.extensions = Some(extensions);
         self
     }
@@ -88,12 +92,14 @@ impl MockSubgraph {
 #[derive(Default, Clone)]
 pub struct MockSubgraphBuilder {
     mocks: MockResponses,
-    extensions: Option<Object>,
+    extensions: Option<Value>,
     subscription_stream: Option<Handle<String, graphql::Response>>,
     headers: HeaderMap,
 }
 impl MockSubgraphBuilder {
-    pub fn with_extensions(mut self, extensions: Object) -> Self {
+    /// Sets the GraphQL error extensions the mock answers with when no mocked
+    /// response matches the incoming request. `extensions` must be an object.
+    pub fn with_extensions(mut self, extensions: Value) -> Self {
         self.extensions = Some(extensions);
         self
     }
@@ -241,7 +247,11 @@ impl Service<SubgraphRequest> for MockSubgraph {
                     serde_json::to_string(body).unwrap()
                 ))
                 .extension_code("FETCH_ERROR".to_string())
-                .extensions(self.extensions.clone().unwrap_or_default())
+                .extensions(
+                    self.extensions
+                        .clone()
+                        .unwrap_or_else(|| DocumentBuilder::new().seal().root_handle()),
+                )
                 .build();
             SubgraphResponse::fake_builder()
                 .error(error)

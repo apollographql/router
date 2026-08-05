@@ -683,7 +683,7 @@ mod test {
     use crate::Configuration;
     use crate::Context;
     use crate::json_ext;
-    use crate::json_ext::Object;
+    use crate::json_ext::Value;
     use crate::plugin::DynPlugin;
     use crate::plugin::test::MockConnector;
     use crate::plugin::test::MockSubgraph;
@@ -737,8 +737,7 @@ mod test {
     async fn build_mock_router_with_variable_dedup_optimization(
         plugin: Box<dyn DynPlugin>,
     ) -> router::BoxCloneService {
-        let mut extensions = Object::new();
-        extensions.insert("test", "value");
+        let extensions = Value::object([("test", "value")]);
 
         let account_mocks = vec![
             (

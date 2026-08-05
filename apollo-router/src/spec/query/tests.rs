@@ -4,6 +4,7 @@ use serde_json_bytes::json;
 use test_log::test;
 
 use super::*;
+use crate::graphql::json_object::empty_object;
 use crate::json_ext::ValueExt;
 
 /// Bridges a `serde_json_bytes::json!` fixture into this crate's [`Value`].
@@ -145,8 +146,8 @@ impl FormatTest {
         let variables = self
             .variables
             .as_ref()
-            .and_then(|variables| value(variables).as_object())
-            .unwrap_or_default();
+            .map(value)
+            .unwrap_or_else(empty_object);
 
         query.format_response(
             &mut response,
@@ -3116,10 +3117,8 @@ fn run_validation(
     variables: serde_json_bytes::Value,
     mode: Mode,
 ) -> Result<(), Response> {
-    let variables = match value(&variables).as_object() {
-        Some(object) => object,
-        None => unreachable!("variables must be an object"),
-    };
+    let variables = value(&variables);
+    assert!(variables.is_object(), "variables must be an object");
     let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
     let request = Request::builder()
         .variables(variables)
@@ -7747,7 +7746,7 @@ fn filtered_defer_fragment() {
 
     query.filtered_query.as_ref().unwrap().format_response(
         &mut response,
-        Object::new(),
+        empty_object(),
         schema.api_schema(),
         BooleanValues { bits: 0 },
         true,
@@ -7757,7 +7756,7 @@ fn filtered_defer_fragment() {
 
     query.format_response(
         &mut response,
-        Object::new(),
+        empty_object(),
         schema.api_schema(),
         BooleanValues { bits: 0 },
         true,

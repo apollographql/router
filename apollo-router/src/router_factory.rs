@@ -1902,7 +1902,10 @@ mod create_subgraph_services_tests {
             .await
             .unwrap();
 
-        assert_eq!(resp.response.body().data, Some(crate::json_ext::string("test")));
+        assert_eq!(
+            resp.response.body().data,
+            Some(crate::json_ext::string("test"))
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

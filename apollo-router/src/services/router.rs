@@ -32,9 +32,9 @@ use crate::context::CHUNK_CONTAINS_GRAPHQL_ERROR;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::ROUTER_RESPONSE_ERRORS;
 use crate::graphql;
+use crate::graphql::json_object::ObjectAccumulator;
+use crate::graphql::json_object::empty_object;
 use crate::http_ext::header_map;
-use crate::json_ext;
-use crate::json_ext::ObjectMap;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
@@ -105,12 +105,21 @@ impl From<Vec<u8>> for IntoBody {
     }
 }
 
-#[buildstructor::buildstructor]
 impl Request {
-    /// This is the constructor (or builder) to use when constructing a real Request.
+    /// Starts building a request for the router service.
     ///
-    /// Required parameters are required in non-testing code to create a Request.
-    #[builder(visibility = "pub")]
+    /// `context`, `uri`, `method` and `body` have no sensible default and must be set before
+    /// [`RequestBuilder::build`].
+    pub fn builder() -> RequestBuilder {
+        RequestBuilder::default()
+    }
+
+    /// Starts building a request with test-friendly defaults: an empty context, a
+    /// `http://example.com/` URI, `GET`, and an empty body.
+    pub fn fake_builder() -> FakeRequestBuilder {
+        FakeRequestBuilder::default()
+    }
+
     fn new(
         context: Context,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
@@ -129,10 +138,6 @@ impl Request {
         })
     }
 
-    /// This is the constructor (or builder) to use when constructing a fake Request.
-    ///
-    /// Required parameters are required in non-testing code to create a Request.
-    #[builder(visibility = "pub")]
     fn fake_new(
         context: Option<Context>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
@@ -149,6 +154,135 @@ impl Request {
             router_request,
             context: context.unwrap_or_default(),
         })
+    }
+}
+
+/// Builds a [`Request`]. Created by [`Request::builder`].
+#[derive(Default)]
+pub struct RequestBuilder {
+    context: Option<Context>,
+    headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
+    uri: Option<http::Uri>,
+    method: Option<Method>,
+    body: Option<Body>,
+}
+
+impl RequestBuilder {
+    pub fn context(mut self, context: impl Into<Context>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    pub fn headers(mut self, headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>) -> Self {
+        self.headers.extend(headers);
+        self
+    }
+
+    pub fn header(
+        mut self,
+        name: impl Into<TryIntoHeaderName>,
+        value: impl Into<TryIntoHeaderValue>,
+    ) -> Self {
+        self.headers.insert(name.into(), value.into());
+        self
+    }
+
+    pub fn uri(mut self, uri: impl Into<http::Uri>) -> Self {
+        self.uri = Some(uri.into());
+        self
+    }
+
+    pub fn method(mut self, method: impl Into<Method>) -> Self {
+        self.method = Some(method.into());
+        self
+    }
+
+    pub fn body(mut self, body: impl Into<Body>) -> Self {
+        self.body = Some(body.into());
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics unless `context`, `uri`, `method` and `body` have all been set.
+    pub fn build(self) -> Result<Request, BoxError> {
+        Request::new(
+            self.context.expect("context is required"),
+            self.headers,
+            self.uri.expect("uri is required"),
+            self.method.expect("method is required"),
+            self.body.expect("body is required"),
+        )
+    }
+}
+
+/// Builds a [`Request`] with test-friendly defaults. Created by [`Request::fake_builder`].
+#[derive(Default)]
+pub struct FakeRequestBuilder {
+    context: Option<Context>,
+    headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
+    uri: Option<http::Uri>,
+    method: Option<Method>,
+    body: Option<IntoBody>,
+}
+
+impl FakeRequestBuilder {
+    pub fn context(mut self, context: impl Into<Context>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    pub fn and_context(mut self, context: Option<impl Into<Context>>) -> Self {
+        self.context = context.map(Into::into);
+        self
+    }
+
+    pub fn headers(mut self, headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>) -> Self {
+        self.headers.extend(headers);
+        self
+    }
+
+    pub fn header(
+        mut self,
+        name: impl Into<TryIntoHeaderName>,
+        value: impl Into<TryIntoHeaderValue>,
+    ) -> Self {
+        self.headers.insert(name.into(), value.into());
+        self
+    }
+
+    pub fn uri(mut self, uri: impl Into<http::Uri>) -> Self {
+        self.uri = Some(uri.into());
+        self
+    }
+
+    pub fn and_uri(mut self, uri: Option<impl Into<http::Uri>>) -> Self {
+        self.uri = uri.map(Into::into);
+        self
+    }
+
+    pub fn method(mut self, method: impl Into<Method>) -> Self {
+        self.method = Some(method.into());
+        self
+    }
+
+    pub fn and_method(mut self, method: Option<impl Into<Method>>) -> Self {
+        self.method = method.map(Into::into);
+        self
+    }
+
+    pub fn body(mut self, body: impl Into<IntoBody>) -> Self {
+        self.body = Some(body.into());
+        self
+    }
+
+    pub fn and_body(mut self, body: Option<impl Into<IntoBody>>) -> Self {
+        self.body = body.map(Into::into);
+        self
+    }
+
+    pub fn build(self) -> Result<Request, BoxError> {
+        Request::fake_new(self.context, self.headers, self.uri, self.method, self.body)
     }
 }
 
@@ -215,8 +349,47 @@ pub struct Response {
     pub context: Context,
 }
 
-#[buildstructor::buildstructor]
 impl Response {
+    /// Starts building a response for the router service, serializing a single GraphQL
+    /// response into the body.
+    ///
+    /// `context` has no sensible default and must be set before [`ResponseBuilder::build`].
+    /// Supplying any error also records it on the context for telemetry.
+    pub fn builder() -> ResponseBuilder {
+        ResponseBuilder::default()
+    }
+
+    /// Starts building a response with test-friendly defaults: an empty context and a
+    /// `200 OK` status.
+    pub fn fake_builder() -> FakeResponseBuilder {
+        FakeResponseBuilder::default()
+    }
+
+    /// Starts building a response around an HTTP response whose body is already encoded.
+    ///
+    /// `response` and `context` have no sensible default and must be set before
+    /// [`HttpResponseBuilder::build`].
+    pub fn http_response_builder() -> HttpResponseBuilder {
+        HttpResponseBuilder::default()
+    }
+
+    /// Starts building a response carrying only errors, with no data and no path — the shape
+    /// a request-level rejection such as an authentication failure takes.
+    ///
+    /// `context` has no sensible default and must be set before
+    /// [`ErrorResponseBuilder::build`].
+    pub fn error_builder() -> ErrorResponseBuilder {
+        ErrorResponseBuilder::default()
+    }
+
+    /// Starts building a response from already-valid headers, so that building cannot fail.
+    ///
+    /// `context` has no sensible default and must be set before
+    /// [`InfallibleResponseBuilder::build`].
+    pub(crate) fn infallible_builder() -> InfallibleResponseBuilder {
+        InfallibleResponseBuilder::default()
+    }
+
     fn stash_the_body_in_extensions(&mut self, body_string: String) {
         self.context.extensions().with_lock(|ext| {
             ext.insert(RouterResponseBodyExtensionType(body_string));
@@ -227,17 +400,12 @@ impl Response {
         self.response.body_mut().into_data_stream().next().await
     }
 
-    /// This is the constructor (or builder) to use when constructing a real Response.
-    ///
-    /// Required parameters are required in non-testing code to create a Response.
-    #[builder(visibility = "pub")]
     fn new(
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<graphql::Error>,
-        // Spelled out rather than as `Object` so buildstructor derives the `extension` setter
-        extensions: ObjectMap<String, NewValue>,
+        extensions: Value,
         status_code: Option<StatusCode>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
@@ -278,7 +446,6 @@ impl Response {
         Ok(response)
     }
 
-    #[builder(visibility = "pub")]
     fn http_response_new(
         response: http::Response<Body>,
         context: Context,
@@ -300,10 +467,6 @@ impl Response {
         Ok(res)
     }
 
-    /// This is the constructor (or builder) to use when constructing a Response that represents a global error.
-    /// It has no path and no response data.
-    /// This is useful for things such as authentication errors.
-    #[builder(visibility = "pub")]
     fn error_new(
         errors: Vec<graphql::Error>,
         status_code: Option<StatusCode>,
@@ -315,24 +478,19 @@ impl Response {
             Default::default(),
             None,
             errors,
-            Default::default(),
+            empty_object(),
             status_code,
             headers,
             context,
         )
     }
 
-    /// This is the constructor (or builder) to use when constructing a real Response.
-    ///
-    /// Required parameters are required in non-testing code to create a Response.
-    #[builder(visibility = "pub(crate)")]
     fn infallible_new(
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<graphql::Error>,
-        // Spelled out rather than as `Object` so buildstructor derives the `extension` setter
-        extensions: ObjectMap<String, NewValue>,
+        extensions: Value,
         status_code: Option<StatusCode>,
         headers: MultiMap<HeaderName, HeaderValue>,
         context: Context,
@@ -369,8 +527,8 @@ impl Response {
     }
 
     fn add_errors_to_context(errors: &[graphql::Error], context: &Context) {
-        context.insert_json_value(CONTAINS_GRAPHQL_ERROR, json_ext::bool_value(true));
-        context.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, json_ext::bool_value(true));
+        context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::from(true));
+        context.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::from(true));
         // This is ONLY guaranteed to capture errors if any were added during router service
         // processing. We will sometimes avoid this path if no router service errors exist, even
         // if errors were passed from the supergraph service, because that path builds the
@@ -430,17 +588,12 @@ impl Response {
         )
     }
 
-    /// This is the constructor (or builder) to use when constructing a fake Response.
-    ///
-    /// Required parameters are required in non-testing code to create a Response.
-    #[builder(visibility = "pub")]
     fn fake_new(
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<graphql::Error>,
-        // Spelled out rather than as `Object` so buildstructor derives the `extension` setter
-        extensions: ObjectMap<String, NewValue>,
+        extensions: Value,
         status_code: Option<StatusCode>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Option<Context>,
@@ -455,6 +608,465 @@ impl Response {
             status_code,
             headers,
             context.unwrap_or_default(),
+        )
+    }
+}
+
+/// Builds a [`Response`]. Created by [`Response::builder`].
+#[derive(Default)]
+pub struct ResponseBuilder {
+    label: Option<String>,
+    data: Option<Value>,
+    path: Option<Path>,
+    errors: Vec<graphql::Error>,
+    extensions: ObjectAccumulator,
+    status_code: Option<StatusCode>,
+    headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
+    context: Option<Context>,
+}
+
+impl ResponseBuilder {
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    pub fn and_label(mut self, label: Option<impl Into<String>>) -> Self {
+        self.label = label.map(Into::into);
+        self
+    }
+
+    pub fn data(mut self, data: impl Into<Value>) -> Self {
+        self.data = Some(data.into());
+        self
+    }
+
+    pub fn and_data(mut self, data: Option<impl Into<Value>>) -> Self {
+        self.data = data.map(Into::into);
+        self
+    }
+
+    pub fn path(mut self, path: impl Into<Path>) -> Self {
+        self.path = Some(path.into());
+        self
+    }
+
+    pub fn and_path(mut self, path: Option<impl Into<Path>>) -> Self {
+        self.path = path.map(Into::into);
+        self
+    }
+
+    pub fn errors(mut self, errors: Vec<graphql::Error>) -> Self {
+        self.errors.extend(errors);
+        self
+    }
+
+    pub fn error(mut self, error: impl Into<graphql::Error>) -> Self {
+        self.errors.push(error.into());
+        self
+    }
+
+    /// Adds every member of the object-shaped `extensions` to the GraphQL extensions.
+    pub fn extensions(mut self, extensions: Value) -> Self {
+        self.extensions.extend(extensions);
+        self
+    }
+
+    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+        self.extensions.insert(key, value);
+        self
+    }
+
+    pub fn status_code(mut self, status_code: impl Into<StatusCode>) -> Self {
+        self.status_code = Some(status_code.into());
+        self
+    }
+
+    pub fn and_status_code(mut self, status_code: Option<impl Into<StatusCode>>) -> Self {
+        self.status_code = status_code.map(Into::into);
+        self
+    }
+
+    pub fn headers(mut self, headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>) -> Self {
+        self.headers.extend(headers);
+        self
+    }
+
+    pub fn header(
+        mut self,
+        name: impl Into<TryIntoHeaderName>,
+        value: impl Into<TryIntoHeaderValue>,
+    ) -> Self {
+        self.headers.insert(name.into(), value.into());
+        self
+    }
+
+    pub fn context(mut self, context: impl Into<Context>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics unless `context` has been set.
+    pub fn build(self) -> Result<Response, BoxError> {
+        Response::new(
+            self.label,
+            self.data,
+            self.path,
+            self.errors,
+            self.extensions.build(),
+            self.status_code,
+            self.headers,
+            self.context.expect("context is required"),
+        )
+    }
+}
+
+/// Builds a [`Response`] with test-friendly defaults. Created by [`Response::fake_builder`].
+#[derive(Default)]
+pub struct FakeResponseBuilder {
+    label: Option<String>,
+    data: Option<Value>,
+    path: Option<Path>,
+    errors: Vec<graphql::Error>,
+    extensions: ObjectAccumulator,
+    status_code: Option<StatusCode>,
+    headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
+    context: Option<Context>,
+}
+
+impl FakeResponseBuilder {
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    pub fn and_label(mut self, label: Option<impl Into<String>>) -> Self {
+        self.label = label.map(Into::into);
+        self
+    }
+
+    pub fn data(mut self, data: impl Into<Value>) -> Self {
+        self.data = Some(data.into());
+        self
+    }
+
+    pub fn and_data(mut self, data: Option<impl Into<Value>>) -> Self {
+        self.data = data.map(Into::into);
+        self
+    }
+
+    pub fn path(mut self, path: impl Into<Path>) -> Self {
+        self.path = Some(path.into());
+        self
+    }
+
+    pub fn and_path(mut self, path: Option<impl Into<Path>>) -> Self {
+        self.path = path.map(Into::into);
+        self
+    }
+
+    pub fn errors(mut self, errors: Vec<graphql::Error>) -> Self {
+        self.errors.extend(errors);
+        self
+    }
+
+    pub fn error(mut self, error: impl Into<graphql::Error>) -> Self {
+        self.errors.push(error.into());
+        self
+    }
+
+    /// Adds every member of the object-shaped `extensions` to the GraphQL extensions.
+    pub fn extensions(mut self, extensions: Value) -> Self {
+        self.extensions.extend(extensions);
+        self
+    }
+
+    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+        self.extensions.insert(key, value);
+        self
+    }
+
+    pub fn status_code(mut self, status_code: impl Into<StatusCode>) -> Self {
+        self.status_code = Some(status_code.into());
+        self
+    }
+
+    pub fn and_status_code(mut self, status_code: Option<impl Into<StatusCode>>) -> Self {
+        self.status_code = status_code.map(Into::into);
+        self
+    }
+
+    pub fn headers(mut self, headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>) -> Self {
+        self.headers.extend(headers);
+        self
+    }
+
+    pub fn header(
+        mut self,
+        name: impl Into<TryIntoHeaderName>,
+        value: impl Into<TryIntoHeaderValue>,
+    ) -> Self {
+        self.headers.insert(name.into(), value.into());
+        self
+    }
+
+    pub fn context(mut self, context: impl Into<Context>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    pub fn and_context(mut self, context: Option<impl Into<Context>>) -> Self {
+        self.context = context.map(Into::into);
+        self
+    }
+
+    pub fn build(self) -> Result<Response, BoxError> {
+        Response::fake_new(
+            self.label,
+            self.data,
+            self.path,
+            self.errors,
+            self.extensions.build(),
+            self.status_code,
+            self.headers,
+            self.context,
+        )
+    }
+}
+
+/// Builds a [`Response`] around an already-encoded HTTP response. Created by
+/// [`Response::http_response_builder`].
+#[derive(Default)]
+pub struct HttpResponseBuilder {
+    response: Option<http::Response<Body>>,
+    context: Option<Context>,
+    body_to_stash: Option<String>,
+    errors_for_context: Option<Vec<graphql::Error>>,
+}
+
+impl HttpResponseBuilder {
+    pub fn response(mut self, response: http::Response<Body>) -> Self {
+        self.response = Some(response);
+        self
+    }
+
+    pub fn context(mut self, context: impl Into<Context>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    /// Records `body_to_stash` on the context so telemetry can read the response body
+    /// without consuming it.
+    pub fn body_to_stash(mut self, body_to_stash: impl Into<String>) -> Self {
+        self.body_to_stash = Some(body_to_stash.into());
+        self
+    }
+
+    pub fn and_body_to_stash(mut self, body_to_stash: Option<impl Into<String>>) -> Self {
+        self.body_to_stash = body_to_stash.map(Into::into);
+        self
+    }
+
+    /// Records `errors_for_context` on the context for error counting, for responses whose
+    /// body is not deserialized.
+    pub fn errors_for_context(mut self, errors_for_context: Vec<graphql::Error>) -> Self {
+        self.errors_for_context = Some(errors_for_context);
+        self
+    }
+
+    pub fn and_errors_for_context(
+        mut self,
+        errors_for_context: Option<Vec<graphql::Error>>,
+    ) -> Self {
+        self.errors_for_context = errors_for_context;
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics unless `response` and `context` have both been set.
+    pub fn build(self) -> Result<Response, BoxError> {
+        Response::http_response_new(
+            self.response.expect("response is required"),
+            self.context.expect("context is required"),
+            self.body_to_stash,
+            self.errors_for_context,
+        )
+    }
+}
+
+/// Builds a [`Response`] carrying only errors. Created by [`Response::error_builder`].
+#[derive(Default)]
+pub struct ErrorResponseBuilder {
+    errors: Vec<graphql::Error>,
+    status_code: Option<StatusCode>,
+    headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
+    context: Option<Context>,
+}
+
+impl ErrorResponseBuilder {
+    pub fn errors(mut self, errors: Vec<graphql::Error>) -> Self {
+        self.errors.extend(errors);
+        self
+    }
+
+    pub fn error(mut self, error: impl Into<graphql::Error>) -> Self {
+        self.errors.push(error.into());
+        self
+    }
+
+    pub fn status_code(mut self, status_code: impl Into<StatusCode>) -> Self {
+        self.status_code = Some(status_code.into());
+        self
+    }
+
+    pub fn and_status_code(mut self, status_code: Option<impl Into<StatusCode>>) -> Self {
+        self.status_code = status_code.map(Into::into);
+        self
+    }
+
+    pub fn headers(mut self, headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>) -> Self {
+        self.headers.extend(headers);
+        self
+    }
+
+    pub fn header(
+        mut self,
+        name: impl Into<TryIntoHeaderName>,
+        value: impl Into<TryIntoHeaderValue>,
+    ) -> Self {
+        self.headers.insert(name.into(), value.into());
+        self
+    }
+
+    pub fn context(mut self, context: impl Into<Context>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics unless `context` has been set.
+    pub fn build(self) -> Result<Response, BoxError> {
+        Response::error_new(
+            self.errors,
+            self.status_code,
+            self.headers,
+            self.context.expect("context is required"),
+        )
+    }
+}
+
+/// Builds a [`Response`] from already-valid headers. Created by
+/// [`Response::infallible_builder`].
+#[derive(Default)]
+pub(crate) struct InfallibleResponseBuilder {
+    label: Option<String>,
+    data: Option<Value>,
+    path: Option<Path>,
+    errors: Vec<graphql::Error>,
+    extensions: ObjectAccumulator,
+    status_code: Option<StatusCode>,
+    headers: MultiMap<HeaderName, HeaderValue>,
+    context: Option<Context>,
+}
+
+impl InfallibleResponseBuilder {
+    pub(crate) fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    pub(crate) fn and_label(mut self, label: Option<impl Into<String>>) -> Self {
+        self.label = label.map(Into::into);
+        self
+    }
+
+    pub(crate) fn data(mut self, data: impl Into<Value>) -> Self {
+        self.data = Some(data.into());
+        self
+    }
+
+    pub(crate) fn and_data(mut self, data: Option<impl Into<Value>>) -> Self {
+        self.data = data.map(Into::into);
+        self
+    }
+
+    pub(crate) fn path(mut self, path: impl Into<Path>) -> Self {
+        self.path = Some(path.into());
+        self
+    }
+
+    pub(crate) fn and_path(mut self, path: Option<impl Into<Path>>) -> Self {
+        self.path = path.map(Into::into);
+        self
+    }
+
+    pub(crate) fn errors(mut self, errors: Vec<graphql::Error>) -> Self {
+        self.errors.extend(errors);
+        self
+    }
+
+    pub(crate) fn error(mut self, error: impl Into<graphql::Error>) -> Self {
+        self.errors.push(error.into());
+        self
+    }
+
+    /// Adds every member of the object-shaped `extensions` to the GraphQL extensions.
+    pub(crate) fn extensions(mut self, extensions: Value) -> Self {
+        self.extensions.extend(extensions);
+        self
+    }
+
+    pub(crate) fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+        self.extensions.insert(key, value);
+        self
+    }
+
+    pub(crate) fn status_code(mut self, status_code: impl Into<StatusCode>) -> Self {
+        self.status_code = Some(status_code.into());
+        self
+    }
+
+    pub(crate) fn and_status_code(mut self, status_code: Option<impl Into<StatusCode>>) -> Self {
+        self.status_code = status_code.map(Into::into);
+        self
+    }
+
+    pub(crate) fn headers(mut self, headers: MultiMap<HeaderName, HeaderValue>) -> Self {
+        self.headers.extend(headers);
+        self
+    }
+
+    pub(crate) fn header(
+        mut self,
+        name: impl Into<HeaderName>,
+        value: impl Into<HeaderValue>,
+    ) -> Self {
+        self.headers.insert(name.into(), value.into());
+        self
+    }
+
+    pub(crate) fn context(mut self, context: impl Into<Context>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics unless `context` has been set.
+    pub(crate) fn build(self) -> Response {
+        Response::infallible_new(
+            self.label,
+            self.data,
+            self.path,
+            self.errors,
+            self.extensions.build(),
+            self.status_code,
+            self.headers,
+            self.context.expect("context is required"),
         )
     }
 }

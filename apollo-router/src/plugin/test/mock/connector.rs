@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+use apollo_json::Value;
 use futures::future;
 use http::HeaderMap;
 use http::HeaderName;
@@ -15,7 +16,6 @@ use serde_json_bytes::json;
 use tower::BoxError;
 use tower::Service;
 
-use crate::json_ext::Object;
 use crate::services::connector::request_service::Request as ConnectorRequest;
 use crate::services::connector::request_service::Response as ConnectorResponse;
 
@@ -25,7 +25,7 @@ type MockResponses = HashMap<String, String>;
 pub struct MockConnector {
     // using an arc to improve efficiency when service is cloned
     mocks: Arc<MockResponses>,
-    extensions: Option<Object>,
+    extensions: Option<Value>,
     map_request_fn:
         Option<Arc<dyn (Fn(ConnectorRequest) -> ConnectorRequest) + Send + Sync + 'static>>,
     headers: HeaderMap,
@@ -41,11 +41,13 @@ impl MockConnector {
         }
     }
 
+    /// Starts building a mock connector, one mocked request/response pair at a time.
     pub fn builder() -> MockConnectorBuilder {
         MockConnectorBuilder::default()
     }
 
-    pub fn with_extensions(mut self, extensions: Object) -> Self {
+    /// Sets the GraphQL error extensions carried by the mock. `extensions` must be an object.
+    pub fn with_extensions(mut self, extensions: Value) -> Self {
         self.extensions = Some(extensions);
         self
     }
@@ -55,11 +57,12 @@ impl MockConnector {
 #[derive(Default, Clone)]
 pub struct MockConnectorBuilder {
     mocks: MockResponses,
-    extensions: Option<Object>,
+    extensions: Option<Value>,
     headers: HeaderMap,
 }
 impl MockConnectorBuilder {
-    pub fn with_extensions(mut self, extensions: Object) -> Self {
+    /// Sets the GraphQL error extensions carried by the mock. `extensions` must be an object.
+    pub fn with_extensions(mut self, extensions: Value) -> Self {
         self.extensions = Some(extensions);
         self
     }

@@ -1,15 +1,13 @@
 use apollo_json::JsonKind;
 
 use crate::graphql::Response;
-use crate::json_ext::Object;
 use crate::json_ext::Value;
-use crate::json_ext::ValueExt;
 
 pub(crate) trait ResponseVisitor {
     fn visit_field(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
-        variables: &Object,
+        variables: &Value,
         _ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &Value,
@@ -27,8 +25,7 @@ pub(crate) trait ResponseVisitor {
                 }
             }
             JsonKind::Object => {
-                let children = Object::from(value.clone());
-                self.visit_selections(request, variables, &field.selection_set, &children);
+                self.visit_selections(request, variables, &field.selection_set, value);
             }
             _ => {}
         }
@@ -37,7 +34,7 @@ pub(crate) trait ResponseVisitor {
     fn visit_list_item(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
-        variables: &Object,
+        variables: &Value,
         _ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &Value,
@@ -49,8 +46,7 @@ pub(crate) trait ResponseVisitor {
                 }
             }
             JsonKind::Object => {
-                let children = Object::from(value.clone());
-                self.visit_selections(request, variables, &field.selection_set, &children);
+                self.visit_selections(request, variables, &field.selection_set, value);
             }
             _ => {}
         }
@@ -60,7 +56,7 @@ pub(crate) trait ResponseVisitor {
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
         response: &Response,
-        variables: &Object,
+        variables: &Value,
     ) {
         if response.path.is_some() {
             // TODO: In this case, we need to find the selection inside `request` corresponding to the path so we can start zipping.
@@ -68,12 +64,16 @@ pub(crate) trait ResponseVisitor {
             return;
         }
 
-        if let Some(children) = response.data.as_ref().and_then(|data| data.as_object()) {
+        if let Some(children) = response
+            .data
+            .as_ref()
+            .filter(|data| data.kind() == JsonKind::Object)
+        {
             if let Some(operation) = &request.operations.anonymous {
-                self.visit_selections(request, variables, &operation.selection_set, &children);
+                self.visit_selections(request, variables, &operation.selection_set, children);
             }
             for operation in request.operations.named.values() {
-                self.visit_selections(request, variables, &operation.selection_set, &children);
+                self.visit_selections(request, variables, &operation.selection_set, children);
             }
         }
     }
@@ -81,9 +81,9 @@ pub(crate) trait ResponseVisitor {
     fn visit_selections(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
-        variables: &Object,
+        variables: &Value,
         selection_set: &apollo_compiler::executable::SelectionSet,
-        fields: &Object,
+        fields: &Value,
     ) {
         for selection in &selection_set.selections {
             match selection {
@@ -207,7 +207,7 @@ mod tests {
         fn visit_field(
             &mut self,
             request: &ExecutableDocument,
-            variables: &Object,
+            variables: &Value,
             _ty: &apollo_compiler::executable::NamedType,
             field: &apollo_compiler::executable::Field,
             value: &Value,
@@ -227,8 +227,7 @@ mod tests {
                     }
                 }
                 JsonKind::Object => {
-                    let children = Object::from(value.clone());
-                    self.visit_selections(request, variables, &field.selection_set, &children);
+                    self.visit_selections(request, variables, &field.selection_set, value);
                 }
                 _ => {}
             }

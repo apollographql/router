@@ -188,7 +188,7 @@ mod tests {
     use super::*;
     use crate::MockedSubgraphs;
     use crate::graphql::Response;
-    use crate::json_ext::Object;
+    use crate::json_ext::Value;
     use crate::plugin::test::MockSubgraph;
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
@@ -196,8 +196,7 @@ mod tests {
         r#"query NoPlanning { topProducts(first: 5) @skip(if: true) { upc } }"#;
 
     async fn build_mock_supergraph(config: serde_json::Value) -> supergraph::BoxCloneService {
-        let mut extensions = Object::new();
-        extensions.insert("test", "value");
+        let extensions = Value::object([("test", "value")]);
 
         let account_mocks = vec![
             (

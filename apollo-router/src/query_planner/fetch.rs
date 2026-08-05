@@ -6,6 +6,7 @@ use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
+use apollo_json::DocumentBuilder;
 use apollo_json::JsonKind;
 use indexmap::IndexSet;
 use serde::Deserialize;
@@ -25,7 +26,6 @@ use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::graphql::Request;
 use crate::json_ext;
-use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
@@ -144,21 +144,22 @@ pub(crate) struct FetchNode {
 
 #[derive(Default)]
 pub(crate) struct Variables {
-    pub(crate) variables: Object,
+    pub(crate) variables: Value,
     pub(crate) inverted_paths: Vec<Vec<Path>>,
     pub(crate) contextual_arguments: Option<ContextualArguments>,
 }
 
-/// The entries of `body_variables` that this fetch declares a usage of.
-fn used_variables<'a>(
-    variable_usages: &'a [Arc<str>],
-    body_variables: &'a Object,
-) -> impl Iterator<Item = (String, Value)> + 'a {
-    variable_usages.iter().filter_map(move |key| {
-        body_variables
-            .get(key.as_ref())
-            .map(|value| (key.to_string(), value))
-    })
+/// A builder holding the entries of `body_variables` that this fetch declares a usage of.
+fn used_variables(variable_usages: &[Arc<str>], body_variables: &Value) -> DocumentBuilder {
+    let mut builder = DocumentBuilder::new();
+    for key in variable_usages {
+        if let Some(value) = body_variables.get(key.as_ref()) {
+            builder
+                .set(key.as_ref(), value)
+                .expect("the variables builder always has an object root");
+        }
+    }
+    builder
 }
 
 impl Variables {
@@ -177,9 +178,7 @@ impl Variables {
         let body = request.body();
         let mut subgraph_context = SubgraphContext::new(data, schema, context_rewrites);
         if !requires.is_empty() {
-            let mut variables = Object::new();
-
-            variables.extend(used_variables(variable_usages, &body.variables));
+            let mut variables = used_variables(variable_usages, &body.variables);
 
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
             let mut values: IndexSet<Value> = IndexSet::default();
@@ -209,15 +208,17 @@ impl Variables {
                 return None;
             }
 
-            let representations = json_ext::array(values);
+            let representations = Value::array(values);
             let contextual_arguments = match subgraph_context.as_mut() {
                 Some(context) => context.add_variables_and_get_args(&mut variables),
                 None => None,
             };
 
-            variables.insert("representations", representations);
+            variables
+                .set("representations", representations)
+                .expect("the variables builder always has an object root");
             Some(Variables {
-                variables,
+                variables: variables.seal().root_handle(),
                 inverted_paths,
                 contextual_arguments,
             })
@@ -237,7 +238,9 @@ impl Variables {
             }
 
             Some(Variables {
-                variables: used_variables(variable_usages, &body.variables).collect::<Object>(),
+                variables: used_variables(variable_usages, &body.variables)
+                    .seal()
+                    .root_handle(),
                 inverted_paths: Vec::new(),
                 contextual_arguments: None,
             })
@@ -255,7 +258,7 @@ impl FetchNode {
         schema: &Schema,
         paths: Vec<Vec<Path>>,
         operation_str: &str,
-        variables: Object,
+        variables: Value,
         hoist_orphan_errors: bool,
     ) -> (Value, Vec<Error>) {
         let (_parts, response) = match service
@@ -887,7 +890,7 @@ mod tests {
             node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
 
         assert!(errors.is_empty());
-        let top = value.as_object().unwrap().get("topField").unwrap();
+        let top = value.get("topField").unwrap();
         let arr = top.as_array().unwrap();
         assert_eq!(arr[0], json!({"name": "Alice"}));
         assert_eq!(arr[1], json!({"name": "Bob"}));
@@ -912,13 +915,7 @@ mod tests {
             node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
 
         assert!(errors.is_empty());
-        let arr = value
-            .as_object()
-            .unwrap()
-            .get("field")
-            .unwrap()
-            .as_array()
-            .unwrap();
+        let arr = value.get("field").unwrap().as_array().unwrap();
         assert_eq!(arr[0], json!({"name": "Alice"}));
         assert_eq!(arr[2], json!({"name": "Alice"}));
     }
@@ -958,13 +955,7 @@ mod tests {
             node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
 
         assert!(errors.is_empty());
-        let arr = value
-            .as_object()
-            .unwrap()
-            .get("f")
-            .unwrap()
-            .as_array()
-            .unwrap();
+        let arr = value.get("f").unwrap().as_array().unwrap();
         assert_eq!(arr[0], json!({"name": "Alice"}));
     }
 

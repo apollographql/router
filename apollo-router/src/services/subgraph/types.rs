@@ -26,11 +26,11 @@ use crate::Context;
 use crate::batching::BatchQuery;
 use crate::error::Error;
 use crate::graphql;
+use crate::graphql::json_object::ObjectAccumulator;
+use crate::graphql::json_object::empty_object;
 use crate::http_ext::TryIntoHeaderName;
 use crate::http_ext::TryIntoHeaderValue;
 use crate::http_ext::header_map;
-use crate::json_ext::Object;
-use crate::json_ext::ObjectMap;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
@@ -83,12 +83,22 @@ pub struct Request {
     pub(crate) id: SubgraphRequestId,
 }
 
-#[buildstructor::buildstructor]
 impl Request {
-    /// This is the constructor (or builder) to use when constructing a real Request.
+    /// Starts building a request for a subgraph service.
     ///
-    /// Required parameters are required in non-testing code to create a Request.
-    #[builder(visibility = "pub")]
+    /// `supergraph_request`, `subgraph_request`, `operation_kind`, `context` and
+    /// `subgraph_name` have no sensible default and must be set before
+    /// [`RequestBuilder::build`].
+    pub fn builder() -> RequestBuilder {
+        RequestBuilder::default()
+    }
+
+    /// Starts building a request with test-friendly defaults: empty supergraph and subgraph
+    /// requests, [`OperationKind::Query`], an empty context and an empty subgraph name.
+    pub fn fake_builder() -> FakeRequestBuilder {
+        FakeRequestBuilder::default()
+    }
+
     fn new(
         supergraph_request: Arc<http::Request<graphql::Request>>,
         subgraph_request: http::Request<graphql::Request>,
@@ -117,12 +127,6 @@ impl Request {
         }
     }
 
-    /// This is the constructor (or builder) to use when constructing a "fake" Request.
-    ///
-    /// This does not enforce the provision of the data that is required for a fully functional
-    /// Request. It's usually enough for testing, when a fully consructed Request is
-    /// difficult to construct and not required for the pusposes of the test.
-    #[builder(visibility = "pub")]
     fn fake_new(
         supergraph_request: Option<Arc<http::Request<graphql::Request>>>,
         subgraph_request: Option<http::Request<graphql::Request>>,
@@ -263,8 +267,37 @@ pub struct Response {
     pub(crate) id: SubgraphRequestId,
 }
 
-#[buildstructor::buildstructor]
 impl Response {
+    /// Starts building a response from a subgraph service.
+    ///
+    /// `context` and `subgraph_name` have no sensible default and must be set before
+    /// [`ResponseBuilder::build`]. When `id` is left unset a fresh one is generated, which
+    /// will not match the id of the originating request.
+    pub fn builder() -> ResponseBuilder {
+        ResponseBuilder::default()
+    }
+
+    /// Starts building a response with test-friendly defaults: an empty context, an empty
+    /// subgraph name, a `200 OK` status and no headers.
+    pub fn fake_builder() -> FakeResponseBuilder {
+        FakeResponseBuilder::default()
+    }
+
+    /// Starts building a response with the [`Response::fake_builder`] defaults, taking
+    /// headers one at a time rather than as a prepared [`http::HeaderMap`].
+    pub fn fake2_builder() -> Fake2ResponseBuilder {
+        Fake2ResponseBuilder::default()
+    }
+
+    /// Starts building a response carrying only errors, with no data and no path — the shape
+    /// a subgraph-level rejection takes.
+    ///
+    /// `context` and `subgraph_name` have no sensible default and must be set before
+    /// [`ErrorResponseBuilder::build`].
+    pub fn error_builder() -> ErrorResponseBuilder {
+        ErrorResponseBuilder::default()
+    }
+
     /// This is the constructor to use when constructing a real Response..
     ///
     /// In this case, you already have a valid response and just wish to associate it with a context
@@ -283,17 +316,12 @@ impl Response {
         }
     }
 
-    /// This is the constructor (or builder) to use when constructing a real Response.
-    ///
-    /// The parameters are not optional, because in a live situation all of these properties must be
-    /// set and be correct to create a Response.
-    #[builder(visibility = "pub")]
     fn new(
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
-        extensions: Object,
+        extensions: Value,
         status_code: Option<StatusCode>,
         context: Context,
         headers: Option<http::HeaderMap<http::HeaderValue>>,
@@ -330,19 +358,12 @@ impl Response {
         }
     }
 
-    /// This is the constructor (or builder) to use when constructing a "fake" Response.
-    ///
-    /// This does not enforce the provision of the data that is required for a fully functional
-    /// Response. It's usually enough for testing, when a fully constructed Response is
-    /// difficult to construct and not required for the purposes of the test.
-    #[builder(visibility = "pub")]
     fn fake_new(
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
-        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        extensions: ObjectMap<String, NewValue>,
+        extensions: Value,
         status_code: Option<StatusCode>,
         context: Option<Context>,
         headers: Option<http::HeaderMap<http::HeaderValue>>,
@@ -363,20 +384,12 @@ impl Response {
         )
     }
 
-    /// This is the constructor (or builder) to use when constructing a "fake" Response.
-    /// It differs from the existing fake_new because it allows easier passing of headers. However we can't change the original without breaking the public APIs.
-    ///
-    /// This does not enforce the provision of the data that is required for a fully functional
-    /// Response. It's usually enough for testing, when a fully constructed Response is
-    /// difficult to construct and not required for the purposes of the test.
-    #[builder(visibility = "pub")]
     fn fake2_new(
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
-        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        extensions: ObjectMap<String, NewValue>,
+        extensions: Value,
         status_code: Option<StatusCode>,
         context: Option<Context>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
@@ -397,10 +410,6 @@ impl Response {
         ))
     }
 
-    /// This is the constructor (or builder) to use when constructing a Response that represents a global error.
-    /// It has no path and no response data.
-    /// This is useful for things such as authentication errors.
-    #[builder(visibility = "pub")]
     fn error_new(
         errors: Vec<Error>,
         status_code: Option<StatusCode>,
@@ -413,7 +422,7 @@ impl Response {
             Default::default(),
             Default::default(),
             errors,
-            Default::default(),
+            empty_object(),
             status_code,
             context,
             Default::default(),
@@ -431,6 +440,729 @@ impl Response {
 
     pub(crate) fn get_from_extensions(&self, key: &str) -> Option<Value> {
         self.response.body().extensions.get(key)
+    }
+}
+
+/// Builds a [`Request`]. Created by [`Request::builder`].
+#[derive(Default)]
+pub struct RequestBuilder {
+    supergraph_request: Option<Arc<http::Request<graphql::Request>>>,
+    subgraph_request: Option<http::Request<graphql::Request>>,
+    operation_kind: Option<OperationKind>,
+    context: Option<Context>,
+    subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
+    subgraph_name: Option<String>,
+    connection_closed_signal: Option<broadcast::Receiver<()>>,
+    executable_document: Option<Arc<Valid<apollo_compiler::ExecutableDocument>>>,
+}
+
+impl RequestBuilder {
+    pub fn supergraph_request(
+        mut self,
+        supergraph_request: Arc<http::Request<graphql::Request>>,
+    ) -> Self {
+        self.supergraph_request = Some(supergraph_request);
+        self
+    }
+
+    pub fn and_supergraph_request(
+        mut self,
+        supergraph_request: Option<Arc<http::Request<graphql::Request>>>,
+    ) -> Self {
+        self.supergraph_request = supergraph_request;
+        self
+    }
+
+    pub fn subgraph_request(mut self, subgraph_request: http::Request<graphql::Request>) -> Self {
+        self.subgraph_request = Some(subgraph_request);
+        self
+    }
+
+    pub fn and_subgraph_request(
+        mut self,
+        subgraph_request: Option<http::Request<graphql::Request>>,
+    ) -> Self {
+        self.subgraph_request = subgraph_request;
+        self
+    }
+
+    pub fn operation_kind(mut self, operation_kind: impl Into<OperationKind>) -> Self {
+        self.operation_kind = Some(operation_kind.into());
+        self
+    }
+
+    pub fn and_operation_kind(mut self, operation_kind: Option<impl Into<OperationKind>>) -> Self {
+        self.operation_kind = operation_kind.map(Into::into);
+        self
+    }
+
+    pub fn context(mut self, context: impl Into<Context>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    pub fn and_context(mut self, context: Option<impl Into<Context>>) -> Self {
+        self.context = context.map(Into::into);
+        self
+    }
+
+    pub fn subscription_stream(mut self, subscription_stream: mpsc::Sender<BoxGqlStream>) -> Self {
+        self.subscription_stream = Some(subscription_stream);
+        self
+    }
+
+    pub fn and_subscription_stream(
+        mut self,
+        subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
+    ) -> Self {
+        self.subscription_stream = subscription_stream;
+        self
+    }
+
+    pub fn subgraph_name(mut self, subgraph_name: impl Into<String>) -> Self {
+        self.subgraph_name = Some(subgraph_name.into());
+        self
+    }
+
+    pub fn and_subgraph_name(mut self, subgraph_name: Option<impl Into<String>>) -> Self {
+        self.subgraph_name = subgraph_name.map(Into::into);
+        self
+    }
+
+    pub fn connection_closed_signal(
+        mut self,
+        connection_closed_signal: broadcast::Receiver<()>,
+    ) -> Self {
+        self.connection_closed_signal = Some(connection_closed_signal);
+        self
+    }
+
+    pub fn and_connection_closed_signal(
+        mut self,
+        connection_closed_signal: Option<broadcast::Receiver<()>>,
+    ) -> Self {
+        self.connection_closed_signal = connection_closed_signal;
+        self
+    }
+
+    pub fn executable_document(
+        mut self,
+        executable_document: Arc<Valid<apollo_compiler::ExecutableDocument>>,
+    ) -> Self {
+        self.executable_document = Some(executable_document);
+        self
+    }
+
+    pub fn and_executable_document(
+        mut self,
+        executable_document: Option<Arc<Valid<apollo_compiler::ExecutableDocument>>>,
+    ) -> Self {
+        self.executable_document = executable_document;
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics unless `supergraph_request`, `subgraph_request`, `operation_kind`, `context`
+    /// and `subgraph_name` have all been set.
+    pub fn build(self) -> Request {
+        Request::new(
+            self.supergraph_request
+                .expect("supergraph_request is required"),
+            self.subgraph_request.expect("subgraph_request is required"),
+            self.operation_kind.expect("operation_kind is required"),
+            self.context.expect("context is required"),
+            self.subscription_stream,
+            self.subgraph_name.expect("subgraph_name is required"),
+            self.connection_closed_signal,
+            self.executable_document,
+        )
+    }
+}
+
+/// Builds a [`Request`] with test-friendly defaults. Created by [`Request::fake_builder`].
+#[derive(Default)]
+pub struct FakeRequestBuilder {
+    supergraph_request: Option<Arc<http::Request<graphql::Request>>>,
+    subgraph_request: Option<http::Request<graphql::Request>>,
+    operation_kind: Option<OperationKind>,
+    context: Option<Context>,
+    subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
+    subgraph_name: Option<String>,
+    connection_closed_signal: Option<broadcast::Receiver<()>>,
+}
+
+impl FakeRequestBuilder {
+    pub fn supergraph_request(
+        mut self,
+        supergraph_request: Arc<http::Request<graphql::Request>>,
+    ) -> Self {
+        self.supergraph_request = Some(supergraph_request);
+        self
+    }
+
+    pub fn and_supergraph_request(
+        mut self,
+        supergraph_request: Option<Arc<http::Request<graphql::Request>>>,
+    ) -> Self {
+        self.supergraph_request = supergraph_request;
+        self
+    }
+
+    pub fn subgraph_request(mut self, subgraph_request: http::Request<graphql::Request>) -> Self {
+        self.subgraph_request = Some(subgraph_request);
+        self
+    }
+
+    pub fn and_subgraph_request(
+        mut self,
+        subgraph_request: Option<http::Request<graphql::Request>>,
+    ) -> Self {
+        self.subgraph_request = subgraph_request;
+        self
+    }
+
+    pub fn operation_kind(mut self, operation_kind: impl Into<OperationKind>) -> Self {
+        self.operation_kind = Some(operation_kind.into());
+        self
+    }
+
+    pub fn and_operation_kind(mut self, operation_kind: Option<impl Into<OperationKind>>) -> Self {
+        self.operation_kind = operation_kind.map(Into::into);
+        self
+    }
+
+    pub fn context(mut self, context: impl Into<Context>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    pub fn and_context(mut self, context: Option<impl Into<Context>>) -> Self {
+        self.context = context.map(Into::into);
+        self
+    }
+
+    pub fn subscription_stream(mut self, subscription_stream: mpsc::Sender<BoxGqlStream>) -> Self {
+        self.subscription_stream = Some(subscription_stream);
+        self
+    }
+
+    pub fn and_subscription_stream(
+        mut self,
+        subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
+    ) -> Self {
+        self.subscription_stream = subscription_stream;
+        self
+    }
+
+    pub fn subgraph_name(mut self, subgraph_name: impl Into<String>) -> Self {
+        self.subgraph_name = Some(subgraph_name.into());
+        self
+    }
+
+    pub fn and_subgraph_name(mut self, subgraph_name: Option<impl Into<String>>) -> Self {
+        self.subgraph_name = subgraph_name.map(Into::into);
+        self
+    }
+
+    pub fn connection_closed_signal(
+        mut self,
+        connection_closed_signal: broadcast::Receiver<()>,
+    ) -> Self {
+        self.connection_closed_signal = Some(connection_closed_signal);
+        self
+    }
+
+    pub fn and_connection_closed_signal(
+        mut self,
+        connection_closed_signal: Option<broadcast::Receiver<()>>,
+    ) -> Self {
+        self.connection_closed_signal = connection_closed_signal;
+        self
+    }
+
+    pub fn build(self) -> Request {
+        Request::fake_new(
+            self.supergraph_request,
+            self.subgraph_request,
+            self.operation_kind,
+            self.context,
+            self.subscription_stream,
+            self.subgraph_name,
+            self.connection_closed_signal,
+        )
+    }
+}
+
+/// Builds a [`Response`]. Created by [`Response::builder`].
+#[derive(Default)]
+pub struct ResponseBuilder {
+    label: Option<String>,
+    data: Option<Value>,
+    path: Option<Path>,
+    errors: Vec<Error>,
+    extensions: ObjectAccumulator,
+    status_code: Option<StatusCode>,
+    context: Option<Context>,
+    headers: Option<http::HeaderMap<http::HeaderValue>>,
+    subgraph_name: Option<String>,
+    id: Option<SubgraphRequestId>,
+}
+
+impl ResponseBuilder {
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    pub fn and_label(mut self, label: Option<impl Into<String>>) -> Self {
+        self.label = label.map(Into::into);
+        self
+    }
+
+    pub fn data(mut self, data: impl Into<Value>) -> Self {
+        self.data = Some(data.into());
+        self
+    }
+
+    pub fn and_data(mut self, data: Option<impl Into<Value>>) -> Self {
+        self.data = data.map(Into::into);
+        self
+    }
+
+    pub fn path(mut self, path: impl Into<Path>) -> Self {
+        self.path = Some(path.into());
+        self
+    }
+
+    pub fn and_path(mut self, path: Option<impl Into<Path>>) -> Self {
+        self.path = path.map(Into::into);
+        self
+    }
+
+    pub fn errors(mut self, errors: Vec<Error>) -> Self {
+        self.errors.extend(errors);
+        self
+    }
+
+    pub fn error(mut self, error: impl Into<Error>) -> Self {
+        self.errors.push(error.into());
+        self
+    }
+
+    /// Adds every member of the object-shaped `extensions` to the GraphQL extensions.
+    pub fn extensions(mut self, extensions: Value) -> Self {
+        self.extensions.extend(extensions);
+        self
+    }
+
+    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+        self.extensions.insert(key, value);
+        self
+    }
+
+    pub fn status_code(mut self, status_code: impl Into<StatusCode>) -> Self {
+        self.status_code = Some(status_code.into());
+        self
+    }
+
+    pub fn and_status_code(mut self, status_code: Option<impl Into<StatusCode>>) -> Self {
+        self.status_code = status_code.map(Into::into);
+        self
+    }
+
+    pub fn context(mut self, context: impl Into<Context>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    pub fn headers(mut self, headers: http::HeaderMap<http::HeaderValue>) -> Self {
+        self.headers = Some(headers);
+        self
+    }
+
+    pub fn and_headers(mut self, headers: Option<http::HeaderMap<http::HeaderValue>>) -> Self {
+        self.headers = headers;
+        self
+    }
+
+    pub fn subgraph_name(mut self, subgraph_name: impl Into<String>) -> Self {
+        self.subgraph_name = Some(subgraph_name.into());
+        self
+    }
+
+    pub fn and_subgraph_name(mut self, subgraph_name: Option<impl Into<String>>) -> Self {
+        self.subgraph_name = subgraph_name.map(Into::into);
+        self
+    }
+
+    pub fn id(mut self, id: impl Into<SubgraphRequestId>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
+
+    pub fn and_id(mut self, id: Option<impl Into<SubgraphRequestId>>) -> Self {
+        self.id = id.map(Into::into);
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics unless `context` and `subgraph_name` have both been set.
+    pub fn build(self) -> Response {
+        Response::new(
+            self.label,
+            self.data,
+            self.path,
+            self.errors,
+            self.extensions.build(),
+            self.status_code,
+            self.context.expect("context is required"),
+            self.headers,
+            self.subgraph_name.expect("subgraph_name is required"),
+            self.id,
+        )
+    }
+}
+
+/// Builds a [`Response`] with test-friendly defaults. Created by [`Response::fake_builder`].
+#[derive(Default)]
+pub struct FakeResponseBuilder {
+    label: Option<String>,
+    data: Option<Value>,
+    path: Option<Path>,
+    errors: Vec<Error>,
+    extensions: ObjectAccumulator,
+    status_code: Option<StatusCode>,
+    context: Option<Context>,
+    headers: Option<http::HeaderMap<http::HeaderValue>>,
+    subgraph_name: Option<String>,
+    id: Option<SubgraphRequestId>,
+}
+
+impl FakeResponseBuilder {
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    pub fn and_label(mut self, label: Option<impl Into<String>>) -> Self {
+        self.label = label.map(Into::into);
+        self
+    }
+
+    pub fn data(mut self, data: impl Into<Value>) -> Self {
+        self.data = Some(data.into());
+        self
+    }
+
+    pub fn and_data(mut self, data: Option<impl Into<Value>>) -> Self {
+        self.data = data.map(Into::into);
+        self
+    }
+
+    pub fn path(mut self, path: impl Into<Path>) -> Self {
+        self.path = Some(path.into());
+        self
+    }
+
+    pub fn and_path(mut self, path: Option<impl Into<Path>>) -> Self {
+        self.path = path.map(Into::into);
+        self
+    }
+
+    pub fn errors(mut self, errors: Vec<Error>) -> Self {
+        self.errors.extend(errors);
+        self
+    }
+
+    pub fn error(mut self, error: impl Into<Error>) -> Self {
+        self.errors.push(error.into());
+        self
+    }
+
+    /// Adds every member of the object-shaped `extensions` to the GraphQL extensions.
+    pub fn extensions(mut self, extensions: Value) -> Self {
+        self.extensions.extend(extensions);
+        self
+    }
+
+    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+        self.extensions.insert(key, value);
+        self
+    }
+
+    pub fn status_code(mut self, status_code: impl Into<StatusCode>) -> Self {
+        self.status_code = Some(status_code.into());
+        self
+    }
+
+    pub fn and_status_code(mut self, status_code: Option<impl Into<StatusCode>>) -> Self {
+        self.status_code = status_code.map(Into::into);
+        self
+    }
+
+    pub fn context(mut self, context: impl Into<Context>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    pub fn and_context(mut self, context: Option<impl Into<Context>>) -> Self {
+        self.context = context.map(Into::into);
+        self
+    }
+
+    pub fn headers(mut self, headers: http::HeaderMap<http::HeaderValue>) -> Self {
+        self.headers = Some(headers);
+        self
+    }
+
+    pub fn and_headers(mut self, headers: Option<http::HeaderMap<http::HeaderValue>>) -> Self {
+        self.headers = headers;
+        self
+    }
+
+    pub fn subgraph_name(mut self, subgraph_name: impl Into<String>) -> Self {
+        self.subgraph_name = Some(subgraph_name.into());
+        self
+    }
+
+    pub fn and_subgraph_name(mut self, subgraph_name: Option<impl Into<String>>) -> Self {
+        self.subgraph_name = subgraph_name.map(Into::into);
+        self
+    }
+
+    pub fn id(mut self, id: impl Into<SubgraphRequestId>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
+
+    pub fn and_id(mut self, id: Option<impl Into<SubgraphRequestId>>) -> Self {
+        self.id = id.map(Into::into);
+        self
+    }
+
+    pub fn build(self) -> Response {
+        Response::fake_new(
+            self.label,
+            self.data,
+            self.path,
+            self.errors,
+            self.extensions.build(),
+            self.status_code,
+            self.context,
+            self.headers,
+            self.subgraph_name,
+            self.id,
+        )
+    }
+}
+
+/// Builds a [`Response`] with test-friendly defaults, taking headers one at a time. Created
+/// by [`Response::fake2_builder`].
+#[derive(Default)]
+pub struct Fake2ResponseBuilder {
+    label: Option<String>,
+    data: Option<Value>,
+    path: Option<Path>,
+    errors: Vec<Error>,
+    extensions: ObjectAccumulator,
+    status_code: Option<StatusCode>,
+    context: Option<Context>,
+    headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
+    subgraph_name: Option<String>,
+    id: Option<SubgraphRequestId>,
+}
+
+impl Fake2ResponseBuilder {
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    pub fn and_label(mut self, label: Option<impl Into<String>>) -> Self {
+        self.label = label.map(Into::into);
+        self
+    }
+
+    pub fn data(mut self, data: impl Into<Value>) -> Self {
+        self.data = Some(data.into());
+        self
+    }
+
+    pub fn and_data(mut self, data: Option<impl Into<Value>>) -> Self {
+        self.data = data.map(Into::into);
+        self
+    }
+
+    pub fn path(mut self, path: impl Into<Path>) -> Self {
+        self.path = Some(path.into());
+        self
+    }
+
+    pub fn and_path(mut self, path: Option<impl Into<Path>>) -> Self {
+        self.path = path.map(Into::into);
+        self
+    }
+
+    pub fn errors(mut self, errors: Vec<Error>) -> Self {
+        self.errors.extend(errors);
+        self
+    }
+
+    pub fn error(mut self, error: impl Into<Error>) -> Self {
+        self.errors.push(error.into());
+        self
+    }
+
+    /// Adds every member of the object-shaped `extensions` to the GraphQL extensions.
+    pub fn extensions(mut self, extensions: Value) -> Self {
+        self.extensions.extend(extensions);
+        self
+    }
+
+    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+        self.extensions.insert(key, value);
+        self
+    }
+
+    pub fn status_code(mut self, status_code: impl Into<StatusCode>) -> Self {
+        self.status_code = Some(status_code.into());
+        self
+    }
+
+    pub fn and_status_code(mut self, status_code: Option<impl Into<StatusCode>>) -> Self {
+        self.status_code = status_code.map(Into::into);
+        self
+    }
+
+    pub fn context(mut self, context: impl Into<Context>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    pub fn and_context(mut self, context: Option<impl Into<Context>>) -> Self {
+        self.context = context.map(Into::into);
+        self
+    }
+
+    pub fn headers(mut self, headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>) -> Self {
+        self.headers.extend(headers);
+        self
+    }
+
+    pub fn header(
+        mut self,
+        name: impl Into<TryIntoHeaderName>,
+        value: impl Into<TryIntoHeaderValue>,
+    ) -> Self {
+        self.headers.insert(name.into(), value.into());
+        self
+    }
+
+    pub fn subgraph_name(mut self, subgraph_name: impl Into<String>) -> Self {
+        self.subgraph_name = Some(subgraph_name.into());
+        self
+    }
+
+    pub fn and_subgraph_name(mut self, subgraph_name: Option<impl Into<String>>) -> Self {
+        self.subgraph_name = subgraph_name.map(Into::into);
+        self
+    }
+
+    pub fn id(mut self, id: impl Into<SubgraphRequestId>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
+
+    pub fn and_id(mut self, id: Option<impl Into<SubgraphRequestId>>) -> Self {
+        self.id = id.map(Into::into);
+        self
+    }
+
+    pub fn build(self) -> Result<Response, BoxError> {
+        Response::fake2_new(
+            self.label,
+            self.data,
+            self.path,
+            self.errors,
+            self.extensions.build(),
+            self.status_code,
+            self.context,
+            self.headers,
+            self.subgraph_name,
+            self.id,
+        )
+    }
+}
+
+/// Builds a [`Response`] carrying only errors. Created by [`Response::error_builder`].
+#[derive(Default)]
+pub struct ErrorResponseBuilder {
+    errors: Vec<Error>,
+    status_code: Option<StatusCode>,
+    context: Option<Context>,
+    subgraph_name: Option<String>,
+    id: Option<SubgraphRequestId>,
+}
+
+impl ErrorResponseBuilder {
+    pub fn errors(mut self, errors: Vec<Error>) -> Self {
+        self.errors.extend(errors);
+        self
+    }
+
+    pub fn error(mut self, error: impl Into<Error>) -> Self {
+        self.errors.push(error.into());
+        self
+    }
+
+    pub fn status_code(mut self, status_code: impl Into<StatusCode>) -> Self {
+        self.status_code = Some(status_code.into());
+        self
+    }
+
+    pub fn and_status_code(mut self, status_code: Option<impl Into<StatusCode>>) -> Self {
+        self.status_code = status_code.map(Into::into);
+        self
+    }
+
+    pub fn context(mut self, context: impl Into<Context>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    pub fn subgraph_name(mut self, subgraph_name: impl Into<String>) -> Self {
+        self.subgraph_name = Some(subgraph_name.into());
+        self
+    }
+
+    pub fn and_subgraph_name(mut self, subgraph_name: Option<impl Into<String>>) -> Self {
+        self.subgraph_name = subgraph_name.map(Into::into);
+        self
+    }
+
+    pub fn id(mut self, id: impl Into<SubgraphRequestId>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
+
+    pub fn and_id(mut self, id: Option<impl Into<SubgraphRequestId>>) -> Self {
+        self.id = id.map(Into::into);
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics unless `context` and `subgraph_name` have both been set.
+    pub fn build(self) -> Response {
+        Response::error_new(
+            self.errors,
+            self.status_code,
+            self.context.expect("context is required"),
+            self.subgraph_name.expect("subgraph_name is required"),
+            self.id,
+        )
     }
 }
 
@@ -517,12 +1249,14 @@ impl Request {
         hasher.update(b"\0V");
         sort_and_hash(
             &mut hasher,
-            body.variables.iter().map(|(k, v)| (k, v.to_bytes())),
+            body.variables.object_iter().map(|(k, v)| (k, v.to_bytes())),
         );
         hasher.update(b"\0E");
         sort_and_hash(
             &mut hasher,
-            body.extensions.iter().map(|(k, v)| (k, v.to_bytes())),
+            body.extensions
+                .object_iter()
+                .map(|(k, v)| (k, v.to_bytes())),
         );
 
         hex::encode(hasher.finalize())
@@ -747,14 +1481,8 @@ mod tests {
 
     #[test]
     fn test_subgraph_request_hash_variables_order_independence() {
-        let mut vars_a = Object::new();
-        vars_a.insert("a", NewValue::Int(1));
-        vars_a.insert("b", NewValue::Int(2));
-        vars_a.insert("c", NewValue::Int(3));
-        let mut vars_b = Object::new();
-        vars_b.insert("c", NewValue::Int(3));
-        vars_b.insert("a", NewValue::Int(1));
-        vars_b.insert("b", NewValue::Int(2));
+        let vars_a = Value::object([("a", 1_i64), ("b", 2_i64), ("c", 3_i64)]);
+        let vars_b = Value::object([("c", 3_i64), ("a", 1_i64), ("b", 2_i64)]);
 
         let req_a = Request::fake_builder()
             .subgraph_request(
@@ -785,11 +1513,8 @@ mod tests {
         // sequence: `{"key": 1, "value2": null}` flattens to "key" + "1" +
         // "value2" + "null", and `{"key1value2": null}` flattens to
         // "key1value2" + "null".
-        let mut vars_two = Object::new();
-        vars_two.insert("key", NewValue::Int(1));
-        vars_two.insert("value2", NewValue::Null);
-        let mut vars_one = Object::new();
-        vars_one.insert("key1value2", NewValue::Null);
+        let vars_two = Value::object([("key", NewValue::Int(1)), ("value2", NewValue::Null)]);
+        let vars_one = Value::object([("key1value2", NewValue::Null)]);
 
         let req_two = Request::fake_builder()
             .subgraph_request(
@@ -821,10 +1546,8 @@ mod tests {
         // whole. A swap between variables and extensions would then produce
         // identical hashes — letting the subgraph dedup cache return request
         // A's response to request B.
-        let mut vars = Object::new();
-        vars.insert("k", NewValue::Int(1));
-        let mut exts = Object::new();
-        exts.insert("k", NewValue::Int(1));
+        let vars = Value::object([("k", 1_i64)]);
+        let exts = Value::object([("k", 1_i64)]);
 
         let req_vars_only = Request::fake_builder()
             .subgraph_request(
@@ -888,12 +1611,8 @@ mod tests {
 
     #[test]
     fn test_subgraph_request_hash_extensions_order_independence() {
-        let mut ext_a = Object::new();
-        ext_a.insert("alpha", "x");
-        ext_a.insert("beta", "y");
-        let mut ext_b = Object::new();
-        ext_b.insert("beta", "y");
-        ext_b.insert("alpha", "x");
+        let ext_a = Value::object([("alpha", "x"), ("beta", "y")]);
+        let ext_b = Value::object([("beta", "y"), ("alpha", "x")]);
 
         let req_a = Request::fake_builder()
             .subgraph_request(

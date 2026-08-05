@@ -10,9 +10,7 @@ use super::instruments::CustomCounter;
 use super::instruments::CustomInstruments;
 use crate::Context;
 use crate::graphql::ResponseVisitor;
-use crate::json_ext::Object;
 use crate::json_ext::Value;
-use crate::json_ext::ValueExt;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
@@ -173,7 +171,7 @@ impl ResponseVisitor for GraphQLInstrumentsVisitor<'_> {
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,
-        variables: &Object,
+        variables: &Value,
         ty: &NamedType,
         field: &Field,
         value: &Value,
@@ -194,9 +192,7 @@ impl ResponseVisitor for GraphQLInstrumentsVisitor<'_> {
                 }
             }
             JsonKind::Object => {
-                if let Some(children) = value.as_object() {
-                    self.visit_selections(request, variables, &field.selection_set, &children);
-                }
+                self.visit_selections(request, variables, &field.selection_set, value);
             }
             _ => {}
         }

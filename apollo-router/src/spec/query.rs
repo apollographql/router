@@ -11,6 +11,7 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
+use apollo_json::DocumentBuilder;
 use derivative::Derivative;
 use indexmap::IndexSet;
 use serde::Deserialize;
@@ -29,6 +30,7 @@ use crate::error::FetchError;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
+use crate::graphql::json_object::insert_member;
 use crate::json_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
@@ -131,7 +133,7 @@ impl Query {
     pub(crate) fn format_response(
         &self,
         response: &mut Response,
-        variables: Object,
+        variables: Value,
         schema: &ApiSchema,
         defer_conditions: BooleanValues,
         include_coercion_errors: bool,
@@ -173,7 +175,8 @@ impl Query {
                             if !parameters.errors.is_empty()
                                 && let Ok(document) = apollo_json::to_document(&parameters.errors)
                             {
-                                response.extensions.insert(
+                                response.extensions = insert_member(
+                                    std::mem::take(&mut response.extensions),
                                     EXTENSIONS_VALUE_COMPLETION_KEY,
                                     document.root_handle(),
                                 );
@@ -195,19 +198,25 @@ impl Query {
                 } else {
                     let mut output = Object::new();
 
-                    let all_variables: Object = if self.operation.variables.is_empty() {
+                    let all_variables: Value = if self.operation.variables.is_empty() {
                         variables
                     } else {
-                        self.operation
-                            .variables
-                            .iter()
-                            .filter_map(|(k, Variable { default_value, .. })| {
-                                default_value
-                                    .as_ref()
-                                    .map(|v| (k.as_str().to_owned(), v.clone()))
-                            })
-                            .chain(variables.iter())
-                            .collect()
+                        let mut builder = DocumentBuilder::new();
+                        for (name, Variable { default_value, .. }) in
+                            self.operation.variables.iter()
+                        {
+                            if let Some(value) = default_value {
+                                builder
+                                    .set(name.as_str(), value.clone())
+                                    .expect("the variables builder always has an object root");
+                            }
+                        }
+                        for (name, value) in variables.object_iter() {
+                            builder
+                                .set(name.as_str(), value)
+                                .expect("the variables builder always has an object root");
+                        }
+                        builder.seal().root_handle()
                     };
 
                     let operation_type_name = schema
@@ -238,9 +247,11 @@ impl Query {
                     if !parameters.errors.is_empty()
                         && let Ok(document) = apollo_json::to_document(&parameters.errors)
                     {
-                        response
-                            .extensions
-                            .insert(EXTENSIONS_VALUE_COMPLETION_KEY, document.root_handle());
+                        response.extensions = insert_member(
+                            std::mem::take(&mut response.extensions),
+                            EXTENSIONS_VALUE_COMPLETION_KEY,
+                            document.root_handle(),
+                        );
                     }
 
                     if let Some(errors) = parameters.coercion_errors.as_mut()
@@ -581,7 +592,7 @@ impl Query {
             _ => {}
         }
 
-        if let Some(input_object) = input.as_object() {
+        if let Ok(input_object) = Object::try_from_value(input.clone()) {
             if let Some(input_type) = input_object
                 .get(TYPENAME)
                 .and_then(|val| val.as_str_owned())
@@ -606,7 +617,7 @@ impl Query {
             let mut output_object = if output.is_null() {
                 Object::new()
             } else {
-                output.as_object().ok_or(InvalidValue)?
+                Object::try_from_value(output.clone()).map_err(|_| InvalidValue)?
             };
 
             let typename = input_object
@@ -1201,7 +1212,8 @@ impl Query {
                 .collect::<HashSet<_>>();
             let unknown_variables = request
                 .variables
-                .keys()
+                .object_iter()
+                .map(|(name, _)| name)
                 .filter(|name| !known_variables.contains(name.as_str()))
                 .collect::<Vec<_>>();
             if !unknown_variables.is_empty() {
@@ -1259,7 +1271,7 @@ impl Query {
     /// The value a variable holds for this request, falling back to the operation's
     /// declared default. An apollo-json value is a handle rather than a place, so
     /// this hands back an owned handle sharing the caller's arena.
-    pub(crate) fn variable_value(&self, variable_name: &str, variables: &Object) -> Option<Value> {
+    pub(crate) fn variable_value(&self, variable_name: &str, variables: &Value) -> Option<Value> {
         variables
             .get(variable_name)
             .or_else(|| self.default_variable_value(variable_name).cloned())
@@ -1302,7 +1314,7 @@ impl Query {
             .unwrap_or(0)
     }
 
-    pub(crate) fn defer_variables_set(&self, variables: &Object) -> BooleanValues {
+    pub(crate) fn defer_variables_set(&self, variables: &Value) -> BooleanValues {
         let mut bits = 0_u32;
         for (i, variable) in self
             .defer_stats
@@ -1381,7 +1393,7 @@ fn emit_missing_field<'b>(
 
 /// Intermediate structure for arguments passed through the entire formatting
 struct FormatParameters<'a> {
-    variables: &'a Object,
+    variables: &'a Value,
     errors: Vec<Error>,
     coercion_errors: Option<Vec<Error>>,
     nullified: Vec<Path>,

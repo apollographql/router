@@ -11,12 +11,12 @@ use serde::Serialize;
 
 use crate::error::Error;
 use crate::graphql::IntoGraphQLErrors;
+use crate::graphql::json_object::ObjectAccumulator;
+use crate::graphql::json_object::empty_object;
+use crate::graphql::json_object::is_empty_object;
 use crate::json_ext;
-use crate::json_ext::Object;
-use crate::json_ext::ObjectMap;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
-use crate::json_ext::ValueExt;
 
 #[derive(thiserror::Error, Display, Debug, Eq, PartialEq)]
 #[error("GraphQL response was malformed: {reason}")]
@@ -27,7 +27,7 @@ pub(crate) struct MalformedResponseError {
 
 /// A graphql primary response.
 /// Used for federated and subgraph queries.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct Response {
@@ -48,8 +48,8 @@ pub struct Response {
     pub errors: Vec<Error>,
 
     /// The optional graphql extensions.
-    #[serde(skip_serializing_if = "Object::is_empty", default)]
-    pub extensions: Object,
+    #[serde(skip_serializing_if = "is_empty_object", default = "empty_object")]
+    pub extensions: Value,
 
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub has_next: Option<bool>,
@@ -65,33 +65,160 @@ pub struct Response {
     pub incremental: Vec<IncrementalResponse>,
 }
 
-#[buildstructor::buildstructor]
-impl Response {
-    /// Constructor
-    #[builder(visibility = "pub")]
-    fn new(
-        label: Option<String>,
-        data: Option<Value>,
-        path: Option<Path>,
-        errors: Vec<Error>,
-        extensions: ObjectMap<String, NewValue>,
-        _subselection: Option<String>,
-        has_next: Option<bool>,
-        subscribed: Option<bool>,
-        incremental: Vec<IncrementalResponse>,
-        created_at: Option<Instant>,
-    ) -> Self {
+impl Default for Response {
+    fn default() -> Self {
         Self {
-            label,
-            data,
-            path,
-            errors,
-            extensions,
-            has_next,
-            subscribed,
-            incremental,
-            created_at,
+            label: None,
+            data: None,
+            path: None,
+            errors: Vec::new(),
+            extensions: empty_object(),
+            has_next: None,
+            subscribed: None,
+            created_at: None,
+            incremental: Vec::new(),
         }
+    }
+}
+
+/// Builds a GraphQL [`Response`]. Every part of a response is optional; an empty builder
+/// yields a response with no data, no errors, and no extensions.
+///
+/// ```
+/// # use apollo_router::graphql::Response;
+/// let response = Response::builder()
+///     .data(apollo_json::Value::object([("hello", "world")]))
+///     .extension("cost", 4_i64)
+///     .build();
+/// ```
+#[derive(Default)]
+pub struct ResponseBuilder {
+    label: Option<String>,
+    data: Option<Value>,
+    path: Option<Path>,
+    errors: Vec<Error>,
+    extensions: ObjectAccumulator,
+    has_next: Option<bool>,
+    subscribed: Option<bool>,
+    incremental: Vec<IncrementalResponse>,
+}
+
+impl ResponseBuilder {
+    /// Sets the label passed to the `@defer` or `@stream` directive for this patch.
+    #[must_use]
+    pub fn label(self, label: impl Into<String>) -> Self {
+        self.and_label(Some(label))
+    }
+
+    /// Sets the label when `label` is `Some`.
+    #[must_use]
+    pub fn and_label(mut self, label: Option<impl Into<String>>) -> Self {
+        self.label = label.map(Into::into);
+        self
+    }
+
+    /// Sets the response data.
+    #[must_use]
+    pub fn data(self, data: impl Into<Value>) -> Self {
+        self.and_data(Some(data))
+    }
+
+    /// Sets the response data when `data` is `Some`.
+    #[must_use]
+    pub fn and_data(mut self, data: Option<impl Into<Value>>) -> Self {
+        self.data = data.map(Into::into);
+        self
+    }
+
+    /// Sets the path in the primary response that this patch merges at.
+    #[must_use]
+    pub fn path(self, path: impl Into<Path>) -> Self {
+        self.and_path(Some(path))
+    }
+
+    /// Sets the merge path when `path` is `Some`.
+    #[must_use]
+    pub fn and_path(mut self, path: Option<impl Into<Path>>) -> Self {
+        self.path = path.map(Into::into);
+        self
+    }
+
+    /// Appends `errors` to the errors collected so far.
+    #[must_use]
+    pub fn errors(mut self, errors: Vec<Error>) -> Self {
+        self.errors.extend(errors);
+        self
+    }
+
+    /// Appends one error.
+    #[must_use]
+    pub fn error(mut self, error: impl Into<Error>) -> Self {
+        self.errors.push(error.into());
+        self
+    }
+
+    /// Adds every member of the JSON object `extensions`, replacing extensions under the
+    /// same keys.
+    #[must_use]
+    pub fn extensions(mut self, extensions: impl Into<Value>) -> Self {
+        self.extensions.extend(extensions.into());
+        self
+    }
+
+    /// Adds one extension, replacing any extension under the same key.
+    #[must_use]
+    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+        self.extensions.insert(key, value);
+        self
+    }
+
+    /// Sets whether more responses follow this one on the same stream.
+    #[must_use]
+    pub fn has_next(self, has_next: bool) -> Self {
+        self.and_has_next(Some(has_next))
+    }
+
+    /// Sets whether more responses follow when `has_next` is `Some`.
+    #[must_use]
+    pub fn and_has_next(mut self, has_next: Option<bool>) -> Self {
+        self.has_next = has_next;
+        self
+    }
+
+    /// Sets whether this response opens a subscription.
+    #[must_use]
+    pub fn subscribed(mut self, subscribed: bool) -> Self {
+        self.subscribed = Some(subscribed);
+        self
+    }
+
+    /// Appends `incremental` to the incremental responses collected so far.
+    #[must_use]
+    pub fn incremental(mut self, incremental: Vec<IncrementalResponse>) -> Self {
+        self.incremental.extend(incremental);
+        self
+    }
+
+    /// Finishes the builder and returns the [`Response`].
+    pub fn build(self) -> Response {
+        Response {
+            label: self.label,
+            data: self.data,
+            path: self.path,
+            errors: self.errors,
+            extensions: self.extensions.build(),
+            has_next: self.has_next,
+            subscribed: self.subscribed,
+            created_at: None,
+            incremental: self.incremental,
+        }
+    }
+}
+
+impl Response {
+    /// Returns a builder that builds a GraphQL [`Response`] from its parts.
+    pub fn builder() -> ResponseBuilder {
+        ResponseBuilder::default()
     }
 
     /// If path is None, this is a primary response.
@@ -134,13 +261,12 @@ impl Response {
             .map_err(|err| MalformedResponseError {
                 reason: err.to_string(),
             })?
-            .and_then(|extensions| extensions.as_object())
-            .unwrap_or_default();
+            .unwrap_or_else(empty_object);
         let label = extract_key_value_from_object!(object, "label", JsonKind::String)
             .map_err(|err| MalformedResponseError {
                 reason: err.to_string(),
             })?
-            .and_then(|label| label.as_str_owned());
+            .and_then(|label| label.as_string());
         let path = extract_key_value_from_object!(object, "path")
             .map(|path| apollo_json::from_value(&path))
             .transpose()
@@ -191,7 +317,7 @@ impl Response {
 
 /// A graphql incremental response.
 /// Used with `@defer`
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct IncrementalResponse {
@@ -212,28 +338,118 @@ pub struct IncrementalResponse {
     pub errors: Vec<Error>,
 
     /// The optional graphql extensions.
-    #[serde(skip_serializing_if = "Object::is_empty", default)]
-    pub extensions: Object,
+    #[serde(skip_serializing_if = "is_empty_object", default = "empty_object")]
+    pub extensions: Value,
 }
 
-#[buildstructor::buildstructor]
-impl IncrementalResponse {
-    /// Constructor
-    #[builder(visibility = "pub")]
-    fn new(
-        label: Option<String>,
-        data: Option<Value>,
-        path: Option<Path>,
-        errors: Vec<Error>,
-        extensions: ObjectMap<String, NewValue>,
-    ) -> Self {
+impl Default for IncrementalResponse {
+    fn default() -> Self {
         Self {
-            label,
-            data,
-            path,
-            errors,
-            extensions,
+            label: None,
+            data: None,
+            path: None,
+            errors: Vec::new(),
+            extensions: empty_object(),
         }
+    }
+}
+
+/// Builds a GraphQL [`IncrementalResponse`], one patch of a deferred response. Every part
+/// is optional.
+#[derive(Default)]
+pub struct IncrementalResponseBuilder {
+    label: Option<String>,
+    data: Option<Value>,
+    path: Option<Path>,
+    errors: Vec<Error>,
+    extensions: ObjectAccumulator,
+}
+
+impl IncrementalResponseBuilder {
+    /// Sets the label passed to the `@defer` or `@stream` directive for this patch.
+    #[must_use]
+    pub fn label(self, label: impl Into<String>) -> Self {
+        self.and_label(Some(label))
+    }
+
+    /// Sets the label when `label` is `Some`.
+    #[must_use]
+    pub fn and_label(mut self, label: Option<impl Into<String>>) -> Self {
+        self.label = label.map(Into::into);
+        self
+    }
+
+    /// Sets the patch data.
+    #[must_use]
+    pub fn data(self, data: impl Into<Value>) -> Self {
+        self.and_data(Some(data))
+    }
+
+    /// Sets the patch data when `data` is `Some`.
+    #[must_use]
+    pub fn and_data(mut self, data: Option<impl Into<Value>>) -> Self {
+        self.data = data.map(Into::into);
+        self
+    }
+
+    /// Sets the path in the primary response that this patch merges at.
+    #[must_use]
+    pub fn path(self, path: impl Into<Path>) -> Self {
+        self.and_path(Some(path))
+    }
+
+    /// Sets the merge path when `path` is `Some`.
+    #[must_use]
+    pub fn and_path(mut self, path: Option<impl Into<Path>>) -> Self {
+        self.path = path.map(Into::into);
+        self
+    }
+
+    /// Appends `errors` to the errors collected so far.
+    #[must_use]
+    pub fn errors(mut self, errors: Vec<Error>) -> Self {
+        self.errors.extend(errors);
+        self
+    }
+
+    /// Appends one error.
+    #[must_use]
+    pub fn error(mut self, error: impl Into<Error>) -> Self {
+        self.errors.push(error.into());
+        self
+    }
+
+    /// Adds every member of the JSON object `extensions`, replacing extensions under the
+    /// same keys.
+    #[must_use]
+    pub fn extensions(mut self, extensions: impl Into<Value>) -> Self {
+        self.extensions.extend(extensions.into());
+        self
+    }
+
+    /// Adds one extension, replacing any extension under the same key.
+    #[must_use]
+    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+        self.extensions.insert(key, value);
+        self
+    }
+
+    /// Finishes the builder and returns the [`IncrementalResponse`].
+    pub fn build(self) -> IncrementalResponse {
+        IncrementalResponse {
+            label: self.label,
+            data: self.data,
+            path: self.path,
+            errors: self.errors,
+            extensions: self.extensions.build(),
+        }
+    }
+}
+
+impl IncrementalResponse {
+    /// Returns a builder that builds a GraphQL [`IncrementalResponse`] from its parts.
+    pub fn builder() -> IncrementalResponseBuilder {
+        IncrementalResponseBuilder::default()
     }
 
     /// append_errors default the errors `path` with the one provided.
@@ -250,7 +466,7 @@ impl From<ExecutionResponse> for Response {
             // PERF(apollo-json): legacy bridge, revisit -- apollo-compiler hands back
             // introspection data as `serde_json_bytes`
             data: data.map(|data| json_ext::from_legacy(&serde_json_bytes::Value::Object(data))),
-            extensions: Default::default(),
+            extensions: empty_object(),
             label: None,
             path: None,
             has_next: None,
@@ -297,7 +513,6 @@ mod tests {
     use crate::graphql::Error;
     use crate::graphql::Location;
     use crate::graphql::Response;
-    use crate::json_ext::json_value;
 
     #[test]
     fn test_append_errors_path_fallback_and_override() {
@@ -401,14 +616,10 @@ mod tests {
                         .message("Name for character with ID 1002 could not be fetched.")
                         .locations(vec!(Location { line: 6, column: 7 }))
                         .path(Path::from("hero/heroFriends/1/name"))
-                        .extensions(json_value!({ "error-extension": 5 }).as_object().unwrap())
+                        .extensions(json_value!({ "error-extension": 5 }))
                         .build()
                 ])
-                .extensions(
-                    json_value!({ "response-extension": 3 })
-                        .as_object()
-                        .unwrap()
-                )
+                .extensions(json_value!({ "response-extension": 3 }))
                 .build()
         );
     }
@@ -487,14 +698,10 @@ mod tests {
                         .message("Name for character with ID 1002 could not be fetched.")
                         .locations(vec!(Location { line: 6, column: 7 }))
                         .path(Path::from("hero/heroFriends/1/name"))
-                        .extensions(json_value!({ "error-extension": 5 }).as_object().unwrap())
+                        .extensions(json_value!({ "error-extension": 5 }))
                         .build()
                 ])
-                .extensions(
-                    json_value!({ "response-extension": 3 })
-                        .as_object()
-                        .unwrap()
-                )
+                .extensions(json_value!({ "response-extension": 3 }))
                 .has_next(true)
                 .build()
         );
@@ -514,7 +721,7 @@ mod tests {
     #[test]
     fn test_data_null() {
         let response = Response::from_bytes("{\"data\":null}".into()).unwrap();
-        assert_eq!(response, Response::builder().data(json_ext::null()).build(),);
+        assert_eq!(response, Response::builder().data(Value::null()).build(),);
     }
 
     /// Tests for Unicode / emoji handling in subgraph responses.

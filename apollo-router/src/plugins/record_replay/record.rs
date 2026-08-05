@@ -17,7 +17,6 @@ use super::recording::Recording;
 use super::recording::RequestDetails;
 use super::recording::ResponseDetails;
 use super::recording::Subgraph;
-use crate::json_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -179,10 +178,7 @@ impl Plugin for Record {
                 if recording_enabled {
                     let query = req.supergraph_request.body().query.clone();
                     let operation_name = req.supergraph_request.body().operation_name.clone();
-                    // PERF(apollo-json): legacy bridge, revisit -- a recording is
-                    // written out as a JSON file, so it holds the legacy type
-                    let variables =
-                        json_ext::object_to_legacy(&req.supergraph_request.body().variables);
+                    let variables = req.supergraph_request.body().variables.clone();
                     let (headers, header_errors) = parse_headers(req.supergraph_request.headers());
                     let method = req.supergraph_request.method().to_string();
                     let uri = req.supergraph_request.uri().to_string();
@@ -253,11 +249,7 @@ impl Plugin for Record {
                     RequestDetails {
                         query: req.subgraph_request.body().query.clone(),
                         operation_name: req.subgraph_request.body().operation_name.clone(),
-                        // PERF(apollo-json): legacy bridge, revisit -- a recording is
-                        // written out as a JSON file, so it holds the legacy type
-                        variables: json_ext::object_to_legacy(
-                            &req.subgraph_request.body().variables,
-                        ),
+                        variables: req.subgraph_request.body().variables.clone(),
                         headers,
                         header_errors,
                         method: req.subgraph_request.method().to_string(),

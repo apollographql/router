@@ -262,10 +262,7 @@ mod tests {
         let svc = SubgraphApqLayer::new(false).layer(mock);
         let resp = svc.oneshot(make_request()).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
-        assert_eq!(
-            resp.response.body().data,
-            Some(json_ext::string("test"))
-        );
+        assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
     }
 
     #[tokio::test]
@@ -290,10 +287,7 @@ mod tests {
         let svc = SubgraphApqLayer::new(true).layer(mock);
         let resp = svc.oneshot(make_request()).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
-        assert_eq!(
-            resp.response.body().data,
-            Some(json_ext::string("test"))
-        );
+        assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
     }
 
     #[tokio::test]
@@ -321,10 +315,7 @@ mod tests {
         let svc = SubgraphApqLayer::new(true).layer(mock);
         let resp = svc.oneshot(make_request()).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
-        assert_eq!(
-            resp.response.body().data,
-            Some(json_ext::string("test"))
-        );
+        assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
     }
 
     #[tokio::test]
@@ -342,10 +333,7 @@ mod tests {
         let svc = SubgraphApqLayer::new(true).layer(mock);
         let resp = svc.oneshot(make_request()).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
-        assert_eq!(
-            resp.response.body().data,
-            Some(json_ext::string("test"))
-        );
+        assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
     }
 
     #[tokio::test]
@@ -376,10 +364,7 @@ mod tests {
 
         let resp = svc.clone().oneshot(make_request()).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
-        assert_eq!(
-            resp.response.body().data,
-            Some(json_ext::string("test"))
-        );
+        assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
         assert!(
             !svc.enabled.load(Relaxed),
             "APQ should be disabled after PQNS"
@@ -410,10 +395,7 @@ mod tests {
 
         let resp = svc.clone().oneshot(make_request()).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
-        assert_eq!(
-            resp.response.body().data,
-            Some(json_ext::string("test"))
-        );
+        assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
         assert!(!svc.enabled.load(Relaxed));
     }
 
@@ -444,10 +426,7 @@ mod tests {
                 "APQ body should omit query on first attempt"
             );
             assert_eq!(body.operation_name.as_deref(), Some("MyOp"));
-            assert_eq!(
-                body.variables.get("id"),
-                Some(json_ext::string("42"))
-            );
+            assert_eq!(body.variables.get("id"), Some(json_ext::string("42")));
             assert!(body.extensions.contains_key(PERSISTED_QUERY_KEY));
             assert!(
                 body.extensions.contains_key("myExt"),
@@ -685,10 +664,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            assert_eq!(
-                resp.response.body().data,
-                Some(json_ext::string("test"))
-            );
+            assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
         }
 
         #[tokio::test(flavor = "multi_thread")]
@@ -718,10 +694,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            assert_eq!(
-                resp.response.body().data,
-                Some(json_ext::string("test"))
-            );
+            assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
         }
 
         #[tokio::test(flavor = "multi_thread")]
@@ -773,10 +746,7 @@ mod tests {
                 .unwrap();
 
             assert_eq!(call_count.load(Relaxed), 2);
-            assert_eq!(
-                resp.response.body().data,
-                Some(json_ext::string("test"))
-            );
+            assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
         }
     }
 }

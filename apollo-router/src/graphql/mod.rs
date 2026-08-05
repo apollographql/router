@@ -1,5 +1,6 @@
 //! Types related to GraphQL requests, responses, etc.
 
+pub(crate) mod json_object;
 mod request;
 mod response;
 mod visitor;
@@ -23,14 +24,16 @@ use serde::Serialize;
 use uuid::Uuid;
 pub(crate) use visitor::ResponseVisitor;
 
+use crate::graphql::json_object::ObjectAccumulator;
+use crate::graphql::json_object::empty_object;
+use crate::graphql::json_object::insert_member;
+use crate::graphql::json_object::is_empty_object;
 use crate::json_ext;
 use crate::json_ext::Object;
-use crate::json_ext::ObjectMap;
 use crate::json_ext::Path;
 pub use crate::json_ext::Path as JsonPath;
 pub use crate::json_ext::PathElement as JsonPathElement;
 use crate::json_ext::Value;
-use crate::json_ext::ValueExt;
 use crate::spec::query::ERROR_CODE_RESPONSE_VALIDATION;
 
 /// An asynchronous [`Stream`] of GraphQL [`Response`]s.
@@ -73,8 +76,8 @@ pub struct Error {
     pub path: Option<Path>,
 
     /// The optional GraphQL extensions for this error.
-    #[serde(skip_serializing_if = "Object::is_empty")]
-    pub extensions: Object,
+    #[serde(skip_serializing_if = "is_empty_object")]
+    pub extensions: Value,
 
     /// A unique identifier for this error
     #[serde(skip_serializing)]
@@ -93,71 +96,148 @@ impl Default for Error {
             message: String::new(),
             locations: Vec::new(),
             path: None,
-            extensions: Object::new(),
+            extensions: empty_object(),
             apollo_id: generate_uuid(),
             span_event_emitted: false,
         }
     }
 }
 
+/// Builds a GraphQL [`Error`]. The message is required; every other part is optional.
+///
+/// ```
+/// # use apollo_router::graphql::Error;
+/// let error = Error::builder()
+///     .message("Cannot query field `nope` on type `Query`")
+///     .extension_code("GRAPHQL_VALIDATION_FAILED")
+///     .build();
+/// ```
+#[derive(Default)]
+pub struct ErrorBuilder {
+    message: Option<String>,
+    locations: Vec<Location>,
+    path: Option<Path>,
+    extension_code: Option<String>,
+    extensions: ObjectAccumulator,
+    apollo_id: Option<Uuid>,
+}
+
+impl ErrorBuilder {
+    /// Sets the error message. Required.
+    #[must_use]
+    pub fn message(mut self, message: impl Into<String>) -> Self {
+        self.message = Some(message.into());
+        self
+    }
+
+    /// Appends `locations` to the locations collected so far.
+    #[must_use]
+    pub fn locations(mut self, locations: Vec<Location>) -> Self {
+        self.locations.extend(locations);
+        self
+    }
+
+    /// Appends one location in the GraphQL document of the originating request.
+    #[must_use]
+    pub fn location(mut self, location: impl Into<Location>) -> Self {
+        self.locations.push(location.into());
+        self
+    }
+
+    /// Sets the JSON path of the field this error belongs to.
+    #[must_use]
+    pub fn path(self, path: impl Into<Path>) -> Self {
+        self.and_path(Some(path))
+    }
+
+    /// Sets the JSON path of the field this error belongs to when `path` is `Some`.
+    #[must_use]
+    pub fn and_path(mut self, path: Option<impl Into<Path>>) -> Self {
+        self.path = path.map(Into::into);
+        self
+    }
+
+    /// Sets the `code` extension, unless [`ErrorBuilder::extension`] or
+    /// [`ErrorBuilder::extensions`] already supplied one.
+    #[must_use]
+    pub fn extension_code(self, code: impl Into<String>) -> Self {
+        self.and_extension_code(Some(code))
+    }
+
+    /// Sets the `code` extension when `code` is `Some`, unless one was already supplied.
+    #[must_use]
+    pub fn and_extension_code(mut self, code: Option<impl Into<String>>) -> Self {
+        self.extension_code = code.map(Into::into);
+        self
+    }
+
+    /// Adds every member of the JSON object `extensions`, replacing extensions under the
+    /// same keys.
+    #[must_use]
+    pub fn extensions(mut self, extensions: impl Into<Value>) -> Self {
+        self.extensions.extend(extensions.into());
+        self
+    }
+
+    /// Adds one extension, replacing any extension under the same key.
+    #[must_use]
+    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+        self.extensions.insert(key, value);
+        self
+    }
+
+    /// Sets the unique identifier of this error, which is otherwise generated. Reach for
+    /// this when deserializing an error that already has one, or in tests that assert on it.
+    #[must_use]
+    pub fn apollo_id(self, apollo_id: impl Into<Uuid>) -> Self {
+        self.and_apollo_id(Some(apollo_id))
+    }
+
+    /// Sets the unique identifier of this error when `apollo_id` is `Some`.
+    #[must_use]
+    pub fn and_apollo_id(mut self, apollo_id: Option<impl Into<Uuid>>) -> Self {
+        self.apollo_id = apollo_id.map(Into::into);
+        self
+    }
+
+    /// Finishes the builder and returns the [`Error`].
+    ///
+    /// # Panics
+    /// Panics when no message was set.
+    pub fn build(self) -> Error {
+        Error::new(
+            self.message.expect("a GraphQL error requires a message"),
+            self.locations,
+            self.path,
+            self.extension_code,
+            self.extensions.build(),
+            self.apollo_id,
+        )
+    }
+}
+
 // Implement getter and getter_mut to not use pub field directly
 
-#[buildstructor::buildstructor]
 impl Error {
-    /// Returns a builder that builds a GraphQL [`Error`] from its components.
-    ///
-    /// Builder methods:
-    ///
-    /// * `.message(impl Into<`[`String`]`>)`
-    ///   Required.
-    ///   Sets [`Error::message`].
-    ///
-    /// * `.locations(impl Into<`[`Vec`]`<`[`Location`]`>>)`
-    ///   Optional.
-    ///   Sets the entire `Vec` of [`Error::locations`], which defaults to the empty.
-    ///
-    /// * `.location(impl Into<`[`Location`]`>)`
-    ///   Optional, may be called multiple times.
-    ///   Adds one item at the end of [`Error::locations`].
-    ///
-    /// * `.path(impl Into<`[`Path`]`>)`
-    ///   Optional.
-    ///   Sets [`Error::path`].
-    ///
-    /// * `.extensions(json_ext::Object)`
-    ///   Optional.
-    ///   Sets the entire [`Error::extensions`] map, which defaults to empty.
-    ///
-    /// * `.extension(impl Into<`[`String`]`>, impl Into<`[`NewValue`]`>)`
-    ///   Optional, may be called multiple times.
-    ///   Adds one item to the [`Error::extensions`] map.
-    ///
-    /// * `.extension_code(impl Into<`[`String`]`>)`
-    ///   Optional.
-    ///   Sets the "code" in the extension map. Will be ignored if extension already has this key
-    ///   set.
-    ///
-    /// * `.apollo_id(impl Into<`[`Uuid`]`>)`
-    ///   Optional.
-    ///   Sets the unique identifier for this Error. This should only be used in cases of
-    ///   deserialization or testing. If not given, the ID will be auto-generated.
-    ///
-    /// * `.build()`
-    ///   Finishes the builder and returns a GraphQL [`Error`].
-    #[builder(visibility = "pub")]
+    /// Returns a builder that builds a GraphQL [`Error`] from its parts.
+    pub fn builder() -> ErrorBuilder {
+        ErrorBuilder::default()
+    }
+
     fn new(
         message: String,
         locations: Vec<Location>,
         path: Option<Path>,
         extension_code: Option<String>,
-        // Spell out the map type rather than the `Object` alias so buildstructor
-        // derives `.extension(key, value)` from it
-        mut extensions: ObjectMap<String, NewValue>,
+        extensions: Value,
         apollo_id: Option<Uuid>,
     ) -> Self {
-        if let Some(code) = extension_code {
-            extensions.insert_if_absent("code", code);
-        }
+        let extensions = match extension_code {
+            Some(code) if extensions.get("code").is_none() => {
+                insert_member(extensions, "code", code)
+            }
+            _ => extensions,
+        };
         Self {
             message,
             locations,
@@ -177,10 +257,9 @@ impl Error {
             .map_err(|err| MalformedResponseError {
                 reason: format!("invalid `extensions` within error: {err}"),
             })?
-            .and_then(|extensions| extensions.as_object())
-            .unwrap_or_default();
+            .unwrap_or_else(empty_object);
         let message = match extract_key_value_from_object!(object, "message", JsonKind::String) {
-            Ok(Some(message)) => Ok(message.as_str_owned().unwrap_or_default()),
+            Ok(Some(message)) => Ok(message.as_string().unwrap_or_default()),
             Ok(None) => Err(MalformedResponseError {
                 reason: "missing required `message` property within error".to_owned(),
             }),
@@ -207,7 +286,7 @@ impl Error {
                 .map_err(|err| MalformedResponseError {
                     reason: format!("invalid `apolloId` within error: {err}"),
                 })?
-                .and_then(|id| id.as_str_owned())
+                .and_then(|id| id.as_string())
                 .map(|id| {
                     Uuid::from_str(&id).map_err(|err| MalformedResponseError {
                         reason: format!("invalid `apolloId` within error: {err}"),
@@ -221,29 +300,35 @@ impl Error {
     }
 
     pub(crate) fn from_value_completion_value(value: &Value) -> Option<Error> {
-        let value_completion = value.as_object()?;
-        let mut extensions = value_completion
-            .get("extensions")
-            .and_then(|extensions| extensions.as_object())
-            .unwrap_or_default();
+        if value.kind() != JsonKind::Object {
+            return None;
+        }
+        let mut extensions = ObjectAccumulator::default();
+        if let Some(existing) = value.get("extensions") {
+            extensions.extend(existing);
+        }
         extensions.insert("code", ERROR_CODE_RESPONSE_VALIDATION);
         extensions.insert("severity", tracing::Level::WARN.as_str());
 
-        let message = value_completion
+        let message = value
             .get("message")
-            .and_then(|message| message.as_str_owned())
+            .and_then(|message| message.as_string())
             .unwrap_or_default();
-        let locations = value_completion
+        let locations = value
             .get("locations")
             .map(skip_invalid_locations)
             .map(|locations| apollo_json::from_value(&locations).unwrap_or_default())
             .unwrap_or_default();
-        let path = value_completion
+        let path = value
             .get("path")
             .and_then(|path| apollo_json::from_value(&path).ok());
 
         Some(Self::new(
-            message, locations, path, None, extensions,
+            message,
+            locations,
+            path,
+            None,
+            extensions.build(),
             None, // apollo_id is not serialized, so it will never exist in a serialized vc error
         ))
     }
@@ -253,7 +338,7 @@ impl Error {
         self.extensions
             .get("code")
             .and_then(|code| match code.kind() {
-                JsonKind::String => code.as_str_owned(),
+                JsonKind::String => code.as_string(),
                 JsonKind::Number => code.raw_number().map(str::to_owned),
                 _ => None,
             })
@@ -304,7 +389,7 @@ fn skip_invalid_locations(value: Value) -> Value {
     let is_minus_one = |location: &Value, key: &str| {
         location.get(key).and_then(|number| number.as_i64()) == Some(-1)
     };
-    json_ext::array(
+    Value::array(
         value.array_iter().filter(|location| {
             !(is_minus_one(location, "line") && is_minus_one(location, "column"))
         }),
@@ -375,9 +460,7 @@ impl From<CompilerExecutionError> for Error {
             path,
             // PERF(apollo-json): legacy bridge, revisit -- apollo-compiler reports
             // error extensions as `serde_json_bytes`
-            extensions: json_ext::from_legacy(&serde_json_bytes::Value::Object(extensions))
-                .as_object()
-                .unwrap_or_default(),
+            extensions: json_ext::from_legacy(&serde_json_bytes::Value::Object(extensions)),
             apollo_id: Uuid::new_v4(),
             span_event_emitted: false,
         }
