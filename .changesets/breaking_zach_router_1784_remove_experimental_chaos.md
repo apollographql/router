@@ -14,4 +14,4 @@ experimental_chaos:
 # (remove the experimental_chaos section)
 ```
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/0000
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9957

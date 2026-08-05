@@ -306,10 +306,7 @@ impl<'a> TestHarness<'a> {
     pub(crate) async fn build_common(
         self,
     ) -> Result<(Arc<Configuration>, Arc<Schema>, SupergraphCreator), BoxError> {
-        #[cfg_attr(
-            not(any(test, feature = "mock_subgraphs_testing")),
-            allow(unused_mut)
-        )]
+        #[cfg_attr(not(any(test, feature = "mock_subgraphs_testing")), allow(unused_mut))]
         let mut config = self.configuration.unwrap_or_default();
         #[cfg(any(test, feature = "mock_subgraphs_testing"))]
         {
