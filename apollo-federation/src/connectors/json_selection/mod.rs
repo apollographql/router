@@ -69,11 +69,29 @@ mod test {
     #[case::spread_match_with_default       ("... rootField->match(['nomatch', { x: $(1) }], [@, { default: $(true) }])", Some(json!({"default": true})), "0.4")]
     #[case::spread_multiple_spreads         ("rootField ... $({ first: $(1) }) ... $({ second: $(2) })", Some(json!({"rootField": "hello", "first": 1, "second": 2})), "0.4")]
     #[case::spread_multiple_with_match      ("... rootField->match(['hello', { a: $(1) }]) ... $({ b: $(2) })", Some(json!({"a": 1, "b": 2})), "0.4")]
+    // The ->ifThen counterparts of the ->match spreads above. Each pairs a
+    // boolean-producing comparison with the branches directly, instead of
+    // encoding "if true" as a [candidate, value] pair and a default as an [@, _]
+    // catch-all. Same expected output, so the two forms are interchangeable
+    // wherever the dispatch is two-way.
+    #[case::spread_with_ifthen               ("rootField ... rootField->eq('hello')->ifThen({ matched: $(true) })", Some(json!({"rootField": "hello", "matched": true})), "0.4")]
+    #[case::spread_with_ifthen_no_match      ("rootField ... rootField->eq('goodbye')->ifThen({ matched: $(true) }, null)", Some(json!(null)), "0.4")]
+    #[case::spread_ifthen_with_default       ("... rootField->eq('nomatch')->ifThen({ x: $(1) }, { default: $(true) })", Some(json!({"default": true})), "0.4")]
+    #[case::spread_multiple_with_ifthen      ("... rootField->eq('hello')->ifThen({ a: $(1) }) ... $({ b: $(2) })", Some(json!({"a": 1, "b": 2})), "0.4")]
+    // With no else branch, a false condition spreads nothing at all — the case
+    // ->match cannot express without an explicit [@, {}] arm.
+    #[case::spread_ifthen_false_spreads_nothing("rootField ... rootField->eq('goodbye')->ifThen({ matched: $(true) })", Some(json!({"rootField": "hello"})), "0.4")]
     fn kitchen_sink(
         #[case] selection: &str,
         #[case] expected: Option<Value>,
         #[case] minimum_version: &str,
-        #[values(ConnectSpec::V0_2, ConnectSpec::V0_3, ConnectSpec::V0_4)] version: ConnectSpec,
+        #[values(
+            ConnectSpec::V0_2,
+            ConnectSpec::V0_3,
+            ConnectSpec::V0_4,
+            ConnectSpec::V0_5
+        )]
+        version: ConnectSpec,
     ) {
         // We're effectively skipping the test but it will be reported as passed because Rust has no runtime "mark as skipped" capability
         if version.as_str() < minimum_version {
