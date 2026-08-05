@@ -713,7 +713,7 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -840,7 +840,7 @@ async fn response() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -860,7 +860,7 @@ async fn response() -> Result<(), ApolloRouterError> {
     );
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -953,7 +953,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -974,7 +974,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -989,7 +989,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -1047,7 +1047,7 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -1062,7 +1062,7 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -1119,7 +1119,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -1134,7 +1134,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -1197,7 +1197,7 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
             expected_response,
         );
 
@@ -1212,7 +1212,7 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
             expected_response,
         );
     }
@@ -1259,8 +1259,10 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
         .send()
         .await
         .unwrap()
-        .json::<graphql::Response>()
+        .bytes()
         .await
+        .map(graphql::Response::from_bytes)
+        .unwrap()
         .unwrap();
 
     assert_response_eq_ignoring_error_id!(

@@ -270,21 +270,7 @@ impl ValueExt for Value {
             }
         }
 
-        let (segments, truncated) = addressing_segments(path);
-        if truncated {
-            // A flatten with nothing addressing a position after it only asserts
-            // that this value is a list; there is nowhere to write.
-            return match self.kind() {
-                JsonKind::Array => Ok(()),
-                JsonKind::Null => {
-                    *self = empty_array();
-                    Ok(())
-                }
-                _ => Err(FetchError::ExecutionPathNotFound {
-                    reason: "expected an array".to_string(),
-                }),
-            };
-        }
+        let segments = insert_segments(path);
         let Some(&first) = segments.first() else {
             *self = value;
             return Ok(());
@@ -546,6 +532,24 @@ fn addressing_segments(path: &Path) -> (Vec<&PathElement>, bool) {
         }
     }
     (segments, false)
+}
+
+/// The path elements that address a position, for a walk that writes through a
+/// flatten rather than stopping at it.
+///
+/// A flatten asserts that the value at that position is a list; the element
+/// after it (an index) is what addresses a member of that list, so the flatten
+/// itself contributes no step. [`addressing_segments`] stops at the first one
+/// instead, which is what building a fresh value from a path does.
+fn insert_segments(path: &Path) -> Vec<&PathElement> {
+    path.iter()
+        .filter(|element| {
+            !matches!(
+                element,
+                PathElement::Flatten(_) | PathElement::Fragment(_)
+            )
+        })
+        .collect()
 }
 
 /// Writes `leaf` at `segments`, creating each missing container with the shape

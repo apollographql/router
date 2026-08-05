@@ -1,0 +1,113 @@
+---
+source: apollo-router/src/plugins/response_cache/tests.rs
+assertion_line: 700
+description: "Make sure only root field query is in status 'cached' and entities are not cached"
+expression: cache_keys
+---
+[
+  {
+    "key": "version:1.2:subgraph:user:type:Query:hash:a28e7a3c6a9b35f6e2818c9eda6e52d93c11688c8fd22d33a2b8c7f49784b8a4:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "invalidationKeys": [
+      "currentUser",
+      "subgraph-user",
+      "type-user-Query"
+    ],
+    "indexes": {
+      "subgraph": true,
+      "type": true,
+      "cache_tag": true
+    },
+    "kind": {
+      "rootFields": [
+        "currentUser"
+      ]
+    },
+    "subgraphName": "user",
+    "subgraphRequest": {
+      "query": "{ currentUser { activeOrganization { __typename id } } }"
+    },
+    "source": "cache",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "age": 5,
+      "public": true
+    },
+    "shouldStore": true,
+    "data": {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "__typename": "Organization",
+            "id": "1"
+          }
+        }
+      }
+    },
+    "warnings": []
+  },
+  {
+    "key": "version:1.2:subgraph:orga:type:Organization:representation:f6e8c0c4f36d6c0d11330be52b76316559e0390ff75fd002ed3fa73f9b6470f7:hash:1eedbd8915ac508382b7b76bce4a9168ff8bdf269e8c1ad0e60c24fcac6a88b6:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "invalidationKeys": [
+      "organization",
+      "organization-1",
+      "subgraph-orga",
+      "type-orga-Organization"
+    ],
+    "indexes": {
+      "subgraph": true,
+      "type": true,
+      "cache_tag": true
+    },
+    "kind": {
+      "typename": "Organization",
+      "entityKey": {
+        "id": "1"
+      }
+    },
+    "subgraphName": "orga",
+    "subgraphRequest": {
+      "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { creatorUser { __typename id } } } }",
+      "variables": {
+        "representations": [
+          {
+            "__typename": "Organization",
+            "id": "1"
+          }
+        ]
+      }
+    },
+    "source": "subgraph",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "age": 1000000,
+      "public": true
+    },
+    "shouldStore": false,
+    "data": {
+      "data": {
+        "creatorUser": {
+          "__typename": "User",
+          "id": 2
+        }
+      }
+    },
+    "warnings": [
+      {
+        "code": "CACHE_CONTROL_MAX_AGE_SMALLER_AGE",
+        "links": [
+          {
+            "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Caching#fresh_and_stale_based_on_age",
+            "title": "Fresh and stale data based on age"
+          },
+          {
+            "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+            "title": "Cache-Control header documentation"
+          }
+        ],
+        "message": "The subgraph returned a 'Cache-Control' header with a max-age smaller than the value of 'Age' header. This means the data has already expired, so the Router will not cache it."
+      }
+    ]
+  }
+]
