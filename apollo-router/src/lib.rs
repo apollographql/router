@@ -81,6 +81,9 @@ pub mod tracer;
 mod uplink;
 
 pub(crate) mod allocator;
+#[cfg(feature = "benchmarking")]
+#[doc(hidden)]
+pub mod benchmarking;
 #[doc(hidden)]
 #[deprecated(
     since = "2.16.0",
