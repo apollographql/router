@@ -827,7 +827,6 @@ mod tests {
     use axum::extract::ws::Message;
     use axum::response::IntoResponse;
     use axum::routing::get;
-    use bytes::Buf;
     use futures::StreamExt;
     use http::HeaderValue;
     use http::StatusCode;
