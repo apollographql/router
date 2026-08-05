@@ -18,7 +18,7 @@ use crate::Endpoint;
 use crate::ListenAddr;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
-use crate::json_ext::Object;
+use crate::json_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -314,7 +314,7 @@ impl Plugin for Subscription {
                                     .extension_code("SUBSCRIPTION_DISABLED")
                                     .build(),
                             )
-                            .extensions(Object::default())
+                            .extensions(json_ext::object([]))
                             .build(),
                     ))
                 } else {
@@ -806,7 +806,8 @@ mod tests {
                             .build(),
                     )
                     .build()
-                    .unwrap(),
+                    .unwrap()
+                    .into(),
             )
             .operation_kind(OperationKind::Subscription)
             .build();
@@ -830,7 +831,7 @@ mod tests {
                         .extension_code("SUBSCRIPTION_DISABLED")
                         .build()
                 )
-                .extensions(Object::default())
+                .extensions(json_ext::object([]))
                 .build()
         );
         crate::plugin::test::assert_no_mock_calls(handle).await;

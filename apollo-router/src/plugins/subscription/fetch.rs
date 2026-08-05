@@ -167,7 +167,8 @@ fn subscription_with_subgraph_service(
                         .build(),
                 )
                 .build()
-                .expect("it won't fail because the url is correct and already checked; qed"),
+                .expect("it won't fail because the url is correct and already checked; qed")
+                .into(),
         )
         .operation_kind(OperationKind::Subscription)
         .context(context)

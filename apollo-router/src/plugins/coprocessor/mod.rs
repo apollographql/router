@@ -1882,10 +1882,7 @@ pub(super) fn filter_graphql_response_body(
                 ));
             }
             if fields.extensions {
-                entries.push((
-                    "extensions".to_string(),
-                    response.extensions.clone().into_value(),
-                ));
+                entries.push(("extensions".to_string(), response.extensions.clone()));
             }
             Some(json_ext::object(entries))
         }

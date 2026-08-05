@@ -8,9 +8,8 @@ use serde::Serialize;
 use super::plugin::RESPONSE_CACHE_VERSION;
 use crate::Context;
 use crate::graphql;
-use crate::json_ext::Object;
+use crate::json_ext::ObjectExt;
 use crate::json_ext::Value;
-use crate::json_ext::ValueExt;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::response_cache::plugin::CONTEXT_CACHE_KEY;
 use crate::plugins::response_cache::plugin::REPRESENTATIONS;
@@ -64,7 +63,7 @@ impl<'a> PrimaryCacheKeyRoot<'a> {
 pub(super) struct PrimaryCacheKeyEntity<'a> {
     pub(super) subgraph_name: &'a str,
     pub(super) entity_type: &'a str,
-    pub(super) representation: &'a Object,
+    pub(super) representation: &'a Value,
     /// NB: hashed before insertion into this struct, so that the hashed representation can be reused for all entities in this query
     pub(super) subgraph_query_hash: &'a str,
     pub(super) additional_data_hash: &'a str,
@@ -82,7 +81,7 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
             representation,
         } = self;
 
-        let hashed_representation = if representation.is_empty() {
+        let hashed_representation = if representation.is_empty().unwrap_or(true) {
             String::new()
         } else {
             sort_and_hash_object(representation)
@@ -126,7 +125,8 @@ pub(super) fn hash_additional_data(
     hash(
         &mut hasher,
         body.variables
-            .iter()
+            .object_entries()
+            .into_iter()
             .filter(|(key, _value)| key.as_str() != REPRESENTATIONS),
     );
 
@@ -135,10 +135,9 @@ pub(super) fn hash_additional_data(
         .expect("this serializer doesn't throw any errors; qed");
 
     // Takes value specific for a subgraph, if it doesn't exist take value for all subgraphs, and if you have data specific for an operation name add it in the hash
-    if let Ok(Some(cache_data)) = context.get::<&str, Object>(CONTEXT_CACHE_KEY) {
+    if let Some(cache_data) = context.get_json_value(CONTEXT_CACHE_KEY) {
         if let Some(v) = cache_data
             .get("subgraphs")
-            .and_then(|s| s.as_object())
             .and_then(|subgraph_data| subgraph_data.get(subgraph_name))
         {
             v.serialize(Blake3Serializer::new(&mut hasher))
@@ -161,9 +160,9 @@ pub(super) fn hash_additional_data(
 }
 
 // Order-insensitive structural hash of a map, ie a representation or entity key
-fn sort_and_hash_object(object: &Object) -> String {
+fn sort_and_hash_object(object: &Value) -> String {
     let mut digest = blake3::Hasher::new();
-    hash(&mut digest, object.iter());
+    hash(&mut digest, object.object_iter());
     digest.finalize().to_hex().to_string()
 }
 
@@ -286,10 +285,10 @@ mod tests {
         // hash does vary based on the order that the vec values are provided.
         // NB: I'm not sure if this is intentional, but adding a test for the existing behavior.
         let data = from_legacy(&serde_json_bytes::json!({"nested": ["does", "order", "matter"]}));
-        let value1 = super::sort_and_hash_object(&data.as_object().unwrap());
+        let value1 = super::sort_and_hash_object(&data);
 
         let data = from_legacy(&serde_json_bytes::json!({"nested": ["order", "does", "matter"]}));
-        let value2 = super::sort_and_hash_object(&data.as_object().unwrap());
+        let value2 = super::sort_and_hash_object(&data);
 
         assert_ne!(value1, value2);
         assert_snapshot!(value1);

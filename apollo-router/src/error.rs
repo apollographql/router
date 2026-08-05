@@ -21,7 +21,6 @@ use crate::graphql::Location as ErrorLocation;
 use crate::graphql::Response;
 use crate::json_ext;
 use crate::json_ext::Path;
-use crate::json_ext::ValueExt;
 use crate::spec::SpecError;
 
 /// Return up to this many GraphQL parsing or validation errors.
@@ -165,11 +164,7 @@ impl FetchError {
             .message(self.to_string())
             .locations(Vec::default())
             .and_path(path)
-            .extensions(
-                json_ext::from_legacy(&value)
-                    .as_object()
-                    .unwrap_or_default(),
-            )
+            .extensions(json_ext::from_legacy(&value))
             .build()
     }
 

@@ -83,7 +83,7 @@ use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::ResponseVisitor;
 use crate::json_ext;
-use crate::json_ext::Object;
+use crate::json_ext::ObjectExt;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::instrument::InstrumentLayer;
@@ -1300,10 +1300,11 @@ impl PluginPrivate for Telemetry {
 }
 
 impl Telemetry {
-    fn filter_variables_values(variables: &Object, forward_rules: &ForwardValues) -> String {
-        let nb_var = variables.len();
+    fn filter_variables_values(variables: &Value, forward_rules: &ForwardValues) -> String {
+        let nb_var = variables.len().unwrap_or(0);
         let variables = variables
-            .iter()
+            .object_entries()
+            .into_iter()
             .map(|(name, value)| {
                 if match &forward_rules {
                     ForwardValues::None => false,

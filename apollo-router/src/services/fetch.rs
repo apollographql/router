@@ -9,8 +9,10 @@ use crate::Context;
 use crate::error::Error;
 use crate::error::FetchError;
 use crate::graphql::Request as GraphQLRequest;
+use crate::json_ext::ObjectExt;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::Variables;
@@ -153,7 +155,7 @@ impl AddSubgraphNameExt for Error {
 
     fn add_subgraph_name(&mut self, subgraph_name: &str) {
         self.extensions
-            .insert(SUBGRAPH_NAME_EXTENSION_KEY, subgraph_name);
+            .object_insert(SUBGRAPH_NAME_EXTENSION_KEY, subgraph_name);
     }
 }
 
@@ -178,12 +180,8 @@ pub(crate) trait SubgraphNameExt {
 
 impl SubgraphNameExt for Error {
     fn subgraph_name(&mut self) -> Option<String> {
-        if let Some(subgraph_name) = self.extensions.remove(SUBGRAPH_NAME_EXTENSION_KEY) {
-            subgraph_name
-                .as_str()
-                .map(|subgraph_name| subgraph_name.to_string())
-        } else {
-            None
-        }
+        self.extensions
+            .object_remove(SUBGRAPH_NAME_EXTENSION_KEY)
+            .and_then(|subgraph_name| subgraph_name.as_str_owned())
     }
 }

@@ -28,6 +28,7 @@ use self::multipart_request::MultipartRequest;
 use self::rearrange_query_plan::rearrange_query_plan;
 use crate::graphql;
 use crate::json_ext;
+use crate::json_ext::ObjectExt;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -327,7 +328,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Re
 // Replaces value at path with the provided one.
 // Returns the provided path if the path is not valid for the given object
 fn replace_value_at_path<'a>(
-    variables: &mut json_ext::Object,
+    variables: &mut json_ext::Value,
     path: &'a [String],
     value: impl Into<NewValue>,
 ) -> std::result::Result<(), &'a [String]> {
@@ -341,7 +342,7 @@ fn replace_value_at_path<'a>(
 }
 
 // Removes value at path.
-fn remove_value_at_path(variables: &mut json_ext::Object, path: &[String]) {
+fn remove_value_at_path(variables: &mut json_ext::Value, path: &[String]) {
     if let Some(segments) = resolve_path(variables, path) {
         write_at_path(variables, &segments, NewValue::Null);
     }
@@ -350,7 +351,7 @@ fn remove_value_at_path(variables: &mut json_ext::Object, path: &[String]) {
 /// The mutation path addressing `path` inside `variables`, or `None` when a
 /// segment names a member that is absent or a container that is not there.
 fn resolve_path<'a>(
-    variables: &json_ext::Object,
+    variables: &json_ext::Value,
     path: &'a [String],
 ) -> Option<Vec<PathSegment<'a>>> {
     let (variable_name, rest) = path.split_first()?;
@@ -377,23 +378,23 @@ fn resolve_path<'a>(
 }
 
 fn write_at_path(
-    variables: &mut json_ext::Object,
+    variables: &mut json_ext::Value,
     segments: &[PathSegment<'_>],
     value: impl Into<NewValue>,
 ) {
-    let mut builder = std::mem::take(variables).into_value().detach().edit();
+    let mut builder = variables.detach().edit();
     builder
         .set_path(segments, value)
         .expect("the segments resolved against this object");
-    *variables = json_ext::Object::from(builder.seal().root_handle());
+    *variables = builder.seal().root_handle();
 }
 
 #[test]
 fn it_works_with_one_segment() {
-    let mut variables = json_ext::Object::from(json_ext::from_legacy(&serde_json_bytes::json! {{
+    let mut variables = json_ext::from_legacy(&serde_json_bytes::json! {{
         "file1": null,
         "file2": null
-    }}));
+    }});
 
     replace_value_at_path(&mut variables, &["file1".to_string()], "placeholder")
         .expect("file1 is a member of the variables");
@@ -436,7 +437,7 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
 
         let variables = &mut req.subgraph_request.body_mut().variables;
         let variable_names: Vec<serde_json_bytes::ByteString> =
-            variables.keys().map(Into::into).collect();
+            variables.object_keys().into_iter().map(Into::into).collect();
         let subgraph_map = map.sugraph_map(&variable_names);
         if !subgraph_map.is_empty() {
             for variable_map in map.per_variable.values() {

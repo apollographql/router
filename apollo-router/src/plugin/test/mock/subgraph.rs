@@ -22,6 +22,7 @@ use tower::Service;
 use crate::graphql;
 use crate::graphql::Request;
 use crate::graphql::Response;
+use crate::json_ext::ObjectExt;
 use crate::plugins::subscription::notification::Handle;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
@@ -221,7 +222,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
             }
 
             body.extensions
-                .insert("subscription", subscription_ext.seal().root_handle());
+                .object_insert("subscription", subscription_ext.seal().root_handle());
         }
 
         normalize(body);

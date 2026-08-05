@@ -14,6 +14,7 @@ use tower::ServiceExt;
 use super::connectors::query_plans::replace_connector_service_names;
 use super::connectors::query_plans::replace_connector_service_names_text;
 use crate::json_ext;
+use crate::json_ext::ObjectExt;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
@@ -152,7 +153,7 @@ impl Plugin for ExposeQueryPlan {
                                         .context
                                         .get_json_value(FORMATTED_QUERY_PLAN_CONTEXT_KEY)
                                         .unwrap_or_default();
-                                    first.extensions.insert(
+                                    first.extensions.object_insert(
                                         "apolloQueryPlan",
                                         json_ext::object([
                                             ("object".to_string(), object),

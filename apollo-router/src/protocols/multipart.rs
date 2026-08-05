@@ -12,7 +12,9 @@ use tokio_stream::wrappers::IntervalStream;
 use tracing::Span;
 
 use crate::graphql;
+use crate::graphql::json_object::is_empty_object;
 use crate::json_ext;
+use crate::json_ext::ObjectExt;
 use crate::json_ext::ValueExt;
 use crate::plugins::subscription::SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE;
 use crate::plugins::subscription::SUBSCRIPTION_ERROR_EXTENSION_KEY;
@@ -316,14 +318,15 @@ impl Stream for Multipart {
 
                     match self.mode {
                         ProtocolMode::Subscription => {
-                            let is_transport_error =
-                                response.extensions.remove(SUBSCRIPTION_ERROR_EXTENSION_KEY)
-                                    == Some(json_ext::bool_value(true));
+                            let is_transport_error = response
+                                .extensions
+                                .object_remove(SUBSCRIPTION_ERROR_EXTENSION_KEY)
+                                == Some(json_ext::bool_value(true));
                             // Magic empty response (that we create internally) means the connection was gracefully closed at the server side
                             if !is_still_open
                                 && response.data.is_none()
                                 && response.errors.is_empty()
-                                && response.extensions.is_empty()
+                                && is_empty_object(&response.extensions)
                             {
                                 self.is_terminated = true;
                                 self.end_reason = Some(EndReason::Subscription(
@@ -339,7 +342,7 @@ impl Stream for Multipart {
                                 !response.errors.is_empty() && !is_transport_error;
 
                             let response = if is_transport_error {
-                                let carries_nothing = response.extensions.is_empty()
+                                let carries_nothing = is_empty_object(&response.extensions)
                                     && response.data.as_ref().is_none_or(|data| data.is_null());
                                 SubscriptionPayload {
                                     errors: std::mem::take(&mut response.errors),

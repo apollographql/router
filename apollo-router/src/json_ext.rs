@@ -612,6 +612,129 @@ impl ValueExt for Value {
     }
 }
 
+/// Keyed operations on an object-shaped [`Value`], for the small metadata
+/// objects the router passes around: GraphQL `extensions`, request
+/// `variables`, coprocessor payloads.
+///
+/// Each mutating method rebuilds the object through a
+/// [`DocumentBuilder`], so a sequence of writes costs one rebuild per
+/// write. That suits objects of a handful of keys; response bodies build
+/// through a single long-lived builder instead.
+///
+/// The names carry an `object_` prefix because [`ValueExt::insert`] already
+/// means "insert at a [`Path`]", and a bare `insert` would resolve to it
+/// with a confusing type error rather than the keyed write intended here.
+pub(crate) trait ObjectExt {
+    /// Writes `value` at `key`, returning the previous value if the key was
+    /// present.
+    fn object_insert(
+        &mut self,
+        key: impl Into<String>,
+        value: impl Into<NewValue>,
+    ) -> Option<Value>;
+
+    /// Writes `value` at `key` only when absent. Returns whether it wrote.
+    fn object_insert_if_absent(
+        &mut self,
+        key: impl Into<String>,
+        value: impl Into<NewValue>,
+    ) -> bool;
+
+    /// Removes `key`, returning its value if it was present.
+    fn object_remove(&mut self, key: &str) -> Option<Value>;
+
+    /// Removes `key`, returning the pair if it was present.
+    fn object_remove_entry(&mut self, key: &str) -> Option<(String, Value)>;
+
+    /// Whether `key` is present.
+    fn object_contains_key(&self, key: &str) -> bool;
+
+    /// The keys, in insertion order.
+    fn object_keys(&self) -> Vec<String>;
+
+    /// The members, in insertion order.
+    fn object_entries(&self) -> Vec<(String, Value)>;
+
+    /// Reorders the members by key, shallowly.
+    fn object_sort_keys(&mut self);
+}
+
+impl ObjectExt for Value {
+    fn object_insert(
+        &mut self,
+        key: impl Into<String>,
+        value: impl Into<NewValue>,
+    ) -> Option<Value> {
+        let key = key.into();
+        let previous = self.get(&key);
+        // A non-object receiver is coerced to an object rather than refused:
+        // these fields are `null` whenever a client sends `"extensions": null`,
+        // and writing to one must not be a request-triggered panic. The keys a
+        // non-object could have held are none, so nothing is discarded that a
+        // caller could observe.
+        let mut builder = if self.kind() == JsonKind::Object {
+            self.detach().edit()
+        } else {
+            DocumentBuilder::new()
+        };
+        builder
+            .set(key.as_str(), value)
+            .expect("an object root accepts any key");
+        *self = builder.seal().root_handle();
+        previous
+    }
+
+    fn object_insert_if_absent(
+        &mut self,
+        key: impl Into<String>,
+        value: impl Into<NewValue>,
+    ) -> bool {
+        let key = key.into();
+        if self.get(&key).is_some() {
+            return false;
+        }
+        self.object_insert(key, value);
+        true
+    }
+
+    fn object_remove(&mut self, key: &str) -> Option<Value> {
+        let previous = self.get(key)?;
+        let mut builder = self.detach().edit();
+        builder.remove(key);
+        *self = builder.seal().root_handle();
+        Some(previous)
+    }
+
+    fn object_remove_entry(&mut self, key: &str) -> Option<(String, Value)> {
+        let value = self.object_remove(key)?;
+        Some((key.to_owned(), value))
+    }
+
+    fn object_contains_key(&self, key: &str) -> bool {
+        self.get(key).is_some()
+    }
+
+    fn object_keys(&self) -> Vec<String> {
+        self.object_iter().map(|(key, _)| key).collect()
+    }
+
+    fn object_entries(&self) -> Vec<(String, Value)> {
+        self.object_iter().collect()
+    }
+
+    fn object_sort_keys(&mut self) {
+        let mut members: Vec<(String, Value)> = self.object_iter().collect();
+        members.sort_by(|(a, _), (b, _)| a.cmp(b));
+        let mut builder = DocumentBuilder::new();
+        for (key, value) in members {
+            builder
+                .set(key.as_str(), to_new_value(value))
+                .expect("a fresh object root accepts any key");
+        }
+        *self = builder.seal().root_handle();
+    }
+}
+
 /// A freshly built empty array.
 fn empty_array() -> Value {
     let mut builder = DocumentBuilder::new();
@@ -1669,6 +1792,7 @@ pub(crate) fn from_legacy(value: &serde_json_bytes::Value) -> Value {
 /// The members of `object` as a `serde_json_bytes` map, for the call sites that
 /// still speak the legacy type. This walks and copies every member, so it
 /// belongs on cold paths only — never on the response path.
+#[allow(dead_code)]
 pub(crate) fn object_to_legacy(object: &Object) -> LegacyMap {
     object
         .iter()

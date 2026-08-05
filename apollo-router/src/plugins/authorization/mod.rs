@@ -29,6 +29,7 @@ use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::json_ext;
+use crate::json_ext::ObjectExt;
 use crate::json_ext::Path;
 use crate::json_ext::ValueExt;
 use crate::layers::ServiceBuilderExt;
@@ -179,7 +180,7 @@ impl UnauthorizedPaths {
                         .expect("error serialization should not fail")
                         .root_handle()
                 });
-                response.extensions.insert(
+                response.extensions.object_insert(
                     "authorizationErrors",
                     json_ext::array(serialized_auth_errors),
                 );

@@ -19,6 +19,7 @@ use serde_json_bytes::Value as JSONValue;
 
 use crate::Context;
 use crate::json_ext;
+use crate::json_ext::ObjectExt;
 use crate::query_planner::fetch::Variables;
 use crate::services::connector::request_service::Request;
 
@@ -31,7 +32,7 @@ const TYPENAME: &str = "__typename";
 /// that a large `representations` variable is walked a single time.
 // PERF(apollo-json): legacy bridge, revisit -- apollo-federation's connector inputs are serde_json_bytes
 fn legacy_variables(variables: &Variables) -> Map<ByteString, JSONValue> {
-    match json_ext::to_legacy(&variables.variables.clone().into_value()) {
+    match json_ext::to_legacy(&variables.variables) {
         JSONValue::Object(map) => map,
         _ => Map::new(),
     }
@@ -241,7 +242,7 @@ fn entities_from_request(
 ) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
 
-    if !variables.variables.contains_key(REPRESENTATIONS_VAR) {
+    if !variables.variables.object_contains_key(REPRESENTATIONS_VAR) {
         return root_fields(connector, operation, variables);
     }
     let legacy_vars = legacy_variables(variables);

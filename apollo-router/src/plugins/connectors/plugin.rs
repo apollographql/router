@@ -14,6 +14,7 @@ use tower::ServiceExt;
 
 use super::query_plans::get_connectors;
 use crate::json_ext;
+use crate::json_ext::ObjectExt;
 use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -131,7 +132,7 @@ impl Plugin for Connectors {
 
                                 let stream = stream.map(move |mut chunk| {
                                     let serialized = { &debug.lock().clone().serialize() };
-                                    chunk.extensions.insert(
+                                    chunk.extensions.object_insert(
                                         CONNECTORS_DEBUG_KEY,
                                         // PERF(apollo-json): legacy bridge, revisit -- the
                                         // connector debug payload is serde_json_bytes
