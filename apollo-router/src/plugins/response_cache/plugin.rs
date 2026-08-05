@@ -2073,12 +2073,17 @@ async fn cache_lookup_entities(
         InvalidationLabels::add_type(&request.context, &name, &entry.typename);
     }
 
+    // The body's representations always become the set that still has to be
+    // fetched -- empty on a full cache hit. The debugger records this body as
+    // the subgraph request a cache entry stands in for, so it has to reflect
+    // what would actually go to the subgraph after cache filtering.
+    request
+        .subgraph_request
+        .body_mut()
+        .variables
+        .object_insert(REPRESENTATIONS, json_ext::array(new_representations.iter().cloned()));
+
     if !new_representations.is_empty() {
-        request
-            .subgraph_request
-            .body_mut()
-            .variables
-            .object_insert(REPRESENTATIONS, json_ext::array(new_representations));
         let cache_status = if cache_result.is_empty() {
             opentelemetry::Value::String("miss".into())
         } else {
