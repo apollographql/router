@@ -286,8 +286,8 @@ impl Error {
                     reason: format!("invalid `apolloId` within error: {err}"),
                 })?
                 .and_then(|id| id.as_string())
-                .map(|id| {
-                    Uuid::from_str(&id).map_err(|err| MalformedResponseError {
+                .map(|id: String| {
+                    Uuid::from_str(id.as_str()).map_err(|err| MalformedResponseError {
                         reason: format!("invalid `apolloId` within error: {err}"),
                     })
                 })

@@ -248,7 +248,7 @@ impl Response {
         let mut object = ensure_object!(value).map_err(|error| MalformedResponseError {
             reason: error.to_string(),
         })?;
-        let data = object.remove("data");
+        let data = crate::json_ext::ObjectExt::object_remove(&mut object, "data");
         let errors = match extract_key_value_from_object!(object, "errors", JsonKind::Array)
             .map_err(|err| MalformedResponseError {
                 reason: err.to_string(),

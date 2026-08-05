@@ -160,12 +160,14 @@ impl Service<router::Request> for CallbackService {
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))
                             .and_then(|bytes| {
-                                serde_json::from_reader::<_, CallbackPayload>(bytes.reader())
-                                    .map_err(|err| {
-                                        format!(
+                                // Through apollo-json's deserializer, not serde_json's: a
+                                // `CallbackPayload` carries a `graphql::Response`, whose
+                                // `Value` fields can only be captured by it.
+                                apollo_json::from_slice::<CallbackPayload>(&bytes).map_err(|err| {
+                                    format!(
                                         "failed to deserialize the request body into JSON: {err}"
                                     )
-                                    })
+                                })
                             });
                         let cb_body = match cb_body {
                             Ok(cb_body) => cb_body,

@@ -1708,7 +1708,7 @@ macro_rules! ensure_array {
 /// an error naming the key.
 macro_rules! extract_key_value_from_object {
     ($object:expr, $key:literal, $kind:expr) => {{
-        match $object.remove($key) {
+        match $crate::json_ext::ObjectExt::object_remove(&mut $object, $key) {
             None => Ok(None),
             Some(value) if value.is_null() => Ok(None),
             Some(value) if value.kind() == $kind => Ok(Some(value)),
@@ -1716,7 +1716,7 @@ macro_rules! extract_key_value_from_object {
         }
     }};
     ($object:expr, $key:literal) => {{
-        match $object.remove($key) {
+        match $crate::json_ext::ObjectExt::object_remove(&mut $object, $key) {
             None => None,
             Some(value) if value.is_null() => None,
             Some(value) => Some(value),
