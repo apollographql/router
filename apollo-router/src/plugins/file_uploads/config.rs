@@ -8,10 +8,10 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct MultipartRequestLimits {
-    /// The maximum amount of files allowed for a single query (default: 4)
+    /// The maximum amount of files allowed for a single query (default: 5)
     pub(crate) max_files: usize,
 
-    /// The maximum size of each file, in bytes (default: 5MB)
+    /// The maximum size of each file (default: 1MB)
     #[serde(deserialize_with = "bytesize::ByteSize::deserialize")]
     #[schemars(with = "String")]
     pub(crate) max_file_size: ByteSize,

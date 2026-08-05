@@ -7535,11 +7535,11 @@ expression: "&schema"
       "description": "Request limits for a multipart request",
       "properties": {
         "max_file_size": {
-          "description": "The maximum size of each file, in bytes (default: 5MB)",
+          "description": "The maximum size of each file (default: 1MB)",
           "type": "string"
         },
         "max_files": {
-          "description": "The maximum amount of files allowed for a single query (default: 4)",
+          "description": "The maximum amount of files allowed for a single query (default: 5)",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
