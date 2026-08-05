@@ -25,23 +25,23 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
-      - image: cimg/redis:7.4.9
+      - image: cimg/redis:7.4.10
       - image: openzipkin/zipkin:3.6.1
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.50.0
       # redis cluster - 3 primaries, 3 replicas
-      - image: cimg/redis:7.4.9
+      - image: cimg/redis:7.4.10
         command: [ "redis-server", "--protected-mode", "no", "--port", "7000", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.9
+      - image: cimg/redis:7.4.10
         command: [ "redis-server", "--protected-mode", "no", "--port", "7001", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.9
+      - image: cimg/redis:7.4.10
         command: [ "redis-server", "--protected-mode", "no", "--port", "7002", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.9
+      - image: cimg/redis:7.4.10
         command: [ "redis-server", "--protected-mode", "no", "--port", "7003", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.9
+      - image: cimg/redis:7.4.10
         command: [ "redis-server", "--protected-mode", "no", "--port", "7004", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.9
+      - image: cimg/redis:7.4.10
         command: [ "redis-server", "--protected-mode", "no", "--port", "7005", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.9
+      - image: cimg/redis:7.4.10
         command: [ "sh", "-c", "sleep 30; echo yes | redis-cli --cluster create --cluster-replicas 1 localhost:7000 localhost:7001 localhost:7002 localhost:7003 localhost:7004 localhost:7005" ]
     resource_class: 2xlarge
     environment:
@@ -82,19 +82,19 @@ executors:
   windows_build: &windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.medium
+    resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
-      CARGO_BUILD_JOBS: 2
+      CARGO_BUILD_JOBS: 4
   windows_test: &windows_test_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.medium
+    resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
-      CARGO_BUILD_JOBS: 2
+      CARGO_BUILD_JOBS: 4
 
 # We don't use {{ arch }} because on windows it is unstable https://discuss.circleci.com/t/value-of-arch-unstable-on-windows/40079
 parameters:
@@ -109,6 +109,15 @@ parameters:
     default: false
   # quick_nightly will skip testing and only build the release artifacts.
   quick_nightly:
+    type: boolean
+    default: false
+  # test_build triggers the standalone `build-test-image` workflow: a single
+  # linux/amd64 Docker image built from whatever branch/commit triggered the
+  # pipeline, tagged by branch+commit (not a release/nightly version), and
+  # pushed to ghcr.io/apollographql/router-test-builds. This is unrelated to
+  # release or nightly versioning -- it exists for ad hoc test builds
+  # consumed by the internal testing framework (RTF).
+  test_build:
     type: boolean
     default: false
 
@@ -272,8 +281,19 @@ commands:
                   iex "& {$(irm get.scoop.sh)} -RunAsAdmin"
             - run:
                 name: Install mise
+                no_output_timeout: 20m
                 command: |
-                  scoop install mise@${MISE_VERSION#v}
+                  for i in 1 2 3; do
+                    if scoop install mise@${MISE_VERSION#v}; then
+                      break
+                    fi
+                    if [ $i -eq 3 ]; then
+                      echo "scoop install mise failed after 3 attempts"
+                      exit 1
+                    fi
+                    echo "scoop install mise failed (attempt $i/3), retrying in $((i*5))s..."
+                    sleep $((i*5))
+                  done
                   for i in 1 2 3; do
                     if mise install --yes --quiet; then
                       break
@@ -978,6 +998,93 @@ jobs:
                   VERSION_WITHOUT_LEADING_V="${VERSION#v}"
                   cargo xtask release notes "$VERSION_WITHOUT_LEADING_V" || true
 
+  # Standalone ad hoc test build. Deliberately independent of `build_release`:
+  # no release-versioning (`cargo xtask release prepare`), no nightly/release
+  # tag scheme, no helm chart, no security scan, no notifications. Builds a
+  # single linux/amd64 image from whatever branch/commit triggered the
+  # pipeline and pushes it to a dedicated, non-release image repository for
+  # consumption by the internal testing framework (RTF).
+  build_test_image:
+    environment:
+      <<: *common_job_environment
+      RELEASE_BIN: router
+      REPO_URL: << pipeline.project.git_url >>
+    executor: amd_linux_build
+    steps:
+      - checkout
+      - setup_environment:
+          platform: amd_linux_build
+      - run:
+          name: Build router binary
+          command: cargo xtask dist
+      - run:
+          command: mkdir -p artifacts
+      - run:
+          name: Package artifact
+          command: cargo xtask package --output artifacts/
+      - store_artifacts:
+          path: artifacts/
+      - setup_remote_docker:
+          # CircleCI Image Policy
+          #   https://circleci.com/docs/remote-docker-images-support-policy/
+          version: docker23
+          docker_layer_caching: true
+      - run:
+          name: Docker build and push test image
+          command: |
+            BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
+            ARTIFACT_FILENAME="router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+            ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/${ARTIFACT_FILENAME}"
+            ROUTER_TAG=ghcr.io/apollographql/router-test-builds
+
+            # Tag by branch + short commit sha -- NOT a release/nightly version.
+            # This pipeline has nothing to do with release or nightly versioning.
+            SANITIZED_BRANCH=$(printf '%s' "${CIRCLE_BRANCH}" | tr -c 'a-zA-Z0-9' '-')
+            SHORT_SHA=$(git rev-parse --short=8 HEAD)
+            TAG="${SANITIZED_BRANCH}-${SHORT_SHA}"
+
+            # Validate local artifact exists and calculate its checksum as a safety net
+            if [ ! -f "artifacts/${ARTIFACT_FILENAME}" ]; then
+              echo "Error: Local artifact not found: artifacts/${ARTIFACT_FILENAME}"
+              exit 1
+            fi
+            LOCAL_ARTIFACT_SHA256SUM=$(sha256sum "artifacts/${ARTIFACT_FILENAME}" | cut -d' ' -f1)
+            echo "Local artifact checksum: ${LOCAL_ARTIFACT_SHA256SUM}"
+
+            # Download the artifact and calculate its checksum
+            echo "Downloading artifact to calculate checksum..."
+            curl -sSL -H "Circle-Token: ${CIRCLE_TOKEN}" -o "router-artifact.tar.gz" "${ARTIFACT_URL}"
+            ARTIFACT_URL_SHA256SUM=$(sha256sum "router-artifact.tar.gz" | cut -d' ' -f1)
+            rm -f router-artifact.tar.gz
+
+            # Compare local vs remote artifact checksums
+            if [ "${LOCAL_ARTIFACT_SHA256SUM}" != "${ARTIFACT_URL_SHA256SUM}" ]; then
+              echo "Error: Local and remote artifact checksums don't match!"
+              echo "Local:      ${LOCAL_ARTIFACT_SHA256SUM}"
+              echo "Remote: ${ARTIFACT_URL_SHA256SUM}"
+              exit 1
+            fi
+            echo "Local and remote artifact checksums match: ${LOCAL_ARTIFACT_SHA256SUM}"
+
+            echo "REPO_URL: ${REPO_URL}"
+            echo "BASE_VERSION: ${BASE_VERSION}"
+            echo "TAG: ${TAG}"
+            echo "ROUTER_TAG: ${ROUTER_TAG}"
+
+            docker context create buildx-build
+            docker buildx create --driver docker-container --use buildx-build
+            docker buildx inspect --bootstrap
+            echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
+            # Build and push debug image
+            docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${TAG} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${TAG}-debug dockerfiles/.
+            docker push ${ROUTER_TAG}:${TAG}-debug
+            # Build and push regular image
+            docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg ROUTER_RELEASE=${TAG} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${TAG} dockerfiles/.
+            docker push ${ROUTER_TAG}:${TAG}
+
+            echo "Pushed: ${ROUTER_TAG}:${TAG}"
+            echo "Pushed: ${ROUTER_TAG}:${TAG}-debug"
+
 workflows:
   ci_checks:
     when:
@@ -985,6 +1092,7 @@ workflows:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
+          - << pipeline.parameters.test_build >>
     jobs:
       - fmt_check:
           matrix:
@@ -1088,6 +1196,7 @@ workflows:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
+          - << pipeline.parameters.test_build >>
     jobs:
       - pre_verify_release:
           matrix:
@@ -1165,6 +1274,7 @@ workflows:
         or:
           - << pipeline.parameters.nightly >>
           - << pipeline.parameters.quick_nightly >>
+          - << pipeline.parameters.test_build >>
     jobs:
       - secops/gitleaks:
           context:
@@ -1178,3 +1288,14 @@ workflows:
             - github-orb
           git-base-revision: <<#pipeline.git.base_revision>><<pipeline.git.base_revision>><</pipeline.git.base_revision >>
           disabled-signatures: "rules.providers.semgrep.security.javascript.lang.security.detect-insecure-websocket"
+
+  # Ad hoc test build: trigger manually via CircleCI's "Trigger Pipeline" UI
+  # on any branch, setting the `test_build` boolean parameter to true. Not
+  # part of releases or nightlies.
+  build-test-image:
+    when: << pipeline.parameters.test_build >>
+    jobs:
+      - build_test_image:
+          context:
+            - router
+            - orb-publishing
