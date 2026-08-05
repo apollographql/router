@@ -624,6 +624,7 @@ The log output includes:
 - HTTP status code (defaults to <code>500</code>)
 - Error message
 - Line number and position where the error occurred
+- The underlying Rhai error, including the callback that failed
 
 #### Errors with custom body
 
@@ -645,6 +646,46 @@ fn supergraph_service(service) {
             }
         };
     });
+}
+```
+
+### What clients see when a script fails
+
+Only a message your script chose is returned to clients. A script that throws is in control of its own error:
+
+```rhai
+fn supergraph_service(service) {
+    service.map_request(|request| {
+        // The client receives exactly: {"errors": [{"message": "Invalid request"}]}
+        throw "Invalid request";
+    });
+}
+```
+
+Throwing an object map works the same way, and additionally lets you pick the status code and the
+full GraphQL response body, as shown in the sections above.
+
+Every _other_ kind of failure is replaced with the status code's reason phrase - such as
+`Internal Server Error` - and the real error is written to the router's logs instead. This covers:
+
+- Failures inside the router's own Rhai functions, such as reading a header that isn't present.
+- Failures raised by the Rhai engine itself, such as calling an undefined function or a type mismatch.
+- A `throw` that carries only a status, like `throw #{ status: 400 }`, which the client sees as `Bad Request`.
+
+This keeps script line numbers, callback names and router internals out of client-facing responses.
+If you want a client to see a specific message for one of these cases, catch the error and throw a
+new one. The error you caught is opaque - it has no `status` or `message` you can set - and
+re-throwing it as-is stays redacted:
+
+```rhai
+fn process_request(request) {
+    try {
+        let value = request.headers["x-custom-header"];
+    } catch(err) {
+        // Log the router's error, return your own.
+        log_error(`missing header: ${err}`);
+        throw #{ status: 400, message: "Invalid request" };
+    }
 }
 ```
 

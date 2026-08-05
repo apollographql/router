@@ -228,9 +228,11 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
             );
         }
 
+        // The thrown message reaches the client, but the Rhai wrapper around it - which would name
+        // the engine and point at a line in the script - does not.
         assert_eq!(
             body.errors.first().unwrap().message.as_str(),
-            "rhai execution error: 'Runtime error: An error occured (line 30, position 5)'"
+            "An error occured"
         );
         crate::plugin::test::assert_no_mock_calls(handle).await;
         Ok(())
@@ -697,7 +699,21 @@ async fn it_can_process_string_subgraph_forbidden() {
     if let Err(error) = call_rhai_function("process_subgraph_response_string").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 257, position 5)'".to_string()));
+        // The thrown string is returned as-is: the script author wrote it, so it is theirs to
+        // show. The Rhai wrapper around it - "rhai execution error", "Runtime error" and the
+        // script's line and position - is not.
+        assert_eq!(
+            processed_error.message,
+            Some("I have raised an error".to_string())
+        );
+        // ...but an operator still gets the whole thing in the logs.
+        assert_eq!(
+            processed_error.internal_detail,
+            Some(
+                "rhai execution error: 'Runtime error: I have raised an error (line 257, position 5)'"
+                    .to_string()
+            )
+        );
     } else {
         // Test failed
         panic!("error processed incorrectly");
@@ -722,13 +738,10 @@ async fn it_cannot_process_om_subgraph_missing_message_and_body() {
     if let Err(error) = call_rhai_function("process_subgraph_response_om_missing_message").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(
-            processed_error.message,
-            Some(
-                "rhai execution error: 'Runtime error: #{\"status\": 400} (line 268, position 5)'"
-                    .to_string()
-            )
-        );
+        // `throw #{ status: 400 }` gets the status it asked for, but there is no author-provided
+        // message to return, so the client gets the status' reason phrase rather than a dump of
+        // the thrown object.
+        assert_eq!(processed_error.message, Some("Bad Request".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");
@@ -752,18 +765,32 @@ async fn it_mentions_source_when_syntax_error_occurs() {
 }
 
 #[test]
-#[should_panic(
-    expected = "can use env: ErrorRuntime(\"could not expand variable: THIS_SHOULD_NOT_EXIST, environment variable not found\", none)"
-)]
 fn it_cannot_expand_missing_environment_variable() {
     assert!(std::env::var("THIS_SHOULD_NOT_EXIST").is_err());
     let engine = new_rhai_test_engine();
-    let _: String = engine
-        .eval(
+    let error = engine
+        .eval::<String>(
             r#"
         env::get("THIS_SHOULD_NOT_EXIST")"#,
         )
-        .expect("can use env");
+        .expect_err("cannot expand a variable that isn't set");
+
+    // A binding failing is not a message the script chose to show a client, so it is redacted from
+    // the response...
+    let processed_error = process_error(error);
+    assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        processed_error.message,
+        Some("Internal Server Error".to_string())
+    );
+    // ...and kept for the logs instead.
+    let internal_detail = processed_error
+        .internal_detail
+        .expect("the real error is logged");
+    assert!(
+        internal_detail.contains("could not expand variable: THIS_SHOULD_NOT_EXIST"),
+        "expected the unredacted error in the logs, got: {internal_detail}"
+    );
 }
 
 // POSIX specifies HOME is always set
@@ -955,16 +982,11 @@ async fn test_rhai_header_removal_with_non_utf8_header() -> Result<(), BoxError>
 
     // Removing a non-UTF-8 header should be OK
     let body = service_response.next_response().await.unwrap();
-    if body.errors.is_empty() {
-        // yay, no errors
-    } else {
-        let rhai_error = body
-            .errors
-            .iter()
-            .find(|e| e.message.contains("rhai execution error"))
-            .expect("unexpected non-rhai error");
-        panic!("Got an unexpected rhai error: {rhai_error:?}");
-    }
+    assert!(
+        body.errors.is_empty(),
+        "removing a non-UTF-8 header should not fail: {:?}",
+        body.errors
+    );
 
     // Check that the header was actually removed
     let headers = service_response.response.headers().clone();
@@ -1107,6 +1129,240 @@ async fn test_subgraph_error_logging_with_body() -> Result<(), BoxError> {
     test_subgraph_error_logging("error_with_body.rhai")
         .with_subscriber(assert_snapshot_subscriber!())
         .await
+}
+
+/// Anything that could tell a client the router runs Rhai, which functions its script registers,
+/// or where in that script a failure happened.
+fn assert_message_discloses_nothing(message: &str) {
+    for disclosure in [
+        "rhai",
+        "Rhai",
+        "Runtime error",
+        "line ",
+        "position ",
+        "in call to function",
+    ] {
+        assert!(
+            !message.contains(disclosure),
+            "client-facing message leaks {disclosure:?}: {message}"
+        );
+    }
+}
+
+// A failure inside the router's own Rhai bindings - here, reading a header that isn't present -
+// used to reach the client as `rhai execution error: 'Runtime error: <binding error> (line N,
+// position M)'`.
+#[tokio::test]
+async fn it_redacts_binding_errors_from_client_responses() -> Result<(), BoxError> {
+    async {
+        let (mock_service, handle) =
+            tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+        let dyn_plugin = create_plugin("rhai_internal_error.rhai").await?;
+        let mut service = dyn_plugin.supergraph_service(mock_service.boxed());
+        let req = SupergraphRequest::fake_builder()
+            .context(Context::new())
+            .build()?;
+
+        let mut response = service.ready().await?.call(req).await?;
+        assert_eq!(
+            response.response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+
+        let body = response.next_response().await.expect("there is a response");
+        let message = &body.errors.first().expect("the request failed").message;
+        assert_eq!(message, "Internal Server Error");
+        assert_message_discloses_nothing(message);
+
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+        Ok(())
+    }
+    // The snapshot is the other half of this test: the error the client no longer sees has to still
+    // be in the logs, unredacted, for an operator to debug the script with.
+    .with_subscriber(assert_snapshot_subscriber!())
+    .await
+}
+
+// Same as above for a failure raised by the Rhai engine rather than by a router binding: those
+// never carried an author-written message in the first place.
+#[tokio::test]
+async fn it_redacts_engine_errors_from_client_responses() -> Result<(), BoxError> {
+    async {
+        let (mock_service, handle) =
+            tower_test::mock::pair::<execution::Request, execution::Response>();
+        let dyn_plugin = create_plugin("rhai_internal_error.rhai").await?;
+        let mut service = dyn_plugin.execution_service(mock_service.boxed());
+        let fake_req = http_ext::Request::fake_builder()
+            .body(Request::builder().query(String::new()).build())
+            .build()?;
+        let req = ExecutionRequest::fake_builder()
+            .context(Context::new())
+            .supergraph_request(fake_req)
+            .build();
+
+        let mut response = service.ready().await?.call(req).await?;
+        assert_eq!(
+            response.response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+
+        let body = response.next_response().await.expect("there is a response");
+        let message = &body.errors.first().expect("the request failed").message;
+        assert_eq!(message, "Internal Server Error");
+        assert_message_discloses_nothing(message);
+
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+        Ok(())
+    }
+    .with_subscriber(assert_snapshot_subscriber!())
+    .await
+}
+
+// Scripts can still `catch` a binding failure, so the router must not have made these errors
+// uncatchable in the course of marking them internal.
+#[tokio::test]
+async fn it_can_catch_binding_errors_in_a_script() {
+    let engine = new_rhai_test_engine();
+    let caught: String = engine
+        .eval(
+            r#"
+            let caught = "not reached";
+            try {
+                env::get("THIS_SHOULD_NOT_EXIST");
+            } catch(err) {
+                caught = `caught: ${err.message}`;
+            }
+            caught"#,
+        )
+        .expect("the script catches the error itself");
+
+    assert_eq!(
+        caught,
+        "caught: could not expand variable: THIS_SHOULD_NOT_EXIST, environment variable not found"
+    );
+}
+
+// A caught binding error used to be a plain string, so scripts and our own docs interpolate the
+// whole error rather than reading `err.message`. Marking it must not turn `${err}` into a dump of
+// however the marker is represented.
+#[test]
+fn it_interpolates_a_caught_binding_error_as_its_message() {
+    let engine = new_rhai_test_engine();
+    let caught: String = engine
+        .eval(
+            r#"
+            let caught = "not reached";
+            try {
+                env::get("THIS_SHOULD_NOT_EXIST");
+            } catch(err) {
+                caught = `${err}`;
+            }
+            caught"#,
+        )
+        .expect("the script catches the error itself");
+
+    assert_eq!(
+        caught,
+        "could not expand variable: THIS_SHOULD_NOT_EXIST, environment variable not found"
+    );
+}
+
+// The documented way to give a client a specific message for a binding failure: catch it and throw
+// your own. The router's own error must not linger on the thrown value and keep it redacted.
+#[test]
+fn it_lets_a_script_replace_a_binding_error_with_its_own() {
+    let engine = new_rhai_test_engine();
+    let error = engine
+        .eval::<()>(
+            r#"
+            try {
+                env::get("THIS_SHOULD_NOT_EXIST");
+            } catch(err) {
+                throw #{ status: 400, message: "Invalid request" };
+            }"#,
+        )
+        .expect_err("the script throws an error of its own");
+
+    let processed_error = process_error(error);
+    assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        processed_error.message,
+        Some("Invalid request".to_string()),
+        "a script's own throw is returned even when it replaces a binding error"
+    );
+}
+
+// A status code with no reason phrase still needs a message, and it has to read like the other
+// redacted messages rather than contradicting the status it accompanies.
+#[test]
+fn it_redacts_a_throw_with_an_unrecognised_status() {
+    let engine = new_rhai_test_engine();
+    let error = engine
+        .eval::<()>("throw #{ status: 599 };")
+        .expect_err("the script throws");
+
+    let processed_error = process_error(error);
+    assert_eq!(processed_error.status.as_u16(), 599);
+    assert_eq!(processed_error.message, Some("Unknown Error".to_string()));
+}
+
+// `engine::internal_error` is the only way a router binding may raise an error: a plain
+// `Err("...".into())` produces an `ErrorRuntime` that `process_error` cannot tell apart from a
+// script's own `throw`, so its text would be returned to clients. Nothing in the type system
+// prevents that - rhai fixes the error type of a fallible binding as `Box<EvalAltResult>` - so it
+// is checked here instead.
+//
+// A binding that raises an error some way these two rules don't describe slips through; they cover
+// the ways a `Box<EvalAltResult>` can be built at all, which is what makes them worth having.
+#[test]
+fn bindings_raise_their_errors_through_internal_error() {
+    // Read the directory rather than listing the files, so a binding added later is checked too.
+    let engine_dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/plugins/rhai/engine");
+    let mut sources = Vec::new();
+    let mut directories = vec![engine_dir.clone()];
+    while let Some(directory) = directories.pop() {
+        for entry in std::fs::read_dir(&directory).expect("the engine's sources are readable") {
+            let path = entry.expect("the engine's sources are readable").path();
+            if path.is_dir() {
+                directories.push(path);
+            // `error.rs` is where the one legitimate construction lives.
+            } else if path.extension().is_some_and(|extension| extension == "rs")
+                && path.file_name().is_some_and(|name| name != "error.rs")
+            {
+                let source = std::fs::read_to_string(&path).expect("the source is readable");
+                sources.push((path, source));
+            }
+        }
+    }
+    assert!(
+        sources.len() > 1,
+        "expected to scan the engine's sources, found {} in {}",
+        sources.len(),
+        engine_dir.display()
+    );
+
+    for (path, source) in sources {
+        let path = path.display();
+        assert!(
+            !source.contains("EvalAltResult::"),
+            "{path} builds a Rhai error directly. Raise it with `engine::internal_error` instead, \
+             or `process_error` will return its text to clients."
+        );
+
+        for (index, line) in source.lines().enumerate() {
+            let produces_an_error = ["Err(", "map_err(", "ok_or(", "ok_or_else("]
+                .iter()
+                .any(|producer| line.contains(producer));
+            assert!(
+                !(produces_an_error && line.contains(".into()")),
+                "{path}:{} converts a value into a Rhai error. Raise it with \
+                 `engine::internal_error` instead, or `process_error` will return its text to \
+                 clients:\n{line}",
+                index + 1
+            );
+        }
+    }
 }
 
 // Helper for calling property mutation test functions

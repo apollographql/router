@@ -58,6 +58,66 @@ rhai:
     router.graceful_shutdown().await;
 }
 
+// A script that fails used to report the Rhai error verbatim to the client, disclosing that the
+// router runs Rhai, the name of the failing callback, and where in the script it failed.
+#[tokio::test(flavor = "multi_thread")]
+async fn client_errors_omit_rhai_internals() {
+    let config = r#"
+rhai:
+  scripts: tests/fixtures
+  main: rhai_internal_error.rhai
+"#;
+
+    let mut router = IntegrationTest::builder()
+        .config(config)
+        .supergraph(PathBuf::from("tests/fixtures/supergraph.graphql"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({"query": "{ topProducts { name } }", "variables": {}}))
+                .build(),
+        )
+        .await;
+
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::INTERNAL_SERVER_ERROR
+    );
+    let body = response.text().await.expect("a response body");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&body).expect("a GraphQL response")["errors"][0]
+            ["message"],
+        json!("Internal Server Error")
+    );
+    for disclosure in [
+        "rhai",
+        "Rhai",
+        "Runtime error",
+        "line ",
+        "position ",
+        "x-header-that-is-not-there",
+    ] {
+        assert!(
+            !body.contains(disclosure),
+            "client response leaks {disclosure:?}: {body}"
+        );
+    }
+
+    // The reason the client no longer sees has to be in the router's logs instead, otherwise this
+    // is just a silent failure.
+    router
+        .wait_for_log_message("header not found: x-header-that-is-not-there")
+        .await;
+
+    router.graceful_shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_rhai_hot_reload_works() {
     let (sender, receiver) = tokio::sync::oneshot::channel();

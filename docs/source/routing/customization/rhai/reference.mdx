@@ -191,6 +191,22 @@ fn supergraph_service(service) {
 }
 ```
 
+## Handling errors from router functions
+
+When one of the router's own Rhai functions fails, the error you catch is a `RouterError`. Interpolating it gives you the reason, and so does its `message` property:
+
+```rhai
+catch(err) {
+    log_error(`failed: ${err}`);
+    // Equivalent to the line above
+    log_error(`failed: ${err.message}`);
+}
+```
+
+An error your own script raised with `throw` is caught unchanged, so a `catch` block that can see both should interpolate `err` directly - a thrown string has no `message` property.
+
+Router errors are never returned to clients - see [what clients see when a script fails](/graphos/routing/customization/rhai#what-clients-see-when-a-script-fails). If you want a client to see a specific message, throw a new error rather than re-throwing the one you caught, which stays redacted.
+
 ## Accessing a TraceId
 
 Your Rhai customization can use the function `traceid()` to retrieve an opentelemetry span id. This will throw an exception if a span is not available, so always handle exceptions when using this function.

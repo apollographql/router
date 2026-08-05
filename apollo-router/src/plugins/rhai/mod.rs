@@ -537,10 +537,12 @@ macro_rules! gen_map_deferred_response {
                     if first.is_none() {
                         let error_details = ErrorDetails {
                             status: StatusCode::INTERNAL_SERVER_ERROR,
-                            message: Some("rhai execution error: empty response".to_string()),
+                            message: Some(redacted_message(StatusCode::INTERNAL_SERVER_ERROR)),
                             position: None,
-                            body: None
+                            body: None,
+                            internal_detail: Some("rhai execution error: empty response".to_string()),
                         };
+                        tracing::error!("map_response callback failed: {error_details:#?}");
                         return Ok($base::response_failure(
                             context,
                             error_details
@@ -759,31 +761,92 @@ struct ErrorDetails {
     message: Option<String>,
     position: Option<Position>,
     body: Option<crate::graphql::Response>,
+    /// The unredacted Rhai error, kept for server-side logging only.
+    ///
+    /// This holds Rhai implementation details - engine error text, script line numbers and the
+    /// names of the callbacks involved - so it must never be copied into `message` or into a
+    /// client-facing response. It is skipped during deserialization because it describes the
+    /// failure, not something a script can throw.
+    #[serde(skip)]
+    internal_detail: Option<String>,
 }
 
 fn default_thrown_status_code() -> StatusCode {
     StatusCode::INTERNAL_SERVER_ERROR
 }
 
+/// The client-facing message for a failure the script author did not choose, i.e. anything the
+/// script did not explicitly `throw`.
+///
+/// Returning the Rhai error itself discloses that the router runs Rhai, which script functions are
+/// registered, and where in the script the failure happened, so clients get the status code's
+/// reason phrase instead and the real error is logged.
+fn redacted_message(status: StatusCode) -> String {
+    // A script is free to throw a status code that has no reason phrase - `throw #{ status: 599 }`
+    // - so there has to be a fallback. It is deliberately as vague as the status is: saying
+    // "Internal Server Error" alongside a 599 would be a lie.
+    status
+        .canonical_reason()
+        .unwrap_or("Unknown Error")
+        .to_string()
+}
+
 fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
     let mut error_details = ErrorDetails {
         status: StatusCode::INTERNAL_SERVER_ERROR,
-        message: Some(format!("rhai execution error: '{error}'")),
+        message: None,
         position: None,
         body: None,
+        internal_detail: None,
     };
+    // Captured before `error` is consumed below: this is the only chance to keep the full Rhai
+    // error text for the logs.
+    error_details.internal_detail = Some(format!("rhai execution error: '{error}'"));
 
     let inner_error = error.unwrap_inner();
-    // We only want to process runtime errors
-    if let EvalAltResult::ErrorRuntime(obj, pos) = inner_error {
-        if let Ok(temp_error_details) = rhai::serde::from_dynamic::<ErrorDetails>(obj) {
-            if temp_error_details.message.is_some() || temp_error_details.body.is_some() {
-                error_details = temp_error_details;
-            } else {
-                error_details.status = temp_error_details.status;
-            }
-        }
+    // A script's `throw` is the usual source of `ErrorRuntime`, and the only source that carries a
+    // message the author chose to show a client, so this is the one variant whose text can be
+    // returned. Every other variant is an engine failure - unknown function, type mismatch, script
+    // recursion limit - whose text describes the script's internals, so those stay redacted.
+    //
+    // Rhai raises `ErrorRuntime` with a string of its own in two places - a `sort` comparer that
+    // fails, and a serialization failure - and nothing in the value distinguishes those from a
+    // `throw`, so they are returned like one. Router bindings, which we do control, mark their
+    // errors instead: see `engine::internal_error`.
+    if let EvalAltResult::ErrorRuntime(thrown, pos) = inner_error {
         error_details.position = Some(pos.into());
+
+        if let Some(internal_message) = engine::internal_error_message(thrown) {
+            // A router Rhai binding failed rather than the script throwing, so the message
+            // describes router internals: it stays out of the response and goes to the logs. Rhai
+            // displays a marked error as its Rust type name rather than as its message, so the
+            // detail captured above has to be rebuilt here to keep the message in the logs.
+            error_details.internal_detail = Some(format!(
+                "rhai execution error: 'Runtime error: {internal_message}{}'",
+                if pos.is_none() {
+                    String::new()
+                } else {
+                    format!(" ({pos})")
+                }
+            ));
+        } else if let Ok(thrown_details) = rhai::serde::from_dynamic::<ErrorDetails>(thrown) {
+            // `throw #{ status: ..., message: ..., body: ... }`
+            error_details.status = thrown_details.status;
+            // A throw carrying only a status - `throw #{ status: 400 }` - gets the status it asked
+            // for and a redacted message, because there is no author-provided message to return.
+            if thrown_details.message.is_some() || thrown_details.body.is_some() {
+                error_details.message = thrown_details.message;
+                error_details.body = thrown_details.body;
+            }
+        } else if let Ok(thrown_message) = thrown.clone().into_string() {
+            // `throw "some message"`. The author wrote this string, so it is theirs to return - but
+            // only the string itself, not the Rhai wrapper around it.
+            error_details.message = Some(thrown_message);
+        }
+    }
+
+    if error_details.message.is_none() {
+        error_details.message = Some(redacted_message(error_details.status));
     }
     error_details
 }
