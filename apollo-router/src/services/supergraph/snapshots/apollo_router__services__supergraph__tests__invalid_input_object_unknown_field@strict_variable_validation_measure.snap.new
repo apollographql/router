@@ -1,0 +1,20 @@
+---
+source: apollo-router/src/services/supergraph/tests.rs
+assertion_line: 4108
+expression: response
+---
+{
+  "data": {
+    "registerPartner": null
+  },
+  "errors": [
+    {
+      "message": "subgraph mock not configured",
+      "path": [],
+      "extensions": {
+        "code": "SUBGRAPH_MOCK_NOT_CONFIGURED",
+        "service": "users"
+      }
+    }
+  ]
+}

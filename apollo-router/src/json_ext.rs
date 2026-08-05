@@ -234,34 +234,28 @@ impl ValueExt for Value {
 
     #[track_caller]
     fn from_path(path: &Path, value: Value) -> Value {
-        let mut builder = DocumentBuilder::new();
-        let mut cursor = builder.root_mut();
-
-        for p in path.iter() {
-            match p {
-                // Type conditions don't matter here since we're just creating a default value.
-                PathElement::Flatten(_) => {
-                    return builder.seal().root_handle();
-                }
-                &PathElement::Index(index) => {
-                    for _ in cursor.value().len().unwrap_or(0)..=index {
-                        let _ = cursor.push(());
-                    }
-                    cursor = cursor
-                        .get_mut(index)
-                        .expect("we just grew the array to include that index");
-                }
-                // Type conditions don't matter here since we're just creating a default value.
-                PathElement::Key(k, _) => {
-                    cursor = cursor
-                        .get_mut(k.as_str())
-                        .expect("a missing key is created as an empty object");
-                }
-                PathElement::Fragment(_) => {}
-            }
-        }
-
-        set_cursor_to(&mut cursor, value);
+        let (segments, truncated) = addressing_segments(path);
+        // A flatten cuts the path short: the original walked down leaving a null
+        // placeholder at each key and returned before writing anything, so the
+        // deepest key it reached holds null rather than `value`.
+        let leaf = if truncated {
+            NewValue::Null
+        } else {
+            NewValue::Node(value)
+        };
+        let Some(root_shape) = segments.first().map(|segment| shape_for(segment)) else {
+            // Nothing addresses a position, so the leaf is the whole value.
+            return match leaf {
+                NewValue::Node(value) => value,
+                _ => Value::default(),
+            };
+        };
+        let mut builder = match root_shape {
+            Shape::Array => DocumentBuilder::new_array(),
+            Shape::Object => DocumentBuilder::new(),
+        };
+        write_at_segments(&mut builder, &segments, leaf)
+            .expect("a freshly built container accepts the path that shaped it");
         builder.seal().root_handle()
     }
 
@@ -558,6 +552,92 @@ impl ObjectExt for Value {
         }
         *self = builder.seal().root_handle();
     }
+}
+
+/// Whether a path element addresses a member of an object or an element of an
+/// array, which decides the shape its container has to have.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    Object,
+    Array,
+}
+
+fn shape_for(segment: &PathElement) -> Shape {
+    match segment {
+        PathElement::Index(_) => Shape::Array,
+        _ => Shape::Object,
+    }
+}
+
+/// The path elements that address a position, and whether a flatten cut the
+/// walk short. Fragments narrow a type rather than addressing a position, so
+/// they contribute nothing.
+fn addressing_segments(path: &Path) -> (Vec<&PathElement>, bool) {
+    let mut segments = Vec::with_capacity(path.len());
+    for element in path.iter() {
+        match element {
+            PathElement::Flatten(_) => return (segments, true),
+            PathElement::Fragment(_) => {}
+            addressing => segments.push(addressing),
+        }
+    }
+    (segments, false)
+}
+
+/// Writes `leaf` at `segments`, creating each missing container with the shape
+/// the following segment needs. Arrays grow with nulls up to an index that is
+/// past the end, matching what a caller merging this value into a larger
+/// response expects to find.
+///
+/// The write lands *at the last segment of its parent* rather than by
+/// descending onto the leaf and overwriting it: a cursor addresses its
+/// children, so a node cannot be made to change its own kind.
+fn write_at_segments(
+    builder: &mut DocumentBuilder,
+    segments: &[&PathElement],
+    leaf: NewValue,
+) -> Result<(), apollo_json::JsonError> {
+    let Some((&last, parents)) = segments.split_last() else {
+        return Ok(());
+    };
+    let mut cursor = builder.root_mut();
+    for (position, &segment) in parents.iter().enumerate() {
+        let next_shape = shape_for(segments[position + 1]);
+        let child = match next_shape {
+            Shape::Array => NewValue::Node(empty_array()),
+            Shape::Object => NewValue::Node(object([])),
+        };
+        cursor = match segment {
+            PathElement::Key(key, _) => {
+                if cursor.value().get(key.as_str()).is_none() {
+                    cursor.set(key.as_str(), child)?;
+                }
+                cursor.get_mut(key.as_str())?
+            }
+            &PathElement::Index(index) => {
+                grow_to(&mut cursor, index)?;
+                cursor.set(index, child)?;
+                cursor.get_mut(index)?
+            }
+            _ => unreachable!("addressing_segments yields only keys and indexes"),
+        };
+    }
+    match last {
+        PathElement::Key(key, _) => cursor.set(key.as_str(), leaf),
+        &PathElement::Index(index) => {
+            grow_to(&mut cursor, index)?;
+            cursor.set(index, leaf)
+        }
+        _ => unreachable!("addressing_segments yields only keys and indexes"),
+    }
+}
+
+/// Extends an array with nulls until `index` addresses an element.
+fn grow_to(cursor: &mut ValueMut<'_>, index: usize) -> Result<(), apollo_json::JsonError> {
+    for _ in cursor.value().len().unwrap_or(0)..=index {
+        cursor.push(())?;
+    }
+    Ok(())
 }
 
 /// A freshly built empty array.
