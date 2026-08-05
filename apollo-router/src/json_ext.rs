@@ -261,82 +261,46 @@ impl ValueExt for Value {
 
     #[track_caller]
     fn insert(&mut self, path: &Path, value: Value) -> Result<(), FetchError> {
-        let mut builder = self.detach().edit();
-        let mut cursor = builder.root_mut();
+        // Flattens and keys carrying type conditions filter the incoming value
+        // as the walk passes them, so fold them all before writing.
         let mut value = value;
-
-        for p in path.iter() {
-            match p {
-                PathElement::Flatten(type_conditions) => {
-                    value = filter_type_conditions(value, type_conditions);
-                    match cursor.value().kind() {
-                        JsonKind::Null => {
-                            // Coerce to an empty array; the loop continues onto the
-                            // next path element without descending into an index,
-                            // matching the pre-apollo-json behavior.
-                            let mut new_builder = DocumentBuilder::new();
-                            new_builder.set(0usize, ()).ok();
-                            let _ = new_builder;
-                            set_cursor_to(&mut cursor, empty_array());
-                        }
-                        JsonKind::Array => {}
-                        _ => {
-                            return Err(FetchError::ExecutionPathNotFound {
-                                reason: "expected an array".to_string(),
-                            });
-                        }
-                    }
-                }
-                &PathElement::Index(index) => match cursor.value().kind() {
-                    JsonKind::Array => {
-                        for _ in cursor.value().len().unwrap_or(0)..=index {
-                            let _ = cursor.push(());
-                        }
-                        cursor = cursor
-                            .get_mut(index)
-                            .expect("we just grew the array to include that index");
-                    }
-                    JsonKind::Null => {
-                        set_cursor_to(&mut cursor, empty_array());
-                        for _ in 0..=index {
-                            let _ = cursor.push(());
-                        }
-                        cursor = cursor
-                            .get_mut(index)
-                            .expect("we just grew the array to include that index");
-                    }
-                    _other => {
-                        return Err(FetchError::ExecutionPathNotFound {
-                            reason: "expected an array".to_string(),
-                        });
-                    }
-                },
-                PathElement::Key(k, type_conditions) => {
-                    value = filter_type_conditions(value, type_conditions);
-                    match cursor.value().kind() {
-                        JsonKind::Object => {
-                            cursor = cursor
-                                .get_mut(k.as_str())
-                                .expect("a missing key is created as an empty object");
-                        }
-                        JsonKind::Null => {
-                            set_cursor_to(&mut cursor, object([]));
-                            cursor = cursor
-                                .get_mut(k.as_str())
-                                .expect("a missing key is created as an empty object");
-                        }
-                        _other => {
-                            return Err(FetchError::ExecutionPathNotFound {
-                                reason: "expected an object".to_string(),
-                            });
-                        }
-                    }
-                }
-                PathElement::Fragment(_) => {}
+        for element in path.iter() {
+            if let PathElement::Flatten(conditions) | PathElement::Key(_, conditions) = element {
+                value = filter_type_conditions(value, conditions);
             }
         }
 
-        set_cursor_to(&mut cursor, value);
+        let (segments, truncated) = addressing_segments(path);
+        if truncated {
+            // A flatten with nothing addressing a position after it only asserts
+            // that this value is a list; there is nowhere to write.
+            return match self.kind() {
+                JsonKind::Array => Ok(()),
+                JsonKind::Null => {
+                    *self = empty_array();
+                    Ok(())
+                }
+                _ => Err(FetchError::ExecutionPathNotFound {
+                    reason: "expected an array".to_string(),
+                }),
+            };
+        }
+        let Some(&first) = segments.first() else {
+            *self = value;
+            return Ok(());
+        };
+
+        let root_shape = shape_for(first);
+        let mut builder = match (self.kind(), root_shape) {
+            (JsonKind::Object, Shape::Object) | (JsonKind::Array, Shape::Array) => {
+                self.detach().edit()
+            }
+            (JsonKind::Null, Shape::Object) => DocumentBuilder::new(),
+            (JsonKind::Null, Shape::Array) => DocumentBuilder::new_array(),
+            (_, shape) => return Err(shape_mismatch(shape)),
+        };
+
+        insert_at_segments(&mut builder, &segments, NewValue::Node(value))?;
         *self = builder.seal().root_handle();
         Ok(())
     }
@@ -632,6 +596,78 @@ fn write_at_segments(
     }
 }
 
+/// The error a path walk reports when an existing value is the wrong shape to
+/// descend into.
+fn shape_mismatch(shape: Shape) -> FetchError {
+    FetchError::ExecutionPathNotFound {
+        reason: match shape {
+            Shape::Object => "expected an object".to_string(),
+            Shape::Array => "expected an array".to_string(),
+        },
+    }
+}
+
+/// Writes `leaf` at `segments` inside a document that already holds data.
+///
+/// Unlike [`write_at_segments`], which builds a chain from nothing, this keeps
+/// what is already there: an existing container of the needed shape is
+/// descended into, an absent or `null` slot is created, and a scalar where a
+/// container is needed is an error rather than something to overwrite.
+fn insert_at_segments(
+    builder: &mut DocumentBuilder,
+    segments: &[&PathElement],
+    leaf: NewValue,
+) -> Result<(), FetchError> {
+    let Some((&last, parents)) = segments.split_last() else {
+        return Ok(());
+    };
+    let mut cursor = builder.root_mut();
+    for (position, &segment) in parents.iter().enumerate() {
+        let needed = shape_for(segments[position + 1]);
+        let existing = match segment {
+            PathElement::Key(key, _) => cursor.value().get(key.as_str()).map(|child| child.kind()),
+            &PathElement::Index(index) => cursor.value().index(index).map(|child| child.kind()),
+            _ => unreachable!("addressing_segments yields only keys and indexes"),
+        };
+        let fresh = match (existing, needed) {
+            (Some(JsonKind::Object), Shape::Object) | (Some(JsonKind::Array), Shape::Array) => None,
+            (None | Some(JsonKind::Null), Shape::Object) => Some(NewValue::Node(object([]))),
+            (None | Some(JsonKind::Null), Shape::Array) => Some(NewValue::Node(empty_array())),
+            (Some(_), shape) => return Err(shape_mismatch(shape)),
+        };
+        cursor = match segment {
+            PathElement::Key(key, _) => {
+                if let Some(fresh) = fresh {
+                    cursor
+                        .set(key.as_str(), fresh)
+                        .map_err(|_| shape_mismatch(needed))?;
+                }
+                cursor
+                    .get_mut(key.as_str())
+                    .map_err(|_| shape_mismatch(needed))?
+            }
+            &PathElement::Index(index) => {
+                grow_to(&mut cursor, index).map_err(|_| shape_mismatch(Shape::Array))?;
+                if let Some(fresh) = fresh {
+                    cursor.set(index, fresh).map_err(|_| shape_mismatch(needed))?;
+                }
+                cursor.get_mut(index).map_err(|_| shape_mismatch(needed))?
+            }
+            _ => unreachable!("addressing_segments yields only keys and indexes"),
+        };
+    }
+    match last {
+        PathElement::Key(key, _) => cursor
+            .set(key.as_str(), leaf)
+            .map_err(|_| shape_mismatch(Shape::Object)),
+        &PathElement::Index(index) => {
+            grow_to(&mut cursor, index).map_err(|_| shape_mismatch(Shape::Array))?;
+            cursor.set(index, leaf).map_err(|_| shape_mismatch(Shape::Array))
+        }
+        _ => unreachable!("addressing_segments yields only keys and indexes"),
+    }
+}
+
 /// Extends an array with nulls until `index` addresses an element.
 fn grow_to(cursor: &mut ValueMut<'_>, index: usize) -> Result<(), apollo_json::JsonError> {
     for _ in cursor.value().len().unwrap_or(0)..=index {
@@ -643,51 +679,6 @@ fn grow_to(cursor: &mut ValueMut<'_>, index: usize) -> Result<(), apollo_json::J
 /// A freshly built empty array.
 fn empty_array() -> Value {
     DocumentBuilder::new_array().seal().root_handle()
-}
-
-/// Overwrites the value a cursor points at, by replacing it in its parent.
-/// `ValueMut` has no way to replace itself directly (only its own
-/// children), so this walks back up isn't possible from the leaf cursor
-/// alone; instead every caller here builds the cursor via `child_mut` from
-/// a still-reachable parent and re-navigates the last segment. Kept as a
-/// free function so the two write sites (`from_path`, `insert`) share the
-/// one place documenting the constraint.
-fn set_cursor_to(cursor: &mut ValueMut<'_>, value: Value) {
-    // `ValueMut` addresses children, not itself, so replacing "this" value
-    // is expressed as clearing every existing child and re-populating from
-    // `value` — equivalent to a whole-value replacement for the shapes this
-    // module produces (object, array, or scalar wrapped as a single-key
-    // object then unwrapped by the caller). For scalars and containers
-    // alike, merging `value` into an emptied cursor reaches the same
-    // result deep_merge would for a fresh target.
-    while cursor.value().len().unwrap_or(0) > 0 {
-        if cursor.value().kind() == JsonKind::Array {
-            cursor.remove(0);
-        } else {
-            let Some(key) = cursor.value().member_at(0).map(|(key, _)| key.into_owned()) else {
-                break;
-            };
-            cursor.remove(key.as_str());
-        }
-    }
-    match value.kind() {
-        JsonKind::Object => {
-            for (key, child) in value.object_iter() {
-                let _ = cursor.set(key.as_str(), to_new_value(child));
-            }
-        }
-        JsonKind::Array => {
-            for child in value.array_iter() {
-                let _ = cursor.push(to_new_value(child));
-            }
-        }
-        JsonKind::Null => {}
-        _ => {
-            // A bare scalar has no children to populate through a cursor;
-            // callers addressing a scalar leaf go through the parent's
-            // `set` directly instead of this helper.
-        }
-    }
 }
 
 fn merge_builder_root(builder: &mut DocumentBuilder, other: ValueRefLike) {

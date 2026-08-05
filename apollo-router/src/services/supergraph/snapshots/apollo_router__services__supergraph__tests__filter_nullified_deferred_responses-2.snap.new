@@ -4,5 +4,26 @@ assertion_line: 1850
 expression: deferred
 ---
 {
-  "hasNext": false
+  "hasNext": true,
+  "incremental": [
+    {
+      "data": {
+        "org": null
+      },
+      "path": [
+        "currentUser"
+      ],
+      "extensions": {
+        "valueCompletion": [
+          {
+            "message": "Cannot return null for non-nullable type ID",
+            "path": [
+              "currentUser",
+              "org"
+            ]
+          }
+        ]
+      }
+    }
+  ]
 }

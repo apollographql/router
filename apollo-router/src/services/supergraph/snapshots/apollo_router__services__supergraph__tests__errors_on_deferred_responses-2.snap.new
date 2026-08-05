@@ -1,9 +1,0 @@
----
-source: apollo-router/src/services/supergraph/tests.rs
-assertion_line: 491
-expression: stream.next_response().await.unwrap()
----
-{
-  "data": null,
-  "hasNext": false
-}
