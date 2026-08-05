@@ -20,6 +20,8 @@ mod last;
 pub(crate) use last::LastMethod;
 mod map;
 pub(crate) use map::MapMethod;
+mod reduce;
+pub(crate) use reduce::ReduceMethod;
 mod r#as;
 pub(crate) use r#as::AsMethod;
 mod r#match;
