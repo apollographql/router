@@ -31,7 +31,12 @@ pub(crate) static SUBSCRIPTION_CALLBACK_HMAC_KEY: OnceCell<String> = OnceCell::n
 pub(crate) const CALLBACK_SUBSCRIPTION_HEADER_NAME: &str = "subscription-protocol";
 pub(crate) const CALLBACK_SUBSCRIPTION_HEADER_VALUE: &str = "callback/1.0";
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+/// Parsed by [`CallbackPayload::parse`] rather than serde: internally tagged
+/// enums make serde buffer the whole body through its own owned
+/// representation, which the arena-backed `Response` in
+/// [`SubscriptionPayload::Next`] cannot cross. `Serialize` stays for the
+/// emitting side.
+#[derive(Serialize, Clone, Debug)]
 #[serde(tag = "kind", rename = "lowercase")]
 pub(crate) enum CallbackPayload {
     #[serde(rename = "subscription")]
@@ -39,6 +44,80 @@ pub(crate) enum CallbackPayload {
 }
 
 impl CallbackPayload {
+    /// Parses a callback request body.
+    ///
+    /// The body parses once with apollo-json and the envelope is read by
+    /// key, so a `next` payload is adopted from the body's own arena rather
+    /// than copied.
+    fn parse(bytes: &[u8]) -> Result<CallbackPayload, String> {
+        let document =
+            apollo_json::Document::parse(bytes.to_vec()).map_err(|err| err.to_string())?;
+        let root = document.root_handle();
+        let string_member = |name: &str| {
+            root.get(name)
+                .and_then(|value| value.as_string())
+                .ok_or_else(|| format!("callback payload without a `{name}`"))
+        };
+        match string_member("kind")?.as_str() {
+            "subscription" => {}
+            other => return Err(format!("unknown callback payload kind `{other}`")),
+        }
+        let id = string_member("id")?;
+        let verifier = string_member("verifier")?;
+
+        let action = string_member("action")?;
+        let payload = match action.as_str() {
+            "check" => SubscriptionPayload::Check { id, verifier },
+            "heartbeat" => {
+                let ids = root
+                    .get("ids")
+                    .map(|ids| {
+                        ids.array_iter()
+                            .map(|id| {
+                                id.as_string()
+                                    .ok_or_else(|| "`ids` holds a non-string id".to_string())
+                            })
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .transpose()?
+                    .ok_or_else(|| "`heartbeat` without `ids`".to_string())?;
+                SubscriptionPayload::Heartbeat { id, ids, verifier }
+            }
+            "next" => {
+                let payload = root
+                    .get("payload")
+                    .ok_or_else(|| "`next` without a `payload`".to_string())?;
+                SubscriptionPayload::Next {
+                    id,
+                    verifier,
+                    payload: Box::new(
+                        Response::from_value(payload).map_err(|err| err.to_string())?,
+                    ),
+                }
+            }
+            "complete" => {
+                let errors = root
+                    .get("errors")
+                    .map(|errors| {
+                        errors
+                            .array_iter()
+                            .map(|error| {
+                                graphql::Error::from_value(error).map_err(|err| err.to_string())
+                            })
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .transpose()?;
+                SubscriptionPayload::Complete {
+                    id,
+                    verifier,
+                    errors,
+                }
+            }
+            other => return Err(format!("unknown callback payload action `{other}`")),
+        };
+        Ok(CallbackPayload::Subscription(payload))
+    }
+
     fn id(&self) -> &String {
         match self {
             CallbackPayload::Subscription(subscription_payload) => subscription_payload.id(),
@@ -62,7 +141,7 @@ pub(crate) struct InvalidIdsPayload {
     pub(crate) verifier: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Clone, Debug)]
 #[serde(tag = "action", rename = "lowercase")]
 pub(crate) enum SubscriptionPayload {
     #[serde(rename = "check")]
@@ -159,10 +238,7 @@ impl Service<router::Request> for CallbackService {
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))
                             .and_then(|bytes| {
-                                // Through apollo-json's deserializer, not serde_json's: a
-                                // `CallbackPayload` carries a `graphql::Response`, whose
-                                // `Value` fields can only be captured by it.
-                                apollo_json::from_slice::<CallbackPayload>(&bytes).map_err(|err| {
+                                CallbackPayload::parse(&bytes).map_err(|err| {
                                     format!(
                                         "failed to deserialize the request body into JSON: {err}"
                                     )

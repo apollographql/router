@@ -368,8 +368,11 @@ mod csrf_tests {
             .await
             .expect("expected body");
 
-        let response = graphql::Response::from_bytes(body.to_bytes()).unwrap();
-        assert_eq!(response.errors.len(), 0);
+        // The fake response is `{}`, which Response::from_bytes rejects (a
+        // response without data must carry an error), so look at the body
+        // directly: passing the CSRF check means no error was injected.
+        let document = apollo_json::Document::parse(body.to_bytes().to_vec()).unwrap();
+        assert!(document.root_handle().get("errors").is_none());
     }
 
     async fn assert_rejected(config: &'static str, request: router::Request) {

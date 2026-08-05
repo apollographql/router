@@ -14,7 +14,6 @@ use apollo_json::ValueMut;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::json_ext;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::Value;
@@ -32,7 +31,11 @@ fn split_path_last_element(path: &Path) -> Option<(Path, &PathElement)> {
 /// without `from` untouched. A `to` that already exists keeps its position and
 /// takes the moved value.
 fn rename_member(object: &mut ValueMut<'_>, from: &str, to: &str) {
-    let Some(value) = object.value().get(from).map(json_ext::owned_copy) else {
+    let Some(value) = object
+        .value()
+        .get(from)
+        .map(|member| member.to_document().root_handle())
+    else {
         return;
     };
     object.remove(from);

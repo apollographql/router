@@ -619,56 +619,6 @@ fn merge_member(key: &str, base: &Value, other: &Value, schema: Option<&Schema>)
 }
 
 
-/// Materializes an owned [`Value`] handle from a borrowed [`ValueRef`],
-/// sharing the source arena by reference rather than copying — the same
-/// adoption apollo-json's own `merge` uses for containers.
-fn value_from_ref(value: apollo_json::ValueRef<'_>) -> Value {
-    // `ValueRef` has no direct "upgrade to owned" method (the crate favors
-    // `Value::get`/`index`/`array_iter`/`object_iter`, which already return
-    // owned handles), so round-trip through a document root: build a
-    // single-entry container and adopt the subtree by reference, which
-    // costs one arena node rather than a deep copy.
-    let mut builder = DocumentBuilder::new();
-    builder
-        .set("v", to_new_value_ref_leaf(value))
-        .expect("fresh object root accepts any key");
-    builder
-        .seal()
-        .root_handle()
-        .get("v")
-        .expect("just inserted")
-}
-
-fn to_new_value_ref_leaf(value: apollo_json::ValueRef<'_>) -> NewValue {
-    match value.kind() {
-        JsonKind::Null => NewValue::Null,
-        JsonKind::Bool => NewValue::Bool(value.as_bool().unwrap_or_default()),
-        JsonKind::Number => value
-            .as_i64()
-            .map(NewValue::Int)
-            .or_else(|| value.as_f64().map(NewValue::Float))
-            .unwrap_or(NewValue::Null),
-        JsonKind::String => NewValue::String(value.as_str().unwrap_or_default().into_owned()),
-        JsonKind::Array => {
-            let mut builder = DocumentBuilder::new();
-            builder.remove(0usize);
-            let doc = apollo_json::Document::parse(b"[]".to_vec()).expect("`[]` is valid JSON");
-            let mut inner = doc.edit();
-            for item in value.array_iter() {
-                let _ = inner.push(to_new_value_ref_leaf(item));
-            }
-            NewValue::Node(inner.seal().root_handle())
-        }
-        JsonKind::Object => {
-            let mut builder = DocumentBuilder::new();
-            for (key, child) in value.object_iter() {
-                let _ = builder.set(key.as_ref(), to_new_value_ref_leaf(child));
-            }
-            NewValue::Node(builder.seal().root_handle())
-        }
-    }
-}
-
 fn filter_type_conditions(value: Value, type_conditions: &Option<TypeConditions>) -> Value {
     if let Some(tc) = type_conditions {
         match value.kind() {
@@ -911,7 +861,7 @@ fn iterate_path_mut<F>(
     }
 }
 
-fn value_matches_type_conditions(value: apollo_json::ValueRef<'_>, tc: &[String]) -> bool {
+fn value_matches_type_conditions(value: apollo_json::BuilderRef<'_>, tc: &[String]) -> bool {
     value.kind() == JsonKind::Object
         && value
             .get("__typename")
@@ -920,7 +870,7 @@ fn value_matches_type_conditions(value: apollo_json::ValueRef<'_>, tc: &[String]
 }
 
 fn is_value_ref_object_of_type(
-    value: apollo_json::ValueRef<'_>,
+    value: apollo_json::BuilderRef<'_>,
     schema: &Schema,
     maybe_type: &str,
 ) -> bool {
@@ -1451,14 +1401,6 @@ where
     T: Serialize + ?Sized,
 {
     apollo_json::to_document(value).map(|document| document.root_handle())
-}
-
-/// Copies a value read out of a document under construction into a standalone
-/// handle. A builder's arena is not shareable, so the subtree is copied rather
-/// than adopted by reference — reach for this only where a value has to survive
-/// the next edit at the cursor it came from.
-pub(crate) fn owned_copy(value: apollo_json::ValueRef<'_>) -> Value {
-    value_from_ref(value)
 }
 
 /// The value if it is object-shaped, or a message naming the expected shape.

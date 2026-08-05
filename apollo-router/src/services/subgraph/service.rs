@@ -1093,7 +1093,7 @@ mod tests {
             // we can customize the callback by sending additional info such as address.
             let res = ws.protocols(["graphql-transport-ws"]).on_upgrade(move |mut socket| async move {
                 let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
+                let ack_msg: ClientMessage = crate::protocols::websocket::parse_client_message(connection_ack.as_bytes()).unwrap();
                 assert!(matches!(ack_msg, ClientMessage::ConnectionInit { .. }));
 
                 socket
@@ -1103,7 +1103,7 @@ mod tests {
                     .await
                     .unwrap();
                 let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let subscribe_msg: ClientMessage = serde_json::from_str(&new_message).unwrap();
+                let subscribe_msg: ClientMessage = crate::protocols::websocket::parse_client_message(new_message.as_bytes()).unwrap();
                 assert!(matches!(subscribe_msg, ClientMessage::Subscribe { .. }));
                 let client_id = if let ClientMessage::Subscribe { payload, id } = subscribe_msg {
                     assert_eq!(
@@ -1162,7 +1162,7 @@ mod tests {
         ) -> Result<impl IntoResponse, Infallible> {
             let res = ws.protocols(["graphql-transport-ws"]).on_upgrade(move |mut socket| async move {
                 let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
+                let ack_msg: ClientMessage = crate::protocols::websocket::parse_client_message(connection_ack.as_bytes()).unwrap();
                 assert!(matches!(ack_msg, ClientMessage::ConnectionInit { .. }));
 
                 socket
@@ -1172,7 +1172,7 @@ mod tests {
                     .await
                     .unwrap();
                 let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let subscribe_msg: ClientMessage = serde_json::from_str(&new_message).unwrap();
+                let subscribe_msg: ClientMessage = crate::protocols::websocket::parse_client_message(new_message.as_bytes()).unwrap();
                 let client_id = if let ClientMessage::Subscribe { payload, id } = subscribe_msg {
                     assert_eq!(
                         payload,
@@ -1227,7 +1227,7 @@ mod tests {
             let graphql_request: Result<graphql::Request, &str> = router::body::into_bytes(body)
                 .await
                 .map_err(|_| ())
-                .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
+                .and_then(|bytes| graphql::Request::deserialize_from_bytes(&bytes).map_err(|_| ()))
                 .map_err(|_| "failed to parse the request body as JSON");
             let graphql_request = graphql_request.unwrap();
             assert!(graphql_request.extensions.object_contains_key("subscription"));
@@ -1482,7 +1482,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "response was malformed: expected value at line 1 column 1"
+            "response was malformed: JSON syntax error at byte 0: expected a JSON value"
         );
     }
 
@@ -1634,7 +1634,7 @@ mod tests {
         );
         assert_eq!(
             response.response.body().errors[1].message,
-            "response was malformed: expected value at line 1 column 1"
+            "response was malformed: JSON syntax error at byte 0: expected a JSON value"
         );
     }
 

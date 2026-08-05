@@ -85,7 +85,7 @@ impl WebSocketProtocol {
 ///
 /// Branches prefixed with "Old" are specific to the subscriptions-transport-ws protocol, other
 /// branches are either part of the graphql-ws protocol or shared by both protocols.
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Serialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum ClientMessage {
     /// A new connection
@@ -146,7 +146,12 @@ pub(crate) enum ClientMessage {
 }
 
 /// WebSocket messages received from the server.
-#[derive(Deserialize, Serialize, Debug)]
+///
+/// Parsed by [`parse_server_message`] rather than serde: the message is
+/// internally tagged, and serde reads such enums by buffering the whole
+/// object through its own owned representation, which an arena-backed
+/// `Response` cannot cross. `Serialize` stays for the test servers.
+#[derive(Serialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum ServerMessage {
     ConnectionAck,
@@ -178,7 +183,7 @@ pub(crate) enum ServerMessage {
     },
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Serialize, Debug, Clone)]
 #[serde(untagged)]
 pub(crate) enum ServerError {
     Error(graphql::Error),
@@ -191,6 +196,119 @@ impl From<ServerError> for Vec<graphql::Error> {
             ServerError::Error(e) => vec![e],
             ServerError::Errors(e) => e,
         }
+    }
+}
+
+/// Parses one message received from the server.
+///
+/// The whole message parses once with apollo-json and the envelope is read
+/// by key, so the `next` payload is adopted from the message's own arena
+/// rather than copied. Reading by key also makes the position of the `type`
+/// tag irrelevant, which serde only achieves for an internally tagged enum
+/// by buffering.
+fn parse_server_message(bytes: &[u8]) -> serde_json::Result<ServerMessage> {
+    use serde::de::Error as _;
+
+    let document =
+        apollo_json::Document::parse(bytes.to_vec()).map_err(serde_json::Error::custom)?;
+    let root = document.root_handle();
+    let tag = root
+        .get("type")
+        .and_then(|tag| tag.as_string())
+        .ok_or_else(|| serde_json::Error::custom("server message without a `type`"))?;
+    let id = || root.get("id").and_then(|id| id.as_string());
+    let payload = |for_tag: &str| {
+        root.get("payload")
+            .ok_or_else(|| serde_json::Error::custom(format!("`{for_tag}` without a `payload`")))
+    };
+
+    match tag.as_str() {
+        "connection_ack" => Ok(ServerMessage::ConnectionAck),
+        "keep_alive" | "ka" => Ok(ServerMessage::KeepAlive),
+        "complete" => Ok(ServerMessage::Complete {
+            id: id().ok_or_else(|| serde_json::Error::custom("`complete` without an `id`"))?,
+        }),
+        "next" | "data" => Ok(ServerMessage::Next {
+            id: id().ok_or_else(|| serde_json::Error::custom(format!("`{tag}` without an `id`")))?,
+            payload: graphql::Response::from_value(payload(&tag)?)
+                .map_err(serde_json::Error::custom)?,
+        }),
+        "error" | "connection_error" => {
+            let payload = payload(&tag)?;
+            let payload = if payload.kind() == apollo_json::JsonKind::Array {
+                ServerError::Errors(
+                    payload
+                        .array_iter()
+                        .map(|error| {
+                            graphql::Error::from_value(error).map_err(serde_json::Error::custom)
+                        })
+                        .collect::<Result<_, _>>()?,
+                )
+            } else {
+                ServerError::Error(
+                    graphql::Error::from_value(payload).map_err(serde_json::Error::custom)?,
+                )
+            };
+            Ok(ServerMessage::Error { id: id(), payload })
+        }
+        // The router never reads a ping or pong payload, so it is not kept.
+        "ping" => Ok(ServerMessage::Ping { payload: None }),
+        "pong" => Ok(ServerMessage::Pong { payload: None }),
+        other => Err(serde_json::Error::custom(format!(
+            "unknown server message type `{other}`"
+        ))),
+    }
+}
+
+
+/// Parses one message the router sent, for test servers to assert on. Manual
+/// for the same reason as [`parse_server_message`]: the enum is internally
+/// tagged and a `graphql::Request` cannot cross serde's buffering.
+#[cfg(test)]
+pub(crate) fn parse_client_message(bytes: &[u8]) -> serde_json::Result<ClientMessage> {
+    use serde::de::Error as _;
+
+    let document =
+        apollo_json::Document::parse(bytes.to_vec()).map_err(serde_json::Error::custom)?;
+    let root = document.root_handle();
+    let tag = root
+        .get("type")
+        .and_then(|tag| tag.as_string())
+        .ok_or_else(|| serde_json::Error::custom("client message without a `type`"))?;
+    let id = || {
+        root.get("id")
+            .and_then(|id| id.as_string())
+            .ok_or_else(|| serde_json::Error::custom(format!("`{tag}` without an `id`")))
+    };
+    let request = || {
+        let payload = root
+            .get("payload")
+            .ok_or_else(|| serde_json::Error::custom(format!("`{tag}` without a `payload`")))?;
+        graphql::Request::deserialize_from_bytes(&payload.to_bytes())
+    };
+
+    match tag.as_str() {
+        "connection_init" => Ok(ClientMessage::ConnectionInit {
+            payload: root
+                .get("payload")
+                .map(|payload| crate::json_ext::to_legacy(&payload)),
+        }),
+        "subscribe" => Ok(ClientMessage::Subscribe {
+            id: id()?,
+            payload: request()?,
+        }),
+        "start" => Ok(ClientMessage::OldStart {
+            id: id()?,
+            payload: request()?,
+        }),
+        "complete" => Ok(ClientMessage::Complete { id: id()? }),
+        "stop" => Ok(ClientMessage::OldStop { id: id()? }),
+        "connection_terminate" => Ok(ClientMessage::OldConnectionTerminate),
+        "ping" => Ok(ClientMessage::Ping { payload: None }),
+        "pong" => Ok(ClientMessage::Pong { payload: None }),
+        other => Err(serde_json::Error::custom(format!(
+            "unknown client message type `{other}`"
+        ))),
     }
 }
 
@@ -370,8 +488,8 @@ where
         })
         // Parse messages received from the `Stream`
         .map(move |msg| match msg {
-            Ok(Message::Text(text)) => serde_json::from_str(&text),
-            Ok(Message::Binary(bin)) => serde_json::from_slice(&bin),
+            Ok(Message::Text(text)) => parse_server_message(text.as_bytes()),
+            Ok(Message::Binary(bin)) => parse_server_message(&bin),
             Ok(Message::Ping(payload)) => Ok(ServerMessage::Ping {
                 payload: serde_json::from_slice(&payload).ok(),
             }),
@@ -394,7 +512,7 @@ where
                     })
                 }
             }
-            Ok(Message::Frame(frame)) => serde_json::from_slice(frame.payload()),
+            Ok(Message::Frame(frame)) => parse_server_message(frame.payload()),
             Err(err) => {
                 tracing::trace!("cannot consume more message on websocket stream: {err:?}");
 
@@ -738,7 +856,7 @@ mod tests {
         let ws_handler = move |ws: WebSocketUpgrade| async move {
             let res = ws.protocols([GRAPHQL_WS_SUBPROTOCOL]).on_upgrade(move |mut socket| async move {
                 let connection_init = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let init_msg: ClientMessage = serde_json::from_str(&connection_init).unwrap();
+                let init_msg: ClientMessage = parse_client_message(connection_init.as_bytes()).unwrap();
                 if let ClientMessage::ConnectionInit { payload } = init_msg {
                     assert_eq!(payload, Some(serde_json_bytes::json!({"connectionParams": {
                         "token": "XXX"
@@ -765,7 +883,7 @@ mod tests {
                     .await
                     .unwrap();
                 let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let subscribe_msg: ClientMessage = serde_json::from_str(&new_message).unwrap();
+                let subscribe_msg: ClientMessage = parse_client_message(new_message.as_bytes()).unwrap();
                 assert!(matches!(subscribe_msg, ClientMessage::Subscribe { .. }));
                 #[allow(unused_assignments)]
                 let mut client_id = None;
@@ -847,7 +965,7 @@ mod tests {
                     .unwrap();
 
                 let terminate_sub = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let terminate_msg: ClientMessage = serde_json::from_str(&terminate_sub).unwrap();
+                let terminate_msg: ClientMessage = parse_client_message(terminate_sub.as_bytes()).unwrap();
                 assert!(matches!(terminate_msg, ClientMessage::OldConnectionTerminate));
                 socket.close().await.unwrap();
             });
@@ -873,7 +991,7 @@ mod tests {
         let ws_handler = move |ws: WebSocketUpgrade| async move {
             let res = ws.protocols([SUBSCRIPTIONS_TRANSPORT_WS_SUBPROTOCOL]).on_upgrade(move |mut socket| async move {
                 let init_connection = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let init_msg: ClientMessage = serde_json::from_str(&init_connection).unwrap();
+                let init_msg: ClientMessage = parse_client_message(init_connection.as_bytes()).unwrap();
                 assert!(matches!(init_msg, ClientMessage::ConnectionInit { .. }));
 
                 if send_ping {
@@ -898,7 +1016,7 @@ mod tests {
                     .await
                     .unwrap();
                 let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let subscribe_msg: ClientMessage = serde_json::from_str(&new_message).unwrap();
+                let subscribe_msg: ClientMessage = parse_client_message(new_message.as_bytes()).unwrap();
                 assert!(matches!(subscribe_msg, ClientMessage::OldStart { .. }));
                 #[allow(unused_assignments)]
                 let mut client_id = None;
@@ -933,11 +1051,11 @@ mod tests {
                     .unwrap();
 
                 let stop_sub = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let stop_msg: ClientMessage = serde_json::from_str(&stop_sub).unwrap();
+                let stop_msg: ClientMessage = parse_client_message(stop_sub.as_bytes()).unwrap();
                 assert!(matches!(stop_msg, ClientMessage::OldStop { .. }));
 
                 let terminate_sub = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let terminate_msg: ClientMessage = serde_json::from_str(&terminate_sub).unwrap();
+                let terminate_msg: ClientMessage = parse_client_message(terminate_sub.as_bytes()).unwrap();
                 assert!(matches!(terminate_msg, ClientMessage::OldConnectionTerminate));
 
                 socket.close().await.unwrap();
@@ -1022,7 +1140,7 @@ mod tests {
                 .error(
                     graphql::Error::builder()
                         .message(
-                            "cannot deserialize websocket server message: Error(\"expected value\", line: 1, column: 1)".to_string())
+                            "cannot deserialize websocket server message: Error(\"JSON syntax error at byte 0: expected a JSON value\", line: 0, column: 0)".to_string())
                         .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
                         .build(),
                 )
@@ -1067,7 +1185,7 @@ mod tests {
                     .on_upgrade(move |mut socket| async move {
                         let connection_ack =
                             socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                        let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
+                        let ack_msg: ClientMessage = parse_client_message(connection_ack.as_bytes()).unwrap();
                         if let ClientMessage::ConnectionInit { payload } = ack_msg {
                             assert_eq!(
                                 payload,
@@ -1185,7 +1303,7 @@ mod tests {
                 .error(
                     graphql::Error::builder()
                         .message(
-                            "cannot deserialize websocket server message: Error(\"expected value\", line: 1, column: 1)".to_string())
+                            "cannot deserialize websocket server message: Error(\"JSON syntax error at byte 0: expected a JSON value\", line: 0, column: 0)".to_string())
                         .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
                         .build(),
                 )
