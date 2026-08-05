@@ -68,3 +68,11 @@ impl ValueExt for &Value {
         self.as_str().map(|s| s.to_string())
     }
 }
+
+/// Copies a `json!` fixture into its own `apollo_json` document and hands back the root.
+///
+/// `serde_json_bytes::json!` and `serde_json::json!` share their syntax, so a fixture written
+/// for either macro reaches an API taking `apollo_json::Value` through this.
+pub(crate) fn json_value(value: serde_json_bytes::Value) -> apollo_json::Value {
+    apollo_json::Document::from_legacy(&value).root_handle()
+}

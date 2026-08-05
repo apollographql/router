@@ -317,7 +317,7 @@ fn setup_from_mocks(
     let mut mocked_subgraphs = MockedSubgraphs::default();
 
     for (name, m) in mocks {
-        let subgraph_mock: SubgraphMock = serde_json::from_str(m).unwrap();
+        let subgraph_mock: SubgraphMock = apollo_json::from_str(m).unwrap();
 
         let mut builder = MockSubgraph::builder();
 

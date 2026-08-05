@@ -208,5 +208,5 @@ async fn make_request(request: Request) -> apollo_router::graphql::Response {
         .expect("should have one response")
         .unwrap();
 
-    serde_json::from_slice(&response).unwrap()
+    apollo_json::from_slice(&response).unwrap()
 }

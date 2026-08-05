@@ -14,6 +14,7 @@ use tracing_test::internal;
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
+use crate::integration::json_value;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_response_errors() {
@@ -362,7 +363,9 @@ async fn build_test_harness(
                 async move {
                     execution_count.fetch_add(1, Ordering::Release);
                     Ok(execution::Response::builder()
-                        .data(json!({"reached execution": true})) // No error
+                        .data(json_value(
+                            serde_json_bytes::json!({"reached execution": true}),
+                        )) // No error
                         .context(request.context)
                         .build()
                         .unwrap())
@@ -395,8 +398,10 @@ fn expect_errors(response: graphql::Response, expected_error_codes: &[&str]) {
     let errors = response.errors;
     if !errors
         .iter()
-        .map(|err| err.extensions.get("code")?.as_str())
-        .eq(expected_error_codes.iter().map(|&code| Some(code)))
+        .map(|err| err.extensions.get("code")?.as_string())
+        .eq(expected_error_codes
+            .iter()
+            .map(|&code| Some(code.to_string())))
     {
         panic!("expected errors with codes {expected_error_codes:#?}, got {errors:#?}")
     }

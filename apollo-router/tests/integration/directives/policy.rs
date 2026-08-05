@@ -117,19 +117,13 @@ async fn policy_directive_should_pass_if_coproc_allowed() -> Result<(), BoxError
         .data
         .unwrap();
 
-    let response = response
-        .as_object()
-        .unwrap()
-        .get_key_value("private")
-        .unwrap()
-        .1
-        .as_object()
-        .unwrap()
-        .get_key_value("id")
-        .unwrap()
-        .1;
+    let id = response
+        .get("private")
+        .and_then(|private| private.get("id"))
+        .and_then(|id| id.as_string())
+        .unwrap();
 
-    assert_eq!(response, "123");
+    assert_eq!(id, "123");
 
     Ok(())
 }
@@ -344,16 +338,15 @@ async fn implementations_without_policy_should_return_data() {
 
     let error = response.errors.first();
     assert!(error.is_none());
-    let binding = response.data.unwrap();
-    let response = binding
+    let id = response
+        .data
+        .unwrap()
         .get("public")
-        .unwrap()
-        .get("id")
-        .unwrap()
-        .as_str()
+        .and_then(|public| public.get("id"))
+        .and_then(|id| id.as_string())
         .unwrap();
 
-    assert_eq!(response, "456");
+    assert_eq!(id, "456");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -567,10 +560,18 @@ mod all_unauthorized_paths {
 
         assert!(response.data.unwrap().is_null());
         assert!(response.errors.is_empty());
-        assert!(!response.extensions.is_empty());
+        // `is_empty` is `None` for non-containers, so `Some(false)` pins both that extensions is
+        // an object and that it carries something.
+        assert_eq!(response.extensions.is_empty(), Some(false));
 
-        let auth_error = &response.extensions["authorizationErrors"][0];
-        let code = auth_error["extensions"]["code"].as_str().unwrap();
+        let code = response
+            .extensions
+            .get("authorizationErrors")
+            .and_then(|errors| errors.index(0))
+            .and_then(|error| error.get("extensions"))
+            .and_then(|extensions| extensions.get("code"))
+            .and_then(|code| code.as_string())
+            .unwrap();
         assert_eq!(code, "UNAUTHORIZED_FIELD_OR_TYPE");
     }
 
@@ -592,7 +593,7 @@ mod all_unauthorized_paths {
 
         assert!(response.data.unwrap().is_null());
         assert!(!response.errors.is_empty());
-        assert!(!response.extensions.contains_key("authorizationErrors"));
+        assert!(response.extensions.get("authorizationErrors").is_none());
 
         let auth_error = &response.errors[0];
         let code = auth_error.extension_code().unwrap();
@@ -617,6 +618,6 @@ mod all_unauthorized_paths {
 
         assert!(response.data.unwrap().is_null());
         assert!(response.errors.is_empty());
-        assert!(!response.extensions.contains_key("authorizationErrors"));
+        assert!(response.extensions.get("authorizationErrors").is_none());
     }
 }

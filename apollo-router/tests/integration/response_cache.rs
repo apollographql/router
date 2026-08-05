@@ -102,8 +102,7 @@ fn extract_cache_keys_from_response(response: &graphql::Response) -> Vec<String>
         .map(|arr| {
             arr.iter()
                 .filter_map(|item| item.get("key"))
-                .filter_map(|k| k.as_str())
-                .map(|s| s.to_string())
+                .filter_map(|k| k.as_string())
                 .collect()
         })
         .unwrap_or_default()
@@ -122,13 +121,10 @@ fn extract_cache_keys_by_subgraph(
     {
         for item in data {
             if let (Some(key), Some(subgraph)) = (
-                item.get("key").and_then(|k| k.as_str()),
-                item.get("subgraphName").and_then(|s| s.as_str()),
+                item.get("key").and_then(|k| k.as_string()),
+                item.get("subgraphName").and_then(|s| s.as_string()),
             ) {
-                result
-                    .entry(subgraph.to_string())
-                    .or_default()
-                    .push(key.to_string());
+                result.entry(subgraph).or_default().push(key);
             }
         }
     }
@@ -402,7 +398,7 @@ async fn make_http_request<ResponseBody>(
     request: http::Request<router::Body>,
 ) -> (HeaderMap<String>, ResponseBody)
 where
-    ResponseBody: for<'a> serde::Deserialize<'a>,
+    ResponseBody: serde::de::DeserializeOwned,
 {
     let response = router.ready().await.unwrap().call(request).await.unwrap();
     let headers = response
@@ -411,7 +407,9 @@ where
         .map(|(k, v)| (k.clone(), v.to_str().unwrap().to_owned()))
         .collect();
     let body = response.into_body().collect().await.unwrap().to_bytes();
-    (headers, serde_json::from_slice(&body).unwrap())
+    // `apollo_json::Value` captures its subtree through a hand-off only apollo-json's own
+    // deserializers offer, so `graphql::Response` cannot be read by `serde_json`.
+    (headers, apollo_json::from_slice(&body).unwrap())
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -564,29 +562,24 @@ async fn private_id_set_at_subgraph_request() {
 }
 
 fn check_cache_tags(response: &graphql::Response, cache_tags: Vec<Vec<String>>) {
-    let mut debugger_entries = response
+    let entries = response
         .extensions
         .get("apolloCacheDebugging")
-        .unwrap()
-        .as_object()
-        .unwrap()
-        .get("data")
-        .unwrap()
-        .as_array()
-        .unwrap()
-        .iter();
+        .and_then(|debugging| debugging.get("data"))
+        .and_then(|data| data.as_array())
+        .unwrap();
+    let mut debugger_entries = entries.into_iter();
 
     for mut expected_cache_tags in cache_tags {
-        let entry = debugger_entries.next().unwrap().as_object().unwrap();
+        let entry = debugger_entries.next().unwrap();
         // `invalidationKeys` is rendered from `HashSet`-backed tiers, so its element order isn't
         // guaranteed; sort both sides before comparing rather than asserting on a specific order.
         let mut actual_cache_tags: Vec<String> = entry
             .get("invalidationKeys")
-            .unwrap()
-            .as_array()
+            .and_then(|keys| keys.as_array())
             .unwrap()
             .iter()
-            .map(|cache_tag| cache_tag.as_str().unwrap().to_string())
+            .map(|cache_tag| cache_tag.as_string().unwrap())
             .collect();
         actual_cache_tags.sort();
         expected_cache_tags.sort();
@@ -1031,6 +1024,7 @@ async fn complex_entity_key_response_cache() {
     //
     assert!(body.errors.is_empty());
     let expectation: serde_json_bytes::Value = json!({"getStatus":{"id":"1","items":[{"id":"i1","name":"Item"}],"stuffDetails":"stuff we have","statusDetails":"status details"}}).into();
+    let expectation = apollo_json::Document::from_legacy(&expectation).root_handle();
     assert_eq!(body.data, Some(expectation));
     insta::assert_json_snapshot!(body.extensions, {
         ".apolloCacheDebugging.data[].key" => insta::dynamic_redaction(|value, _path| {
@@ -1124,6 +1118,7 @@ async fn test_cache_keys_nullable_data() {
 
     // NOTE: nulls here are what we're testing
     let expectation: serde_json_bytes::Value = json!({"getStatus":{"id":"1","items":[{"id":"i1","name": null}],"stuffDetails":"stuff we have","statusDetails":"status details"}}).into();
+    let expectation = apollo_json::Document::from_legacy(&expectation).root_handle();
     assert_eq!(body.data, Some(expectation));
     insta::assert_json_snapshot!(body.extensions, {
         ".apolloCacheDebugging.data[].key" => insta::dynamic_redaction(|value, _path| {

@@ -46,6 +46,7 @@ use wiremock::matchers::path_regex;
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::json_value;
 use crate::integration::redis_monitor::Monitor as RedisMonitor;
 use crate::integration::response_cache::namespace;
 
@@ -273,10 +274,10 @@ async fn apq() -> Result<(), BoxError> {
         .await
         .unwrap();
 
-    let persisted = json!({
+    let persisted = json_value(serde_json_bytes::json!({
         "version" : 1,
         "sha256Hash" : query_hash
-    });
+    }));
 
     // an APQ should fail if we do not know about the hash
     // it should not set a value in Redis

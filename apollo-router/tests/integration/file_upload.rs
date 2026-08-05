@@ -1635,7 +1635,7 @@ mod helper {
             let (_span, response) = router
                 .execute_multipart_request(self.request, self.transformer)
                 .await;
-            let response = serde_json::from_slice(&response.bytes().await?)?;
+            let response = apollo_json::from_slice(&response.bytes().await?)?;
             validation_fn(response);
 
             // Kill the server and finish up

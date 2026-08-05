@@ -37,6 +37,8 @@ use uuid::Uuid;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
 
+use crate::integration::json_value;
+
 mod integration;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -56,7 +58,11 @@ async fn api_schema_hides_field() {
         "{message}"
     );
     assert_eq!(
-        actual.errors[0].extensions["code"].as_str(),
+        actual.errors[0]
+            .extensions
+            .get("code")
+            .and_then(|code| code.as_string())
+            .as_deref(),
         Some("GRAPHQL_VALIDATION_FAILED"),
     );
 }
@@ -178,13 +184,13 @@ async fn empty_posts_should_not_work() {
     assert_eq!(1, actual.errors.len());
 
     let message = "Invalid GraphQL request";
-    let mut extensions_map = serde_json_bytes::map::Map::new();
-    extensions_map.insert("code", "INVALID_GRAPHQL_REQUEST".into());
-    extensions_map.insert("details", "failed to deserialize the request body into JSON: EOF while parsing a value at line 1 column 0".into());
     let expected_error = graphql::Error::builder()
         .message(message)
         .extension_code("INVALID_GRAPHQL_REQUEST")
-        .extensions(extensions_map)
+        .extensions(json_value(json!({
+            "code": "INVALID_GRAPHQL_REQUEST",
+            "details": "failed to deserialize the request body into JSON: EOF while parsing a value at line 1 column 0",
+        })))
         .apollo_id(actual.errors[0].apollo_id())
         .build();
     assert_eq!(expected_error, actual.errors[0]);
@@ -256,8 +262,6 @@ async fn queries_should_work_over_post() {
 #[tokio::test(flavor = "multi_thread")]
 async fn service_errors_should_be_propagated() {
     let message = "Unknown operation named \"invalidOperationName\"";
-    let mut extensions_map = serde_json_bytes::map::Map::new();
-    extensions_map.insert("code", "GRAPHQL_UNKNOWN_OPERATION_NAME".into());
 
     let request = supergraph::Request::fake_builder()
         .query(r#"{ topProducts { name } }"#)
@@ -271,7 +275,9 @@ async fn service_errors_should_be_propagated() {
 
     let expected_error = apollo_router::graphql::Error::builder()
         .message(message)
-        .extensions(extensions_map)
+        .extensions(json_value(
+            json!({"code": "GRAPHQL_UNKNOWN_OPERATION_NAME"}),
+        ))
         .extension_code("VALIDATION_ERROR")
         // Overwrite error ID to avoid comparing random Uuids
         .apollo_id(actual.errors[0].apollo_id())
@@ -412,10 +418,10 @@ async fn automated_persisted_queries() {
     let (router, registry) =
         setup_sandboxed_router_and_registry(serde_json::json!({}), mocks).await;
 
-    let persisted = json!({
+    let persisted = json_value(json!({
         "version" : 1u8,
         "sha256Hash" : "9d1474aa069127ff795d3412b11dfc1f1be0853aed7a54c4a619ee0b1725382e"
-    });
+    }));
 
     let apq_only_request = supergraph::Request::fake_builder()
         .extension("persistedQuery", persisted.clone())
@@ -478,17 +484,16 @@ async fn automated_persisted_queries() {
 #[tokio::test(flavor = "multi_thread")]
 async fn persisted_queries() {
     use hyper::header::HeaderValue;
-    use serde_json::json;
 
     /// Construct a persisted query request from an ID.
     fn pq_request(persisted_query_id: &str) -> router::Request {
         supergraph::Request::fake_builder()
             .extension(
                 "persistedQuery",
-                json!({
+                json_value(json!({
                     "version": 1,
                     "sha256Hash": persisted_query_id
-                }),
+                })),
             )
             .build()
             .expect("expecting valid request")
@@ -499,11 +504,11 @@ async fn persisted_queries() {
     // set up a PQM with one query
     const PERSISTED_QUERY_ID: &str = "GetMyNameID";
     const PERSISTED_QUERY_BODY: &str = "query GetMyName { me { name } }";
-    let expected_data = serde_json_bytes::json!({
+    let expected_data = json_value(json!({
       "me": {
         "name": "Ada Lovelace"
       }
-    });
+    }));
     let manifest = PersistedQueryManifest::from(vec![ManifestOperation {
         id: PERSISTED_QUERY_ID.to_string(),
         body: PERSISTED_QUERY_BODY.to_string(),
@@ -552,11 +557,11 @@ async fn persisted_queries() {
     // Error on unpersisted query.
     const UNKNOWN_QUERY_ID: &str = "unknown_query";
     const UNPERSISTED_QUERY_BODY: &str = "query GetYourName { you: me { name } }";
-    let expected_data = serde_json_bytes::json!({
+    let expected_data = json_value(json!({
       "you": {
         "name": "Ada Lovelace"
       }
-    });
+    }));
     let actual = query_with_router(router.clone(), pq_request(UNKNOWN_QUERY_ID)).await;
     assert_eq!(
         actual.errors,
@@ -625,8 +630,12 @@ async fn persisted_queries() {
 
     assert_eq!(actual.errors[0].message, "Invalid GraphQL request");
     assert_eq!(
-        actual.errors[0].extensions["code"],
-        "INVALID_GRAPHQL_REQUEST"
+        actual.errors[0]
+            .extensions
+            .get("code")
+            .and_then(|code| code.as_string())
+            .as_deref(),
+        Some("INVALID_GRAPHQL_REQUEST")
     );
 }
 
@@ -656,7 +665,7 @@ async fn missing_variables() {
 
     assert_eq!(StatusCode::BAD_REQUEST, http_response.response.status());
 
-    let response = serde_json::from_slice::<graphql::Response>(
+    let response = apollo_json::from_slice::<graphql::Response>(
         http_response
             .next_response()
             .await
@@ -759,7 +768,7 @@ async fn input_object_variable_validation() {
         .query("query($x: MyInput) { getData(params: $x) }")
         .variable(
             "x",
-            json!({"coordinates": [{"latitude": 45.5, "longitude": null}]}),
+            json_value(json!({"coordinates": [{"latitude": 45.5, "longitude": null}]})),
         )
         .build()
         .unwrap();
@@ -842,7 +851,7 @@ async fn query_just_at_recursion_limit() {
     let expected_service_hits = hashmap! {};
 
     let (mut http_response, registry) = http_query_rust_with_config(request, config).await;
-    let actual = serde_json::from_slice::<graphql::Response>(
+    let actual = apollo_json::from_slice::<graphql::Response>(
         http_response
             .next_response()
             .await
@@ -904,7 +913,7 @@ async fn query_just_at_token_limit() {
     let expected_service_hits = hashmap! {};
 
     let (mut http_response, registry) = http_query_rust_with_config(request, config).await;
-    let actual = serde_json::from_slice::<graphql::Response>(
+    let actual = apollo_json::from_slice::<graphql::Response>(
         http_response
             .next_response()
             .await
@@ -1687,7 +1696,7 @@ async fn query_with_router(
     router: router::BoxCloneService,
     request: router::Request,
 ) -> graphql::Response {
-    serde_json::from_slice(
+    apollo_json::from_slice(
         router
             .oneshot(request)
             .await

@@ -1,7 +1,6 @@
 //! Server implementation for the callback-based subscription protocol.
 use std::task::Poll;
 
-use bytes::Buf;
 use futures::future::BoxFuture;
 use hmac::Hmac;
 use hmac::Mac;

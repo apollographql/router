@@ -3,29 +3,28 @@
 //!
 
 use apollo_compiler::ast::Document;
+use apollo_json::JsonKind;
+use apollo_json::Value;
 use apollo_router::MockedSubgraphs;
 use apollo_router::TestHarness;
-use apollo_router::graphql::Request;
 use apollo_router::graphql::Response;
 use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::supergraph;
 use serde::Deserialize;
 use serde_json::json;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Value;
 use tower::ServiceExt;
-
-type JsonMap = serde_json_bytes::Map<ByteString, Value>;
 
 #[derive(Deserialize)]
 struct SubgraphMock {
     mocks: Vec<RequestAndResponse>,
 }
 
+/// A mocked exchange, held as raw JSON for [`MockSubgraph`] to deserialize into
+/// a GraphQL request and response.
 #[derive(Deserialize)]
 struct RequestAndResponse {
-    request: Request,
-    response: Response,
+    request: serde_json::Value,
+    response: serde_json::Value,
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -82,13 +81,11 @@ async fn _test_type_conditions_enabled() -> Response {
         ],
     );
     let supergraph_service = harness.build_supergraph().await.unwrap();
-    let mut variables = JsonMap::new();
-    variables.insert("movieResultParam", "movieResultEnabled".into());
-    variables.insert("articleResultParam", "articleResultEnabled".into());
     let request = supergraph::Request::fake_builder()
         .query(QUERY.to_string())
         .header("Apollo-Expose-Query-Plan", "true")
-        .variables(variables)
+        .variable("movieResultParam", "movieResultEnabled")
+        .variable("articleResultParam", "articleResultEnabled")
         .build()
         .expect("expecting valid request");
 
@@ -130,13 +127,11 @@ async fn _test_type_conditions_enabled_generate_query_fragments() -> Response {
         ],
     );
     let supergraph_service = harness.build_supergraph().await.unwrap();
-    let mut variables = JsonMap::new();
-    variables.insert("movieResultParam", "movieResultEnabled".into());
-    variables.insert("articleResultParam", "articleResultEnabled".into());
     let request = supergraph::Request::fake_builder()
         .query(QUERY.to_string())
         .header("Apollo-Expose-Query-Plan", "true")
-        .variables(variables)
+        .variable("movieResultParam", "movieResultEnabled")
+        .variable("articleResultParam", "articleResultEnabled")
         .build()
         .expect("expecting valid request");
 
@@ -178,13 +173,11 @@ async fn _test_type_conditions_enabled_list_of_list() -> Response {
         ],
     );
     let supergraph_service = harness.build_supergraph().await.unwrap();
-    let mut variables = JsonMap::new();
-    variables.insert("movieResultParam", "movieResultEnabled".into());
-    variables.insert("articleResultParam", "articleResultEnabled".into());
     let request = supergraph::Request::fake_builder()
         .query(QUERY_LIST_OF_LIST.to_string())
         .header("Apollo-Expose-Query-Plan", "true")
-        .variables(variables)
+        .variable("movieResultParam", "movieResultEnabled")
+        .variable("articleResultParam", "articleResultEnabled")
         .build()
         .expect("expecting valid request");
 
@@ -227,13 +220,11 @@ async fn _test_type_conditions_enabled_list_of_list_of_list() -> Response {
         ],
     );
     let supergraph_service = harness.build_supergraph().await.unwrap();
-    let mut variables = JsonMap::new();
-    variables.insert("movieResultParam", "movieResultEnabled".into());
-    variables.insert("articleResultParam", "articleResultEnabled".into());
     let request = supergraph::Request::fake_builder()
         .query(QUERY_LIST_OF_LIST_OF_LIST.to_string())
         .header("Apollo-Expose-Query-Plan", "true")
-        .variables(variables)
+        .variable("movieResultParam", "movieResultEnabled")
+        .variable("articleResultParam", "articleResultEnabled")
         .build()
         .expect("expecting valid request");
 
@@ -275,9 +266,6 @@ async fn _test_type_conditions_disabled() -> Response {
         ],
     );
     let supergraph_service = harness.build_supergraph().await.unwrap();
-    let mut variables = JsonMap::new();
-    variables.insert("movieResultParam", "movieResultDisabled".into());
-    variables.insert("articleResultParam", "articleResultDisabled".into());
     let request = supergraph::Request::fake_builder()
         .query(QUERY.to_string())
         .header("Apollo-Expose-Query-Plan", "true")
@@ -326,13 +314,11 @@ async fn _test_type_conditions_enabled_shouldnt_make_article_fetch() -> Response
         ],
     );
     let supergraph_service = harness.build_supergraph().await.unwrap();
-    let mut variables = JsonMap::new();
-    variables.insert("movieResultParam", "movieResultEnabled".into());
-    variables.insert("articleResultParam", "articleResultEnabled".into());
     let request = supergraph::Request::fake_builder()
         .query(QUERY.to_string())
         .header("Apollo-Expose-Query-Plan", "true")
-        .variables(variables)
+        .variable("movieResultParam", "movieResultEnabled")
+        .variable("articleResultParam", "articleResultEnabled")
         .build()
         .expect("expecting valid request");
 
@@ -362,10 +348,7 @@ fn setup_from_mocks(
         let mut builder = MockSubgraph::builder();
 
         for mock in subgraph_mock.mocks {
-            builder = builder.with_json(
-                serde_json::to_value(mock.request).unwrap(),
-                serde_json::to_value(mock.response).unwrap(),
-            );
+            builder = builder.with_json(mock.request, mock.response);
         }
 
         mocked_subgraphs.insert(name, builder.build());
@@ -477,43 +460,33 @@ query Search($movieResultParam: String, $articleResultParam: String) {
 }"#;
 
 fn normalize_response_extensions(mut response: Response) -> Response {
-    let extensions = &mut response.extensions;
-
-    for (key, value) in extensions.iter_mut() {
-        visit_object(key, value, &mut |key, value| {
-            if key.as_str() == "operation"
-                && let Value::String(s) = value
-            {
-                let new_value = Document::parse(s.as_str(), key.as_str())
-                    .unwrap()
-                    .serialize()
-                    .no_indent()
-                    .to_string();
-                *value = Value::String(new_value.into());
-            }
-        });
-    }
+    response.extensions = reprint_operations(response.extensions);
     response
 }
 
-fn visit_object(key: &ByteString, value: &mut Value, cb: &mut impl FnMut(&ByteString, &mut Value)) {
-    cb(key, value);
-
-    match value {
-        Value::Object(o) => {
-            for (key, value) in o.iter_mut() {
-                visit_object(key, value, cb);
-            }
-        }
-        Value::Array(a) => {
-            for v in a.iter_mut() {
-                if let Some(m) = v.as_object_mut() {
-                    for (k, v) in m.iter_mut() {
-                        visit_object(k, v, cb);
-                    }
-                }
-            }
-        }
-        _ => {}
+/// Rebuilds `value` with every `operation` string reprinted by apollo-compiler, so a snapshot holds
+/// one canonical spelling of an operation whatever the query planner emitted.
+fn reprint_operations(value: Value) -> Value {
+    match value.kind() {
+        JsonKind::Object => Value::object(value.object_iter().map(|(key, member)| {
+            // Bound before the match, so the borrow of `member` ends before the arm that moves it.
+            let string = member.as_string();
+            let member = match string {
+                Some(operation) if key == "operation" => reprint_operation(&operation),
+                _ => reprint_operations(member),
+            };
+            (key, member)
+        })),
+        JsonKind::Array => Value::array(value.array_iter().map(reprint_operations)),
+        _ => value,
     }
+}
+
+fn reprint_operation(operation: &str) -> Value {
+    Document::parse(operation, "operation")
+        .unwrap()
+        .serialize()
+        .no_indent()
+        .to_string()
+        .into()
 }

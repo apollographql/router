@@ -30,6 +30,8 @@ use std::time::Duration;
 use std::time::Instant;
 
 use anyhow::anyhow;
+use apollo_json::NewValue;
+use apollo_json::Value;
 use apollo_router::TestHarness;
 use apollo_router::make_fake_batch;
 use apollo_router::services::router;
@@ -848,14 +850,9 @@ async fn test_metrics_with_library_version_http_header() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_with_library_name_request_extension() {
-    let mut clients_map = serde_json_bytes::map::Map::new();
-    clients_map.insert("name", "apollo library".into());
-    let mut extensions_map = serde_json_bytes::map::Map::new();
-    extensions_map.insert("clientLibrary", clients_map.into());
-
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-        .extensions(extensions_map.clone())
+        .extension("clientLibrary", Value::object([("name", "apollo library")]))
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
@@ -866,14 +863,12 @@ async fn test_metrics_with_library_name_request_extension() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_with_library_version_request_extension() {
-    let mut clients_map = serde_json_bytes::map::Map::new();
-    clients_map.insert("version", "apollo library version".into());
-    let mut extensions_map = serde_json_bytes::map::Map::new();
-    extensions_map.insert("clientLibrary", clients_map.into());
-
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-        .extensions(extensions_map.clone())
+        .extension(
+            "clientLibrary",
+            Value::object([("version", "apollo library version")]),
+        )
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
@@ -1075,16 +1070,19 @@ async fn test_features_disabled() {
     assert_report!(report);
 }
 
+/// The `persistedQuery` request extension naming the operation in
+/// `fixtures/reports/pq_manifest.json`.
+fn persisted_query_extension() -> Value {
+    Value::object([
+        ("version", NewValue::from(1_i64)),
+        ("sha256Hash", NewValue::from("test_pq_id")),
+    ])
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_persisted_query_by_id_stats() {
     let request = supergraph::Request::fake_builder()
-        .extension(
-            "persistedQuery",
-            serde_json::json!({
-                "version": 1,
-                "sha256Hash": "test_pq_id"
-            }),
-        )
+        .extension("persistedQuery", persisted_query_extension())
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
@@ -1124,13 +1122,7 @@ async fn test_persisted_query_by_safelist_body_stats() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_persisted_query_by_id_logging_only_stats() {
     let request = supergraph::Request::fake_builder()
-        .extension(
-            "persistedQuery",
-            serde_json::json!({
-                "version": 1,
-                "sha256Hash": "test_pq_id"
-            }),
-        )
+        .extension("persistedQuery", persisted_query_extension())
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");

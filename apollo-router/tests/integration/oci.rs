@@ -454,10 +454,12 @@ async fn test_router_oci_tag_hot_reload() -> Result<(), BoxError> {
         "Expected HTTP 200 or 400 for GraphQL validation error, got: {}",
         status
     );
-    let graphql_response: apollo_router::graphql::Response = response
-        .json()
+    let body = response
+        .bytes()
         .await
-        .expect("Failed to parse GraphQL response");
+        .expect("Failed to read GraphQL response body");
+    let graphql_response: apollo_router::graphql::Response =
+        apollo_json::from_slice(&body).expect("Failed to parse GraphQL response");
     assert!(
         !graphql_response.errors.is_empty(),
         "Expected query for count field to fail after hot reload"
