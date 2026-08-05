@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 88b8ea27b4fce920bca268fe140fbed18764e35c
+# Composed from subgraphs with hash: 0d554b7f6826717e157fad6081e12681ba45caa4
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -21,6 +21,21 @@ directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boole
 directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+type Dummy
+  @join__type(graph: SUBGRAPH1)
+{
+  dummy: Boolean!
+}
+
+type Entity
+  @join__type(graph: SUBGRAPH1, key: "subEntity { id1 }")
+  @join__type(graph: SUBGRAPH3, key: "subEntity { id2 }")
+{
+  subEntity: SubEntity!
+  requiredSubEntity: SubEntity! @join__field(graph: SUBGRAPH3)
+  requiringField: Boolean @join__field(graph: SUBGRAPH3, requires: "requiredSubEntity { requiredField }")
+}
 
 input join__ContextArgument {
   name: String!
@@ -60,24 +75,22 @@ type Query
   @join__type(graph: SUBGRAPH2)
   @join__type(graph: SUBGRAPH3)
 {
-  t: T @join__field(graph: SUBGRAPH1)
+  unionField: Union @join__field(graph: SUBGRAPH1)
 }
 
-type T
-  @join__type(graph: SUBGRAPH1, key: "id")
-  @join__type(graph: SUBGRAPH2, key: "id")
-  @join__type(graph: SUBGRAPH3, key: "id u { x }")
+type SubEntity
+  @join__type(graph: SUBGRAPH1, key: "id1")
+  @join__type(graph: SUBGRAPH2, key: "id1")
+  @join__type(graph: SUBGRAPH2, key: "id2")
+  @join__type(graph: SUBGRAPH3, key: "id2", resolvable: false)
 {
-  id: ID!
-  u: U
-  computed: String @join__field(graph: SUBGRAPH3, requires: "u { w }")
+  id1: ID! @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2)
+  id2: ID! @join__field(graph: SUBGRAPH2) @join__field(graph: SUBGRAPH3)
+  requiredField: Boolean! @join__field(graph: SUBGRAPH2) @join__field(graph: SUBGRAPH3, external: true)
 }
 
-type U
+union Union
   @join__type(graph: SUBGRAPH1)
-  @join__type(graph: SUBGRAPH2)
-  @join__type(graph: SUBGRAPH3)
-{
-  x: String @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2) @join__field(graph: SUBGRAPH3, external: true)
-  w: Int @join__field(graph: SUBGRAPH2) @join__field(graph: SUBGRAPH3, external: true)
-}
+  @join__unionMember(graph: SUBGRAPH1, member: "Entity")
+  @join__unionMember(graph: SUBGRAPH1, member: "Dummy")
+ = Entity | Dummy
