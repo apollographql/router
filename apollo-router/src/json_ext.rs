@@ -20,144 +20,6 @@ use crate::error::FetchError;
 use crate::spec::Schema;
 use crate::spec::TYPENAME;
 
-/// A JSON object, spelled with key and value type arguments so that
-/// `buildstructor` recognizes a constructor parameter of this type as a map and
-/// derives the `.extension(key, value)` / `.extensions(map)` pair from it. The
-/// two arguments name what such a setter accepts — `K` its key and `V` its
-/// value — and carry no data; [`Object`] is the only inhabited spelling.
-pub(crate) struct ObjectMap<K, V>(Value, std::marker::PhantomData<fn() -> (K, V)>);
-
-impl<K, V> Clone for ObjectMap<K, V> {
-    fn clone(&self) -> Self {
-        ObjectMap(self.0.clone(), self.1)
-    }
-}
-
-/// A JSON object.
-///
-/// Object membership only exists inside an apollo-json document, so this
-/// wraps a [`Value`] known to be object-shaped and provides a
-/// `serde_json_bytes::Map`-like API for the small metadata objects
-/// (extensions, variables, coprocessor payloads) it is used for. Each
-/// mutation reopens a builder over a detached copy of the current value
-/// and reseals it, which is cheap at these sizes but is not the zero-copy
-/// path this crate exists for — response bodies build through
-/// [`DocumentBuilder`] directly instead of through `Object`.
-pub(crate) type Object = ObjectMap<String, NewValue>;
-
-/// Wraps `value` without checking its shape; the checked entry points are
-/// [`Object::try_from_value`] and `From<Value>`.
-fn wrap_object(value: Value) -> Object {
-    ObjectMap(value, std::marker::PhantomData)
-}
-
-impl Object {
-    pub(crate) fn new() -> Self {
-        wrap_object(DocumentBuilder::new().seal().root_handle())
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.0.len().unwrap_or(0)
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub(crate) fn get(&self, key: &str) -> Option<Value> {
-        self.0.get(key)
-    }
-
-    pub(crate) fn contains_key(&self, key: &str) -> bool {
-        self.0.get(key).is_some()
-    }
-
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (String, Value)> + '_ {
-        self.0.object_iter()
-    }
-
-    pub(crate) fn keys(&self) -> impl Iterator<Item = String> + '_ {
-        self.0.object_iter().map(|(key, _)| key)
-    }
-
-    pub(crate) fn values(&self) -> impl Iterator<Item = Value> + '_ {
-        self.0.object_iter().map(|(_, value)| value)
-    }
-
-    /// Inserts `value` at `key`, returning the previous value if any.
-    pub(crate) fn insert(
-        &mut self,
-        key: impl Into<String>,
-        value: impl Into<NewValue>,
-    ) -> Option<Value> {
-        let key = key.into();
-        let previous = self.0.get(&key);
-        let mut builder = self.0.detach().edit();
-        builder
-            .set(key.as_str(), value)
-            .expect("the root of a freshly detached object always accepts a key");
-        self.0 = builder.seal().root_handle();
-        previous
-    }
-
-    pub(crate) fn remove(&mut self, key: &str) -> Option<Value> {
-        let previous = self.0.get(key)?;
-        let mut builder = self.0.detach().edit();
-        builder.remove(key);
-        self.0 = builder.seal().root_handle();
-        Some(previous)
-    }
-
-    pub(crate) fn into_value(self) -> Value {
-        self.0
-    }
-}
-
-impl Default for Object {
-    fn default() -> Self {
-        Object::new()
-    }
-}
-
-impl std::fmt::Debug for Object {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Object({})", self.0.to_string())
-    }
-}
-
-impl PartialEq for Object {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl Eq for Object {}
-
-impl From<Value> for Object {
-    /// Wraps an object-shaped value. Panics if `value` is not an object —
-    /// callers that cannot guarantee the shape should check `.kind()` first.
-    fn from(value: Value) -> Self {
-        assert_eq!(
-            value.kind(),
-            JsonKind::Object,
-            "Object::from requires an object-shaped Value"
-        );
-        wrap_object(value)
-    }
-}
-
-impl Serialize for Object {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for Object {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Value::deserialize(deserializer).map(wrap_object)
-    }
-}
-
 const FRAGMENT_PREFIX: &str = "... on ";
 
 static TYPE_CONDITIONS_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -278,9 +140,6 @@ pub(crate) trait ValueExt {
     fn is_object_of_type(&self, schema: &Schema, maybe_type: &str) -> bool;
 
     fn as_i32(&self) -> Option<i32>;
-
-    /// The value as an object, or `None` when it holds any other shape.
-    fn as_object(&self) -> Option<Object>;
 
     /// The array's elements. This materializes a `Vec` of handles;
     /// [`Value::array_iter`] walks the same elements without one.
@@ -477,7 +336,7 @@ impl ValueExt for Value {
                                 .expect("a missing key is created as an empty object");
                         }
                         JsonKind::Null => {
-                            set_cursor_to(&mut cursor, Object::new().into_value());
+                            set_cursor_to(&mut cursor, object([]));
                             cursor = cursor
                                 .get_mut(k.as_str())
                                 .expect("a missing key is created as an empty object");
@@ -577,10 +436,6 @@ impl ValueExt for Value {
 
     fn as_i32(&self) -> Option<i32> {
         self.as_i64()?.to_i32()
-    }
-
-    fn as_object(&self) -> Option<Object> {
-        (self.kind() == JsonKind::Object).then(|| wrap_object(self.clone()))
     }
 
     fn as_array(&self) -> Option<Vec<Value>> {
@@ -1786,20 +1641,21 @@ pub(crate) fn from_legacy(value: &serde_json_bytes::Value) -> Value {
 /// still speak the legacy type. This walks and copies every member, so it
 /// belongs on cold paths only — never on the response path.
 #[allow(dead_code)]
-pub(crate) fn object_to_legacy(object: &Object) -> LegacyMap {
+pub(crate) fn object_to_legacy(object: &Value) -> LegacyMap {
     object
-        .iter()
+        .object_iter()
         .map(|(key, value)| (key.into(), to_legacy(&value)))
         .collect()
 }
 
-/// An [`Object`] holding the members of a `serde_json_bytes` map. This walks and
-/// copies every member, so it belongs on cold paths only — never on the response
-/// path.
-pub(crate) fn object_from_legacy(map: &LegacyMap) -> Object {
-    map.iter()
-        .map(|(key, value)| (key.as_str().to_string(), from_legacy(value)))
-        .collect()
+/// An object-shaped [`Value`] holding the members of a `serde_json_bytes` map.
+/// This walks and copies every member, so it belongs on cold paths only — never
+/// on the response path.
+pub(crate) fn object_from_legacy(map: &LegacyMap) -> Value {
+    object(
+        map.iter()
+            .map(|(key, value)| (key.as_str().to_string(), from_legacy(value))),
+    )
 }
 
 /// The `serde_json_bytes` spelling of a JSON object, as the legacy call sites
@@ -1821,116 +1677,6 @@ where
     apollo_json::to_document(value).map(|document| document.root_handle())
 }
 
-impl Object {
-    /// The value at `key`, inserting `default()` first when the key is absent.
-    #[allow(dead_code)]
-    pub(crate) fn get_or_insert_with(
-        &mut self,
-        key: impl Into<String>,
-        default: impl FnOnce() -> Value,
-    ) -> Value {
-        let key = key.into();
-        if let Some(existing) = self.0.get(&key) {
-            return existing;
-        }
-        self.insert(key.clone(), default());
-        self.0.get(&key).expect("just inserted at that key")
-    }
-
-    /// Inserts `value` at `key` only when the key is absent, reporting whether
-    /// it inserted.
-    #[allow(dead_code)]
-    pub(crate) fn insert_if_absent(
-        &mut self,
-        key: impl Into<String>,
-        value: impl Into<NewValue>,
-    ) -> bool {
-        let key = key.into();
-        if self.0.get(&key).is_some() {
-            return false;
-        }
-        self.insert(key, value);
-        true
-    }
-
-    /// Removes `key`, returning it together with its value.
-    #[allow(dead_code)]
-    pub(crate) fn remove_entry(&mut self, key: &str) -> Option<(String, Value)> {
-        self.remove(key).map(|value| (key.to_string(), value))
-    }
-
-    /// Wraps an object-shaped value, handing `value` back unchanged when it
-    /// holds any other shape. The `From<Value>` conversion panics instead;
-    /// reach for this where the shape is not guaranteed.
-    #[allow(dead_code)]
-    pub(crate) fn try_from_value(value: Value) -> Result<Object, Value> {
-        if value.kind() == JsonKind::Object {
-            Ok(wrap_object(value))
-        } else {
-            Err(value)
-        }
-    }
-
-    /// Reorders the members by key, ascending. Nested objects keep their own
-    /// order.
-    #[allow(dead_code)]
-    pub(crate) fn sort_keys(&mut self) {
-        let mut entries: Vec<(String, Value)> = self.0.object_iter().collect();
-        entries.sort_by(|(left, _), (right, _)| left.cmp(right));
-        self.0 = object(entries);
-    }
-}
-
-impl std::hash::Hash for Object {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::hash::Hash::hash(&self.0, state);
-    }
-}
-
-impl FromIterator<(String, Value)> for Object {
-    fn from_iter<T: IntoIterator<Item = (String, Value)>>(entries: T) -> Self {
-        wrap_object(object(entries))
-    }
-}
-
-impl Extend<(String, Value)> for Object {
-    fn extend<T: IntoIterator<Item = (String, Value)>>(&mut self, entries: T) {
-        let mut builder = self.0.detach().edit();
-        for (key, value) in entries {
-            builder
-                .set(key.as_str(), value)
-                .expect("the root of a freshly detached object always accepts a key");
-        }
-        self.0 = builder.seal().root_handle();
-    }
-}
-
-impl IntoIterator for Object {
-    type Item = (String, Value);
-    type IntoIter = std::vec::IntoIter<(String, Value)>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.object_iter().collect::<Vec<_>>().into_iter()
-    }
-}
-
-impl IntoIterator for &Object {
-    type Item = (String, Value);
-    type IntoIter = std::vec::IntoIter<(String, Value)>;
-
-    /// Collects the members into a `Vec`; [`Object::iter`] walks them without
-    /// one.
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.object_iter().collect::<Vec<_>>().into_iter()
-    }
-}
-
-impl From<Object> for Value {
-    fn from(object: Object) -> Self {
-        object.into_value()
-    }
-}
-
 /// Copies a value read out of a document under construction into a standalone
 /// handle. A builder's arena is not shareable, so the subtree is copied rather
 /// than adopted by reference — reach for this only where a value has to survive
@@ -1939,11 +1685,13 @@ pub(crate) fn owned_copy(value: apollo_json::ValueRef<'_>) -> Value {
     value_from_ref(value)
 }
 
-/// The value as an [`Object`], or a message naming the expected shape.
+/// The value if it is object-shaped, or a message naming the expected shape.
 macro_rules! ensure_object {
     ($value:expr) => {{
-        $crate::json_ext::Object::try_from_value($value)
-            .map_err(|_| "invalid type, expected an object")
+        match $value {
+            value if value.kind() == ::apollo_json::JsonKind::Object => Ok(value),
+            _ => Err("invalid type, expected an object"),
+        }
     }};
 }
 

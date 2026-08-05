@@ -3084,7 +3084,8 @@ mod tests {
                                 .build(),
                         )
                         .build()
-                        .unwrap(),
+                        .unwrap()
+                        .into(),
                 )
                 .subgraph_name("my_subgraph_name")
                 .build();
@@ -3145,7 +3146,8 @@ mod tests {
                                 .build(),
                         )
                         .build()
-                        .unwrap(),
+                        .unwrap()
+                        .into(),
                 )
                 .subgraph_name("my_subgraph_name_error")
                 .build();
