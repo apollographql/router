@@ -62,7 +62,6 @@ mod rhai_imports {
     pub(super) use rhai::exported_module;
     pub(super) use rhai::module_resolvers::FileModuleResolver;
     pub(super) use rhai::plugin::export_module;
-    pub(super) use rhai::serde::from_dynamic;
     pub(super) use rhai::serde::to_dynamic;
 }
 

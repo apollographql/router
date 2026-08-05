@@ -31,7 +31,6 @@ use crate::graphql;
 use crate::json_ext;
 use crate::json_ext::ObjectExt;
 use crate::json_ext::Path;
-use crate::json_ext::ValueExt;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;

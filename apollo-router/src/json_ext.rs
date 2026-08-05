@@ -145,16 +145,6 @@ pub(crate) trait ValueExt {
     /// [`Value::array_iter`] walks the same elements without one.
     fn as_array(&self) -> Option<Vec<Value>>;
 
-    fn is_object(&self) -> bool;
-
-    fn is_array(&self) -> bool;
-
-    fn is_string(&self) -> bool;
-
-    fn is_number(&self) -> bool;
-
-    fn is_boolean(&self) -> bool;
-
     /// The string value, owned. [`Value::as_str`] borrows from `self`, so it
     /// cannot be used on a temporary — `v.get(k).and_then(|v| v.as_str())`
     /// does not compile; this copies the string instead.
@@ -440,26 +430,6 @@ impl ValueExt for Value {
 
     fn as_array(&self) -> Option<Vec<Value>> {
         (self.kind() == JsonKind::Array).then(|| self.array_iter().collect())
-    }
-
-    fn is_object(&self) -> bool {
-        self.kind() == JsonKind::Object
-    }
-
-    fn is_array(&self) -> bool {
-        self.kind() == JsonKind::Array
-    }
-
-    fn is_string(&self) -> bool {
-        self.kind() == JsonKind::String
-    }
-
-    fn is_number(&self) -> bool {
-        self.kind() == JsonKind::Number
-    }
-
-    fn is_boolean(&self) -> bool {
-        self.kind() == JsonKind::Bool
     }
 
     fn as_str_owned(&self) -> Option<String> {

@@ -511,7 +511,6 @@ mod tests {
     use crate::TestHarness;
     use crate::graphql;
     use crate::graphql::Request;
-    use crate::json_ext::json_value;
     use crate::layers::ServiceExt as LayerExt;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;

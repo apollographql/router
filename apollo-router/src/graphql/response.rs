@@ -515,7 +515,6 @@ mod tests {
     use crate::graphql::Error;
     use crate::graphql::Location;
     use crate::graphql::Response;
-    use crate::json_ext::json_value;
 
     #[test]
     fn test_append_errors_path_fallback_and_override() {

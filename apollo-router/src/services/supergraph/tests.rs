@@ -14,7 +14,6 @@ use crate::TestHarness;
 use crate::graphql;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
-use crate::json_ext::json_value;
 use crate::plugin::test::MockSubgraph;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph;

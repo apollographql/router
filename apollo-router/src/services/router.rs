@@ -975,6 +975,9 @@ pub(crate) struct InfallibleResponseBuilder {
     context: Option<Context>,
 }
 
+// Reproduces the surface buildstructor generated; not every setter has a
+// caller on this branch.
+#[allow(dead_code)]
 impl InfallibleResponseBuilder {
     pub(crate) fn label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());

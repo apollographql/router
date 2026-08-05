@@ -728,7 +728,6 @@ mod tests {
     use super::*;
     use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Request;
-    use crate::json_ext::json_value;
     use crate::metrics::FutureMetricsExt;
 
     async fn emulate_correct_websocket_server_new_protocol(

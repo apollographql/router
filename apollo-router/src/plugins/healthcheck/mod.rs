@@ -332,7 +332,6 @@ mod test {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::json_ext::json_value;
     use crate::plugins::test::PluginTestHarness;
     use crate::plugins::test::ServiceHandle;
 
