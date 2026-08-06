@@ -61,7 +61,6 @@ use uuid::Uuid;
 use self::apollo::ForwardValues;
 use self::apollo::LicensedOperationCountByType;
 use self::apollo::OperationSubType;
-use self::apollo::SingleReport;
 use self::apollo_exporter::Sender;
 use self::apollo_exporter::proto;
 use self::config::Conf;
@@ -1700,7 +1699,7 @@ impl Telemetry {
                 ..Default::default()
             }
         };
-        sender.send(SingleReport::Stats(metrics));
+        sender.send(metrics);
     }
 
     /// Returns `[(subgraph_name, trace), …]`
