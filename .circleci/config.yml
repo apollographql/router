@@ -296,10 +296,6 @@ commands:
                     echo "mise install failed (attempt $i/3), retrying in $((i*5))s..."
                     sleep $((i*5))
                   done
-                # Backstop: our own watcher above bounds the install script's runtime, but
-                # keep this well below CircleCI's 10-minute default so any other silent
-                # stall in this step (e.g. `mise install`) fails fast too.
-                no_output_timeout: 5m
       - when:
           condition:
             or:
