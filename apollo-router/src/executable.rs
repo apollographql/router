@@ -23,7 +23,6 @@ use url::ParseError;
 use url::Url;
 
 use crate::LicenseSource;
-use crate::configuration::Discussed;
 use crate::configuration::expansion::Expansion;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
@@ -97,10 +96,6 @@ enum ConfigSubcommand {
         #[clap(value_parser, env = "APOLLO_ROUTER_CONFIG_PATH")]
         config_path: PathBuf,
     },
-    /// List all the available experimental configurations with related GitHub discussion
-    Experimental,
-    /// List all the available preview configurations with related GitHub discussion
-    Preview,
 }
 
 /// Options for the router
@@ -448,18 +443,6 @@ impl Executable {
                 let config_string = std::fs::read_to_string(config_path)?;
                 let output = generate_upgrade(&config_string, *diff)?;
                 println!("{output}");
-                Ok(())
-            }
-            Some(Commands::Config(ConfigSubcommandArgs {
-                command: ConfigSubcommand::Experimental,
-            })) => {
-                Discussed::new().print_experimental();
-                Ok(())
-            }
-            Some(Commands::Config(ConfigSubcommandArgs {
-                command: ConfigSubcommand::Preview,
-            })) => {
-                Discussed::new().print_preview();
                 Ok(())
             }
             None => Self::inner_start(shutdown, schema, config, license, opt).await,
