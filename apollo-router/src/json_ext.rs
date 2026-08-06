@@ -1384,6 +1384,37 @@ pub(crate) fn object_from_legacy(map: &LegacyMap) -> Value {
     )
 }
 
+/// Serde field adapter for an arena [`Value`] stored inside a type that
+/// round-trips through a foreign serde deserializer -- the distributed
+/// query-plan cache reads plans back with `serde_json`. Capture is
+/// impossible there (serde's data model cannot carry an arena reference),
+/// so deserialization rebuilds the value structurally through the legacy
+/// tree and pays a copy. Serialization streams the value as plain data.
+///
+/// Reach for this only at a boundary like a cache codec; response-path
+/// values parse with apollo-json and never need it.
+pub(crate) mod value_rebuild {
+    use serde::Deserialize as _;
+    use serde::Deserializer;
+    use serde::Serialize as _;
+    use serde::Serializer;
+
+    use super::Value;
+
+    pub(crate) fn serialize<S: Serializer>(
+        value: &Value,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        value.serialize(serializer)
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Value, D::Error> {
+        serde_json_bytes::Value::deserialize(deserializer).map(|value| super::from_legacy(&value))
+    }
+}
+
 /// The `serde_json_bytes` spelling of a JSON object, as the legacy call sites
 /// name it.
 pub(crate) type LegacyMap =

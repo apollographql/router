@@ -53,6 +53,11 @@ pub(crate) enum DataRewrite {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DataValueSetter {
     pub(crate) path: Path,
+    /// Rebuilt on deserialize: rewrites live inside the internally tagged
+    /// [`PlanNode`](crate::query_planner::PlanNode) tree, which the
+    /// distributed query-plan cache reads back through serde -- and serde's
+    /// buffering for tagged enums cannot capture an arena value.
+    #[serde(with = "crate::json_ext::value_rebuild")]
     pub(crate) set_value_to: Value,
 }
 
@@ -123,6 +128,21 @@ pub(crate) fn apply_rewrites(
 
 #[cfg(test)]
 mod tests {
+    /// A rewrite travels through the distributed query-plan cache as JSON
+    /// read back by serde. This fails if `set_value_to` loses its rebuild
+    /// adapter: serde buffers internally tagged enums, and buffering cannot
+    /// capture an arena value.
+    #[test]
+    fn rewrites_round_trip_through_serde() {
+        let rewrite = DataRewrite::ValueSetter(DataValueSetter {
+            path: Path::from("a/b"),
+            set_value_to: crate::json_ext::json_value!({"kept": [1, {"deep": "yes"}]}),
+        });
+        let bytes = serde_json::to_string(&rewrite).expect("serializes");
+        let back: DataRewrite = serde_json::from_str(&bytes).expect("deserializes");
+        assert_eq!(rewrite, back);
+    }
+
     use apollo_compiler::name;
 
     use super::*;
