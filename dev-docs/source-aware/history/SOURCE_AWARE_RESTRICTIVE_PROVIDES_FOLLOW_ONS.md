@@ -31,7 +31,39 @@
   response equality and dispatched-request equality) → full fed corpus +
   connectors suite for flag-off/regression safety.
 
+  > **The oracle does not always hold — it did not for item 1.** Parity with
+  > expansion is only a valid oracle where expansion is *correct*. Item 1's
+  > whole subject is a shape expansion cannot represent, so there parity would
+  > have been the bug and the test had to assert **divergence** instead. Before
+  > applying this recipe to an item, ask whether expansion gets that case right;
+  > if it does not, the recipe is inverted for that item. See
+  > `SOURCE_AWARE_NESTED_POSITIONS.md`, "The oracle inverts".
+
 ## 1. Nested output shapes (M–L) — the real correctness frontier
+
+> **BUILT.** See `SOURCE_AWARE_NESTED_POSITIONS.md` for what was actually done,
+> where this plan was wrong, and what it turned out to unlock. Three corrections
+> to the plan below, kept here because they are the kind of thing the next item
+> will hit too:
+>
+> - **A third site.** The candidate predicate had to become recursive as well.
+>   `has_prunable_field` read only the landing node's own out-edges, so on a
+>   schema where every top-level field *is* provided, the candidate was dropped
+>   before any copy was made — the pass was a **no-op on the very shape it was
+>   meant to fix**.
+> - **`shape_node` is not a viable memo key.** `Shape`'s `Name` leaves carry
+>   position-specific input paths (`$root.*.manager.*.id`), so structurally
+>   identical restrictions hash differently and never share a copy. Derive a
+>   path-free tree first.
+> - **The traversal assumption was found, and it is a new category.** Not a
+>   guard that eats a path, but `selection_set_is_fully_local_from_all_nodes`
+>   skipping path-building altogether. Fixed by *reachability* of a boundary
+>   copy, not a check on the node itself, since with a single-subgraph connector
+>   supergraph it fires at `Query`.
+>
+> It also turned out to unlock recursive output shapes (`User.friends: [User]`)
+> with no further planner work; the remaining blocker there is
+> `Code::CircularReference` validation.
 
 **Gap.** `connector_provided_fields` reads only the *top level* of
 `SelectionAnalysis::output_shape()`. A connector whose selection returns
@@ -158,12 +190,21 @@ exercises this today; write the fixture before deciding it matters.
 
 ## Recommended order and why
 
-1. **Item 2 (diagnostic flavor)** — one sitting; produces data; zero risk.
-2. **Item 1** — the remaining silent-wrongness class; largest correctness
-   value; hardest, so do it while the pass template is fresh.
+1. ~~**Item 2 (diagnostic flavor)**~~ — the diagnostic half landed with item 1:
+   every level left over-merged for want of a re-entry now emits a
+   `tracing::debug!` naming the type, source and provided set. The **decision**
+   between plan-time error, diagnostic-only, and a strictness knob is still
+   open, and is still the operator's.
+2. ~~**Item 1**~~ — **done**, ahead of item 2 rather than after it. That
+   ordering held up: the per-level conservatism keeps today's behaviour wherever
+   no re-entry exists, so item 2's semantics stay genuinely open rather than
+   being settled incidentally, which was the reason for the original ordering.
 3. **Item 3** — small, closes the stamping scope note, unblocks type-level
-   connector users.
-4. **Items 4/5** — behind a fixture or the cost model, respectively.
+   connector users. Now the next one.
+4. **Items 4/5** — behind a fixture or the cost model, respectively. Item 5
+   (interfaces/unions) is closer than it was: it was specified as "structurally
+   the same recursion as item 1", and that recursion now exists, so it becomes
+   the abstract-type case of `restrict_node` rather than new machinery.
 
 None of this blocks the step-4 cost-model demo (the divergence fixture uses
 field connectors and top-level shapes only); the demo can proceed in parallel

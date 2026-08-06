@@ -15,9 +15,10 @@ This directory documents that work. Everything described here lives behind
 |---|---|
 | Config flag | `experimental_connectors_source_aware`, default off |
 | Flag off | byte-identical to today's expansion path |
-| Flag on | plans over the raw supergraph and dispatches real connector HTTP requests |
-| Last verified | connectors suite (117 tests) and the full `apollo-federation` suite pass, clippy and rustfmt clean. A past run, not a live signal; re-run the recipe in "Working on it" before relying on it |
-| Not built | source-aware cost model, composition-side satisfiability, nested output shapes |
+| Flag on | plans over the raw supergraph and dispatches real connector HTTP requests. **No longer always identical to expansion** — see "Where the two paths diverge" below |
+| Last verified | connectors suite (123 tests), the full `apollo-federation` suite (1930 + 834), and the `sibling-position-over-merge` sample pass; clippy and rustfmt clean on changed files. A past run, not a live signal; re-run the recipe in "Working on it" before relying on it |
+| Not built | source-aware cost model, composition-side satisfiability, type-level entity resolvers, interfaces/unions as connector output |
+| Recently built | **nested output shapes** — one type reached at several positions with different sub-selections now gets a restricted node per position (`SOURCE_AWARE_NESTED_POSITIONS.md`). This also makes `User.friends: [User]` plannable; validation still forbids it |
 | Tracking | exploratory, no engineering ticket |
 
 This is a feasibility spike that outgrew its original scope. It is not queued
@@ -121,6 +122,37 @@ verifies. It is **not** proof that the two plans produce byte-identical
 execution output. Across two modes that legitimately name different subgraphs,
 it is the strongest verdict this oracle can give, and it is real evidence, but
 it is equivalence of correctness rather than equivalence of output.
+
+### Where the two paths diverge, on purpose
+
+Every check above uses **parity with expansion as the oracle**, and for most of
+this branch that is right. There is now one class where it is not.
+
+A connector whose selection reaches one type at several positions with different
+sub-selections — `id manager { id name } reports { id }`, where `Person` arrives
+under `manager` with `{id, name}` and under `reports` with `{id}` — is a shape
+**expansion cannot represent**. It has one `Person` per synthetic subgraph, so it
+unions the positions and attributes `Person.name` to a connector that does not
+return it under `reports`. The field comes back `null`, on a schema rover
+composes without errors or hints.
+
+Source-aware planning gives each position its own restricted node and resolves
+`name` through the entity resolver. So here the two paths **must** produce
+different answers, and source-aware's is the correct one.
+
+Two consequences, both easy to get wrong later:
+
+- **Parity is not the test for this class.** A source-aware result that matches
+  expansion on such a schema is the bug, not the confirmation. Before using the
+  parity oracle on a new case, ask whether expansion gets that case right.
+- **The reproduction is `apollo-router/tests/samples/connectors/sibling-position-over-merge/`**,
+  which runs both paths in one test via `ReloadConfiguration` and asserts the
+  divergence directly. Its expansion-path expectations encode a defect
+  deliberately; if expansion is ever fixed, that sample should fail loudly rather
+  than be quietly updated.
+
+"Flag off is byte-identical to expansion" remains true and is unaffected — the
+restricted nodes only exist in a graph the source-aware pass has mutated.
 
 ## Priors worth updating
 
@@ -411,9 +443,19 @@ by the restrictive-provides pass, is in
 **Federation side.** `query_plan/source_aware.rs` (entry point and the pass
 wiring), `query_plan/connector_stamp.rs` (stamping, provided-fields,
 fetch splitting), `query_graph/connect_graph.rs` (source-entering edges and the
-restrictive-provides pass), `query_graph/graph_path.rs` (the two self-gated
-traversal relaxations), `query_graph/build_query_graph.rs`
+restrictive-provides pass), `query_graph/graph_path.rs` (two of the three
+self-gated traversal relaxations), `query_plan/query_planning_traversal.rs` (the
+third — the "fully local selection" shortcut, gated on
+`QueryGraph::nodes_reaching_connector_boundary_copy`),
+`query_graph/build_query_graph.rs`
 (`precompute_non_trivial_followup_edges`, refactored so the pass can re-run it).
+
+All three relaxations are gated on `connector_boundary_copy`, so they are
+unreachable in an expansion graph. Expect to find more: they exist because
+planner optimizations assume **"same type ⇒ same fields reachable"**, and
+boundary copies deliberately break that. Note the third is a different *category*
+from the first two — those eat a path, while it skips path-building altogether —
+so "no option disappeared" is not evidence that no assumption was tripped.
 
 **Router side.** `spec/schema.rs` (the fork), `query_planner/query_planner_service.rs`
 (planner construction and stamping), `plugins/connectors/query_plans.rs`
@@ -426,14 +468,31 @@ building), `services/fetch_service.rs` and `services/connector_service.rs`
 1. Federation plan-shape test in `source_aware.rs`.
 2. Router end-to-end repro in `plugins/connectors/tests/mod.rs`, using the
    expansion path as the oracle and asserting both response equality and
-   dispatched-request equality.
+   dispatched-request equality — **but only where expansion is correct**; see
+   "Where the two paths diverge, on purpose" above, and prefer a
+   `tests/samples` case when the point is that the paths differ.
 3. Full federation corpus plus the connectors suite, for flag-off safety.
 
 ```
 cargo test -p apollo-federation
 cargo test -p apollo-router --lib plugins::connectors
+cargo test -p apollo-router --test samples --features snapshot connectors
 cargo clippy -p apollo-federation -p apollo-router --all-targets
 ```
+
+Then the three commands `cargo xtask lint` actually runs, because clippy alone
+is **not** the lint gate and the `cargo doc` half has caught this branch twice:
+
+```
+cargo clippy --all --all-targets --all-features -- -D warnings
+RUSTDOCFLAGS="-Dwarnings" cargo doc --all --no-deps
+cargo fmt --all -- --check
+```
+
+Two silent-skip traps in the samples harness, both of which look like a passing
+run: a sample with `"snapshot": true` is skipped entirely without
+`--features snapshot`, and `Plan`/`Action` use `serde(deny_unknown_fields)`, so
+one stray key in `plan.json` skips the whole sample with no message.
 
 Diagnostic printers, which are not assertions and want `-- --nocapture`:
 `distance_probe_raw_vs_expanded_graph`, `mirage_check_entity_queries_over_raw_graph`,

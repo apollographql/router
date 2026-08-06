@@ -6,14 +6,16 @@
 > was actually built, where the plan was wrong, and what it turned out to
 > unlock.
 >
-> **Sibling docs this obsoletes in part**, to be reconciled when this lands on
-> `benjamn/source-aware-query-planner`:
+> **Sibling docs reconciled** in the same change:
 >
-> - the follow-on doc's item 1 is done, and its **verification recipe is wrong
->   for this item** (see "The oracle inverts", below);
-> - `README.md`'s status table lists "nested output shapes" under **Not built**,
->   and its "flag off is byte-identical" claim is still true but now load-bearing
->   in a new way, since flag *on* deliberately diverges.
+> - `SOURCE_AWARE_RESTRICTIVE_PROVIDES_FOLLOW_ONS.md` — item 1 marked built with
+>   the three corrections to its plan, its verification recipe carries a warning
+>   that parity with expansion is only a valid oracle where expansion is correct,
+>   and the recommended order is updated.
+> - `README.md` — status table no longer lists nested output shapes under "Not
+>   built", and a new "Where the two paths diverge, on purpose" section records
+>   that flag-*on* now deliberately differs from expansion for this class. The
+>   "flag off is byte-identical" claim is unchanged and still true.
 
 ## What was wrong
 
