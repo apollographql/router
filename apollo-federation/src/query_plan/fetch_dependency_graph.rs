@@ -19,7 +19,6 @@ use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
 use itertools::Itertools;
-use multimap::MultiMap;
 use petgraph::adj::List as AdjList;
 use petgraph::algo::tred::dag_transitive_reduction_closure;
 use petgraph::graph::IndexType;
@@ -87,6 +86,7 @@ use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
+use crate::utils::MultiIndexMap;
 use crate::utils::iter_into_single_item;
 use crate::utils::logging::snapshot;
 
@@ -1713,9 +1713,15 @@ impl FetchDependencyGraph {
         // merge an ancestor node into a descendant node. JS version's insertion order is almost
         // topologically sorted, thanks to the way the graph is constructed from the root. However,
         // it's not exactly topologically sorted. So, it's unclear whether that is 100% safe.
-        // Note: MultiMap preserves insertion order for values of the same key. Thus, the values
-        // of the same key in `by_subgraphs` will be topologically sorted as well.
-        let mut by_subgraphs = MultiMap::new();
+        // Note: `by_subgraphs` must be an insertion-ordered map. A HashMap-backed map here
+        // iterates its keys in a `RandomState`-random order per planning call, which executes
+        // the per-key merges below in a random across-key order; the merge order changes edge
+        // insertion order and merge outcomes downstream, producing nondeterministic plan shapes
+        // (differing `_entities` type-condition batching) across identical calls.
+        // `MultiIndexMap` preserves insertion order for both keys and the values of each key:
+        // keys are inserted in topological-sort order, and values pushed under the same key
+        // inherit that order too, so each key's values remain topologically sorted as well.
+        let mut by_subgraphs = MultiIndexMap::new();
         let sorted_nodes = petgraph::algo::toposort(&self.graph, None)
             .map_err(|_| FederationError::internal("Failed to sort nodes due to cycle(s)"))?;
         for node_index in sorted_nodes {
