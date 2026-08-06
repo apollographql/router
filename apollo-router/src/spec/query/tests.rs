@@ -8375,7 +8375,7 @@ fn reformat_response_root_fragment_mixed_with_direct_fields() {
 // Fragment-caching tests for `apply_selection_set`
 //
 // These validate that the named-fragment deduplication cache in
-// `apply_selection_set_cached` produces correct results on nested objects.
+// `apply_selection_set` produces correct results on nested objects.
 // ---------------------------------------------------------------------------
 
 const NESTED_FRAGMENT_CACHE_SCHEMA: &str = "
@@ -8555,9 +8555,9 @@ const RECURSIVE_NODE_SCHEMA: &str = "
 #[test]
 fn reformat_response_child_fragment_does_not_contaminate_parent_dedup() {
     // Regression: a nested field that spreads fragment F must not leave F
-    // recorded in the parent frame's applied_fragments set. Without the
-    // snapshot/restore fix in apply_selection_set the parent's second ...F
-    // (and the first, depending on ordering) would be silently skipped.
+    // recorded in the parent object's `visited_fragments`. If the set were shared
+    // across objects, the parent's second ...F (and the first, depending on
+    // ordering) would be silently skipped.
     FormatTest::builder()
         .schema(RECURSIVE_NODE_SCHEMA)
         .query(
@@ -8589,9 +8589,9 @@ fn reformat_response_child_fragment_does_not_contaminate_parent_dedup() {
 
 #[test]
 fn reformat_response_parent_fragment_does_not_contaminate_child_dedup() {
-    // Regression: a parent that already inserted F into its applied_fragments
+    // Regression: a parent that already inserted F into its `visited_fragments`
     // before recursing into a nested field must not cause the child's ...F
-    // spread to be skipped (the child gets its own clean frame).
+    // spread to be skipped (the child gets its own set).
     FormatTest::builder()
         .schema(RECURSIVE_NODE_SCHEMA)
         .query(
@@ -8647,7 +8647,7 @@ const VISIT_COUNT_SCHEMA: &str = "
 ";
 
 #[test]
-fn fragment_applied_once_per_frame_root() {
+fn fragment_applied_once_per_object_root() {
     // Three spreads of F at the root, F selects `c` which the response omits.
     // Cached: one application, one error. Uncached: three errors.
     FormatTest::builder()
@@ -8667,8 +8667,8 @@ fn fragment_applied_once_per_frame_root() {
 }
 
 #[test]
-fn fragment_applied_once_per_frame_nested() {
-    // Same, one level down: exercises `apply_selection_set_cached` rather than
+fn fragment_applied_once_per_object_nested() {
+    // Same, one level down: exercises `apply_selection_set` rather than
     // `apply_root_selection_set_cached`.
     FormatTest::builder()
         .schema(VISIT_COUNT_SCHEMA)
@@ -8717,7 +8717,7 @@ fn exponential_fragment_chain_applies_leaf_once() {
 
 #[test]
 fn fragment_applied_once_per_list_element() {
-    // Each list element is its own frame: the fragment must be applied exactly
+    // Each list element is its own object: the fragment must be applied exactly
     // once per element (3 errors), not once for the whole list (1) and not
     // twice per element (6).
     FormatTest::builder()

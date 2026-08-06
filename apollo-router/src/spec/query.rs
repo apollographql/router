@@ -154,8 +154,6 @@ impl Query {
                                 errors: Vec::new(),
                                 coercion_errors: include_coercion_errors.then(Vec::new),
                                 nullified: Vec::new(),
-                                applied_fragments: HashSet::new(),
-                                spare_fragment_set: None,
                             };
 
                             response.data = Some(
@@ -220,8 +218,6 @@ impl Query {
                         errors: Vec::new(),
                         coercion_errors: include_coercion_errors.then(Vec::new),
                         nullified: Vec::new(),
-                        applied_fragments: HashSet::new(),
-                        spare_fragment_set: None,
                     };
 
                     response.data = Some(
@@ -359,7 +355,7 @@ impl Query {
     /// - Returns Err(InvalidValue) if formatting fails and error(s) have been emitted.
     fn format_value<'a: 'b, 'b>(
         &'a self,
-        parameters: &mut FormatParameters<'_, 'a>,
+        parameters: &mut FormatParameters,
         field_type: &executable::Type,
         input: &mut Value,
         output: &mut Value,
@@ -415,7 +411,7 @@ impl Query {
     #[inline]
     fn format_non_nullable_value<'a: 'b, 'b>(
         &'a self,
-        parameters: &mut FormatParameters<'_, 'a>,
+        parameters: &mut FormatParameters,
         field_type: &executable::Type,
         input: &mut Value,
         output: &mut Value,
@@ -495,7 +491,7 @@ impl Query {
     #[inline]
     fn format_list<'a: 'b, 'b>(
         &'a self,
-        parameters: &mut FormatParameters<'_, 'a>,
+        parameters: &mut FormatParameters,
         input: &mut Value,
         inner_type: &executable::Type,
         output: &mut Value,
@@ -557,7 +553,7 @@ impl Query {
     #[allow(clippy::too_many_arguments)]
     fn format_named_type<'a: 'b, 'b>(
         &'a self,
-        parameters: &mut FormatParameters<'_, 'a>,
+        parameters: &mut FormatParameters,
         field_type: &executable::Type,
         input: &mut Value,
         type_name: &Name,
@@ -620,6 +616,12 @@ impl Query {
                 _ => field_type,
             };
 
+            // The spec's `CollectFields` step 1: "if visitedFragments is not provided,
+            // initialize it to the empty set". Each object gets a fresh set, so a
+            // fragment applied on a nested object can neither suppress nor be
+            // suppressed by the same fragment on an ancestor.
+            let mut visited_fragments = HashSet::new();
+
             if let Err(err) = self.apply_selection_set(
                 selection_set,
                 parameters,
@@ -627,6 +629,7 @@ impl Query {
                 output_object,
                 path,
                 current_type,
+                &mut visited_fragments,
             ) {
                 parameters.nullified.push(Path::from_response_slice(path));
                 *output = Value::Null;
@@ -788,58 +791,21 @@ impl Query {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn apply_selection_set<'a: 'b, 'b>(
         &'a self,
         selection_set: &'a [Selection],
-        parameters: &mut FormatParameters<'_, 'a>,
+        parameters: &mut FormatParameters,
         input: &mut Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
         // the type under which we apply selections
         current_type: &executable::Type,
-    ) -> Result<(), InvalidValue> {
-        // Snapshot the caller's applied_fragments state and give this frame an
-        // empty set. Without this, a nested object's apply_selection_set call
-        // (reached via format_value → format_named_type) would clear the parent
-        // frame's dedup state mid-traversal, causing the parent to re-apply
-        // fragments it already recorded (or skip ones it hasn't seen yet
-        // because the child's entries leaked into the parent's set).
-        //
-        // The empty set is recycled from `spare_fragment_set` rather than freshly
-        // allocated, so a list of N sibling objects that each spread a fragment
-        // costs one allocation instead of N. A single slot (rather than one per
-        // depth) is enough for that case and, unlike a pool, never allocates any
-        // backing storage of its own.
-        let recycled = parameters.spare_fragment_set.take().unwrap_or_default();
-        let saved = std::mem::replace(&mut parameters.applied_fragments, recycled);
-        let result = self.apply_selection_set_cached(
-            selection_set,
-            parameters,
-            input,
-            output,
-            path,
-            current_type,
-        );
-        let mut used = std::mem::replace(&mut parameters.applied_fragments, saved);
-        // `clear()` is O(capacity), so don't retain a set that one pathological
-        // frame grew huge — that would tax every later frame. Dropping it just
-        // restores the un-recycled behaviour for the next frame.
-        if used.capacity() <= MAX_RECYCLED_FRAGMENT_SET_CAPACITY {
-            used.clear();
-            parameters.spare_fragment_set = Some(used);
-        }
-        result
-    }
-
-    fn apply_selection_set_cached<'a: 'b, 'b>(
-        &'a self,
-        selection_set: &'a [Selection],
-        parameters: &mut FormatParameters<'_, 'a>,
-        input: &mut Object,
-        output: &mut Object,
-        path: &mut Vec<ResponsePathElement<'b>>,
-        // the type under which we apply selections
-        current_type: &executable::Type,
+        // The spec's `visitedFragments` (CollectFields, step 3.d): shared with the
+        // recursive calls for inline fragments and fragment bodies on the same
+        // object; each new object gets a fresh set from its caller in
+        // `format_named_type`.
+        visited_fragments: &mut HashSet<&'a str>,
     ) -> Result<(), InvalidValue> {
         // For skip and include, using .unwrap_or is legit here because
         // validate_variables should have already checked that
@@ -975,16 +941,18 @@ impl Query {
                             output.insert(TYPENAME, input_type.clone());
                         }
 
-                        // Inline fragments share the named-fragment cache with their
-                        // parent so an anonymous `... on T { ...Frag }` wrapper still
-                        // benefits from de-duplication of `...Frag`.
-                        self.apply_selection_set_cached(
+                        // Inline fragments collect fields into the same object, so
+                        // they share `visited_fragments` with their parent — an
+                        // anonymous `... on T { ...Frag }` wrapper still
+                        // de-duplicates `...Frag` (CollectFields step 3.c.iv).
+                        self.apply_selection_set(
                             selection_set,
                             parameters,
                             input,
                             output,
                             path,
                             current_type,
+                            visited_fragments,
                         )?;
                     }
                 }
@@ -999,13 +967,14 @@ impl Query {
                         continue;
                     }
 
-                    // Skip if we have already applied this named fragment during the
-                    // current selection-set traversal. The first application wrote
-                    // every reachable field; a second application would write the
-                    // same values, so it is safe to omit. Always record — including
-                    // when the same leaf is reached via distinct chain names
-                    // (`...Leaf` then `...ChainA` where ChainA spreads Leaf).
-                    if !parameters.applied_fragments.insert(name.as_str()) {
+                    // Skip if we have already applied this named fragment to this
+                    // object. The first application wrote every reachable field; a
+                    // second application would write the same values, so it is safe
+                    // to omit. Recorded before the fragment-existence and
+                    // type-condition checks, as in CollectFields step 3.d.iii, so a
+                    // leaf reached via distinct chain names (`...Leaf` then
+                    // `...ChainA` where ChainA spreads Leaf) still de-duplicates.
+                    if !visited_fragments.insert(name.as_str()) {
                         continue;
                     }
 
@@ -1031,13 +1000,14 @@ impl Query {
                                 output.insert(TYPENAME, input_type.clone());
                             }
 
-                            self.apply_selection_set_cached(
+                            self.apply_selection_set(
                                 selection_set,
                                 parameters,
                                 input,
                                 output,
                                 path,
                                 current_type,
+                                visited_fragments,
                             )?;
                         }
                     } else {
@@ -1055,18 +1025,20 @@ impl Query {
         &'a self,
         root_type_name: &str,
         selection_set: &'a [Selection],
-        parameters: &mut FormatParameters<'_, 'a>,
+        parameters: &mut FormatParameters,
         input: &mut Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
     ) -> Result<(), InvalidValue> {
-        // Track which named fragments have already been applied during this root
-        // selection-set traversal. Re-applying a `...Frag` at the same (input,
-        // output, root_type_name, path) is idempotent — the same fields would be
-        // written from the same input — so the second application can be skipped.
-        // This collapses exponential fragment-of-fragment blowups (e.g. `L1 = ...L0
-        // ...L0`, `L2 = ...L1 ...L1`, ...) into linear work.
-        parameters.applied_fragments.clear();
+        // Track which named fragments have already been applied to the root object
+        // — the spec's `visitedFragments` (CollectFields, step 1: "if
+        // visitedFragments is not provided, initialize it to the empty set").
+        // Re-applying a `...Frag` at the same (input, output, root_type_name, path)
+        // is idempotent — the same fields would be written from the same input — so
+        // the second application can be skipped. This collapses exponential
+        // fragment-of-fragment blowups (e.g. `L1 = ...L0 ...L0`, `L2 = ...L1 ...L1`,
+        // ...) into linear work.
+        let mut visited_fragments: HashSet<&'a str> = HashSet::new();
         self.apply_root_selection_set_cached(
             root_type_name,
             selection_set,
@@ -1074,17 +1046,20 @@ impl Query {
             input,
             output,
             path,
+            &mut visited_fragments,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn apply_root_selection_set_cached<'a: 'b, 'b>(
         &'a self,
         root_type_name: &str,
         selection_set: &'a [Selection],
-        parameters: &mut FormatParameters<'_, 'a>,
+        parameters: &mut FormatParameters,
         input: &mut Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
+        visited_fragments: &mut HashSet<&'a str>,
     ) -> Result<(), InvalidValue> {
         for selection in selection_set {
             match selection {
@@ -1169,9 +1144,10 @@ impl Query {
                         || parameters.schema.is_subtype(type_condition, root_type_name);
 
                     if is_apply {
-                        // Inline fragments share the named-fragment cache with their
-                        // parent so an anonymous `... on T { ...Frag }` wrapper still
-                        // benefits from de-duplication of `...Frag`.
+                        // Inline fragments collect fields into the same object, so
+                        // they share `visited_fragments` with their parent — an
+                        // anonymous `... on T { ...Frag }` wrapper still
+                        // de-duplicates `...Frag` (CollectFields step 3.c.iv).
                         self.apply_root_selection_set_cached(
                             root_type_name,
                             selection_set,
@@ -1179,6 +1155,7 @@ impl Query {
                             input,
                             output,
                             path,
+                            visited_fragments,
                         )?;
                     }
                 }
@@ -1193,13 +1170,14 @@ impl Query {
                         continue;
                     }
 
-                    // Skip if we have already applied this named fragment during the
-                    // current root-selection-set traversal. The first application
-                    // wrote every reachable field; a second application would write
-                    // the same values, so it is safe to omit. Always record — including
-                    // when the same leaf is reached via distinct chain names
-                    // (`...Leaf` then `...ChainA` where ChainA spreads Leaf).
-                    if !parameters.applied_fragments.insert(name.as_str()) {
+                    // Skip if we have already applied this named fragment to the root
+                    // object. The first application wrote every reachable field; a
+                    // second application would write the same values, so it is safe
+                    // to omit. Recorded before the fragment-existence and
+                    // type-condition checks, as in CollectFields step 3.d.iii, so a
+                    // leaf reached via distinct chain names (`...Leaf` then
+                    // `...ChainA` where ChainA spreads Leaf) still de-duplicates.
+                    if !visited_fragments.insert(name.as_str()) {
                         continue;
                     }
 
@@ -1221,6 +1199,7 @@ impl Query {
                                 input,
                                 output,
                                 path,
+                                visited_fragments,
                             )?;
                         }
                     } else {
@@ -1432,31 +1411,16 @@ fn emit_missing_field<'b>(
     }
 }
 
-/// Upper bound on the capacity of an `applied_fragments` set kept in
-/// `FormatParameters::spare_fragment_set`. Real selection sets spread a handful of
-/// named fragments; anything past this is a pathological query whose oversized
-/// table we'd rather free than clear once per frame.
-const MAX_RECYCLED_FRAGMENT_SET_CAPACITY: usize = 64;
-
 /// Intermediate structure for arguments passed through the entire formatting
-struct FormatParameters<'a, 'q> {
+struct FormatParameters<'a> {
     variables: &'a Object,
     errors: Vec<Error>,
     coercion_errors: Option<Vec<Error>>,
     nullified: Vec<Path>,
     schema: &'a ApiSchema,
-    /// Named fragments already applied during the current selection-set frame.
-    /// Scoped per object via swap/restore in `apply_selection_set`; cleared at
-    /// root entry. Always consulted so convergent spreads (`...Leaf` +
-    /// `...ChainA` that spreads Leaf) still deduplicate.
-    applied_fragments: HashSet<&'q str>,
-    /// An emptied `applied_fragments` allocation, handed to the next frame that
-    /// needs one so that formatting a list of objects doesn't allocate a set per
-    /// element.
-    spare_fragment_set: Option<HashSet<&'q str>>,
 }
 
-impl FormatParameters<'_, '_> {
+impl FormatParameters<'_> {
     fn insert_coercion_error(&mut self, error: Error) {
         if let Some(errors) = self.coercion_errors.as_mut() {
             errors.push(error)
