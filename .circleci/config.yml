@@ -258,7 +258,32 @@ commands:
                     --connect-timeout 10 --max-time 60 \
                     --retry 5 --retry-connrefused \
                     -o /tmp/mise-install.sh https://mise.jdx.dev/install.sh
-                  sh /tmp/mise-install.sh
+
+                  # The install script itself fetches the mise binary and checksums with
+                  # bare `curl` calls that have no timeout or retry of their own (and no env
+                  # var to configure them), so a stall there hangs with zero output until
+                  # CircleCI's 10-minute no-output timeout kills the step outright (as
+                  # happened on build 393704: https://circleci.com/gh/apollographql/router/393704).
+                  # Bound each attempt ourselves and retry -- this step also runs on macOS,
+                  # which has no `timeout` binary, so use a portable background-watcher kill
+                  # instead of relying on one.
+                  for i in 1 2 3; do
+                    sh /tmp/mise-install.sh &
+                    script_pid=$!
+                    ( sleep 120; kill -9 "$script_pid" 2>/dev/null ) &
+                    watcher_pid=$!
+                    if wait "$script_pid" 2>/dev/null; then
+                      kill "$watcher_pid" 2>/dev/null
+                      break
+                    fi
+                    kill "$watcher_pid" 2>/dev/null
+                    if [ $i -eq 3 ]; then
+                      echo "mise install script failed or timed out after 3 attempts"
+                      exit 1
+                    fi
+                    echo "mise install script failed or timed out (attempt $i/3), retrying in $((i*5))s..."
+                    sleep $((i*5))
+                  done
                   mise activate bash >> "$BASH_ENV"
                   for i in 1 2 3; do
                     if mise install --yes --quiet; then
@@ -271,6 +296,10 @@ commands:
                     echo "mise install failed (attempt $i/3), retrying in $((i*5))s..."
                     sleep $((i*5))
                   done
+                # Backstop: our own watcher above bounds the install script's runtime, but
+                # keep this well below CircleCI's 10-minute default so any other silent
+                # stall in this step (e.g. `mise install`) fails fast too.
+                no_output_timeout: 5m
       - when:
           condition:
             or:
