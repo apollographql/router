@@ -1,0 +1,43 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.13", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/connect/v0.4", import: ["@connect", "@source"])
+  @source(name: "example", http: { baseURL: "http://localhost:4047/" })
+
+type Query {
+  # One connector, and its selection reaches `Person` at two positions with
+  # different fields at each:
+  #
+  #   manager { id name }   ->  Person with { id, name }
+  #   reports { id }        ->  Person with { id }
+  #
+  # Expansion has one `Person` per synthetic subgraph and unions these, so
+  # `Person.name` is attributed to this connector for both positions.
+  users: [User]
+    @connect(
+      source: "example"
+      http: { GET: "/users" }
+      selection: "id manager { id name } reports { id }"
+    )
+
+  # An entity resolver that genuinely can supply any `Person` field. The planner
+  # never reaches for it, because the union above says it does not need to.
+  person(id: ID!): Person
+    @connect(
+      source: "example"
+      http: { GET: "/people/{$args.id}" }
+      selection: "id name title"
+      entity: true
+    )
+}
+
+type User {
+  id: ID!
+  manager: Person
+  reports: [Person]
+}
+
+type Person @key(fields: "id") {
+  id: ID!
+  name: String
+  title: String
+}

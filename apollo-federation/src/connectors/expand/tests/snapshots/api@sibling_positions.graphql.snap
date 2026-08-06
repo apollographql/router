@@ -1,0 +1,23 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+expression: api_schema
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling_positions.graphql
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+type Person {
+  id: ID!
+  name: String
+  title: String
+}
+
+type Query {
+  users: [User]
+  person(id: ID!): Person
+}
+
+type User {
+  id: ID!
+  manager: Person
+  reports: [Person]
+}

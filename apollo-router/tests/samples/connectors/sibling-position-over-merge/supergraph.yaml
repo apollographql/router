@@ -1,0 +1,10 @@
+# rover supergraph compose --config ./supergraph.yaml > ./supergraph.graphql
+#
+# federation 2.13 is the minimum version connect v0.4 requires; see
+# CONNECT_VERSIONS in apollo-federation/src/connectors/spec/mod.rs.
+federation_version: =2.13.0
+subgraphs:
+  connectors:
+    routing_url: http://none
+    schema:
+      file: ./connectors.graphql

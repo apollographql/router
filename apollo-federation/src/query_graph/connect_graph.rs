@@ -29,7 +29,7 @@
 // grafted into `build_query_graph`; until then they're read only by the tests.
 #![allow(dead_code)]
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::ast::NamedType;
@@ -49,7 +49,8 @@ use crate::connectors::EntityResolver;
 use crate::connectors::source_aware::derive_condition;
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
-use crate::query_plan::connector_stamp::connector_provided_fields;
+use crate::query_plan::connector_stamp::ProvidedTree;
+use crate::query_plan::connector_stamp::connector_provided_tree;
 use crate::query_plan::query_planning_traversal::non_local_selections_estimation::precompute_non_local_selection_metadata;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
@@ -145,30 +146,46 @@ pub(crate) fn build_connector_source_edges(
 /// synthetic subgraphs (see the module docs and
 /// `SOURCE_AWARE_B2B_RESTRICTIVE_PROVIDES.md`).
 ///
-/// For each `FieldCollection` edge backed by a connector whose landing-type node
-/// has field edges the connector's `selection` does not return:
+/// For each `FieldCollection` edge backed by a connector, the connector's output
+/// shape is read **recursively** ([`connector_provided_tree`]) and walked
+/// alongside the graph from the landing-type node down. At every level where the
+/// node has field edges the shape does not return at *that position*
+/// ([`restrict_node`]):
 ///
-/// 1. **Copy** the landing-type node (mirroring `copy_for_provides_internal`,
-///    including the types-to-nodes bookkeeping), marked
+/// 1. **Copy** the node (mirroring `copy_for_provides_internal`, including the
+///    types-to-nodes bookkeeping), marked
 ///    [`connector_boundary_copy`](QueryGraphNode::connector_boundary_copy) so
 ///    path traversal permits its same-source re-entry.
-/// 2. **Clone** the landing node's out-edges onto the copy, **pruning** field
-///    edges for non-provided fields (keeping `__typename`). The original's
-///    self-key edge (head == tail, added by `handle_key` for every keyed type)
-///    clones into `copy -> original` — exactly the `KeyResolution` re-entry that
-///    keeps pruned fields reachable. True self-edges are ignored by the planner,
-///    but this copy-to-original edge joins distinct nodes and is considered.
-/// 3. **Re-point** the connector's field edge to the copy (mirroring
+/// 2. **Clone** the node's out-edges onto the copy, **pruning** field edges for
+///    non-provided fields (keeping `__typename`), and **re-pointing** provided
+///    fields whose own type was restricted at that type's restricted copy rather
+///    than the shared full node. The original's self-key edge (head == tail,
+///    added by `handle_key` for every keyed type) clones into `copy -> original`
+///    — exactly the `KeyResolution` re-entry that keeps pruned fields reachable.
+///    True self-edges are ignored by the planner, but this copy-to-original edge
+///    joins distinct nodes and is considered.
+/// 3. **Re-point** the connector's field edge to the outermost copy (mirroring
 ///    `update_edge_tail`: paired add-then-remove preserves edge indices).
+///
+/// Recursing is what distinguishes one type reached at two positions with
+/// different sub-selections. A connector selecting
+/// `id manager { id name } reports { id }` reaches `Person` under `manager` with
+/// `{id, name}` and under `reports` with `{id}`; a top-level-only read sees only
+/// `User`'s fields, all of which are provided, and so prunes nothing at all while
+/// the planner goes on believing the connector serves `Person.name` at both
+/// positions.
 ///
 /// The planner keeps ownership of *validity*: it emits an `_entities` fetch for
 /// a pruned field only when the re-entry's key condition is actually satisfiable
 /// from the copy, and correctly fails otherwise — no hand-rolled
 /// missing-field-to-`_entities` translation.
 ///
-/// Conservatively skips a connector edge when nothing is prunable (the connector
-/// provides every field) or when the landing node has no `KeyResolution` re-entry
-/// (pruning would only turn today's over-merge into a planning error). Only
+/// Conservatively leaves a level alone when nothing is prunable there (the shape
+/// provides every field) or when that node has no `KeyResolution` re-entry
+/// (pruning would only turn today's over-merge into a planning error — see the
+/// follow-on plan's "no-key semantics" item, which is an operator decision). A
+/// level that prunes nothing itself but has a restricted child is still copied,
+/// to carry the re-pointed child edge, and needs no re-entry of its own. Only
 /// source-aware raw graphs contain unexpanded connectors, so the expansion path
 /// never reaches the mutation.
 ///
@@ -188,7 +205,7 @@ pub(crate) fn restrict_connector_reachability(
     struct Candidate {
         edge: EdgeIndex,
         landing: NodeIndex,
-        provided: HashSet<String>,
+        provided: ProvidedTree,
     }
     let mut candidates: Vec<Candidate> = Vec::new();
     for edge in query_graph.graph.edge_indices() {
@@ -208,68 +225,48 @@ pub(crate) fn restrict_connector_reachability(
         );
         // All connectors on this field in this subgraph. With several connectors
         // on one field ([0], [1], ...) prune only what *no* variant provides
-        // (the union) — conservative, since the planner cannot distinguish them.
-        let mut provided: HashSet<String> = HashSet::new();
-        let mut found = false;
+        // (the merge) — conservative, since the planner cannot distinguish them.
+        let mut provided: Option<ProvidedTree> = None;
+        let mut skip = false;
         for connector in connectors {
             if connector.id.subgraph_name.as_str() != source.as_ref()
                 || connector.id.directive.simple_name() != simple_name
             {
                 continue;
             }
-            let Some(fields) = connector_provided_fields(connector) else {
+            let Some(tree) = connector_provided_tree(connector) else {
                 // Non-object output shape (e.g. a scalar field connector) — not
                 // the root/entity over-merge case this pass guards.
-                found = false;
+                skip = true;
                 break;
             };
-            provided.extend(fields);
-            found = true;
-        }
-        if !found {
-            continue;
-        }
-
-        let (_, landing) = query_graph.edge_endpoints(edge)?;
-        let landing_weight = query_graph.node_weight(landing)?;
-        if landing_weight.source != *source
-            || !matches!(landing_weight.type_, QueryGraphNodeType::SchemaType(_))
-        {
-            continue;
-        }
-
-        let mut has_prunable_field = false;
-        let mut has_reentry = false;
-        for out_edge in query_graph
-            .graph
-            .edges_directed(landing, Direction::Outgoing)
-        {
-            match &out_edge.weight().transition {
-                QueryGraphEdgeTransition::FieldCollection {
-                    field_definition_position,
-                    ..
-                } => {
-                    let name = field_definition_position.field_name();
-                    if name.as_str() != "__typename" && !provided.contains(name.as_str()) {
-                        has_prunable_field = true;
-                    }
-                }
-                QueryGraphEdgeTransition::KeyResolution => has_reentry = true,
-                _ => {}
+            match &mut provided {
+                Some(existing) => existing.merge(tree),
+                None => provided = Some(tree),
             }
         }
-        if has_prunable_field && has_reentry {
-            candidates.push(Candidate {
-                edge,
-                landing,
-                provided,
-            });
+        let Some(provided) = provided.filter(|_| !skip) else {
+            continue;
+        };
+
+        let (_, landing) = query_graph.edge_endpoints(edge)?;
+        if !is_restrictable(query_graph, landing, source)? {
+            continue;
         }
+
+        candidates.push(Candidate {
+            edge,
+            landing,
+            provided,
+        });
     }
 
     if candidates.is_empty() {
         return Ok(false);
     }
+
+    let mut memo: HashMap<(NodeIndex, ProvidedTree), Option<NodeIndex>> = HashMap::new();
+    let mut copies_made = 0usize;
 
     for Candidate {
         edge,
@@ -277,64 +274,226 @@ pub(crate) fn restrict_connector_reachability(
         provided,
     } in candidates
     {
-        let landing_weight = query_graph.node_weight(landing)?.clone();
-        let QueryGraphNodeType::SchemaType(type_pos) = &landing_weight.type_ else {
-            continue; // filtered during candidate collection
+        let Some(copy) =
+            restrict_node(query_graph, landing, &provided, &mut memo, &mut copies_made)?
+        else {
+            // Nothing is prunable anywhere in this connector's output shape, or
+            // no level that could be pruned has a re-entry — leave the graph
+            // alone rather than trade an over-merge for a planning error.
+            continue;
         };
 
-        // 1. Copy the landing-type node.
-        let copy = query_graph.graph.add_node(QueryGraphNode {
-            type_: landing_weight.type_.clone(),
-            source: landing_weight.source.clone(),
-            has_reachable_cross_subgraph_edges: landing_weight.has_reachable_cross_subgraph_edges,
-            provide_id: None,
-            root_kind: None,
-            connector_boundary_copy: true,
-        });
-        query_graph
-            .types_to_nodes_by_source
-            .get_mut(&landing_weight.source)
-            .ok_or_else(|| {
-                FederationError::internal(format!(
-                    "Types-to-nodes map unexpectedly missing for source \"{}\"",
-                    landing_weight.source
-                ))
-            })?
-            .entry(type_pos.type_name().clone())
-            .or_default()
-            .insert(copy);
-
-        // 2. Clone out-edges onto the copy, pruning non-provided field edges.
-        let out_edges: Vec<(NodeIndex, QueryGraphEdge)> = query_graph
-            .graph
-            .edges_directed(landing, Direction::Outgoing)
-            .map(|edge_ref| (edge_ref.target(), edge_ref.weight().clone()))
-            .collect();
-        for (target, weight) in out_edges {
-            if let QueryGraphEdgeTransition::FieldCollection {
-                field_definition_position,
-                ..
-            } = &weight.transition
-            {
-                let name = field_definition_position.field_name();
-                if name.as_str() != "__typename" && !provided.contains(name.as_str()) {
-                    continue;
-                }
-            }
-            query_graph.graph.add_edge(copy, target, weight);
-        }
-
-        // 3. Re-point the connector's field edge to the copy.
+        // Re-point the connector's field edge to the (recursively) restricted
+        // copy (mirroring `update_edge_tail`: paired add-then-remove preserves
+        // edge indices).
         let (head, _) = query_graph.edge_endpoints(edge)?;
         let weight = query_graph.edge_weight(edge)?.clone();
         query_graph.graph.add_edge(head, copy, weight);
         query_graph.graph.remove_edge(edge);
     }
 
+    if copies_made == 0 {
+        return Ok(false);
+    }
+
+    tracing::debug!(
+        copies = copies_made,
+        "restrictive-provides: created connector boundary copies"
+    );
+
     precompute_non_trivial_followup_edges(query_graph)?;
     query_graph.non_local_selection_metadata =
         precompute_non_local_selection_metadata(query_graph)?;
+    // Boundary copies invalidate the "rest of the selection is local to this subgraph" planning
+    // shortcut for themselves *and every ancestor*, since that shortcut can fire at the root and
+    // skip path-building for the whole operation. See
+    // `QueryGraph::nodes_reaching_connector_boundary_copy`.
+    query_graph.recompute_nodes_reaching_connector_boundary_copy();
     Ok(true)
+}
+
+/// Whether `node` is a node this pass may copy and prune: an object-ish schema
+/// type in `source`, and not already a boundary copy (copies are only ever
+/// reached from copies, and re-restricting one would prune an already-pruned
+/// field set).
+fn is_restrictable(
+    query_graph: &QueryGraph,
+    node: NodeIndex,
+    source: &Arc<str>,
+) -> Result<bool, FederationError> {
+    let weight = query_graph.node_weight(node)?;
+    Ok(weight.source == *source
+        && !weight.connector_boundary_copy
+        && matches!(weight.type_, QueryGraphNodeType::SchemaType(_)))
+}
+
+/// Whether `node` has a `KeyResolution` out-edge, i.e. whether a field pruned
+/// from a copy of it stays reachable through an `_entities` re-entry.
+fn has_reentry(query_graph: &QueryGraph, node: NodeIndex) -> bool {
+    query_graph
+        .graph
+        .edges_directed(node, Direction::Outgoing)
+        .any(|edge| {
+            matches!(
+                edge.weight().transition,
+                QueryGraphEdgeTransition::KeyResolution
+            )
+        })
+}
+
+/// Build a copy of `node` restricted to `provided`, recursively restricting the
+/// types of the provided fields that carry a sub-selection. Returns `Ok(None)`
+/// when no restriction is called for anywhere beneath `node`, in which case the
+/// caller should keep pointing at `node` itself.
+///
+/// Memoized on `(node, provided)`: one connector selection can reach the same
+/// type at several positions with *different* sub-shapes — which is the entire
+/// point of this pass — so the key must include the restriction, not just the
+/// type. Two structurally identical restrictions of one node do share a copy.
+///
+/// Termination is by the `provided` tree, not the graph: each recursive step
+/// descends one level into a finite tree (bounded by `MAX_PROVIDED_DEPTH` during
+/// its derivation), so a cyclic type graph cannot cause unbounded recursion.
+fn restrict_node(
+    query_graph: &mut QueryGraph,
+    node: NodeIndex,
+    provided: &ProvidedTree,
+    memo: &mut HashMap<(NodeIndex, ProvidedTree), Option<NodeIndex>>,
+    copies_made: &mut usize,
+) -> Result<Option<NodeIndex>, FederationError> {
+    let memo_key = (node, provided.clone());
+    if let Some(cached) = memo.get(&memo_key) {
+        return Ok(*cached);
+    }
+
+    let node_weight = query_graph.node_weight(node)?.clone();
+    let QueryGraphNodeType::SchemaType(type_pos) = &node_weight.type_ else {
+        memo.insert(memo_key, None);
+        return Ok(None);
+    };
+
+    // Snapshot the out-edges before any mutation: the recursion below adds nodes
+    // and edges, and only ever reads *originals*, never a copy in progress.
+    let out_edges: Vec<(NodeIndex, QueryGraphEdge)> = query_graph
+        .graph
+        .edges_directed(node, Direction::Outgoing)
+        .map(|edge_ref| (edge_ref.target(), edge_ref.weight().clone()))
+        .collect();
+
+    // Restrict the children first, so this level only needs a copy when either
+    // it prunes something itself or one of its children was restricted.
+    let mut prune_here = false;
+    let mut restricted_children: HashMap<String, NodeIndex> = HashMap::new();
+    for (target, weight) in &out_edges {
+        let QueryGraphEdgeTransition::FieldCollection {
+            field_definition_position,
+            ..
+        } = &weight.transition
+        else {
+            continue;
+        };
+        let name = field_definition_position.field_name();
+        if name.as_str() == "__typename" {
+            continue;
+        }
+        if !provided.provides(name.as_str()) {
+            prune_here = true;
+            continue;
+        }
+        let Some(sub_tree) = provided.sub_tree(name.as_str()) else {
+            // Provided with nothing restrictable below (a scalar leaf, or a
+            // shape the derivation could not read as one object).
+            continue;
+        };
+        if !is_restrictable(query_graph, *target, &node_weight.source)? {
+            continue;
+        }
+        let sub_tree = sub_tree.clone();
+        if let Some(child) = restrict_node(query_graph, *target, &sub_tree, memo, copies_made)? {
+            restricted_children.insert(name.to_string(), child);
+        }
+    }
+
+    // Per-level re-entry conservatism: pruning a field with no `KeyResolution`
+    // re-entry would turn today's over-merge (a silent null) into a planning
+    // error. That is arguably the more honest outcome, but it is a behaviour
+    // change and belongs to the operator — see follow-on item 2, "no-key
+    // semantics". Until it is decided, such a level keeps all of its fields.
+    if prune_here && !has_reentry(query_graph, node) {
+        // Record it: every such position is one where the over-merge survives, and that set is
+        // precisely the evidence the no-key-semantics decision needs. Emitting it now means the
+        // decision can be made from data rather than requiring another pass to collect it.
+        tracing::debug!(
+            type_ = %type_pos.type_name(),
+            source = %node_weight.source,
+            provided = ?provided.field_names().collect::<Vec<_>>(),
+            "restrictive-provides: leaving an over-merge in place — fields are prunable here but \
+             the type has no KeyResolution re-entry, so pruning would turn a silent null into a \
+             planning error (follow-on: no-key semantics)"
+        );
+        prune_here = false;
+    }
+
+    if !prune_here && restricted_children.is_empty() {
+        memo.insert(memo_key, None);
+        return Ok(None);
+    }
+
+    // 1. Copy the node.
+    let copy = query_graph.graph.add_node(QueryGraphNode {
+        type_: node_weight.type_.clone(),
+        source: node_weight.source.clone(),
+        has_reachable_cross_subgraph_edges: node_weight.has_reachable_cross_subgraph_edges,
+        provide_id: None,
+        root_kind: None,
+        connector_boundary_copy: true,
+    });
+    query_graph
+        .types_to_nodes_by_source
+        .get_mut(&node_weight.source)
+        .ok_or_else(|| {
+            FederationError::internal(format!(
+                "Types-to-nodes map unexpectedly missing for source \"{}\"",
+                node_weight.source
+            ))
+        })?
+        .entry(type_pos.type_name().clone())
+        .or_default()
+        .insert(copy);
+    *copies_made += 1;
+
+    // 2. Clone out-edges onto the copy: prune the field edges this level does
+    //    not provide, and re-point provided fields whose type was restricted at
+    //    the copy of that type rather than the shared full node.
+    //
+    //    Non-field edges clone unchanged. That includes the original's self-key
+    //    edge (head == tail, added by `handle_key` for every keyed type), which
+    //    clones into `copy -> original` — exactly the `KeyResolution` re-entry
+    //    that keeps pruned fields reachable. True self-edges are ignored by the
+    //    planner, but this copy-to-original edge joins distinct nodes and is
+    //    considered.
+    for (target, weight) in out_edges {
+        let mut target = target;
+        if let QueryGraphEdgeTransition::FieldCollection {
+            field_definition_position,
+            ..
+        } = &weight.transition
+        {
+            let name = field_definition_position.field_name();
+            if name.as_str() != "__typename" {
+                if prune_here && !provided.provides(name.as_str()) {
+                    continue;
+                }
+                if let Some(child) = restricted_children.get(name.as_str()) {
+                    target = *child;
+                }
+            }
+        }
+        query_graph.graph.add_edge(copy, target, weight);
+    }
+
+    memo.insert(memo_key, Some(copy));
+    Ok(Some(copy))
 }
 
 #[cfg(test)]

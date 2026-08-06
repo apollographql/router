@@ -79,6 +79,7 @@ pub fn build_federated_query_graph(
         arguments_to_context_ids_by_source: Default::default(),
         override_condition_labels: Default::default(),
         non_local_selection_metadata: Default::default(),
+        nodes_reaching_connector_boundary_copy: Default::default(),
     };
     let query_graph =
         extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?
@@ -159,6 +160,7 @@ pub(crate) fn build_query_graph(
         arguments_to_context_ids_by_source: Default::default(),
         override_condition_labels: Default::default(),
         non_local_selection_metadata: Default::default(),
+        nodes_reaching_connector_boundary_copy: Default::default(),
     };
     let builder = SchemaQueryGraphBuilder::new(
         query_graph,

@@ -241,28 +241,188 @@ fn stamp_fetch(fetch: &mut FetchNode, connectors: &[Connector], schema: &Schema)
     }
 }
 
-/// The set of top-level fields a connector's `selection` actually returns on its
-/// output object, derived via the [`SelectionAnalysis`] caching pathway. This is
-/// the per-connector field availability that expansion used to encode
+/// How far into a connector's output shape the provided-field derivation will
+/// walk. The shape tree is finite (it is derived from a finite selection) and
+/// connectors validation rejects a type repeating along a path
+/// (`CIRCULAR_REFERENCE`), so this cap should be unreachable — it is here so
+/// that an unforeseen self-referential shape becomes a bounded loss of
+/// precision rather than an unbounded recursion during planner construction.
+const MAX_PROVIDED_DEPTH: usize = 32;
+
+/// What a connector's `selection` provides at one position of its output shape.
+///
+/// The distinction between the two non-object cases is deliberate: both mean
+/// "nothing below here can be restricted", but they mean it for opposite
+/// reasons, and conflating them makes it impossible to tell a scalar field from
+/// a shape the derivation could not read.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum Provided {
+    /// A terminal value — a scalar leaf. Provided, with no sub-selection to
+    /// restrict. In practice a [`ShapeCase::Name`] holding an input path
+    /// (`$root.*.id`), which is a reference into the *input*, not the shape.
+    Leaf,
+    /// Provided, but the shape at this position could not be read as a single
+    /// object (a union, an intersection, an unknown). Restricting below it
+    /// would risk pruning a field the connector does return, so nothing below
+    /// is restricted.
+    Opaque,
+    /// An object whose fields are known exactly.
+    Object(ProvidedTree),
+}
+
+/// The fields a connector's `selection` returns on one object position of its
+/// output shape, recursively.
+///
+/// A `BTreeMap` rather than a `HashSet`/`IndexMap` so the tree is `Hash` + `Eq`
+/// with a canonical ordering: it is used as a memo key when building restricted
+/// query-graph node copies, where two structurally identical restrictions must
+/// hash alike so they can share one copy.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ProvidedTree {
+    pub(crate) fields: std::collections::BTreeMap<String, Provided>,
+}
+
+impl ProvidedTree {
+    /// The field names provided at this level. `__typename` is never present
+    /// (it is always implicitly available and is excluded during derivation).
+    pub(crate) fn field_names(&self) -> impl Iterator<Item = &str> {
+        self.fields.keys().map(|name| name.as_str())
+    }
+
+    pub(crate) fn provides(&self, field: &str) -> bool {
+        self.fields.contains_key(field)
+    }
+
+    /// The sub-tree to restrict `field`'s type to, or `None` when `field` is
+    /// provided but nothing below it can be restricted ([`Provided::Leaf`] or
+    /// [`Provided::Opaque`]).
+    pub(crate) fn sub_tree(&self, field: &str) -> Option<&ProvidedTree> {
+        match self.fields.get(field) {
+            Some(Provided::Object(tree)) => Some(tree),
+            _ => None,
+        }
+    }
+
+    /// Merge another tree into this one, keeping whatever *either* provides.
+    ///
+    /// Used when several connectors sit on one field (`Query.users[0]`, `[1]`):
+    /// the planner cannot distinguish them, so only what *no* variant provides
+    /// may be pruned. Merging is therefore least-restrictive at every level —
+    /// an [`Provided::Opaque`] or [`Provided::Leaf`] on either side wins over an
+    /// object, since it means that side declined to restrict below.
+    pub(crate) fn merge(&mut self, other: ProvidedTree) {
+        for (name, incoming) in other.fields {
+            match self.fields.entry(name) {
+                std::collections::btree_map::Entry::Vacant(slot) => {
+                    slot.insert(incoming);
+                }
+                std::collections::btree_map::Entry::Occupied(mut slot) => {
+                    match (slot.get_mut(), incoming) {
+                        (Provided::Object(existing), Provided::Object(incoming)) => {
+                            existing.merge(incoming);
+                        }
+                        // One side declines to restrict below ⇒ neither does.
+                        (existing, Provided::Leaf | Provided::Opaque) => {
+                            *existing = Provided::Opaque;
+                        }
+                        (existing @ (Provided::Leaf | Provided::Opaque), Provided::Object(_)) => {
+                            *existing = Provided::Opaque;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Read one position of a connector's output shape into a [`Provided`].
+fn provided_at(shape: &shape::Shape, depth: usize) -> Provided {
+    if depth >= MAX_PROVIDED_DEPTH {
+        return Provided::Opaque;
+    }
+    match shape.case() {
+        ShapeCase::Object { fields, .. } => {
+            let mut tree = ProvidedTree {
+                fields: Default::default(),
+            };
+            for (name, sub) in fields.iter() {
+                if name == "__typename" {
+                    continue;
+                }
+                tree.fields
+                    .insert(name.to_string(), provided_at(sub, depth + 1));
+            }
+            Provided::Object(tree)
+        }
+        // A list position. `SelectionAnalysis` normally folds the list into the
+        // path (`$root.*.reports.*.id`) and hands back the element object
+        // directly, so this arm is for shapes that do surface an array: the
+        // element shape is what a GraphQL sub-selection applies to.
+        ShapeCase::Array { prefix, tail } => {
+            let mut merged: Option<Provided> = None;
+            for element in prefix.iter().chain(std::iter::once(tail)) {
+                if matches!(element.case(), ShapeCase::None) {
+                    continue;
+                }
+                let element = provided_at(element, depth);
+                merged = Some(match (merged, element) {
+                    (None, element) => element,
+                    (Some(Provided::Object(mut a)), Provided::Object(b)) => {
+                        a.merge(b);
+                        Provided::Object(a)
+                    }
+                    _ => Provided::Opaque,
+                });
+            }
+            merged.unwrap_or(Provided::Opaque)
+        }
+        // A scalar leaf. `Name` here holds a path into the connector's *input*
+        // (`$root.*.id`), not a reference into the shape tree, so it is
+        // terminal and cannot reintroduce a cycle.
+        ShapeCase::Name(..)
+        | ShapeCase::String(_)
+        | ShapeCase::Int(_)
+        | ShapeCase::Bool(_)
+        | ShapeCase::Float
+        | ShapeCase::Null => Provided::Leaf,
+        // Unions, intersections, and anything unreadable: provided, but not
+        // restrictable below.
+        _ => Provided::Opaque,
+    }
+}
+
+/// The fields a connector's `selection` actually returns on its output object,
+/// **recursively**, derived via the [`SelectionAnalysis`] caching pathway.
+///
+/// This is the per-connector field availability that expansion used to encode
 /// structurally (a minimal synthetic subgraph exposing only these fields); the
 /// collapsed source-aware graph loses it, so we recompute it from the selection.
+/// Reading it recursively rather than only at the top level is what lets the
+/// restrictive-provides pass distinguish one type reached at two positions with
+/// different sub-selections — `manager { id name }` and `reports { id }` both
+/// landing on `Person` — which a top-level-only read unions into an over-claim.
 ///
 /// `__typename` is excluded (always implicitly available). Returns `None` when
 /// the output shape is not an object (e.g. a field connector returning a scalar)
 /// — those are not the root/entity over-merge case this guards.
-pub(crate) fn connector_provided_fields(connector: &Connector) -> Option<HashSet<String>> {
+pub(crate) fn connector_provided_tree(connector: &Connector) -> Option<ProvidedTree> {
     let analysis = SelectionAnalysis::new(connector.selection.clone());
-    let shape = analysis.output_shape();
-    match shape.case() {
-        ShapeCase::Object { fields, .. } => Some(
-            fields
-                .iter()
-                .map(|(name, _)| name.to_string())
-                .filter(|name| name != "__typename")
-                .collect(),
-        ),
-        _ => None,
+    match provided_at(&analysis.output_shape(), 0) {
+        Provided::Object(tree) => Some(tree),
+        Provided::Leaf | Provided::Opaque => None,
     }
+}
+
+/// The **top-level** fields a connector's `selection` returns — the flat view of
+/// [`connector_provided_tree`].
+///
+/// The restrictive-provides pass consumes the full tree rather than this, since a
+/// top-level-only read is exactly what cannot represent one type at two positions.
+/// Kept for the provided-field tests, which assert the flat property directly.
+#[cfg(test)]
+pub(crate) fn connector_provided_fields(connector: &Connector) -> Option<HashSet<String>> {
+    connector_provided_tree(connector)
+        .map(|tree| tree.field_names().map(|name| name.to_string()).collect())
 }
 
 /// The connector on `{parent_type}.{field}` within `subgraph`, if any.

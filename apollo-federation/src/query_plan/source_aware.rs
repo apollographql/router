@@ -248,6 +248,154 @@ mod tests {
         }
     }
 
+    /// **Nested positions.** One connector reaching one type at two *sibling*
+    /// positions with different sub-selections is the case a top-level-only read
+    /// of the output shape cannot represent. `Query.users` selects
+    /// `id manager { id name } reports { id }`, so `Person` arrives under
+    /// `manager` with `{id, name}` and under `reports` with `{id}` only.
+    ///
+    /// `{ users { manager { name } } }` must therefore stay a single fetch (the
+    /// connector does return `name` there), while
+    /// `{ users { reports { name } } }` must gain an `_entities` fetch to the
+    /// `Query.person` resolver (it does not return `name` there). Before the
+    /// recursive restriction, both planned as a single fetch and the second
+    /// returned a silent `null` — with nothing prunable among `User`'s own
+    /// fields, the pass did not fire at all.
+    #[test]
+    fn plans_entity_fetch_per_nested_position() {
+        let sdl =
+            include_str!("../connectors/expand/tests/schemas/expand/sibling_positions.graphql");
+        let planner = SourceAwareQueryPlanner::new(sdl, QueryPlannerConfig::default()).unwrap();
+        let plan_for = |query: &str| {
+            let doc = ExecutableDocument::parse_and_validate(
+                planner.api_schema().schema(),
+                query,
+                "q.graphql",
+            )
+            .unwrap();
+            planner.plan(&doc).unwrap()
+        };
+
+        // `manager` provides `name` — one fetch, no entity jump.
+        let plan = plan_for("{ users { manager { name } } }");
+        assert_eq!(
+            fetch_stamps(&plan).len(),
+            1,
+            "manager provides name, so this stays a single fetch, got {plan}"
+        );
+
+        // `reports` does not provide `name` — it must be resolved by re-entry.
+        let plan = plan_for("{ users { reports { name } } }");
+        let stamps = fetch_stamps(&plan);
+        assert_eq!(
+            stamps.len(),
+            2,
+            "reports does not provide name, so it needs a root fetch + entity fetch, got {plan}"
+        );
+        assert!(
+            stamps[0]
+                .1
+                .as_deref()
+                .is_some_and(|c| c.contains("Query.users")),
+            "root fetch stamped Query.users, got {stamps:?}"
+        );
+        assert!(
+            stamps[1]
+                .1
+                .as_deref()
+                .is_some_and(|c| c.contains("Query.person")),
+            "entity fetch stamped with the Query.person resolver, got {stamps:?}"
+        );
+        let rendered = plan.to_string();
+        let flatten = rendered
+            .find("Flatten(path: \"users.@.reports.@\")")
+            .unwrap_or_else(|| {
+                panic!("expected an entity fetch flattened at the reports position in {plan}")
+            });
+        // `__typename` contains "name", so strip it before asking about the field.
+        assert!(
+            !rendered[..flatten]
+                .replace("__typename", "")
+                .contains("name"),
+            "name must not remain in the root fetch: {plan}"
+        );
+        assert!(
+            rendered[flatten..].contains("name"),
+            "name must be selected by the entity fetch: {plan}"
+        );
+
+        // `title` is provided at *neither* position, so it needs the re-entry
+        // from `manager` too — the case that distinguishes a genuinely
+        // per-position restriction from one that only fixed `reports`.
+        let plan = plan_for("{ users { manager { title } } }");
+        assert_eq!(
+            fetch_stamps(&plan).len(),
+            2,
+            "title is provided at neither position, so manager needs a re-entry too, got {plan}"
+        );
+    }
+
+    /// **A recursive output shape** — `User.friends: [User]`, the shape
+    /// connectors validation rejects with `CIRCULAR_REFERENCE` and the one
+    /// customers keep asking for. `Query.users` selects `id name friends { id }`,
+    /// so `User` is reached at the root with `{id, name, friends}` and under
+    /// `friends` with `{id}`: the *same type* at two depths of one path, with
+    /// different field sets.
+    ///
+    /// The recursion terminates because it walks the finite output *shape*, not
+    /// the cyclic type graph — a selection can only nest finitely — so a
+    /// self-referential type needs no special handling beyond the memo key
+    /// distinguishing `User{id, name, friends}` from `User{id}`.
+    ///
+    /// This test says nothing about whether such a schema *composes*; it is here
+    /// to record that the planning half is not what blocks it.
+    #[test]
+    fn plans_recursive_output_shape() {
+        let sdl =
+            include_str!("../connectors/expand/tests/schemas/expand/recursive_output.graphql");
+        let planner = SourceAwareQueryPlanner::new(sdl, QueryPlannerConfig::default()).unwrap();
+        let plan_for = |query: &str| {
+            let doc = ExecutableDocument::parse_and_validate(
+                planner.api_schema().schema(),
+                query,
+                "q.graphql",
+            )
+            .unwrap();
+            planner.plan(&doc).unwrap()
+        };
+
+        // Provided at the root: one fetch.
+        let plan = plan_for("{ users { id name } }");
+        assert_eq!(
+            fetch_stamps(&plan).len(),
+            1,
+            "root-provided fields stay a single fetch, got {plan}"
+        );
+
+        // `friends` returns only `id`, so `name` one level down needs the
+        // re-entry even though `name` *is* provided at the root. This is the
+        // recursive case: the same type restricted differently by depth.
+        let plan = plan_for("{ users { friends { name } } }");
+        let stamps = fetch_stamps(&plan);
+        assert_eq!(
+            stamps.len(),
+            2,
+            "name under friends is not provided there, so it needs a re-entry, got {plan}"
+        );
+        assert!(
+            stamps[1]
+                .1
+                .as_deref()
+                .is_some_and(|c| c.contains("Query.user")),
+            "the re-entry is stamped to the Query.user entity resolver, got {stamps:?}"
+        );
+        assert!(
+            plan.to_string()
+                .contains("Flatten(path: \"users.@.friends.@\")"),
+            "the entity fetch is flattened at the friends position, got {plan}"
+        );
+    }
+
     /// The entry point produces a stamped raw-graph plan end to end: build once
     /// from SDL, plan operations, and every connector fetch carries its
     /// coordinate. This is the same evidence as

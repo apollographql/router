@@ -1,0 +1,111 @@
+{
+  "enterprise": false,
+  "redis": false,
+  "snapshot": true,
+  "actions": [
+    {
+      "type": "Start",
+      "schema_path": "./supergraph.graphql",
+      "configuration_path": "./configuration.yaml",
+      "subgraphs": {
+        "example": {
+          "snapshot": {
+            "path": "./http_snapshots.json",
+            "base_url": "http://localhost:4047/"
+          }
+        }
+      }
+    },
+    {
+      "type": "Request",
+      "description": "Control: `manager` is the position where the connector does return `name`.",
+      "request": {
+        "query": "{ users { manager { name } } }"
+      },
+      "expected_response": {
+        "data": { "users": [{ "manager": { "name": "Ada" } }] }
+      }
+    },
+    {
+      "type": "Request",
+      "description": "The bug: `reports` is the position where the connector returns only `id`, so `name` is null. Expansion unioned the two positions of `Person`, so the planner served this from the `users` connector instead of the `Query.person` entity resolver.",
+      "request": {
+        "query": "{ users { reports { name } } }"
+      },
+      "expected_response": {
+        "data": { "users": [{ "reports": [{ "name": null }] }] }
+      }
+    },
+    {
+      "type": "Request",
+      "description": "Both positions in one query, which is the clearest statement of the defect: the same field on the same type resolves differently depending on the path it was reached by.",
+      "request": {
+        "query": "{ users { manager { name } reports { name } } }"
+      },
+      "expected_response": {
+        "data": {
+          "users": [
+            {
+              "manager": { "name": "Ada" },
+              "reports": [{ "name": null }]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "ReloadConfiguration",
+      "configuration_path": "./configuration-source-aware.yaml"
+    },
+    {
+      "type": "Request",
+      "description": "Source-aware, control: `manager` still resolves from the `users` connector in a single fetch. The entity resolver returns \"Ada (via resolver)\" for person 9, so getting plain \"Ada\" here proves the restriction did NOT manufacture an unnecessary re-entry at a position the connector can serve.",
+      "request": {
+        "query": "{ users { manager { name } } }"
+      },
+      "expected_response": {
+        "data": { "users": [{ "manager": { "name": "Ada" } }] }
+      }
+    },
+    {
+      "type": "Request",
+      "description": "Source-aware, the fix: `reports` is restricted to `{ id }`, so `name` is resolved by re-entering `Query.person`. \"Grace\" comes from GET /people/2 and could not have come from the `users` connector, which never returns a name under `reports`.",
+      "request": {
+        "query": "{ users { reports { name } } }"
+      },
+      "expected_response": {
+        "data": { "users": [{ "reports": [{ "name": "Grace" }] }] }
+      }
+    },
+    {
+      "type": "Request",
+      "description": "Source-aware, both positions in one query — the same statement as the expansion-path case above, now answered correctly: `name` resolves per position, from the connector under `manager` and from the entity resolver under `reports`.",
+      "request": {
+        "query": "{ users { manager { name } reports { name } } }"
+      },
+      "expected_response": {
+        "data": {
+          "users": [
+            {
+              "manager": { "name": "Ada" },
+              "reports": [{ "name": "Grace" }]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Request",
+      "description": "Source-aware: `title` is returned at neither position, so even `manager` needs the re-entry here. This is what distinguishes a genuinely per-position restriction from one that only happened to fix `reports`.",
+      "request": {
+        "query": "{ users { manager { title } } }"
+      },
+      "expected_response": {
+        "data": { "users": [{ "manager": { "title": "Director" } }] }
+      }
+    },
+    {
+      "type": "Stop"
+    }
+  ]
+}

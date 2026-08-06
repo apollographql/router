@@ -1,0 +1,20 @@
+# Same as `configuration.yaml`, plus the source-aware query planner. The sample
+# runs both so the divergence between the two planning paths is visible in one
+# test run: under expansion `reports { name }` is a silent null, under
+# source-aware planning it is resolved by re-entering the `Query.person` entity
+# resolver.
+experimental_connectors_source_aware: true
+
+include_subgraph_errors:
+  all: true
+
+connectors:
+  sources:
+    connectors.example:
+      override_url: http://localhost:4047
+
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: text

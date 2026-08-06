@@ -1,0 +1,32 @@
+[
+  {
+    "request": { "method": "GET", "path": "users", "body": null },
+    "response": {
+      "status": 200,
+      "headers": { "content-type": ["application/json; charset=utf-8"] },
+      "body": [
+        {
+          "id": "1",
+          "manager": { "id": "9", "name": "Ada" },
+          "reports": [{ "id": "2" }]
+        }
+      ]
+    }
+  },
+  {
+    "request": { "method": "GET", "path": "people/2", "body": null },
+    "response": {
+      "status": 200,
+      "headers": { "content-type": ["application/json; charset=utf-8"] },
+      "body": { "id": "2", "name": "Grace", "title": "Engineer" }
+    }
+  },
+  {
+    "request": { "method": "GET", "path": "people/9", "body": null },
+    "response": {
+      "status": 200,
+      "headers": { "content-type": ["application/json; charset=utf-8"] },
+      "body": { "id": "9", "name": "Ada (via resolver)", "title": "Director" }
+    }
+  }
+]

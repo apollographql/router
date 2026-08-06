@@ -660,6 +660,21 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             if n.has_reachable_cross_subgraph_edges {
                 return Ok(false);
             }
+            // A connector boundary copy breaks the "same type ⇒ same fields reachable" assumption
+            // this shortcut rests on: `can_rebase_on` below consults the subgraph *schema*, which
+            // still has the fields the copy deliberately pruned. Taking the shortcut would attach
+            // the sub-selection verbatim and never walk the field edges that force the
+            // `KeyResolution` re-entry. Reachability rather than the node itself, because with a
+            // single-subgraph connector supergraph this can fire at the root, before the traversal
+            // reaches any copy. Empty for every graph the restrictive-provides pass didn't mutate,
+            // so the expansion path is unaffected.
+            if self
+                .parameters
+                .federated_query_graph
+                .reaches_connector_boundary_copy(*node)
+            {
+                return Ok(false);
+            }
             let parent_ty = match &n.type_ {
                 QueryGraphNodeType::SchemaType(ty) => {
                     match CompositeTypeDefinitionPosition::try_from(ty.clone()) {

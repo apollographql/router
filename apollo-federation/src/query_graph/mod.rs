@@ -512,6 +512,25 @@ pub struct QueryGraph {
     /// To speed up the estimation of counting non-local selections, we precompute specific metadata
     /// about the query graph and store that here.
     non_local_selection_metadata: non_local_selections_estimation::QueryGraphMetadata,
+    /// Every node from which a [`QueryGraphNode::connector_boundary_copy`] is reachable, including
+    /// the copies themselves. Empty for every graph except a source-aware raw graph that the
+    /// restrictive-provides pass has mutated (see
+    /// [`connect_graph::restrict_connector_reachability`]).
+    ///
+    /// This exists to disable the "rest of the selection is local to this subgraph" shortcut in
+    /// query planning (`selection_set_is_fully_local_from_all_nodes`) wherever a boundary copy
+    /// could be involved. That shortcut decides a sub-selection needs no graph traversal by
+    /// rebasing it on the node's type *in the subgraph schema* — i.e. it assumes "same type ⇒ same
+    /// fields reachable". A boundary copy deliberately breaks that assumption: its reachable fields
+    /// are a strict subset of its type's fields, with the remainder reachable only through a
+    /// `KeyResolution` re-entry. Taking the shortcut would attach the sub-selection to the fetch
+    /// verbatim and never walk the pruned field edges, silently reinstating the over-merge the pass
+    /// exists to remove.
+    ///
+    /// It has to be *reachability* rather than a check on the node itself, because the shortcut is
+    /// evaluated at ancestors too: with a single-subgraph connector supergraph the whole operation
+    /// can be judged local at the `Query` node, long before the traversal reaches any copy.
+    nodes_reaching_connector_boundary_copy: IndexSet<NodeIndex>,
 }
 
 impl QueryGraph {
@@ -521,6 +540,36 @@ impl QueryGraph {
 
     pub(crate) fn graph(&self) -> &DiGraph<QueryGraphNode, QueryGraphEdge> {
         &self.graph
+    }
+
+    /// Whether a connector boundary copy is reachable from `node`, in which case the
+    /// "fully local selection" planning shortcut is unsound — see
+    /// [`Self::nodes_reaching_connector_boundary_copy`].
+    pub(crate) fn reaches_connector_boundary_copy(&self, node: NodeIndex) -> bool {
+        self.nodes_reaching_connector_boundary_copy.contains(&node)
+    }
+
+    /// Recompute [`Self::nodes_reaching_connector_boundary_copy`] by walking edges backwards from
+    /// every boundary copy. Called by the restrictive-provides pass after it mutates the graph;
+    /// a graph with no copies leaves the set empty and every caller unaffected.
+    pub(crate) fn recompute_nodes_reaching_connector_boundary_copy(&mut self) {
+        let mut reaching = IndexSet::default();
+        let mut stack: Vec<NodeIndex> = self
+            .graph
+            .node_indices()
+            .filter(|node| self.graph[*node].connector_boundary_copy)
+            .collect();
+        while let Some(node) = stack.pop() {
+            if !reaching.insert(node) {
+                continue;
+            }
+            stack.extend(
+                self.graph
+                    .neighbors_directed(node, Direction::Incoming)
+                    .filter(|ancestor| !reaching.contains(ancestor)),
+            );
+        }
+        self.nodes_reaching_connector_boundary_copy = reaching;
     }
 
     pub(crate) fn override_condition_labels(&self) -> &IndexSet<Arc<str>> {
