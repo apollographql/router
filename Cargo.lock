@@ -32,15 +32,15 @@ dependencies = [
 
 [[package]]
 name = "addr2line"
-version = "0.27.0"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efe1709241908a54ef1925c6018f41d3f523d0cfe174719761eb39e7b7bf086a"
+checksum = "e567177890eb1617b1f774005b66b26b2377afd138a2ca37aae7d8f0c81429d4"
 dependencies = [
  "cpp_demangle",
  "fallible-iterator",
  "gimli 0.34.0",
  "memmap2",
- "object 0.39.0",
+ "object 0.40.0",
  "rustc-demangle",
  "smallvec",
  "typed-arena",
@@ -289,7 +289,7 @@ dependencies = [
 name = "apollo-router"
 version = "2.17.0"
 dependencies = [
- "addr2line 0.27.0",
+ "addr2line 0.27.1",
  "ahash",
  "anyhow",
  "apollo-compiler",
@@ -4765,9 +4765,9 @@ dependencies = [
 
 [[package]]
 name = "object"
-version = "0.39.0"
+version = "0.40.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63944c133d03f44e75866bbd160b95af0ec3f6a13d936d69d31c81078cbc5baf"
+checksum = "dd229a0361b9d0d4396176e02d65897f487eebeab7caa6d443855ee152ca0b9c"
 dependencies = [
  "flate2",
  "memchr",
@@ -6438,9 +6438,9 @@ checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
 name = "ruzstd"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3640bec8aad418d7d03c72ea2de10d5c646a598f9883c7babc160d91e3c1b26c"
+checksum = "a252f5e20f038fe7b4ea53e073e65398d652c864cc162fc77c56c2f13717b888"
 dependencies = [
  "twox-hash",
 ]
