@@ -6,4 +6,4 @@ The router expands such an error across every entity in the batch by matching th
 
 `Path::equal_if_flattened` now also treats two `Key` path elements as equal whenever their names match, regardless of any type condition attached to either side, so these errors correctly surface once per affected entity instead of vanishing silently.
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/PLACEHOLDER
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9925
