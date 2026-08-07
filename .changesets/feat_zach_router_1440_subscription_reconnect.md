@@ -8,17 +8,19 @@ Adds two new fields to the `subscription` configuration block that allow the rou
 ```yaml
 subscription:
   enabled: true
-  max_reconnect_attempts: 5      # retry up to 5 times on connection drop
-  reconnect_delay: 2s            # wait 2 seconds between each attempt
   mode:
     passthrough:
       all:
         path: /subscriptions
+        max_reconnect_attempts: 5      # retry up to 5 times on connection drop
+        reconnect_delay: 2s            # wait 2 seconds between each attempt
 ```
 
 When the WebSocket connection to a subgraph drops and reconnection is configured, the router re-establishes the connection transparently — client subscriptions remain open during the reconnect window and resume receiving events once the connection is restored. After all retry attempts are exhausted the router forwards the final transport error to the client and terminates the subscription.
 
 Reconnection only applies to WebSocket passthrough mode. Callback-mode subscriptions are unaffected.
+
+Independently of whether reconnection is enabled, a subgraph WebSocket that ends without a protocol-level `complete` now always surfaces a transport error to subscribed clients. Previously this was inconsistent — an abnormal close or read failure forwarded an error, but a connection that ended with no close frame terminated the client subscription silently.
 
 Two behaviors worth noting when enabling reconnection:
 

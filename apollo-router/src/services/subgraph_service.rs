@@ -2756,6 +2756,93 @@ mod tests {
         server.await.unwrap();
     }
 
+    /// Same as [`emulate_websocket_server_with_reconnect`], but speaks the legacy
+    /// subscriptions-transport-ws protocol: negotiates the "graphql-ws" subprotocol, expects an
+    /// `OldStart` message rather than `Subscribe`, and sends subscription events as a raw
+    /// `type: "data"` message (rather than `type: "next"`) to exercise the client's
+    /// `#[serde(alias = "data")]` handling.
+    async fn emulate_websocket_server_with_reconnect_legacy_protocol(
+        listener: TcpListener,
+        connection_count: Arc<AtomicU32>,
+    ) {
+        let app = Router::new()
+            .route(
+                "/ws",
+                get(
+                    |ws: WebSocketUpgrade,
+                     ConnectInfo(_addr): ConnectInfo<SocketAddr>,
+                     State(count): State<Arc<AtomicU32>>| async move {
+                        let conn_num = count.fetch_add(1, Ordering::SeqCst);
+                        ws.protocols(["graphql-ws"])
+                            .on_upgrade(move |mut socket| async move {
+                                let msg = socket
+                                    .recv()
+                                    .await
+                                    .unwrap()
+                                    .unwrap()
+                                    .into_text()
+                                    .unwrap();
+                                assert!(matches!(
+                                    serde_json::from_str::<ClientMessage>(&msg).unwrap(),
+                                    ClientMessage::ConnectionInit { .. }
+                                ));
+                                socket
+                                    .send(Message::text(
+                                        serde_json::to_string(&ServerMessage::ConnectionAck)
+                                            .unwrap(),
+                                    ))
+                                    .await
+                                    .unwrap();
+
+                                let msg = socket
+                                    .recv()
+                                    .await
+                                    .unwrap()
+                                    .unwrap()
+                                    .into_text()
+                                    .unwrap();
+                                let client_id = if let ClientMessage::OldStart { id, .. } =
+                                    serde_json::from_str::<ClientMessage>(&msg).unwrap()
+                                {
+                                    id
+                                } else {
+                                    panic!("expected OldStart message");
+                                };
+
+                                let username =
+                                    if conn_num == 0 { "ada_lovelace" } else { "grace_hopper" };
+                                socket
+                                    .send(Message::text(format!(
+                                        r#"{{"type":"data","id":"{client_id}","payload":{{"data":{{"userWasCreated":{{"username":"{username}"}}}}}}}}"#
+                                    )))
+                                    .await
+                                    .unwrap();
+
+                                if conn_num == 0 {
+                                    // Simulate unexpected connection drop with an abnormal close
+                                    // frame (code 1011), which surfaces as a `Disconnected` event.
+                                    socket
+                                        .send(Message::Close(Some(CloseFrame {
+                                            code: 1011,
+                                            reason: "unexpected termination".into(),
+                                        })))
+                                        .await
+                                        .unwrap();
+                                }
+                                // Subsequent connections: hold open until the test aborts the task.
+                            })
+                    },
+                ),
+            )
+            .with_state(connection_count);
+
+        let server = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        );
+        server.await.unwrap();
+    }
+
     /// First connection: completes the handshake, sends one event, then drops with an abnormal
     /// close (triggering a reconnect). Every subsequent connection refuses the WebSocket upgrade
     /// (HTTP 500), so the reconnect handshake fails inside `open_ws_gql_stream`. Used to verify a
@@ -3187,6 +3274,35 @@ mod tests {
         .layer(s)
     }
 
+    fn subscription_config_with_reconnect_protocol(
+        max_reconnect_attempts: u32,
+        protocol: WebSocketProtocol,
+    ) -> SubscriptionConfig {
+        let mut config = subscription_config_with_reconnect(max_reconnect_attempts);
+        if let Some(passthrough) = &mut config.mode.passthrough
+            && let Some(ws) = passthrough.subgraphs.get_mut("test")
+        {
+            ws.protocol = protocol;
+        }
+        config
+    }
+
+    fn with_subscription_layer_reconnect_protocol(
+        s: SubgraphService,
+        max_reconnect_attempts: u32,
+        protocol: WebSocketProtocol,
+    ) -> SubscriptionSubgraphService<SubgraphService> {
+        SubscriptionSubgraphLayer::new(
+            crate::plugins::subscription::notification::Notify::builder().build(),
+            Some(Arc::new(subscription_config_with_reconnect_protocol(
+                max_reconnect_attempts,
+                protocol,
+            ))),
+            Arc::from(s.service.to_string()),
+        )
+        .layer(s)
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn test_websocket_reconnect_succeeds() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -3251,6 +3367,92 @@ mod tests {
         // reconnect window (so HTTP-multipart clients don't tear down). The next item the
         // client sees is data from the reconnected stream. Loop defensively in case any
         // unexpected error item slips through.
+        let second = loop {
+            let item = gql_stream.next().await.unwrap();
+            if item.errors.is_empty() {
+                break item;
+            }
+        };
+        assert_eq!(
+            second,
+            graphql::Response::builder()
+                .subscribed(true)
+                .data(serde_json_bytes::json!({"userWasCreated": {"username": "grace_hopper"}}))
+                .build()
+        );
+
+        spawned_task.abort();
+    }
+
+    /// Same scenario as `test_websocket_reconnect_succeeds`, but against a subgraph speaking the
+    /// legacy subscriptions-transport-ws protocol (`OldStart`/`OldStop`, "graphql-ws"
+    /// subprotocol, `type: "data"` events) rather than graphql-ws (`Subscribe`/`Complete`,
+    /// "graphql-transport-ws" subprotocol, `type: "next"`). Confirms reconnect works
+    /// independently of which WebSocket protocol the subgraph uses.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_websocket_reconnect_succeeds_legacy_protocol() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let connection_count = Arc::new(AtomicU32::new(0));
+        let spawned_task =
+            tokio::task::spawn(emulate_websocket_server_with_reconnect_legacy_protocol(
+                listener,
+                connection_count.clone(),
+            ));
+
+        let subgraph_service = with_subscription_layer_reconnect_protocol(
+            SubgraphService::new(
+                "test",
+                true,
+                HttpClientServiceFactory::from_config(
+                    "test",
+                    &Configuration::default(),
+                    crate::configuration::shared::Client::default(),
+                ),
+            )
+            .expect("can create a SubgraphService"),
+            1,
+            WebSocketProtocol::SubscriptionsTransportWs,
+        );
+
+        let (tx, rx) = mpsc::channel(2);
+        let mut rx_stream = ReceiverStream::new(rx);
+        let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
+
+        let response = subgraph_service
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request(
+                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                    ))
+                    .subgraph_request(subgraph_http_request(
+                        url,
+                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                    ))
+                    .operation_kind(OperationKind::Subscription)
+                    .subscription_stream(tx)
+                    .subgraph_name(String::from("test"))
+                    .context(Context::new())
+                    .build(),
+            )
+            .await
+            .unwrap();
+        assert!(response.response.body().errors.is_empty());
+
+        let mut gql_stream = rx_stream.next().await.unwrap();
+
+        // First event comes from the initial connection.
+        let first = gql_stream.next().await.unwrap();
+        assert_eq!(
+            first,
+            graphql::Response::builder()
+                .subscribed(true)
+                .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                .build()
+        );
+
+        // Transient transport errors from the abnormal close are suppressed during the
+        // reconnect window. The next item the client sees is data from the reconnected stream.
         let second = loop {
             let item = gql_stream.next().await.unwrap();
             if item.errors.is_empty() {
@@ -4026,16 +4228,18 @@ mod tests {
             let first = gql_stream.next().await;
             assert!(first.is_some(), "stream ended before initial data event");
 
-            // Wait long enough for the 1 ms reconnect delay to expire and for
-            // `open_ws_gql_stream` to initiate a TCP connection to the stalling server,
-            // then drop the stream to fire the closing signal mid-handshake.
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            // Confirm the handshake is actually in flight before we drop the stream — otherwise
-            // the assertions below would pass trivially because the handshake was never attempted.
-            assert_eq!(
-                connection_count.load(Ordering::SeqCst),
-                2,
-                "expected the reconnect handshake to have dialed the stalling server by now"
+            // Poll until the reconnect handshake has actually dialed the stalling server before
+            // dropping the stream — otherwise the assertions below would pass trivially because
+            // the handshake was never attempted. This avoids racing a fixed sleep against the
+            // 1 ms reconnect delay and the TCP connect.
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                while connection_count.load(Ordering::SeqCst) < 2 {
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .expect(
+                "expected the reconnect handshake to have dialed the stalling server within 5s",
             );
             drop(gql_stream);
 
