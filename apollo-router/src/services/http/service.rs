@@ -31,6 +31,7 @@ use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 use tower::ServiceBuilder;
+use tower::ServiceExt as _;
 #[cfg(unix)]
 use tower::util::Either;
 use tower_http::decompression::Decompression;
@@ -43,6 +44,8 @@ use super::ServiceTarget;
 use super::connection_timing::ConnectionTimingConnector;
 use crate::Configuration;
 use crate::axum_factory::compression::Compressor;
+use crate::batching::BatchQuery;
+use crate::configuration::Batching;
 use crate::configuration::TlsClientAuth;
 use crate::configuration::shared::DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT;
 use crate::error::FetchError;
@@ -496,6 +499,49 @@ impl tower::Service<HttpRequest> for HttpClientService {
     }
 
     fn call(&mut self, request: HttpRequest) -> Self::Future {
+        // We use configuration to determine if calls may be batched. If we have Batching
+        // configuration, then we check (batch_include()) if the current subgraph has batching enabled
+        // in configuration. If it does, we then start to process a potential batch.
+        //
+        // If we are processing a batch, then we'd like to park tasks here, but we can't park them whilst
+        // we have the context extensions lock held. That would be very bad...
+        // We grab the (potential) BatchQuery and then operate on it later
+        let opt_batch_query = request.context.extensions().with_lock(|lock| {
+            lock.get::<Batching>()
+                .and_then(|batching_config| {
+                    batching_config.batch_include(&self.service).then_some(())
+                })
+                .and_then(|_| lock.get::<BatchQuery>().cloned())
+                .and_then(|bq| (!bq.finished()).then_some(bq))
+        });
+
+        // If we have a batch query, then it's time for batching
+        if let Some(query) = opt_batch_query {
+            let service = self.clone();
+            let service = std::mem::replace(self, service);
+
+            return Box::pin(async move {
+                let service_name = service.service.clone();
+
+                let response_rx = query
+                    .signal_progress(
+                        service_name.clone(),
+                        // FIXME(@goto-bus-stop): temporary to make the types work
+                        service.boxed_clone(),
+                        request,
+                    )
+                    .await?;
+
+                // Park this query until we have our response and pass it back up
+                response_rx
+                    .await
+                    .map_err(|err| FetchError::SubrequestBatchingError {
+                        service: service_name.to_string(),
+                        reason: format!("tx receive failed: {err}"),
+                    })?
+            });
+        }
+
         let HttpRequest {
             mut http_request,
             context,

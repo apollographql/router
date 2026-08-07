@@ -7,7 +7,7 @@ use std::task::Poll;
 
 use futures::future::BoxFuture;
 use http::StatusCode;
-use http_body::Body;
+use http_body::Body as _;
 use itertools::Itertools;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
@@ -24,11 +24,9 @@ use super::http::get_uri_details;
 use super::http::http_response_to_graphql_response;
 use crate::Context;
 use crate::Notify;
-use crate::batching::BatchQuery;
 use crate::batching::BatchQueryInfo;
 use crate::batching::SubgraphBatchRequest;
 use crate::batching::assemble_batch;
-use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::configuration::SubgraphApq;
 use crate::configuration::subgraph::SubgraphConfiguration;
@@ -50,6 +48,7 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::services::Plugins;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::services::http::HttpResponse;
 use crate::services::http::service::WireByteCount;
 use crate::services::layers::apq::subgraph::SubgraphApqLayer;
 use crate::services::layers::content_negotiation::ContentType;
@@ -107,24 +106,7 @@ pub(crate) async fn process_batch(
     mut contexts: Vec<(Context, SubgraphRequestId)>,
     request: http::Request<RouterBody>,
     listener_count: usize,
-) -> Result<Vec<SubgraphResponse>, FetchError> {
-    let schema_uri = request.uri();
-    let (host, port, path) = get_uri_details(schema_uri);
-
-    // We can't provide a single operation name in the span (since we may be processing multiple
-    // operations). Product decision, use the hard coded value "batch".
-    let subgraph_req_span = tracing::info_span!(SUBGRAPH_REQUEST_SPAN_NAME,
-        "otel.kind" = "CLIENT",
-        "net.peer.name" = %host,
-        "net.peer.port" = %port,
-        "http.route" = %path,
-        "http.url" = %schema_uri,
-        "net.transport" = "ip_tcp",
-        "apollo.subgraph.name" = %&service,
-        "graphql.operation.name" = "batch",
-        "apollo.subgraph.response.aborted" = tracing::field::Empty,
-    );
-
+) -> Result<Vec<HttpResponse>, FetchError> {
     // The graphql spec is lax about what strategy to use for processing responses: https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#processing-the-response
     //
     // "If the response uses a non-200 status code and the media type of the response payload is application/json
@@ -169,34 +151,32 @@ pub(crate) async fn process_batch(
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     tracing::debug!("fetching from subgraph: {service}");
-    let (parts, content_type, body) = match do_fetch(http_client, &batch_context, service, request)
-        .instrument(subgraph_req_span)
-        .await
-    {
-        Ok(res) => res,
-        Err(err) => {
-            let resp = http::Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(err.to_graphql_error(None))
-                .map_err(|err| FetchError::SubrequestHttpError {
-                    status_code: None,
-                    service: service_name.clone(),
-                    reason: format!("cannot create the http response from error: {err:?}"),
-                })?;
-            let (parts, body) = resp.into_parts();
-            let body =
-                serde_json::to_vec(&body).map_err(|err| FetchError::SubrequestHttpError {
-                    status_code: None,
-                    service: service_name.clone(),
-                    reason: format!("cannot serialize the error: {err:?}"),
-                })?;
-            (
-                parts,
-                Ok(ContentType::ApplicationJson),
-                Some(Ok(body.into())),
-            )
-        }
-    };
+    let (parts, content_type, body) =
+        match do_fetch(http_client, &batch_context, service, request).await {
+            Ok(res) => res,
+            Err(err) => {
+                let resp = http::Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(err.to_graphql_error(None))
+                    .map_err(|err| FetchError::SubrequestHttpError {
+                        status_code: None,
+                        service: service_name.clone(),
+                        reason: format!("cannot create the http response from error: {err:?}"),
+                    })?;
+                let (parts, body) = resp.into_parts();
+                let body =
+                    serde_json::to_vec(&body).map_err(|err| FetchError::SubrequestHttpError {
+                        status_code: None,
+                        service: service_name.clone(),
+                        reason: format!("cannot serialize the error: {err:?}"),
+                    })?;
+                (
+                    parts,
+                    Ok(ContentType::ApplicationJson),
+                    Some(Ok(body.into())),
+                )
+            }
+        };
 
     // Mask sensitive response headers once, for reuse in both the telemetry
     // event and the debug log below. Logging the raw `parts` would otherwise
@@ -207,41 +187,6 @@ pub(crate) async fn process_batch(
         Some(service),
         &parts.headers,
     );
-
-    let subgraph_response_event = batch_context
-        .extensions()
-        .with_lock(|lock| lock.get::<SubgraphEventResponse>().cloned());
-    if let Some(event) = subgraph_response_event {
-        let mut attrs = Vec::with_capacity(5);
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.response.headers"),
-            opentelemetry::Value::String(headers_str.clone().into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.response.status"),
-            opentelemetry::Value::String(format!("{}", parts.status).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.response.version"),
-            opentelemetry::Value::String(format!("{:?}", parts.version).into()),
-        ));
-        if let Some(Ok(b)) = &body {
-            attrs.push(KeyValue::new(
-                Key::from_static_str("http.response.body"),
-                opentelemetry::Value::String(String::from_utf8_lossy(b).to_string().into()),
-            ));
-        }
-        attrs.push(KeyValue::new(
-            Key::from_static_str("subgraph.name"),
-            opentelemetry::Value::String(service_name.clone().into()),
-        ));
-        log_event(
-            event.level,
-            "subgraph.response",
-            attrs,
-            &format!("Raw response from subgraph {service:?} received"),
-        );
-    }
 
     tracing::debug!(
         "parts status: {:?}, version: {:?}, headers: {headers_str}, content_type: {content_type:?}, body: {body:?}",
@@ -264,7 +209,7 @@ pub(crate) async fn process_batch(
         service: service_name.clone(),
         reason: error.to_string(),
     })?;
-    let mut graphql_responses = Vec::with_capacity(array.len());
+    let mut exploded_bodies = Vec::with_capacity(array.len());
     for value in array {
         let object =
             ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
@@ -274,30 +219,26 @@ pub(crate) async fn process_batch(
 
         // Map our Vec<u8> into Bytes
         // Map our serde conversion error to a FetchError
-        let body = Some(
-            serde_json::to_vec(&object)
-                .map(|v| v.into())
-                .map_err(|error| FetchError::SubrequestMalformedResponse {
-                    service: service_name.clone(),
-                    reason: error.to_string(),
-                }),
-        );
+        let body = serde_json::to_vec(&object).map_err(|error| {
+            FetchError::SubrequestMalformedResponse {
+                service: service_name.clone(),
+                reason: error.to_string(),
+            }
+        })?;
 
-        let graphql_response =
-            http_response_to_graphql_response(service, content_type.clone(), body, &parts);
-        graphql_responses.push(graphql_response);
+        exploded_bodies.push(router::body::from_bytes(body));
     }
 
-    tracing::debug!("we have a vec of graphql_responses: {graphql_responses:?}");
+    tracing::debug!("we have a vec of graphql_responses: {exploded_bodies:?}");
     // Before we process our graphql responses, ensure that we have a context for each
     // response
-    if graphql_responses.len() != contexts.len() {
+    if exploded_bodies.len() != contexts.len() {
         return Err(FetchError::SubrequestBatchingError {
             service: service_name.clone(),
             reason: format!(
                 "number of contexts ({}) is not equal to number of graphql responses ({})",
                 contexts.len(),
-                graphql_responses.len()
+                exploded_bodies.len()
             ),
         });
     }
@@ -305,32 +246,29 @@ pub(crate) async fn process_batch(
     // We are going to pop contexts from the back, so let's reverse our contexts
     contexts.reverse();
     // Build an http Response for each graphql response
-    let subgraph_responses: Result<Vec<_>, _> = graphql_responses
+    let exploded_responses: Result<Vec<_>, _> = exploded_bodies
         .into_iter()
-        .map(|res| {
+        .map(|body| {
             http::Response::builder()
                 .status(parts.status)
                 .version(parts.version)
-                .body(res)
-                .map(|mut http_res| {
-                    *http_res.headers_mut() = parts.headers.clone();
+                .body(body)
+                .map(|mut http_response| {
+                    *http_response.headers_mut() = parts.headers.clone();
                     // Use the original context for the request to create the response
-                    let (context, id) =
+                    let (context, _id) =
                         contexts.pop().expect("we have a context for each response");
-                    let resp = SubgraphResponse::new_from_response(
-                        http_res,
+                    let resp = HttpResponse {
+                        http_response,
                         context,
-                        service_name.clone(),
-                        id,
-                    );
+                    };
 
                     // Avoid `{resp:?}`: SubgraphResponse's derived Debug prints
                     // the response HeaderMap unmasked. Log the non-header parts.
                     tracing::debug!(
-                        "built subgraph response for {}: status={:?}, body={:?}",
-                        resp.subgraph_name,
-                        resp.response.status(),
-                        resp.response.body(),
+                        "built subgraph response for {service}: status={:?}, body={:?}",
+                        resp.http_response.status(),
+                        resp.http_response.body(),
                     );
                     resp
                 })
@@ -340,20 +278,18 @@ pub(crate) async fn process_batch(
         })
         .collect();
 
-    // Avoid `{subgraph_responses:?}`: each SubgraphResponse's derived Debug
-    // prints the response HeaderMap unmasked. Log a count (or the error).
-    match &subgraph_responses {
+    match &exploded_responses {
         Ok(responses) => tracing::debug!("built {} subgraph responses", responses.len()),
         Err(error) => tracing::debug!("failed to build subgraph responses: {error}"),
     }
-    subgraph_responses
+    exploded_responses
 }
 
 /// Notify all listeners of a batch query of the results
 async fn notify_batch_query(
     service: String,
-    senders: Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
-    responses: Result<Vec<SubgraphResponse>, FetchError>,
+    senders: Vec<oneshot::Sender<Result<HttpResponse, BoxError>>>,
+    responses: Result<Vec<HttpResponse>, FetchError>,
 ) -> Result<(), BoxError> {
     // Avoid `{responses:#?}`: SubgraphResponse's derived Debug prints the
     // response HeaderMap unmasked. Log the listener count and a result summary.
@@ -376,10 +312,10 @@ async fn notify_batch_query(
                 // Try to notify all waiters. If we can't notify an individual sender, then log an error
                 // which, unlike failing to notify on success (see below), contains the the entire error
                 // response.
-                if let Err(log_error) = tx.send(Err(Box::new(e.clone()))).map_err(|error| {
+                if let Err(log_error) = tx.send(Err(Box::new(e.clone()))).map_err(|_| {
                     FetchError::SubrequestBatchingError {
                         service: service.clone(),
-                        reason: format!("tx send failed: {error:?}"),
+                        reason: format!("tx send failed: {e:?}"),
                     }
                 }) {
                     tracing::error!(service, error=%log_error, "failed to notify sender that batch processing failed");
@@ -434,7 +370,7 @@ struct BatchInfo {
 
 type BatchResult = (
     BatchInfo,
-    Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
+    Vec<oneshot::Sender<Result<HttpResponse, BoxError>>>,
 );
 
 /// Collect all batch requests and process them concurrently
@@ -513,44 +449,8 @@ pub(crate) async fn process_batches(
     Ok(())
 }
 
+/// call_http makes http calls with modified graphql::Request (body)
 async fn call_http(
-    request: SubgraphRequest,
-    http_client: crate::services::http::BoxCloneService,
-    service_name: &str,
-) -> Result<SubgraphResponse, BoxError> {
-    // We use configuration to determine if calls may be batched. If we have Batching
-    // configuration, then we check (batch_include()) if the current subgraph has batching enabled
-    // in configuration. If it does, we then start to process a potential batch.
-    //
-    // If we are processing a batch, then we'd like to park tasks here, but we can't park them whilst
-    // we have the context extensions lock held. That would be very bad...
-    // We grab the (potential) BatchQuery and then operate on it later
-    let opt_batch_query = request.context.extensions().with_lock(|lock| {
-        lock.get::<Batching>()
-            .and_then(|batching_config| batching_config.batch_include(service_name).then_some(()))
-            .and_then(|_| lock.get::<BatchQuery>().cloned())
-            .and_then(|bq| (!bq.finished()).then_some(bq))
-    });
-
-    // If we have a batch query, then it's time for batching
-    if let Some(query) = opt_batch_query {
-        let response_rx = query.signal_progress(http_client, request).await?;
-
-        // Park this query until we have our response and pass it back up
-        response_rx
-            .await
-            .map_err(|err| FetchError::SubrequestBatchingError {
-                service: service_name.to_string(),
-                reason: format!("tx receive failed: {err}"),
-            })?
-    } else {
-        tracing::debug!("we called http");
-        call_single_http(request, http_client, service_name).await
-    }
-}
-
-/// call_single_http makes http calls with modified graphql::Request (body)
-async fn call_single_http(
     request: SubgraphRequest,
     client: crate::services::http::BoxCloneService,
     service_name: &str,
@@ -571,8 +471,16 @@ async fn call_single_http(
         subgraph_request,
         context,
         id: subgraph_request_id,
+        query_hash,
         ..
     } = request;
+
+    // Used in batching to identify the query
+    // TODO(@goto-bus-stop): this should be in a batching-specific layer or done differently
+    context.extensions().with_lock(|lock| {
+        lock.insert(query_hash);
+        lock.insert(subgraph_request_id.clone());
+    });
 
     let (parts, body) = subgraph_request.into_parts();
     let operation_name = body
