@@ -25,23 +25,23 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
-      - image: cimg/redis:7.4.9
+      - image: cimg/redis:7.4.10
       - image: openzipkin/zipkin:3.6.1
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.50.0
       # redis cluster - 3 primaries, 3 replicas
-      - image: cimg/redis:7.4.9
+      - image: cimg/redis:7.4.10
         command: [ "redis-server", "--protected-mode", "no", "--port", "7000", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.9
+      - image: cimg/redis:7.4.10
         command: [ "redis-server", "--protected-mode", "no", "--port", "7001", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.9
+      - image: cimg/redis:7.4.10
         command: [ "redis-server", "--protected-mode", "no", "--port", "7002", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.9
+      - image: cimg/redis:7.4.10
         command: [ "redis-server", "--protected-mode", "no", "--port", "7003", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.9
+      - image: cimg/redis:7.4.10
         command: [ "redis-server", "--protected-mode", "no", "--port", "7004", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.9
+      - image: cimg/redis:7.4.10
         command: [ "redis-server", "--protected-mode", "no", "--port", "7005", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.9
+      - image: cimg/redis:7.4.10
         command: [ "sh", "-c", "sleep 30; echo yes | redis-cli --cluster create --cluster-replicas 1 localhost:7000 localhost:7001 localhost:7002 localhost:7003 localhost:7004 localhost:7005" ]
     resource_class: 2xlarge
     environment:
@@ -82,19 +82,19 @@ executors:
   windows_build: &windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.medium
+    resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
-      CARGO_BUILD_JOBS: 2
+      CARGO_BUILD_JOBS: 4
   windows_test: &windows_test_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.medium
+    resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
-      CARGO_BUILD_JOBS: 2
+      CARGO_BUILD_JOBS: 4
 
 # We don't use {{ arch }} because on windows it is unstable https://discuss.circleci.com/t/value-of-arch-unstable-on-windows/40079
 parameters:
@@ -281,8 +281,19 @@ commands:
                   iex "& {$(irm get.scoop.sh)} -RunAsAdmin"
             - run:
                 name: Install mise
+                no_output_timeout: 20m
                 command: |
-                  scoop install mise@${MISE_VERSION#v}
+                  for i in 1 2 3; do
+                    if scoop install mise@${MISE_VERSION#v}; then
+                      break
+                    fi
+                    if [ $i -eq 3 ]; then
+                      echo "scoop install mise failed after 3 attempts"
+                      exit 1
+                    fi
+                    echo "scoop install mise failed (attempt $i/3), retrying in $((i*5))s..."
+                    sleep $((i*5))
+                  done
                   for i in 1 2 3; do
                     if mise install --yes --quiet; then
                       break
@@ -992,8 +1003,7 @@ jobs:
   # tag scheme, no helm chart, no security scan, no notifications. Builds a
   # single linux/amd64 image from whatever branch/commit triggered the
   # pipeline and pushes it to a dedicated, non-release image repository for
-  # consumption by the internal testing framework (RTF). See
-  # AD_HOC_TEST_BUILD_PLAN.md for the design rationale.
+  # consumption by the internal testing framework (RTF).
   build_test_image:
     environment:
       <<: *common_job_environment
@@ -1029,7 +1039,7 @@ jobs:
 
             # Tag by branch + short commit sha -- NOT a release/nightly version.
             # This pipeline has nothing to do with release or nightly versioning.
-            SANITIZED_BRANCH=$(echo "${CIRCLE_BRANCH}" | tr -c 'a-zA-Z0-9' '-')
+            SANITIZED_BRANCH=$(printf '%s' "${CIRCLE_BRANCH}" | tr -c 'a-zA-Z0-9' '-')
             SHORT_SHA=$(git rev-parse --short=8 HEAD)
             TAG="${SANITIZED_BRANCH}-${SHORT_SHA}"
 
@@ -1281,7 +1291,7 @@ workflows:
 
   # Ad hoc test build: trigger manually via CircleCI's "Trigger Pipeline" UI
   # on any branch, setting the `test_build` boolean parameter to true. Not
-  # part of releases or nightlies -- see AD_HOC_TEST_BUILD_PLAN.md.
+  # part of releases or nightlies.
   build-test-image:
     when: << pipeline.parameters.test_build >>
     jobs:

@@ -915,6 +915,38 @@ query {
 
 The response would include an `"UNAUTHORIZED_FIELD_OR_TYPE"` error at the `/posts/... on PrivateBlog` path.
 
+## Authorization directives and `@include`/`@skip`
+
+Authorization directives take precedence over GraphQL's built-in `@include` and `@skip` directives. If an operation references a field protected by `@requiresScopes`, `@authenticated`, or `@policy`, the router enforces that requirement even when `@include(if: false)` or `@skip(if: true)` excludes the field from the response.
+
+Continuing the [social media example](#example-requiresscopes-use-case), a request without the `read:email` scope receives an `UNAUTHORIZED_FIELD_OR_TYPE` error at the `/users/@/email` path for both of these operations:
+
+<CodeColumns>
+
+```graphql title="Field requested unconditionally"
+query {
+  users {
+    username
+    email
+  }
+}
+```
+
+```graphql title="Field excluded with @include"
+query {
+  users {
+    username
+    email @include(if: false)
+  }
+}
+```
+
+</CodeColumns>
+
+This applies whether the `if` argument is a literal value or a variable.
+
+Whether a client is allowed to request a field is a separate question from whether the router fetches it. Treat an authorization directive as governing every reference to a field within an operation: if a request doesn't meet a field's requirements, omit the field from the operation entirely rather than excluding it with `@include` or `@skip`.
+
 ## Query deduplication
 
 You can enable [query deduplication](/router/configuration/traffic-shaping/#query-deduplication) in the router to reduce redundant requests to a subgraph. The router does this by buffering similar queries and reusing the result.
