@@ -1,9 +1,0 @@
-type T @key(fields: "id") {
-  id: ID!
-  u: U @shareable
-}
-
-type U @shareable {
-  x: String
-  w: Int
-}
