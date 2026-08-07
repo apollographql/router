@@ -2094,10 +2094,10 @@ impl TextMapPropagator for CustomTraceIdPropagator {
         cx: &opentelemetry::Context,
         extractor: &dyn Extractor,
     ) -> opentelemetry::Context {
-        cx.with_remote_span_context(
-            self.extract_span_context(extractor)
-                .unwrap_or_else(SpanContext::empty_context),
-        )
+        match self.extract_span_context(extractor) {
+            Some(span_context) => cx.with_remote_span_context(span_context),
+            None => cx.clone(),
+        }
     }
 
     fn fields(&self) -> FieldIter<'_> {
@@ -3429,6 +3429,50 @@ mod tests {
         ));
 
         assert!(tracing_test::logs_contain(&invalid_trace_id));
+    }
+
+    #[test]
+    fn test_custom_trace_id_propagator_preserves_context_when_header_absent() {
+        let header = String::from("x-trace-id");
+        let existing_trace_id = TraceId::from(0x04f9e396465c4840bc2bf493b8b1a7fc);
+        let cx = opentelemetry::Context::new().with_remote_span_context(
+            SpanContext::new(
+                existing_trace_id,
+                SpanId::from(0x1234567890abcdef),
+                TraceFlags::SAMPLED,
+                true,
+                TraceState::default(),
+            )
+        );
+
+        let propagator = CustomTraceIdPropagator::new(header.clone(), TraceIdFormat::Uuid);
+        let headers: HashMap<String, String> = HashMap::new();
+        let result_cx = propagator.extract_with_context(&cx, &headers);
+
+        assert_eq!(result_cx.span().span_context().trace_id(), existing_trace_id);
+    }
+
+    #[test]
+    fn test_custom_trace_id_propagator_preserves_context_when_header_invalid() {
+        let header = String::from("x-trace-id");
+        let invalid_trace_id = String::from("");
+        let existing_trace_id = TraceId::from(0x04f9e396465c4840bc2bf493b8b1a7fc);
+        let cx = opentelemetry::Context::new().with_remote_span_context(
+            SpanContext::new(
+                existing_trace_id,
+                SpanId::from(0x1234567890abcdef),
+                TraceFlags::SAMPLED,
+                true,
+                TraceState::default(),
+            )
+        );
+
+        let propagator = CustomTraceIdPropagator::new(header.clone(), TraceIdFormat::Uuid);
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert(header, invalid_trace_id.clone());
+        let result_cx = propagator.extract_with_context(&cx, &headers);
+
+        assert_eq!(result_cx.span().span_context().trace_id(), existing_trace_id);
     }
 
     #[test]
