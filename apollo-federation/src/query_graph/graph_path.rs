@@ -243,7 +243,7 @@ impl ExcludedDestinations {
             .any(|excluded| excluded.as_ref() == destination)
     }
 
-    fn add_excluded(&self, destination: &Arc<str>) -> Self {
+    pub(crate) fn add_excluded(&self, destination: &Arc<str>) -> Self {
         if !self.is_excluded(destination) {
             let mut new = self.0.as_ref().clone();
             new.push(destination.clone());
@@ -886,7 +886,7 @@ where
     fn merge_edge_conditions_with_resolution(
         &self,
         condition_path_tree: &Option<Arc<OpPathTree>>,
-        context_map: &Option<IndexMap<Name, ContextMapEntry>>,
+        context_map: &Option<Arc<IndexMap<Name, ContextMapEntry>>>,
     ) -> (
         Vec<Option<Arc<OpPathTree>>>,
         Vec<Option<IndexSet<Name>>>,
@@ -1324,7 +1324,7 @@ where
                 return Ok(ConditionResolution::Satisfied {
                     cost: total_cost,
                     path_tree: None,
-                    context_map: Some(context_map),
+                    context_map: Some(Arc::new(context_map)),
                 });
             }
         }
@@ -1397,7 +1397,7 @@ where
         } = &mut resolution
         {
             *cost += total_cost;
-            *ctx_map = Some(context_map);
+            *ctx_map = Some(Arc::new(context_map));
         }
         snapshot!(
             "ConditionResolution",
