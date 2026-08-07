@@ -76,6 +76,36 @@ pub use self::models::MakeUriError;
 pub use self::models::OriginatingDirective;
 pub use self::models::SourceName;
 pub use self::spec::connect::ConnectBatchArguments;
+
+/// Whether `supergraph_sdl` must be planned **source-aware** — over the raw
+/// supergraph, with connectors left unexpanded — regardless of any router
+/// configuration.
+///
+/// **Connect v0.5 implies source-aware planning.** The spec version in the
+/// developer's `@link` is the single place this is configured: it is visible to
+/// composition (which relaxes `Code::CircularReference` at v0.5, see
+/// `validation::connect::selection::enforce_circular_reference`) and to the
+/// router at schema load, so the two cannot drift apart.
+///
+/// The reason is that v0.5 permits output shapes expansion cannot represent — one
+/// type reached at several positions with different sub-selections, including a
+/// type reaching itself (`User.friends: [User]`). Expansion has one type per
+/// synthetic subgraph, so it silently drops such fields from the expanded
+/// supergraph while the API schema still advertises them; querying one then fails
+/// with an internal error. Rather than compose a schema the default planner
+/// cannot serve, a v0.5 supergraph is never expanded.
+///
+/// Returns `false` for a supergraph with no connect link, and for connect v0.4
+/// and earlier — those are released, still served by expansion, and deliberately
+/// unaffected.
+pub fn supergraph_requires_source_aware(supergraph_sdl: &str) -> bool {
+    apollo_compiler::Schema::parse(supergraph_sdl, "supergraph.graphql")
+        .ok()
+        .as_ref()
+        .and_then(spec::connect_spec_from_schema)
+        .is_some_and(|spec| spec >= ConnectSpec::V0_5)
+}
+
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;

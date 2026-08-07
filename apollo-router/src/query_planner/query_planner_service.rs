@@ -10,6 +10,7 @@ use std::time::Instant;
 use apollo_compiler::Name;
 use apollo_compiler::ast;
 use apollo_federation::connectors::Connector;
+use apollo_federation::connectors::supergraph_requires_source_aware;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::connector_stamp::stamp_connector_coordinates;
@@ -101,6 +102,7 @@ pub(crate) struct QueryPlannerService {
     enable_authorization_directives: bool,
     authorization_config: Arc<authorization::Conf>,
     _federation_instrument: ObservableGauge<u64>,
+    _connectors_source_aware_instrument: Option<ObservableGauge<u64>>,
     compute_jobs_queue_size_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm,
     introspection: Arc<IntrospectionCache>,
@@ -122,10 +124,36 @@ fn federation_version_instrument(federation_version: Option<i64>) -> ObservableG
         .build()
 }
 
+/// Records whether this router is planning connectors source-aware, and **how it
+/// was enabled** — which the config-derived
+/// `apollo.router.config.connectors_source_aware` gauge cannot answer on its own,
+/// because connect v0.5 implies source-aware from the schema with no
+/// configuration at all.
+///
+/// Emitted once per planner build (startup and every schema/config reload) rather
+/// than per request, so a router serving zero traffic still reports.
+fn connectors_source_aware_instrument(enabled_by: &'static str) -> ObservableGauge<u64> {
+    meter_provider()
+        .meter("apollo/router")
+        .u64_observable_gauge("apollo.router.supergraph.connectors_source_aware")
+        .with_callback(move |observer| {
+            observer.observe(1, &[KeyValue::new("enabled_by", enabled_by)]);
+        })
+        .build()
+}
+
 /// The federation query planner, paired with the connector set that source-aware
-/// mode stamps onto plans. `None` in the default (expansion) mode, where fetches
-/// are resolved by synthetic subgraph name instead.
-type PlannerWithConnectors = (Arc<QueryPlanner>, Option<Arc<Vec<Connector>>>);
+/// mode stamps onto plans, and the source-aware usage gauge.
+///
+/// The last two are `None` in the default (expansion) mode, where fetches are
+/// resolved by synthetic subgraph name instead. The gauge is returned rather than
+/// built at the call site because only `create_planner` knows *how* source-aware
+/// was enabled, and it must be held by the service or it stops reporting.
+type PlannerWithConnectors = (
+    Arc<QueryPlanner>,
+    Option<Arc<Vec<Connector>>>,
+    Option<ObservableGauge<u64>>,
+);
 
 impl QueryPlannerService {
     /// Build the federation query planner, plus (source-aware only) the
@@ -141,12 +169,31 @@ impl QueryPlannerService {
         // source-aware entry point — this is the only way the router can reach
         // the raw-graph build, since `from_query_graph` is `pub(crate)` — and
         // carry the connector set so `plan_inner` can stamp coordinates.
-        if configuration.experimental_connectors_source_aware && schema.connectors.is_some() {
+        // The condition must match `spec/schema.rs`'s exactly: that decides whether
+        // `schema.raw_sdl` is the raw or the expanded supergraph, and planning the
+        // wrong one against the wrong planner would be silently incorrect. Connect
+        // v0.5 implies source-aware there, so it must here too.
+        let by_config = configuration.experimental_connectors_source_aware;
+        let by_spec = supergraph_requires_source_aware(&schema.raw_sdl);
+        if (by_config || by_spec) && schema.connectors.is_some() {
+            // Held for the lifetime of the planner so the gauge keeps reporting.
+            // `by_config` wins the label when both are true: it is the explicit
+            // choice, and it is the one that would still apply if the schema were
+            // rolled back to v0.4.
+            let instrument = connectors_source_aware_instrument(if by_config {
+                "config"
+            } else {
+                "connect_spec"
+            });
             let source_aware = SourceAwareQueryPlanner::new(&schema.raw_sdl, config)
                 .map_err(ServiceBuildError::QpInitError)?;
             let (planner, connectors) = source_aware.into_parts();
             metric_rust_qp_init(None);
-            return Ok((Arc::new(planner), Some(Arc::new(connectors))));
+            return Ok((
+                Arc::new(planner),
+                Some(Arc::new(connectors)),
+                Some(instrument),
+            ));
         }
 
         let result = QueryPlanner::new(schema.federation_supergraph(), config);
@@ -170,6 +217,7 @@ impl QueryPlannerService {
 
         Ok((
             Arc::new(result.map_err(ServiceBuildError::QpInitError)?),
+            None,
             None,
         ))
     }
@@ -259,7 +307,8 @@ impl QueryPlannerService {
         configuration: Arc<Configuration>,
     ) -> Result<Self, ServiceBuildError> {
         let introspection = Arc::new(IntrospectionCache::new(&configuration));
-        let (planner, connectors_to_stamp) = Self::create_planner(&schema, &configuration)?;
+        let (planner, connectors_to_stamp, connectors_source_aware_instrument) =
+            Self::create_planner(&schema, &configuration)?;
 
         let subgraph_schemas = Arc::new(
             planner
@@ -289,6 +338,7 @@ impl QueryPlannerService {
             authorization_config: Arc::new(AuthorizationPlugin::configuration(&configuration)),
             configuration,
             _federation_instrument: federation_instrument,
+            _connectors_source_aware_instrument: connectors_source_aware_instrument,
             compute_jobs_queue_size_gauge: Default::default(),
             signature_normalization_algorithm,
             introspection,

@@ -406,8 +406,12 @@ impl<'schema> Connect<'schema> {
                 object_name: parent_type.name().clone(),
                 field_name: field_def.name.clone(),
             });
-            // direct recursion isn't allowed, like a connector on User.friends: [User]
-            if parent_type.name() == field_def.ty.inner_named_type().as_str() {
+            // Direct recursion isn't allowed, like a connector on User.friends: [User] —
+            // through connect v0.4. From v0.5 the schema is planned source-aware rather
+            // than expanded, which can represent it. See `enforce_circular_reference`.
+            if selection::enforce_circular_reference(self.schema.connect_link.spec)
+                && parent_type.name() == field_def.ty.inner_named_type().as_str()
+            {
                 messages.push(Message {
                     code: Code::CircularReference,
                     message: format!(

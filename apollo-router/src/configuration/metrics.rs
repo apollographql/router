@@ -457,6 +457,20 @@ impl InstrumentData {
             "$.metrics.usage_reports.batch_processor.max_export_timeout"
         );
 
+        // Source-aware connector planning, when enabled *by configuration*.
+        //
+        // This does not capture every router running source-aware, and that is
+        // deliberate rather than an oversight: connect v0.5 implies source-aware
+        // from the schema's `@link` version with no configuration at all (see
+        // `supergraph_requires_source_aware`), and this mechanism only sees the
+        // config. The schema-derived half is reported by
+        // `apollo.router.supergraph.connectors_source_aware`, which is emitted
+        // where the schema is actually known; read the two together.
+        populate_config_instrument!(
+            apollo.router.config.connectors_source_aware,
+            "$[?(@.experimental_connectors_source_aware == true)]"
+        );
+
         populate_config_instrument!(
             apollo.router.config.connectors,
             "$.connectors",

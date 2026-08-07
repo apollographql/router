@@ -1,0 +1,32 @@
+# The same recursive output shape as `circular_reference.graphql`, at connect
+# v0.5 instead of v0.2. It must validate cleanly: v0.5 implies source-aware
+# planning, which represents one type at several output-shape positions as
+# distinct query-graph nodes, so `User` at `{id, name, friends}` and `User` at
+# `{id}` coexist and the recursive field plans correctly.
+#
+# The v0.2/v0.4 fixtures alongside this one must keep reporting
+# `CircularReference` — expansion still cannot represent this, and those versions
+# are released.
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.5"
+    import: ["@connect"]
+)
+
+type Query {
+    me: User
+    @connect(http: {GET: "http://127.0.0.1/me"}, selection: "id name friends { id }")
+
+    user(id: ID!): User
+    @connect(
+        http: {GET: "http://127.0.0.1/users/{$args.id}"}
+        selection: "id name"
+        entity: true
+    )
+}
+
+type User @key(fields: "id") {
+    id: ID!
+    name: String
+    friends: [User!]!
+}

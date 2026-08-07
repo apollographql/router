@@ -47,6 +47,35 @@ use crate::connectors::variable::VariableContext;
 
 mod variables;
 
+/// Whether a type repeating along a path in a connector's output shape is a
+/// composition error (`Code::CircularReference`) for `spec`.
+///
+/// **Enforced through connect v0.4, permitted from v0.5.** The rule was never
+/// about the selection being ill-formed: `id name friends { id }` describes a
+/// perfectly finite output shape. It was about **expansion** being unable to
+/// represent it. Expansion has one type per synthetic subgraph, so it cannot hold
+/// `User` at `{id, name, friends}` and at `{id}` at once; what it emits instead
+/// drops the recursive field entirely, while the API schema — derived from the
+/// *pre-expansion* supergraph (`expand/mod.rs:77`) — still advertises it. Querying
+/// that field then fails with an *internal* error ("Object type `User` has no
+/// field `friends`"), which is why the loud composition error was the better of
+/// the two.
+///
+/// From v0.5 that trade no longer applies, because **connect v0.5 implies
+/// source-aware planning** (see
+/// [`supergraph_requires_source_aware`](crate::connectors::supergraph_requires_source_aware)):
+/// a v0.5 supergraph is never expanded, and the source-aware planner represents
+/// one type at several output-shape positions as distinct query-graph nodes, so a
+/// recursive selection plans correctly. The spec version in the developer's
+/// `@link` is the single place this is configured — it is visible to composition
+/// here and to the router at schema load, with nothing to keep in sync.
+///
+/// v0.4 and earlier are deliberately unchanged: they are released, they are still
+/// served by expansion, and expansion still cannot represent recursion.
+pub(super) fn enforce_circular_reference(spec: ConnectSpec) -> bool {
+    spec < ConnectSpec::V0_5
+}
+
 /// The `@connect(selection:)` argument
 pub(super) struct Selection<'schema> {
     parsed: JSONSelection,
@@ -512,6 +541,9 @@ impl<'schema> SelectionValidator<'schema> {
         field_def: &Node<FieldDefinition>,
         current_ty: SchemaTypeRef<'schema>,
     ) -> Result<(), Message> {
+        if !enforce_circular_reference(self.schema.connect_link.spec) {
+            return Ok(());
+        }
         for (depth, seen_part) in self.path_with_root().enumerate() {
             let (seen_type, ancestor_field) = match seen_part {
                 PathPart::Root(root) => (root, None),
@@ -884,6 +916,9 @@ impl<'schema> LegacySelectionValidator<'schema> {
         field: LegacyField,
         object: &Node<ObjectType>,
     ) -> Result<(), Message> {
+        if !enforce_circular_reference(self.schema.connect_link.spec) {
+            return Ok(());
+        }
         for (depth, seen_part) in self.path_with_root().enumerate() {
             let (seen_type, ancestor_field) = match seen_part {
                 LegacyPathPart::Root(root) => (root, None),

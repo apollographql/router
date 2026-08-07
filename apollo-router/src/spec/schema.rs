@@ -16,6 +16,7 @@ use apollo_federation::connectors::expand::Connectors;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
 use apollo_federation::connectors::expand::unexpanded_connectors;
+use apollo_federation::connectors::supergraph_requires_source_aware;
 use apollo_federation::link::metadata::LinksMetadata;
 use apollo_federation::link::spec::Identity;
 use apollo_federation::router_supported_supergraph_specs;
@@ -69,7 +70,23 @@ impl Schema {
             ..Default::default()
         };
 
-        let (raw_sdl, api_schema, connectors) = if config.experimental_connectors_source_aware {
+        // Connect v0.5 implies source-aware planning: such a supergraph may contain
+        // output shapes expansion cannot represent, so expanding it would silently
+        // drop fields the API schema still advertises. The spec version in the
+        // schema is the single configuration site; the flag remains the way to opt
+        // in at v0.4 and earlier. `query_planner_service` derives the same decision
+        // from the same helper — the two must agree, or the planner would plan over
+        // a graph of the other shape.
+        let source_aware = config.experimental_connectors_source_aware
+            || supergraph_requires_source_aware(&raw_sdl.sdl);
+        if source_aware && !config.experimental_connectors_source_aware {
+            tracing::info!(
+                "connect v0.5 detected: planning source-aware (connectors are not expanded). \
+                 This is implied by the schema's connect @link version, not by configuration."
+            );
+        }
+
+        let (raw_sdl, api_schema, connectors) = if source_aware {
             // Source-aware: do NOT expand connectors into synthetic subgraphs.
             // Keep the original raw SDL as the schema to parse and plan over, and
             // build the connector set (coordinate-indexed) directly from the raw
@@ -623,6 +640,47 @@ mod tests {
         assert!(schema.is_subtype("Foo", "InterfaceType2"));
         assert!(schema.is_subtype("Bar", "InterfaceType2"));
         assert!(schema.is_subtype("Baz", "InterfaceType2"));
+    }
+
+    /// **Connect v0.5 implies source-aware planning, with no configuration at
+    /// all.** The spec version in the schema is the single configuration site:
+    /// composition relaxes `CircularReference` at v0.5 because the source-aware
+    /// planner can represent the shapes it permits, and this is the other half of
+    /// that bargain — a v0.5 supergraph is never expanded, so it can never reach
+    /// the planner in a form that drops those fields.
+    ///
+    /// v0.4 and earlier are deliberately untouched and still expand by default.
+    #[test]
+    fn connect_v0_5_implies_source_aware_without_configuration() {
+        let v0_5 = include_str!("../plugins/connectors/testdata/recursive_output_v0_5.graphql");
+        let v0_4 = include_str!("../plugins/connectors/testdata/steelthread.graphql");
+
+        // Default configuration — the flag is off.
+        let config = Configuration::default();
+        assert!(
+            !config.experimental_connectors_source_aware,
+            "this test is meaningless if the flag defaults on"
+        );
+
+        // v0.5: not expanded, despite no configuration.
+        let parsed = Schema::parse(v0_5, &config).unwrap();
+        assert_eq!(
+            parsed.raw_sdl.as_str(),
+            v0_5,
+            "a connect v0.5 supergraph must be planned over the raw SDL, not expanded"
+        );
+        assert!(
+            parsed.connectors.is_some(),
+            "the connector set is still built for a v0.5 supergraph"
+        );
+
+        // v0.4: still expanded, so nothing released changes behaviour.
+        let parsed = Schema::parse(v0_4, &config).unwrap();
+        assert_ne!(
+            parsed.raw_sdl.as_str(),
+            v0_4,
+            "connect v0.4 and earlier must keep expanding by default"
+        );
     }
 
     #[test]
