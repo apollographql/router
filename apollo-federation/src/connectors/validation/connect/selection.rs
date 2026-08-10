@@ -603,6 +603,14 @@ impl<'schema> SelectionValidator<'schema> {
         type_ref: SchemaTypeRef<'schema>,
         shape: &Shape,
     ) -> Result<Vec<(Name, Name)>, Message> {
+        // Shape errors are now carried as metadata rather than a dedicated
+        // `ShapeCase::Error` variant. A shape-processing failure is surfaced
+        // through other diagnostics; there is nothing to credit as seen here,
+        // and we must not descend into the (possibly partial) structure, as
+        // that could emit spurious `SelectedFieldNotFound`-style errors.
+        if shape.has_own_errors() {
+            return Ok(Vec::new());
+        }
         match shape.case() {
             ShapeCase::Object { fields, .. } => {
                 for (field_name, field_shape) in fields.iter() {
@@ -792,9 +800,6 @@ impl<'schema> SelectionValidator<'schema> {
             // mask genuine `CONNECTORS_UNRESOLVED_FIELD` errors. A structure-aware
             // policy for these is left to a follow-up.
             ShapeCase::Name(_, _) | ShapeCase::Unknown => Ok(Vec::new()),
-            // A shape-processing failure is surfaced through other diagnostics;
-            // there is nothing to credit as seen here.
-            ShapeCase::Error(_) => Ok(Vec::new()),
         }
     }
 }

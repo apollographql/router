@@ -589,7 +589,7 @@ mod shape_tests {
         let input_shape = Shape::list(Shape::unknown([]), []);
         let result = get_shape(vec![parse_condition("@.rank->gt(0)")], input_shape.clone());
         assert!(
-            !matches!(result.case(), ShapeCase::Error(_)),
+            !result.has_own_errors(),
             "->find over a concrete list produced an error shape (regression): {}",
             result.pretty_print()
         );
