@@ -346,6 +346,14 @@ pub enum Code {
     /// an object-typed field. Auto-derive over nested object types is not yet
     /// supported; provide an explicit `selection:`. (Parked co-design item.)
     UnsupportedMethodAutoDerive,
+    /// A per-element argument to `->map`, `->filter`, `->find`, or `->reduce`
+    /// writes `@` but cannot reach the element with it, because the path
+    /// retargets the cursor first: `->reduce($acc, 0, $acc->add(@))` moves `@`
+    /// onto the accumulator, and `->filter($args.ids->contains(@))` moves it
+    /// onto `$args.ids`. Both read as ordinary code and both silently ignore
+    /// the array. An argument that never writes `@` is not reported — see
+    /// [`Code::severity`].
+    ElementIgnoredByMethodArgument,
 }
 
 impl Code {
@@ -363,6 +371,14 @@ impl Code {
             // that an error retroactively would break them on upgrade; warn
             // instead, and reserve the error for v0.5+.
             Self::UnknownMethodLegacySpec => Severity::Warning,
+            // Requiring a written `@` already excludes the deliberate cases
+            // (`->reduce($acc, 0, $acc->add(1))` counts elements;
+            // `->filter($args.showAll)` keeps or drops the whole list), so what
+            // remains is nearly always a mistake. It stays a warning because
+            // "nearly" is not "always" — an argument may legitimately refer to
+            // its own receiver — and because this is a heuristic about intent
+            // rather than a rule the language enforces.
+            Self::ElementIgnoredByMethodArgument => Severity::Warning,
             _ => Severity::Error,
         }
     }

@@ -646,6 +646,242 @@ impl JSONSelection {
     }
 }
 
+/// The `->` methods that evaluate an argument once per element of an array,
+/// paired with the index of that argument. Their per-element argument is the
+/// only place `@` means "the current element", which is what makes
+/// [`JSONSelection::element_ignoring_calls`] meaningful.
+const PER_ELEMENT_ARGS: &[(&str, usize)] = &[
+    ("map", 0),
+    ("filter", 0),
+    ("find", 0),
+    // `->reduce($acc, <seed>, <update>)`: the seed runs once in the caller's
+    // scope, so only the update is per-element.
+    ("reduce", 2),
+];
+
+impl JSONSelection {
+    /// Collect every per-element `->method(...)` call — `->map`, `->filter`,
+    /// `->find`, `->reduce` — whose per-element argument **writes `@` but does
+    /// not read the element with it**.
+    ///
+    /// That conjunction is the whole check. Writing `@` is the author saying
+    /// *here is where the element goes*; the report fires only when the `@` they
+    /// wrote cannot mean the element, because the cursor was retargeted before
+    /// reaching it. `->reduce($acc, 0, $acc->add(@))` is the case: leading with
+    /// `$acc` moves `@` onto the accumulator, so the array is never read and the
+    /// fold quietly returns the seed folded into itself.
+    ///
+    /// An argument with **no `@` at all** is left alone, because ignoring the
+    /// element can be deliberate — `items->reduce($acc, 0, $acc->add(1))` counts
+    /// elements, `items->filter($args.showAll)` keeps or drops the whole list.
+    /// Neither mentions `@`, so neither is claiming to use an element it does not
+    /// use. Requiring the mention is what separates a stated intent from a
+    /// design choice.
+    ///
+    /// Still a heuristic rather than a proof, so callers raise it as a warning.
+    pub(crate) fn element_ignoring_calls(&self) -> Vec<&WithRange<String>> {
+        let mut out = Vec::new();
+        match &self.inner {
+            TopLevelSelection::Named(sub) => collect_element_ignoring_subselection(sub, &mut out),
+            TopLevelSelection::Value(lit) => collect_element_ignoring_lit(lit, &mut out),
+        }
+        out
+    }
+}
+
+fn collect_element_ignoring_subselection<'a>(
+    sub: &'a SubSelection,
+    out: &mut Vec<&'a WithRange<String>>,
+) {
+    for named in &sub.selections {
+        collect_element_ignoring_lit(&named.path, out);
+    }
+}
+
+fn collect_element_ignoring_lit<'a>(
+    lit: &'a WithRange<LitExpr>,
+    out: &mut Vec<&'a WithRange<String>>,
+) {
+    match lit.as_ref() {
+        LitExpr::String(_) | LitExpr::Number(_) | LitExpr::Bool(_) | LitExpr::Null => {}
+        LitExpr::LegacyObject(map) => {
+            for value in map.values() {
+                collect_element_ignoring_lit(value, out);
+            }
+        }
+        LitExpr::Object(sub) => collect_element_ignoring_subselection(sub, out),
+        LitExpr::Array(items) => {
+            for item in items {
+                collect_element_ignoring_lit(item, out);
+            }
+        }
+        LitExpr::Path(path) => collect_element_ignoring_pathlist(&path.path, out),
+        LitExpr::LitPath(root, tail) => {
+            collect_element_ignoring_lit(root, out);
+            collect_element_ignoring_pathlist(tail, out);
+        }
+        LitExpr::OpChain(_, operands) => {
+            for operand in operands {
+                collect_element_ignoring_lit(operand, out);
+            }
+        }
+    }
+}
+
+fn collect_element_ignoring_pathlist<'a>(
+    path: &'a WithRange<PathList>,
+    out: &mut Vec<&'a WithRange<String>>,
+) {
+    match path.as_ref() {
+        PathList::Var(_, tail) | PathList::Key(_, tail) | PathList::Question(tail) => {
+            collect_element_ignoring_pathlist(tail, out)
+        }
+        PathList::Expr(lit, tail) => {
+            collect_element_ignoring_lit(lit, out);
+            collect_element_ignoring_pathlist(tail, out);
+        }
+        PathList::Method(name, args, tail) => {
+            if let Some(args) = args {
+                if let Some((_, index)) = PER_ELEMENT_ARGS
+                    .iter()
+                    .find(|(method, _)| *method == name.as_ref().as_str())
+                    && let Some(per_element) = args.args.get(*index)
+                {
+                    // Report only when the author wrote `@` and none of those
+                    // `@`s can mean the element. An argument that never
+                    // mentions `@` is ignoring the element on purpose.
+                    let usage = scan_at_usage_lit(per_element, true);
+                    if usage.mentions && !usage.reads_subject {
+                        out.push(name);
+                    }
+                }
+                // Recurse regardless: a nested call inside the argument is
+                // judged on its own element, not this one.
+                for arg in &args.args {
+                    collect_element_ignoring_lit(arg, out);
+                }
+            }
+            collect_element_ignoring_pathlist(tail, out);
+        }
+        PathList::Selection(sub) => collect_element_ignoring_subselection(sub, out),
+        PathList::Empty => {}
+    }
+}
+
+/// What an expression does with `@`, as seen from one particular ambient value.
+#[derive(Clone, Copy, Default)]
+struct AtUsage {
+    /// The expression writes `@` somewhere, anywhere — the author's statement
+    /// that a value flows in here.
+    mentions: bool,
+    /// The expression reads the ambient value under consideration, whether via
+    /// `@` or via a bare key.
+    reads_subject: bool,
+}
+
+impl AtUsage {
+    const NONE: Self = Self {
+        mentions: false,
+        reads_subject: false,
+    };
+
+    /// Combine two positions in the same expression. `reads_subject` is a
+    /// disjunction because one reader anywhere is enough.
+    fn or(self, other: Self) -> Self {
+        Self {
+            mentions: self.mentions || other.mentions,
+            reads_subject: self.reads_subject || other.reads_subject,
+        }
+    }
+
+    /// Keep the mention, discard the read — for a sub-expression evaluated
+    /// against some *other* value, where an `@` is still written but cannot
+    /// mean the subject.
+    fn retargeted(self) -> Self {
+        Self {
+            mentions: self.mentions,
+            reads_subject: false,
+        }
+    }
+}
+
+/// Scan `lit`, evaluated against an ambient value, for its use of `@`.
+///
+/// `ambient_is_subject` tracks whether the ambient value is still the one we are
+/// asking about. It starts true at the root of a per-element argument (where the
+/// ambient value *is* the element) and goes false the moment a path retargets the
+/// cursor — leading with `$var`, or rooting a path in a literal. Everything
+/// downstream of a retarget reads that other value instead, which is exactly the
+/// distinction between `@->add($acc)` and `$acc->add(@)`: both mention `@`, only
+/// the first reads the element with it.
+fn scan_at_usage_lit(lit: &WithRange<LitExpr>, ambient_is_subject: bool) -> AtUsage {
+    match lit.as_ref() {
+        LitExpr::String(_) | LitExpr::Number(_) | LitExpr::Bool(_) | LitExpr::Null => AtUsage::NONE,
+        LitExpr::LegacyObject(map) => map.values().fold(AtUsage::NONE, |acc, value| {
+            acc.or(scan_at_usage_lit(value, ambient_is_subject))
+        }),
+        LitExpr::Object(sub) => sub.selections.iter().fold(AtUsage::NONE, |acc, named| {
+            acc.or(scan_at_usage_lit(&named.path, ambient_is_subject))
+        }),
+        LitExpr::Array(items) => items.iter().fold(AtUsage::NONE, |acc, item| {
+            acc.or(scan_at_usage_lit(item, ambient_is_subject))
+        }),
+        LitExpr::Path(path) => scan_at_usage_pathlist(&path.path, ambient_is_subject),
+        // A literal-rooted path reads the literal, so its tail is evaluated
+        // against that literal rather than the ambient value. The literal itself
+        // may still read the ambient value, as in `[@, 1]->first`.
+        LitExpr::LitPath(root, tail) => scan_at_usage_lit(root, ambient_is_subject)
+            .or(scan_at_usage_pathlist(tail, false).retargeted()),
+        LitExpr::OpChain(_, operands) => operands.iter().fold(AtUsage::NONE, |acc, operand| {
+            acc.or(scan_at_usage_lit(operand, ambient_is_subject))
+        }),
+    }
+}
+
+fn scan_at_usage_pathlist(path: &WithRange<PathList>, ambient_is_subject: bool) -> AtUsage {
+    match path.as_ref() {
+        PathList::Var(known_var, tail) => match known_var.as_ref() {
+            // `@` is the ambient value itself — always a mention, and a read of
+            // the subject only when the ambient value still is the subject.
+            KnownVariable::AtSign => AtUsage {
+                mentions: true,
+                reads_subject: ambient_is_subject,
+            }
+            .or(scan_at_usage_pathlist(tail, false).retargeted()),
+            // Any named variable (or `$`) moves the cursor off the ambient
+            // value for the whole rest of the path.
+            KnownVariable::Dollar | KnownVariable::Local(_) | KnownVariable::External(_) => {
+                scan_at_usage_pathlist(tail, false).retargeted()
+            }
+        },
+        // A bare key reads a property of the ambient value, without mentioning
+        // `@` — `->map(total)` is a read but not a claim about `@`.
+        PathList::Key(_, tail) => AtUsage {
+            mentions: false,
+            reads_subject: ambient_is_subject,
+        }
+        .or(scan_at_usage_pathlist(tail, false).retargeted()),
+        PathList::Question(tail) => scan_at_usage_pathlist(tail, ambient_is_subject),
+        PathList::Expr(lit, tail) => scan_at_usage_lit(lit, ambient_is_subject)
+            .or(scan_at_usage_pathlist(tail, false).retargeted()),
+        // A method's arguments are evaluated against its receiver, so they
+        // inherit whatever the path has reached by this point.
+        PathList::Method(_, args, tail) => args
+            .as_ref()
+            .map(|args| {
+                args.args.iter().fold(AtUsage::NONE, |acc, arg| {
+                    acc.or(scan_at_usage_lit(arg, ambient_is_subject))
+                })
+            })
+            .unwrap_or(AtUsage::NONE)
+            .or(scan_at_usage_pathlist(tail, ambient_is_subject)),
+        PathList::Selection(sub) => sub.selections.iter().fold(AtUsage::NONE, |acc, named| {
+            acc.or(scan_at_usage_lit(&named.path, ambient_is_subject))
+        }),
+        PathList::Empty => AtUsage::NONE,
+    }
+}
+
 fn collect_methods_subselection<'a>(sub: &'a SubSelection, out: &mut Vec<&'a WithRange<String>>) {
     for named in &sub.selections {
         collect_methods_lit(&named.path, out);
@@ -1566,16 +1802,46 @@ impl PathList {
             // method name, so we can unconditionally return based on what
             // parse_identifier tells us. since MethodArgs::parse is optional,
             // the absence of args will never trigger the error case.
-            return match (parse_identifier, opt(MethodArgs::parse)).parse(suffix) {
-                Ok((suffix, (method, args_opt))) => {
+            // The method name has to be parsed before its arguments, because
+            // `->reduce($acc, <seed>, <update>)` binds `$acc` *within* its own
+            // argument list — the update expression is parsed with the
+            // accumulator already in scope. See `MethodArgs::parse_with_binding`.
+            let (suffix, method) = match parse_identifier.parse(suffix) {
+                Ok(parsed) => parsed,
+                Err(_) => {
+                    return Err(nom_fail_message(
+                        input.clone(),
+                        "Method name must follow ->",
+                    ));
+                }
+            };
+            let bind_arg_zero_from =
+                if ArrowMethod::lookup(method.as_ref()) == Some(ArrowMethod::Reduce) {
+                    // Argument 1 is the seed, evaluated in the caller's scope
+                    // before any accumulator exists, so the binding starts at
+                    // argument 2.
+                    Some(2)
+                } else {
+                    None
+                };
+
+            return match opt(|input| MethodArgs::parse_with_binding(input, bind_arg_zero_from))
+                .parse(suffix)
+            {
+                Ok((suffix, args_opt)) => {
                     let mut local_var_name = None;
 
-                    // Convert the first argument of input->as($var) from
-                    // KnownVariable::External (the default for parsed named
-                    // variable references) to KnownVariable::Local, when we know
-                    // we're parsing an ->as($var) method invocation.
+                    // Convert the first argument of input->as($var) — or of
+                    // input->reduce($acc, ...) — from KnownVariable::External
+                    // (the default for parsed named variable references) to
+                    // KnownVariable::Local, now that we know we are parsing one
+                    // of the two methods that bind their first argument.
+                    let binding_method = matches!(
+                        ArrowMethod::lookup(method.as_ref()),
+                        Some(ArrowMethod::As | ArrowMethod::Reduce)
+                    );
                     let args = if let Some(args) = args_opt.as_ref()
-                        && ArrowMethod::lookup(method.as_ref()) == Some(ArrowMethod::As)
+                        && binding_method
                     {
                         let new_args = if let Some(old_first_arg) = args.args.first()
                             && let LitExpr::Path(path_selection) = old_first_arg.as_ref()
@@ -1616,10 +1882,16 @@ impl PathList {
                         args_opt
                     };
 
-                    let suffix_with_local_var = if let Some(var_name) = local_var_name {
-                        suffix.map_extra(|extra| extra.with_local_var(var_name))
-                    } else {
-                        suffix
+                    // `->as($var)` binds for everything that follows it, which
+                    // is the whole point of the method. `->reduce($acc, ...)`
+                    // binds only inside its own update argument (handled during
+                    // argument parsing), so its accumulator must not leak into
+                    // the tail — `$acc` after the fold is an unbound variable.
+                    let suffix_with_local_var = match local_var_name {
+                        Some(var_name) if bind_arg_zero_from.is_none() => {
+                            suffix.map_extra(|extra| extra.with_local_var(var_name))
+                        }
+                        _ => suffix,
                     };
 
                     let (remainder, rest) =
@@ -2272,18 +2544,58 @@ impl Ranged for MethodArgs {
 // the PathSelection::Method will be None, so we can safely define MethodArgs
 // using a Vec<LitExpr> in all cases (possibly empty but never missing).
 impl MethodArgs {
-    fn parse(input: Span) -> ParseResult<Self> {
+    /// Parse a parenthesized method argument list.
+    ///
+    /// When `bind_first_arg_from` is `Some(index)` and the first argument is a
+    /// bare `$variable`, that variable is in scope as a `Local` while parsing
+    /// arguments at `index` and later. This is what makes `$acc` resolve as a
+    /// local inside `->reduce($acc, <seed>, <update>)`'s update expression while
+    /// staying unbound in the seed, which is evaluated once in the caller's
+    /// scope before any accumulator exists.
+    ///
+    /// The binding is confined to this argument list: the span handed back
+    /// carries the caller's original locals, so an accumulator cannot leak into
+    /// whatever follows the method. That is the difference from `->as`, which
+    /// binds for the rest of the path on purpose.
+    fn parse_with_binding(input: Span, bind_first_arg_from: Option<usize>) -> ParseResult<Self> {
         let input = spaces_or_comments(input)?.0;
+        let outer_local_vars = input.extra.local_vars.clone();
         let (mut input, open_paren) = ranged_span("(").parse(input)?;
         input = spaces_or_comments(input)?.0;
 
         let mut args = Vec::new();
         if let Ok((remainder, first)) = LitExpr::parse(input.clone()) {
+            // A bare `$var` first argument is what a binding method declares.
+            // Anything else (a path with a suffix, a literal) is not a binder,
+            // and the method's own argument validation reports it.
+            let bound_var = bind_first_arg_from.and_then(|from| {
+                let LitExpr::Path(path) = first.as_ref() else {
+                    return None;
+                };
+                let PathList::Var(var_name, var_tail) = path.path.as_ref() else {
+                    return None;
+                };
+                if !matches!(var_tail.as_ref(), PathList::Empty) {
+                    return None;
+                }
+                match var_name.as_ref() {
+                    KnownVariable::External(name) | KnownVariable::Local(name) => {
+                        Some((from, name.clone()))
+                    }
+                    KnownVariable::Dollar | KnownVariable::AtSign => None,
+                }
+            });
+
             args.push(first);
             input = remainder;
 
             while let Ok((remainder, _)) = (spaces_or_comments, char(',')).parse(input.clone()) {
                 input = spaces_or_comments(remainder)?.0;
+                if let Some((from, name)) = bound_var.as_ref()
+                    && args.len() >= *from
+                {
+                    input = input.map_extra(|extra| extra.with_local_var(name.clone()));
+                }
                 if let Ok((remainder, arg)) = LitExpr::parse(input.clone()) {
                     args.push(arg);
                     input = remainder;
@@ -2295,6 +2607,13 @@ impl MethodArgs {
 
         input = spaces_or_comments(input.clone())?.0;
         let (input, close_paren) = ranged_span(")").parse(input.clone())?;
+
+        // Drop any binding introduced above, so it cannot escape the argument
+        // list and shadow a caller variable of the same name.
+        let input = input.map_extra(|mut extra| {
+            extra.local_vars = outer_local_vars;
+            extra
+        });
 
         let range = merge_ranges(open_paren.range(), close_paren.range());
         Ok((input, Self { args, range }))
