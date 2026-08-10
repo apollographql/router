@@ -726,6 +726,7 @@ mod tests {
     use crate::apollo_studio_interop::UsageReporting;
     use crate::configuration::QueryPlanning;
     use crate::configuration::Supergraph;
+    use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
     use crate::spec::Schema;
@@ -1882,15 +1883,38 @@ mod tests {
         .unwrap()
     }
 
-    fn caching_request_with_metadata(
+    /// A configuration and schema pair for which `AuthorizationPlugin::enable_directives` is
+    /// true. Without that, `plan` never calls `update_cache_key` and every request is keyed
+    /// under `CacheKeyMetadata::default()`, so no segmentation can be observed.
+    fn authorization_enabled_config_and_schema() -> (Configuration, Arc<Schema>) {
+        let configuration: Configuration = serde_json::from_value(serde_json::json!({
+            "authorization": { "directives": { "enabled": true } }
+        }))
+        .unwrap();
+        // Links `requiresScopes`; a schema with no authorization spec keeps
+        // `enable_directives` false whatever the configuration says.
+        let schema = include_str!("../../tests/fixtures/supergraph-auth.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+        (configuration, schema)
+    }
+
+    /// Builds a request the way the router does: authorization state travels in the context
+    /// as JWT claims, and `plan` derives `CacheKeyMetadata` from them via
+    /// `AuthorizationPlugin::update_cache_key`. Inserting `CacheKeyMetadata` into the
+    /// context directly would not survive — `update_cache_key` overwrites it.
+    fn caching_request(
         query: &str,
         doc: &ParsedDocument,
-        metadata: CacheKeyMetadata,
+        authenticated: bool,
     ) -> query_planner::CachingRequest {
         let context = Context::new();
+        if authenticated {
+            context
+                .insert(APOLLO_AUTHENTICATION_JWT_CLAIMS, "placeholder".to_string())
+                .unwrap();
+        }
         context.extensions().with_lock(|lock| {
             lock.insert::<ParsedDocument>(doc.clone());
-            lock.insert(metadata);
         });
         query_planner::CachingRequest::new(query.to_string(), None, context)
     }
@@ -1898,6 +1922,10 @@ mod tests {
     /// `CacheKeyMetadata` is part of `CachingQueryKey`'s `Hash`/`Eq`, so the same query
     /// under different authorization state reaches the inner planner again. That keeps an
     /// unauthenticated request from receiving a plan built for an authenticated one.
+    ///
+    /// Drives it through the producer that runs in production — `update_cache_key`, reading
+    /// the request's JWT claims — because that call overwrites the context's
+    /// `CacheKeyMetadata` before the cache key is built.
     #[test(tokio::test)]
     async fn plan_cache_is_segmented_by_authorization_metadata() {
         let (mock, handle) = tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
@@ -1908,31 +1936,23 @@ mod tests {
             },
         );
 
-        let configuration: Configuration = Default::default();
-        let schema = include_str!("../testdata/starstuff@current.graphql");
-        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+        let (configuration, schema) = authorization_enabled_config_and_schema();
         let mut service = caching_planner_for_test(mock, &schema, &configuration).await;
 
         let query = "query ExampleQuery { me { name } }";
         let doc = Query::parse_document(query, None, &schema, &configuration).unwrap();
 
-        let unauthenticated = CacheKeyMetadata::default();
-        let authenticated = CacheKeyMetadata {
-            is_authenticated: true,
-            ..Default::default()
-        };
-
-        for metadata in [
-            unauthenticated.clone(),
-            authenticated,
+        for authenticated in [
+            false,
+            true,
             // Repeats the first key, which must now hit the cache.
-            unauthenticated,
+            false,
         ] {
             service
                 .ready()
                 .await
                 .unwrap()
-                .call(caching_request_with_metadata(query, &doc, metadata))
+                .call(caching_request(query, &doc, authenticated))
                 .await
                 .unwrap();
         }
@@ -1949,24 +1969,32 @@ mod tests {
     }
 
     /// `entry.insert` does not discriminate on the `QueryPlannerContent` variant, so the
-    /// cache stores an authorization rejection like any other planner output.
+    /// cache stores an authorization rejection like any other planner output — and, like any
+    /// other planner output, it stays keyed by authorization state, so a rejection cached for
+    /// an unauthenticated request is never served to an authenticated one.
     #[test(tokio::test)]
     async fn rejection_response_is_cached() {
         let (mock, handle) = tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
         let (driver, planner_calls) = spawn_counting_planner(
             handle,
+            // The content `QueryPlannerService::get` returns for a whole-query rejection:
+            // null data carrying the unauthorized-path errors.
             QueryPlannerContent::Response {
                 response: Box::new(
                     crate::graphql::Response::builder()
                         .data(crate::json_ext::Value::Null)
+                        .error(
+                            crate::graphql::Error::builder()
+                                .message("Unauthorized field or type")
+                                .extension_code("UNAUTHORIZED_FIELD_OR_TYPE")
+                                .build(),
+                        )
                         .build(),
                 ),
             },
         );
 
-        let configuration: Configuration = Default::default();
-        let schema = include_str!("../testdata/starstuff@current.graphql");
-        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+        let (configuration, schema) = authorization_enabled_config_and_schema();
         let mut service = caching_planner_for_test(mock, &schema, &configuration).await;
 
         let query = "query ExampleQuery { me { name } }";
@@ -1977,11 +2005,7 @@ mod tests {
                 .ready()
                 .await
                 .unwrap()
-                .call(caching_request_with_metadata(
-                    query,
-                    &doc,
-                    CacheKeyMetadata::default(),
-                ))
+                .call(caching_request(query, &doc, false))
                 .await
                 .unwrap();
         }
@@ -1990,6 +2014,21 @@ mod tests {
             planner_calls.load(std::sync::atomic::Ordering::SeqCst),
             1,
             "the second identical request must be served from cache"
+        );
+
+        service
+            .ready()
+            .await
+            .unwrap()
+            .call(caching_request(query, &doc, true))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            planner_calls.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "a cached rejection must not be served to a request in a different \
+             authorization state"
         );
 
         drop(service);

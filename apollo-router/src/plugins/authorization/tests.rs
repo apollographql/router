@@ -554,9 +554,14 @@ mod whole_query_rejection {
         assert_no_subgraph_calls(handles).await;
     }
 
-    /// Directive-based authorization strips selections from the document, so a rejection
-    /// carries field-error semantics: value completion nulls the stripped selections and
-    /// propagates to `data: null`. 200 with errors is the correct response.
+    /// The status comes from the short-circuit in the query planner, not from response
+    /// formatting: `filter_query` returns `Err(Unauthorized)`, `QueryPlannerService::get`
+    /// builds a `graphql::Response` with `data: null` directly, and
+    /// `SupergraphResponse::new_from_graphql_response` wraps it with `http::Response::new`,
+    /// which is 200 regardless of errors or data shape. Execution and value completion never
+    /// run — see `does_not_reach_execution`. 200 with errors is the right answer for a
+    /// rejection with field-error semantics, so this pins that the short-circuit does not
+    /// pick up an error status along the way.
     #[tokio::test]
     async fn returns_http_200() {
         let (service, _handles) = build_router_rejecting_whole_query().await;
