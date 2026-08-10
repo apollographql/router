@@ -676,10 +676,10 @@ This keeps script line numbers, callback names and router internals out of clien
 If you want a client to see a specific message for one of these cases, catch the error and throw a
 new one. Re-throwing the error you caught stays redacted - both the opaque `RouterError` a router
 function raises and the object map the Rhai engine hands you, whose `message` is the engine's own
-error text. The object map still honours a `status` you set on it before re-throwing; only the
-message you did not write is replaced. A `RouterError` has no `status` or `message` you can set at
-all - assigning one raises a fresh error that replaces the one you caught, so it is your own throw
-you want here:
+error text. The object map still honours a `status` you set on it before re-throwing, but its
+`message` is always replaced - overwriting it first does not make it yours to return. A
+`RouterError` has no `status` or `message` you can set at all - assigning one raises a fresh error
+that replaces the one you caught, so it is your own throw you want here:
 
 ```rhai
 fn process_request(request) {
