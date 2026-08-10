@@ -47,6 +47,7 @@ use crate::plugins::telemetry::consts::FIELD_EXCEPTION_MESSAGE;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::apollo_trace_throttle::ApolloTraceThrottle;
+use crate::plugins::telemetry::tracing::apollo_trace_throttle::TraceSummary;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::services::connector_service::APOLLO_CONNECTOR_DETAIL;
 use crate::services::connector_service::APOLLO_CONNECTOR_FIELD_ALIAS;
@@ -315,43 +316,6 @@ impl Exporter {
 /// large FTv1 blobs in subgraph spans.
 const MAX_TRACE_SIZE_BYTES: usize = 10 * 1024 * 1024;
 
-/// Approximate serialized size of a complete trace, summed across its spans. This counts the
-/// dominant contributors — string attribute/event values (e.g. large FTv1 blobs) and names — and
-/// ignores the small, roughly-fixed per-span framing, which is enough for a coarse 10MB guard.
-fn approx_trace_size(trace: &[LightSpanData]) -> usize {
-    trace.iter().map(approx_span_size).sum()
-}
-
-fn approx_span_size(span: &LightSpanData) -> usize {
-    let attributes: usize = span
-        .attributes
-        .iter()
-        .map(|(k, v)| k.as_str().len() + attribute_value_size(v))
-        .sum();
-    let events: usize = span
-        .events
-        .iter()
-        .map(|event| {
-            event.name.len()
-                + event
-                    .attributes
-                    .iter()
-                    .map(|(k, v)| k.as_str().len() + attribute_value_size(v))
-                    .sum::<usize>()
-        })
-        .sum();
-    span.name.len() + attributes + events
-}
-
-fn attribute_value_size(value: &Value) -> usize {
-    match value {
-        Value::String(s) => s.as_str().len(),
-        // Scalars and (rare) array attributes contribute negligibly next to the large string
-        // blobs (e.g. FTv1) that are what actually push a trace over the limit.
-        _ => 8,
-    }
-}
-
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
     async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
@@ -381,19 +345,23 @@ impl SpanExporter for Exporter {
                         &self.include_attr_event_names,
                     );
                     let trace = span_cache.pop_spans_for_tree(root_span);
+                    // To avoid scanning the trace multiple times, we do a single pass over the 
+                    // trace's spans to get both the approximate size, and the dimensions 
+                    // identifying a representative trace.
+                    let summary = TraceSummary::from_trace(&trace);
                     // Unconditionally drop traces over the hard size limit — GraphOS ignores
                     // oversized traces anyway, so exporting them just wastes CPU and bandwidth.
                     // This is independent of the configured throttle. Checked before the throttle
                     // (so an oversized trace doesn't consume a representative slot) and before
                     // `prepare_for_export` (so we skip the CPU-heavy FTV1 re-encode for it).
-                    if approx_trace_size(&trace) > MAX_TRACE_SIZE_BYTES {
+                    if summary.approx_size_bytes > MAX_TRACE_SIZE_BYTES {
                         oversized_traces += 1;
                         continue;
                     }
                     // Apply the Apollo-pipeline throttle on the complete trace. Dropped traces
                     // never reach `prepare_for_export`, so their CPU-heavy FTV1 re-encode is skipped.
                     total_traces += 1;
-                    if self.trace_throttle.should_keep(&trace) {
+                    if self.trace_throttle.should_keep(&summary) {
                         kept_traces += 1;
                         grouped_traces.push(trace);
                     }
@@ -988,7 +956,7 @@ mod trace_size_test {
     use super::APOLLO_PRIVATE_FTV1;
     use super::LightSpanData;
     use super::MAX_TRACE_SIZE_BYTES;
-    use super::approx_trace_size;
+    use super::TraceSummary;
 
     fn span_with_ftv1(byte_len: usize) -> LightSpanData {
         let mut attributes: HashMap<Key, Value> = HashMap::new();
@@ -1014,20 +982,20 @@ mod trace_size_test {
     #[test]
     fn small_trace_is_under_the_limit() {
         let trace = vec![span_with_ftv1(1024)];
-        assert!(approx_trace_size(&trace) <= MAX_TRACE_SIZE_BYTES);
+        assert!(TraceSummary::from_trace(&trace).approx_size_bytes <= MAX_TRACE_SIZE_BYTES);
     }
 
     #[test]
     fn large_ftv1_attribute_exceeds_the_limit() {
         // A single subgraph span carrying an 11MB FTV1 blob must trip the 10MB guard.
         let trace = vec![span_with_ftv1(11 * 1024 * 1024)];
-        assert!(approx_trace_size(&trace) > MAX_TRACE_SIZE_BYTES);
+        assert!(TraceSummary::from_trace(&trace).approx_size_bytes > MAX_TRACE_SIZE_BYTES);
     }
 
     #[test]
     fn size_accumulates_across_spans() {
         // No single span exceeds the limit, but together they do.
         let trace: Vec<LightSpanData> = (0..3).map(|_| span_with_ftv1(4 * 1024 * 1024)).collect();
-        assert!(approx_trace_size(&trace) > MAX_TRACE_SIZE_BYTES);
+        assert!(TraceSummary::from_trace(&trace).approx_size_bytes > MAX_TRACE_SIZE_BYTES);
     }
 }

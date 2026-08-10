@@ -22,6 +22,8 @@ use opentelemetry::trace::Status;
 use parking_lot::Mutex;
 
 use crate::plugins::telemetry::apollo::ApolloTraceThrottleConfig;
+use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
+use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::metrics::apollo::histogram::duration_bucket;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS_KEY;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
@@ -31,6 +33,7 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::GRAPHQL_ERROR_EXT_CODE
 use crate::plugins::telemetry::tracing::apollo_telemetry::LightSpanData;
 use crate::plugins::telemetry::tracing::apollo_telemetry::OPERATION_SUBTYPE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::OPERATION_TYPE;
+use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 
 /// Maximum number of distinct dimension combinations remembered by the representative-traces
 /// filter. Because the trace's end-minute is part of every key, entries for elapsed minutes can
@@ -72,12 +75,123 @@ impl ApolloTraceThrottle {
         }
     }
 
-    /// Decide whether a complete trace should be exported to Apollo. `trace[0]` is the root span.
-    pub(crate) fn should_keep(&self, trace: &[LightSpanData]) -> bool {
+    /// Decide whether a complete trace should be exported to Apollo, given the summary gathered
+    /// from its spans by [`TraceSummary::from_trace`].
+    pub(crate) fn should_keep(&self, summary: &TraceSummary) -> bool {
         match self {
-            Self::RepresentativeTraces(filter) => filter.should_keep(trace),
+            Self::RepresentativeTraces(filter) => filter.should_keep(summary),
             Self::RateLimited(limiter) => limiter.check(Instant::now()),
         }
+    }
+}
+
+/// Everything the Apollo export path needs to know about a complete, reassembled trace, gathered
+/// in a single pass over its spans: the approximate serialized size (for the hard size limit)
+/// and the dimensions identifying a representative trace (for the throttle).
+///
+/// The key dimensions are spread across different spans:
+///
+/// | Dimension                | Span it is recorded on                               |
+/// |--------------------------|------------------------------------------------------|
+/// | operation signature      | `supergraph`, or the `subscription_event` root       |
+/// | operation type / subtype | `execution` (also on the `router` root for the type) |
+/// | client name / version    | root (`router`) span                                 |
+/// | duration, end time       | root span                                            |
+/// | errors                   | any span                                             |
+#[derive(Debug, Default)]
+pub(crate) struct TraceSummary {
+    /// Approximate serialized size of the whole trace, in bytes.
+    pub(crate) approx_size_bytes: usize,
+    /// `None` when the trace carries no usable operation signature, which means no key can be
+    /// computed and the trace must not be deduplicated.
+    signature: Option<String>,
+    operation_type: String,
+    operation_subtype: String,
+    client_name: String,
+    client_version: String,
+    duration: Duration,
+    end_time_secs: u64,
+    has_errors: bool,
+}
+
+impl TraceSummary {
+    /// Walk the trace's spans once, accumulating size and picking each key dimension off
+    /// whichever span actually carries it.
+    pub(crate) fn from_trace(trace: &[LightSpanData]) -> Self {
+        let mut summary = TraceSummary::default();
+        // The signature is preferentially taken from the supergraph span, falling back to a
+        // subscription-event root.
+        let mut supergraph_signature: Option<String> = None;
+        let mut subscription_signature: Option<String> = None;
+
+        for span in trace {
+            summary.approx_size_bytes += approx_span_size(span);
+            summary.has_errors |= span_has_errors(span);
+
+            match span.name.as_ref() {
+                SUPERGRAPH_SPAN_NAME => {
+                    supergraph_signature =
+                        non_empty_attr(&span.attributes, &APOLLO_PRIVATE_OPERATION_SIGNATURE);
+                }
+                SUBSCRIPTION_EVENT_SPAN_NAME => {
+                    subscription_signature =
+                        non_empty_attr(&span.attributes, &APOLLO_PRIVATE_OPERATION_SIGNATURE);
+                }
+                EXECUTION_SPAN_NAME => {
+                    summary.operation_type = string_attr(&span.attributes, &OPERATION_TYPE);
+                    summary.operation_subtype = string_attr(&span.attributes, &OPERATION_SUBTYPE);
+                }
+                _ => {}
+            }
+        }
+
+        summary.signature = supergraph_signature.or(subscription_signature);
+
+        // Duration, end time and the client attributes come from the root span.
+        if let Some(root) = trace.first() {
+            summary.duration = trace_duration(root);
+            summary.end_time_secs = root
+                .end_time
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            summary.client_name = string_attr(&root.attributes, &CLIENT_NAME_KEY);
+            summary.client_version = string_attr(&root.attributes, &CLIENT_VERSION_KEY);
+            // The router span also records the operation type; use it when there was no execution
+            // span in the trace (e.g. a request that failed before execution).
+            if summary.operation_type.is_empty() {
+                summary.operation_type = string_attr(&root.attributes, &OPERATION_TYPE);
+            }
+        }
+
+        summary
+    }
+
+    /// Hash of the dimension combination that identifies a "representative" trace, or `None` if
+    /// data required to build the key is missing.
+    fn trace_key(&self) -> Option<u64> {
+        // Signature is the only string that is required to build a trace key. Client name/version
+        // and operation subtype are legitimately absent in some traces.
+        let signature = self.signature.as_ref()?;
+
+        // Error traces are spread across twelve 5-second sub-buckets within the minute, so up to
+        // 12 representative error traces per minute get through (vs. 1 for non-error traces).
+        let error_key: i8 = if self.has_errors {
+            ((self.end_time_secs % 60) / 5) as i8
+        } else {
+            -1
+        };
+
+        let mut hasher = DefaultHasher::new();
+        signature.hash(&mut hasher);
+        (self.end_time_secs / 60).hash(&mut hasher); // minute floor
+        duration_bucket(self.duration).hash(&mut hasher);
+        error_key.hash(&mut hasher);
+        self.operation_type.hash(&mut hasher);
+        self.operation_subtype.hash(&mut hasher);
+        self.client_name.hash(&mut hasher);
+        self.client_version.hash(&mut hasher);
+        Some(hasher.finish())
     }
 }
 
@@ -99,13 +213,10 @@ impl RepresentativeTraceFilter {
         }
     }
 
-    fn should_keep(&self, trace: &[LightSpanData]) -> bool {
-        let Some(root) = trace.first() else {
-            return false;
-        };
+    fn should_keep(&self, summary: &TraceSummary) -> bool {
         // Fail open: if the key can't be built we must not deduplicate, because an incomplete key
         // would conflate unrelated traces and silently drop them.
-        let Some(key) = Self::trace_key(root, trace_has_errors(trace)) else {
+        let Some(key) = summary.trace_key() else {
             return true;
         };
 
@@ -117,41 +228,6 @@ impl RepresentativeTraceFilter {
             seen.put(key, ());
             true
         }
-    }
-
-    /// Hash of the dimension combination that identifies a "representative" trace, or `None` if
-    /// data required to build the key is missing.
-    fn trace_key(root: &LightSpanData, has_errors: bool) -> Option<u64> {
-        // Signature is the only string that is required to build a trace key. Client name/version
-        // and operation subtype are legitimately absent in some traces.
-        let signature = string_attr(&root.attributes, &APOLLO_PRIVATE_OPERATION_SIGNATURE);
-        if signature.is_empty() {
-            return None
-        }
-
-        let end_secs = root
-            .end_time
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        // Error traces are spread across twelve 5-second sub-buckets within the minute, so up to
-        // 12 representative error traces per minute get through (vs. 1 for non-error traces).
-        let error_key: i8 = if has_errors {
-            ((end_secs % 60) / 5) as i8
-        } else {
-            -1
-        };
-
-        let mut hasher = DefaultHasher::new();
-        signature.hash(&mut hasher);
-        (end_secs / 60).hash(&mut hasher); // minute floor
-        duration_bucket(trace_duration(root)).hash(&mut hasher);
-        error_key.hash(&mut hasher);
-        string_attr(&root.attributes, &OPERATION_TYPE).hash(&mut hasher);
-        string_attr(&root.attributes, &OPERATION_SUBTYPE).hash(&mut hasher);
-        string_attr(&root.attributes, &CLIENT_NAME_KEY).hash(&mut hasher);
-        string_attr(&root.attributes, &CLIENT_VERSION_KEY).hash(&mut hasher);
-        Some(hasher.finish())
     }
 }
 
@@ -216,19 +292,59 @@ fn trace_duration(root: &LightSpanData) -> Duration {
     }
 }
 
-/// Whether any span in the trace signals an error, used only as a bucketing dimension (so error
-/// traces are sampled at a higher rate). This is an approximation that avoids decoding FTV1: it
-/// looks at OTel span status and error events, not subgraph errors encoded inside the FTV1 blob.
-fn trace_has_errors(trace: &[LightSpanData]) -> bool {
-    trace.iter().any(|span| {
-        matches!(span.status, Status::Error { .. })
-            || span.events.iter().any(|event| {
-                event
+/// Extract a string attribute, or `None` when it is absent, not a string, or empty — all of which
+/// mean "we don't know this dimension" rather than "this dimension is the empty string".
+fn non_empty_attr(attributes: &HashMap<Key, Value>, key: &Key) -> Option<String> {
+    match attributes.get(key) {
+        Some(Value::String(s)) if !s.as_str().is_empty() => Some(s.as_str().to_string()),
+        _ => None,
+    }
+}
+
+/// Whether a span signals an error, used only as a bucketing dimension (so error traces are
+/// sampled at a higher rate). This is an approximation that avoids decoding FTV1: it looks at OTel
+/// span status and error events, not subgraph errors encoded inside the FTV1 blob.
+fn span_has_errors(span: &LightSpanData) -> bool {
+    matches!(span.status, Status::Error { .. })
+        || span.events.iter().any(|event| {
+            event
+                .attributes
+                .keys()
+                .any(|key| key.as_str() == GRAPHQL_ERROR_EXT_CODE)
+        })
+}
+
+/// Approximate serialized size of a span. This counts the dominant contributors — string
+/// attribute/event values (e.g. large FTV1 blobs) and names — and ignores the small,
+/// roughly-fixed per-span framing, which is enough for a coarse size guard.
+fn approx_span_size(span: &LightSpanData) -> usize {
+    let attributes: usize = span
+        .attributes
+        .iter()
+        .map(|(k, v)| k.as_str().len() + attribute_value_size(v))
+        .sum();
+    let events: usize = span
+        .events
+        .iter()
+        .map(|event| {
+            event.name.len()
+                + event
                     .attributes
-                    .keys()
-                    .any(|key| key.as_str() == GRAPHQL_ERROR_EXT_CODE)
-            })
-    })
+                    .iter()
+                    .map(|(k, v)| k.as_str().len() + attribute_value_size(v))
+                    .sum::<usize>()
+        })
+        .sum();
+    span.name.len() + attributes + events
+}
+
+fn attribute_value_size(value: &Value) -> usize {
+    match value {
+        Value::String(s) => s.as_str().len(),
+        // Scalars and (rare) array attributes contribute negligibly next to the large string
+        // blobs (e.g. FTV1) that are what actually push a trace over the limit.
+        _ => 8,
+    }
 }
 
 #[cfg(test)]
@@ -240,6 +356,10 @@ mod tests {
     use opentelemetry::trace::TraceId;
 
     use super::*;
+    use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
+    use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
+    use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
+    use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 
     // A representative filter with a small capacity is fine for these tests; nothing here relies on
     // the production capacity.
@@ -249,51 +369,139 @@ mod tests {
         }
     }
 
+    /// Build the summary the way `export` does, then ask the filter. Tests operate on real span
+    /// trees so they exercise the same extraction path as production.
+    fn keep(filter: &RepresentativeTraceFilter, trace: &[LightSpanData]) -> bool {
+        filter.should_keep(&TraceSummary::from_trace(trace))
+    }
+
     fn at_second(secs: u64) -> std::time::SystemTime {
         UNIX_EPOCH + Duration::from_secs(secs)
     }
 
-    /// Build a root request span with the given dimension attributes and end time.
-    fn root(
-        signature: &str,
-        client_name: &str,
-        duration_ns: i64,
-        end: std::time::SystemTime,
-        status: Status,
-    ) -> LightSpanData {
-        let mut attributes: HashMap<Key, Value> = HashMap::new();
-        attributes.insert(
-            APOLLO_PRIVATE_OPERATION_SIGNATURE,
-            Value::String(signature.to_string().into()),
-        );
-        attributes.insert(
-            CLIENT_NAME_KEY,
-            Value::String(client_name.to_string().into()),
-        );
-        attributes.insert(CLIENT_VERSION_KEY, Value::String("v1".into()));
-        attributes.insert(OPERATION_TYPE, Value::String("query".into()));
-        attributes.insert(APOLLO_PRIVATE_DURATION_NS_KEY, Value::I64(duration_ns));
-
+    /// A bare span with the given name; callers add whichever attributes the test needs. Tests
+    /// deliberately do not put every dimension on one span, because the router never does.
+    fn named_span(name: &'static str, end: std::time::SystemTime) -> LightSpanData {
         LightSpanData {
             trace_id: TraceId::from_bytes([1; 16]),
             span_id: SpanId::from_bytes([1; 8]),
             parent_span_id: SpanId::INVALID,
             span_kind: SpanKind::Server,
-            name: Cow::from("request"),
+            name: Cow::from(name),
             start_time: end,
             end_time: end,
-            attributes,
-            status,
+            attributes: HashMap::new(),
+            status: Status::Unset,
             droppped_attribute_count: 0,
             events: Vec::new(),
         }
     }
 
-    /// A root span with none of the key dimensions on it.
-    fn root_without_signature(end: std::time::SystemTime) -> LightSpanData {
-        let mut span = root("ignored", "web", 1_000_000, end, Status::Unset);
-        span.attributes.remove(&APOLLO_PRIVATE_OPERATION_SIGNATURE);
-        span
+    /// Build a trace with the span topology the router actually produces: the root `router` span
+    /// carries `apollo_private.request`, the duration and the client attributes; the `supergraph`
+    /// span carries the operation signature; and the `execution` span carries the operation type.
+    /// No single span carries all of the key dimensions.
+    fn realistic_trace(
+        signature: &str,
+        client_name: &str,
+        duration_ns: i64,
+        end: std::time::SystemTime,
+        status: Status,
+    ) -> Vec<LightSpanData> {
+        let mut router = named_span(ROUTER_SPAN_NAME, end);
+        router.status = status;
+        router.attributes.insert(
+            CLIENT_NAME_KEY,
+            Value::String(client_name.to_string().into()),
+        );
+        router
+            .attributes
+            .insert(CLIENT_VERSION_KEY, Value::String("v1".into()));
+        router
+            .attributes
+            .insert(APOLLO_PRIVATE_DURATION_NS_KEY, Value::I64(duration_ns));
+
+        let mut supergraph = named_span(SUPERGRAPH_SPAN_NAME, end);
+        supergraph.attributes.insert(
+            APOLLO_PRIVATE_OPERATION_SIGNATURE,
+            Value::String(signature.to_string().into()),
+        );
+
+        let mut execution = named_span(EXECUTION_SPAN_NAME, end);
+        execution
+            .attributes
+            .insert(OPERATION_TYPE, Value::String("query".into()));
+
+        vec![router, supergraph, execution]
+    }
+
+    /// The same topology, but with no operation signature anywhere, so no key can be built.
+    fn trace_without_signature(end: std::time::SystemTime) -> Vec<LightSpanData> {
+        let mut trace = realistic_trace("ignored", "web", 1_000_000, end, Status::Unset);
+        for span in &mut trace {
+            span.attributes.remove(&APOLLO_PRIVATE_OPERATION_SIGNATURE);
+        }
+        trace
+    }
+
+    /// Regression test for the key being read only from the root span: the operation signature
+    /// lives on the `supergraph` span, so identical traces were never recognised as duplicates.
+    #[test]
+    fn dedups_traces_whose_signature_lives_on_the_supergraph_span() {
+        let filter = representative_filter();
+        let end = at_second(600);
+        let make = || realistic_trace("sigA", "web", 1_000_000, end, Status::Unset);
+
+        assert!(keep(&filter, &make()), "first trace is kept");
+        assert!(
+            !keep(&filter, &make()),
+            "a duplicate of the same operation within the minute must be dropped"
+        );
+    }
+
+    /// The flip side: distinct operations must not be conflated. Without reading the supergraph
+    /// span, every operation shares an (empty) signature and collapses into one representative.
+    #[test]
+    fn distinguishes_operations_by_signature_on_the_supergraph_span() {
+        let filter = representative_filter();
+        let end = at_second(600);
+
+        assert!(keep(
+            &filter,
+            &realistic_trace("sigA", "web", 1_000_000, end, Status::Unset)
+        ));
+        assert!(
+            keep(
+                &filter,
+                &realistic_trace("sigB", "web", 1_000_000, end, Status::Unset)
+            ),
+            "a different operation must be kept, not treated as a duplicate"
+        );
+    }
+
+    /// Subscription-event traces are rooted at the `subscription_event` span, which carries the
+    /// signature itself (there is no supergraph span in the tree).
+    #[test]
+    fn dedups_subscription_event_traces() {
+        let filter = representative_filter();
+        let end = at_second(600);
+        let make = || {
+            let mut event = named_span(SUBSCRIPTION_EVENT_SPAN_NAME, end);
+            event.attributes.insert(
+                APOLLO_PRIVATE_OPERATION_SIGNATURE,
+                Value::String("subSig".into()),
+            );
+            event
+                .attributes
+                .insert(APOLLO_PRIVATE_DURATION_NS_KEY, Value::I64(1_000_000));
+            vec![event]
+        };
+
+        assert!(keep(&filter, &make()), "first event trace is kept");
+        assert!(
+            !keep(&filter, &make()),
+            "duplicate subscription event must be dropped"
+        );
     }
 
     #[test]
@@ -305,7 +513,7 @@ mod tests {
         // signature we cannot tell operations apart, so all of them must be kept.
         for i in 0..5 {
             assert!(
-                filter.should_keep(&[root_without_signature(end)]),
+                keep(&filter, &trace_without_signature(end)),
                 "trace {i} must be kept when the key cannot be computed"
             );
         }
@@ -315,12 +523,12 @@ mod tests {
     fn keeps_every_trace_when_the_operation_signature_is_empty() {
         let filter = representative_filter();
         let end = at_second(600);
-        let make = || vec![root("", "web", 1_000_000, end, Status::Unset)];
+        let make = || realistic_trace("", "web", 1_000_000, end, Status::Unset);
 
         // An empty signature means "unknown", not "an operation whose signature is the empty
         // string", so it must fail open just like an absent attribute.
-        assert!(filter.should_keep(&make()));
-        assert!(filter.should_keep(&make()));
+        assert!(keep(&filter, &make()));
+        assert!(keep(&filter, &make()));
     }
 
     #[test]
@@ -329,14 +537,14 @@ mod tests {
         let end = at_second(600);
 
         // Fail-open traces must not insert a key, or they would evict/collide with real ones.
-        assert!(filter.should_keep(&[root_without_signature(end)]));
-        assert!(filter.should_keep(&[root_without_signature(end)]));
+        assert!(keep(&filter, &trace_without_signature(end)));
+        assert!(keep(&filter, &trace_without_signature(end)));
 
         // A normal trace still dedups as usual.
-        let valid = || vec![root("sigA", "web", 1_000_000, end, Status::Unset)];
-        assert!(filter.should_keep(&valid()), "first valid trace is kept");
+        let valid = || realistic_trace("sigA", "web", 1_000_000, end, Status::Unset);
+        assert!(keep(&filter, &valid()), "first valid trace is kept");
         assert!(
-            !filter.should_keep(&valid()),
+            !keep(&filter, &valid()),
             "duplicate valid trace is still dropped"
         );
     }
@@ -345,42 +553,33 @@ mod tests {
     fn keeps_first_and_drops_duplicate_within_minute() {
         let filter = representative_filter();
         let end = at_second(600); // minute floor = 10
-        let make = || vec![root("sigA", "web", 1_000_000, end, Status::Unset)];
+        let make = || realistic_trace("sigA", "web", 1_000_000, end, Status::Unset);
 
-        assert!(filter.should_keep(&make()), "first of a key is kept");
-        assert!(
-            !filter.should_keep(&make()),
-            "duplicate within minute dropped"
-        );
-        assert!(!filter.should_keep(&make()), "still dropped");
+        assert!(keep(&filter, &make()), "first of a key is kept");
+        assert!(!keep(&filter, &make()), "duplicate within minute dropped");
+        assert!(!keep(&filter, &make()), "still dropped");
     }
 
     #[test]
     fn distinguishes_key_dimensions() {
         let end = at_second(600);
         // Each variation from the baseline must be treated as a new representative.
-        let baseline = || vec![root("sigA", "web", 1_000_000, end, Status::Unset)];
+        let baseline = || realistic_trace("sigA", "web", 1_000_000, end, Status::Unset);
 
         // signature, client, latency bucket, next minute, and error status each form a new key.
         let variants = vec![
-            vec![root("sigB", "web", 1_000_000, end, Status::Unset)],
-            vec![root("sigA", "ios", 1_000_000, end, Status::Unset)],
-            vec![root("sigA", "web", 1_000_000_000, end, Status::Unset)], // different latency bucket
-            vec![root(
-                "sigA",
-                "web",
-                1_000_000,
-                at_second(660),
-                Status::Unset,
-            )], // next minute
-            vec![root("sigA", "web", 1_000_000, end, Status::error("boom"))],
+            realistic_trace("sigB", "web", 1_000_000, end, Status::Unset),
+            realistic_trace("sigA", "ios", 1_000_000, end, Status::Unset),
+            realistic_trace("sigA", "web", 1_000_000_000, end, Status::Unset), // different latency bucket
+            realistic_trace("sigA", "web", 1_000_000, at_second(660), Status::Unset), // next minute
+            realistic_trace("sigA", "web", 1_000_000, end, Status::error("boom")),
         ];
 
         for variant in variants {
             let filter = representative_filter();
-            assert!(filter.should_keep(&baseline()));
+            assert!(keep(&filter, &baseline()));
             assert!(
-                filter.should_keep(&variant),
+                keep(&filter, &variant),
                 "a differing dimension must produce a new representative"
             );
         }
@@ -393,14 +592,14 @@ mod tests {
         // 5-second sub-bucket, so up to 12 distinct error representatives get through.
         let mut kept = 0;
         for sec in 600..660 {
-            let trace = vec![root(
+            let trace = realistic_trace(
                 "sigA",
                 "web",
                 1_000_000,
                 at_second(sec),
                 Status::error("boom"),
-            )];
-            if filter.should_keep(&trace) {
+            );
+            if keep(&filter, &trace) {
                 kept += 1;
             }
         }
@@ -409,23 +608,17 @@ mod tests {
 
     #[test]
     fn detects_errors_from_span_status() {
-        let error_trace = vec![root(
+        let error_trace = realistic_trace(
             "sigA",
             "web",
             1_000_000,
             at_second(600),
             Status::error("boom"),
-        )];
-        assert!(trace_has_errors(&error_trace));
+        );
+        assert!(TraceSummary::from_trace(&error_trace).has_errors);
 
-        let ok_trace = vec![root(
-            "sigA",
-            "web",
-            1_000_000,
-            at_second(600),
-            Status::Unset,
-        )];
-        assert!(!trace_has_errors(&ok_trace));
+        let ok_trace = realistic_trace("sigA", "web", 1_000_000, at_second(600), Status::Unset);
+        assert!(!TraceSummary::from_trace(&ok_trace).has_errors);
     }
 
     #[test]
