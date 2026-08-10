@@ -58,7 +58,7 @@ telemetry:
     sampler: 0.1
 ```
 
-Whatever these samplers let through is then subject to a safeguard that further reduces GraphOS trace volume — see [Apollo trace throttling](#apollo-trace-throttling).
+Whatever these samplers let through is then subject to a safeguard that further reduces GraphOS trace volume — see the [Apollo trace throttling section](#apollo-trace-throttling).
 
 <OTelEnvVarsCaution />
 
@@ -97,9 +97,9 @@ The value uses the same trace-ID-based algorithm as `telemetry.exporters.tracing
 
 <MinVersionBadge version="Router v3.0.0" />
 
-To keep trace volume manageable for high-traffic graphs, the router applies a throttle that further reduces the number of traces it sends to GraphOS. This runs after the `telemetry.apollo.sampler` and `telemetry.exporters.tracing.common.sampler` head samplers, so it only ever affects the traces those samplers already selected. This helps to avoid the processing and transfer of traces that would be dropped by GraphOS at ingestion time anyway, and it affects only the GraphOS pipeline — traces sent to your own OTLP collector or to Datadog are unaffected.
+To keep trace volume manageable for high-traffic graphs, the router applies a throttle that further reduces the number of traces it sends to GraphOS. This runs after the `telemetry.apollo.sampler` and `telemetry.exporters.tracing.common.sampler` head samplers, so it only ever affects the traces those samplers already selected. This reduces the processing and transfer of traces, and it affects only the GraphOS pipeline — traces sent to your own OTLP collector or to Datadog are unaffected.
 
-The strategy of the throttle can be configured with `telemetry.apollo.tracing.throttle`:
+Configure the strategy of the throttle with `telemetry.apollo.tracing.throttle`:
 
 ```yaml title="router.yaml"
 telemetry:
