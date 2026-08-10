@@ -674,8 +674,10 @@ Every _other_ kind of failure is replaced with the status code's reason phrase -
 
 This keeps script line numbers, callback names and router internals out of client-facing responses.
 If you want a client to see a specific message for one of these cases, catch the error and throw a
-new one. The error you caught is opaque - it has no `status` or `message` you can set - and
-re-throwing it as-is stays redacted:
+new one. Re-throwing the error you caught stays redacted - both the opaque `RouterError` a router
+function raises, which has no `status` or `message` you can set, and the object map the Rhai engine
+hands you, whose `message` is the engine's own error text. A `status` you set on either is still
+honoured; only the message you did not write is replaced.
 
 ```rhai
 fn process_request(request) {

@@ -18,6 +18,7 @@ use rhai::EvalAltResult;
 use rhai::FnPtr;
 use rhai::FuncArgs;
 use rhai::Instant;
+use rhai::Map;
 use rhai::Scope;
 use rhai::Shared;
 use schemars::JsonSchema;
@@ -726,7 +727,7 @@ impl ServiceStep {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Debug)]
 struct Position {
     line: Option<usize>,
     pos: Option<usize>,
@@ -751,12 +752,14 @@ impl From<&rhai::Position> for Position {
     }
 }
 
-#[derive(Deserialize, Debug)]
+/// What a failed Rhai callback turns into: the response the client gets, and the reason an operator
+/// needs.
+///
+/// This is built by `process_error`, never deserialized from a script's value - `process_error`
+/// reads the keys of a thrown object map one at a time instead, so that a key it cannot use does
+/// not take the rest of the author's intent down with it.
+#[derive(Debug)]
 struct ErrorDetails {
-    #[serde(
-        with = "http_serde::status_code",
-        default = "default_thrown_status_code"
-    )]
     status: StatusCode,
     message: Option<String>,
     position: Option<Position>,
@@ -765,14 +768,8 @@ struct ErrorDetails {
     ///
     /// This holds Rhai implementation details - engine error text, script line numbers and the
     /// names of the callbacks involved - so it must never be copied into `message` or into a
-    /// client-facing response. It is skipped during deserialization because it describes the
-    /// failure, not something a script can throw.
-    #[serde(skip)]
+    /// client-facing response.
     internal_detail: Option<String>,
-}
-
-fn default_thrown_status_code() -> StatusCode {
-    StatusCode::INTERNAL_SERVER_ERROR
 }
 
 /// The client-facing message for a failure the script author did not choose, i.e. anything the
@@ -791,17 +788,31 @@ fn redacted_message(status: StatusCode) -> String {
         .to_string()
 }
 
+/// Whether a thrown object map is one rhai handed a `catch` block for an engine failure, rather
+/// than one the script wrote itself.
+///
+/// `EvalAltResult::dump_fields` stamps every such map with an `error` key naming the variant -
+/// `"ErrorFunctionNotFound"` and the like. A script's own throw never picks that key up, because
+/// rhai passes a thrown value to `catch` unchanged rather than rebuilding it, so the key tells the
+/// two apart. It matters because the `message` on an engine map is the engine's own error text: a
+/// script re-throwing that map, with or without a status set on it first, would put back exactly
+/// what `process_error` redacts everywhere else.
+fn is_caught_engine_error(thrown_map: &Map) -> bool {
+    thrown_map
+        .get("error")
+        .is_some_and(|variant| variant.is_string())
+}
+
 fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
     let mut error_details = ErrorDetails {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         message: None,
         position: None,
         body: None,
-        internal_detail: None,
+        // Rendered before `error` is taken apart below: this is the only place the whole Rhai
+        // error is available, including the chain of script callbacks it came up through.
+        internal_detail: Some(format!("rhai execution error: '{error}'")),
     };
-    // Captured before `error` is consumed below: this is the only chance to keep the full Rhai
-    // error text for the logs.
-    error_details.internal_detail = Some(format!("rhai execution error: '{error}'"));
 
     let inner_error = error.unwrap_inner();
     // A script's `throw` is the usual source of `ErrorRuntime`, and the only source that carries a
@@ -820,29 +831,42 @@ fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
         if let Some(internal_message) = engine::internal_error_message(thrown) {
             // A router Rhai binding failed rather than the script throwing, so the message
             // describes router internals: it stays out of the response and goes to the logs. Rhai
-            // displays a marked error as its Rust type name rather than as its message, so the
-            // detail captured above has to be rebuilt here to keep the message in the logs.
-            error_details.internal_detail = Some(format!(
-                "rhai execution error: 'Runtime error: {internal_message}{}'",
-                if pos.is_none() {
-                    String::new()
-                } else {
-                    format!(" ({pos})")
-                }
-            ));
-        } else if let Ok(thrown_details) = rhai::serde::from_dynamic::<ErrorDetails>(thrown) {
-            // `throw #{ status: ..., message: ..., body: ... }`
-            error_details.status = thrown_details.status;
+            // renders a marked error as its Rust type rather than as its message, so put the
+            // message back where that type was named - rebuilding the detail from this error alone
+            // would drop the `in call to function` chain around it.
+            if let Some(detail) = &mut error_details.internal_detail {
+                *detail = detail.replace(engine::internal_error_displayed_as(), &internal_message);
+            }
+        } else if let Some(thrown_map) = thrown.read_lock::<Map>() {
+            // `throw #{ status: ..., message: ..., body: ... }`, read one key at a time. A script
+            // is free to throw a map carrying keys of its own - rhai gives a `catch` block `line`
+            // and `position` integers alongside the message - and a key we cannot use must not
+            // discard the status and message the author did choose.
+            let thrown_value = |key: &str| thrown_map.get(key).filter(|value| !value.is_unit());
+            if let Some(status) = thrown_value("status")
+                .and_then(|value| value.as_int().ok())
+                .and_then(|code| u16::try_from(code).ok())
+                .and_then(|code| StatusCode::from_u16(code).ok())
+            {
+                error_details.status = status;
+            }
+            let message = thrown_value("message")
+                .filter(|_| !is_caught_engine_error(&thrown_map))
+                .and_then(|value| value.as_immutable_string_ref().ok())
+                .map(|message| message.to_string());
+            let body = thrown_value("body").and_then(|value| {
+                rhai::serde::from_dynamic::<crate::graphql::Response>(value).ok()
+            });
             // A throw carrying only a status - `throw #{ status: 400 }` - gets the status it asked
             // for and a redacted message, because there is no author-provided message to return.
-            if thrown_details.message.is_some() || thrown_details.body.is_some() {
-                error_details.message = thrown_details.message;
-                error_details.body = thrown_details.body;
+            if message.is_some() || body.is_some() {
+                error_details.message = message;
+                error_details.body = body;
             }
-        } else if let Ok(thrown_message) = thrown.clone().into_string() {
+        } else if let Ok(thrown_message) = thrown.as_immutable_string_ref() {
             // `throw "some message"`. The author wrote this string, so it is theirs to return - but
             // only the string itself, not the Rhai wrapper around it.
-            error_details.message = Some(thrown_message);
+            error_details.message = Some(thrown_message.to_string());
         }
     }
 

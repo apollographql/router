@@ -75,6 +75,7 @@ const CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE: &str =
 
 const CANNOT_GET_ENVIRONMENT_VARIABLE: &str = "environment variable not found";
 
+pub(super) use error::displayed_as as internal_error_displayed_as;
 use error::internal_error;
 pub(super) use error::internal_error_message;
 pub(crate) use types::OptionDance;
@@ -279,9 +280,13 @@ mod router_header_map {
         x: &mut HeaderMap,
         key: &str,
     ) -> Result<String, Box<EvalAltResult>> {
+        // Parse the key before naming it in an error: `HeaderMap::remove` accepts any `&str` and
+        // simply finds nothing, so an unparsed key would put whatever the script passed - which may
+        // be a value it read off the request - into the log line verbatim.
+        let search_name = HeaderName::from_str(key).map_err(internal_error)?;
         let removed = x
-            .remove(key)
-            .ok_or_else(|| internal_error(format!("header not found: {key}")))?;
+            .remove(&search_name)
+            .ok_or_else(|| internal_error(format!("header not found: {search_name}")))?;
         Ok(String::from_utf8_lossy(removed.as_bytes()).to_string())
     }
 
@@ -1364,13 +1369,13 @@ impl Rhai {
                         function_name,
                         (rhai_service, name.to_string()),
                     )
-                    .map_err(|err| err.to_string())?;
+                    .map_err(|err| err.to_string())?; // not a rhai binding
             }
             None => {
                 let _ = self
                     .engine
                     .call_fn::<Dynamic>(&mut guard, &self.ast, function_name, (rhai_service,))
-                    .map_err(|err| err.to_string())?;
+                    .map_err(|err| err.to_string())?; // not a rhai binding
             }
         }
 
@@ -1452,19 +1457,28 @@ impl Rhai {
                 tracing::info!(%message, target = %print_main);
             })
             // Register a series of logging functions
+            //
+            // Note: these render their argument with `error::display_for_log` rather than with
+            // `Display`, so that `log_error(err)` on a caught binding failure reads as its message
+            // and not as the Rust type rhai's `Display` would name.
             .register_fn("log_trace", move |message: Dynamic| {
+                let message = error::display_for_log(&message);
                 tracing::trace!(%message, target = %trace_main);
             })
             .register_fn("log_debug", move |message: Dynamic| {
+                let message = error::display_for_log(&message);
                 tracing::debug!(%message, target = %debug_main);
             })
             .register_fn("log_info", move |message: Dynamic| {
+                let message = error::display_for_log(&message);
                 tracing::info!(%message, target = %info_main);
             })
             .register_fn("log_warn", move |message: Dynamic| {
+                let message = error::display_for_log(&message);
                 tracing::warn!(%message, target = %warn_main);
             })
             .register_fn("log_error", move |message: Dynamic| {
+                let message = error::display_for_log(&message);
                 tracing::error!(%message, target = %error_main);
             });
 

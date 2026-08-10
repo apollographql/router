@@ -55,8 +55,26 @@ pub(crate) fn internal_error_message(thrown: &Dynamic) -> Option<String> {
         .map(|error| error.message.clone())
 }
 
-/// Give scripts the same access to a binding failure they had when it was a plain string: `${err}`
-/// and `print(err)` yield the message, and so does `err.message`.
+/// How rhai renders a marked error when it formats the `Dynamic` carrying it with `Display`.
+///
+/// Rhai's `Display` for a custom value writes [`std::any::type_name`] rather than going through the
+/// `to_string` registered below, so this is the token `process_error` substitutes the real message
+/// back into when it keeps the engine's error text for the logs.
+pub(crate) fn displayed_as() -> &'static str {
+    std::any::type_name::<RouterInternalError>()
+}
+
+/// Render a value a script passed to one of the router's logging functions.
+///
+/// Those take a `Dynamic` and format it with `Display`, which renders a marked error as
+/// [`displayed_as`] rather than through the registered `to_string` - so a script logging the error
+/// itself, `log_error(err)`, has to be routed past that the way an interpolated one already is.
+pub(super) fn display_for_log(value: &Dynamic) -> String {
+    internal_error_message(value).unwrap_or_else(|| value.to_string())
+}
+
+/// Give scripts the same access to a binding failure they had when it was a plain string: `${err}`,
+/// `print(err)` and `log_error(err)` yield the message, and so does `err.message`.
 pub(super) fn register(engine: &mut Engine) {
     engine
         .register_type_with_name::<RouterInternalError>(SCRIPT_TYPE_NAME)
@@ -69,4 +87,39 @@ pub(super) fn register(engine: &mut Engine) {
         .register_fn("to_debug", |error: &mut RouterInternalError| {
             error.message.clone()
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn thrown_value(error: EvalAltResult) -> Dynamic {
+        match error {
+            EvalAltResult::ErrorRuntime(thrown, _) => thrown,
+            other => panic!("expected a runtime error, got: {other}"),
+        }
+    }
+
+    // The two places a marked error is rendered outside a script: a router logging function, which
+    // takes a `Dynamic` and formats it with `Display`, and `process_error`, which substitutes the
+    // message back into rhai's own error text. Both rest on `Display` naming the Rust type rather
+    // than calling the `to_string` registered for scripts.
+    #[test]
+    fn it_renders_a_marked_error_as_its_message_rather_than_its_type() {
+        let thrown = thrown_value(*internal_error("environment variable not found"));
+
+        assert_eq!(thrown.to_string(), displayed_as());
+        assert_eq!(
+            display_for_log(&thrown),
+            "environment variable not found",
+            "log_error(err) has to read as the message, not as the marker"
+        );
+    }
+
+    #[test]
+    fn it_renders_everything_else_as_it_always_did() {
+        let thrown = thrown_value("a message the script threw".into());
+
+        assert_eq!(display_for_log(&thrown), "a message the script threw");
+    }
 }

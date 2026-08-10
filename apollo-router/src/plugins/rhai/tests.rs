@@ -1131,24 +1131,6 @@ async fn test_subgraph_error_logging_with_body() -> Result<(), BoxError> {
         .await
 }
 
-/// Anything that could tell a client the router runs Rhai, which functions its script registers,
-/// or where in that script a failure happened.
-fn assert_message_discloses_nothing(message: &str) {
-    for disclosure in [
-        "rhai",
-        "Rhai",
-        "Runtime error",
-        "line ",
-        "position ",
-        "in call to function",
-    ] {
-        assert!(
-            !message.contains(disclosure),
-            "client-facing message leaks {disclosure:?}: {message}"
-        );
-    }
-}
-
 // A failure inside the router's own Rhai bindings - here, reading a header that isn't present -
 // used to reach the client as `rhai execution error: 'Runtime error: <binding error> (line N,
 // position M)'`.
@@ -1172,7 +1154,6 @@ async fn it_redacts_binding_errors_from_client_responses() -> Result<(), BoxErro
         let body = response.next_response().await.expect("there is a response");
         let message = &body.errors.first().expect("the request failed").message;
         assert_eq!(message, "Internal Server Error");
-        assert_message_discloses_nothing(message);
 
         crate::plugin::test::assert_no_mock_calls(handle).await;
         Ok(())
@@ -1209,7 +1190,6 @@ async fn it_redacts_engine_errors_from_client_responses() -> Result<(), BoxError
         let body = response.next_response().await.expect("there is a response");
         let message = &body.errors.first().expect("the request failed").message;
         assert_eq!(message, "Internal Server Error");
-        assert_message_discloses_nothing(message);
 
         crate::plugin::test::assert_no_mock_calls(handle).await;
         Ok(())
@@ -1220,8 +1200,8 @@ async fn it_redacts_engine_errors_from_client_responses() -> Result<(), BoxError
 
 // Scripts can still `catch` a binding failure, so the router must not have made these errors
 // uncatchable in the course of marking them internal.
-#[tokio::test]
-async fn it_can_catch_binding_errors_in_a_script() {
+#[test]
+fn it_can_catch_binding_errors_in_a_script() {
     let engine = new_rhai_test_engine();
     let caught: String = engine
         .eval(
@@ -1306,16 +1286,94 @@ fn it_redacts_a_throw_with_an_unrecognised_status() {
     assert_eq!(processed_error.message, Some("Unknown Error".to_string()));
 }
 
+// A thrown object map is read a key at a time, so a key the router has no use for - the value a
+// `catch` sees for an engine error carries `line` and `position` integers, and re-throwing it with
+// a status set is an obvious thing to write - does not take the author's status and message with
+// it.
+#[test]
+fn it_returns_a_throw_that_carries_keys_of_its_own() {
+    let engine = new_rhai_test_engine();
+    let error = engine
+        .eval::<()>(r#"throw #{ status: 400, message: "Invalid request", position: 3 };"#)
+        .expect_err("the script throws");
+
+    let processed_error = process_error(error);
+    assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        processed_error.message,
+        Some("Invalid request".to_string()),
+        "a key the router cannot use must not discard the author's message"
+    );
+}
+
+// Re-throwing the value a `catch` block was handed for an engine failure must not put the engine's
+// error text into the response, however the script dresses it up first. Its status is still the
+// author's to choose - only the message rhai wrote is redacted.
+#[test]
+fn it_redacts_a_re_thrown_engine_error() {
+    let engine = new_rhai_test_engine();
+    let error = engine
+        .eval::<()>(
+            r#"
+            try {
+                this_function_does_not_exist();
+            } catch(err) {
+                err.status = 400;
+                throw err;
+            }"#,
+        )
+        .expect_err("the script re-throws what it caught");
+
+    let processed_error = process_error(error);
+    assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        processed_error.message,
+        Some("Bad Request".to_string()),
+        "the engine's own error text is not the script author's to return"
+    );
+    // The operator still gets it.
+    let internal_detail = processed_error
+        .internal_detail
+        .expect("the real error is logged");
+    assert!(
+        internal_detail.contains("this_function_does_not_exist"),
+        "expected the unredacted error in the logs, got: {internal_detail}"
+    );
+}
+
+// ...and a key it *can* use but cannot read - a body that isn't a GraphQL response - only costs the
+// author that key, not the status they asked for.
+#[test]
+fn it_keeps_the_status_of_a_throw_whose_body_is_malformed() {
+    let engine = new_rhai_test_engine();
+    let error = engine
+        .eval::<()>(r#"throw #{ status: 403, body: "not a graphql response" };"#)
+        .expect_err("the script throws");
+
+    let processed_error = process_error(error);
+    assert_eq!(processed_error.status, StatusCode::FORBIDDEN);
+    assert!(processed_error.body.is_none());
+    // There is no author-provided message left to return, so the status' reason phrase stands in.
+    assert_eq!(processed_error.message, Some("Forbidden".to_string()));
+}
+
 // `engine::internal_error` is the only way a router binding may raise an error: a plain
 // `Err("...".into())` produces an `ErrorRuntime` that `process_error` cannot tell apart from a
 // script's own `throw`, so its text would be returned to clients. Nothing in the type system
 // prevents that - rhai fixes the error type of a fallible binding as `Box<EvalAltResult>` - so it
 // is checked here instead.
 //
-// A binding that raises an error some way these two rules don't describe slips through; they cover
-// the ways a `Box<EvalAltResult>` can be built at all, which is what makes them worth having.
+// A binding that raises an error some way these rules don't describe slips through; they cover the
+// three ways this code has ever produced one - naming `EvalAltResult`, converting a value with
+// `.into()`, and leaning on a `?` to do that conversion implicitly - which is what makes them worth
+// having.
 #[test]
 fn bindings_raise_their_errors_through_internal_error() {
+    // Not everything in `engine/` is a binding: `run_rhai_service` raises `String`s that only ever
+    // reach a log, never `process_error`. The few such lines say so, rather than the rules below
+    // guessing which functions rhai calls.
+    const NOT_A_BINDING: &str = "not a rhai binding";
+
     // Read the directory rather than listing the files, so a binding added later is checked too.
     let engine_dir =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/plugins/rhai/engine");
@@ -1351,14 +1409,27 @@ fn bindings_raise_their_errors_through_internal_error() {
         );
 
         for (index, line) in source.lines().enumerate() {
-            // The `.into()` has to come after the producer to be the thing the producer is raising:
-            // an earlier one is converting an argument, as in `from_dynamic(&om.into())`.
+            if line.contains(NOT_A_BINDING) {
+                continue;
+            }
+
+            // A producer raises what follows it as a Rhai error either explicitly, with an `.into()`
+            // after it, or implicitly, with a `?` leaning on `impl From<T: AsRef<str>> for
+            // Box<EvalAltResult>`. The `.into()` has to come after the producer to be the thing
+            // being raised: an earlier one is converting an argument, as in
+            // `from_dynamic(&om.into())`. The `?` form names neither `EvalAltResult` nor `.into()`,
+            // and is how `.map_err(|e| e.to_string())?` and `.ok_or("...")?` - the shapes every
+            // disclosure fixed alongside this test was written in - get past a reader.
             let converts_into_an_error = ["Err(", "map_err(", "ok_or(", "ok_or_else("]
                 .iter()
                 .filter_map(|producer| line.find(producer))
                 .min()
-                .zip(line.rfind(".into()"))
-                .is_some_and(|(producer, conversion)| conversion > producer);
+                .is_some_and(|producer| {
+                    line.rfind(".into()")
+                        .is_some_and(|conversion| conversion > producer)
+                        || line.contains(")?")
+                })
+                && !line.contains("internal_error");
             assert!(
                 !converts_into_an_error,
                 "{path}:{} converts a value into a Rhai error. Raise it with \
@@ -1367,18 +1438,19 @@ fn bindings_raise_their_errors_through_internal_error() {
                 index + 1
             );
 
-            // Rhai's own conversions fail with a `Box<EvalAltResult>` already built, so a bare `?`
-            // on one raises an unmarked error without naming `EvalAltResult` or `.into()` - neither
-            // rule above sees it.
+            // Rhai's own conversions fail with a `Box<EvalAltResult>` already built, so propagating
+            // one unchanged raises an unmarked error without naming `EvalAltResult` or `.into()` -
+            // the rule above never sees it. That propagation does not need a `?` either: every
+            // `to_dynamic` getter here returns the `Result` as its tail expression.
             let converts_from_rhai = ["from_dynamic(", "to_dynamic("]
                 .iter()
                 .any(|conversion| line.contains(conversion))
                 && !line.contains("internal_error");
             assert!(
-                !(converts_from_rhai && line.contains(")?")),
+                !converts_from_rhai,
                 "{path}:{} propagates a Rhai conversion failure unchanged. Add \
-                 `.map_err(internal_error)` before the `?`, or `process_error` may return its text \
-                 to clients:\n{line}",
+                 `.map_err(internal_error)` to it, or `process_error` may return its text to \
+                 clients:\n{line}",
                 index + 1
             );
         }
@@ -1407,7 +1479,6 @@ async fn it_redacts_deserialization_failures_in_binding_setters() {
     let processed_error = process_error(error);
     let message = processed_error.message.expect("the failure has a message");
     assert_eq!(message, "Internal Server Error");
-    assert_message_discloses_nothing(&message);
 
     // The other half: what the client no longer sees still has to be available to an operator.
     let internal_detail = processed_error
