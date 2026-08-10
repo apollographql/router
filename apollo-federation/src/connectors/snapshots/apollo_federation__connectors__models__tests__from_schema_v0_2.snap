@@ -202,11 +202,12 @@ expression: "&connectors"
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: Some(
-            true,
-        ),
-        output_is_non_null: Some(
-            false,
+        output_type: Some(
+            List(
+                Named(
+                    "Post",
+                ),
+            ),
         ),
         label: Label(
             "connectors.json http: GET /posts",
@@ -490,8 +491,7 @@ expression: "&connectors"
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: None,
-        output_is_non_null: None,
+        output_type: None,
         label: Label(
             "[BATCH] connectors.json http: POST /posts",
         ),

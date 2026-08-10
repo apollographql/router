@@ -269,11 +269,12 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/types_u
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: Some(
-            true,
-        ),
-        output_is_non_null: Some(
-            false,
+        output_type: Some(
+            List(
+                Named(
+                    "T",
+                ),
+            ),
         ),
         label: Label(
             "connectors.example http: GET /",

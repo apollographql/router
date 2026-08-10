@@ -323,11 +323,10 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_
             connect_extensions: None,
             connect_is_success: None,
         },
-        output_is_list: Some(
-            false,
-        ),
-        output_is_non_null: Some(
-            false,
+        output_type: Some(
+            Named(
+                "String",
+            ),
         ),
         label: Label(
             "connectors.example http: GET /{$args.bar}/{$args.doubleBaz.buzz}/{$args.baz.quux.quaz}",

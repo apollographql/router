@@ -3375,8 +3375,7 @@ mod tests {
                                         request_variable_keys: Default::default(),
                                         response_variable_keys: Default::default(),
                                         error_settings: Default::default(),
-                                        output_is_list: Some(false),
-                                        output_is_non_null: Some(false),
+                                        output_type: None,
                                         label: "label".into(),
                                     };
                                     let response_key = ResponseKey::RootField {
