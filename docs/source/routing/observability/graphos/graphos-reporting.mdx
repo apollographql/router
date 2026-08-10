@@ -108,7 +108,7 @@ telemetry:
       throttle: representative_traces   # representative_traces (default) | rate_limited
 ```
 
-- `representative_traces` (default): Sends at most one representative trace per minute for each distinct combination of operation, client, latency bucket, error status, and operation type. Tre router drops traces that duplicate a combination already seen within the current minute. Error traces are sampled at a higher rate so that failures remain visible. This gives broad coverage of distinct behaviors while significantly reducing volume for repetitive traffic.
+- `representative_traces` (default): Sends at most one representative trace per minute for each distinct combination of operation, client, latency bucket, error status, and operation type. The router drops traces that duplicate a combination already seen within the current minute. Error traces are sampled at a higher rate so that failures remain visible. This gives broad coverage of distinct behaviors while significantly reducing volume for repetitive traffic.
 - `rate_limited`: Sends every trace but caps the export rate at a fixed maximum of 100 traces per second, per router instance. This is cheaper in CPU and memory than `representative_traces` and is a good fallback if you find that representative sampling is too resource-intensive for your workload. The rate is not configurable.
 
 Independently of the throttle, the router always drops any individual trace larger than 10MB before sending it to GraphOS. GraphOS rejects oversized traces at ingestion anyway, so exporting them would only waste CPU and bandwidth. Oversized traces are most often caused by pathologically large field-level (FTV1) trace data on subgraph spans. This limit is fixed and can't be configured.

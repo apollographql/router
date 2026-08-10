@@ -329,6 +329,8 @@ impl SpanExporter for Exporter {
         let mut kept_traces: u64 = 0;
         // Traces dropped for exceeding the hard 10MB size limit.
         let mut oversized_traces: u64 = 0;
+        // Traces dropped because the apollo_telemetry exporter would not have sent them anyway.
+        let mut unexportable_traces: u64 = 0;
 
         {
             let mut span_cache = self.span_cache.lock();
@@ -345,10 +347,16 @@ impl SpanExporter for Exporter {
                         &self.include_attr_event_names,
                     );
                     let trace = span_cache.pop_spans_for_tree(root_span);
-                    // To avoid scanning the trace multiple times, we do a single pass over the 
-                    // trace's spans to get both the approximate size, and the dimensions 
-                    // identifying a representative trace.
+                    // To avoid scanning the trace multiple times, we do a single pass over the
+                    // trace's spans to get the approximate size, the dimensions identifying a
+                    // representative trace, and an "exportable" flag which indicates whether or
+                    // not a trace has a signature-bearing supergraph span (these were
+                    // previously dropped in the `prepare_for_export` function).
                     let summary = TraceSummary::from_trace(&trace);
+                    if !summary.is_exportable() {
+                        unexportable_traces += 1;
+                        continue;
+                    }
                     // Unconditionally drop traces over the hard size limit — GraphOS ignores
                     // oversized traces anyway, so exporting them just wastes CPU and bandwidth.
                     // This is independent of the configured throttle. Checked before the throttle
@@ -405,10 +413,18 @@ impl SpanExporter for Exporter {
             );
         }
 
+        if unexportable_traces > 0 {
+            u64_counter!(
+                "apollo.router.telemetry.apollo.trace_throttle.unexportable",
+                "Complete traces dropped because Apollo's exporter would not have sent them",
+                unexportable_traces
+            );
+        }
+
         // ftv1 decode/re-encode is CPU-heavy, so run it after releasing the span_cache lock.
         let otlp_traces: Vec<Vec<SpanData>> = grouped_traces
             .into_iter()
-            .filter_map(|grouped| self.otlp_exporter.prepare_for_export(grouped))
+            .map(|grouped| self.otlp_exporter.prepare_for_export(grouped))
             .collect();
 
         if !otlp_traces.is_empty() {

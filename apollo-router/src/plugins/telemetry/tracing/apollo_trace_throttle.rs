@@ -102,6 +102,15 @@ impl ApolloTraceThrottle {
 pub(crate) struct TraceSummary {
     /// Approximate serialized size of the whole trace, in bytes.
     pub(crate) approx_size_bytes: usize,
+    /// Whether or not Apollo's exporter will actually send this trace. This mirrors functionality
+    /// that was originally present in `ApolloOtlpExporter::prepare_for_export`: A trace is only
+    /// sent if it contains a `supergraph` span carrying the `apollo_private.operation_signature`
+    /// key (the value may be empty). In practice this excludes introspection queries, and also
+    /// any trace with no supergraph span at all. Checking it up front lets the exporter discard
+    /// such traces before they consume a representative-trace slot or a rate-limit token.
+    /// Note this is presence-only, whereas [`Self::signature`] additionally requires a non-empty
+    /// value: a trace with an empty signature is still exported, it just cannot be deduplicated.
+    is_exportable: bool,
     /// `None` when the trace carries no usable operation signature, which means no key can be
     /// computed and the trace must not be deduplicated.
     signature: Option<String>,
@@ -130,6 +139,10 @@ impl TraceSummary {
 
             match span.name.as_ref() {
                 SUPERGRAPH_SPAN_NAME => {
+                    // This mirrors a check that used to live inside ApolloOtlpExporter::prepare_for_export
+                    summary.is_exportable |= span
+                        .attributes
+                        .contains_key(&APOLLO_PRIVATE_OPERATION_SIGNATURE);
                     supergraph_signature =
                         non_empty_attr(&span.attributes, &APOLLO_PRIVATE_OPERATION_SIGNATURE);
                 }
@@ -165,6 +178,10 @@ impl TraceSummary {
         }
 
         summary
+    }
+
+    pub(crate) fn is_exportable(&self) -> bool {
+        self.is_exportable
     }
 
     /// Hash of the dimension combination that identifies a "representative" trace, or `None` if
@@ -435,13 +452,62 @@ mod tests {
         vec![router, supergraph, execution]
     }
 
-    /// The same topology, but with no operation signature anywhere, so no key can be built.
-    fn trace_without_signature(end: std::time::SystemTime) -> Vec<LightSpanData> {
+    /// The same topology, but the supergraph span's signature is present and empty. The trace is
+    /// still exportable, yet no dedup key can be built from it, so the throttle must fail open.
+    fn trace_with_empty_signature(end: std::time::SystemTime) -> Vec<LightSpanData> {
+        realistic_trace("", "web", 1_000_000, end, Status::Unset)
+    }
+
+    /// A trace whose supergraph span has no signature attribute at all. Apollo's exporter drops
+    /// these, so they should never reach the throttle.
+    fn unexportable_trace(end: std::time::SystemTime) -> Vec<LightSpanData> {
         let mut trace = realistic_trace("ignored", "web", 1_000_000, end, Status::Unset);
         for span in &mut trace {
             span.attributes.remove(&APOLLO_PRIVATE_OPERATION_SIGNATURE);
         }
         trace
+    }
+
+    /// Mirrors code that was previously in `ApolloOtlpExporter::prepare_for_export`: a trace is
+    /// only sent when a `supergraph` span carries the signature key, so traces without one must
+    /// be reported as unexportable and skipped before they can consume a throttle slot.
+    #[test]
+    fn traces_without_a_signature_bearing_supergraph_span_are_unexportable() {
+        let end = at_second(600);
+
+        assert!(
+            TraceSummary::from_trace(&realistic_trace(
+                "sigA",
+                "web",
+                1_000_000,
+                end,
+                Status::Unset
+            ))
+            .is_exportable()
+        );
+        assert!(
+            !TraceSummary::from_trace(&unexportable_trace(end)).is_exportable(),
+            "no signature attribute on the supergraph span means Apollo drops the trace"
+        );
+        // Presence of the key is what counts, not a non-empty value.
+        assert!(
+            TraceSummary::from_trace(&trace_with_empty_signature(end)).is_exportable(),
+            "an empty signature is still exported"
+        );
+    }
+
+    /// A subscription-event trace has no supergraph span, so Apollo's exporter discards it. It
+    /// must therefore be reported as unexportable rather than consuming a throttle slot.
+    #[test]
+    fn subscription_event_traces_without_a_supergraph_span_are_unexportable() {
+        let end = at_second(600);
+        let mut event = named_span(SUBSCRIPTION_EVENT_SPAN_NAME, end);
+        event.attributes.insert(
+            APOLLO_PRIVATE_OPERATION_SIGNATURE,
+            Value::String("subSig".into()),
+        );
+
+        assert!(!TraceSummary::from_trace(&[event]).is_exportable());
     }
 
     /// Regression test for the key being read only from the root span: the operation signature
@@ -479,10 +545,11 @@ mod tests {
         );
     }
 
-    /// Subscription-event traces are rooted at the `subscription_event` span, which carries the
-    /// signature itself (there is no supergraph span in the tree).
+    /// Covers the signature falling back to the `subscription_event` root, which carries it
+    /// directly. Note such traces have no supergraph span, so `export` discards them as
+    /// unexportable before the throttle ever sees them today.
     #[test]
-    fn dedups_subscription_event_traces() {
+    fn uses_the_subscription_event_signature_when_there_is_no_supergraph_span() {
         let filter = representative_filter();
         let end = at_second(600);
         let make = || {
@@ -510,10 +577,11 @@ mod tests {
         let end = at_second(600);
 
         // Identical traces that would otherwise dedup to a single representative: without the
-        // signature we cannot tell operations apart, so all of them must be kept.
+        // signature we cannot tell operations apart, so all of them must be kept. `export` now
+        // discards these even earlier as unexportable; the filter fails open regardless.
         for i in 0..5 {
             assert!(
-                keep(&filter, &trace_without_signature(end)),
+                keep(&filter, &unexportable_trace(end)),
                 "trace {i} must be kept when the key cannot be computed"
             );
         }
@@ -537,8 +605,8 @@ mod tests {
         let end = at_second(600);
 
         // Fail-open traces must not insert a key, or they would evict/collide with real ones.
-        assert!(keep(&filter, &trace_without_signature(end)));
-        assert!(keep(&filter, &trace_without_signature(end)));
+        assert!(keep(&filter, &unexportable_trace(end)));
+        assert!(keep(&filter, &unexportable_trace(end)));
 
         // A normal trace still dedups as usual.
         let valid = || realistic_trace("sigA", "web", 1_000_000, end, Status::Unset);
