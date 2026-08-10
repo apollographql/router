@@ -1943,9 +1943,7 @@ mod tests {
         let doc = Query::parse_document(query, None, &schema, &configuration).unwrap();
 
         for authenticated in [
-            false,
-            true,
-            // Repeats the first key, which must now hit the cache.
+            false, true, // Repeats the first key, which must now hit the cache.
             false,
         ] {
             service
