@@ -287,7 +287,12 @@ mod view_selection_tests {
     ) -> SdkMeterProvider {
         let user_views: Vec<(InstrumentNameMatcher, MetricView)> = user_views
             .into_iter()
-            .map(|v| (v.name_matcher().expect("test view names are valid globs"), v))
+            .map(|v| {
+                (
+                    v.name_matcher().expect("test view names are valid globs"),
+                    v,
+                )
+            })
             .collect();
         let bucket_boundaries = BUCKETS.to_vec();
         MeterProviderBuilder::default()
