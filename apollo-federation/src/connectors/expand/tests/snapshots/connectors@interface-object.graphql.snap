@@ -1,6 +1,5 @@
 ---
 source: apollo-federation/src/connectors/expand/tests/mod.rs
-assertion_line: 26
 expression: connectors.by_service_name
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interface-object.graphql
 ---
@@ -171,6 +170,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             connect_extensions: None,
             connect_is_success: None,
         },
+        methods: None,
         label: Label(
             "connectors.json http: GET /itfs/{$this.id}/e",
         ),
@@ -321,6 +321,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             connect_extensions: None,
             connect_is_success: None,
         },
+        methods: None,
         label: Label(
             "connectors.json http: GET /itfs",
         ),
@@ -563,6 +564,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interfa
             connect_extensions: None,
             connect_is_success: None,
         },
+        methods: None,
         label: Label(
             "connectors.json http: GET /itfs/{$args.id}",
         ),

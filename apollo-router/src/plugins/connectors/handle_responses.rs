@@ -443,6 +443,7 @@ mod tests {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -558,6 +559,7 @@ mod tests {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -680,6 +682,7 @@ mod tests {
             spec: ConnectSpec::V0_2,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(User), None, 0),
             schema_subtypes_map: Default::default(),
+            methods: None,
             transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -801,6 +804,7 @@ mod tests {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -932,6 +936,7 @@ mod tests {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1217,6 +1222,7 @@ mod tests {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1315,6 +1321,7 @@ mod tests {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1423,6 +1430,7 @@ mod tests {
         Arc::new(Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1556,6 +1564,7 @@ mod tests {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_2,
             schema_subtypes_map: Default::default(),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1686,6 +1695,7 @@ mod tests {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_2,
             schema_subtypes_map: Default::default(),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1789,6 +1799,7 @@ mod tests {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_2,
             schema_subtypes_map: Default::default(),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,

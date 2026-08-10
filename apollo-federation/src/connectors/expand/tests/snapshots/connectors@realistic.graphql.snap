@@ -1,6 +1,5 @@
 ---
 source: apollo-federation/src/connectors/expand/tests/mod.rs
-assertion_line: 26
 expression: connectors.by_service_name
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realistic.graphql
 ---
@@ -591,6 +590,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             connect_extensions: None,
             connect_is_success: None,
         },
+        methods: None,
         label: Label(
             "connectors.example http: POST /create/user",
         ),
@@ -818,6 +818,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             connect_extensions: None,
             connect_is_success: None,
         },
+        methods: None,
         label: Label(
             "connectors.example http: GET /filter/users",
         ),
@@ -1180,6 +1181,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             connect_extensions: None,
             connect_is_success: None,
         },
+        methods: None,
         label: Label(
             "connectors.example http: GET /by-company/{$args.company.name}",
         ),
@@ -1974,6 +1976,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
             connect_extensions: None,
             connect_is_success: None,
         },
+        methods: None,
         label: Label(
             "connectors.example http: GET /{$args.id}",
         ),
