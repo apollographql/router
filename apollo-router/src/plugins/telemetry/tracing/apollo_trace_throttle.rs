@@ -103,7 +103,11 @@ impl RepresentativeTraceFilter {
         let Some(root) = trace.first() else {
             return false;
         };
-        let key = Self::trace_key(root, trace_has_errors(trace));
+        // Fail open: if the key can't be built we must not deduplicate, because an incomplete key
+        // would conflate unrelated traces and silently drop them.
+        let Some(key) = Self::trace_key(root, trace_has_errors(trace)) else {
+            return true;
+        };
 
         let mut seen = self.seen.lock();
         // `get` (rather than `contains`) refreshes recency so a hot key isn't evicted mid-minute.
@@ -115,8 +119,16 @@ impl RepresentativeTraceFilter {
         }
     }
 
-    /// Hash of the dimension combination that identifies a "representative" trace.
-    fn trace_key(root: &LightSpanData, has_errors: bool) -> u64 {
+    /// Hash of the dimension combination that identifies a "representative" trace, or `None` if
+    /// data required to build the key is missing.
+    fn trace_key(root: &LightSpanData, has_errors: bool) -> Option<u64> {
+        // Signature is the only string that is required to build a trace key. Client name/version
+        // and operation subtype are legitimately absent in some traces.
+        let signature = string_attr(&root.attributes, &APOLLO_PRIVATE_OPERATION_SIGNATURE);
+        if signature.is_empty() {
+            return None
+        }
+
         let end_secs = root
             .end_time
             .duration_since(UNIX_EPOCH)
@@ -131,7 +143,7 @@ impl RepresentativeTraceFilter {
         };
 
         let mut hasher = DefaultHasher::new();
-        string_attr(&root.attributes, &APOLLO_PRIVATE_OPERATION_SIGNATURE).hash(&mut hasher);
+        signature.hash(&mut hasher);
         (end_secs / 60).hash(&mut hasher); // minute floor
         duration_bucket(trace_duration(root)).hash(&mut hasher);
         error_key.hash(&mut hasher);
@@ -139,7 +151,7 @@ impl RepresentativeTraceFilter {
         string_attr(&root.attributes, &OPERATION_SUBTYPE).hash(&mut hasher);
         string_attr(&root.attributes, &CLIENT_NAME_KEY).hash(&mut hasher);
         string_attr(&root.attributes, &CLIENT_VERSION_KEY).hash(&mut hasher);
-        hasher.finish()
+        Some(hasher.finish())
     }
 }
 
@@ -275,6 +287,58 @@ mod tests {
             droppped_attribute_count: 0,
             events: Vec::new(),
         }
+    }
+
+    /// A root span with none of the key dimensions on it.
+    fn root_without_signature(end: std::time::SystemTime) -> LightSpanData {
+        let mut span = root("ignored", "web", 1_000_000, end, Status::Unset);
+        span.attributes.remove(&APOLLO_PRIVATE_OPERATION_SIGNATURE);
+        span
+    }
+
+    #[test]
+    fn keeps_every_trace_when_the_operation_signature_is_missing() {
+        let filter = representative_filter();
+        let end = at_second(600);
+
+        // Identical traces that would otherwise dedup to a single representative: without the
+        // signature we cannot tell operations apart, so all of them must be kept.
+        for i in 0..5 {
+            assert!(
+                filter.should_keep(&[root_without_signature(end)]),
+                "trace {i} must be kept when the key cannot be computed"
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_every_trace_when_the_operation_signature_is_empty() {
+        let filter = representative_filter();
+        let end = at_second(600);
+        let make = || vec![root("", "web", 1_000_000, end, Status::Unset)];
+
+        // An empty signature means "unknown", not "an operation whose signature is the empty
+        // string", so it must fail open just like an absent attribute.
+        assert!(filter.should_keep(&make()));
+        assert!(filter.should_keep(&make()));
+    }
+
+    #[test]
+    fn missing_signature_does_not_poison_the_cache_for_valid_traces() {
+        let filter = representative_filter();
+        let end = at_second(600);
+
+        // Fail-open traces must not insert a key, or they would evict/collide with real ones.
+        assert!(filter.should_keep(&[root_without_signature(end)]));
+        assert!(filter.should_keep(&[root_without_signature(end)]));
+
+        // A normal trace still dedups as usual.
+        let valid = || vec![root("sigA", "web", 1_000_000, end, Status::Unset)];
+        assert!(filter.should_keep(&valid()), "first valid trace is kept");
+        assert!(
+            !filter.should_keep(&valid()),
+            "duplicate valid trace is still dropped"
+        );
     }
 
     #[test]
