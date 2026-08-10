@@ -149,6 +149,20 @@ const BYTES_PER_CONTEXT_MAP_ENTRY: usize = 512;
 /// with real measurements) once profiling data is available.
 const MAX_CACHE_BYTES: usize = 8 * 1024 * 1024; // 8 MiB
 
+/// Env var name used to override `MAX_CACHE_BYTES` without a rebuild, for fast iteration while
+/// tuning this value against real traffic. Deliberately NOT wired through the router's YAML
+/// config/schema -- this is a temporary testing lever, not a supported user-facing setting.
+/// Remove once a real value (or a proper config path, if one turns out to be warranted) is
+/// settled on.
+const MAX_CACHE_BYTES_ENV_VAR: &str = "APOLLO_ROUTER_CONDITION_CACHE_MAX_BYTES";
+
+fn max_cache_bytes() -> usize {
+    std::env::var(MAX_CACHE_BYTES_ENV_VAR)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(MAX_CACHE_BYTES)
+}
+
 /// See the constants above for the reasoning behind each term.
 fn estimate_entry_bytes(resolution: &ConditionResolution) -> usize {
     let mut size = BASE_ENTRY_OVERHEAD_BYTES;
@@ -176,7 +190,7 @@ pub(crate) struct ConditionResolverCache {
 
 impl ConditionResolverCache {
     pub(crate) fn new() -> Self {
-        Self::with_budget(MAX_CACHE_BYTES)
+        Self::with_budget(max_cache_bytes())
     }
 
     /// Also used by tests to exercise eviction with a small, easy-to-reason-about budget instead
