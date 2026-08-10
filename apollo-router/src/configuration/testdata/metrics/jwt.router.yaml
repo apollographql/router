@@ -3,5 +3,4 @@ authentication:
     jwt:
       jwks:
         - url: https://example.com
-
-
+      on_error: RedactedError
