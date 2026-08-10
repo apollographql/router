@@ -250,7 +250,7 @@ dependencies = [
 [[package]]
 name = "apollo-errors"
 version = "0.7.1"
-source = "git+https://github.com/apollographql/apollo-platform-rs?rev=3b59c86a#3b59c86aa3ecaad92d8070c1488bc7b26d13e2be"
+source = "git+https://github.com/apollographql/apollo-platform-rs?rev=9d72e40b#9d72e40bf4bc4000e725b5c51b5902fb986ced06"
 dependencies = [
  "apollo-errors-derive",
  "http 1.4.0",
@@ -263,7 +263,7 @@ dependencies = [
 [[package]]
 name = "apollo-errors-derive"
 version = "0.5.1"
-source = "git+https://github.com/apollographql/apollo-platform-rs?rev=3b59c86a#3b59c86aa3ecaad92d8070c1488bc7b26d13e2be"
+source = "git+https://github.com/apollographql/apollo-platform-rs?rev=9d72e40b#9d72e40bf4bc4000e725b5c51b5902fb986ced06"
 dependencies = [
  "heck",
  "http 1.4.0",
@@ -342,7 +342,7 @@ dependencies = [
 [[package]]
 name = "apollo-json"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/apollo-platform-rs?rev=3b59c86a#3b59c86aa3ecaad92d8070c1488bc7b26d13e2be"
+source = "git+https://github.com/apollographql/apollo-platform-rs?rev=9d72e40b#9d72e40bf4bc4000e725b5c51b5902fb986ced06"
 dependencies = [
  "ahash",
  "apollo-errors",
