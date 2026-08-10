@@ -1369,13 +1369,13 @@ impl Rhai {
                         function_name,
                         (rhai_service, name.to_string()),
                     )
-                    .map_err(|err| err.to_string())?; // not a rhai binding
+                    .map_err(|err| error::display_error_for_log(&err))?; // not a rhai binding
             }
             None => {
                 let _ = self
                     .engine
                     .call_fn::<Dynamic>(&mut guard, &self.ast, function_name, (rhai_service,))
-                    .map_err(|err| err.to_string())?; // not a rhai binding
+                    .map_err(|err| error::display_error_for_log(&err))?; // not a rhai binding
             }
         }
 

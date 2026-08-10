@@ -1306,6 +1306,26 @@ fn it_returns_a_throw_that_carries_keys_of_its_own() {
     );
 }
 
+// `error` is the key rhai stamps its own error maps with, and also an obvious name for a code of
+// the script's own. Telling the two apart is what keeps a throw of the second kind returnable.
+#[test]
+fn it_returns_a_throw_that_carries_an_error_code_of_its_own() {
+    let engine = new_rhai_test_engine();
+    let error = engine
+        .eval::<()>(
+            r#"throw #{ status: 400, message: "Email is invalid", error: "INVALID_EMAIL" };"#,
+        )
+        .expect_err("the script throws");
+
+    let processed_error = process_error(error);
+    assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        processed_error.message,
+        Some("Email is invalid".to_string()),
+        "an error code of the author's own must not be mistaken for rhai's own error map"
+    );
+}
+
 // Re-throwing the value a `catch` block was handed for an engine failure must not put the engine's
 // error text into the response, however the script dresses it up first. Its status is still the
 // author's to choose - only the message rhai wrote is redacted.

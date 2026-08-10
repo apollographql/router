@@ -791,16 +791,22 @@ fn redacted_message(status: StatusCode) -> String {
 /// Whether a thrown object map is one rhai handed a `catch` block for an engine failure, rather
 /// than one the script wrote itself.
 ///
-/// `EvalAltResult::dump_fields` stamps every such map with an `error` key naming the variant -
-/// `"ErrorFunctionNotFound"` and the like. A script's own throw never picks that key up, because
-/// rhai passes a thrown value to `catch` unchanged rather than rebuilding it, so the key tells the
-/// two apart. It matters because the `message` on an engine map is the engine's own error text: a
-/// script re-throwing that map, with or without a status set on it first, would put back exactly
-/// what `process_error` redacts everywhere else.
+/// `EvalAltResult::dump_fields` stamps every such map with an `error` key naming the variant, and
+/// every variant a script can catch is named `ErrorSomething` - `"ErrorFunctionNotFound"` and the
+/// like. A script's own throw never picks that key up, because rhai passes a thrown value to
+/// `catch` unchanged rather than rebuilding it, so the key tells the two apart. It matters because
+/// the `message` on an engine map is the engine's own error text: a script re-throwing that map,
+/// with or without a status set on it first, would put back exactly what `process_error` redacts
+/// everywhere else.
+///
+/// The value is matched as well as the key, because `error` is an obvious name for a code of the
+/// script's own - `throw #{ message: "Email is invalid", error: "INVALID_EMAIL" }` is a message the
+/// author wrote and has to be returned.
 fn is_caught_engine_error(thrown_map: &Map) -> bool {
     thrown_map
         .get("error")
-        .is_some_and(|variant| variant.is_string())
+        .and_then(|variant| variant.as_immutable_string_ref().ok())
+        .is_some_and(|variant| variant.starts_with("Error"))
 }
 
 fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {

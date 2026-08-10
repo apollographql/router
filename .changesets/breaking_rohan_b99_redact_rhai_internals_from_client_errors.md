@@ -26,6 +26,6 @@ Three behaviour changes to be aware of when upgrading:
 
 - Client-facing messages for a thrown string no longer include the `rhai execution error: 'Runtime error: ... (line N, position M)'` wrapper. Only the string you threw is returned. The full error is still in the logs.
 - An error raised by a router Rhai function is now caught as a `RouterError` rather than a string. Interpolating it - `${err}` - reads as it always has, and `err.message` gives the same text. Errors your script raised with `throw` are caught unchanged.
-- Re-throwing an error you caught keeps it redacted, whichever kind it is: a caught router error is opaque rather than an object map you can add a `status` or `message` to, and the object map the Rhai engine gives you for its own failures keeps its `message` out of the response. A `status` you set on either is still honoured. To give a client a specific message, `throw` a new error instead.
+- Re-throwing an error you caught keeps it redacted, whichever kind it is: a caught router error is opaque rather than an object map you can add a `status` or `message` to, and the object map the Rhai engine gives you for its own failures keeps its `message` out of the response. A `status` you set on that object map is still honoured; a caught router error takes no `status` at all - assigning one raises a fresh error that replaces the one you caught. To give a client a specific message, `throw` a new error instead.
 
 By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/9956
