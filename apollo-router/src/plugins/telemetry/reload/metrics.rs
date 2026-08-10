@@ -194,7 +194,10 @@ impl<'a> MetricsBuilder<'a> {
             })
     }
 
-    pub(crate) fn configure_views(&mut self, meter_provider_type: MeterProviderType) {
+    pub(crate) fn configure_views(
+        &mut self,
+        meter_provider_type: MeterProviderType,
+    ) -> Result<(), BoxError> {
         let bucket_boundaries = self.metrics_common().buckets.clone();
         let cardinality_limit = self.metrics_common().cardinality_limit;
         // Preserve declaration order so earlier, more-specific views win over later
@@ -204,8 +207,8 @@ impl<'a> MetricsBuilder<'a> {
             .views
             .clone()
             .into_iter()
-            .map(|v| (v.name_matcher(), v))
-            .collect();
+            .map(|v| Ok((v.name_matcher()?, v)))
+            .collect::<Result<_, BoxError>>()?;
 
         self.with_view(meter_provider_type, move |instrument: &Instrument| {
             resolve_view(
@@ -215,6 +218,7 @@ impl<'a> MetricsBuilder<'a> {
                 cardinality_limit,
             )
         });
+        Ok(())
     }
 }
 
@@ -283,7 +287,7 @@ mod view_selection_tests {
     ) -> SdkMeterProvider {
         let user_views: Vec<(InstrumentNameMatcher, MetricView)> = user_views
             .into_iter()
-            .map(|v| (v.name_matcher(), v))
+            .map(|v| (v.name_matcher().expect("test view names are valid globs"), v))
             .collect();
         let bucket_boundaries = BUCKETS.to_vec();
         MeterProviderBuilder::default()
@@ -480,6 +484,33 @@ mod view_selection_tests {
                 assert_eq!(bounds, custom, "custom buckets should apply to {name}");
             });
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bracket_view_applies_custom_buckets_to_matching_instruments() {
+        let exporter = InMemoryMetricExporter::default();
+        let custom = vec![1.0, 5.0, 10.0];
+        let mut view = empty_view("request.[dc]ount");
+        view.aggregation = Some(MetricAggregation::Histogram {
+            buckets: custom.clone(),
+        });
+        let provider = meter_provider_with(exporter.clone(), vec![view], None);
+
+        let histogram = provider.meter("t").f64_histogram("request.count").build();
+        histogram.record(3.0, &[]);
+        provider.force_flush().unwrap();
+
+        with_metric(&exporter, "request.count", |data| {
+            let AggregatedMetrics::F64(MetricData::Histogram(hist)) = data else {
+                panic!("expected Histogram aggregation, got {data:?}")
+            };
+            let bounds: Vec<f64> = hist
+                .data_points()
+                .next()
+                .map(|dp| dp.bounds().collect())
+                .unwrap_or_default();
+            assert_eq!(bounds, custom, "custom buckets should apply via [dc]ount");
+        });
     }
 
     #[tokio::test(flavor = "multi_thread")]

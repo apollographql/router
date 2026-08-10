@@ -15,6 +15,7 @@ use opentelemetry_sdk::trace::SpanLimits;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use tower::BoxError;
 
 use super::*;
 use crate::Configuration;
@@ -251,19 +252,19 @@ impl MetricView {
     /// Converts this MetricView into a view function for OTel SDK 0.31+
     pub(crate) fn into_view_fn(
         self,
-    ) -> impl Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static {
-        let matcher = self.name_matcher();
+    ) -> Result<impl Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static, BoxError> {
+        let matcher = self.name_matcher()?;
         let view = self;
-        move |instrument: &Instrument| {
+        Ok(move |instrument: &Instrument| {
             if !matcher.matches(instrument.name()) {
                 return None;
             }
             Some(view.clone().into_stream())
-        }
+        })
     }
 
     /// Compiles this view's `name` into a matcher used to select instruments.
-    pub(crate) fn name_matcher(&self) -> InstrumentNameMatcher {
+    pub(crate) fn name_matcher(&self) -> Result<InstrumentNameMatcher, BoxError> {
         InstrumentNameMatcher::new(&self.name)
     }
 }
@@ -272,44 +273,31 @@ impl MetricView {
 ///
 /// This restores the wildcard selection the OpenTelemetry SDK performed natively
 /// before the 0.31 View API migration, which replaced pattern-aware selection with a
-/// plain closure. `*` matches zero or more characters and `?` matches exactly one; a
-/// bare `*` or an empty name matches every instrument. Any other character (including
-/// `.`) is matched literally, and names without a wildcard are matched exactly.
+/// plain closure. `name` is a glob (`*`, `?`, `[...]`); a bare `*` or an empty name
+/// matches every instrument, and a name with no glob metacharacters matches exactly.
 #[derive(Clone, Debug)]
 pub(crate) enum InstrumentNameMatcher {
     /// Matches every instrument (empty name or a bare `*`).
     All,
     /// Matches a single instrument name exactly.
     Exact(String),
-    /// Matches instrument names against a wildcard pattern (`*`, `?`).
-    Pattern(regex::Regex),
+    /// Matches instrument names against a glob pattern (`*`, `?`, `[...]`).
+    Pattern(globset::GlobMatcher),
 }
 
 impl InstrumentNameMatcher {
-    fn new(name: &str) -> Self {
+    fn new(name: &str) -> Result<Self, BoxError> {
         if name.is_empty() || name == "*" {
-            return Self::All;
+            return Ok(Self::All);
         }
-        // Only `*`/`?` opt a name into wildcard matching, mirroring the pre-0.31 SDK.
-        if name.contains('*') || name.contains('?') {
-            // Translate the glob into an anchored regex: escape every character, then
-            // turn the escaped wildcards back into their regex equivalents (`*` -> zero
-            // or more, `?` -> exactly one). Everything else stays literal.
-            let translated = regex::escape(name).replace(r"\*", ".*").replace(r"\?", ".");
-            match regex::Regex::new(&format!("^{translated}$")) {
-                Ok(pattern) => return Self::Pattern(pattern),
-                Err(error) => {
-                    // Unreachable in practice because the input is fully escaped, but
-                    // fall back to exact matching rather than risk matching nothing.
-                    ::tracing::warn!(
-                        metric_view.name = name,
-                        %error,
-                        "invalid metric view name pattern; falling back to exact match"
-                    );
-                }
-            }
+        // Only glob metacharacters opt a name into pattern matching, mirroring the pre-0.31 SDK.
+        if name.contains(['*', '?', '[', ']']) {
+            let glob = globset::Glob::new(name).map_err(|error| -> BoxError {
+                format!("invalid metric view name `{name}`: {error}").into()
+            })?;
+            return Ok(Self::Pattern(glob.compile_matcher()));
         }
-        Self::Exact(name.to_string())
+        Ok(Self::Exact(name.to_string()))
     }
 
     pub(crate) fn matches(&self, name: &str) -> bool {
@@ -1084,7 +1072,11 @@ mod tests {
 
     #[test]
     fn instrument_name_matcher_exact_and_wildcards() {
-        let matcher = |name: &str| MetricView::default_view(name, None, None).name_matcher();
+        let matcher = |name: &str| {
+            MetricView::default_view(name, None, None)
+                .name_matcher()
+                .expect("valid glob")
+        };
 
         // Exact (no wildcard chars)
         assert!(matcher("request.duration").matches("request.duration"));
@@ -1102,14 +1094,27 @@ mod tests {
         assert!(!matcher("request.coun?").matches("request.coun"));
         assert!(!matcher("request.coun?").matches("request.counts"));
 
+        // `[...]` = one character from a set
+        assert!(matcher("request.[cs]ount").matches("request.count"));
+        assert!(matcher("request.[cs]ount").matches("request.sount"));
+        assert!(!matcher("request.[cs]ount").matches("request.bount"));
+
         // Catch-alls: bare `*` and empty string match everything
         assert!(matcher("*").matches("anything.at.all"));
         assert!(matcher("").matches("anything.at.all"));
 
-        // Metacharacters in the name stay literal, not regex syntax: the `.` must
+        // Metacharacters other than the glob syntax stay literal: the `.` must
         // match a literal dot.
         assert!(matcher("a.b*").matches("a.bcd"));
         assert!(!matcher("a.b*").matches("axbcd"));
+    }
+
+    #[test]
+    fn instrument_name_matcher_rejects_invalid_pattern() {
+        let error = MetricView::default_view("request.[cs", None, None)
+            .name_matcher()
+            .expect_err("unbalanced bracket must be rejected");
+        assert!(error.to_string().contains("request.[cs"));
     }
 
     #[test]
@@ -1344,7 +1349,7 @@ mod tests {
 
         let meter_provider = MeterProviderBuilder::default()
             .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
-            .with_view(view.into_view_fn())
+            .with_view(view.into_view_fn().unwrap())
             .build();
 
         // Record a histogram value
@@ -1387,7 +1392,7 @@ mod tests {
 
         let meter_provider = MeterProviderBuilder::default()
             .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
-            .with_view(merged.into_view_fn())
+            .with_view(merged.into_view_fn().unwrap())
             .build();
 
         let meter = meter_provider.meter("test");
@@ -1421,7 +1426,7 @@ mod tests {
 
         let meter_provider = MeterProviderBuilder::default()
             .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
-            .with_view(view.into_view_fn())
+            .with_view(view.into_view_fn().unwrap())
             .build();
 
         let meter = meter_provider.meter("test");
@@ -1463,7 +1468,7 @@ mod tests {
 
         let meter_provider = MeterProviderBuilder::default()
             .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
-            .with_view(merged.into_view_fn())
+            .with_view(merged.into_view_fn().unwrap())
             .build();
 
         let meter = meter_provider.meter("test");

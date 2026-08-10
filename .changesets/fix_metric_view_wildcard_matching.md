@@ -1,6 +1,6 @@
-### Metric view names support `*`/`?` wildcards and catch-all patterns again ([PR #9809](https://github.com/apollographql/router/pull/9809))
+### Metric view names support glob patterns again ([PR #9809](https://github.com/apollographql/router/pull/9809))
 
-Wildcard (`*`, `?`) and catch-all (`*` or an empty string) patterns in `telemetry.exporters.metrics.common.views[].name` match instruments again.
+Glob patterns (`*`, `?`, `[...]`) and catch-all (`*` or an empty string) patterns in `telemetry.exporters.metrics.common.views[].name` match instruments again.
 
 Since v2.13.0 only exact names matched, so a view targeting several instruments at once no longer worked. For example, custom histogram buckets on a `cost.*` view were not applied, and a catch-all drop rule stopped suppressing anything:
 
