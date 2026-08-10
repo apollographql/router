@@ -2,11 +2,14 @@
 use std::sync::Arc;
 
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use super::Plugins;
 use super::router::body::RouterBody;
 use crate::Context;
+use crate::batching::JoinBatchRequestsLayer;
+use crate::layers::InternalServiceBuilderExt as _;
 
 pub(crate) mod connection_timing;
 pub(crate) mod service;
@@ -64,13 +67,13 @@ impl HttpClientServiceFactory {
     }
 
     pub(crate) fn create(&self, name: &str) -> BoxCloneService {
-        let service = self.service.clone();
-        self.plugins
-            .iter()
-            .rev()
-            .fold(service.boxed_clone(), |acc, (_, e)| {
-                e.http_client_service(name, acc)
+        ServiceBuilder::new()
+            .layer(JoinBatchRequestsLayer::new(name))
+            .rust_plugins(self.plugins.clone(), |plugin, service| {
+                plugin.http_client_service(name, service)
             })
+            .service(self.service.clone())
+            .boxed_clone()
     }
 
     #[cfg(test)]

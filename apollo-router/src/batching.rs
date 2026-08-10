@@ -29,8 +29,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
-use bytes::BytesMut;
-use http_body_util::BodyExt as _;
 use opentelemetry::Context as otelContext;
 use opentelemetry::trace::TraceContextExt;
 use parking_lot::Mutex as PMutex;
@@ -42,19 +40,17 @@ use tower::BoxError;
 use tracing::Instrument;
 use tracing::Span;
 
-use crate::Context;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
-use crate::services::process_batches;
-use crate::services::router;
-use crate::services::router::body::RouterBody;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::spec::QueryHash;
 
+mod join_batch_requests_layer;
 mod query_plan_analysis_layer;
+pub(crate) use self::join_batch_requests_layer::*;
 pub(crate) use self::query_plan_analysis_layer::*;
 
 /// A query that is part of a batch.
@@ -421,7 +417,7 @@ impl Batch {
                 });
             }
 
-            process_batches(svc_map).await?;
+            self::join_batch_requests_layer::process_batches(svc_map).await?;
             Ok(())
         }.instrument(tracing::info_span!("batch_request", size)));
 
@@ -469,65 +465,6 @@ impl Drop for Batch {
     }
 }
 
-/// A batch of requests that we'll send to a subgraph (...as a single batch request).
-pub(crate) struct SubgraphBatchRequest {
-    pub(crate) http_client: crate::services::http::BoxCloneService,
-    pub(crate) contexts: Vec<(Context, SubgraphRequestId)>,
-    pub(crate) request: http::Request<RouterBody>,
-    pub(crate) txs: Vec<oneshot::Sender<Result<HttpResponse, BoxError>>>,
-}
-
-// Assemble a single batch request to a subgraph
-pub(crate) async fn assemble_batch(
-    batch_queries: Vec<BatchQueryInfo>,
-) -> Result<SubgraphBatchRequest, BoxError> {
-    let mut txs = Vec::with_capacity(batch_queries.len());
-    let mut contexts = Vec::with_capacity(batch_queries.len());
-    let mut body_streams = Vec::with_capacity(batch_queries.len());
-
-    let mut iter = batch_queries.into_iter();
-
-    let first = iter.next().ok_or(SubgraphBatchingError::RequestsIsEmpty)?;
-    let http_client = first.http_client;
-    txs.push(first.sender);
-    let request_id = get_request_id(&first.request);
-    contexts.push((first.request.context, request_id));
-    // We'll use the HTTP parts (headers, URI etc) from the first request for the whole batch
-    let (parts, first_body) = first.request.http_request.into_parts();
-    body_streams.push(first_body);
-
-    for batch_query in iter {
-        txs.push(batch_query.sender);
-        let request_id = get_request_id(&batch_query.request);
-        contexts.push((batch_query.request.context, request_id));
-        body_streams.push(batch_query.request.http_request.into_body());
-    }
-    debug_assert_eq!(txs.len(), contexts.len());
-    debug_assert_eq!(txs.len(), body_streams.len());
-
-    // Construct the actual byte body of the batched request
-    let mut batch_body = BytesMut::new();
-    batch_body.extend_from_slice(&[b'[']);
-    for body in body_streams {
-        let bytes = body.collect().await.unwrap().to_bytes();
-        batch_body.extend_from_slice(&bytes);
-        batch_body.extend_from_slice(&[b',']);
-    }
-    // There's guaranteed to be a comma here, because `body_streams` is guaranteed to be non-empty,
-    // because we'd have returned with a RequestsIsEmpty error otherwise.
-    *batch_body.last_mut().unwrap() = b']';
-    let batch_body = batch_body.freeze();
-
-    // Generate the final request and pass it up
-    let request = http::Request::from_parts(parts, router::body::from_bytes(batch_body));
-    Ok(SubgraphBatchRequest {
-        http_client,
-        contexts,
-        request,
-        txs,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -536,22 +473,17 @@ mod tests {
     use http::header::ACCEPT;
     use http::header::CONTENT_TYPE;
     use http_body_util::BodyExt;
-    use tokio::sync::oneshot;
     use tower::ServiceExt;
     use wiremock::MockServer;
     use wiremock::ResponseTemplate;
     use wiremock::matchers;
 
     use super::Batch;
-    use super::BatchQueryInfo;
-    use super::SubgraphBatchRequest;
-    use super::assemble_batch;
     use crate::Context;
     use crate::TestHarness;
     use crate::graphql;
     use crate::graphql::Request;
     use crate::layers::ServiceExt as LayerExt;
-    use crate::services::http::HttpClientServiceFactory;
     use crate::services::http::HttpRequest;
     use crate::services::http::HttpResponse;
     use crate::services::router;
@@ -560,118 +492,6 @@ mod tests {
     use crate::services::subgraph::SubgraphRequestId;
     use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
     use crate::spec::QueryHash;
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn it_assembles_batch() {
-        // Assemble a list of requests for testing
-        let (receivers, requests): (Vec<_>, Vec<_>) = (0..2)
-            .map(|index| {
-                let subgraph_name = Arc::from("test");
-                let (tx, rx) = oneshot::channel();
-                let gql_request = graphql::Request::fake_builder()
-                    .operation_name(format!("batch_test_{index}"))
-                    .query(format!("query batch_test {{ slot{index} }}"))
-                    .build();
-
-                let body = body::from_bytes(serde_json::to_vec(&gql_request).unwrap());
-                let context = Context::new();
-                context.extensions().with_lock(|lock| {
-                    lock.insert(SubgraphRequestId::new());
-                });
-
-                (
-                    rx,
-                    BatchQueryInfo {
-                        http_client: HttpClientServiceFactory::for_test(&subgraph_name),
-                        request: HttpRequest {
-                            http_request: http::Request::builder().body(body).unwrap(),
-                            context,
-                        },
-                        sender: tx,
-                        subgraph_name,
-                    },
-                )
-            })
-            .unzip();
-
-        // Create a vector of the input request context IDs for comparison
-        let input_context_ids = requests
-            .iter()
-            .map(|r| r.request.context.id.clone())
-            .collect::<Vec<String>>();
-        // Assemble them
-        let SubgraphBatchRequest {
-            http_client: _,
-            contexts,
-            request,
-            txs,
-        } = assemble_batch(requests)
-            .await
-            .expect("it can assemble a batch");
-
-        let output_context_ids = contexts
-            .iter()
-            .map(|r| r.0.id.clone())
-            .collect::<Vec<String>>();
-        // Make sure all of our contexts are preserved during assembly
-        assert_eq!(input_context_ids, output_context_ids);
-
-        // We should see the aggregation of all of the requests
-        let actual: Vec<graphql::Request> = serde_json::from_str(
-            std::str::from_utf8(&router::body::into_bytes(request.into_body()).await.unwrap())
-                .unwrap(),
-        )
-        .unwrap();
-
-        let expected: Vec<_> = (0..2)
-            .map(|index| {
-                graphql::Request::fake_builder()
-                    .operation_name(format!("batch_test_{index}"))
-                    .query(format!("query batch_test {{ slot{index} }}"))
-                    .build()
-            })
-            .collect();
-        assert_eq!(actual, expected);
-
-        // We should also have all of the correct senders and they should be linked to the correct waiter
-        // Note: We reverse the senders since they should be in reverse order when assembled
-        assert_eq!(txs.len(), receivers.len());
-        for (index, (tx, rx)) in Iterator::zip(txs.into_iter(), receivers).enumerate() {
-            let data = serde_json_bytes::json!({
-                "data": {
-                    format!("slot{index}"): "valid"
-                }
-            });
-            let graphql_response = graphql::Response::builder().data(data.clone()).build();
-            let body = body::from_bytes(serde_json::to_vec(&graphql_response).unwrap());
-
-            let response = HttpResponse {
-                http_response: http::Response::builder()
-                    .header(
-                        http::header::CONTENT_TYPE,
-                        "application/graphql-response+json",
-                    )
-                    .body(body)
-                    .unwrap(),
-                context: Context::new(),
-            };
-
-            assert!(tx.send(Ok(response)).is_ok());
-
-            // We want to make sure that we don't hang the test if we don't get the correct message
-            let received = tokio::time::timeout(Duration::from_millis(10), rx)
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap();
-
-            let body = body::into_bytes(received.http_response.into_body())
-                .await
-                .unwrap();
-            let body: graphql::Response = serde_json::from_slice(&body).unwrap();
-            assert_eq!(body.data, Some(data));
-        }
-    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_rejects_index_out_of_bounds() {

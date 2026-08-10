@@ -157,7 +157,7 @@ pub(super) fn http_response_to_graphql_response(
     graphql_response
 }
 
-pub(super) async fn do_fetch(
+pub(crate) async fn do_fetch(
     mut client: crate::services::http::BoxCloneService,
     context: &Context,
     service_name: &str,
