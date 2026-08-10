@@ -8,7 +8,7 @@ use crate::graphql;
 use crate::plugins::limits::RouterLimitsConfig;
 use crate::plugins::limits::operation_limits;
 use crate::plugins::limits::operation_limits::OperationLimits;
-use crate::services::layers::query_analysis::ParsedDocument;
+use crate::services::query_parsing::ParsedDocument;
 use crate::services::supergraph;
 
 /// Layer that enforces operation limits and rejects GraphQL requests that exceed the limits.

@@ -39,7 +39,9 @@ use super::listeners::ListenersAndRouters;
 use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
 use super::listeners::extra_endpoints;
+use super::utils::ConnectionRouterService;
 use super::utils::PropagatingMakeSpan;
+use super::utils::connection_router_service;
 use crate::Context;
 use crate::axum_factory::compression::Compressor;
 use crate::axum_factory::listeners::get_extra_listeners;
@@ -75,21 +77,16 @@ impl AxumHttpServerFactory {
     }
 }
 
-pub(crate) fn make_axum_router<RF>(
-    service_factory: RF,
+pub(crate) fn make_axum_router(
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
     license: Arc<LicenseState>,
-) -> Result<ListenersAndRouters, ApolloRouterError>
-where
-    RF: RouterFactory,
-{
+) -> Result<ListenersAndRouters, ApolloRouterError> {
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
 
     ensure_endpoints_consistency(configuration, &endpoints)?;
 
     let mut main_endpoint = main_endpoint(
-        service_factory,
         configuration,
         endpoints
             .remove(&configuration.supergraph.listen)
@@ -128,9 +125,10 @@ impl HttpServerFactory for AxumHttpServerFactory {
         RF: RouterFactory,
     {
         Box::pin(async move {
-            let pipeline_ref = service_factory.pipeline_ref().clone();
-            let all_routers =
-                make_axum_router(service_factory, &configuration, extra_endpoints, license)?;
+            let pipeline_handle = service_factory.pipeline_handle();
+            // Built once per reload; connections clone it cheaply.
+            let router_service = connection_router_service(service_factory.create());
+            let all_routers = make_axum_router(&configuration, extra_endpoints, license)?;
 
             // serve main router
 
@@ -188,7 +186,8 @@ impl HttpServerFactory for AxumHttpServerFactory {
 
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
                 all_routers.main.1,
-                pipeline_ref.clone(),
+                pipeline_handle.clone(),
+                Some(router_service),
                 actual_main_listen_address.clone(),
                 main_listener,
                 configuration.clone(),
@@ -228,7 +227,10 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     .map(|((listen_addr, listener), router)| {
                         let (server, shutdown_sender) = serve_router_on_listen_addr(
                             router,
-                            pipeline_ref.clone(),
+                            pipeline_handle.clone(),
+                            // Extra listeners (health check, metrics, ...) never serve
+                            // GraphQL requests, so they have no need for a router service.
+                            None,
                             listen_addr.clone(),
                             listener,
                             configuration.clone(),
@@ -294,15 +296,11 @@ impl HttpServerFactory for AxumHttpServerFactory {
     }
 }
 
-fn main_endpoint<RF>(
-    service_factory: RF,
+fn main_endpoint(
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
     license: Arc<LicenseState>,
-) -> Result<ListenAddrAndRouter, ApolloRouterError>
-where
-    RF: RouterFactory,
-{
+) -> Result<ListenAddrAndRouter, ApolloRouterError> {
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
@@ -316,7 +314,7 @@ where
         .gzip(true)
         .deflate(true);
 
-    let mut main_route = main_router::<RF>(configuration).layer(
+    let mut main_route = main_router(configuration).layer(
         ServiceBuilder::new()
             // Telemetry layers MUST be first. This means that they will be hit first during execution of the pipeline
             // Adding layers before telemetry will cause us to lose metrics and spans.
@@ -329,7 +327,6 @@ where
             // CORS layer must be before any layer that can short-circuit with an error response, else
             // browser clients will not be able to view the error response body.
             .layer(cors)
-            .layer(Extension(service_factory))
             .layer(LicenseLayer::new(license))
             .layer(decompression),
     );
@@ -370,17 +367,14 @@ struct HandlerOptions {
     experimental_log_on_broken_pipe: bool,
 }
 
-pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router<()>
-where
-    RF: RouterFactory,
-{
+pub(super) fn main_router(configuration: &Configuration) -> axum::Router<()> {
     let mut router = Router::new().route(
         &configuration.supergraph.sanitized_path(),
-        get(handle_graphql::<RF>).post(handle_graphql::<RF>),
+        get(handle_graphql).post(handle_graphql),
     );
 
     if BARE_WILDCARD_PATH_REGEX.is_match(configuration.supergraph.path.as_str()) {
-        router = router.route("/", get(handle_graphql::<RF>).post(handle_graphql::<RF>));
+        router = router.route("/", get(handle_graphql).post(handle_graphql));
     }
 
     router = router.route_layer(Extension(HandlerOptions {
@@ -396,17 +390,15 @@ where
     router
 }
 
-async fn handle_graphql<RF: RouterFactory>(
+async fn handle_graphql(
     Extension(options): Extension<HandlerOptions>,
-    Extension(service_factory): Extension<RF>,
+    Extension(service): Extension<ConnectionRouterService>,
     http_request: Request<axum::body::Body>,
 ) -> impl IntoResponse {
     let HandlerOptions {
         early_cancel,
         experimental_log_on_broken_pipe,
     } = options;
-    let service = service_factory.create();
-
     let request: router::Request = http_request.into();
     let context = request.context.clone();
     let accept_encoding = request
@@ -548,6 +540,7 @@ mod tests {
 
     use super::*;
     use crate::assert_snapshot_subscriber;
+
     // Drive the http router call into its cancellation-handling path (where `CancelHandler`
     // is constructed) and then deterministically cancel it before completion. With
     // `experimental_log_on_broken_pipe = true`, dropping `CancelHandler` without an

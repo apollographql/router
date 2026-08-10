@@ -355,9 +355,10 @@ fn attribute_value_size(value: &Value) -> usize {
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
     async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
-        // Exporting to apollo means that we must have complete trace as the entire trace must be built.
-        // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
-        // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
+        // Apollo's ingest requires traces to be grouped and drops any trace whose root request
+        // span is missing.
+        // Traces that aren't complete yet are kept for the next export event. Spans whose root
+        // never arrives are eventually evicted by the LRU.
         let mut grouped_traces: Vec<Vec<LightSpanData>> = Vec::new();
         // Number of complete traces seen this export, and how many the sampler kept
         let mut total_traces: u64 = 0;
@@ -494,8 +495,11 @@ impl SpanCache {
     /// Collects the subtree for a trace by calling pop() on the LRU cache for
     /// all spans in the tree, given an initial "root span". Used by the OTLP exporter
     /// to build up a complete trace.
-    /// For a future iteration, consider using the same algorithm in the `groupbytrace`
-    /// processor, which groups based on trace ID instead of connecting recursively by parent ID.
+    ///
+    /// For a future iteration, consider keying on trace id rather than linking recursively by
+    /// parent id, as the OpenTelemetry Collector `groupbytrace` processor does.
+    /// Apollo's collector does not run that processor, which is why the router assembles
+    /// traces itself.
     fn pop_spans_for_tree(&mut self, root_span: LightSpanData) -> Vec<LightSpanData> {
         let root_span_id = root_span.span_id;
         let mut child_spans = match self.spans_by_parent_id.pop(&root_span_id) {

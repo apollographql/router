@@ -13,6 +13,7 @@ use rustls::pki_types::CertificateDer;
 use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::service_fn;
 use tracing::Instrument;
@@ -31,6 +32,7 @@ use crate::plugins::subscription::notification::Notify;
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::plugins::traffic_shaping::TrafficShaping;
+use crate::query_planner::InMemoryQueryPlanCache;
 use crate::query_planner::QueryPlannerService;
 use crate::query_planner::warmup;
 use crate::services::PluggableSupergraphServiceBuilder;
@@ -41,9 +43,10 @@ use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
-use crate::services::layers::query_analysis::QueryAnalysis;
+use crate::services::query_parsing;
+use crate::services::query_planner;
 use crate::services::router;
-use crate::services::router::pipeline_handle::PipelineRef;
+use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::spec::Schema;
@@ -141,14 +144,17 @@ impl Endpoint {
 }
 /// Factory for creating a router service instance.
 ///
-/// Instances of this trait are used by the HTTP server to obtain a new
-/// router service for each incoming request.
-pub(crate) trait RouterFactory: Clone + Send + Sync + 'static {
+/// The HTTP server calls `create` once per reload and shares the resulting
+/// service across every connection it serves.
+pub(crate) trait RouterFactory: Clone + Send + 'static {
     fn create(&self) -> router::BoxCloneService;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 
-    fn pipeline_ref(&self) -> Arc<PipelineRef>;
+    /// Returns the handle for this factory's pipeline. Hold a clone for as long as
+    /// requests are still served from this pipeline, including across a reload that
+    /// replaces this factory.
+    fn pipeline_handle(&self) -> Arc<PipelineHandle>;
 }
 
 /// Factory for creating a RouterFactory
@@ -156,15 +162,15 @@ pub(crate) trait RouterFactory: Clone + Send + Sync + 'static {
 /// Instances of this traits are used by the StateMachine to generate a new
 /// RouterFactory from configuration when it changes
 #[async_trait::async_trait]
-pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
+pub(crate) trait RouterSuperServiceFactory {
     type RouterFactory: RouterFactory;
 
-    async fn create<'a>(
-        &'a mut self,
+    async fn create(
+        &mut self,
         is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        previous_router: Option<&'a Self::RouterFactory>,
+        previous_router: Option<Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: Arc<LicenseState>,
     ) -> Result<Self::RouterFactory, BoxError>;
@@ -178,21 +184,25 @@ pub(crate) struct YamlRouterFactory;
 impl RouterSuperServiceFactory for YamlRouterFactory {
     type RouterFactory = RouterCreator;
 
-    async fn create<'a>(
-        &'a mut self,
+    async fn create(
+        &mut self,
         _is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        previous_router: Option<&'a Self::RouterFactory>,
+        previous_router: Option<Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: Arc<LicenseState>,
     ) -> Result<Self::RouterFactory, BoxError> {
+        let previous_config: Option<Arc<Configuration>> =
+            previous_router.as_ref().map(|r| r.configuration.clone());
+        let previous_cache = previous_router.as_ref().map(|r| r.previous_cache());
+
         // we have to create a telemetry plugin before creating everything else, to generate a trace
         // of router and plugin creation
         let plugin_registry = &*crate::plugin::PLUGINS;
         let mut initial_telemetry_plugin = None;
 
-        if previous_router.is_none()
+        if previous_config.is_none()
             && apollo_opentelemetry_initialized()
             && let Some(factory) = plugin_registry
                 .iter()
@@ -206,14 +216,9 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             if let Some(plugin_config) = &mut telemetry_config {
                 inject_schema_id(schema.schema_id.as_str(), plugin_config);
                 // Extract previous telemetry config for hot reload comparison
-                let previous_telemetry_config = previous_router.and_then(|router| {
-                    router
-                        .configuration
-                        .apollo_plugins
-                        .plugins
-                        .get("telemetry")
-                        .cloned()
-                });
+                let previous_telemetry_config = previous_config
+                    .as_ref()
+                    .and_then(|config| config.apollo_plugins.plugins.get("telemetry").cloned());
 
                 let telemetry_init = PluginInit::builder()
                     .config(plugin_config.clone())
@@ -246,7 +251,8 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         Self.inner_create(
             configuration,
             schema,
-            previous_router,
+            previous_config,
+            previous_cache,
             initial_telemetry_plugin,
             extra_plugins,
             license,
@@ -257,36 +263,45 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 }
 
 impl YamlRouterFactory {
-    async fn inner_create<'a>(
-        &'a mut self,
+    #[allow(clippy::too_many_arguments)]
+    async fn inner_create(
+        &mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        previous_router: Option<&'a RouterCreator>,
+        previous_config: Option<Arc<Configuration>>,
+        previous_cache: Option<InMemoryQueryPlanCache>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: Arc<LicenseState>,
     ) -> Result<RouterCreator, BoxError> {
-        // Instantiate the parser here so we can use it to warm up the planner below
-        let query_analysis =
-            Arc::new(QueryAnalysis::new(schema.clone(), configuration.clone()).await);
         let persisted_queries = Arc::new(PersistedQueryExpander::new(&configuration).await?);
+        let query_parsing_service =
+            query_parsing::query_parsing_service(schema.clone(), configuration.clone());
 
-        let (supergraph_creator, warmup) = self
+        let (supergraph_creator, query_planner_service) = self
             .inner_create_supergraph(
                 configuration.clone(),
                 schema,
-                query_analysis.clone(),
                 initial_telemetry_plugin,
                 extra_plugins,
                 license,
-                previous_router,
+                previous_config,
             )
             .await?;
 
+        let warmup_query_planner_service = ServiceBuilder::new()
+            .layer(warmup::WarmupParseQueryLayer::new(
+                query_parsing_service.clone(),
+            ))
+            .map_response(drop) // Ignore response
+            .service(query_planner_service)
+            .boxed_clone();
+
+        // TODO(@goto-bus-stop): this can now probably just be inlined here
         SupergraphCreator::warm_up_query_planner(
-            warmup,
+            warmup_query_planner_service,
             &persisted_queries,
-            previous_router.map(|previous| previous.previous_cache()),
+            previous_cache,
             configuration.supergraph.query_planning.warmed_up_queries,
             &configuration
                 .persisted_queries
@@ -295,9 +310,9 @@ impl YamlRouterFactory {
         .await;
 
         RouterCreator::new(
-            query_analysis,
             persisted_queries,
             Arc::new(supergraph_creator),
+            query_parsing_service,
             configuration,
         )
         .await
@@ -308,12 +323,11 @@ impl YamlRouterFactory {
         &mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        query_analysis: Arc<QueryAnalysis>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: Arc<LicenseState>,
-        previous_router: Option<&crate::services::router::service::RouterCreator>,
-    ) -> Result<(SupergraphCreator, warmup::BoxCloneService), BoxError> {
+        previous_config: Option<Arc<Configuration>>,
+    ) -> Result<(SupergraphCreator, query_planner::CacheBoxCloneService), BoxError> {
         let (query_planner_service, subgraph_schemas) = {
             let _span = tracing::info_span!("query_planner_creation").entered();
 
@@ -336,7 +350,7 @@ impl YamlRouterFactory {
                 initial_telemetry_plugin,
                 extra_plugins,
                 license,
-                previous_router,
+                previous_config,
             )
             .instrument(tracing::info_span!("plugins"))
             .await?
@@ -349,7 +363,6 @@ impl YamlRouterFactory {
                 query_planner_service,
                 schema.clone(),
                 subgraph_schemas,
-                query_analysis,
             );
             builder = builder.with_configuration(configuration.clone());
             let (http_service_factory, connector_http_service_factory) =
@@ -593,7 +606,7 @@ pub(crate) async fn create_plugins(
     initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     license: Arc<LicenseState>,
-    previous_router: Option<&crate::services::router::service::RouterCreator>,
+    previous_config: Option<Arc<Configuration>>,
 ) -> Result<Plugins, BoxError> {
     let supergraph_schema = Arc::new(schema.supergraph_schema().clone());
     let supergraph_schema_id = schema.schema_id.clone().into_inner();
@@ -601,11 +614,10 @@ pub(crate) async fn create_plugins(
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
 
     // Extract previous plugin configurations for hot reload previous config detection
-    let (previous_apollo_plugins_config, previous_user_plugins_config) = match previous_router {
-        Some(router) => {
+    let (previous_apollo_plugins_config, previous_user_plugins_config) = match &previous_config {
+        Some(config) => {
             // Extract apollo plugin configs from the previous router's stored configuration
-            let prev_apollo_configs: HashMap<&str, &Value> = router
-                .configuration
+            let prev_apollo_configs: HashMap<&str, &Value> = config
                 .apollo_plugins
                 .plugins
                 .iter()
@@ -613,8 +625,7 @@ pub(crate) async fn create_plugins(
                 .collect();
 
             // Extract user plugin configs from the previous router's stored configuration
-            let prev_user_configs: HashMap<String, &Value> = router
-                .configuration
+            let prev_user_configs: HashMap<String, &Value> = config
                 .plugins
                 .plugins
                 .as_ref()

@@ -298,22 +298,6 @@ async fn get_router_service_with_subgraph_mock(
     build_router_with_subgraph_mock(task, config).await
 }
 
-/// Same as `get_router_service_with_subgraph_mock` but flips `demand_control.enabled`
-/// on in the shared `apollo_reports.router.yaml` fixture (it ships `enabled: false`),
-/// so the router emits the `apollo_private.cost.*` span attributes exercised by
-/// `test_demand_control_trace`.
-async fn get_router_service_with_subgraph_mock_demand_control(
-    reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
-    _mocked: bool,
-) -> (JoinHandle<()>, BoxCloneService) {
-    let (task, config) = config(false, reports).await;
-    let config = jsonpath_lib::replace_with(config, "$.demand_control.enabled", &mut |_| {
-        Some(serde_json::Value::Bool(true))
-    })
-    .expect("could not enable demand_control");
-    build_router_with_subgraph_mock(task, config).await
-}
-
 async fn build_router_with_subgraph_mock(
     task: JoinHandle<()>,
     mut config: serde_json::Value,
@@ -791,7 +775,15 @@ async fn get_trace_report_with_subgraph_mock_demand_control(
     request: router::Request,
 ) -> ExportTraceServiceRequest {
     get_traces(
-        get_router_service_with_subgraph_mock_demand_control,
+        |reports, _mocked| async move {
+            let (task, config) = config(false, reports).await;
+            let config =
+                jsonpath_lib::replace_with(config, "$.demand_control.enabled", &mut |_| {
+                    Some(serde_json::Value::Bool(true))
+                })
+                .expect("could not enable demand_control");
+            build_router_with_subgraph_mock(task, config).await
+        },
         reports,
         false,
         request,
@@ -1143,7 +1135,7 @@ async fn test_demand_control_trace() {
     let report = get_trace_report_with_subgraph_mock_demand_control(reports, req).await;
 
     // The demand-control cost data reaches Studio as `apollo_private.cost.*` span
-    // attributes (allowlisted in REPORTS_INCLUDE_ATTRS in apollo_telemetry.rs).
+    // attributes.
     // Assert their presence explicitly so this test fails loudly if the attributes
     // ever stop flowing through the OTLP path, independent of the snapshot below.
     let cost_keys: Vec<&str> = report

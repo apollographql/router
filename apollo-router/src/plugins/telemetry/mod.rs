@@ -158,6 +158,7 @@ pub(crate) mod metrics;
 /// Opentelemetry utils
 pub(crate) mod otel;
 mod otlp;
+pub(crate) mod pipeline_bypass;
 pub(crate) mod reload;
 pub(crate) mod resource;
 pub(crate) mod span_ext;

@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -2967,6 +2968,14 @@ expression: "&schema"
           "default": null,
           "deprecated": true,
           "description": "Feature gate for Connect spec v0.4. Previously required to opt into the\nv0.4 spec during its preview phase; now a no-op, since `@link`-ing\nconnect/v0.4 in a subgraph is itself a sufficient opt-in.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "preview_connect_v0_5": {
+          "default": null,
+          "description": "Feature gate for Connect spec v0.5. Set to `true` to enable using\nthe v0.5 spec during the preview phase.",
           "type": [
             "boolean",
             "null"
@@ -12659,14 +12668,6 @@ expression: "&schema"
             }
           ],
           "description": "Applied on specific subgraphs"
-        },
-        "deduplicate_variables": {
-          "default": null,
-          "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
-          "type": [
-            "boolean",
-            "null"
-          ]
         },
         "router": {
           "anyOf": [

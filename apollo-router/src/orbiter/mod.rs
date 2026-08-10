@@ -94,12 +94,12 @@ pub(crate) struct OrbiterRouterSuperServiceFactory {
 impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
     type RouterFactory = RouterCreator;
 
-    async fn create<'a>(
-        &'a mut self,
+    async fn create(
+        &mut self,
         is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        previous_router: Option<&'a Self::RouterFactory>,
+        previous_router: Option<Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: Arc<LicenseState>,
     ) -> Result<Self::RouterFactory, BoxError> {

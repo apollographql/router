@@ -228,7 +228,9 @@ async fn test_http_max_request_bytes() {
             });
         let config = serde_json::json!({
             "limits": {
-                "http_max_request_bytes": http_max_request_bytes
+                "router": {
+                    "http_max_request_bytes": http_max_request_bytes
+                }
             }
         });
         crate::TestHarness::builder()
@@ -281,7 +283,9 @@ async fn test_http_max_request_bytes_get() {
     async fn with_config(http_max_request_bytes: usize) -> router::Response {
         let config = serde_json::json!({
             "limits": {
-                "http_max_request_bytes": http_max_request_bytes
+                "router": {
+                    "http_max_request_bytes": http_max_request_bytes
+                }
             }
         });
         crate::TestHarness::builder()

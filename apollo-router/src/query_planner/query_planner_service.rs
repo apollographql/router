@@ -46,8 +46,8 @@ use crate::query_planner::labeler::add_defer_labels;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
-use crate::services::layers::query_analysis::ParsedDocument;
-use crate::services::layers::query_analysis::ParsedDocumentInner;
+use crate::services::query_parsing::ParsedDocument;
+use crate::services::query_parsing::ParsedDocumentInner;
 use crate::services::query_planner::PlanOptions;
 use crate::spec::Query;
 use crate::spec::Schema;
@@ -359,6 +359,8 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Backpressure is not exerted by the compute job pool currently, so we can only let the
+        // caller know about pool saturation once we actually try to submit a job.
         Poll::Ready(Ok(()))
     }
 
