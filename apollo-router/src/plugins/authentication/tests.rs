@@ -76,25 +76,6 @@ pub(crate) fn create_an_url(filename: &str) -> String {
     Url::from_file_path(jwks_absolute_path).unwrap().to_string()
 }
 
-<<<<<<< HEAD
-async fn build_a_default_test_harness() -> router::BoxCloneService {
-    build_a_test_harness(None, None, false, false, false).await
-=======
-type MockHandle = tower_test::mock::Handle<supergraph::Request, supergraph::Response>;
-
-fn spawn_mock_driver(mut handle: MockHandle) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let (req, responder) = handle.next_request().await.unwrap();
-        responder.send_response(
-            supergraph::Response::fake_builder()
-                .data("response created within the mock")
-                .context(req.context)
-                .build()
-                .unwrap(),
-        );
-    })
-}
-
 async fn parse_next_graphql_response(service_response: &mut router::Response) -> graphql::Response {
     serde_json::from_slice(
         service_response
@@ -108,18 +89,8 @@ async fn parse_next_graphql_response(service_response: &mut router::Response) ->
     .unwrap()
 }
 
-fn assert_mock_success(service_response: &router::Response, response: &graphql::Response) {
-    assert_eq!(response.errors, vec![]);
-    assert_eq!(StatusCode::OK, service_response.response.status());
-    assert_eq!(
-        "response created within the mock",
-        response.data.as_ref().unwrap()
-    );
-}
-
-async fn build_a_default_test_harness() -> (router::BoxCloneService, MockHandle) {
+async fn build_a_default_test_harness() -> router::BoxCloneService {
     build_a_test_harness(None, None, false, false, None).await
->>>>>>> 1fbc1ff0a (feat(authentication): add RedactedError mode for JWT auth failures (#9928))
 }
 
 async fn build_a_test_harness(
@@ -127,8 +98,7 @@ async fn build_a_test_harness(
     header_value_prefix: Option<String>,
     multiple_jwks: bool,
     ignore_other_prefixes: bool,
-<<<<<<< HEAD
-    continue_on_error: bool,
+    on_error: Option<&str>,
 ) -> router::BoxCloneService {
     // create a mock service we will use to test our plugin
     let mut mock_service = test::MockSupergraphService::new();
@@ -151,14 +121,6 @@ async fn build_a_test_harness(
             });
         mock_service
     });
-=======
-    on_error: Option<&str>,
-) -> (router::BoxCloneService, MockHandle) {
-    let (mock_service, handle) =
-        tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
-    // Caller is responsible for driving `handle`: spawn a driver for tests that
-    // reach the inner service, or call assert_no_mock_calls for rejection tests.
->>>>>>> 1fbc1ff0a (feat(authentication): add RedactedError mode for JWT auth failures (#9928))
 
     let jwks_url = create_an_url("jwks.json");
 
@@ -528,14 +490,8 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_does_not_match_config_and_is_ignored() {
-<<<<<<< HEAD
-    let test_harness = build_a_test_harness(None, None, false, true, false).await;
+    let test_harness = build_a_test_harness(None, None, false, true, None).await;
     // Let's create a request with our operation name
-=======
-    let (test_harness, handle) = build_a_test_harness(None, None, false, true, None).await;
-    let driver = spawn_mock_driver(handle);
-
->>>>>>> 1fbc1ff0a (feat(authentication): add RedactedError mode for JWT auth failures (#9928))
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "Basic dXNlcjpwYXNzd29yZA==")
         .build()
@@ -568,12 +524,7 @@ async fn it_accepts_when_auth_prefix_does_not_match_config_and_is_ignored() {
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_jwt() {
-<<<<<<< HEAD
-    let test_harness = build_a_test_harness(None, None, true, false, false).await;
-=======
-    let (test_harness, handle) = build_a_test_harness(None, None, true, false, None).await;
-    let driver = spawn_mock_driver(handle);
->>>>>>> 1fbc1ff0a (feat(authentication): add RedactedError mode for JWT auth failures (#9928))
+    let test_harness = build_a_test_harness(None, None, true, false, None).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -611,14 +562,8 @@ async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_auth() {
-<<<<<<< HEAD
     let test_harness =
-        build_a_test_harness(Some("SOMETHING".to_string()), None, false, false, false).await;
-=======
-    let (test_harness, handle) =
         build_a_test_harness(Some("SOMETHING".to_string()), None, false, false, None).await;
-    let driver = spawn_mock_driver(handle);
->>>>>>> 1fbc1ff0a (feat(authentication): add RedactedError mode for JWT auth failures (#9928))
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -656,14 +601,8 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_aut
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_prefix() {
-<<<<<<< HEAD
     let test_harness =
-        build_a_test_harness(None, Some("SOMETHING".to_string()), false, false, false).await;
-=======
-    let (test_harness, handle) =
         build_a_test_harness(None, Some("SOMETHING".to_string()), false, false, None).await;
-    let driver = spawn_mock_driver(handle);
->>>>>>> 1fbc1ff0a (feat(authentication): add RedactedError mode for JWT auth failures (#9928))
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -701,13 +640,7 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_pre
 
 #[tokio::test]
 async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
-<<<<<<< HEAD
-    let test_harness = build_a_test_harness(None, Some("".to_string()), false, false, false).await;
-=======
-    let (test_harness, handle) =
-        build_a_test_harness(None, Some("".to_string()), false, false, None).await;
-    let driver = spawn_mock_driver(handle);
->>>>>>> 1fbc1ff0a (feat(authentication): add RedactedError mode for JWT auth failures (#9928))
+    let test_harness = build_a_test_harness(None, Some("".to_string()), false, false, None).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -745,12 +678,7 @@ async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
 
 #[tokio::test]
 async fn it_inserts_success_jwt_status_into_context() {
-<<<<<<< HEAD
-    let test_harness = build_a_test_harness(None, None, false, false, false).await;
-=======
-    let (test_harness, handle) = build_a_test_harness(None, None, false, false, None).await;
-    let driver = spawn_mock_driver(handle);
->>>>>>> 1fbc1ff0a (feat(authentication): add RedactedError mode for JWT auth failures (#9928))
+    let test_harness = build_a_test_harness(None, None, false, false, None).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -817,11 +745,7 @@ async fn it_inserts_success_jwt_status_into_context() {
 
 #[tokio::test]
 async fn it_inserts_failure_jwt_status_into_context() {
-<<<<<<< HEAD
-    let test_harness = build_a_test_harness(None, None, false, false, false).await;
-=======
-    let (test_harness, handle) = build_a_test_harness(None, None, false, false, None).await;
->>>>>>> 1fbc1ff0a (feat(authentication): add RedactedError mode for JWT auth failures (#9928))
+    let test_harness = build_a_test_harness(None, None, false, false, None).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -889,13 +813,7 @@ async fn it_inserts_failure_jwt_status_into_context() {
 
 #[tokio::test]
 async fn it_moves_on_after_jwt_errors_when_configured() {
-<<<<<<< HEAD
-    let test_harness = build_a_test_harness(None, None, false, false, true).await;
-=======
-    let (test_harness, handle) =
-        build_a_test_harness(None, None, false, false, Some("Continue")).await;
-    let driver = spawn_mock_driver(handle);
->>>>>>> 1fbc1ff0a (feat(authentication): add RedactedError mode for JWT auth failures (#9928))
+    let test_harness = build_a_test_harness(None, None, false, false, Some("Continue")).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -960,25 +878,15 @@ async fn it_moves_on_after_jwt_errors_when_configured() {
 #[tokio::test]
 #[should_panic]
 async fn it_panics_when_auth_prefix_has_correct_format_but_contains_whitespace() {
-<<<<<<< HEAD
     let _test_harness =
-        build_a_test_harness(None, Some("SOMET HING".to_string()), false, false, false).await;
-=======
-    // The build panics, so the handle is never returned — discard the tuple.
-    let _ = build_a_test_harness(None, Some("SOMET HING".to_string()), false, false, None).await;
->>>>>>> 1fbc1ff0a (feat(authentication): add RedactedError mode for JWT auth failures (#9928))
+        build_a_test_harness(None, Some("SOMET HING".to_string()), false, false, None).await;
 }
 
 #[tokio::test]
 #[should_panic]
 async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whitespace() {
-<<<<<<< HEAD
     let _test_harness =
-        build_a_test_harness(None, Some("SOMETHING ".to_string()), false, false, false).await;
-=======
-    // The build panics, so the handle is never returned — discard the tuple.
-    let _ = build_a_test_harness(None, Some("SOMETHING ".to_string()), false, false, None).await;
->>>>>>> 1fbc1ff0a (feat(authentication): add RedactedError mode for JWT auth failures (#9928))
+        build_a_test_harness(None, Some("SOMETHING ".to_string()), false, false, None).await;
 }
 
 #[tokio::test]
@@ -2825,9 +2733,8 @@ mod redacted_errors {
     use jsonwebtoken::encode;
     use jsonwebtoken::get_current_timestamp;
     use p256::ecdsa::SigningKey;
-    use p256::elliptic_curve::Generate;
+    use p256::ecdsa::signature::rand_core::OsRng;
     use p256::pkcs8::EncodePrivateKey;
-    use rand::rngs::SysRng;
     use tower::ServiceExt;
 
     use super::JWT_CONTEXT_KEY;
@@ -2907,7 +2814,7 @@ mod redacted_errors {
         on_error: Option<&str>,
         authorization: &str,
     ) -> (router::Response, graphql::Response) {
-        let (test_harness, handle) = build_a_test_harness(None, None, false, false, on_error).await;
+        let test_harness = build_a_test_harness(None, None, false, false, on_error).await;
 
         let request = supergraph::Request::canned_builder()
             .header(http::header::AUTHORIZATION, authorization)
@@ -2920,7 +2827,6 @@ mod redacted_errors {
             .unwrap();
         let response = parse_next_graphql_response(&mut service_response).await;
 
-        crate::plugin::test::assert_no_mock_calls(handle).await;
         (service_response, response)
     }
 
@@ -2982,7 +2888,7 @@ mod redacted_errors {
 
     #[tokio::test]
     async fn it_redacts_audience_mismatch_without_echoing_configured_audiences() {
-        let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
+        let signing_key = SigningKey::random(&mut OsRng);
         let manager = make_manager(
             &jwk(&signing_key),
             None,
@@ -3011,7 +2917,7 @@ mod redacted_errors {
 
     #[tokio::test]
     async fn it_keeps_full_error_detail_in_the_context_when_redacting() {
-        let (test_harness, handle) =
+        let test_harness =
             build_a_test_harness(None, None, false, false, Some("RedactedError")).await;
 
         let request = supergraph::Request::canned_builder()
@@ -3048,8 +2954,6 @@ mod redacted_errors {
         let response = parse_next_graphql_response(&mut service_response).await;
         assert_redacted(&response, &["Base64", "offset"]);
         assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
-
-        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
@@ -3073,7 +2977,7 @@ mod redacted_errors {
     #[tokio::test]
     async fn it_records_the_failure_code_on_the_jwt_metric() {
         async {
-            let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
+            let signing_key = SigningKey::random(&mut OsRng);
             let manager = make_manager(&jwk(&signing_key), None, None);
             let request = request_with_authorization(&tampered_token(&signing_key));
 
@@ -3098,7 +3002,7 @@ mod redacted_errors {
     #[tokio::test]
     async fn it_records_no_failure_code_on_success() {
         async {
-            let signing_key = SigningKey::try_generate_from_rng(&mut SysRng).unwrap();
+            let signing_key = SigningKey::random(&mut OsRng);
             let manager = make_manager(&jwk(&signing_key), None, None);
             let request = super::common::build_request_with_header_token(
                 signing_key,
