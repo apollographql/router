@@ -467,7 +467,7 @@ pub(crate) struct ClientRequestAccepts {
     /// True if the client accepts `application/graphql-response+json` specifically. When this is
     /// true, that media type should be preferred over `application/json` in the response's
     /// `Content-Type` header.
-    pub(crate) json_response: bool,
+    pub(crate) graphql_response_json: bool,
     pub(crate) wildcard: bool,
 }
 

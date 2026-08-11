@@ -180,7 +180,7 @@ where
                 let ClientRequestAccepts {
                     wildcard: accepts_wildcard,
                     json: accepts_json,
-                    json_response: accepts_json_response,
+                    graphql_response_json: accepts_json_response,
                     multipart_defer: accepts_multipart_defer,
                     multipart_subscription: accepts_multipart_subscription,
                 } = context.extensions().with_lock(|lock| {
@@ -279,8 +279,8 @@ fn parse_accept(headers: &HeaderMap) -> ClientRequestAccepts {
                     {
                         accepts.json = true
                     }
-                    if !accepts.json_response && is_graphql_response_json {
-                        accepts.json_response = true
+                    if !accepts.graphql_response_json && is_graphql_response_json {
+                        accepts.graphql_response_json = true
                     }
                     if !accepts.wildcard && (mime.ty == _STAR && mime.subty == _STAR) {
                         accepts.wildcard = true
@@ -353,7 +353,7 @@ mod tests {
         default_headers.append(ACCEPT, HeaderValue::from_static("foo/bar"));
         let accepts = parse_accept(&default_headers);
         assert!(accepts.json);
-        assert!(!accepts.json_response);
+        assert!(!accepts.graphql_response_json);
 
         let mut default_headers = HeaderMap::new();
         default_headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
@@ -375,7 +375,7 @@ mod tests {
         default_headers.append(ACCEPT, HeaderValue::from_static("foo/bar"));
         let accepts = parse_accept(&default_headers);
         assert!(accepts.json);
-        assert!(accepts.json_response);
+        assert!(accepts.graphql_response_json);
 
         let mut default_headers = HeaderMap::new();
         default_headers.insert(
@@ -394,5 +394,16 @@ mod tests {
         );
         let accepts = parse_accept(&default_headers);
         assert!(accepts.multipart_subscription);
+
+        // A spec-compliant GraphQL-over-HTTP client accepting both, with application/json as a
+        // lower-priority fallback: application/graphql-response+json should still be preferred.
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("application/graphql-response+json, application/json;q=0.9"),
+        );
+        let accepts = parse_accept(&default_headers);
+        assert!(accepts.json);
+        assert!(accepts.graphql_response_json);
     }
 }
