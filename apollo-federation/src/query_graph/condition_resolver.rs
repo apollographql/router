@@ -193,7 +193,7 @@ impl ConditionResolverCache {
                 context_map: None,
             } = &entry.resolution
                 && cached_cost == cost
-                && tree.equals_same_root(cached_tree)
+                && (Arc::ptr_eq(tree, cached_tree) || tree == cached_tree)
             {
                 return entry.resolution.clone();
             }
