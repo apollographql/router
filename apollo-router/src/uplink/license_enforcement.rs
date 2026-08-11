@@ -468,6 +468,8 @@ impl LicenseEnforcementReport {
     }
 
     pub(crate) fn check(&self, license: Arc<LicenseState>) -> Result<Arc<LicenseState>, ApolloRouterError> {
+        let license_violation_error = || ApolloRouterError::LicenseViolation(self.restricted_features_in_use());
+
         let license_limits = match &*license {
             LicenseState::Licensed { limits } => {
                 if self.uses_restricted_features() {
@@ -475,13 +477,7 @@ impl LicenseEnforcementReport {
                         "The router is using features not available for your license:\n\n{}",
                         self
                     );
-                    // Enforcement is a pure function of the configuration, schema and
-                    // license, so a retry of these three re-derives the same violation.
-                    // A newly published license arrives as its own event and gets its
-                    // own attempt.
-                    return Err(ApolloRouterError::LicenseViolation(
-                        self.restricted_features_in_use(),
-                    ));
+                    return Err(license_violation_error());
                 } else {
                     tracing::debug!("A valid Apollo license has been detected.");
                     limits
@@ -493,9 +489,7 @@ impl LicenseEnforcementReport {
                         "License violation, the router is using features not available for your license:\n\n{}\n\nThe license warning period has started. The Router will stop serving requests after the license expires. See {LICENSE_EXPIRED_URL} for more information.",
                         self
                     );
-                    return Err((ApolloRouterError::LicenseViolation(
-                        self.restricted_features_in_use(),
-                    )));
+                    return Err(license_violation_error());
                 } else {
                     tracing::warn!(
                         "License warning period has started. The Router will stop serving requests after the license expires. In order to continue using these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{:?}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
@@ -539,9 +533,7 @@ impl LicenseEnforcementReport {
                         self
                     );
                 }
-                return Err((ApolloRouterError::LicenseViolation(
-                    self.restricted_features_in_use(),
-                )));
+                return Err(license_violation_error());
             }
             _ => {
                 tracing::debug!(
