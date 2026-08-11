@@ -40,21 +40,21 @@ struct TranslateError {
 /// When the batching layer receives a batch query (a POST request with a JSON array in the body),
 /// it splits the requests into multiple requests that flow separately through the rest of the
 /// pipeline, and reassembles the responses into a single JSON array response.
-pub(super) struct BatchingLayer {
+pub(crate) struct SplitBatchRequestLayer {
     config: Batching,
 }
 
-impl BatchingLayer {
-    pub(super) fn new(config: Batching) -> Self {
+impl SplitBatchRequestLayer {
+    pub(crate) fn new(config: Batching) -> Self {
         Self { config }
     }
 }
 
-impl<S> tower::Layer<S> for BatchingLayer {
-    type Service = BatchingService<S>;
+impl<S> tower::Layer<S> for SplitBatchRequestLayer {
+    type Service = SplitBatchRequestService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        BatchingService {
+        SplitBatchRequestService {
             inner,
             config: self.config.clone(),
         }
@@ -62,11 +62,11 @@ impl<S> tower::Layer<S> for BatchingLayer {
 }
 
 #[derive(Clone)]
-pub(super) struct BatchingService<S> {
+pub(crate) struct SplitBatchRequestService<S> {
     inner: S,
     config: Batching,
 }
-impl<S> Service<RouterRequest> for BatchingService<S>
+impl<S> Service<RouterRequest> for SplitBatchRequestService<S>
 where
     S: Service<RouterRequest, Response = RouterResponse, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -226,7 +226,7 @@ where
     }
 }
 
-impl<S> BatchingService<S>
+impl<S> SplitBatchRequestService<S>
 where
     S: Service<RouterRequest, Response = RouterResponse, Error = BoxError> + Clone,
 {

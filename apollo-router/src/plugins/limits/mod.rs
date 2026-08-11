@@ -413,8 +413,8 @@ mod test {
 
     use crate::Context;
     use crate::plugins::limits::LimitsPlugin;
-    use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
     use crate::plugins::limits::layer::BodyLimitControl;
+    use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::router;
 

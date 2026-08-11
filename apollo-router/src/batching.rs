@@ -50,8 +50,10 @@ use crate::spec::QueryHash;
 
 mod join_batch_requests_layer;
 mod query_plan_analysis_layer;
+mod split_batch_request_layer;
 pub(crate) use self::join_batch_requests_layer::*;
 pub(crate) use self::query_plan_analysis_layer::*;
+pub(crate) use self::split_batch_request_layer::*;
 
 /// A query that is part of a batch.
 /// Note: It's ok to make transient clones of this struct, but *do not* store clones anywhere apart
