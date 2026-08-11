@@ -45,7 +45,6 @@ use crate::error::SubgraphBatchingError;
 use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
-use crate::services::subgraph::SubgraphRequestId;
 use crate::spec::QueryHash;
 
 mod join_batch_requests_layer;
@@ -231,14 +230,6 @@ fn get_query_hash(request: &HttpRequest) -> Arc<QueryHash> {
         lock.get()
             .cloned()
             .expect("subgraph request must have QueryHash")
-    })
-}
-
-fn get_request_id(request: &HttpRequest) -> SubgraphRequestId {
-    request.context.extensions().with_lock(|lock| {
-        lock.get()
-            .cloned()
-            .expect("subgraph request must have SubgraphRequestId")
     })
 }
 
@@ -488,7 +479,6 @@ mod tests {
     use crate::services::router;
     use crate::services::router::body;
     use crate::services::subgraph;
-    use crate::services::subgraph::SubgraphRequestId;
     use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
     use crate::spec::QueryHash;
 
@@ -791,24 +781,14 @@ mod tests {
         let query1 = Batch::query_for_index(batch.clone(), 0).unwrap();
         let query2 = Batch::query_for_index(batch.clone(), 1).unwrap();
 
-        let context = Context::new();
-        context.extensions().with_lock(|lock| {
-            lock.insert(SubgraphRequestId::new());
-        });
-
         let body =
             serde_json::to_vec(&graphql::Request::builder().query("{ field1 }").build()).unwrap();
         let request1 = HttpRequest {
             http_request: http::Request::builder()
                 .body(body::from_bytes(body))
                 .unwrap(),
-            context,
+            context: Context::new(),
         };
-
-        let context = Context::new();
-        context.extensions().with_lock(|lock| {
-            lock.insert(SubgraphRequestId::new());
-        });
 
         let body =
             serde_json::to_vec(&graphql::Request::builder().query("{ field2 }").build()).unwrap();
@@ -816,7 +796,7 @@ mod tests {
             http_request: http::Request::builder()
                 .body(body::from_bytes(body))
                 .unwrap(),
-            context,
+            context: Context::new(),
         };
 
         // We have to provide pre-readied HTTP clients.

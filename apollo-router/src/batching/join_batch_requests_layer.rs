@@ -15,7 +15,6 @@ use tracing::instrument;
 use crate::Context;
 use crate::batching::BatchQuery;
 use crate::batching::BatchQueryInfo;
-use crate::batching::get_request_id;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::error::FetchError;
@@ -24,7 +23,6 @@ use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
-use crate::services::subgraph::SubgraphRequestId;
 
 /// Intercept requests that are part of a batch, and batch them up together into a single request
 /// per subgraph.
@@ -137,7 +135,7 @@ where
 /// A batch of requests that we'll send to a subgraph (...as a single batch request).
 struct SubgraphBatchRequest {
     http_client: crate::services::http::BoxCloneService,
-    contexts: Vec<(Context, SubgraphRequestId)>,
+    contexts: Vec<Context>,
     request: http::Request<RouterBody>,
     txs: Vec<oneshot::Sender<Result<HttpResponse, BoxError>>>,
 }
@@ -155,16 +153,14 @@ async fn assemble_batch(
     let first = iter.next().ok_or(SubgraphBatchingError::RequestsIsEmpty)?;
     let http_client = first.http_client;
     txs.push(first.sender);
-    let request_id = get_request_id(&first.request);
-    contexts.push((first.request.context, request_id));
+    contexts.push(first.request.context);
     // We'll use the HTTP parts (headers, URI etc) from the first request for the whole batch
     let (parts, first_body) = first.request.http_request.into_parts();
     body_streams.push(first_body);
 
     for batch_query in iter {
         txs.push(batch_query.sender);
-        let request_id = get_request_id(&batch_query.request);
-        contexts.push((batch_query.request.context, request_id));
+        contexts.push(batch_query.request.context);
         body_streams.push(batch_query.request.http_request.into_body());
     }
     debug_assert_eq!(txs.len(), contexts.len());
@@ -198,7 +194,7 @@ async fn assemble_batch(
 async fn process_batch(
     mut http_client: crate::services::http::BoxCloneService,
     service: &str,
-    mut contexts: Vec<(Context, SubgraphRequestId)>,
+    contexts: Vec<Context>,
     request: http::Request<RouterBody>,
     listener_count: usize,
 ) -> Result<Vec<HttpResponse>, FetchError> {
@@ -221,7 +217,6 @@ async fn process_batch(
     let batch_context = contexts
         .first()
         .expect("we have at least one context in the batch")
-        .0
         .clone();
     let service_name = service.to_string();
 
@@ -350,12 +345,12 @@ async fn process_batch(
         });
     }
 
-    // We are going to pop contexts from the back, so let's reverse our contexts
-    contexts.reverse();
     // Build an http Response for each graphql response
-    let exploded_responses: Result<Vec<_>, _> = exploded_bodies
+    let exploded_responses = exploded_bodies
         .into_iter()
-        .map(|body| {
+        // We already checked the lengths are equal
+        .zip_eq(contexts)
+        .map(|(body, context)| {
             http::Response::builder()
                 .status(parts.status)
                 .version(parts.version)
@@ -363,8 +358,6 @@ async fn process_batch(
                 .map(|mut http_response| {
                     *http_response.headers_mut() = parts.headers.clone();
                     // Use the original context for the request to create the response
-                    let (context, _id) =
-                        contexts.pop().expect("we have a context for each response");
                     let resp = HttpResponse {
                         http_response,
                         context,
@@ -383,7 +376,7 @@ async fn process_batch(
                     reason: e.to_string(),
                 })
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>();
 
     match &exploded_responses {
         Ok(responses) => tracing::debug!("built {} subgraph responses", responses.len()),
@@ -472,7 +465,7 @@ struct BatchInfo {
     /// A pre-readied HTTP client service for this subgraph.
     http_client: crate::services::http::BoxCloneService,
     request: http::Request<RouterBody>,
-    contexts: Vec<(Context, SubgraphRequestId)>,
+    contexts: Vec<Context>,
 }
 
 type BatchResult = (
@@ -572,7 +565,6 @@ mod tests {
     use crate::services::http::HttpRequest;
     use crate::services::http::HttpResponse;
     use crate::services::router::body;
-    use crate::services::subgraph::SubgraphRequestId;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_assembles_batch() {
@@ -589,9 +581,6 @@ mod tests {
 
                 let body = body::from_bytes(serde_json::to_vec(&gql_request).unwrap());
                 let context = Context::new();
-                context.extensions().with_lock(|lock| {
-                    lock.insert(SubgraphRequestId::new());
-                });
 
                 (
                     rx,
@@ -625,7 +614,7 @@ mod tests {
 
         let output_context_ids = contexts
             .iter()
-            .map(|r| r.0.id.clone())
+            .map(|context| context.id.clone())
             .collect::<Vec<String>>();
         // Make sure all of our contexts are preserved during assembly
         assert_eq!(input_context_ids, output_context_ids);

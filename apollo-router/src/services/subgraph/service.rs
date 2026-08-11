@@ -116,7 +116,6 @@ async fn call_http(
     // TODO(@goto-bus-stop): this should be in a batching-specific layer or done differently
     context.extensions().with_lock(|lock| {
         lock.insert(query_hash);
-        lock.insert(subgraph_request_id.clone());
     });
 
     let (parts, body) = subgraph_request.into_parts();
