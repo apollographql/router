@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -110,6 +109,10 @@ where
 pub(crate) struct LicenseEnforcementReport {
     restricted_config_in_use: Vec<ConfigurationRestriction>,
     restricted_schema_in_use: Vec<SchemaViolation>,
+    /// The license the restrictions above were derived from. Held so that `enforce`
+    /// cannot be handed a *different* license than the one the report was built
+    /// against, which would silently produce a verdict about neither.
+    license: Arc<LicenseState>,
 }
 
 impl LicenseEnforcementReport {
@@ -120,17 +123,18 @@ impl LicenseEnforcementReport {
     pub(crate) fn build(
         configuration: &Configuration,
         schema: &Schema,
-        license: &LicenseState,
+        license: Arc<LicenseState>,
     ) -> LicenseEnforcementReport {
         LicenseEnforcementReport {
             restricted_config_in_use: Self::validate_configuration(
                 configuration,
-                &Self::configuration_restrictions(license),
+                &Self::configuration_restrictions(&license),
             ),
             restricted_schema_in_use: Self::validate_schema(
                 schema,
-                &Self::schema_restrictions(license),
+                &Self::schema_restrictions(&license),
             ),
+            license,
         }
     }
 
@@ -468,23 +472,33 @@ impl LicenseEnforcementReport {
         schema_restrictions
     }
 
-    pub(crate) fn check(
-        &self,
-        license: Arc<LicenseState>,
-    ) -> Result<Arc<LicenseState>, ApolloRouterError> {
+    /// Applies license enforcement, returning the *effective* license the router
+    /// should run under.
+    ///
+    /// The effective license is not always the published one: when no restricted
+    /// features are in use there is nothing to warn or halt about, so any license
+    /// collapses to `Licensed` and the router runs unrestricted.
+    ///
+    /// `LicenseEnforcementViolation` is the only failure this can produce, and it is a pure
+    /// function of the configuration, schema and license the report was built from —
+    /// see the type's documentation.
+    pub(crate) fn enforce(&self) -> Result<Arc<LicenseState>, LicenseEnforcementViolation> {
         if self.uses_restricted_features() {
-            self.check_restricted_features(license)
+            self.enforce_restricted_features()
         } else {
-            Ok(self.check_no_restricted_features(license))
+            Ok(self.effective_license_unrestricted())
         }
     }
 
-    fn check_restricted_features(
+    /// Enforcement when restricted features *are* in use, so the license has to
+    /// actually permit them.
+    fn enforce_restricted_features(
         &self,
-        license: Arc<LicenseState>,
-    ) -> Result<Arc<LicenseState>, ApolloRouterError> {
-        let license_violation_error =
-            || ApolloRouterError::LicenseViolation(self.restricted_features_in_use());
+    ) -> Result<Arc<LicenseState>, LicenseEnforcementViolation> {
+        let license = self.license.clone();
+        let license_violation_error = || LicenseEnforcementViolation {
+            restricted_features: self.restricted_features_in_use(),
+        };
 
         match &*license {
             LicenseState::Licensed { .. } => {
@@ -526,7 +540,11 @@ impl LicenseEnforcementReport {
         }
     }
 
-    fn check_no_restricted_features(&self, license: Arc<LicenseState>) -> Arc<LicenseState> {
+    /// The effective license when no restricted features are in use. Infallible by
+    /// construction: with nothing to enforce, every license state is acceptable and
+    /// only the logging differs.
+    fn effective_license_unrestricted(&self) -> Arc<LicenseState> {
+        let license = self.license.clone();
         let license_limits = match &*license {
             LicenseState::Licensed { limits } => {
                 tracing::debug!("A valid Apollo license has been detected.");
@@ -594,6 +612,26 @@ impl Display for LicenseEnforcementReport {
         }
 
         Ok(())
+    }
+}
+
+/// The router is using features its license does not permit.
+///
+/// This is deliberately the *only* failure `LicenseEnforcementReport::enforce` can
+/// return, rather than the broader `ApolloRouterError`. Enforcement is a pure
+/// function of the configuration, schema and license, so callers are entitled to
+/// treat this as permanent — re-running enforcement on the same three inputs derives
+/// the same violation. Keeping the type this narrow means that entitlement is checked
+/// by the compiler: a new failure mode inside `enforce` cannot quietly inherit
+/// "permanent" without changing this signature.
+#[derive(Debug)]
+pub(crate) struct LicenseEnforcementViolation {
+    restricted_features: Vec<String>,
+}
+
+impl From<LicenseEnforcementViolation> for ApolloRouterError {
+    fn from(violation: LicenseEnforcementViolation) -> Self {
+        ApolloRouterError::LicenseViolation(violation.restricted_features)
     }
 }
 
@@ -971,6 +1009,7 @@ impl License {
 mod test {
     use std::collections::HashSet;
     use std::str::FromStr;
+    use std::sync::Arc;
     use std::time::Duration;
     use std::time::UNIX_EPOCH;
 
@@ -982,6 +1021,7 @@ mod test {
     use crate::spec::Schema;
     use crate::uplink::license_enforcement::Audience;
     use crate::uplink::license_enforcement::Claims;
+    use crate::uplink::license_enforcement::ConfigurationRestriction;
     use crate::uplink::license_enforcement::License;
     use crate::uplink::license_enforcement::LicenseEnforcementReport;
     use crate::uplink::license_enforcement::LicenseLimits;
@@ -998,7 +1038,115 @@ mod test {
         let schema =
             Schema::parse(supergraph_schema, &config).expect("supergraph schema must be valid");
 
-        LicenseEnforcementReport::build(&config, &schema, &license)
+        LicenseEnforcementReport::build(&config, &schema, Arc::new(license))
+    }
+
+    /// A report for `license`, carrying one fake restricted-feature entry when
+    /// `uses_restricted_features` is set. Constructed directly rather than through
+    /// `build` so that each case states exactly the two things enforcement depends
+    /// on, without a configuration and schema in between.
+    fn report_for(
+        license: LicenseState,
+        uses_restricted_features: bool,
+    ) -> LicenseEnforcementReport {
+        let mut config_restrictions = Vec::new();
+        if uses_restricted_features {
+            config_restrictions.push(
+                ConfigurationRestriction::builder()
+                    .name("Test feature")
+                    .path("$.test")
+                    .build(),
+            );
+        }
+
+        LicenseEnforcementReport {
+            restricted_config_in_use: config_restrictions,
+            restricted_schema_in_use: vec![],
+            license: Arc::new(license),
+        }
+    }
+
+    // With nothing restricted in use there is nothing to enforce, so every license
+    // state is acceptable and collapses to `Licensed`: warn and halt behavior only
+    // exists to police restricted features, and there are none.
+    #[rstest::rstest]
+    #[case(LicenseState::Licensed { limits: None })]
+    #[case(LicenseState::LicensedWarn { limits: None })]
+    #[case(LicenseState::LicensedHalt { limits: None })]
+    #[case(LicenseState::Unlicensed)]
+    fn test_enforce_without_restricted_features_collapses_to_licensed(
+        #[case] license: LicenseState,
+    ) {
+        let effective = report_for(license.clone(), false)
+            .enforce()
+            .expect("no restricted features in use, so any license is acceptable");
+
+        assert_eq!(
+            *effective,
+            LicenseState::Licensed { limits: None },
+            "{license} should collapse to Licensed when nothing is restricted"
+        );
+    }
+
+    // Collapsing to `Licensed` must carry the limits over rather than discarding them —
+    // dropping them would silently un-limit a router whose license caps it.
+    #[rstest::rstest]
+    #[case(LicenseState::Licensed { limits: Some(LicenseLimits::default()) })]
+    #[case(LicenseState::LicensedWarn { limits: Some(LicenseLimits::default()) })]
+    #[case(LicenseState::LicensedHalt { limits: Some(LicenseLimits::default()) })]
+    fn test_enforce_without_restricted_features_preserves_limits(#[case] license: LicenseState) {
+        let effective = report_for(license.clone(), false)
+            .enforce()
+            .expect("no restricted features in use, so any license is acceptable");
+
+        assert_eq!(
+            *effective,
+            LicenseState::Licensed {
+                limits: Some(LicenseLimits::default())
+            },
+            "{license} should keep its limits when collapsing to Licensed"
+        );
+    }
+
+    // Once restricted features are in use the license has to actually permit them.
+    // Licensed and LicensedWarn mean the features are not paid for, and Unlicensed
+    // means there is no license at all; all three are violations naming the feature.
+    #[rstest::rstest]
+    #[case(LicenseState::Licensed { limits: None })]
+    #[case(LicenseState::LicensedWarn { limits: None })]
+    #[case(LicenseState::Unlicensed)]
+    fn test_enforce_with_restricted_features_rejects_licenses_that_do_not_permit_them(
+        #[case] license: LicenseState,
+    ) {
+        let violation = report_for(license.clone(), true)
+            .enforce()
+            .expect_err("restricted features in use must be a violation");
+
+        assert_eq!(
+            violation.restricted_features,
+            vec!["Test feature".to_string()],
+            "{license} should report the restricted feature in use"
+        );
+    }
+
+    // LicensedHalt is the one state that passes enforcement *with* restricted features
+    // in use, and the one case where the effective license is not `Licensed`. Halting is
+    // enforced by the axum middleware (`license_handler`) returning a canned response,
+    // not by refusing to build the router — so the halt state has to survive to the
+    // server, and collapsing it here would quietly resume serving an expired license.
+    #[rstest::rstest]
+    #[case(None)]
+    #[case(Some(LicenseLimits::default()))]
+    fn test_enforce_with_restricted_features_preserves_halt(#[case] limits: Option<LicenseLimits>) {
+        let license = LicenseState::LicensedHalt {
+            limits: limits.clone(),
+        };
+
+        let effective = report_for(license.clone(), true)
+            .enforce()
+            .expect("a halted license does not fail enforcement");
+
+        assert_eq!(*effective, LicenseState::LicensedHalt { limits });
     }
 
     #[test]

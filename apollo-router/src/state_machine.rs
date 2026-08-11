@@ -41,9 +41,7 @@ use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::spec::Schema;
 use crate::uplink::feature_gate_enforcement::FeatureGateEnforcementReport;
-use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
-use crate::uplink::license_enforcement::LicenseLimits;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::schema::SchemaState;
 
@@ -645,9 +643,15 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             })?,
         );
 
-        // Check the license
-        let report = LicenseEnforcementReport::build(&configuration, &schema, &license);
-        let effective_license = report.check(license.clone()).map_err(ReloadError::Permanent)?;
+        // Check the license. A violation is permanent: enforcement is a pure function of
+        // the configuration, schema and license, so retrying these same three inputs
+        // re-derives the same violation. A newly published license is a separate event
+        // and gets its own attempt. `LicenseEnforcementViolation` is the only error `enforce` can
+        // return, which is what makes this blanket mapping safe.
+        let report = LicenseEnforcementReport::build(&configuration, &schema, license.clone());
+        let effective_license = report
+            .enforce()
+            .map_err(|violation| ReloadError::Permanent(violation.into()))?;
 
         if let Err(feature_gate_violations) =
             FeatureGateEnforcementReport::build(&configuration, &schema).check()
@@ -988,6 +992,7 @@ mod tests {
     use crate::services::new_service::ServiceFactory;
     use crate::services::router;
     use crate::services::router::pipeline_handle::PipelineRef;
+    use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::schema::SchemaState;
 
     type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
