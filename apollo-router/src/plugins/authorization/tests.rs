@@ -14,7 +14,7 @@ use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::graphql;
 use crate::plugin::test::MockSubgraph;
-use crate::plugins::authorization::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::router;
 use crate::services::router::body;

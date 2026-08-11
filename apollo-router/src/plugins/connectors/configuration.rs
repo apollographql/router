@@ -64,6 +64,11 @@ pub(crate) struct ConnectorsConfig {
     #[serde(default)]
     #[deprecated(note = "Connect spec v0.4 no longer requires this flag.")]
     pub(crate) preview_connect_v0_4: Option<bool>,
+
+    /// Feature gate for Connect spec v0.5. Set to `true` to enable using
+    /// the v0.5 spec during the preview phase.
+    #[serde(default)]
+    pub(crate) preview_connect_v0_5: Option<bool>,
 }
 
 /// Configuration for a `@source` directive

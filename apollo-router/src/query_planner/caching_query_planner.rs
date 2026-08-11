@@ -37,7 +37,7 @@ use crate::query_planner::SubgraphSchemas;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
-use crate::services::layers::query_analysis::ParsedDocument;
+use crate::services::query_parsing::ParsedDocument;
 use crate::services::query_planner;
 use crate::services::query_planner::PlanOptions;
 use crate::spec::QueryHash;
@@ -226,6 +226,13 @@ where
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> task::Poll<Result<(), Self::Error>> {
+        // We don't propagate backpressure from the query planner itself,
+        // because compared to short-lived work, query planning can take a long time and is
+        // more sensitive to pool saturation. In that case, we want the router to stop serving
+        // requests containing _new_ queries, but it's still capable of serving requests with
+        // already planned queries.
+        // XXX(@goto-bus-stop): to maintain this behaviour once we adopt apollo-cache layers, we can
+        // add a load shed layer on the query planner.
         task::Poll::Ready(Ok(()))
     }
 

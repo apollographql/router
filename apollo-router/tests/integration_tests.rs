@@ -804,8 +804,10 @@ const PARSER_LIMITS_TEST_QUERY_RECURSION: usize = 6;
 async fn query_just_under_recursion_limit() {
     let config = serde_json::json!({
         "limits": {
-            "parser_max_recursion": PARSER_LIMITS_TEST_QUERY_RECURSION
-        }
+            "router": {
+                "parser_max_recursion": PARSER_LIMITS_TEST_QUERY_RECURSION,
+            },
+        },
     });
     let request = supergraph::Request::fake_builder()
         .query(PARSER_LIMITS_TEST_QUERY)
@@ -827,8 +829,10 @@ async fn query_just_under_recursion_limit() {
 async fn query_just_at_recursion_limit() {
     let config = serde_json::json!({
         "limits": {
-            "parser_max_recursion": PARSER_LIMITS_TEST_QUERY_RECURSION - 1
-        }
+            "router": {
+                "parser_max_recursion": PARSER_LIMITS_TEST_QUERY_RECURSION - 1,
+            },
+        },
     });
     let request = supergraph::Request::fake_builder()
         .query(PARSER_LIMITS_TEST_QUERY)
@@ -862,8 +866,10 @@ async fn query_just_at_recursion_limit() {
 async fn query_just_under_token_limit() {
     let config = serde_json::json!({
         "limits": {
-            "parser_max_tokens": PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT,
-        }
+            "router": {
+                "parser_max_tokens": PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT,
+            },
+        },
     });
     let request = supergraph::Request::fake_builder()
         .query(PARSER_LIMITS_TEST_QUERY)
@@ -885,8 +891,10 @@ async fn query_just_under_token_limit() {
 async fn query_just_at_token_limit() {
     let config = serde_json::json!({
         "limits": {
-            "parser_max_tokens": PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT - 1,
-        }
+            "router": {
+                "parser_max_tokens": PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT - 1,
+            },
+        },
     });
     let request = supergraph::Request::fake_builder()
         .query(PARSER_LIMITS_TEST_QUERY)

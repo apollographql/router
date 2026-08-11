@@ -114,7 +114,7 @@ pub(crate) struct InstrumentsConfig {
     >,
 }
 
-const HTTP_SERVER_REQUEST_DURATION_METRIC: &str = "http.server.request.duration";
+pub(crate) const HTTP_SERVER_REQUEST_DURATION_METRIC: &str = "http.server.request.duration";
 const HTTP_SERVER_REQUEST_BODY_SIZE_METRIC: &str = "http.server.request.body.size";
 const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str = "http.server.response.body.size";
 const HTTP_SERVER_ACTIVE_REQUESTS: &str = "http.server.active_requests";
@@ -3318,6 +3318,7 @@ mod tests {
                                         request_variable_keys: Default::default(),
                                         response_variable_keys: Default::default(),
                                         error_settings: Default::default(),
+                                        output_type: None,
                                         label: "label".into(),
                                     };
                                     let response_key = ResponseKey::RootField {

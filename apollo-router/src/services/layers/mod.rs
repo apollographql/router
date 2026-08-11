@@ -5,5 +5,4 @@ pub(crate) mod content_negotiation;
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 pub(crate) mod jemalloc_metrics;
 pub(crate) mod persisted_queries;
-pub(crate) mod query_analysis;
 pub(crate) mod static_page;

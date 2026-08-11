@@ -107,7 +107,9 @@ impl LitExpr {
                 let (input, _) = spaces_or_comments(input)?;
                 Self::parse_primary(input)
             }
-            ConnectSpec::V0_3 | ConnectSpec::V0_4 => Self::parse_with_operators(input),
+            ConnectSpec::V0_3 | ConnectSpec::V0_4 | ConnectSpec::V0_5 => {
+                Self::parse_with_operators(input)
+            }
         }
     }
 
@@ -584,6 +586,9 @@ mod tests {
     use crate::connectors::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::connectors::json_selection::location::new_span;
     use crate::connectors::json_selection::location::new_span_with_spec;
+    use crate::connectors::json_selection::parser::Alias;
+    use crate::connectors::json_selection::parser::NamedSelection;
+    use crate::connectors::json_selection::parser::NamingPrefix;
     use crate::connectors::spec::ConnectSpec;
 
     #[track_caller]
@@ -681,7 +686,16 @@ mod tests {
     }
 
     #[test]
-    fn test_lit_expr_parse_objects() {
+    fn test_lit_expr_parse_objects_v0_3() {
+        // v0.3 and earlier parse object literals as an unordered
+        // `LitExpr::LegacyObject` map. Pinned to V0_3 so bumping
+        // `ConnectSpec::latest()` can't silently drop this coverage; v0.4+
+        // `Object` parsing is covered by `test_lit_expr_parse_objects_v0_4`.
+        #[track_caller]
+        fn check_parse(input: &str, expected: LitExpr) {
+            check_parse_with_spec(input, ConnectSpec::V0_3, expected);
+        }
+
         check_parse(
             "{a: 1}",
             LitExpr::LegacyObject({
@@ -742,6 +756,77 @@ mod tests {
             check_parse(
                 "{ a : 1, \"b\": 2 }",
                 make_expected(Key::field("a"), Key::quoted("b")),
+            );
+        }
+    }
+
+    #[test]
+    fn test_lit_expr_parse_objects_v0_4() {
+        // As of connect/v0.4, object literals are syntactically identical to
+        // a `SubSelection`, so `{a: 1}` parses as `LitExpr::Object`, wrapping
+        // one `NamedSelection` per property, rather than `LitExpr::LegacyObject`
+        // (see `test_lit_expr_parse_objects_v0_3`). Behavior is identical across
+        // v0.4 and v0.5, so assert both.
+        #[track_caller]
+        fn check_parse(input: &str, expected: LitExpr) {
+            for spec in [ConnectSpec::V0_4, ConnectSpec::V0_5] {
+                check_parse_with_spec(input, spec, expected.clone());
+            }
+        }
+
+        fn named_number(alias: Alias, value: i64) -> NamedSelection {
+            NamedSelection {
+                prefix: NamingPrefix::Alias(alias),
+                path: LitExpr::Number(serde_json::Number::from(value)).into_with_range(),
+            }
+        }
+
+        check_parse(
+            "{a: 1}",
+            LitExpr::Object(SubSelection {
+                selections: vec![named_number(Alias::field("a"), 1)],
+                ..Default::default()
+            }),
+        );
+
+        check_parse(
+            "{'a': 1}",
+            LitExpr::Object(SubSelection {
+                selections: vec![named_number(Alias::quoted("a"), 1)],
+                ..Default::default()
+            }),
+        );
+
+        {
+            fn make_expected(a_alias: Alias, b_alias: Alias) -> LitExpr {
+                LitExpr::Object(SubSelection {
+                    selections: vec![named_number(a_alias, 1), named_number(b_alias, 2)],
+                    ..Default::default()
+                })
+            }
+            check_parse(
+                "{'a': 1, 'b': 2}",
+                make_expected(Alias::quoted("a"), Alias::quoted("b")),
+            );
+            check_parse(
+                "{ a : 1, 'b': 2}",
+                make_expected(Alias::field("a"), Alias::quoted("b")),
+            );
+            check_parse(
+                "{ a : 1, b: 2}",
+                make_expected(Alias::field("a"), Alias::field("b")),
+            );
+            check_parse(
+                "{ \"a\" : 1, \"b\": 2 }",
+                make_expected(Alias::quoted("a"), Alias::quoted("b")),
+            );
+            check_parse(
+                "{ \"a\" : 1, b: 2 }",
+                make_expected(Alias::quoted("a"), Alias::field("b")),
+            );
+            check_parse(
+                "{ a : 1, \"b\": 2 }",
+                make_expected(Alias::field("a"), Alias::quoted("b")),
             );
         }
     }
@@ -872,6 +957,92 @@ mod tests {
         }
 
         {
+            // As of connect/v0.4, object literals are syntactically identical
+            // to a `SubSelection`, so `{a: ..., b: ...}` parses as
+            // `LitExpr::Object`, preserving property order as written (unlike
+            // the unordered `LegacyObject` map used before v0.4, pinned in the
+            // block below). Identical across v0.4 and v0.5, so assert both.
+            #[track_caller]
+            fn check_parse(input: &str, expected: LitExpr) {
+                for spec in [ConnectSpec::V0_4, ConnectSpec::V0_5] {
+                    check_parse_with_spec(input, spec, expected.clone());
+                }
+            }
+
+            fn var_path(var: KnownVariable, key: &str) -> LitExpr {
+                LitExpr::Path(PathSelection {
+                    path: PathList::Var(
+                        var.into_with_range(),
+                        PathList::Key(
+                            Key::field(key).into_with_range(),
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                })
+            }
+
+            fn named(alias: &str, value: LitExpr) -> NamedSelection {
+                NamedSelection {
+                    prefix: NamingPrefix::Alias(Alias::field(alias)),
+                    path: value.into_with_range(),
+                }
+            }
+
+            let a = named(
+                "a",
+                var_path(KnownVariable::External(Namespace::Args.to_string()), "a"),
+            );
+            let b = named(
+                "b",
+                var_path(KnownVariable::External(Namespace::This.to_string()), "b"),
+            );
+
+            check_parse(
+                r#"{
+                a: $args.a,
+                b: $this.b,
+            }"#,
+                LitExpr::Object(SubSelection {
+                    selections: vec![a.clone(), b.clone()],
+                    ..Default::default()
+                }),
+            );
+
+            check_parse(
+                r#"{
+                b: $this.b,
+                a: $args.a,
+            }"#,
+                LitExpr::Object(SubSelection {
+                    selections: vec![b.clone(), a.clone()],
+                    ..Default::default()
+                }),
+            );
+
+            check_parse(
+                r#" {
+                a : $args . a ,
+                b : $this . b
+            ,} "#,
+                LitExpr::Object(SubSelection {
+                    selections: vec![a, b],
+                    ..Default::default()
+                }),
+            );
+        }
+
+        {
+            // v0.3 parses the same object literals as an unordered
+            // `LegacyObject` map (property order not preserved, so all three
+            // orderings compare equal). Pinned to V0_3 so bumping `latest()`
+            // can't silently drop this coverage.
+            #[track_caller]
+            fn check_parse(input: &str, expected: LitExpr) {
+                check_parse_with_spec(input, ConnectSpec::V0_3, expected);
+            }
+
             let expected = LitExpr::LegacyObject({
                 let mut map = IndexMap::default();
                 map.insert(
@@ -914,7 +1085,6 @@ mod tests {
             }"#,
                 expected.clone(),
             );
-
             check_parse(
                 r#"{
                 b: $this.b,
@@ -922,7 +1092,6 @@ mod tests {
             }"#,
                 expected.clone(),
             );
-
             check_parse(
                 r#" {
                 a : $args . a ,

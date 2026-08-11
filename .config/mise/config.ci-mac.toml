@@ -1,5 +1,5 @@
 [tools]
 # renovate-automation: rustc version
 rust = { version = "1.96.1", targets = "x86_64-apple-darwin,aarch64-apple-darwin", profile = "default", components = "llvm-tools" }
-"cargo:cargo-llvm-cov" = "0.6.16"
+"cargo:cargo-llvm-cov" = "0.8.7"
 "ubi:codecov/codecov-cli" = "11.3.1"

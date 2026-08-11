@@ -124,6 +124,78 @@ mod requires_tests {
             )],
         );
     }
+
+    #[test]
+    fn fails_when_external_on_nested_key_fields_with_cross_subgraph_requires() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T
+              }
+
+              type T @key(fields: "id") {
+                id: ID!
+                u: U @shareable
+              }
+
+              type U @shareable {
+                x: String
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID!
+                u: U @shareable
+              }
+
+              type U @shareable {
+                x: String
+                w: Int
+              }
+            "#,
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+              type T @key(fields: "id u { x }") {
+                id: ID!
+                u: U
+                computed: String @requires(fields: "u { w }")
+              }
+
+              type U {
+                x: String @external
+                w: Int @external
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "SATISFIABILITY_ERROR",
+                r#"
+                The following supergraph API query:
+                {
+                  t {
+                    computed
+                  }
+                }
+                cannot be satisfied by the subgraphs because:
+                - from subgraph "Subgraph1": cannot find field "T.computed".
+                - from subgraph "Subgraph2": cannot find field "T.computed".
+                - from subgraph "Subgraph3": @requires condition on field "T.computed" can be satisfied but missing usable key on "T" in subgraph "Subgraph3" to resume query.
+                "#,
+            )],
+        );
+    }
 }
 
 mod non_resolvable_keys_tests {

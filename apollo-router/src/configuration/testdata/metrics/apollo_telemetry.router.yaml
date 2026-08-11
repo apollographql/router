@@ -3,7 +3,6 @@ supergraph:
 
 telemetry:
   apollo:
-    otlp_tracing_sampler: 1
     errors:
       preview_extended_error_metrics: enabled
       subgraph:
