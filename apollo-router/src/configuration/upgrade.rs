@@ -122,10 +122,11 @@ pub(crate) fn upgrade_configuration(
     // Rust-side migrations for transformations that cannot be expressed as
     // YAML actions (e.g. composite keys built from two dynamic map keys).
     // These run after the YAML migrations so any preceding renames (e.g.
-    // `preview_connectors` → `connectors`) are already in place.
-    if matches!(upgrade_mode, UpgradeMode::Major)
-        && migrate_connectors_subgraphs_to_sources(&mut config)
-    {
+    // `preview_connectors` → `connectors`) are already in place. Unlike the
+    // major-version-only YAML migrations, this is a within-2.x rename, so it
+    // must also run in `UpgradeMode::Minor` (the startup validation path) —
+    // not just `UpgradeMode::Major` (the `router config upgrade` CLI).
+    if migrate_connectors_subgraphs_to_sources(&mut config) {
         effective_descriptions.push(
             "Apollo Connectors `connectors.subgraphs` configuration has been replaced by `connectors.sources` keyed by `<subgraph>.<source>`".to_string(),
         );
