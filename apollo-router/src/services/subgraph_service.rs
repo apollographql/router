@@ -90,7 +90,7 @@ const GRAPHQL_RESPONSE: mediatype::Name = mediatype::Name::new_unchecked("graphq
 #[allow(clippy::declare_interior_mutable_const)]
 pub(crate) static APPLICATION_JSON_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static("application/json");
-static ACCEPT_GRAPHQL_JSON: HeaderValue =
+static ACCEPT_ALL_JSON_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static("application/json, application/graphql-response+json");
 
 enum APQError {
@@ -360,7 +360,7 @@ pub(crate) async fn process_batch(
         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
     request
         .headers_mut()
-        .append(ACCEPT, ACCEPT_GRAPHQL_JSON.clone());
+        .append(ACCEPT, ACCEPT_ALL_JSON_HEADER_VALUE.clone());
 
     let schema_uri = request.uri();
     let (host, port, path) = get_uri_details(schema_uri);
@@ -825,7 +825,7 @@ pub(crate) async fn call_single_http(
         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
     request
         .headers_mut()
-        .append(ACCEPT, ACCEPT_GRAPHQL_JSON.clone());
+        .append(ACCEPT, ACCEPT_ALL_JSON_HEADER_VALUE.clone());
 
     let schema_uri = request.uri();
     let (host, port, path) = get_uri_details(schema_uri);
