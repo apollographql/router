@@ -7,7 +7,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::ops::Deref;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -32,7 +34,7 @@ use strum::IntoEnumIterator;
 use thiserror::Error;
 
 use super::parsed_link_spec::ParsedLinkSpec;
-use crate::Configuration;
+use crate::{ApolloRouterError, Configuration};
 use crate::plugins::authentication::jwks::convert_key_algorithm;
 use crate::spec::LINK_DIRECTIVE_NAME;
 use crate::spec::Schema;
@@ -463,6 +465,103 @@ impl LicenseEnforcementReport {
         }
 
         schema_restrictions
+    }
+
+    pub(crate) fn check(&self, license: Arc<LicenseState>) -> Result<Arc<LicenseState>, ApolloRouterError> {
+        let license_limits = match &*license {
+            LicenseState::Licensed { limits } => {
+                if self.uses_restricted_features() {
+                    tracing::error!(
+                        "The router is using features not available for your license:\n\n{}",
+                        self
+                    );
+                    // Enforcement is a pure function of the configuration, schema and
+                    // license, so a retry of these three re-derives the same violation.
+                    // A newly published license arrives as its own event and gets its
+                    // own attempt.
+                    return Err(ApolloRouterError::LicenseViolation(
+                        self.restricted_features_in_use(),
+                    ));
+                } else {
+                    tracing::debug!("A valid Apollo license has been detected.");
+                    limits
+                }
+            }
+            LicenseState::LicensedWarn { limits } => {
+                if self.uses_restricted_features() {
+                    tracing::error!(
+                        "License violation, the router is using features not available for your license:\n\n{}\n\nThe license warning period has started. The Router will stop serving requests after the license expires. See {LICENSE_EXPIRED_URL} for more information.",
+                        self
+                    );
+                    return Err((ApolloRouterError::LicenseViolation(
+                        self.restricted_features_in_use(),
+                    )));
+                } else {
+                    tracing::warn!(
+                        "License warning period has started. The Router will stop serving requests after the license expires. In order to continue using these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{:?}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                        // The report does not contain any features because they are contained within the allowedFeatures claim,
+                        // therefore we output all of the allowed features that the user's license enables them to use.
+                        license.get_allowed_features()
+                    );
+                    limits
+                }
+            }
+            // LicensedHalt doesn't return an error, which might be surprising; rather, the middleware in the axum
+            // server (`license_handler`) will check for halted licenses and send back a canned response
+            LicenseState::LicensedHalt { limits } => {
+                if self.uses_restricted_features() {
+                    tracing::error!(
+                        "License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                        self
+                    );
+                } else {
+                    tracing::error!(
+                        "License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{:?}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                        // The report does not contain any features because they are contained within the allowedFeatures claim,
+                        // therefore we output all of the allowed features that the user's license enables them to use.
+                        license.get_allowed_features()
+                    );
+                }
+                limits
+            }
+            LicenseState::Unlicensed if self.uses_restricted_features() => {
+                // This is OSS, so fail to reload or start.
+                if crate::services::APOLLO_KEY.lock().is_some()
+                    && crate::services::APOLLO_GRAPH_REF.lock().is_some()
+                {
+                    tracing::error!(
+                        "License not found. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides a license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                        self
+                    );
+                } else {
+                    tracing::error!(
+                        "Not connected to GraphOS. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS (using APOLLO_KEY and APOLLO_GRAPH_REF) that provides a license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                        self
+                    );
+                }
+                return Err((ApolloRouterError::LicenseViolation(
+                    self.restricted_features_in_use(),
+                )));
+            }
+            _ => {
+                tracing::debug!(
+                    "A valid Apollo license was not detected. However, no restricted features are in use."
+                );
+                // Without restricted features, there's no need to limit the router
+                &Option::<LicenseLimits>::None
+            }
+        };
+
+        // If there are no restricted features in use then the effective license is Licensed as we don't need warn or halt behavior.
+        let effective_license = if !self.uses_restricted_features() {
+            Arc::new(LicenseState::Licensed {
+                limits: license_limits.clone(),
+            })
+        } else {
+            license.clone()
+        };
+
+        Ok(effective_license)
     }
 }
 
