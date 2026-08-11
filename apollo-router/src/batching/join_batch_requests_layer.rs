@@ -8,6 +8,7 @@ use http_body_util::BodyExt as _;
 use itertools::Itertools;
 use tokio::sync::oneshot;
 use tower::BoxError;
+use tower::Service as _;
 use tower::ServiceExt as _;
 use tracing::instrument;
 
@@ -21,11 +22,9 @@ use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
-use crate::services::layers::content_negotiation::ContentType;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph::SubgraphRequestId;
-use crate::services::subgraph::http::do_fetch;
 
 /// Analyze the query plan for a batch query.
 #[derive(Clone)]
@@ -121,7 +120,7 @@ where
                         reason: format!("tx receive failed: {err}"),
                     })?
             } else {
-                inner.call(req).await.map_err(Into::into)
+                inner.call(req).await
             }
         })
     }
@@ -189,7 +188,7 @@ async fn assemble_batch(
 /// Process a single subgraph batch request
 #[instrument(skip(http_client, contexts, request))]
 async fn process_batch(
-    http_client: crate::services::http::BoxCloneService,
+    mut http_client: crate::services::http::BoxCloneService,
     service: &str,
     mut contexts: Vec<(Context, SubgraphRequestId)>,
     request: http::Request<RouterBody>,
@@ -239,32 +238,48 @@ async fn process_batch(
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     tracing::debug!("fetching from subgraph: {service}");
-    let (parts, content_type, body) =
-        match do_fetch(http_client, &batch_context, service, request).await {
-            Ok(res) => res,
-            Err(err) => {
-                let resp = http::Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(err.to_graphql_error(None))
-                    .map_err(|err| FetchError::SubrequestHttpError {
-                        status_code: None,
-                        service: service_name.clone(),
-                        reason: format!("cannot create the http response from error: {err:?}"),
-                    })?;
-                let (parts, body) = resp.into_parts();
-                let body =
-                    serde_json::to_vec(&body).map_err(|err| FetchError::SubrequestHttpError {
-                        status_code: None,
-                        service: service_name.clone(),
-                        reason: format!("cannot serialize the error: {err:?}"),
-                    })?;
-                (
-                    parts,
-                    Ok(ContentType::ApplicationJson),
-                    Some(Ok(body.into())),
-                )
-            }
-        };
+    let (parts, body) = match http_client
+        .call(HttpRequest {
+            http_request: request,
+            context: batch_context.clone(),
+        })
+        .await
+    {
+        Ok(response) => {
+            let (parts, response_body) = response.http_response.into_parts();
+            let body = router::body::into_bytes(response_body)
+                .await
+                .map_err(|err| FetchError::SubrequestHttpError {
+                    status_code: Some(parts.status.as_u16()),
+                    service: service_name.clone(),
+                    reason: err.to_string(),
+                })?;
+            (parts, body)
+        }
+        Err(err) => {
+            let err = FetchError::SubrequestHttpError {
+                status_code: None,
+                service: service_name.clone(),
+                reason: err.to_string(),
+            };
+            let resp = http::Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(err.to_graphql_error(None))
+                .map_err(|err| FetchError::SubrequestHttpError {
+                    status_code: None,
+                    service: service_name.clone(),
+                    reason: format!("cannot create the http response from error: {err:?}"),
+                })?;
+            let (parts, body) = resp.into_parts();
+            let body =
+                serde_json::to_vec(&body).map_err(|err| FetchError::SubrequestHttpError {
+                    status_code: None,
+                    service: service_name.clone(),
+                    reason: format!("cannot serialize the error: {err:?}"),
+                })?;
+            (parts, body.into())
+        }
+    };
 
     // Mask sensitive response headers once, for reuse in both the telemetry
     // event and the debug log below. Logging the raw `parts` would otherwise
@@ -277,16 +292,12 @@ async fn process_batch(
     );
 
     tracing::debug!(
-        "parts status: {:?}, version: {:?}, headers: {headers_str}, content_type: {content_type:?}, body: {body:?}",
+        "parts status: {:?}, version: {:?}, headers: {headers_str}, body: {body:?}",
         parts.status,
         parts.version,
     );
     let value =
-        serde_json::from_slice(&body.ok_or(FetchError::SubrequestMalformedResponse {
-            service: service_name.clone(),
-            reason: "no body in response".to_string(),
-        })??)
-        .map_err(|error| FetchError::SubrequestMalformedResponse {
+        serde_json::from_slice(&body).map_err(|error| FetchError::SubrequestMalformedResponse {
             service: service_name.clone(),
             reason: error.to_string(),
         })?;

@@ -10,6 +10,7 @@ use super::router::body::RouterBody;
 use crate::Context;
 use crate::batching::JoinBatchRequestsLayer;
 use crate::layers::InternalServiceBuilderExt as _;
+use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
 
 pub(crate) mod connection_timing;
 pub(crate) mod service;
@@ -69,6 +70,7 @@ impl HttpClientServiceFactory {
     pub(crate) fn create(&self, name: &str) -> BoxCloneService {
         ServiceBuilder::new()
             .layer(JoinBatchRequestsLayer::new(name))
+            .layer(SubgraphResponseSizeLimitLayer::new(name))
             .rust_plugins(self.plugins.clone(), |plugin, service| {
                 plugin.http_client_service(name, service)
             })

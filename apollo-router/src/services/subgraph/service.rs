@@ -1,6 +1,7 @@
 //! Tower fetcher for subgraphs.
 
 use std::collections::HashMap;
+use std::error::Error as _;
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
 use std::task::Poll;
@@ -11,16 +12,17 @@ use http_body::Body as _;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use tower::BoxError;
+use tower::Service as _;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing::Instrument;
 
-use super::http::do_fetch;
 use super::http::get_uri_details;
 use super::http::http_response_to_graphql_response;
 use crate::Notify;
 use crate::configuration::SubgraphApq;
 use crate::configuration::subgraph::SubgraphConfiguration;
+use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::InternalServiceBuilderExt as _;
@@ -37,6 +39,8 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::services::Plugins;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::plugins::limits::response_size_limit::ResponseSizeLimitError;
+use crate::services::http::HttpRequest;
 use crate::services::http::service::WireByteCount;
 use crate::services::layers::apq::subgraph::SubgraphApqLayer;
 use crate::services::layers::content_negotiation::SubgraphContentNegotiationLayer;
@@ -87,7 +91,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
 /// call_http makes http calls with modified graphql::Request (body)
 async fn call_http(
     request: SubgraphRequest,
-    client: crate::services::http::BoxCloneService,
+    mut client: crate::services::http::BoxCloneService,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
     let subgraph_request_event = request
@@ -203,10 +207,51 @@ async fn call_http(
     }
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
-    let (parts, content_type, body) = match do_fetch(client, &context, service_name, request)
-        .instrument(subgraph_req_span)
-        .await
-    {
+    let fetch_result: Result<_, FetchError> = async {
+        let response = client
+            .call(HttpRequest {
+                http_request: request,
+                context: context.clone(),
+            })
+            .await
+            .map_err(|err| {
+                tracing::error!(fetch_error = ?err);
+                FetchError::SubrequestHttpError {
+                    status_code: None,
+                    service: service_name.to_string(),
+                    reason: err.to_string(),
+                }
+            })?;
+
+        let (parts, response_body) = response.http_response.into_parts();
+        let body = router::body::into_bytes(response_body)
+            .instrument(tracing::debug_span!("aggregate_response_data"))
+            .await
+            .map_err(|err| {
+                tracing::error!(fetch_error = ?err);
+                // HACK(@goto-bus-stop): the error ends up double-boxed because we mix `axum::Error` and
+                // `tower::BoxError` types, so we have to look into the source error here.
+                if err
+                    .source()
+                    .and_then(|source| source.downcast_ref::<ResponseSizeLimitError>())
+                    .is_some()
+                {
+                    tracing::Span::current()
+                        .record("apollo.subgraph.response.aborted", "response_size_limit");
+                }
+                FetchError::SubrequestHttpError {
+                    status_code: Some(parts.status.as_u16()),
+                    service: service_name.to_string(),
+                    reason: err.to_string(),
+                }
+            });
+
+        Ok((parts, body))
+    }
+    .instrument(subgraph_req_span)
+    .await;
+
+    let (parts, body) = match fetch_result {
         Ok(resp) => resp,
         Err(err) => {
             return Ok(SubgraphResponse::builder()
@@ -263,7 +308,7 @@ async fn call_http(
                 Key::from_static_str("http.response.version"),
                 opentelemetry::Value::String(format!("{:?}", parts.version).into()),
             ));
-            if let Some(Ok(b)) = &body {
+            if let Ok(b) = &body {
                 attrs.push(KeyValue::new(
                     Key::from_static_str("http.response.body"),
                     opentelemetry::Value::String(String::from_utf8_lossy(b).to_string().into()),
@@ -282,7 +327,7 @@ async fn call_http(
         }
     }
 
-    if body.as_ref().is_some_and(|r| r.is_ok())
+    if body.is_ok()
         && let Some(wire_size) = parts
             .extensions
             .get::<WireByteCount>()
@@ -293,8 +338,7 @@ async fn call_http(
         });
     }
 
-    let graphql_response =
-        http_response_to_graphql_response(service_name, content_type, body, &parts);
+    let graphql_response = http_response_to_graphql_response(service_name, body, &parts);
 
     let resp = http::Response::from_parts(parts, graphql_response);
     Ok(SubgraphResponse::new_from_response(

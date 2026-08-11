@@ -4,28 +4,18 @@
 //! HTTP responses coming back from a subgraph into `graphql::Response`s.
 
 use bytes::Bytes;
-use futures::TryFutureExt;
-use http::Request;
 use http::response::Parts;
-use http_body_util::LengthLimitError;
 use hyper_rustls::ConfigBuilderExt;
 use rustls::RootCertStore;
 use serde_json_bytes::Entry;
 use serde_json_bytes::json;
 use tower::BoxError;
-use tower::Service;
-use tracing::Instrument;
 
-use crate::Context;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::graphql;
-use crate::plugins::limits::SubgraphResponseSizeLimit;
-use crate::services::http::HttpRequest;
 use crate::services::layers::content_negotiation::ContentType;
 use crate::services::layers::content_negotiation::get_graphql_content_type;
-use crate::services::router;
-use crate::services::router::body::RouterBody;
 
 #[allow(clippy::declare_interior_mutable_const)]
 pub(crate) static APPLICATION_JSON_HEADER_VALUE: http::HeaderValue =
@@ -74,13 +64,13 @@ pub(super) fn get_uri_details(uri: &hyper::Uri) -> (&str, u16, &str) {
 
 pub(super) fn http_response_to_graphql_response(
     service_name: &str,
-    content_type: Result<ContentType, FetchError>,
-    body: Option<Result<Bytes, FetchError>>,
+    body: Result<Bytes, FetchError>,
     parts: &Parts,
 ) -> graphql::Response {
+    let content_type = get_graphql_content_type(service_name, parts);
     let mut graphql_response = match (content_type, body, parts.status.is_success()) {
-        (Ok(ContentType::ApplicationGraphqlResponseJson), Some(Ok(body)), _)
-        | (Ok(ContentType::ApplicationJson), Some(Ok(body)), true) => {
+        (Ok(ContentType::ApplicationGraphqlResponseJson), Ok(body), _)
+        | (Ok(ContentType::ApplicationJson), Ok(body), true) => {
             // Application graphql json expects valid graphql response
             // Application json expects valid graphql response if 2xx
             tracing::debug_span!("parse_subgraph_response").in_scope(|| {
@@ -95,7 +85,7 @@ pub(super) fn http_response_to_graphql_response(
                 })
             })
         }
-        (Ok(ContentType::ApplicationJson), Some(Ok(body)), false) => {
+        (Ok(ContentType::ApplicationJson), Ok(body), false) => {
             // Application json does not expect a valid graphql response if not 2xx.
             // If parse fails then attach the entire payload as an error
             tracing::debug_span!("parse_subgraph_response").in_scope(|| {
@@ -122,7 +112,7 @@ pub(super) fn http_response_to_graphql_response(
             if let Err(err) = content_type {
                 graphql_response.errors.push(err.to_graphql_error(None));
             }
-            if let Some(Err(err)) = body {
+            if let Err(err) = body {
                 graphql_response.errors.push(err.to_graphql_error(None));
             }
             graphql_response
@@ -157,94 +147,10 @@ pub(super) fn http_response_to_graphql_response(
     graphql_response
 }
 
-pub(crate) async fn do_fetch(
-    mut client: crate::services::http::BoxCloneService,
-    context: &Context,
-    service_name: &str,
-    request: Request<RouterBody>,
-) -> Result<
-    (
-        Parts,
-        Result<ContentType, FetchError>,
-        Option<Result<Bytes, FetchError>>,
-    ),
-    FetchError,
-> {
-    let response = client
-        .call(HttpRequest {
-            http_request: request,
-            context: context.clone(),
-        })
-        .map_err(|err| {
-            tracing::error!(fetch_error = ?err);
-            FetchError::SubrequestHttpError {
-                status_code: None,
-                service: service_name.to_string(),
-                reason: err.to_string(),
-            }
-        })
-        .await?;
-
-    let (parts, body) = response.http_response.into_parts();
-
-    let content_type = get_graphql_content_type(service_name, &parts);
-
-    let response_size_limit = context
-        .extensions()
-        .with_lock(|e| e.get::<SubgraphResponseSizeLimit>().copied());
-
-    let body = if content_type.is_ok() {
-        let body_result = match response_size_limit {
-            Some(SubgraphResponseSizeLimit(limit)) => {
-                router::body::into_bytes_limited(body, limit)
-                    .instrument(tracing::debug_span!("aggregate_response_data"))
-                    .await
-                    .map_err(|err| {
-                        tracing::error!(fetch_error = ?err);
-                        let reason = if err.downcast_ref::<LengthLimitError>().is_some() {
-                            u64_counter!(
-                                "apollo.router.limits.subgraph_response_size.exceeded",
-                                "Number of subgraph responses aborted because they exceeded the configured response size limit",
-                                1,
-                                subgraph.name = service_name.to_string()
-                            );
-                            tracing::Span::current()
-                                .record("apollo.subgraph.response.aborted", "response_size_limit");
-                            format!("subgraph response body exceeded limit of {limit} bytes")
-                        } else {
-                            err.to_string()
-                        };
-                        FetchError::SubrequestHttpError {
-                            status_code: Some(parts.status.as_u16()),
-                            service: service_name.to_string(),
-                            reason,
-                        }
-                    })
-            }
-            None => {
-                router::body::into_bytes(body)
-                    .instrument(tracing::debug_span!("aggregate_response_data"))
-                    .await
-                    .map_err(|err| {
-                        tracing::error!(fetch_error = ?err);
-                        FetchError::SubrequestHttpError {
-                            status_code: Some(parts.status.as_u16()),
-                            service: service_name.to_string(),
-                            reason: err.to_string(),
-                        }
-                    })
-            }
-        };
-        Some(body_result)
-    } else {
-        None
-    };
-    Ok((parts, content_type, body))
-}
-
 #[cfg(test)]
 mod tests {
     use http::StatusCode;
+    use http::header::CONTENT_TYPE;
 
     use super::*;
     use crate::assert_response_eq_ignoring_error_id;
@@ -263,15 +169,11 @@ mod tests {
     fn it_converts_ok_http_to_graphql() {
         let (parts, body) = http::Response::builder()
             .status(StatusCode::OK)
-            .body(None)
+            .header(CONTENT_TYPE, "application/graphql-response+json")
+            .body(Ok(Bytes::new()))
             .unwrap()
             .into_parts();
-        let actual = http_response_to_graphql_response(
-            "test_service",
-            Ok(ContentType::ApplicationGraphqlResponseJson),
-            body,
-            &parts,
-        );
+        let actual = http_response_to_graphql_response("test_service", body, &parts);
 
         let expected = graphql::Response::builder().build();
         assert_eq!(actual, expected);
@@ -281,15 +183,11 @@ mod tests {
     fn it_converts_error_http_to_graphql() {
         let (parts, body) = http::Response::builder()
             .status(StatusCode::IM_A_TEAPOT)
-            .body(None)
+            .header(CONTENT_TYPE, "application/graphql-response+json")
+            .body(Ok(Bytes::new()))
             .unwrap()
             .into_parts();
-        let actual = http_response_to_graphql_response(
-            "test_service",
-            Ok(ContentType::ApplicationGraphqlResponseJson),
-            body,
-            &parts,
-        );
+        let actual = http_response_to_graphql_response("test_service", body, &parts);
 
         let expected = graphql::Response::builder()
             .error(
@@ -314,16 +212,12 @@ mod tests {
 
         let (parts, body) = http::Response::builder()
             .status(StatusCode::OK)
-            .body(Some(Ok(Bytes::from(json.to_string()))))
+            .header(CONTENT_TYPE, "application/graphql-response+json")
+            .body(Ok(Bytes::from(json.to_string())))
             .unwrap()
             .into_parts();
 
-        let actual = http_response_to_graphql_response(
-            "test_service",
-            Ok(ContentType::ApplicationGraphqlResponseJson),
-            body,
-            &parts,
-        );
+        let actual = http_response_to_graphql_response("test_service", body, &parts);
 
         let expected = graphql::Response::builder()
             .data(json["data"].take())
@@ -348,16 +242,12 @@ mod tests {
 
         let (parts, body) = http::Response::builder()
             .status(StatusCode::OK)
-            .body(Some(Ok(Bytes::from(json.to_string()))))
+            .header(CONTENT_TYPE, "application/graphql-response+json")
+            .body(Ok(Bytes::from(json.to_string())))
             .unwrap()
             .into_parts();
 
-        let actual = http_response_to_graphql_response(
-            "test_service",
-            Ok(ContentType::ApplicationGraphqlResponseJson),
-            body,
-            &parts,
-        );
+        let actual = http_response_to_graphql_response("test_service", body, &parts);
 
         let expected = graphql::Response::builder()
             .data(json["data"].take())
@@ -383,16 +273,12 @@ mod tests {
 
         let (parts, body) = http::Response::builder()
             .status(StatusCode::IM_A_TEAPOT)
-            .body(Some(Ok(Bytes::from(json.to_string()))))
+            .header(CONTENT_TYPE, "application/graphql-response+json")
+            .body(Ok(Bytes::from(json.to_string())))
             .unwrap()
             .into_parts();
 
-        let actual = http_response_to_graphql_response(
-            "test_service",
-            Ok(ContentType::ApplicationGraphqlResponseJson),
-            body,
-            &parts,
-        );
+        let actual = http_response_to_graphql_response("test_service", body, &parts);
 
         let expected = graphql::Response::builder()
             .data(json["data"].take())
