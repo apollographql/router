@@ -26,7 +26,15 @@ use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph::SubgraphRequestId;
 
-/// Analyze the query plan for a batch query.
+/// Intercept requests that are part of a batch, and batch them up together into a single request
+/// per subgraph.
+///
+/// All subgraph requests for a batch, even for different subgraphs, are sent at the same time once
+/// the whole batch is ready.
+//
+// This layer works together with the `crate::batching::Batch` structure, which calls back into the
+// `process_batches` function declared in this file, and that's where eventually the inner service
+// is called.
 #[derive(Clone)]
 pub(crate) struct JoinBatchRequestsLayer {
     // TODO(@goto-bus-stop): Should take this from the request instead.

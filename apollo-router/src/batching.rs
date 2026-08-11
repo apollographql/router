@@ -86,15 +86,12 @@ impl fmt::Display for BatchQuery {
 
 impl BatchQuery {
     /// Is this BatchQuery finished?
-    pub(crate) fn finished(&self) -> bool {
+    fn finished(&self) -> bool {
         self.remaining.load(Ordering::Acquire) == 0
     }
 
     /// Inform the batch of query hashes representing fetches needed by this element of the batch query
-    pub(crate) async fn set_query_hashes(
-        &self,
-        query_hashes: Vec<Arc<QueryHash>>,
-    ) -> Result<(), BoxError> {
+    async fn set_query_hashes(&self, query_hashes: Vec<Arc<QueryHash>>) -> Result<(), BoxError> {
         self.remaining.store(query_hashes.len(), Ordering::Release);
 
         self.sender
@@ -116,7 +113,7 @@ impl BatchQuery {
     /// The returned channel can be awaited to receive the GraphQL response, when ready.
     ///
     /// The HTTP client must be pre-readied.
-    pub(crate) async fn signal_progress(
+    async fn signal_progress(
         &self,
         subgraph_name: Arc<str>,
         http_client: crate::services::http::BoxCloneService,
@@ -162,7 +159,7 @@ impl BatchQuery {
     }
 
     /// Signal to the batch handler that this specific batch query is cancelled
-    pub(crate) async fn signal_cancelled(&self, reason: String) -> Result<(), BoxError> {
+    async fn signal_cancelled(&self, reason: String) -> Result<(), BoxError> {
         self.sender
             .lock()
             .await
@@ -218,7 +215,7 @@ struct BatchHandlerMessageProgress {
 }
 
 /// Collection of info needed to resolve a batch query
-pub(crate) struct BatchQueryInfo {
+struct BatchQueryInfo {
     /// The owning subgraph request
     request: HttpRequest,
     subgraph_name: Arc<str>,
@@ -248,7 +245,7 @@ fn get_request_id(request: &HttpRequest) -> SubgraphRequestId {
 // TODO: Do we want to generate a UUID for a batch for observability reasons?
 // TODO: Do we want to track the size of a batch?
 #[derive(Debug)]
-pub(crate) struct Batch {
+struct Batch {
     /// A sender channel to communicate with the batching handler
     senders: PMutex<Vec<Option<mpsc::Sender<BatchHandlerMessage>>>>,
 
@@ -266,7 +263,7 @@ pub(crate) struct Batch {
 impl Batch {
     /// Creates a new batch, spawning an async task for handling updates to the
     /// batch lifecycle.
-    pub(crate) fn spawn_handler(size: usize) -> Self {
+    fn spawn_handler(size: usize) -> Self {
         tracing::debug!("New batch created with size {size}");
 
         // Create the message channel pair for sending update events to the spawned task
@@ -433,7 +430,7 @@ impl Batch {
     /// Create a batch query for a specific index in this batch
     ///
     /// This function may fail if the index doesn't exist or has already been taken
-    pub(crate) fn query_for_index(
+    fn query_for_index(
         batch: Arc<Batch>,
         index: usize,
     ) -> Result<BatchQuery, SubgraphBatchingError> {
