@@ -495,12 +495,11 @@ impl LicenseEnforcementReport {
     fn enforce_restricted_features(
         &self,
     ) -> Result<Arc<LicenseState>, LicenseEnforcementViolation> {
-        let license = self.license.clone();
         let license_violation_error = || LicenseEnforcementViolation {
             restricted_features: self.restricted_features_in_use(),
         };
 
-        match &*license {
+        match &*self.license {
             LicenseState::Licensed { .. } => {
                 tracing::error!(
                     "The router is using features not available for your license:\n\n{self}"
@@ -520,7 +519,7 @@ impl LicenseEnforcementReport {
                 tracing::error!(
                     "License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{self}\n\nSee {LICENSE_EXPIRED_URL} for more information."
                 );
-                Ok(license.clone())
+                Ok(self.license.clone())
             }
             LicenseState::Unlicensed => {
                 // This is OSS, so fail to reload or start.
@@ -544,8 +543,7 @@ impl LicenseEnforcementReport {
     /// construction: with nothing to enforce, every license state is acceptable and
     /// only the logging differs.
     fn effective_license_unrestricted(&self) -> Arc<LicenseState> {
-        let license = self.license.clone();
-        let license_limits = match &*license {
+        let license_limits = match &*self.license {
             LicenseState::Licensed { limits } => {
                 tracing::debug!("A valid Apollo license has been detected.");
                 limits
@@ -555,7 +553,7 @@ impl LicenseEnforcementReport {
                     "License warning period has started. The Router will stop serving requests after the license expires. In order to continue using these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{:?}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
                     // The report does not contain any features because they are contained within the allowedFeatures claim,
                     // therefore we output all of the allowed features that the user's license enables them to use.
-                    license.get_allowed_features()
+                    self.license.get_allowed_features()
                 );
                 limits
             }
@@ -566,7 +564,7 @@ impl LicenseEnforcementReport {
                     "License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{:?}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
                     // The report does not contain any features because they are contained within the allowedFeatures claim,
                     // therefore we output all of the allowed features that the user's license enables them to use.
-                    license.get_allowed_features()
+                    self.license.get_allowed_features()
                 );
                 limits
             }
