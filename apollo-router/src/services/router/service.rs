@@ -70,6 +70,7 @@ use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::content_negotiation;
+use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_CONTENT_TYPE_HEADER_VALUE;
 use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::layers::persisted_queries::EnforceSafelistLayer;
 use crate::services::layers::persisted_queries::ExpandIdsLayer;
@@ -421,6 +422,7 @@ where
         let ClientRequestAccepts {
             wildcard: accepts_wildcard,
             json: accepts_json,
+            json_response: accepts_json_response,
             multipart_defer: accepts_multipart_defer,
             multipart_subscription: accepts_multipart_subscription,
         } = context
@@ -459,9 +461,14 @@ where
                 {
                     let errors = response.errors.clone();
 
-                    parts
-                        .headers
-                        .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
+                    parts.headers.insert(
+                        CONTENT_TYPE,
+                        if accepts_json_response {
+                            GRAPHQL_JSON_RESPONSE_CONTENT_TYPE_HEADER_VALUE.clone()
+                        } else {
+                            APPLICATION_JSON_HEADER_VALUE.clone()
+                        },
+                    );
                     let body: Result<String, BoxError> = tracing::trace_span!("serialize_response")
                         .in_scope(|| {
                             let body = serde_json::to_string(&response)?;

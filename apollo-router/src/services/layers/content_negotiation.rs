@@ -5,6 +5,7 @@
 use std::ops::ControlFlow;
 
 use http::HeaderMap;
+use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http::header::ACCEPT;
@@ -39,6 +40,10 @@ use crate::services::router::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER
 use crate::services::supergraph;
 
 pub(crate) const GRAPHQL_JSON_RESPONSE_HEADER_VALUE: &str = "application/graphql-response+json";
+
+#[allow(clippy::declare_interior_mutable_const)]
+pub(crate) static GRAPHQL_JSON_RESPONSE_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
+    HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
 
 /// A layer for the router service that rejects requests that do not have an expected Content-Type,
 /// or that have an Accept header that is not supported by the router.
@@ -175,6 +180,7 @@ where
                 let ClientRequestAccepts {
                     wildcard: accepts_wildcard,
                     json: accepts_json,
+                    json_response: accepts_json_response,
                     multipart_defer: accepts_multipart_defer,
                     multipart_subscription: accepts_multipart_subscription,
                 } = context.extensions().with_lock(|lock| {
@@ -184,9 +190,12 @@ where
                 });
 
                 if !res.has_next.unwrap_or_default() && (accepts_json || accepts_wildcard) {
-                    parts
-                        .headers
-                        .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
+                    let content_type = if accepts_json_response {
+                        GRAPHQL_JSON_RESPONSE_CONTENT_TYPE_HEADER_VALUE.clone()
+                    } else {
+                        APPLICATION_JSON_HEADER_VALUE.clone()
+                    };
+                    parts.headers.insert(CONTENT_TYPE, content_type);
                 } else if accepts_multipart_defer {
                     parts.headers.insert(
                         CONTENT_TYPE,
@@ -261,13 +270,17 @@ fn parse_accept(headers: &HeaderMap) -> ClientRequestAccepts {
         if let Ok(str) = value.to_str() {
             for result in MediaTypeList::new(str) {
                 if let Ok(mime) = result {
+                    let is_graphql_response_json = mime.ty == APPLICATION
+                        && mime.subty.as_str() == "graphql-response"
+                        && mime.suffix == Some(JSON);
                     if !accepts.json
                         && ((mime.ty == APPLICATION && mime.subty == JSON)
-                            || (mime.ty == APPLICATION
-                                && mime.subty.as_str() == "graphql-response"
-                                && mime.suffix == Some(JSON)))
+                            || is_graphql_response_json)
                     {
                         accepts.json = true
+                    }
+                    if !accepts.json_response && is_graphql_response_json {
+                        accepts.json_response = true
                     }
                     if !accepts.wildcard && (mime.ty == _STAR && mime.subty == _STAR) {
                         accepts.wildcard = true
@@ -340,6 +353,7 @@ mod tests {
         default_headers.append(ACCEPT, HeaderValue::from_static("foo/bar"));
         let accepts = parse_accept(&default_headers);
         assert!(accepts.json);
+        assert!(!accepts.json_response);
 
         let mut default_headers = HeaderMap::new();
         default_headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
@@ -361,6 +375,7 @@ mod tests {
         default_headers.append(ACCEPT, HeaderValue::from_static("foo/bar"));
         let accepts = parse_accept(&default_headers);
         assert!(accepts.json);
+        assert!(accepts.json_response);
 
         let mut default_headers = HeaderMap::new();
         default_headers.insert(

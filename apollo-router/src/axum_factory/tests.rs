@@ -1456,6 +1456,54 @@ async fn it_errors_on_bad_accept_header() -> Result<(), ApolloRouterError> {
 }
 
 #[test(tokio::test)]
+async fn it_returns_graphql_response_json_content_type_when_accepted()
+-> Result<(), ApolloRouterError> {
+    let expected_response = graphql::Response::builder()
+        .data(json!({"__typename": "Query"}))
+        .build();
+    let example_response = expected_response.clone();
+    let (mock, mut handle) = tower_test::mock::pair::<
+        crate::services::supergraph::Request,
+        crate::services::supergraph::Response,
+    >();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(SupergraphResponse::new_from_graphql_response(
+            example_response,
+            req.context,
+        ));
+    });
+    let router_service = router::service::from_supergraph_mock(mock).await;
+    let (server, client) = init(router_service).await;
+    let url = format!("{}", server.graphql_listen_address().as_ref().unwrap());
+
+    let response = client
+        .post(url.as_str())
+        .header(ACCEPT, "application/graphql-response+json")
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+        .body(json!({ "query": "{ __typename }" }).to_string())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE),
+        Some(&HeaderValue::from_static(
+            "application/graphql-response+json"
+        ))
+    );
+    assert_eq!(
+        response.json::<graphql::Response>().await.unwrap(),
+        expected_response
+    );
+
+    server.shutdown().await?;
+    driver.await.unwrap();
+    Ok(())
+}
+
+#[test(tokio::test)]
 async fn it_displays_homepage() {
     let conf = Arc::new(Configuration::fake_builder().build().unwrap());
 
