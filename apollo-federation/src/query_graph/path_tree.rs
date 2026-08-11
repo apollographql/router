@@ -114,6 +114,8 @@ where
             && self.trigger == other.trigger
             && self.conditions == other.conditions
             && self.tree == other.tree
+            && self.matching_context_ids == other.matching_context_ids
+            && self.arguments_to_context_usages == other.arguments_to_context_usages
     }
 }
 
@@ -411,9 +413,6 @@ where
             self.node, other.node,
             "Cannot merge path trees rooted different nodes"
         );
-        if self == other {
-            return;
-        }
         if other.childs.is_empty() {
             return;
         }
