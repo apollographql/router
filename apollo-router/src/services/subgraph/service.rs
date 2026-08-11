@@ -50,20 +50,18 @@ use crate::services::subgraph;
 /// Client for interacting with subgraphs.
 #[derive(Clone)]
 pub(crate) struct SubgraphService {
-    /// Pre-built HTTP client service with all plugin layers already folded in.
-    /// Used on the hot (non-batching) path to avoid re-folding plugins per request.
-    http_client: crate::services::http::BoxCloneService,
+    inner: crate::services::http::BoxCloneService,
     service: Arc<String>,
 }
 
 impl SubgraphService {
     pub(crate) fn new(
         service: impl Into<String>,
-        http_client: crate::services::http::BoxCloneService,
+        inner: crate::services::http::BoxCloneService,
     ) -> Result<Self, BoxError> {
         let name = service.into();
         Ok(Self {
-            http_client,
+            inner,
             service: Arc::new(name),
         })
     }
@@ -75,16 +73,16 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.http_client.poll_ready(cx)
+        self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
         let service_name = self.service.clone();
 
-        let fresh_client = self.http_client.clone();
-        let http_client = std::mem::replace(&mut self.http_client, fresh_client);
+        let fresh_client = self.inner.clone();
+        let inner = std::mem::replace(&mut self.inner, fresh_client);
 
-        Box::pin(async move { call_http(request, http_client, &service_name).await })
+        Box::pin(async move { call_http(request, inner, &service_name).await })
     }
 }
 
