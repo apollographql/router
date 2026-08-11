@@ -6940,7 +6940,7 @@ expression: "&schema"
               "$ref": "#/definitions/OnError"
             }
           ],
-          "description": "Control the behavior when an error occurs during the authentication process.\n\nDefaults to `Error`. When set to `Continue`, requests that fail JWT authentication will\ncontinue to be processed by the router, but without the JWT claims in the context. When set\nto `Error`, requests that fail JWT authentication will be rejected with a HTTP 403 error."
+          "description": "Control the behavior when an error occurs during the authentication process.\n\nDefaults to `Error`.\n\n* When set to `Continue`, requests that fail JWT authentication will continue to be\n  processed by the router, but without the JWT claims in the context.\n* When set to `Error`, requests that fail JWT authentication will be rejected with a\n  HTTP 403 error.\n* When set to `RedactedError`, requests that fail JWT authentication are rejected in the\n  same way as `Error`, but the response contains a generic error message instead of the\n  details of the validation failure. The details remain available in the\n  `apollo::authentication::jwt_status` context value and in the\n  `apollo.router.operations.authentication.jwt` metric."
         },
         "sources": {
           "description": "Alternative sources to extract the JWT",
@@ -7631,7 +7631,8 @@ expression: "&schema"
     "OnError": {
       "enum": [
         "Continue",
-        "Error"
+        "Error",
+        "RedactedError"
       ],
       "type": "string"
     },

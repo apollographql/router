@@ -76,8 +76,21 @@ pub(crate) fn create_an_url(filename: &str) -> String {
     Url::from_file_path(jwks_absolute_path).unwrap().to_string()
 }
 
+async fn parse_next_graphql_response(service_response: &mut router::Response) -> graphql::Response {
+    serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap()
+}
+
 async fn build_a_default_test_harness() -> router::BoxCloneService {
-    build_a_test_harness(None, None, false, false, false).await
+    build_a_test_harness(None, None, false, false, None).await
 }
 
 async fn build_a_test_harness(
@@ -85,7 +98,7 @@ async fn build_a_test_harness(
     header_value_prefix: Option<String>,
     multiple_jwks: bool,
     ignore_other_prefixes: bool,
-    continue_on_error: bool,
+    on_error: Option<&str>,
 ) -> router::BoxCloneService {
     // create a mock service we will use to test our plugin
     let mut mock_service = test::MockSupergraphService::new();
@@ -156,9 +169,9 @@ async fn build_a_test_harness(
     config["authentication"]["router"]["jwt"]["ignore_other_prefixes"] =
         serde_json::Value::Bool(ignore_other_prefixes);
 
-    if continue_on_error {
+    if let Some(on_error) = on_error {
         config["authentication"]["router"]["jwt"]["on_error"] =
-            serde_json::Value::String("Continue".to_string());
+            serde_json::Value::String(on_error.to_string());
     }
 
     match crate::TestHarness::builder()
@@ -477,7 +490,7 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_does_not_match_config_and_is_ignored() {
-    let test_harness = build_a_test_harness(None, None, false, true, false).await;
+    let test_harness = build_a_test_harness(None, None, false, true, None).await;
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "Basic dXNlcjpwYXNzd29yZA==")
@@ -511,7 +524,7 @@ async fn it_accepts_when_auth_prefix_does_not_match_config_and_is_ignored() {
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_jwt() {
-    let test_harness = build_a_test_harness(None, None, true, false, false).await;
+    let test_harness = build_a_test_harness(None, None, true, false, None).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -550,7 +563,7 @@ async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_auth() {
     let test_harness =
-        build_a_test_harness(Some("SOMETHING".to_string()), None, false, false, false).await;
+        build_a_test_harness(Some("SOMETHING".to_string()), None, false, false, None).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -589,7 +602,7 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_aut
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_prefix() {
     let test_harness =
-        build_a_test_harness(None, Some("SOMETHING".to_string()), false, false, false).await;
+        build_a_test_harness(None, Some("SOMETHING".to_string()), false, false, None).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -627,7 +640,7 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_pre
 
 #[tokio::test]
 async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
-    let test_harness = build_a_test_harness(None, Some("".to_string()), false, false, false).await;
+    let test_harness = build_a_test_harness(None, Some("".to_string()), false, false, None).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -665,7 +678,7 @@ async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
 
 #[tokio::test]
 async fn it_inserts_success_jwt_status_into_context() {
-    let test_harness = build_a_test_harness(None, None, false, false, false).await;
+    let test_harness = build_a_test_harness(None, None, false, false, None).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -732,7 +745,7 @@ async fn it_inserts_success_jwt_status_into_context() {
 
 #[tokio::test]
 async fn it_inserts_failure_jwt_status_into_context() {
-    let test_harness = build_a_test_harness(None, None, false, false, false).await;
+    let test_harness = build_a_test_harness(None, None, false, false, None).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -800,7 +813,7 @@ async fn it_inserts_failure_jwt_status_into_context() {
 
 #[tokio::test]
 async fn it_moves_on_after_jwt_errors_when_configured() {
-    let test_harness = build_a_test_harness(None, None, false, false, true).await;
+    let test_harness = build_a_test_harness(None, None, false, false, Some("Continue")).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -866,14 +879,14 @@ async fn it_moves_on_after_jwt_errors_when_configured() {
 #[should_panic]
 async fn it_panics_when_auth_prefix_has_correct_format_but_contains_whitespace() {
     let _test_harness =
-        build_a_test_harness(None, Some("SOMET HING".to_string()), false, false, false).await;
+        build_a_test_harness(None, Some("SOMET HING".to_string()), false, false, None).await;
 }
 
 #[tokio::test]
 #[should_panic]
 async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whitespace() {
     let _test_harness =
-        build_a_test_harness(None, Some("SOMETHING ".to_string()), false, false, false).await;
+        build_a_test_harness(None, Some("SOMETHING ".to_string()), false, false, None).await;
 }
 
 #[tokio::test]
@@ -2697,5 +2710,317 @@ mod duplicate_key_retry {
                 panic!("kid-matched entry B should have been retried and accepted: {response:?}");
             }
         }
+    }
+}
+
+/// Redaction of client-visible JWT validation errors (`on_error: RedactedError`).
+///
+/// The detailed messages the router returns by default echo `jsonwebtoken`'s own error text
+/// (base64 byte offsets, the list of supported signing algorithms) and the router's configured
+/// issuers/audiences back to an unauthenticated caller. `RedactedError` rejects the request with
+/// a single generic message instead, while keeping the full detail in the
+/// `apollo::authentication::jwt_status` context object and in telemetry.
+mod redacted_errors {
+    use std::collections::HashSet;
+    use std::ops::ControlFlow;
+
+    use base64::Engine as _;
+    use base64::prelude::BASE64_URL_SAFE_NO_PAD;
+    use http::StatusCode;
+    use http_body_util::BodyExt;
+    use jsonwebtoken::Algorithm;
+    use jsonwebtoken::EncodingKey;
+    use jsonwebtoken::encode;
+    use jsonwebtoken::get_current_timestamp;
+    use p256::ecdsa::SigningKey;
+    use p256::ecdsa::signature::rand_core::OsRng;
+    use p256::pkcs8::EncodePrivateKey;
+    use tower::ServiceExt;
+
+    use super::JWT_CONTEXT_KEY;
+    use super::JWTConf;
+    use super::JwtStatus;
+    use super::build_a_test_harness;
+    use super::common::jwk;
+    use super::make_manager;
+    use super::parse_next_graphql_response;
+    use crate::graphql;
+    use crate::metrics::FutureMetricsExt as _;
+    use crate::plugins::authentication::Source;
+    use crate::plugins::authentication::authenticate;
+    use crate::plugins::authentication::default_header_name;
+    use crate::plugins::authentication::default_header_value_prefix;
+    use crate::services::router;
+    use crate::services::supergraph;
+
+    /// The message every JWT failure collapses to when redaction is on.
+    const REDACTED: &str = "Authentication failed";
+
+    /// A structurally valid JWT whose signature segment is not valid base64, so it fails in
+    /// `jsonwebtoken::decode` with `Base64 error: Invalid last symbol 66, offset 42.`. Same token
+    /// as `it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt`.
+    const UNDECODABLE_JWT: &str = "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5B";
+
+    /// A JWT whose header declares the unsigned `none` algorithm. Deserializing that header fails
+    /// with a serde message enumerating every algorithm the router supports — the third
+    /// disclosure example in the report.
+    fn jwt_with_alg_none() -> String {
+        let header = BASE64_URL_SAFE_NO_PAD.encode(br#"{"alg":"none","typ":"JWT"}"#);
+        format!("Bearer {header}.e30.")
+    }
+
+    /// A well-formed token signed by `signing_key` whose final signature byte has been altered,
+    /// as a tampered token would be. Signature verification fails inside `jsonwebtoken::decode`.
+    fn tampered_token(signing_key: &SigningKey) -> String {
+        let token = encode(
+            &jsonwebtoken::Header::new(Algorithm::ES256),
+            &serde_json::json!({ "sub": "test", "exp": get_current_timestamp() + 60 }),
+            &EncodingKey::from_ec_der(&signing_key.to_pkcs8_der().unwrap().to_bytes()),
+        )
+        .unwrap();
+
+        let (head, last) = token.split_at(token.len() - 1);
+        let flipped = if last == "A" { "B" } else { "A" };
+        format!("Bearer {head}{flipped}")
+    }
+
+    fn request_with_authorization(authorization: &str) -> router::Request {
+        supergraph::Request::canned_builder()
+            .header(http::header::AUTHORIZATION, authorization)
+            .build()
+            .unwrap()
+            .try_into()
+            .unwrap()
+    }
+
+    /// A `JWTConf` with the default header source, deserialized from JSON so that the `on_error`
+    /// value is exercised the same way a user's `router.yaml` would be.
+    fn jwt_conf(on_error: Option<&str>) -> JWTConf {
+        let mut json = serde_json::json!({ "jwks": [] });
+        if let Some(on_error) = on_error {
+            json["on_error"] = serde_json::Value::String(on_error.to_string());
+        }
+
+        let mut config: JWTConf =
+            serde_json::from_value(json).expect("`on_error` value is accepted");
+        config.sources.push(Source::Header {
+            name: default_header_name(),
+            value_prefix: default_header_value_prefix(),
+        });
+        config
+    }
+
+    async fn send_with_authorization(
+        on_error: Option<&str>,
+        authorization: &str,
+    ) -> (router::Response, graphql::Response) {
+        let test_harness = build_a_test_harness(None, None, false, false, on_error).await;
+
+        let request = supergraph::Request::canned_builder()
+            .header(http::header::AUTHORIZATION, authorization)
+            .build()
+            .unwrap();
+
+        let mut service_response = test_harness
+            .oneshot(request.try_into().unwrap())
+            .await
+            .unwrap();
+        let response = parse_next_graphql_response(&mut service_response).await;
+
+        (service_response, response)
+    }
+
+    /// Assert the response carries exactly one generic `AUTH_ERROR`, and that none of
+    /// `forbidden` appears anywhere in it.
+    fn assert_redacted(response: &graphql::Response, forbidden: &[&str]) {
+        let expected_error = graphql::Error::builder()
+            .message(REDACTED)
+            .extension_code("AUTH_ERROR")
+            .build();
+
+        crate::assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
+
+        let serialized = serde_json::to_string(response).expect("response serializes");
+        for leaked in forbidden {
+            assert!(
+                !serialized.contains(leaked),
+                "response should not disclose {leaked:?}, but was: {serialized}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn it_redacts_jwt_decoding_errors() {
+        let (service_response, response) =
+            send_with_authorization(Some("RedactedError"), UNDECODABLE_JWT).await;
+
+        assert_redacted(&response, &["Base64", "offset", "Cannot decode JWT"]);
+        assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
+    }
+
+    #[tokio::test]
+    async fn it_redacts_jwt_header_errors_including_supported_algorithms() {
+        let (service_response, response) =
+            send_with_authorization(Some("RedactedError"), &jwt_with_alg_none()).await;
+
+        assert_redacted(
+            &response,
+            &[
+                "HS256",
+                "EdDSA",
+                "unknown variant",
+                super::HEADER_TOKEN_TRUNCATED,
+            ],
+        );
+        assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
+    }
+
+    #[tokio::test]
+    async fn it_redacts_header_prefix_errors() {
+        // Prefix problems are redacted too: redaction is all-or-nothing, so there is no
+        // per-message judgement about which strings are safe to disclose.
+        let (service_response, response) =
+            send_with_authorization(Some("RedactedError"), "invalid").await;
+
+        assert_redacted(&response, &["Bearer", "prefixed"]);
+        assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
+    }
+
+    #[tokio::test]
+    async fn it_redacts_audience_mismatch_without_echoing_configured_audiences() {
+        let signing_key = SigningKey::random(&mut OsRng);
+        let manager = make_manager(
+            &jwk(&signing_key),
+            None,
+            Some(HashSet::from(["hello".to_string(), "goodbye".to_string()])),
+        );
+
+        let request = super::common::build_request_with_header_token(
+            signing_key,
+            serde_json::json!({
+                "sub": "test",
+                "exp": get_current_timestamp(),
+                "aud": "AAAA",
+            }),
+        );
+
+        match authenticate(&jwt_conf(Some("RedactedError")), &manager, request) {
+            ControlFlow::Break(res) => {
+                assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
+                let body = res.response.into_body().collect().await.unwrap();
+                let response: graphql::Response = serde_json::from_slice(&body.to_bytes()).unwrap();
+                assert_redacted(&response, &["hello", "goodbye", "aud", "AAAA"]);
+            }
+            ControlFlow::Continue(_) => panic!("audience check should have failed"),
+        }
+    }
+
+    #[tokio::test]
+    async fn it_keeps_full_error_detail_in_the_context_when_redacting() {
+        let test_harness =
+            build_a_test_harness(None, None, false, false, Some("RedactedError")).await;
+
+        let request = supergraph::Request::canned_builder()
+            .header(http::header::AUTHORIZATION, UNDECODABLE_JWT)
+            .build()
+            .unwrap();
+
+        let mut service_response = test_harness
+            .oneshot(request.try_into().unwrap())
+            .await
+            .unwrap();
+
+        // The client sees a generic message...
+        let jwt_context = service_response
+            .context
+            .get::<_, JwtStatus>(JWT_CONTEXT_KEY)
+            .expect("deserialization succeeds")
+            .expect("a context value was set");
+
+        // ...but the operator still has the code, reason and full message in the context, which
+        // is what telemetry selectors, rhai and coprocessors read.
+        match jwt_context.error() {
+            Some(err) => {
+                assert_eq!(err.code, "CANNOT_DECODE_JWT");
+                assert_eq!(err.reason.as_deref(), Some("BASE64_ERROR"));
+                assert_eq!(
+                    err.message,
+                    "Cannot decode JWT: Base64 error: Invalid last symbol 66, offset 42."
+                );
+            }
+            None => panic!("expected an error"),
+        }
+
+        let response = parse_next_graphql_response(&mut service_response).await;
+        assert_redacted(&response, &["Base64", "offset"]);
+        assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
+    }
+
+    #[tokio::test]
+    async fn it_does_not_redact_by_default() {
+        // Redaction is opt-in: omitting `on_error` must keep today's detailed messages.
+        let (service_response, response) = send_with_authorization(None, UNDECODABLE_JWT).await;
+
+        let expected_error = graphql::Error::builder()
+            .message("Cannot decode JWT: Base64 error: Invalid last symbol 66, offset 42.")
+            .extension_code("AUTH_ERROR")
+            .build();
+
+        crate::assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
+        assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
+    }
+
+    // The metric assertions below drive `authenticate` directly rather than going through
+    // `build_a_test_harness`: the router pipeline moves the request onto another task, which is
+    // outside the task-local meter provider that `with_metrics` installs.
+
+    #[tokio::test]
+    async fn it_records_the_failure_code_on_the_jwt_metric() {
+        async {
+            let signing_key = SigningKey::random(&mut OsRng);
+            let manager = make_manager(&jwk(&signing_key), None, None);
+            let request = request_with_authorization(&tampered_token(&signing_key));
+
+            match authenticate(&jwt_conf(Some("RedactedError")), &manager, request) {
+                ControlFlow::Break(_) => {}
+                ControlFlow::Continue(_) => panic!("a tampered signature should be rejected"),
+            }
+
+            // With the message redacted, this attribute is how an operator sees *why*
+            // authentication failed.
+            assert_counter!(
+                "apollo.router.operations.authentication.jwt",
+                1,
+                authentication.jwt.failed = true,
+                authentication.jwt.failure_code = "CANNOT_DECODE_JWT"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn it_records_no_failure_code_on_success() {
+        async {
+            let signing_key = SigningKey::random(&mut OsRng);
+            let manager = make_manager(&jwk(&signing_key), None, None);
+            let request = super::common::build_request_with_header_token(
+                signing_key,
+                serde_json::json!({ "sub": "test", "exp": get_current_timestamp() + 60 }),
+            );
+
+            match authenticate(&jwt_conf(None), &manager, request) {
+                ControlFlow::Continue(_) => {}
+                ControlFlow::Break(response) => panic!("a valid token should pass: {response:?}"),
+            }
+
+            assert_counter!(
+                "apollo.router.operations.authentication.jwt",
+                1,
+                authentication.jwt.failed = false
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }
