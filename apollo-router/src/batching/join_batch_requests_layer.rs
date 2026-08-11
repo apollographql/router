@@ -164,11 +164,11 @@ async fn assemble_batch(
 
     // Construct the actual byte body of the batched request
     let mut batch_body = BytesMut::new();
-    batch_body.extend_from_slice(&[b'[']);
+    batch_body.extend_from_slice(b"[");
     for body in body_streams {
         let bytes = body.collect().await.unwrap().to_bytes();
         batch_body.extend_from_slice(&bytes);
-        batch_body.extend_from_slice(&[b',']);
+        batch_body.extend_from_slice(b",");
     }
     // There's guaranteed to be a comma here, because `body_streams` is guaranteed to be non-empty,
     // because we'd have returned with a RequestsIsEmpty error otherwise.

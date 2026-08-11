@@ -25,8 +25,10 @@ pub(crate) struct SubgraphResponseSizeLimit(pub usize);
 /// Error type returned by the response size limiting Body type when more than the maximum amount of
 /// bytes have been read.
 #[derive(Debug, thiserror::Error)]
-#[error("subgraph response size limit exceeded")]
-pub(crate) struct ResponseSizeLimitError;
+#[error("subgraph response body exceeded limit of {limit} bytes")]
+pub(crate) struct ResponseSizeLimitError {
+    limit: usize,
+}
 
 /// Limit the response body size.
 ///
@@ -107,7 +109,7 @@ where
                         );
                         // Return our own type instead of the upstream LengthLimitError, to report a
                         // custom error message.
-                        axum::Error::new(ResponseSizeLimitError)
+                        axum::Error::new(ResponseSizeLimitError { limit })
                     } else {
                         axum::Error::new(err)
                     }

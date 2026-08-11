@@ -167,29 +167,34 @@ mod tests {
 
     #[test]
     fn it_converts_ok_http_to_graphql() {
-        let (parts, body) = http::Response::builder()
+        let (parts, _body) = http::Response::builder()
             .status(StatusCode::OK)
             .header(CONTENT_TYPE, "application/graphql-response+json")
-            .body(Ok(Bytes::new()))
+            .body(())
             .unwrap()
             .into_parts();
+        let body = Ok(Bytes::from_static(br#"{"data":{}}"#));
         let actual = http_response_to_graphql_response("test_service", body, &parts);
 
-        let expected = graphql::Response::builder().build();
+        let expected = graphql::Response::builder()
+            .data(serde_json_bytes::json!({}))
+            .build();
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn it_converts_error_http_to_graphql() {
-        let (parts, body) = http::Response::builder()
+        let (parts, _body) = http::Response::builder()
             .status(StatusCode::IM_A_TEAPOT)
             .header(CONTENT_TYPE, "application/graphql-response+json")
-            .body(Ok(Bytes::new()))
+            .body(())
             .unwrap()
             .into_parts();
+        let body = Ok(Bytes::from_static(br#"{"data":{}}"#));
         let actual = http_response_to_graphql_response("test_service", body, &parts);
 
         let expected = graphql::Response::builder()
+            .data(serde_json_bytes::json!({}))
             .error(
                 super::FetchError::SubrequestHttpError {
                     status_code: Some(418),
@@ -210,12 +215,13 @@ mod tests {
             }
         });
 
-        let (parts, body) = http::Response::builder()
+        let (parts, _body) = http::Response::builder()
             .status(StatusCode::OK)
             .header(CONTENT_TYPE, "application/graphql-response+json")
-            .body(Ok(Bytes::from(json.to_string())))
+            .body(())
             .unwrap()
             .into_parts();
+        let body = Ok(Bytes::from(json.to_string()));
 
         let actual = http_response_to_graphql_response("test_service", body, &parts);
 
@@ -240,12 +246,13 @@ mod tests {
             "errors": [error],
         });
 
-        let (parts, body) = http::Response::builder()
+        let (parts, _body) = http::Response::builder()
             .status(StatusCode::OK)
             .header(CONTENT_TYPE, "application/graphql-response+json")
-            .body(Ok(Bytes::from(json.to_string())))
+            .body(())
             .unwrap()
             .into_parts();
+        let body = Ok(Bytes::from(json.to_string()));
 
         let actual = http_response_to_graphql_response("test_service", body, &parts);
 
@@ -271,12 +278,13 @@ mod tests {
             "errors": [error],
         });
 
-        let (parts, body) = http::Response::builder()
+        let (parts, _body) = http::Response::builder()
             .status(StatusCode::IM_A_TEAPOT)
             .header(CONTENT_TYPE, "application/graphql-response+json")
-            .body(Ok(Bytes::from(json.to_string())))
+            .body(())
             .unwrap()
             .into_parts();
+        let body = Ok(Bytes::from(json.to_string()));
 
         let actual = http_response_to_graphql_response("test_service", body, &parts);
 
