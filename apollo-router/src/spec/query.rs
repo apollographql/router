@@ -1436,6 +1436,11 @@ impl<'a> OutputObject<'a> {
             NewValue::Int(value) => json_ext::from_i64(*value),
             NewValue::Float(value) => json_ext::from_f64(*value),
             NewValue::String(value) => json_ext::string(value.as_str()),
+            // `NewValue` is non-exhaustive. Only the variants above are ever
+            // written here, and a value read back but not recognized would
+            // silently drop a member, so name the variant rather than
+            // substituting a default.
+            other => unreachable!("unhandled output member: {other:?}"),
         })
     }
 
