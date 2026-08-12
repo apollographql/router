@@ -35,11 +35,13 @@ use crate::services::router::body::RouterBody;
 // is called.
 #[derive(Clone)]
 pub(crate) struct JoinBatchRequestsLayer {
-    // TODO(@goto-bus-stop): Should take this from the request instead.
     subgraph_name: Arc<str>,
 }
 
 impl JoinBatchRequestsLayer {
+    /// Create a layer that joins batch requests into a single request per subgraph.
+    ///
+    /// The subgraph name must be passed in so requests for the same subgraph can be identified.
     pub(crate) fn new(subgraph_name: impl Into<Arc<str>>) -> Self {
         Self {
             subgraph_name: subgraph_name.into(),
@@ -112,7 +114,8 @@ where
                 let response_rx = query
                     .signal_progress(
                         subgraph_name.clone(),
-                        // FIXME(@goto-bus-stop): temporary to make the types work
+                        // Send our type-erased inner service to the batching worker.
+                        // Only one of the inner services will actually be called
                         inner.boxed_clone(),
                         req,
                     )
@@ -167,17 +170,22 @@ async fn assemble_batch(
     debug_assert_eq!(txs.len(), body_streams.len());
 
     // Construct the actual byte body of the batched request
-    let mut batch_body = BytesMut::new();
-    batch_body.extend_from_slice(b"[");
-    for body in body_streams {
-        let bytes = body.collect().await.unwrap().to_bytes();
-        batch_body.extend_from_slice(&bytes);
-        batch_body.extend_from_slice(b",");
-    }
-    // There's guaranteed to be a comma here, because `body_streams` is guaranteed to be non-empty,
-    // because we'd have returned with a RequestsIsEmpty error otherwise.
-    *batch_body.last_mut().unwrap() = b']';
-    let batch_body = batch_body.freeze();
+    let batch_body = {
+        let mut batch_body = BytesMut::new();
+        batch_body.extend_from_slice(b"[");
+        for body in body_streams {
+            let bytes = body.collect().await.unwrap().to_bytes();
+            batch_body.extend_from_slice(&bytes);
+            batch_body.extend_from_slice(b",");
+        }
+
+        // There's guaranteed to be a comma here, because `body_streams` is guaranteed to be non-empty,
+        // because we'd have returned with a RequestsIsEmpty error otherwise.
+        debug_assert_eq!(batch_body.last(), Some(&b','));
+        *batch_body.last_mut().unwrap() = b']';
+
+        batch_body.freeze()
+    };
 
     // Generate the final request and pass it up
     let request = http::Request::from_parts(parts, router::body::from_bytes(batch_body));
@@ -198,20 +206,6 @@ async fn process_batch(
     request: http::Request<RouterBody>,
     listener_count: usize,
 ) -> Result<Vec<HttpResponse>, FetchError> {
-    // The graphql spec is lax about what strategy to use for processing responses: https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#processing-the-response
-    //
-    // "If the response uses a non-200 status code and the media type of the response payload is application/json
-    // then the client MUST NOT rely on the body to be a well-formed GraphQL response since the source of the response
-    // may not be the server but instead some intermediary such as API gateways, proxies, firewalls, etc."
-    //
-    // The TLDR of this is that it's really asking us to do the best we can with whatever information we have with some modifications depending on content type.
-    // Our goal is to give the user the most relevant information possible in the response errors
-    //
-    // Rules:
-    // 1. If the content type of the response is not `application/json` or `application/graphql-response+json` then we won't try to parse.
-    // 2. If an HTTP status is not 2xx it will always be attached as a graphql error.
-    // 3. If the response type is `application/json` and status is not 2xx and the body the entire body will be output if the response is not valid graphql.
-
     // We need a "representative context" for a batch. We use the first context in our list of
     // contexts
     let batch_context = contexts
@@ -569,7 +563,6 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_assembles_batch() {
         // Assemble a list of requests for testing
-        // TODO(@goto-bus-stop): use the layer instead of assemble_batch directly?
         let (receivers, requests): (Vec<_>, Vec<_>) = (0..2)
             .map(|index| {
                 let subgraph_name = Arc::from("test");
