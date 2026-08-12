@@ -169,7 +169,7 @@ impl ResponseBuilder {
 
     /// Adds one extension, replacing any extension under the same key.
     #[must_use]
-    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+    pub fn extension<'v>(mut self, key: impl Into<String>, value: impl Into<NewValue<'v>>) -> Self {
         self.extensions.insert(key, value);
         self
     }
@@ -440,7 +440,7 @@ impl IncrementalResponseBuilder {
 
     /// Adds one extension, replacing any extension under the same key.
     #[must_use]
-    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+    pub fn extension<'v>(mut self, key: impl Into<String>, value: impl Into<NewValue<'v>>) -> Self {
         self.extensions.insert(key, value);
         self
     }

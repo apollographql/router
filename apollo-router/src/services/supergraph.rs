@@ -214,7 +214,7 @@ impl RequestBuilder {
         self
     }
 
-    pub fn variable(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+    pub fn variable<'v>(mut self, key: impl Into<String>, value: impl Into<NewValue<'v>>) -> Self {
         self.variables.insert(key, value);
         self
     }
@@ -225,7 +225,7 @@ impl RequestBuilder {
         self
     }
 
-    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+    pub fn extension<'v>(mut self, key: impl Into<String>, value: impl Into<NewValue<'v>>) -> Self {
         self.extensions.insert(key, value);
         self
     }
@@ -315,7 +315,7 @@ impl FakeRequestBuilder {
         self
     }
 
-    pub fn variable(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+    pub fn variable<'v>(mut self, key: impl Into<String>, value: impl Into<NewValue<'v>>) -> Self {
         self.variables.insert(key, value);
         self
     }
@@ -326,7 +326,7 @@ impl FakeRequestBuilder {
         self
     }
 
-    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+    pub fn extension<'v>(mut self, key: impl Into<String>, value: impl Into<NewValue<'v>>) -> Self {
         self.extensions.insert(key, value);
         self
     }
@@ -405,7 +405,7 @@ impl CannedRequestBuilder {
         self
     }
 
-    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+    pub fn extension<'v>(mut self, key: impl Into<String>, value: impl Into<NewValue<'v>>) -> Self {
         self.extensions.insert(key, value);
         self
     }
@@ -712,7 +712,7 @@ impl ResponseBuilder {
         self
     }
 
-    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+    pub fn extension<'v>(mut self, key: impl Into<String>, value: impl Into<NewValue<'v>>) -> Self {
         self.extensions.insert(key, value);
         self
     }
@@ -823,7 +823,7 @@ impl FakeResponseBuilder {
         self
     }
 
-    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+    pub fn extension<'v>(mut self, key: impl Into<String>, value: impl Into<NewValue<'v>>) -> Self {
         self.extensions.insert(key, value);
         self
     }
@@ -1065,7 +1065,7 @@ impl InfallibleResponseBuilder {
         self
     }
 
-    pub(crate) fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+    pub(crate) fn extension<'v>(mut self, key: impl Into<String>, value: impl Into<NewValue<'v>>) -> Self {
         self.extensions.insert(key, value);
         self
     }

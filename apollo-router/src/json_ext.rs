@@ -47,7 +47,7 @@ fn split_path_element_and_type_conditions(s: &str) -> (String, Option<TypeCondit
 /// document under construction. Containers are adopted by reference — the
 /// source arena stays alive, nothing is copied — matching apollo-json's
 /// own merge semantics.
-fn to_new_value(value: Value) -> NewValue {
+fn to_new_value(value: Value) -> NewValue<'static> {
     NewValue::Node(value)
 }
 
@@ -330,17 +330,17 @@ impl ValueExt for Value {
 pub(crate) trait ObjectExt {
     /// Writes `value` at `key`, returning the previous value if the key was
     /// present.
-    fn object_insert(
+    fn object_insert<'v>(
         &mut self,
         key: impl Into<String>,
-        value: impl Into<NewValue>,
+        value: impl Into<NewValue<'v>>,
     ) -> Option<Value>;
 
     /// Writes `value` at `key` only when absent. Returns whether it wrote.
-    fn object_insert_if_absent(
+    fn object_insert_if_absent<'v>(
         &mut self,
         key: impl Into<String>,
-        value: impl Into<NewValue>,
+        value: impl Into<NewValue<'v>>,
     ) -> bool;
 
     /// Removes `key`, returning its value if it was present.
@@ -363,10 +363,10 @@ pub(crate) trait ObjectExt {
 }
 
 impl ObjectExt for Value {
-    fn object_insert(
+    fn object_insert<'v>(
         &mut self,
         key: impl Into<String>,
-        value: impl Into<NewValue>,
+        value: impl Into<NewValue<'v>>,
     ) -> Option<Value> {
         let key = key.into();
         let previous = self.get(&key);
@@ -387,10 +387,10 @@ impl ObjectExt for Value {
         previous
     }
 
-    fn object_insert_if_absent(
+    fn object_insert_if_absent<'v>(
         &mut self,
         key: impl Into<String>,
-        value: impl Into<NewValue>,
+        value: impl Into<NewValue<'v>>,
     ) -> bool {
         let key = key.into();
         if self.get(&key).is_some() {
@@ -1337,7 +1337,7 @@ impl fmt::Display for Path {
 /// A document whose root is `value`. A container passed as
 /// [`NewValue::Node`] is adopted by reference, sharing its arena rather than
 /// being copied.
-fn rooted_document(value: impl Into<NewValue>) -> apollo_json::Document {
+fn rooted_document<'v>(value: impl Into<NewValue<'v>>) -> apollo_json::Document {
     let mut builder = DocumentBuilder::new();
     builder
         .set_path(&[], value)
@@ -1346,7 +1346,7 @@ fn rooted_document(value: impl Into<NewValue>) -> apollo_json::Document {
 }
 
 /// A standalone [`Value`] holding `value`.
-fn rooted_value(value: impl Into<NewValue>) -> Value {
+fn rooted_value<'v>(value: impl Into<NewValue<'v>>) -> Value {
     rooted_document(value).root_handle()
 }
 
@@ -1359,7 +1359,7 @@ pub(crate) fn null() -> Value {
 /// A JSON string.
 #[allow(dead_code)]
 pub(crate) fn string(value: impl Into<String>) -> Value {
-    rooted_value(NewValue::String(value.into()))
+    rooted_value(NewValue::String(value.into().into()))
 }
 
 /// A JSON boolean.

@@ -168,7 +168,7 @@ impl Query {
                                     &mut output,
                                     &mut Vec::new(),
                                 ) {
-                                    Ok(()) => output.into_value(),
+                                    Ok(()) => output.into_response_value(),
                                     Err(InvalidValue) => json_ext::null(),
                                 },
                             );
@@ -241,7 +241,7 @@ impl Query {
                             &mut output,
                             &mut Vec::new(),
                         ) {
-                            Ok(()) => output.into_value(),
+                            Ok(()) => output.into_response_value(),
                             Err(InvalidValue) => json_ext::null(),
                         },
                     );
@@ -369,10 +369,10 @@ impl Query {
     /// - Returns Err(InvalidValue) if formatting fails and error(s) have been emitted.
     fn format_value<'a: 'b, 'b>(
         &'a self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'a>,
         field_type: &executable::Type,
         input: &Value,
-        output: &mut Value,
+        output: &mut NewValue<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
@@ -425,10 +425,10 @@ impl Query {
     #[inline]
     fn format_non_nullable_value<'a: 'b, 'b>(
         &'a self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'a>,
         field_type: &executable::Type,
         input: &Value,
-        output: &mut Value,
+        output: &mut NewValue<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
@@ -446,7 +446,7 @@ impl Query {
         let inner_result =
             self.format_value(parameters, &inner_type, input, output, path, selection_set);
 
-        if output.is_null() {
+        if is_pending_null(output) {
             let message = format!("Null value found for non-nullable type {inner_type}");
             match inner_result {
                 Ok(()) => {
@@ -505,22 +505,34 @@ impl Query {
     #[inline]
     fn format_list<'a: 'b, 'b>(
         &'a self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'a>,
         input: &Value,
         inner_type: &executable::Type,
-        output: &mut Value,
+        output: &mut NewValue<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
         let Some(input_array) = input.as_array() else {
             return Ok(());
         };
-        // Elements are formatted into this vector and written back as one array,
-        // since an apollo-json value cannot be mutated through a handle.
-        let mut output_array = if output.is_null() {
-            vec![json_ext::null(); input_array.len()]
-        } else {
-            output.as_array().ok_or(InvalidValue)?
+        // Elements are formatted in place in this pending array. Taking the
+        // output leaves the slot null while the elements are formatted, so a
+        // list abandoned partway through never leaves half an array behind.
+        let mut output_array = match std::mem::replace(output, NewValue::Null) {
+            // An earlier fragment already formatted this list; keep what it
+            // wrote and let the selections below merge into it.
+            NewValue::Array(items) => items,
+            // Nothing written here yet: one pending null per input element. A
+            // nullified slot reads as a null too, matching the `is_null` check
+            // this replaced — that accepted any spelling of null, so this does.
+            pending if is_pending_null(&pending) => std::iter::repeat_with(|| NewValue::Null)
+                .take(input_array.len())
+                .collect(),
+            // Some other value is already at this slot, so the list cannot be
+            // formatted over it. An adopted handle cannot appear here: a
+            // list-typed field only ever reaches this function, which writes a
+            // pending array or a null.
+            _ => return Err(InvalidValue),
         };
         let result = input_array.iter().enumerate().try_for_each(|(i, element)| {
             path.push(ResponsePathElement::Index(i));
@@ -556,10 +568,10 @@ impl Query {
                         .build(),
                 );
             }
-            *output = json_ext::null();
+            *output = NewValue::Null;
             return Err(InvalidValue);
         }
-        *output = json_ext::array(output_array);
+        *output = NewValue::Array(output_array);
         Ok(())
     }
 
@@ -567,11 +579,11 @@ impl Query {
     #[allow(clippy::too_many_arguments)]
     fn format_named_type<'a: 'b, 'b>(
         &'a self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'a>,
         field_type: &executable::Type,
         input: &Value,
         type_name: &Name,
-        output: &mut Value,
+        output: &mut NewValue<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
@@ -579,15 +591,19 @@ impl Query {
         // so we must pass them directly to the client
         match parameters.schema.types.get(type_name) {
             Some(ExtendedType::Scalar(_)) => {
-                *output = input.clone();
+                *output = NewValue::Node(input.clone());
                 return Ok(());
             }
             Some(ExtendedType::Enum(enum_type)) => {
-                *output = input
+                // An enum value outside the schema's value set is nullified,
+                // exactly as the previous `unwrap_or_default()` on a value did.
+                *output = match input
                     .as_str_owned()
-                    .filter(|s| enum_type.values.contains_key(s.as_str()))
-                    .map(|_| input.clone())
-                    .unwrap_or_default();
+                    .filter(|value| enum_type.values.contains_key(value.as_str()))
+                {
+                    Some(_) => NewValue::Node(input.clone()),
+                    None => NewValue::Null,
+                };
                 return Ok(());
             }
             _ => {}
@@ -607,17 +623,25 @@ impl Query {
                     parameters.schema.types.get(input_type.as_str())
                 else {
                     parameters.nullified.push(Path::from_response_slice(path));
-                    *output = json_ext::null();
+                    *output = NewValue::Null;
                     return Ok(());
                 };
             }
 
-            let mut output_object = if output.is_null() {
-                OutputObject::new()
-            } else if output.is_object() {
-                OutputObject::from_value(output)
-            } else {
-                return Err(InvalidValue);
+            // Taking the output leaves the slot null while the members are
+            // formatted, so an object abandoned partway through never leaves a
+            // half-formatted object behind.
+            let mut output_object = match std::mem::replace(output, NewValue::Null) {
+                // An earlier fragment already formatted members here; keep them
+                // and let this selection set merge into them.
+                NewValue::Object(members) => OutputObject::reopen(members),
+                // Nothing written here yet, in any spelling of null — the
+                // `is_null` check this replaced accepted them all.
+                pending if is_pending_null(&pending) => OutputObject::new(),
+                // Some other value is already at this slot. An adopted handle
+                // cannot appear here: a field with a selection set only reaches
+                // this function, which writes a pending object or a null.
+                _ => return Err(InvalidValue),
             };
 
             let typename = input
@@ -642,14 +666,14 @@ impl Query {
                 current_type,
             ) {
                 parameters.nullified.push(Path::from_response_slice(path));
-                *output = json_ext::null();
+                *output = NewValue::Null;
                 // Propagate the Err, since `apply_selection_set` already emitted an error.
                 return Err(err);
             }
-            *output = output_object.into_value();
+            *output = output_object.into_pending();
         } else {
             parameters.nullified.push(Path::from_response_slice(path));
-            *output = json_ext::null();
+            *output = NewValue::Null;
             // We don't emit errors for null object value nor propagate Err.
             // Note: `format_non_nullable_value` will emit an error if this object's type is
             //       non-nullable.
@@ -661,18 +685,18 @@ impl Query {
     #[inline]
     fn format_integer(
         &self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_>,
         path: &[ResponsePathElement<'_>],
         input: &Value,
-        output: &mut Value,
+        output: &mut NewValue<'_>,
     ) -> Result<(), InvalidValue> {
         // if the value is invalid, we do not insert it in the output object
         // which is equivalent to inserting null
         if input.is_valid_int_input() {
-            *output = input.clone();
+            *output = NewValue::Node(input.clone());
             Ok(())
         } else {
-            *output = json_ext::null();
+            *output = NewValue::Null;
             if input.is_null() {
                 Ok(())
             } else {
@@ -691,16 +715,16 @@ impl Query {
     #[inline]
     fn format_float(
         &self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_>,
         path: &[ResponsePathElement<'_>],
         input: &Value,
-        output: &mut Value,
+        output: &mut NewValue<'_>,
     ) -> Result<(), InvalidValue> {
         if input.is_valid_float_input() {
-            *output = input.clone();
+            *output = NewValue::Node(input.clone());
             Ok(())
         } else {
-            *output = json_ext::null();
+            *output = NewValue::Null;
             if input.is_null() {
                 Ok(())
             } else {
@@ -719,16 +743,16 @@ impl Query {
     #[inline]
     fn format_boolean(
         &self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_>,
         path: &[ResponsePathElement<'_>],
         input: &Value,
-        output: &mut Value,
+        output: &mut NewValue<'_>,
     ) -> Result<(), InvalidValue> {
         if input.as_bool().is_some() {
-            *output = input.clone();
+            *output = NewValue::Node(input.clone());
             Ok(())
         } else {
-            *output = json_ext::null();
+            *output = NewValue::Null;
             if input.is_null() {
                 Ok(())
             } else {
@@ -747,16 +771,16 @@ impl Query {
     #[inline]
     fn format_string(
         &self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_>,
         path: &[ResponsePathElement<'_>],
         input: &Value,
-        output: &mut Value,
+        output: &mut NewValue<'_>,
     ) -> Result<(), InvalidValue> {
         if input.as_str().is_some() {
-            *output = input.clone();
+            *output = NewValue::Node(input.clone());
             Ok(())
         } else {
-            *output = json_ext::null();
+            *output = NewValue::Null;
             if input.is_null() {
                 Ok(())
             } else {
@@ -775,16 +799,16 @@ impl Query {
     #[inline]
     fn format_id(
         &self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_>,
         path: &[ResponsePathElement<'_>],
         input: &Value,
-        output: &mut Value,
+        output: &mut NewValue<'_>,
     ) -> Result<(), InvalidValue> {
         if input.is_string() || input.is_number() {
-            *output = input.clone();
+            *output = NewValue::Node(input.clone());
             Ok(())
         } else {
-            *output = json_ext::null();
+            *output = NewValue::Null;
             if input.is_null() {
                 Ok(())
             } else {
@@ -803,7 +827,7 @@ impl Query {
     fn apply_selection_set<'a: 'b, 'b>(
         &'a self,
         selection_set: &'a [Selection],
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'a>,
         input: &Value,
         output: &mut OutputObject<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
@@ -850,38 +874,36 @@ impl Query {
                     }
 
                     if let Some(input_value) = input.get(field_name.as_str()) {
-                        let mut output_value = match output.get(field_name.as_str()) {
-                            Some(existing) => {
-                                // if there's already a value for that key in the output it means either:
-                                // - the value is a scalar and was already copied into output
-                                // - the value was already null and is already present in output
-                                // if we expect an object or list at that key, output will already contain
-                                // an object or list and then input_value cannot be null
+                        // if there's already a value for that key in the output it means either:
+                        // - the value is a scalar and was already copied into output
+                        // - the value was already null and is already present in output
+                        // if we expect an object or list at that key, output will already contain
+                        // an object or list and then input_value cannot be null
 
-                                // A prior fragment spread may have nullified this field due to a non-null
-                                // constraint violation. Object-typed inputs keep their value, so
-                                // input_value stays non-null even after nullification; without this guard
-                                // a later fragment would re-enter format_value and overwrite the null.
-                                if input_value.is_null() || existing.is_null() {
-                                    continue;
-                                }
-                                existing
-                            }
-                            None => json_ext::null(),
-                        };
+                        // A prior fragment spread may have nullified this field due to a non-null
+                        // constraint violation. Object-typed inputs keep their value, so
+                        // input_value stays non-null even after nullification; without this guard
+                        // a later fragment would re-enter format_value and overwrite the null.
+                        if let Some(existing) = output.peek(field_name.as_str())
+                            && (input_value.is_null() || is_pending_null(existing))
+                        {
+                            continue;
+                        }
 
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         path.push(ResponsePathElement::Key(field_name.as_str()));
+                        // Format through the member's slot: a field seen for the
+                        // first time is appended as a pending null and written in
+                        // place, so nothing is moved out of the object and back.
                         let res = self.format_value(
                             parameters,
                             &field_type.0,
                             &input_value,
-                            &mut output_value,
+                            output.slot(field_name.as_str()),
                             path,
                             selection_set,
                         );
                         path.pop();
-                        output.insert(field_name.as_str(), output_value);
                         // Type-aware Err handling: non-null fields propagate Err to continue the
                         // bubble; nullable fields swallow (the child already reported, the field
                         // is already nullified).
@@ -1009,9 +1031,9 @@ impl Query {
 
     fn apply_root_selection_set<'a: 'b, 'b>(
         &'a self,
-        root_type_name: &str,
+        root_type_name: &'a str,
         selection_set: &'a [Selection],
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'a>,
         input: &Value,
         output: &mut OutputObject<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
@@ -1037,9 +1059,9 @@ impl Query {
     #[allow(clippy::too_many_arguments)]
     fn apply_root_selection_set_cached<'a: 'b, 'b>(
         &'a self,
-        root_type_name: &str,
+        root_type_name: &'a str,
         selection_set: &'a [Selection],
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'a>,
         input: &Value,
         output: &mut OutputObject<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
@@ -1066,38 +1088,35 @@ impl Query {
                             output.insert(field_name_str, root_type_name);
                         }
                     } else if let Some(input_value) = input.get(field_name_str) {
-                        let mut output_value = match output.get(field_name_str) {
-                            Some(existing) => {
-                                // if there's already a value for that key in the output it means either:
-                                // - the value is a scalar and was already copied into output
-                                // - the value was already null and is already present in output
-                                // if we expect an object or list at that key, output will already contain
-                                // an object or list and then input_value cannot be null
+                        // if there's already a value for that key in the output it means either:
+                        // - the value is a scalar and was already copied into output
+                        // - the value was already null and is already present in output
+                        // if we expect an object or list at that key, output will already contain
+                        // an object or list and then input_value cannot be null
 
-                                // A prior fragment spread may have nullified this field due to a non-null
-                                // constraint violation. Object-typed inputs keep their value, so
-                                // input_value stays non-null even after nullification; without this guard
-                                // a later fragment would re-enter format_value and overwrite the null.
-                                if input_value.is_null() || existing.is_null() {
-                                    continue;
-                                }
-                                existing
-                            }
-                            None => json_ext::null(),
-                        };
+                        // A prior fragment spread may have nullified this field due to a non-null
+                        // constraint violation. Object-typed inputs keep their value, so
+                        // input_value stays non-null even after nullification; without this guard
+                        // a later fragment would re-enter format_value and overwrite the null.
+                        if let Some(existing) = output.peek(field_name_str)
+                            && (input_value.is_null() || is_pending_null(existing))
+                        {
+                            continue;
+                        }
 
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         path.push(ResponsePathElement::Key(field_name_str));
+                        // Format through the member's slot, as in
+                        // `apply_selection_set`.
                         let res = self.format_value(
                             parameters,
                             &field_type.0,
                             &input_value,
-                            &mut output_value,
+                            output.slot(field_name_str),
                             path,
                             selection_set,
                         );
                         path.pop();
-                        output.insert(field_name_str, output_value);
                         // Type-aware Err handling (mirrors `apply_selection_set`): non-null fields
                         // propagate Err to continue the bubble; nullable fields swallow (child
                         // already reported, field is already nullified).
@@ -1391,14 +1410,35 @@ fn emit_missing_field<'b>(
     }
 }
 
+/// Whether a pending value is a JSON `null`.
+///
+/// A formatted null reaches the output either as `NewValue::Null`, written by a
+/// formatter that nullified the slot, or as an adopted handle that happens to
+/// hold a null, when the subgraph's own value passed through unchanged. Both are
+/// nulls in the response, and nullability propagation has to treat them alike.
+fn is_pending_null(value: &NewValue<'_>) -> bool {
+    match value {
+        NewValue::Null => true,
+        NewValue::Node(handle) => handle.is_null(),
+        _ => false,
+    }
+}
+
 /// One output object under construction, holding its members in the order the
 /// query requested them.
 ///
-/// [`OutputObject::into_value`] seals the members into a value in one pass,
-/// adopting each member by reference, so a subtree that passed through
-/// formatting unchanged keeps sharing the arena it came from.
+/// Members are *pending*: they live here as `NewValue`s and reach an arena only
+/// when the root of the response is sealed, once, by
+/// [`OutputObject::into_response_value`]. Nothing intermediate is allocated in
+/// an arena, so a subtree that nullability propagation later discards cost
+/// nothing to build, and a subtree that came through formatting unchanged is
+/// still adopted by reference from the arena it arrived in.
+///
+/// Keys borrow from the parsed query, so writing a member is a `Vec` push with
+/// no allocation; the only copy is the one into the arena at seal time, which
+/// the response needs regardless.
 struct OutputObject<'a> {
-    members: Vec<(Cow<'a, str>, NewValue)>,
+    members: Vec<(Cow<'a, str>, NewValue<'a>)>,
 }
 
 impl<'a> OutputObject<'a> {
@@ -1408,14 +1448,9 @@ impl<'a> OutputObject<'a> {
         }
     }
 
-    /// Reopens an object value for further members, adopting each by reference.
-    fn from_value(value: &Value) -> Self {
-        OutputObject {
-            members: value
-                .object_iter()
-                .map(|(key, member)| (Cow::Owned(key), NewValue::Node(member)))
-                .collect(),
-        }
+    /// Continues an object an earlier fragment already wrote members into.
+    fn reopen(members: Vec<(Cow<'a, str>, NewValue<'a>)>) -> Self {
+        OutputObject { members }
     }
 
     fn position(&self, key: &str) -> Option<usize> {
@@ -1426,35 +1461,41 @@ impl<'a> OutputObject<'a> {
         self.position(key).is_some()
     }
 
-    /// A handle to the member already written at `key`.
-    fn get(&self, key: &str) -> Option<Value> {
+    /// The member already written at `key`, for deciding whether to format over
+    /// it.
+    fn peek(&self, key: &str) -> Option<&NewValue<'a>> {
         let (_, member) = &self.members[self.position(key)?];
-        Some(match member {
-            NewValue::Node(handle) => handle.clone(),
-            NewValue::Null => json_ext::null(),
-            NewValue::Bool(value) => json_ext::bool_value(*value),
-            NewValue::Int(value) => json_ext::from_i64(*value),
-            NewValue::Float(value) => json_ext::from_f64(*value),
-            NewValue::String(value) => json_ext::string(value.as_str()),
-            // `NewValue` is non-exhaustive. Only the variants above are ever
-            // written here, and a value read back but not recognized would
-            // silently drop a member, so name the variant rather than
-            // substituting a default.
-            other => unreachable!("unhandled output member: {other:?}"),
-        })
+        Some(member)
+    }
+
+    /// The slot for `key`, appended as a pending null when the key is new, so a
+    /// formatter can write through it in place instead of reading a value out
+    /// and putting it back. A key already present keeps its position.
+    fn slot(&mut self, key: impl Into<Cow<'a, str>>) -> &mut NewValue<'a> {
+        let key = key.into();
+        let index = match self.position(&key) {
+            Some(index) => index,
+            None => {
+                self.members.push((key, NewValue::Null));
+                self.members.len() - 1
+            }
+        };
+        &mut self.members[index].1
     }
 
     /// Writes `value` at `key`, keeping the position of a key already present.
-    fn insert(&mut self, key: impl Into<Cow<'a, str>>, value: impl Into<NewValue>) {
-        let key = key.into();
-        let existing = self.position(&key);
-        match existing {
-            Some(index) => self.members[index].1 = value.into(),
-            None => self.members.push((key, value.into())),
-        }
+    fn insert(&mut self, key: impl Into<Cow<'a, str>>, value: impl Into<NewValue<'a>>) {
+        *self.slot(key) = value.into();
     }
 
-    fn into_value(self) -> Value {
+    /// The pending object, for a parent to hold as one of its own members.
+    fn into_pending(self) -> NewValue<'a> {
+        NewValue::Object(self.members)
+    }
+
+    /// Seals the whole pending tree into one document — one arena for the entire
+    /// response, rather than one per object.
+    fn into_response_value(self) -> Value {
         let mut builder = DocumentBuilder::new();
         for (key, member) in self.members {
             builder

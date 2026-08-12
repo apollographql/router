@@ -327,10 +327,10 @@ async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Re
 
 // Replaces value at path with the provided one.
 // Returns the provided path if the path is not valid for the given object
-fn replace_value_at_path<'a>(
+fn replace_value_at_path<'v, 'a>(
     variables: &mut json_ext::Value,
     path: &'a [String],
-    value: impl Into<NewValue>,
+    value: impl Into<NewValue<'v>>,
 ) -> std::result::Result<(), &'a [String]> {
     match resolve_path(variables, path) {
         Some(segments) => {
@@ -377,10 +377,10 @@ fn resolve_path<'a>(
     Some(segments)
 }
 
-fn write_at_path(
+fn write_at_path<'v>(
     variables: &mut json_ext::Value,
     segments: &[PathSegment<'_>],
-    value: impl Into<NewValue>,
+    value: impl Into<NewValue<'v>>,
 ) {
     let mut builder = variables.detach().edit();
     builder

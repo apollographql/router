@@ -181,7 +181,7 @@ impl RequestBuilder {
 
     /// Adds one variable, replacing any variable of the same name.
     #[must_use]
-    pub fn variable(mut self, name: impl Into<String>, value: impl Into<NewValue>) -> Self {
+    pub fn variable<'v>(mut self, name: impl Into<String>, value: impl Into<NewValue<'v>>) -> Self {
         self.variables.insert(name, value);
         self
     }
@@ -196,7 +196,7 @@ impl RequestBuilder {
 
     /// Adds one extension, replacing any extension under the same key.
     #[must_use]
-    pub fn extension(mut self, key: impl Into<String>, value: impl Into<NewValue>) -> Self {
+    pub fn extension<'v>(mut self, key: impl Into<String>, value: impl Into<NewValue<'v>>) -> Self {
         self.extensions.insert(key, value);
         self
     }

@@ -17,7 +17,7 @@ pub(crate) fn is_empty_object(value: &Value) -> bool {
 }
 
 /// `object` with `value` written at `key`, replacing any member already there.
-pub(crate) fn insert_member(object: Value, key: &str, value: impl Into<NewValue>) -> Value {
+pub(crate) fn insert_member<'v>(object: Value, key: &str, value: impl Into<NewValue<'v>>) -> Value {
     let mut builder = edit_object(object);
     set_member(&mut builder, key, value);
     builder.seal().root_handle()
@@ -33,7 +33,7 @@ fn edit_object(object: Value) -> DocumentBuilder {
     }
 }
 
-fn set_member(builder: &mut DocumentBuilder, key: &str, value: impl Into<NewValue>) {
+fn set_member<'v>(builder: &mut DocumentBuilder, key: &str, value: impl Into<NewValue<'v>>) {
     builder
         .set(key, value)
         .expect("an object root accepts any key holding a finite number");
@@ -45,7 +45,7 @@ pub(crate) struct ObjectAccumulator(Option<Value>);
 
 impl ObjectAccumulator {
     /// Adds one member, replacing any member already at `key`.
-    pub(crate) fn insert(&mut self, key: impl Into<String>, value: impl Into<NewValue>) {
+    pub(crate) fn insert<'v>(&mut self, key: impl Into<String>, value: impl Into<NewValue<'v>>) {
         let object = self.0.take().unwrap_or_else(empty_object);
         self.0 = Some(insert_member(object, key.into().as_str(), value));
     }
