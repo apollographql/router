@@ -5,6 +5,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::schema::Type;
 use encoding_rs::Encoding;
 use encoding_rs::UTF_8;
 use http::HeaderMap;
@@ -18,6 +19,7 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
+use crate::connectors::ConnectSpec;
 use crate::connectors::Connector;
 use crate::connectors::JSONSelection;
 use crate::connectors::ProblemLocation;
@@ -124,9 +126,94 @@ pub fn handle_raw_response(
         warnings,
     );
     if success {
-        map_response(data, key, inputs, warnings)
+        let response = map_response(data, key, inputs, warnings);
+        check_response_shape(connector, response)
     } else {
         map_error(connector, data, parts, key, inputs, warnings)
+    }
+}
+
+/// The error code used for [`check_response_shape`] errors, distinguishing a
+/// response-shape violation from an ordinary fetch failure (`CONNECTORS_FETCH`).
+const RESPONSE_SHAPE_ERROR_CODE: &str = "CONNECTORS_RESPONSE_SHAPE";
+
+/// Returns an error when the mapped response value doesn't match the shape
+/// the schema declares for this field: arrayness (`[T]` vs `T`) or
+/// non-null (`T!` receiving `null`). Without this check, a shape mismatch is
+/// silently nullified by the GraphQL runtime, and a `null` for a non-null
+/// field is only reported via the `extensions.valueCompletion` side channel
+/// rather than a top-level error — both making the underlying bug nearly
+/// impossible to diagnose. This provides an actionable error instead.
+///
+/// `output_type` is `None` for type-level connectors (e.g. `BatchEntity`,
+/// which always returns an array by design and has its own validation in
+/// `add_to_data`), since they have no field definition to derive shape from;
+/// the check is skipped in that case.
+///
+/// Only runs for connect/v0.5+ connectors: this changes visible behavior (a
+/// case that used to return null now returns an error), so v0.4-and-earlier
+/// connectors are unaffected when they upgrade.
+fn check_response_shape(connector: &Connector, response: MappedResponse) -> MappedResponse {
+    let MappedResponse::Data {
+        data,
+        key,
+        problems,
+    } = response
+    else {
+        return response;
+    };
+
+    if connector.spec < ConnectSpec::V0_5 {
+        return MappedResponse::Data {
+            data,
+            key,
+            problems,
+        };
+    }
+
+    let is_array = matches!(data, Value::Array(_));
+    let is_null = matches!(data, Value::Null);
+    let output_is_list = connector.output_type.as_ref().map(Type::is_list);
+    let output_is_non_null = connector.output_type.as_ref().map(Type::is_non_null);
+
+    let message = if is_null {
+        (output_is_non_null == Some(true)).then(|| {
+            "Response was null. The schema declares this field non-nullable, \
+             but the connector returned no data."
+                .to_string()
+        })
+    } else if output_is_list == Some(true) && !is_array {
+        Some(
+            "Response was not a list. The schema expects a list for this field, \
+             but the connector returned a single object. \
+             Check that the API returns an array."
+                .to_string(),
+        )
+    } else if output_is_list == Some(false) && is_array {
+        Some(
+            "Response was a list. The schema expects a single object for this field, \
+             but the connector returned an array."
+                .to_string(),
+        )
+    } else {
+        None
+    };
+
+    if let Some(message) = message {
+        let mut error = RuntimeError::new(message, &key).with_code(RESPONSE_SHAPE_ERROR_CODE);
+        error.subgraph_name = Some(connector.id.subgraph_name.clone());
+        error.coordinate = Some(connector.id.coordinate());
+        MappedResponse::Error {
+            error,
+            key,
+            problems,
+        }
+    } else {
+        MappedResponse::Data {
+            data,
+            key,
+            problems,
+        }
     }
 }
 
@@ -763,6 +850,7 @@ mod tests {
 
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
+    use apollo_compiler::schema::Type;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::StatusCode;
@@ -773,6 +861,7 @@ mod tests {
     use super::MappedResponse;
     use super::deserialize_response;
     use super::is_success;
+    use crate::connectors::ConnectSpec;
     use crate::connectors::JSONSelection;
     use crate::connectors::runtime::inputs::RequestInputs;
     use crate::connectors::runtime::key::ResponseKey;
@@ -917,5 +1006,213 @@ mod tests {
             items[0].get("viewUri").is_none(),
             "original field name should not appear in output when aliased"
         );
+    }
+
+    fn make_connector(
+        output_type: Option<Type>,
+        spec: ConnectSpec,
+    ) -> crate::connectors::models::Connector {
+        use apollo_compiler::name;
+
+        use crate::connectors::ConnectId;
+        use crate::connectors::models::Connector;
+        use crate::connectors::models::ConnectorErrorsSettings;
+
+        Connector {
+            id: ConnectId::new(
+                "subgraph".into(),
+                None,
+                name!("Query"),
+                name!("posts"),
+                None,
+                0,
+            ),
+            transport: None,
+            selection: JSONSelection::parse("$").unwrap(),
+            config: None,
+            max_requests: None,
+            entity_resolver: None,
+            spec,
+            schema_subtypes_map: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            batch_settings: None,
+            error_settings: ConnectorErrorsSettings::default(),
+            output_type,
+            label: "test".into(),
+        }
+    }
+
+    fn root_field_key(name: &str) -> ResponseKey {
+        ResponseKey::RootField {
+            name: name.to_string(),
+            inputs: RequestInputs::default(),
+            selection: Arc::new(JSONSelection::parse("$").unwrap()),
+        }
+    }
+
+    // CNN-564: when schema declares a list field but API returns a single object,
+    // check_response_shape must return an error instead of silently passing through
+    // the wrong-shaped data (which the router would null without explanation).
+    #[test]
+    fn list_field_with_object_response_produces_error() {
+        let connector = make_connector(Some(apollo_compiler::ty!([Post])), ConnectSpec::V0_5);
+        let key = root_field_key("posts");
+        let response = MappedResponse::Data {
+            data: json!({"id": 1, "title": "First"}),
+            key,
+            problems: vec![],
+        };
+
+        let result = super::check_response_shape(&connector, response);
+
+        let MappedResponse::Error { error, .. } = result else {
+            panic!("expected Error variant, got Data");
+        };
+        assert!(
+            error.message.contains("not a list"),
+            "error message should explain the mismatch, got: {:?}",
+            error.message
+        );
+        assert_eq!(error.code(), "CONNECTORS_RESPONSE_SHAPE");
+    }
+
+    // CNN-564: when schema declares a single-object field but API returns an array,
+    // check_response_shape must return an error.
+    #[test]
+    fn non_list_field_with_array_response_produces_error() {
+        let connector = make_connector(Some(apollo_compiler::ty!(Post)), ConnectSpec::V0_5);
+        let key = root_field_key("post");
+        let response = MappedResponse::Data {
+            data: json!([{"id": 1}, {"id": 2}]),
+            key,
+            problems: vec![],
+        };
+
+        let result = super::check_response_shape(&connector, response);
+
+        let MappedResponse::Error { error, .. } = result else {
+            panic!("expected Error variant, got Data");
+        };
+        assert!(
+            error.message.contains("a list"),
+            "error message should explain the mismatch, got: {:?}",
+            error.message
+        );
+        assert_eq!(error.code(), "CONNECTORS_RESPONSE_SHAPE");
+    }
+
+    // CNN-564: when schema declares a nullable list field and API returns null,
+    // do NOT emit a shape-mismatch error (null is a valid/separate failure mode).
+    #[test]
+    fn nullable_list_field_with_null_response_passes_through() {
+        let connector = make_connector(Some(apollo_compiler::ty!([Post])), ConnectSpec::V0_5);
+        let key = root_field_key("posts");
+        let response = MappedResponse::Data {
+            data: Value::Null,
+            key,
+            problems: vec![],
+        };
+
+        let result = super::check_response_shape(&connector, response);
+
+        assert!(
+            matches!(result, MappedResponse::Data { .. }),
+            "null data should pass through without a shape-mismatch error"
+        );
+    }
+
+    // CNN-564: when the field's arrayness is unknown (e.g. type-level
+    // connectors with no field definition), skip the check entirely rather
+    // than treating `None` as `false` and false-positiving on arrayness.
+    #[test]
+    fn unknown_arrayness_skips_check() {
+        let connector = make_connector(None, ConnectSpec::V0_5);
+        let key = root_field_key("posts");
+        let response = MappedResponse::Data {
+            data: json!([{"id": 1}, {"id": 2}]),
+            key,
+            problems: vec![],
+        };
+
+        let result = super::check_response_shape(&connector, response);
+
+        assert!(
+            matches!(result, MappedResponse::Data { .. }),
+            "unknown arrayness should not produce a shape-mismatch error"
+        );
+    }
+
+    // CNN-564: when schema declares a non-null field and the API returns
+    // null, emit an actionable error instead of relying on the generic
+    // null-bubbling machinery, which by default only surfaces via
+    // `extensions.valueCompletion` rather than a top-level error.
+    #[test]
+    fn non_null_field_with_null_response_produces_error() {
+        let connector = make_connector(Some(apollo_compiler::ty!([Post]!)), ConnectSpec::V0_5);
+        let key = root_field_key("posts");
+        let response = MappedResponse::Data {
+            data: Value::Null,
+            key,
+            problems: vec![],
+        };
+
+        let result = super::check_response_shape(&connector, response);
+
+        let MappedResponse::Error { error, .. } = result else {
+            panic!("expected Error variant, got Data");
+        };
+        assert!(
+            error.message.contains("non-nullable"),
+            "error message should explain the non-null violation, got: {:?}",
+            error.message
+        );
+        assert_eq!(error.code(), "CONNECTORS_RESPONSE_SHAPE");
+    }
+
+    // CNN-564: this check is a visible behavior change (null -> error), so it
+    // must only run for connect/v0.5+; earlier connectors are unaffected when
+    // they upgrade.
+    #[test]
+    fn pre_v0_5_connectors_are_unaffected() {
+        let connector = make_connector(Some(apollo_compiler::ty!([Post]!)), ConnectSpec::V0_4);
+        let key = root_field_key("posts");
+        let response = MappedResponse::Data {
+            data: json!({"id": 1, "title": "First"}),
+            key,
+            problems: vec![],
+        };
+
+        let result = super::check_response_shape(&connector, response);
+
+        assert!(
+            matches!(result, MappedResponse::Data { .. }),
+            "v0.4 and earlier connectors must not be affected by this check"
+        );
+    }
+
+    // CNN-564: when the response is already an Error, check_response_shape must
+    // leave it untouched (don't double-error).
+    #[test]
+    fn error_response_is_unchanged_by_list_check() {
+        use crate::connectors::runtime::errors::RuntimeError;
+
+        let connector = make_connector(Some(apollo_compiler::ty!([Post])), ConnectSpec::V0_5);
+        let key = root_field_key("posts");
+        let error = RuntimeError::new("original error", &key);
+        let response = MappedResponse::Error {
+            error,
+            key,
+            problems: vec![],
+        };
+
+        let result = super::check_response_shape(&connector, response);
+
+        let MappedResponse::Error { error, .. } = result else {
+            panic!("expected Error variant");
+        };
+        assert_eq!(error.message, "original error");
     }
 }

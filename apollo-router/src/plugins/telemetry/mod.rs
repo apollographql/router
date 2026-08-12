@@ -2135,10 +2135,10 @@ impl TextMapPropagator for CustomTraceIdPropagator {
         cx: &opentelemetry::Context,
         extractor: &dyn Extractor,
     ) -> opentelemetry::Context {
-        cx.with_remote_span_context(
-            self.extract_span_context(extractor)
-                .unwrap_or_else(SpanContext::empty_context),
-        )
+        match self.extract_span_context(extractor) {
+            Some(span_context) => cx.with_remote_span_context(span_context),
+            None => cx.clone(),
+        }
     }
 
     fn fields(&self) -> FieldIter<'_> {
@@ -3470,6 +3470,71 @@ mod tests {
         ));
 
         assert!(tracing_test::logs_contain(&invalid_trace_id));
+    }
+
+    #[test]
+    fn test_extract_with_context_preserves_existing_context_when_header_absent() {
+        let header = String::from("x-trace-id");
+        let propagator = CustomTraceIdPropagator::new(header, TraceIdFormat::Uuid);
+
+        let existing_span_context = SpanContext::new(
+            TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736").unwrap(),
+            SpanId::from_hex("00f067aa0ba902b7").unwrap(),
+            TraceFlags::default().with_sampled(true),
+            true,
+            TraceState::default(),
+        );
+        let cx =
+            opentelemetry::Context::new().with_remote_span_context(existing_span_context.clone());
+
+        let headers: HashMap<String, String> = HashMap::new();
+
+        let result_cx = propagator.extract_with_context(&cx, &headers);
+
+        assert_eq!(result_cx.span().span_context(), &existing_span_context);
+    }
+
+    #[test]
+    fn test_extract_with_context_stays_empty_when_header_absent_and_no_prior_context() {
+        let header = String::from("x-trace-id");
+        let propagator = CustomTraceIdPropagator::new(header, TraceIdFormat::Uuid);
+
+        let cx = opentelemetry::Context::new(); // no propagator has extracted anything yet
+        let headers: HashMap<String, String> = HashMap::new(); // custom header absent
+
+        let result_cx = propagator.extract_with_context(&cx, &headers);
+
+        assert_eq!(
+            result_cx.span().span_context(),
+            &SpanContext::empty_context()
+        );
+    }
+
+    #[test]
+    fn test_extract_with_context_overrides_when_header_present() {
+        let header = String::from("x-trace-id");
+        let propagator = CustomTraceIdPropagator::new(header.clone(), TraceIdFormat::Uuid);
+
+        // Prior context, as if W3C had already extracted a different traceparent.
+        let previous_span_context = SpanContext::new(
+            TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736").unwrap(),
+            SpanId::from_hex("00f067aa0ba902b7").unwrap(),
+            TraceFlags::default().with_sampled(true),
+            true,
+            TraceState::default(),
+        );
+        let cx = opentelemetry::Context::new().with_remote_span_context(previous_span_context);
+
+        // Custom header is present and must take precedence.
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert(header, "04f9e396-465c-4840-bc2b-f493b8b1a7fc".to_string());
+
+        let result_cx = propagator.extract_with_context(&cx, &headers);
+
+        assert_eq!(
+            result_cx.span().span_context().trace_id().to_string(),
+            "04f9e396465c4840bc2bf493b8b1a7fc"
+        );
     }
 
     #[test]
