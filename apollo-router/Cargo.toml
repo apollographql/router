@@ -219,7 +219,7 @@ schemars.workspace = true
 shellexpand = "3.1.0"
 sha2 = "0.10.8"
 semver = "1.0.23"
-apollo-json = { git = "https://github.com/apollographql/apollo-platform-rs", rev = "8a0e4b8f" }
+apollo-json = { git = "https://github.com/apollographql/apollo-platform-rs", rev = "d3e8b193" }
 serde.workspace = true
 serde_derive_default = "0.1"
 serde_json_bytes.workspace = true

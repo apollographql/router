@@ -86,5 +86,5 @@ tower = { version = "0.5.1", features = ["full"] }
 # dependency at the same copy. The rev matches apollo-json's, so one
 # checkout serves both.
 [patch.crates-io]
-apollo-errors = { git = "https://github.com/apollographql/apollo-platform-rs", rev = "8a0e4b8f" }
-apollo-errors-derive = { git = "https://github.com/apollographql/apollo-platform-rs", rev = "8a0e4b8f" }
+apollo-errors = { git = "https://github.com/apollographql/apollo-platform-rs", rev = "d3e8b193" }
+apollo-errors-derive = { git = "https://github.com/apollographql/apollo-platform-rs", rev = "d3e8b193" }
