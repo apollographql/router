@@ -4,7 +4,12 @@ The deprecated `connectors.subgraphs` configuration field has been removed. The 
 
 Existing configurations are migrated automatically at startup: each `subgraphs.<subgraph_name>.sources.<source_name>` entry is collapsed into a single `sources` entry keyed by `<subgraph_name>.<source_name>`, and any `$config` block at the subgraph level is copied onto each source. The router logs a notice describing the rewrite.
 
-The migration preserves the deprecated runtime's precedence rules: a subgraph-level `$config` overwrites any source-level `$config` defined alongside it (matching the order in which the old `apply_config` assigned values). A subgraph entry that only declares `$config` (no `sources`) cannot be expressed in the new shape and its `$config` is dropped — under the new model, `$config` is per-source.
+The migration preserves the deprecated runtime's precedence rules, including when a `connectors.sources` entry already exists for the same `<subgraph>.<source>` key: the deprecated `override_url` / `max_requests_per_operation` win over it when set, and a subgraph-level `$config` always overwrites any source-level `$config` — matching the order in which the old `apply_config` applied the two shapes.
+
+Two cases can't be fully replicated automatically, and the router logs a separate notice for them:
+
+- A subgraph entry that only declares `$config` (no `sources`) can't be expressed in the new shape, since `$config` is per-source there; its `$config` is dropped.
+- The deprecated runtime applied a subgraph's `$config` to *every* connector under that subgraph, including ones on `@source`s the deprecated config's own `sources` map didn't list. The migration can only copy `$config` onto the composite keys it can see, so if your schema declares additional sources for a migrated subgraph, copy `$config` onto their `connectors.sources` entries by hand.
 
 Before:
 
