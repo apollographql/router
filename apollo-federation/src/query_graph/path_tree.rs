@@ -114,6 +114,8 @@ where
             && self.trigger == other.trigger
             && self.conditions == other.conditions
             && self.tree == other.tree
+            && self.matching_context_ids == other.matching_context_ids
+            && self.arguments_to_context_usages == other.arguments_to_context_usages
     }
 }
 
@@ -366,9 +368,10 @@ where
     }
 
     /// May have false negatives (see comment about `Arc::ptr_eq`)
-    fn equals_same_root(self: &Arc<Self>, other: &Arc<Self>) -> bool {
+    pub(crate) fn equals_same_root(self: &Arc<Self>, other: &Arc<Self>) -> bool {
         Arc::ptr_eq(self, other)
-            || self.childs.iter().zip(&other.childs).all(|(a, b)| {
+            || self.childs.len() == other.childs.len()
+                && self.childs.iter().zip(&other.childs).all(|(a, b)| {
                 a.edge == b.edge
                     // `Arc::ptr_eq` instead of `==` is faster and good enough.
                     // This method is all about avoid unnecessary merging
@@ -410,9 +413,6 @@ where
             self.node, other.node,
             "Cannot merge path trees rooted different nodes"
         );
-        if self == other {
-            return;
-        }
         if other.childs.is_empty() {
             return;
         }

@@ -182,7 +182,9 @@ impl InstrumentData {
         );
         populate_config_instrument!(
             apollo.router.config.authentication.jwt,
-            "$.authentication[?(@..jwt)]"
+            "$.authentication[?(@..jwt)]",
+            opt.on_error,
+            "$.router.jwt.on_error"
         );
         populate_config_instrument!(
             apollo.router.config.authentication.aws.sigv4,
@@ -407,7 +409,9 @@ impl InstrumentData {
             opt.limits.max_file_size,
             "$.limits.max_file_size",
             opt.limits.max_files,
-            "$.limits.max_files"
+            "$.limits.max_files",
+            opt.limits.max_overhead_size,
+            "$.limits.max_overhead_size"
         );
 
         populate_config_instrument!(
