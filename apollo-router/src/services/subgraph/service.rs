@@ -253,7 +253,7 @@ pub(crate) async fn process_batch(
         service: service_name.clone(),
         reason: "no body in response".to_string(),
     })??;
-    let value: Value = apollo_json::Document::parse(body.to_vec())
+    let value: Value = apollo_json::Document::parse(body)
         .map(|document| document.root_handle())
         .map_err(|error| FetchError::SubrequestMalformedResponse {
             service: service_name.clone(),
