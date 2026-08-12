@@ -695,10 +695,7 @@ impl<'schema> SelectionValidator<'schema> {
                                         })
                                         .collect();
                                     for concrete_ref in concrete_refs {
-                                        self.walk_selection_with_shape(
-                                            concrete_ref,
-                                            field_shape,
-                                        )?;
+                                        self.walk_selection_with_shape(concrete_ref, field_shape)?;
                                     }
                                 }
                                 (ExtendedType::Interface(interface_type), true) => {
@@ -723,10 +720,7 @@ impl<'schema> SelectionValidator<'schema> {
                                         })
                                         .collect();
                                     for concrete_ref in concrete_refs {
-                                        self.walk_selection_with_shape(
-                                            concrete_ref,
-                                            field_shape,
-                                        )?;
+                                        self.walk_selection_with_shape(concrete_ref, field_shape)?;
                                     }
                                 }
                                 (_, true) => {
