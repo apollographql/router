@@ -1753,9 +1753,10 @@ async fn insert_entities_in_result(
     let mut inserted_types: HashMap<String, usize> = HashMap::new();
     let mut to_insert: Vec<_> = Vec::new();
     // Split the subgraph errors between those we can attribute to a single fetched entity and
-    // those we cannot. Unattributed errors are passed through untouched at the end so that they
-    // are not lost during reassembly, and they suppress caching for this whole batch because we
-    // cannot tell which of the fetched entities they invalidate.
+    // those we cannot. Unattributed errors are passed through at the end so that they are not
+    // lost during reassembly — see `attribute_errors_to_entities` for the one path rewrite some
+    // of them get — and the ones pointing into `_entities` suppress caching for this whole batch,
+    // because we cannot tell which of the fetched entities they invalidate.
     //
     // Only the entities this reassembly is going to consume — one per cache miss — can be
     // attributed to. A subgraph returning more entities than we asked representations for would
@@ -1767,7 +1768,14 @@ async fn insert_entities_in_result(
         .min(entities.len());
     let (mut errors_by_entity_idx, unattributed_errors) =
         attribute_errors_to_entities(errors, attributable_entity_count);
-    let has_unattributed_errors = !unattributed_errors.is_empty();
+    // Only an error pointing into `_entities` can be about one of the fetched entities, so only
+    // those keep the batch out of the cache. An error with no path, or with a path outside
+    // `_entities`, reports something else — a deprecation notice, a failure from an unrelated part
+    // of the query — and suppressing the write for it would let a subgraph that attaches one to
+    // every response silently take its entity hit rate to zero.
+    let has_unattributable_entity_errors = unattributed_errors
+        .iter()
+        .any(|(_, error)| error_targets_entities(error));
     let mut entities_it = entities.drain(..).enumerate();
 
     // insert requested entities and cached entities in the same order as
@@ -1811,7 +1819,7 @@ async fn insert_entities_in_result(
                 }
 
                 if !has_errors
-                    && !has_unattributed_errors
+                    && !has_unattributable_entity_errors
                     && cache_control.should_store()
                     && should_cache_private
                     && request_cache_control.as_ref().is_none_or(|c| !c.no_store())
@@ -1830,9 +1838,10 @@ async fn insert_entities_in_result(
         }
     }
 
-    // Errors we could not tie to a specific entity are kept as they came from the subgraph: their
-    // paths cannot be rewritten to the reassembled entity indexes, but dropping them would hide
-    // the failure from the client entirely.
+    // Errors we could not tie to a specific entity are passed through as the subgraph sent them,
+    // save for the out-of-range index `attribute_errors_to_entities` strips: their paths cannot be
+    // rewritten to the reassembled entity indexes, but dropping them would hide the failure from
+    // the client entirely.
     new_errors.extend(unattributed_errors);
     debug_assert!(
         errors_by_entity_idx.is_empty(),
@@ -1871,9 +1880,12 @@ async fn insert_entities_in_result(
 ///
 /// An error is attributable when its path is of the form `["_entities", <index>, ...]` and the
 /// index refers to one of the `attributable_entity_count` entities being reassembled. Not every
-/// subgraph produces that index: async-graphql, for instance, resolves the `_entities` field
-/// without a context per list element and reports `["_entities", "fieldName"]`. Errors with no
-/// path at all, or with an out-of-range index, are unattributable too.
+/// subgraph produces that index: some may resolve the `_entities` field
+/// without a context per list element and reports `["_entities", "fieldName"]`. Such an error is
+/// still attributable when this reassembly consumes a single entity, since there is only one it
+/// can be about; the missing index is inserted into its path. Errors with no path at all, with a
+/// path outside `_entities`, or with an out-of-range index are unattributable — and an out-of-range
+/// index is *stripped* from the path, see below.
 #[allow(clippy::type_complexity)]
 fn attribute_errors_to_entities(
     errors: &[Error],
@@ -1890,11 +1902,54 @@ fn attribute_errors_to_entities(
                     .or_default()
                     .push((error_idx, error.clone()));
             }
-            _ => unattributed.push((error_idx, error.clone())),
+            // The error names an entity this reassembly will not consume: the subgraph numbered
+            // it against a different list, or returned more entities than we sent
+            // representations for. That index only means something inside the subgraph's own
+            // response, and we have no reassembled position to rewrite it to. Downstream,
+            // `FetchNode::response_at_path` resolves an `_entities` index against the *original*
+            // representation list, so leaving it in place would blame an unrelated entity —
+            // possibly one served from the cache that the subgraph never saw — or drop the error
+            // outright once the index is past the end of that list. Strip the index so the path
+            // has the same shape as an index-less one, which `response_at_path` re-paths onto the
+            // whole fetch instead.
+            Some(_) => {
+                let mut error = error.clone();
+                if let Some(path) = error.path.as_mut() {
+                    path.0.remove(1);
+                }
+                unattributed.push((error_idx, error));
+            }
+            // An `_entities` path with no index names no entity on its own, but when this
+            // reassembly consumes exactly one entity there is only one it can be about. Attributing
+            // it spares the client the same error repeated over every element of the fetch —
+            // `FetchNode::response_at_path` re-paths an index-less error onto the whole fetch,
+            // which also covers entities served from the cache that the subgraph never saw. The
+            // index is *inserted* rather than overwriting the field key, so the loop above can
+            // rewrite it to the entity's reassembled position like any other attributed error. An
+            // out-of-range index is deliberately not treated this way: a subgraph numbering against
+            // another list is a bug we cannot reason about, while a missing index is a known
+            // framework behaviour.
+            None if attributable_entity_count == 1 && error_targets_entities(error) => {
+                let mut error = error.clone();
+                if let Some(path) = error.path.as_mut() {
+                    path.0.insert(1, PathElement::Index(0));
+                }
+                attributed.entry(0).or_default().push((error_idx, error));
+            }
+            None => unattributed.push((error_idx, error.clone())),
         }
     }
 
     (attributed, unattributed)
+}
+
+/// Whether the error's path points into the `_entities` field, and so could be reporting a failure
+/// of one of the entities the fetch returned.
+fn error_targets_entities(error: &Error) -> bool {
+    matches!(
+        error.path.as_ref().and_then(|path| path.0.first()),
+        Some(PathElement::Key(key, None)) if key == ENTITIES
+    )
 }
 
 /// The index of the entity an error refers to, if its path starts with `["_entities", <index>]`.

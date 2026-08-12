@@ -25,6 +25,7 @@ use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
 use crate::plugins::response_cache::debugger::CacheEntryKind;
 use crate::plugins::response_cache::debugger::CacheKeyContext;
+use crate::plugins::response_cache::debugger::CacheKeySource;
 use crate::plugins::response_cache::debugger::CacheKeysContext;
 use crate::plugins::response_cache::debugger::CdnInvalidationDebug;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
@@ -5576,8 +5577,8 @@ fn has_subgraph_errors_warning(entry: &CacheKeyContext) -> bool {
 }
 
 /// Regression test for REG-2060:
-/// Some subgraph frameworks resolve `_entities` without a context per list element — async-graphql
-/// is one — and report entity errors without the index segment in their path:
+/// Some subgraph frameworks resolve `_entities` without a context per list element and
+/// report entity errors without the index segment in their path, for example:
 /// `["_entities", "name"]` instead of `["_entities", 0, "name"]`. The response cache cannot
 /// attribute such an error to one of the fetched entities, but it must still pass it on to the
 /// client instead of dropping it while reassembling the `_entities` response, and it must not cache
@@ -5590,7 +5591,7 @@ async fn entity_error_without_index_in_path() {
         .unwrap();
 
     let service = entity_error_harness(
-        storage,
+        storage.clone(),
         drop_tx,
         serde_json::json!([{"name": null}, {"name": "Organization 2"}]),
         // The failure is reported without the entity index, so it cannot be attributed.
@@ -5602,13 +5603,15 @@ async fn entity_error_without_index_in_path() {
     )
     .await;
 
-    let mut response = service.oneshot(entity_error_request()).await.unwrap();
+    let mut response = service
+        .clone()
+        .oneshot(entity_error_request())
+        .await
+        .unwrap();
 
-    // Neither organization may be cached: the error could belong to either of them. The store
-    // decision is read back from the cache debugger rather than from storage, so this does not
-    // race with the write task the plugin spawns; `entity_error_with_index_in_path` covers the
-    // same decision against real storage.
+    // Neither organization may be cached: the error could belong to either of them.
     let debug_entries = organization_debug_entries(&response);
+    let mut keys = Vec::new();
     for id in ["1", "2"] {
         let entry = debug_entries
             .get(id)
@@ -5618,6 +5621,7 @@ async fn entity_error_without_index_in_path() {
             "organization {id} should not be cached alongside an unattributable error"
         );
         assert!(has_subgraph_errors_warning(entry));
+        keys.push(entry.key.clone());
     }
 
     let mut body = response.next_response().await.unwrap();
@@ -5670,6 +5674,34 @@ async fn entity_error_without_index_in_path() {
       ]
     }
     "#);
+
+    // `should_store` above is only the debugger's mirror of the decision, computed by
+    // `compute_should_store` and not by the store gate in `insert_entities_in_result`. A second
+    // request checks the gate itself: had either entity reached the cache, its debug entry would
+    // now name the cache rather than the subgraph as its source. This is the assertion that fails
+    // if the gate stops honouring unattributable errors while the debugger keeps reporting that it
+    // does — and it cannot lose a race with the plugin's spawned write task, since a regression's
+    // write would have landed during the round trip.
+    let response = service.oneshot(entity_error_request()).await.unwrap();
+    let debug_entries = organization_debug_entries(&response);
+    for id in ["1", "2"] {
+        let entry = debug_entries
+            .get(id)
+            .unwrap_or_else(|| panic!("missing debug entry for organization {id}"));
+        assert!(
+            matches!(entry.source, CacheKeySource::Subgraph),
+            "organization {id} must be refetched from the subgraph, not served from the cache"
+        );
+    }
+
+    // And directly against storage, now that the second request has given any errant write ample
+    // time to land.
+    let key_strs: Vec<&str> = keys.iter().map(String::as_str).collect();
+    let cached = storage.fetch_multiple(&key_strs, "").await.unwrap();
+    assert!(
+        cached.iter().all(Option::is_none),
+        "no entity may be written alongside an unattributable error, got: {cached:?}"
+    );
 }
 
 /// Counterpart to `entity_error_without_index_in_path`: when the subgraph *does* report the entity

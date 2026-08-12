@@ -1633,8 +1633,11 @@ fn entity_error_request() -> supergraph::Request {
         .unwrap()
 }
 
-/// Waits for the entity cache's spawned write task to store `expected` entries, so a later
-/// assertion on the exact store contents is not racing that task.
+/// Waits for the entity cache's spawned write task to store at least `expected` entries, so a
+/// follow-up request is not racing that task. Note that entries become visible one at a time —
+/// `RedisCacheStorage::insert_multiple` pipelines one `SET` per key and `MockStore` takes its lock
+/// per command — so returning from here means *at least* `expected` landed, never exactly that
+/// many. Assert on which keys are present rather than on `len()`.
 async fn wait_for_stored_entries(mock_store: &MockStore, expected: usize) {
     for _ in 0..50 {
         if mock_store.len() >= expected {
@@ -1649,8 +1652,8 @@ async fn wait_for_stored_entries(mock_store: &MockStore, expected: usize) {
 }
 
 /// Regression test for REG-2060:
-/// Some subgraph frameworks resolve `_entities` without a context per list element — async-graphql
-/// is one — and report entity errors without the index segment in their path:
+/// Some subgraph frameworks resolve `_entities` without a context per list element and
+/// report entity errors without the index segment in their path, for example:
 /// `["_entities", "name"]` instead of `["_entities", 0, "name"]`. The entity cache cannot attribute
 /// such an error to one of the fetched entities, but it must still pass it on to the client instead
 /// of dropping it while reassembling the `_entities` response, and it must not cache entities the
@@ -1709,7 +1712,7 @@ async fn entity_error_with_index_in_path() {
         .unwrap();
 
     let service = entity_error_harness(
-        redis_cache,
+        redis_cache.clone(),
         Some((
             serde_json::json!([{"name": null}, {"name": "Organization 2"}]),
             serde_json::json!([{
@@ -1726,12 +1729,14 @@ async fn entity_error_with_index_in_path() {
     let response = response.next_response().await.unwrap();
     insta::assert_json_snapshot!(response);
 
-    // Both entities are written in one batch, so once the sibling has landed the errored entity's
-    // absence is conclusive rather than a race with the spawned write task.
+    // Wait for the sibling's write so the second request below reads a settled cache. Counting
+    // entries cannot tell the two organizations apart — and a count of 1 can be observed midway
+    // through a two-key write — so the assertion is a second request with `orga` left unmocked:
+    // organization 2 can only carry a name if it came from the cache, and the fetch error can only
+    // be there if organization 1 was *not* cached and had to be refetched.
     wait_for_stored_entries(&mock_store, 1).await;
-    assert_eq!(
-        mock_store.len(),
-        1,
-        "only the entity the error was attributed to should be kept out of the cache"
-    );
+    let service = entity_error_harness(redis_cache, None).await;
+    let mut response = service.oneshot(entity_error_request()).await.unwrap();
+    let response = response.next_response().await.unwrap();
+    insta::assert_json_snapshot!(response);
 }
