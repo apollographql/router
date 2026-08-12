@@ -1333,13 +1333,17 @@ async fn cache_store_entities_from_response(
             None
         };
 
+        // Moved out rather than borrowed: `new_errors` replaces this list below, so handing the
+        // errors over avoids cloning every one of them back out during reassembly.
+        let errors = std::mem::take(&mut response.response.body_mut().errors);
+
         let (new_entities, new_errors) = insert_entities_in_result(
             entities
                 .as_array_mut()
                 .ok_or_else(|| FetchError::MalformedResponse {
                     reason: "expected an array of entities".to_string(),
                 })?,
-            &response.response.body().errors,
+            errors,
             cache,
             subgraph_ttl,
             cache_control,
@@ -1731,7 +1735,10 @@ fn filter_representations(
 #[allow(clippy::too_many_arguments)]
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
-    errors: &[Error],
+    // Taken by value: the caller replaces the response's error list with what this returns, so
+    // every error is either moved into the reassembled list or dropped on the floor. Borrowing
+    // would mean cloning all of them back out.
+    errors: Vec<Error>,
     cache: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
     cache_control: CacheControl,
@@ -1848,8 +1855,9 @@ async fn insert_entities_in_result(
         "every attributed entity index is consumed by the loop above"
     );
     // Restore the order the subgraph sent the errors in: the loop above emits them grouped by
-    // reassembled entity, and the unattributed ones were appended after those.
-    new_errors.sort_by_key(|(error_idx, _)| *error_idx);
+    // reassembled entity, and the unattributed ones were appended after those. Unstable is fine —
+    // every error carries a distinct index, so there are no equal keys for stability to preserve.
+    new_errors.sort_unstable_by_key(|(error_idx, _)| *error_idx);
     let new_errors: Vec<Error> = new_errors.into_iter().map(|(_, error)| error).collect();
 
     if !to_insert.is_empty() {
@@ -1888,19 +1896,19 @@ async fn insert_entities_in_result(
 /// index is *stripped* from the path, see below.
 #[allow(clippy::type_complexity)]
 fn attribute_errors_to_entities(
-    errors: &[Error],
+    errors: Vec<Error>,
     attributable_entity_count: usize,
 ) -> (HashMap<usize, Vec<(usize, Error)>>, Vec<(usize, Error)>) {
     let mut attributed: HashMap<usize, Vec<(usize, Error)>> = HashMap::new();
     let mut unattributed: Vec<(usize, Error)> = Vec::new();
 
-    for (error_idx, error) in errors.iter().enumerate() {
-        match entity_index_from_error_path(error) {
+    for (error_idx, mut error) in errors.into_iter().enumerate() {
+        match entity_index_from_error_path(&error) {
             Some(entity_idx) if entity_idx < attributable_entity_count => {
                 attributed
                     .entry(entity_idx)
                     .or_default()
-                    .push((error_idx, error.clone()));
+                    .push((error_idx, error));
             }
             // The error names an entity this reassembly will not consume: the subgraph numbered
             // it against a different list, or returned more entities than we sent
@@ -1913,7 +1921,6 @@ fn attribute_errors_to_entities(
             // has the same shape as an index-less one, which `response_at_path` re-paths onto the
             // whole fetch instead.
             Some(_) => {
-                let mut error = error.clone();
                 if let Some(path) = error.path.as_mut() {
                     path.0.remove(1);
                 }
@@ -1929,14 +1936,13 @@ fn attribute_errors_to_entities(
             // out-of-range index is deliberately not treated this way: a subgraph numbering against
             // another list is a bug we cannot reason about, while a missing index is a known
             // framework behaviour.
-            None if attributable_entity_count == 1 && error_targets_entities(error) => {
-                let mut error = error.clone();
+            None if attributable_entity_count == 1 && error_targets_entities(&error) => {
                 if let Some(path) = error.path.as_mut() {
                     path.0.insert(1, PathElement::Index(0));
                 }
                 attributed.entry(0).or_default().push((error_idx, error));
             }
-            None => unattributed.push((error_idx, error.clone())),
+            None => unattributed.push((error_idx, error)),
         }
     }
 
