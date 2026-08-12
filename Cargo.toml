@@ -86,15 +86,5 @@ tower = { version = "0.5.1", features = ["full"] }
 # dependency at the same copy. The rev matches apollo-json's, so one
 # checkout serves both.
 [patch.crates-io]
-# TEMPORARY (ROUTER-2044): must match the apollo-platform-rs patch below, or
-# apollo-errors is linked twice and its linkme ERROR_REGISTRY aborts at runtime.
-apollo-errors = { path = "/Users/bryn/git/apollo-platform-rs/.worktrees/RR-1055/apollo-errors/crates/apollo-errors" }
-apollo-errors-derive = { path = "/Users/bryn/git/apollo-platform-rs/.worktrees/RR-1055/apollo-errors/crates/apollo-errors-derive" }
-
-# TEMPORARY (ROUTER-2044): iterate against the local apollo-json worktree while
-# the pending-tree API is being developed. Reverted to the pinned git rev before
-# the branch is shared.
-[patch."https://github.com/apollographql/apollo-platform-rs"]
-apollo-json = { path = "/Users/bryn/git/apollo-platform-rs/.worktrees/RR-1055/apollo-json/crates/apollo-json" }
-apollo-errors = { path = "/Users/bryn/git/apollo-platform-rs/.worktrees/RR-1055/apollo-errors/crates/apollo-errors" }
-apollo-errors-derive = { path = "/Users/bryn/git/apollo-platform-rs/.worktrees/RR-1055/apollo-errors/crates/apollo-errors-derive" }
+apollo-errors = { git = "https://github.com/apollographql/apollo-platform-rs", rev = "ba45732a" }
+apollo-errors-derive = { git = "https://github.com/apollographql/apollo-platform-rs", rev = "ba45732a" }
