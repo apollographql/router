@@ -124,6 +124,6 @@ actions:
     - message: "Invalid GraphQL request"
       extensions:
         code: INVALID_GRAPHQL_REQUEST
-        details: 'failed to deserialize the request body into JSON: invalid type: string "", expected a GraphQL request at line 1 column 2'
+        details: 'failed to deserialize the request body into JSON: invalid type: a string, expected a GraphQL request'
 
 - type: Stop

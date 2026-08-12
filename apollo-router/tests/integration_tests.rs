@@ -189,7 +189,7 @@ async fn empty_posts_should_not_work() {
         .extension_code("INVALID_GRAPHQL_REQUEST")
         .extensions(json_value(json!({
             "code": "INVALID_GRAPHQL_REQUEST",
-            "details": "failed to deserialize the request body into JSON: EOF while parsing a value at line 1 column 0",
+            "details": "failed to deserialize the request body into JSON: JSON syntax error at byte 0: unexpected end of input",
         })))
         .apollo_id(actual.errors[0].apollo_id())
         .build();
