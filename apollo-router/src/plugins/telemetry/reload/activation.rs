@@ -213,6 +213,11 @@ impl Activation {
     /// in `self.new_meter_providers`. The old providers will be safely dropped when this `Activation`
     /// is dropped (using blocking tasks to avoid runtime deadlocks).
     pub(crate) fn reload_metrics(&mut self) {
+        // Route `opentelemetry::global::meter*` at the router's provider so that instruments
+        // created by dependencies (e.g apollo platform libraries) export
+        // alongside the router's own metrics instead of no-oping.
+        crate::metrics::install_global_meter_provider_bridge();
+
         let global_meter_provider = meter_provider_internal();
         // Swap new meter providers with old ones. Old providers stored here will be
         // safely dropped in the Drop implementation using blocking tasks.

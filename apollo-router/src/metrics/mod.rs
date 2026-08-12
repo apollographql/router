@@ -867,6 +867,39 @@ pub fn meter_provider() -> impl opentelemetry::metrics::MeterProvider {
     meter_provider_internal()
 }
 
+/// Bridges `opentelemetry::global::meter*` onto the router's own meter provider.
+///
+/// Libraries cannot be handed a meter provider by their caller — per the OTel spec they create
+/// instruments from the global one. The router configures metrics through [`AggregateMeterProvider`] 
+/// and nothing ever populated the global, so those instruments resolved against
+/// `NoopMeterProvider` and reached no exporter.
+///
+/// This resolves [`meter_provider_internal`] per call rather than capturing it once, so the
+/// bridge survives a config reload (in production the aggregate provider is a stable handle
+/// whose delegates are swapped) and works under test (where the provider is a task local).
+struct DelegatingMeterProvider;
+
+impl opentelemetry::metrics::MeterProvider for DelegatingMeterProvider {
+    fn meter_with_scope(
+        &self,
+        scope: opentelemetry::InstrumentationScope,
+    ) -> opentelemetry::metrics::Meter {
+        opentelemetry::metrics::MeterProvider::meter_with_scope(&meter_provider_internal(), scope)
+    }
+}
+
+static GLOBAL_METER_PROVIDER_BRIDGE: OnceLock<()> = OnceLock::new();
+
+/// Installs the [`DelegatingMeterProvider`] as the process-wide OTel meter provider, once.
+///
+/// Idempotent, and deliberately only ever set once: a custom router that installs its own global
+/// provider before the router's telemetry activates keeps it.
+pub(crate) fn install_global_meter_provider_bridge() {
+    GLOBAL_METER_PROVIDER_BRIDGE.get_or_init(|| {
+        opentelemetry::global::set_meter_provider(DelegatingMeterProvider);
+    });
+}
+
 /// Parse key/value attributes into `opentelemetry::KeyValue` structs. Should only be used within
 /// this module, as a helper for the various metric macros (ie `u64_counter!`).
 macro_rules! parse_attributes {
@@ -1890,6 +1923,11 @@ pub(crate) trait FutureMetricsExt<T> {
         test_utils::AGGREGATE_METER_PROVIDER_ASYNC.scope(
             Default::default(),
             async move {
+                // Production installs the bridge from `Activation::reload_metrics`, which tests
+                // that never activate telemetry don't reach. Installing it here means instruments
+                // that dependencies create via `opentelemetry::global` land in this task's
+                // provider, so `assert_counter!` and friends can see them.
+                install_global_meter_provider_bridge();
                 // We want to eagerly create the meter provider, the reason is that this will be shared among subtasks that use `with_current_meter_provider`.
                 let _ = meter_provider_internal();
                 let result = self.await;
