@@ -320,6 +320,16 @@ async fn call_websocket(
         async move {
             let mut gql_stream = gql_stream;
             let mut attempt = 0u32;
+            // Tracks whether the loop is exiting because all router clients left (in which case
+            // the topic may already have been re-registered by a new, unrelated client under the
+            // same deduplication key by the time this task's `handle_sink.close()` would run —
+            // forcibly deleting it would silently kill that new subscription) vs. because the
+            // subgraph itself ended the stream or reconnection was exhausted (in which case the
+            // topic legitimately still belongs to this task and any still-connected clients need
+            // the forced termination signal). Only the latter should call `handle_sink.close()`;
+            // the former relies on `HandleGuard::drop`'s receiver-count-guarded `Unsubscribe`,
+            // which cannot delete a topic that already has a new subscriber.
+            let mut client_departed = false;
 
             'retry: loop {
                 let connection_started_at = Instant::now();
@@ -344,6 +354,7 @@ async fn call_websocket(
                                         // the subgraph connection open. We don't increment the
                                         // subgraph-ended counter here because the clients left
                                         // first.
+                                        client_departed = true;
                                         break 'retry;
                                     }
                                 }
@@ -374,9 +385,11 @@ async fn call_websocket(
                                             tracing::debug!(
                                                 "subscription_closing_signal observed while suppressing transient errors"
                                             );
+                                            client_departed = true;
                                             break 'retry;
                                         }
                                     } else if handle_sink.send_sync(resp).is_err() {
+                                        client_departed = true;
                                         break 'retry;
                                     }
                                 }
@@ -416,6 +429,7 @@ async fn call_websocket(
                         // sent and missed. Breaking on any of them is correct.
                         _ = subscription_closing_signal.recv() => {
                             tracing::debug!("subscription_closing_signal triggered");
+                            client_departed = true;
                             break 'retry;
                         },
                     }
@@ -444,6 +458,7 @@ async fn call_websocket(
                             biased;
                             _ = subscription_closing_signal.recv() => {
                                 tracing::debug!("subscription_closing_signal received during reconnect delay");
+                                client_departed = true;
                                 break 'retry;
                             },
                             _ = tokio::time::sleep(reconnect_delay) => {},
@@ -455,6 +470,7 @@ async fn call_websocket(
                             biased;
                             _ = subscription_closing_signal.recv() => {
                                 tracing::debug!("subscription_closing_signal received during reconnect handshake");
+                                client_departed = true;
                                 break 'retry;
                             },
                             res = open_ws_gql_stream(
@@ -520,10 +536,20 @@ async fn call_websocket(
                 subscriptions.complete = true
             );
 
-            // Send ForceDelete to the pubsub so the client-facing HandleStream receives None
-            // and terminates. Without this, the HandleStream waits forever when the subgraph
-            // closes the WebSocket and there are no reconnect attempts left.
-            let _ = handle_sink.close().await;
+            if !client_departed {
+                // Send ForceDelete to the pubsub so the client-facing HandleStream receives None
+                // and terminates. Without this, the HandleStream waits forever when the subgraph
+                // closes the WebSocket and there are no reconnect attempts left.
+                //
+                // Only do this when the subgraph (not the clients) ended the subscription:
+                // `force_delete` removes whatever topic is currently registered under this key
+                // with no generation check, so if all clients had already left, dropping
+                // `handle_sink` below instead relies on `HandleGuard::drop`'s
+                // receiver-count-guarded `Unsubscribe` — which is safe against a same-key topic
+                // that a new, unrelated deduplicated subscription may have re-created in the
+                // meantime.
+                let _ = handle_sink.close().await;
+            }
         }
         .with_current_meter_provider()
         .instrument(forwarding_span),

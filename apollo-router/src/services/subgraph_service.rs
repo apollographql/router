@@ -2570,6 +2570,185 @@ mod tests {
         .await;
     }
 
+    /// WebSocket server that sends one event per connection and then holds the connection open
+    /// indefinitely (never closes it, never errors) — so a forwarding task reading from it can
+    /// only end via its client-departure path (the closing signal), never via the subgraph
+    /// itself ending the stream.
+    async fn emulate_websocket_server_that_stays_open(listener: TcpListener) {
+        async fn ws_handler(
+            ws: WebSocketUpgrade,
+            ConnectInfo(_addr): ConnectInfo<SocketAddr>,
+        ) -> Result<impl IntoResponse, Infallible> {
+            let res = ws.protocols(["graphql-transport-ws"]).on_upgrade(move |mut socket| async move {
+                let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
+                assert!(matches!(ack_msg, ClientMessage::ConnectionInit { .. }));
+
+                socket
+                    .send(Message::text(
+                        serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
+                    ))
+                    .await
+                    .unwrap();
+                let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                let subscribe_msg: ClientMessage = serde_json::from_str(&new_message).unwrap();
+                let client_id = if let ClientMessage::Subscribe { payload, id } = subscribe_msg {
+                    assert_eq!(
+                        payload,
+                        Request::builder()
+                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                            .build()
+                    );
+
+                    id
+                } else {
+                    panic!("subscribe message should be sent");
+                };
+
+                socket
+                    .send(Message::text(
+                        serde_json::to_string(&ServerMessage::Next { id: client_id, payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
+                    ))
+                    .await
+                    .unwrap();
+
+                // Hold the connection open. The router closes it (by dropping `gql_stream`)
+                // only once the forwarding task's whole async block ends.
+                while let Some(Ok(_)) = socket.recv().await {}
+            });
+
+            Ok(res)
+        }
+
+        let app = Router::new().route("/ws", get(ws_handler));
+        let server = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        );
+        server.await.unwrap();
+    }
+
+    /// Regression test for a deduplication race: when the last client for a deduplicated
+    /// subscription leaves right as a textually-identical subscription from a new client
+    /// arrives, the new client's subscription must survive the old one's teardown rather than
+    /// being silently killed by a stale `ForceDelete` targeting the (by-then re-created) topic.
+    ///
+    /// Uses the default (`current_thread`) test runtime rather than `flavor = "multi_thread"` so
+    /// the interleaving below is deterministic: the client-1 unsubscribe and the client-2
+    /// resubscribe are queued back to back on the test's own task without yielding, so the
+    /// pubsub actor — a separate task, only scheduled once this task actually suspends — always
+    /// processes them in that order (deleting, then re-creating, the topic) before the old
+    /// forwarding task, only just woken by the deletion's closing signal, gets a chance to run
+    /// its own teardown.
+    #[tokio::test]
+    async fn test_dedup_client_departure_does_not_kill_recreated_subscription() {
+        async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let socket_addr = listener.local_addr().unwrap();
+            let spawned_task =
+                tokio::task::spawn(emulate_websocket_server_that_stays_open(listener));
+
+            // A single shared `Notify` (unlike `with_subscription_layer`, which would hand each
+            // call its own) so both requests below hit the same deduplication topic.
+            let subgraph_service = SubscriptionSubgraphLayer::new(
+                Notify::builder().build(),
+                Some(Arc::new(subscription_config())),
+                Arc::from("test"),
+            )
+            .layer(
+                SubgraphService::new(
+                    "test",
+                    true,
+                    HttpClientServiceFactory::from_config(
+                        "test",
+                        &Configuration::default(),
+                        crate::configuration::shared::Client::default(),
+                    ),
+                )
+                .expect("can create a SubgraphService"),
+            );
+
+            let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
+            let query = "subscription {\n  userWasCreated {\n    username\n  }\n}";
+
+            // Client 1 creates the deduplicated topic and connects to the subgraph.
+            let (tx1, rx1) = mpsc::channel(2);
+            let mut rx_stream1 = ReceiverStream::new(rx1);
+            let response1 = subgraph_service
+                .clone()
+                .oneshot(
+                    SubgraphRequest::builder()
+                        .supergraph_request(supergraph_request(query))
+                        .subgraph_request(subgraph_http_request(url.clone(), query))
+                        .operation_kind(OperationKind::Subscription)
+                        .subscription_stream(tx1)
+                        .subgraph_name(String::from("test"))
+                        .context(Context::new())
+                        .build(),
+                )
+                .await
+                .unwrap();
+            assert!(response1.response.body().errors.is_empty());
+            let mut gql_stream1 = rx_stream1.next().await.unwrap();
+            assert!(
+                gql_stream1.next().await.is_some(),
+                "client 1 should receive the first event"
+            );
+
+            // Client 1 — the only subscriber — disconnects. This immediately (synchronously,
+            // via `HandleGuard::drop`) queues a receiver-count-guarded `Unsubscribe` for the
+            // pubsub actor; the old forwarding task hasn't reacted to it yet.
+            drop(gql_stream1);
+
+            // A textually-identical request from a new client arrives right away, with no
+            // intervening yield — queuing its `CreateOrSubscribe` immediately behind client 1's
+            // `Unsubscribe` on the same task, before the pubsub actor or the old forwarding task
+            // have run at all.
+            let (tx2, rx2) = mpsc::channel(2);
+            let mut rx_stream2 = ReceiverStream::new(rx2);
+            let response2 = subgraph_service
+                .oneshot(
+                    SubgraphRequest::builder()
+                        .supergraph_request(supergraph_request(query))
+                        .subgraph_request(subgraph_http_request(url, query))
+                        .operation_kind(OperationKind::Subscription)
+                        .subscription_stream(tx2)
+                        .subgraph_name(String::from("test"))
+                        .context(Context::new())
+                        .build(),
+                )
+                .await
+                .unwrap();
+            assert!(response2.response.body().errors.is_empty());
+            let mut gql_stream2 = rx_stream2.next().await.unwrap();
+
+            // Give the old forwarding task's belated teardown every opportunity to run — and,
+            // pre-fix, to send its stale `ForceDelete` — before checking that client 2 survived.
+            for _ in 0..50 {
+                tokio::task::yield_now().await;
+            }
+
+            let message = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                gql_stream2.next(),
+            )
+            .await
+            .expect("client 2's subscription must not be silently killed by client 1's teardown")
+            .expect("client 2's stream ended instead of delivering data");
+            assert_eq!(
+                message,
+                graphql::Response::builder()
+                    .subscribed(true)
+                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .build()
+            );
+
+            spawned_task.abort();
+        }
+        .with_metrics()
+        .await;
+    }
+
     /// Verifies that a server-sent Complete message does NOT trigger reconnection, even when
     /// max_reconnect_attempts > 0. A Complete ends the stream with a terminal `None`, which is
     /// never treated as a recoverable drop.
