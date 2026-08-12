@@ -5445,3 +5445,188 @@ async fn include_cache_control_header_on_router_response_true_sends_headers() {
     assert!(cache_control_contains_max_age(&cache_control_header));
     assert!(cache_control_contains_public(&cache_control_header));
 }
+
+/// Regression test for REG-2060:
+/// Some subgraph frameworks resolve `_entities` without a context per list element — async-graphql
+/// is one — and report entity errors without the index segment in their path:
+/// `["_entities", "name"]` instead of `["_entities", 0, "name"]`. The response cache cannot
+/// attribute such an error to one of the fetched entities, but it must still pass it on to the
+/// client instead of dropping it while reassembling the `_entities` response, and it must not cache
+/// entities the error may belong to.
+#[tokio::test]
+async fn entity_error_without_index_in_path() {
+    let query = "query { currentUser { allOrganizations { id name } } }";
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+            serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+            serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
+                    {
+                        "__typename": "Organization",
+                        "id": "1"
+                    },
+                    {
+                        "__typename": "Organization",
+                        "id": "2"
+                    }
+                ] }}}},
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("no-store")).build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json! {{
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+            "variables": {
+                "representations": [
+                    {
+                        "id": "1",
+                        "__typename": "Organization",
+                    },
+                    {
+                        "id": "2",
+                        "__typename": "Organization",
+                    }
+                ]
+            }}},
+            // The failure is reported without the entity index, so it cannot be attributed.
+            serde_json::json! {{
+                "data": {
+                    "_entities": [
+                        {
+                            "name": null,
+                        },
+                        {
+                            "name": "Organization 2"
+                        }
+                    ]
+                },
+                "errors": [{
+                    "message": "cannot resolve name",
+                    "path": ["_entities", "name"],
+                    "extensions": {"code": "NAME_FAILURE"}
+                }]
+            }},
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
+    ].into_iter().collect());
+
+    let map = [
+        (
+            "user".to_string(),
+            Subgraph {
+                redis: None,
+                enabled: true.into(),
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+        (
+            "orga".to_string(),
+            Subgraph {
+                redis: None,
+                enabled: true.into(),
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let subgraphs_conf = create_subgraph_conf(map);
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+    let response_cache = ResponseCache::for_test(
+        storage.clone(),
+        subgraphs_conf,
+        valid_schema.clone(),
+        true,
+        drop_tx,
+        true,
+    )
+    .await
+    .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
+    let all_keys: Vec<String> = cache_keys.iter().map(|ck| ck.key.clone()).collect();
+
+    let mut body = response.next_response().await.unwrap();
+    assert!(remove_debug_extensions_key(&mut body));
+
+    // The subgraph error must reach the client. Since it carries no entity index, the router
+    // cannot tell which entity failed and reports it for every entity of the fetch — the same
+    // behaviour as when the response cache is disabled.
+    insta::assert_json_snapshot!(body, @r#"
+    {
+      "data": {
+        "currentUser": {
+          "allOrganizations": [
+            {
+              "id": "1",
+              "name": null
+            },
+            {
+              "id": "2",
+              "name": "Organization 2"
+            }
+          ]
+        }
+      },
+      "errors": [
+        {
+          "message": "cannot resolve name",
+          "path": [
+            "currentUser",
+            "allOrganizations",
+            0
+          ],
+          "extensions": {
+            "code": "NAME_FAILURE",
+            "service": "orga"
+          }
+        },
+        {
+          "message": "cannot resolve name",
+          "path": [
+            "currentUser",
+            "allOrganizations",
+            1
+          ],
+          "extensions": {
+            "code": "NAME_FAILURE",
+            "service": "orga"
+          }
+        }
+      ]
+    }
+    "#);
+
+    // Neither organization may be cached: the error could belong to either of them. Cache writes
+    // are spawned before the response is returned, so give them a chance to land before checking.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let key_strs: Vec<&str> = all_keys.iter().map(|k| k.as_str()).collect();
+    let cached = storage.fetch_multiple(&key_strs, "").await.unwrap();
+    assert!(
+        cached.iter().all(Option::is_none),
+        "no entity should have been cached alongside an unattributable error, got: {cached:?}"
+    );
+}

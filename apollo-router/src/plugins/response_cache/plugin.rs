@@ -3014,6 +3014,13 @@ async fn insert_entities_in_result(
     let mut inserted_types: HashMap<String, usize> = HashMap::new();
     let mut to_insert: Vec<_> = Vec::new();
     let mut debug_ctx_entries = Vec::new();
+    // Split the subgraph errors between those we can attribute to a single fetched entity and
+    // those we cannot. Unattributed errors are passed through untouched at the end so that they
+    // are not lost during reassembly, and they suppress caching for this whole batch because we
+    // cannot tell which of the fetched entities they invalidate.
+    let (mut errors_by_entity_idx, unattributed_errors) =
+        attribute_errors_to_entities(errors, entities.len());
+    let has_unattributed_errors = !unattributed_errors.is_empty();
     let mut entities_it = entities.drain(..).enumerate();
     // iterate through per-entity cache tags in parallel with entities; tags are matched
     // positionally, meaning the first tag array applies to the first entity, etc
@@ -3052,26 +3059,15 @@ async fn insert_entities_in_result(
                     key = format!("{key}:{id}");
                 }
 
-                let mut has_errors = false;
-                for error in errors.iter().filter(|e| {
-                    e.path
-                        .as_ref()
-                        .map(|path| {
-                            path.starts_with(&Path(vec![
-                                PathElement::Key(ENTITIES.to_string(), None),
-                                PathElement::Index(entity_idx),
-                            ]))
-                        })
-                        .unwrap_or(false)
-                }) {
+                let entity_errors = errors_by_entity_idx.remove(&entity_idx).unwrap_or_default();
+                let has_errors = !entity_errors.is_empty();
+                for mut error in entity_errors {
                     // update the entity index, because it does not match with the original one
-                    let mut e = error.clone();
-                    if let Some(path) = e.path.as_mut() {
+                    if let Some(path) = error.path.as_mut() {
                         path.0[1] = PathElement::Index(new_entity_idx);
                     }
 
-                    new_errors.push(e);
-                    has_errors = true;
+                    new_errors.push(error);
                 }
 
                 // Per-entity cache tags from the subgraph's `apolloEntityCacheTags` extension.
@@ -3143,7 +3139,11 @@ async fn insert_entities_in_result(
                         .update_metadata(),
                     );
                 }
-                if !has_errors && cache_control.should_store() && should_cache_private {
+                if !has_errors
+                    && !has_unattributed_errors
+                    && cache_control.should_store()
+                    && should_cache_private
+                {
                     to_insert.push(Document {
                         control: cache_control.clone(),
                         data: value.clone(),
@@ -3158,6 +3158,11 @@ async fn insert_entities_in_result(
             }
         }
     }
+
+    // Errors we could not tie to a specific entity are kept as they came from the subgraph: their
+    // paths cannot be rewritten to the reassembled entity indexes, but dropping them would hide
+    // the failure from the client entirely.
+    new_errors.extend(unattributed_errors);
 
     // For debug mode
     if !debug_ctx_entries.is_empty() {
@@ -3183,6 +3188,48 @@ async fn insert_entities_in_result(
     }
 
     Ok((new_entities, new_errors))
+}
+
+/// Split subgraph errors from an `_entities` fetch into the ones belonging to a specific fetched
+/// entity, keyed by its index in the subgraph response, and the ones that cannot be attributed.
+///
+/// An error is attributable when its path is of the form `["_entities", <index>, ...]` and the
+/// index refers to one of the `fetched_entity_count` entities the subgraph returned. Not every
+/// subgraph produces that index: async-graphql, for instance, resolves the `_entities` field
+/// without a context per list element and reports `["_entities", "fieldName"]`. Errors with no
+/// path at all, or with an out-of-range index, are unattributable too.
+fn attribute_errors_to_entities(
+    errors: &[Error],
+    fetched_entity_count: usize,
+) -> (HashMap<usize, Vec<Error>>, Vec<Error>) {
+    let mut attributed: HashMap<usize, Vec<Error>> = HashMap::new();
+    let mut unattributed: Vec<Error> = Vec::new();
+
+    for error in errors {
+        match entity_index_from_error_path(error) {
+            Some(entity_idx) if entity_idx < fetched_entity_count => {
+                attributed
+                    .entry(entity_idx)
+                    .or_default()
+                    .push(error.clone());
+            }
+            _ => unattributed.push(error.clone()),
+        }
+    }
+
+    (attributed, unattributed)
+}
+
+/// The index of the entity an error refers to, if its path starts with `["_entities", <index>]`.
+fn entity_index_from_error_path(error: &Error) -> Option<usize> {
+    match error.path.as_ref()?.0.as_slice() {
+        [
+            PathElement::Key(key, None),
+            PathElement::Index(entity_idx),
+            ..,
+        ] if key == ENTITIES => Some(*entity_idx),
+        _ => None,
+    }
 }
 
 fn assemble_response_from_errors(
@@ -3285,12 +3332,17 @@ mod tests {
     use tokio::sync::broadcast;
     use uuid::Uuid;
 
+    use super::ENTITIES;
     use super::Subgraph;
     use super::Ttl;
     use crate::configuration::subgraph::SubgraphConfiguration;
+    use crate::graphql::Error;
+    use crate::json_ext::Path;
+    use crate::json_ext::PathElement;
     use crate::plugin::PluginInit;
     use crate::plugin::PluginPrivate;
     use crate::plugins::response_cache::plugin::ResponseCache;
+    use crate::plugins::response_cache::plugin::attribute_errors_to_entities;
     use crate::plugins::response_cache::plugin::get_entity_key_from_selection_set;
     use crate::plugins::response_cache::plugin::get_invalidation_entity_keys_from_schema;
     use crate::plugins::response_cache::plugin::get_invalidation_root_keys_from_schema;
@@ -4759,5 +4811,92 @@ mod tests {
         }))
         .unwrap();
         assert!(!config.include_cache_control_header_on_router_response);
+    }
+
+    fn error_with_path(message: &str, path: Option<Path>) -> Error {
+        match path {
+            Some(path) => Error::builder()
+                .message(message)
+                .path(path)
+                .extension_code("TEST")
+                .build(),
+            None => Error::builder()
+                .message(message)
+                .extension_code("TEST")
+                .build(),
+        }
+    }
+
+    fn entities_path(elements: Vec<PathElement>) -> Path {
+        let mut path = vec![PathElement::Key(ENTITIES.to_string(), None)];
+        path.extend(elements);
+        Path(path)
+    }
+
+    #[test]
+    fn attribute_errors_with_an_entity_index() {
+        let errors = vec![
+            error_with_path(
+                "first",
+                Some(entities_path(vec![
+                    PathElement::Index(0),
+                    PathElement::Key("name".to_string(), None),
+                ])),
+            ),
+            error_with_path("second", Some(entities_path(vec![PathElement::Index(1)]))),
+            error_with_path("third", Some(entities_path(vec![PathElement::Index(1)]))),
+        ];
+
+        let (attributed, unattributed) = attribute_errors_to_entities(&errors, 2);
+
+        assert!(unattributed.is_empty());
+        assert_eq!(
+            attributed
+                .get(&0)
+                .map(|errors| errors.iter().map(|e| e.message.as_str()).collect()),
+            Some(vec!["first"])
+        );
+        assert_eq!(
+            attributed
+                .get(&1)
+                .map(|errors| errors.iter().map(|e| e.message.as_str()).collect()),
+            Some(vec!["second", "third"])
+        );
+    }
+
+    // Errors that cannot be tied to one fetched entity: a path without the index (as produced by
+    // async-graphql), no path at all, an index past the end of the fetched entities, and a path
+    // that does not point into `_entities`.
+    #[test]
+    fn attribute_errors_without_an_entity_index() {
+        let errors = vec![
+            error_with_path(
+                "no index",
+                Some(entities_path(vec![PathElement::Key(
+                    "createShipment".to_string(),
+                    None,
+                )])),
+            ),
+            error_with_path("no path", None),
+            error_with_path(
+                "out of range",
+                Some(entities_path(vec![PathElement::Index(5)])),
+            ),
+            error_with_path(
+                "not an entity error",
+                Some(Path(vec![PathElement::Key("topLevel".to_string(), None)])),
+            ),
+        ];
+
+        let (attributed, unattributed) = attribute_errors_to_entities(&errors, 2);
+
+        assert!(attributed.is_empty());
+        assert_eq!(
+            unattributed
+                .iter()
+                .map(|e| e.message.as_str())
+                .collect::<Vec<_>>(),
+            vec!["no index", "no path", "out of range", "not an entity error"]
+        );
     }
 }

@@ -1750,6 +1750,13 @@ async fn insert_entities_in_result(
 
     let mut inserted_types: HashMap<String, usize> = HashMap::new();
     let mut to_insert: Vec<_> = Vec::new();
+    // Split the subgraph errors between those we can attribute to a single fetched entity and
+    // those we cannot. Unattributed errors are passed through untouched at the end so that they
+    // are not lost during reassembly, and they suppress caching for this whole batch because we
+    // cannot tell which of the fetched entities they invalidate.
+    let (mut errors_by_entity_idx, unattributed_errors) =
+        attribute_errors_to_entities(errors, entities.len());
+    let has_unattributed_errors = !unattributed_errors.is_empty();
     let mut entities_it = entities.drain(..).enumerate();
 
     // insert requested entities and cached entities in the same order as
@@ -1781,29 +1788,19 @@ async fn insert_entities_in_result(
                     key = format!("{key}:{id}");
                 }
 
-                let mut has_errors = false;
-                for error in errors.iter().filter(|e| {
-                    e.path
-                        .as_ref()
-                        .map(|path| {
-                            path.starts_with(&Path(vec![
-                                PathElement::Key(ENTITIES.to_string(), None),
-                                PathElement::Index(entity_idx),
-                            ]))
-                        })
-                        .unwrap_or(false)
-                }) {
+                let entity_errors = errors_by_entity_idx.remove(&entity_idx).unwrap_or_default();
+                let has_errors = !entity_errors.is_empty();
+                for mut error in entity_errors {
                     // update the entity index, because it does not match with the original one
-                    let mut e = error.clone();
-                    if let Some(path) = e.path.as_mut() {
+                    if let Some(path) = error.path.as_mut() {
                         path.0[1] = PathElement::Index(new_entity_idx);
                     }
 
-                    new_errors.push(e);
-                    has_errors = true;
+                    new_errors.push(error);
                 }
 
                 if !has_errors
+                    && !has_unattributed_errors
                     && cache_control.should_store()
                     && should_cache_private
                     && request_cache_control.as_ref().is_none_or(|c| !c.no_store())
@@ -1821,6 +1818,11 @@ async fn insert_entities_in_result(
             }
         }
     }
+
+    // Errors we could not tie to a specific entity are kept as they came from the subgraph: their
+    // paths cannot be rewritten to the reassembled entity indexes, but dropping them would hide
+    // the failure from the client entirely.
+    new_errors.extend(unattributed_errors);
 
     if !to_insert.is_empty() {
         let span = tracing::info_span!("cache_store");
@@ -1841,6 +1843,48 @@ async fn insert_entities_in_result(
     }
 
     Ok((new_entities, new_errors))
+}
+
+/// Split subgraph errors from an `_entities` fetch into the ones belonging to a specific fetched
+/// entity, keyed by its index in the subgraph response, and the ones that cannot be attributed.
+///
+/// An error is attributable when its path is of the form `["_entities", <index>, ...]` and the
+/// index refers to one of the `fetched_entity_count` entities the subgraph returned. Not every
+/// subgraph produces that index: async-graphql, for instance, resolves the `_entities` field
+/// without a context per list element and reports `["_entities", "fieldName"]`. Errors with no
+/// path at all, or with an out-of-range index, are unattributable too.
+fn attribute_errors_to_entities(
+    errors: &[Error],
+    fetched_entity_count: usize,
+) -> (HashMap<usize, Vec<Error>>, Vec<Error>) {
+    let mut attributed: HashMap<usize, Vec<Error>> = HashMap::new();
+    let mut unattributed: Vec<Error> = Vec::new();
+
+    for error in errors {
+        match entity_index_from_error_path(error) {
+            Some(entity_idx) if entity_idx < fetched_entity_count => {
+                attributed
+                    .entry(entity_idx)
+                    .or_default()
+                    .push(error.clone());
+            }
+            _ => unattributed.push(error.clone()),
+        }
+    }
+
+    (attributed, unattributed)
+}
+
+/// The index of the entity an error refers to, if its path starts with `["_entities", <index>]`.
+fn entity_index_from_error_path(error: &Error) -> Option<usize> {
+    match error.path.as_ref()?.0.as_slice() {
+        [
+            PathElement::Key(key, None),
+            PathElement::Index(entity_idx),
+            ..,
+        ] if key == ENTITIES => Some(*entity_idx),
+        _ => None,
+    }
 }
 
 fn assemble_response_from_errors(
