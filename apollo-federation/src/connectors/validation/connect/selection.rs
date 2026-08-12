@@ -683,8 +683,48 @@ impl<'schema> SelectionValidator<'schema> {
                                     // Valid: object field with subselection
                                     self.walk_selection_with_shape(field_type_ref, field_shape)?;
                                 }
+                                (ExtendedType::Union(union_type), true) => {
+                                    // Expand union to concrete member types and
+                                    // validate against each, mirroring the top-level
+                                    // expansion in type_check_shape_based.
+                                    let concrete_refs: Vec<_> = union_type
+                                        .members
+                                        .iter()
+                                        .filter_map(|member_name| {
+                                            SchemaTypeRef::new(self.schema, member_name)
+                                        })
+                                        .collect();
+                                    for concrete_ref in concrete_refs {
+                                        self.walk_selection_with_shape(concrete_ref, field_shape)?;
+                                    }
+                                }
+                                (ExtendedType::Interface(interface_type), true) => {
+                                    // Expand interface to concrete implementing
+                                    // types and validate against each.
+                                    let concrete_refs: Vec<_> = self
+                                        .schema
+                                        .types
+                                        .values()
+                                        .filter_map(|t| {
+                                            if let ExtendedType::Object(o) = t {
+                                                if o.implements_interfaces
+                                                    .contains(&interface_type.name)
+                                                {
+                                                    SchemaTypeRef::new(self.schema, &o.name)
+                                                } else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect();
+                                    for concrete_ref in concrete_refs {
+                                        self.walk_selection_with_shape(concrete_ref, field_shape)?;
+                                    }
+                                }
                                 (_, true) => {
-                                    // Invalid: non-object field with subselection (group selection)
+                                    // Invalid: non-composite field with subselection (group selection)
                                     return Err(Message {
                                         code: Code::GroupSelectionIsNotObject,
                                         message: format!(
