@@ -1,30 +1,255 @@
 ---
 title: Circuit Breaking
-subtitle: Improve system stability by implementing circuit breaking
+subtitle: Stop sending requests to a failing subgraph or connector until it recovers
+description: Configure circuit breaking in the GraphOS Router to shed load from a failing subgraph or connector source, per subgraph, per connector source, or for all of them at once.
 ---
 
-Circuit breaking prevents cascading failures in your distributed system by temporarily halting requests to subgraphs that fail or experience high latency. This gives your services time to recover without being overwhelmed by additional requests.
+Circuit breaking prevents cascading failures in your distributed system by temporarily halting requests to a subgraph or connector source that is already failing. This gives the struggling service time to recover instead of being overwhelmed by requests that are unlikely to succeed, and it returns an error to the client immediately rather than making it wait.
 
-Apollo Router monitors the health of your services. When it detects failures or timeouts, it temporarily removes the service from the request chain. You can implement circuit breakers at various levels (for example, at the router level or subgraph level).
+The router tracks the outcome of every request it makes to each subgraph and each connector source separately. Each of those targets gets its own _circuit_, which is in one of three states:
 
-Circuit breaking helps your team manage environments where services are dynamic and experience varying loads. Use it with patterns like rate limiting and load balancing to optimize resource usage.
+- **Closed**: requests flow through normally. This is the starting state.
+- **Open**: the target has been failing, so requests are rejected immediately without reaching it.
+- **Half-open**: the circuit has been open long enough to try again, so a single _probe_ request is let through. If the probe succeeds the circuit closes; if it fails the circuit opens again.
 
-Set thresholds for timeouts or errors to trigger circuit breaking. Manually override them to force a breaker closed or open.
+## Configuration
 
-## Implementing circuit breaking
+Circuit breaking is disabled unless you configure it. Add a `circuit_breaker` section to your [YAML config file](/router/configuration/overview/#yaml-config-file):
 
-To implement circuit breaking, evaluate your system architecture and the specific requirements of your services.
+```yaml title="router.yaml"
+circuit_breaker:
+  all: # Rules applied to every subgraph
+    failure_rate_threshold: 0.5 # Open the circuit once half of the window has failed
+    window_size: 100 # Measure the failure rate over the last 100 requests
+    min_requests: 10 # ...but only once at least 10 requests are in the window
+    open_duration: 30s # Stay open for 30s, then let a single probe request through
+    consecutive_failures: 5 # Or open immediately after 5 failures in a row
+  subgraphs: # Rules applied to individual subgraphs, in place of `all`
+    products:
+      consecutive_failures: 2 # Open the products circuit after only 2 failures in a row
+    reviews:
+      enabled: false # Don't apply circuit breaking to reviews at all
+  connector:
+    all: # Rules applied to every connector source
+      open_duration: 10s
+    sources: # Rules applied to individual connector sources, in place of `connector.all`
+      products.api:
+        window_size: 500
+```
 
-### Use service meshes and proxies (recommended)
+Every option is optional and has a default, so `circuit_breaker: {all: {}}` is enough to protect every subgraph with the values shown above.
 
-Service meshes like [Istio](https://istio.io/) and proxies such as [Envoy](https://www.envoyproxy.io/) and [NGINX](https://www.nginx.com/) provide robust circuit breaking at the network or application level. Configure these tools to monitor health, error rates, and latency to halt or reroute traffic to failing subgraphs or services.
+### Options
 
-Apollo recommends using these tools for circuit breaking outside the Apollo Router. Many organizations already use this approach for rate limiting and load balancing.
+<table class="field-table">
+  <thead>
+    <tr>
+      <th>Option</th>
+      <th>Description</th>
+      <th>Default</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>
 
-Service mesh circuit breaking is typically not GraphQL-aware and might treat entire subgraphs atomically, lacking per-resolver or per-query granularity.
+`enabled`
 
-### Use circuit breakers at the application level
+      </td>
+      <td>
 
-Wrap data sources or resolvers with circuit breaker logic using libraries like [`opossum`](https://github.com/nodeshift/opossum) (Node.js) or [`resilience4j`](https://github.com/resilience4j/resilience4j) (Java). Use this approach in your subgraph services to enable per-resolver or per-backend API circuit breaking.
+Whether circuit breaking applies to this target. Set it to `false` on a subgraph or connector source to opt that one target out of an `all` block, leaving any options beside it in place.
+
+      </td>
+      <td>`true`</td>
+    </tr>
+    <tr>
+      <td>
+
+`failure_rate_threshold`
+
+      </td>
+      <td>
+
+Fraction of the requests in the window that must fail before the circuit opens. Must be greater than `0.0` and at most `1.0`. Evaluated only once the window holds at least `min_requests` requests.
+
+      </td>
+      <td>`0.5`</td>
+    </tr>
+    <tr>
+      <td>
+
+`window_size`
+
+      </td>
+      <td>
+
+Number of most recent requests the failure rate is measured over. Older outcomes drop out of the window as new ones arrive, so the rate always reflects how the target is behaving now. Must be at least `min_requests` and at most `1000000`.
+
+      </td>
+      <td>`100`</td>
+    </tr>
+    <tr>
+      <td>
+
+`min_requests`
+
+      </td>
+      <td>
+
+Minimum number of requests in the window before the failure rate is evaluated. Prevents the circuit from opening on a handful of early failures. Must be at most `window_size`.
+
+      </td>
+      <td>`10`</td>
+    </tr>
+    <tr>
+      <td>
+
+`open_duration`
+
+      </td>
+      <td>
+
+How long the circuit stays open before letting a single probe request through. Also bounds the probe itself: a probe that hasn't reported an outcome within this long counts as failed, and the circuit opens again.
+
+      </td>
+      <td>`30s`</td>
+    </tr>
+    <tr>
+      <td>
+
+`consecutive_failures`
+
+      </td>
+      <td>
+
+Number of consecutive failures that open the circuit immediately, whatever the overall failure rate. Catches hard failures before a full rate window has filled.
+
+      </td>
+      <td>`5`</td>
+    </tr>
+  </tbody>
+</table>
+
+### Configuring subgraphs and connector sources
+
+`circuit_breaker` is organized like other per-subgraph router configuration:
+
+- `all` applies to every subgraph.
+- `subgraphs.<subgraph name>` applies to one subgraph.
+- `connector.all` applies to every connector source.
+- `connector.sources` applies to one connector source, keyed by the single string `<subgraph name>.<source name>` — for example `products.api`.
+
+A subgraph or source listed under `subgraphs` or `connector.sources` takes its options from its own block alone. That block stands in for the corresponding `all` block rather than layering over it, so an option the block leaves out falls back to the default and not to the value `all` gave it. In this example, `products` opens after 2 consecutive failures and measures its failure rate over the default window of 100 requests — `all`'s `window_size` of 200 applies to every _other_ subgraph, not to `products`:
+
+```yaml title="router.yaml"
+circuit_breaker:
+  all:
+    window_size: 200
+    consecutive_failures: 5
+  subgraphs:
+    products:
+      consecutive_failures: 2
+```
+
+To give `products` the larger window as well, set it in the `products` block too:
+
+```yaml title="router.yaml"
+circuit_breaker:
+  all:
+    window_size: 200
+    consecutive_failures: 5
+  subgraphs:
+    products:
+      window_size: 200
+      consecutive_failures: 2
+```
+
+Subgraphs and connector sources are configured independently: an `all` block under `circuit_breaker` doesn't apply to connectors, and `connector.all` doesn't apply to subgraphs.
+
+### Turning circuit breaking off for one target
+
+To leave one subgraph or connector source out of an `all` block, set `enabled: false` on it. Any options in the same block stay where they are, ready for when you switch it back on:
+
+```yaml title="router.yaml"
+circuit_breaker:
+  all:
+    consecutive_failures: 5
+  subgraphs:
+    reviews:
+      enabled: false # Don't apply circuit breaking to reviews for now
+      consecutive_failures: 2 # ...but remember these settings for when it goes back on
+```
+
+## What counts as a failure
+
+The router records a request to a subgraph or connector source as a failure when:
+
+- the response carries a `5xx` HTTP status,
+- the transport failed — for example the router couldn't connect, or the connection dropped — or
+- the request was cancelled before the target answered. A target that has stopped responding never returns an error of its own, so a cancellation from an outer [timeout](./traffic-shaping#timeouts) or a client disconnect is the only evidence the circuit gets.
+
+Everything else, including `4xx` responses and GraphQL errors in an otherwise successful response, counts as a success. A `4xx` usually says something about the request rather than the health of the target.
+
+Requests the router turns away itself never reach the target, so they say nothing about its health and are left out of the circuit entirely. That covers a request rejected by a connector's [`max_requests`](/graphos/routing/connectors/limits) limit, a [rate limit](./traffic-shaping#rate-limiting), and a request a [coprocessor](/router/customizations/coprocessor) or [rhai script](/graphos/routing/customization/rhai) fails before it is sent. Responses the router answers without asking the target — a [response cache](./caching/response-caching) hit, most of all — are equally invisible to the circuit, and keep being served while it is open.
+
+<Note>
+
+Because cancellations count as failures, a router that sheds or times out requests aggressively can open a circuit on a target that is answering correctly. Size `consecutive_failures` and `failure_rate_threshold` with that in mind.
+
+Failures raised by your own [native Rust plugins](/graphos/routing/customization/native) at the subgraph service are the exception, and do count against the target's circuit. The circuit breaker sits above them deliberately: a plugin that replaces the subgraph service instead of forwarding to it would otherwise switch circuit breaking off without saying so.
+
+</Note>
+
+## Observability
+
+Each circuit reports itself under the `apollo.qos.circuit_breaker.name` attribute, set to the subgraph name or the `<subgraph name>.<source name>` source key:
+
+| Instrument | Description |
+| --- | --- |
+| `apollo.qos.circuit_breaker.state` | Gauge of the circuit's current state: `0` closed, `1` half-open, `2` open. |
+| `apollo.qos.circuit_breaker.requests` | Counter of requests, with `apollo.qos.circuit_breaker.status` set to `accepted`, `rejected`, or `probe`. |
+| `apollo.qos.circuit_breaker.state.transitions` | Counter of state changes, with `apollo.qos.circuit_breaker.state.from` and `apollo.qos.circuit_breaker.state.to`. |
+
+Every request through a circuit also opens an `apollo.qos.circuit_breaker` span carrying the circuit's name and the state it was in.
+
+## What clients see
+
+While a circuit is open, the affected fetch fails immediately without a request being made. The router adds an error to the GraphQL response with the extension code `REQUEST_CIRCUIT_BREAKER_OPEN`:
+
+```json
+{
+  "errors": [
+    {
+      "message": "Your request was rejected because the circuit breaker for this service is open",
+      "extensions": {
+        "code": "REQUEST_CIRCUIT_BREAKER_OPEN"
+      }
+    }
+  ]
+}
+```
+
+Whether the client receives partial data alongside the error depends on the query plan, exactly as it does for any other failing fetch.
+
+<Note>
+
+The error is attached to the subgraph response, so [`include_subgraph_errors`](/router/configuration/subgraph-error-inclusion) applies to it like any other subgraph error. With the default configuration the client sees `Subgraph errors redacted` instead of the message and code above.
+
+</Note>
+
+## Alternatives
+
+Circuit breaking in the router covers the calls the router makes. If you need circuit breaking elsewhere in your architecture, or with different granularity, consider these alternatives, which compose with the router's own circuit breaking.
+
+### Service meshes and proxies
+
+Service meshes like [Istio](https://istio.io/) and proxies such as [Envoy](https://www.envoyproxy.io/) and [NGINX](https://www.nginx.com/) provide circuit breaking at the network level, including for traffic that doesn't pass through the router. Many organizations already use this approach for rate limiting and load balancing.
+
+Service mesh circuit breaking is typically not GraphQL-aware and might treat entire subgraphs atomically, lacking per-connector-source granularity.
+
+### Application-level circuit breakers
+
+Wrap data sources or resolvers in your subgraph services with circuit breaker logic using libraries like [`opossum`](https://github.com/nodeshift/opossum) (Node.js) or [`resilience4j`](https://github.com/resilience4j/resilience4j) (Java). Use this approach for per-resolver or per-backend-API circuit breaking inside a subgraph.
 
 This decentralized approach can require coordination and duplication across your services.

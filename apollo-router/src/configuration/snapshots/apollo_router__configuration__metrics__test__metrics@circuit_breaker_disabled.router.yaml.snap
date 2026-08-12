@@ -1,0 +1,5 @@
+---
+source: apollo-router/src/configuration/metrics.rs
+expression: "& metrics.non_zero()"
+---
+[]

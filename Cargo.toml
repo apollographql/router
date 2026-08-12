@@ -78,3 +78,20 @@ sha1 = "0.10.6"
 tempfile = "3.10.1"
 tokio = { version = "1.36.0", features = ["full"] }
 tower = { version = "0.5.1", features = ["full"] }
+
+# TEMPORARY (ROUTER-2056): apollo-qos 0.5.1, which introduces `CircuitBreakerLayer`, is not
+# published yet, so `apollo-router` depends on it by path. That pulls second copies of the
+# apollo-platform-rs crates it shares with apollo-router into the graph — the path ones apollo-qos
+# resolves through its own workspace, alongside the crates.io ones apollo-router depends on.
+# Duplicating them breaks apollo-router in two ways: the two copies of apollo-errors each register
+# the `ERROR_REGISTRY` distributed slice, which makes linkme panic on the first registry lookup at
+# runtime, and a `CircuitBreakerConfig` implementing one copy's `apollo_configuration::Validate`
+# cannot be validated through the other's. Patching the crates.io copies to the same paths unifies
+# them.
+#
+# Remove this section together with the apollo-qos path dependency in apollo-router/Cargo.toml
+# once apollo-qos 0.5.1 is published.
+[patch.crates-io]
+apollo-configuration = { path = "../apollo-platform-rs/apollo-configuration/crates/apollo-configuration" }
+apollo-errors = { path = "../apollo-platform-rs/apollo-errors/crates/apollo-errors" }
+apollo-errors-derive = { path = "../apollo-platform-rs/apollo-errors/crates/apollo-errors-derive" }

@@ -54,9 +54,10 @@ snapshot = []
 addr2line = "0.27.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-errors = "0.7.1"
+apollo-configuration = "0.5.0"
+apollo-errors = "0.8.0"
 apollo-federation = { path = "../apollo-federation", version = "=2.17.0" }
-apollo-qos = "0.5.0"
+apollo-qos = { path = "../../apollo-platform-rs/apollo-qos/crates/apollo-qos", version = "=0.6.0" }
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "futures-io",

@@ -223,6 +223,11 @@ fn get_plugin_config(plugin: &str) -> &str {
                 debug_extensions: false
                 "#
         }
+        "circuit_breaker" => {
+            r#"
+                all: {}
+                "#
+        }
         "experimental_mock_subgraphs" => {
             r#"
                subgraphs: {}
@@ -240,6 +245,81 @@ fn get_plugin_config(plugin: &str) -> &str {
         }
         _ => panic!("This function does not contain config for plugin: {plugin}"),
     }
+}
+
+/// Where the circuit breaker sits decides what its circuits are allowed to see, and only the
+/// order of the calls in [`create_plugins`](crate::pipeline::create_plugins) decides that.
+///
+/// It has to be below every plugin that can answer a subgraph request itself or fail one on
+/// the router's own account — `response_cache`, so a cache hit is still served while a circuit
+/// is open, and `coprocessor` and `rhai`, so their failures are not counted against a subgraph
+/// that is answering fine. It has to stay above user plugins and `experimental_mock_subgraphs`,
+/// which replace the subgraph service rather than forwarding to it and would otherwise drop the
+/// circuit breaker out of the stack entirely.
+#[tokio::test]
+async fn test_circuit_breaker_is_the_innermost_router_owned_plugin() {
+    let license = LicenseState::Licensed {
+        limits: Default::default(),
+    };
+
+    let config_for =
+        |plugin: &str| serde_yaml::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
+    let router_config = Configuration::builder()
+        .apollo_plugin("connectors", config_for("connectors"))
+        .apollo_plugin("coprocessor", config_for("coprocessor"))
+        .apollo_plugin("response_cache", config_for("response_cache"))
+        .apollo_plugin("circuit_breaker", config_for("circuit_breaker"))
+        .apollo_plugin(
+            "experimental_mock_subgraphs",
+            config_for("experimental_mock_subgraphs"),
+        )
+        .build()
+        .unwrap();
+
+    let schema = include_str!("../../testdata/supergraph.graphql");
+    let schema = Schema::parse(schema, &router_config).unwrap();
+
+    let is_telemetry_disabled = false;
+    let pipeline = PipelineFactory
+        .create_pipeline(
+            is_telemetry_disabled,
+            Arc::new(router_config),
+            Arc::new(schema),
+            None,
+            None,
+            Arc::new(license),
+        )
+        .await
+        .unwrap();
+
+    let position = |name: &str| {
+        pipeline
+            .plugins
+            .get_index_of(name)
+            .unwrap_or_else(|| panic!("{name} should have been added"))
+    };
+    let circuit_breaker = position("apollo.circuit_breaker");
+
+    // Earlier in the list is further from the target, so the circuit breaker comes after
+    // everything whose failures and answers it must not see.
+    for outside in [
+        "apollo.traffic_shaping",
+        "apollo.limits",
+        "apollo.connectors",
+        "apollo.coprocessor",
+        "apollo.response_cache",
+    ] {
+        assert!(
+            position(outside) < circuit_breaker,
+            "{outside} should wrap the circuit breaker, not the other way round"
+        );
+    }
+
+    // ...and before the plugins that replace the subgraph service instead of forwarding.
+    assert!(
+        circuit_breaker < position("apollo.experimental_mock_subgraphs"),
+        "the circuit breaker should wrap experimental_mock_subgraphs"
+    );
 }
 
 #[tokio::test]

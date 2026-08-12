@@ -28,6 +28,7 @@ prepare_pipeline
     plugin: apollo.rhai
     plugin: apollo.coprocessor
     plugin: apollo.response_cache
+    plugin: apollo.circuit_breaker
     plugin: apollo.experimental_mock_subgraphs
   http_client_inputs
   query_plan_redis_connect

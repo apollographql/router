@@ -154,6 +154,9 @@ pub enum Error {
     #[error("Gateway timeout")]
     GatewayTimeout,
 
+    #[error("Circuit breaker open")]
+    CircuitBreakerOpen,
+
     #[error("Connector error: {0}")]
     TransportFailure(String),
 }
@@ -180,6 +183,7 @@ impl Error {
             Self::RequestLimitExceeded => "REQUEST_LIMIT_EXCEEDED",
             Self::RateLimited => "REQUEST_RATE_LIMITED",
             Self::GatewayTimeout => "GATEWAY_TIMEOUT",
+            Self::CircuitBreakerOpen => "REQUEST_CIRCUIT_BREAKER_OPEN",
             Self::TransportFailure(_) => "HTTP_CLIENT_ERROR",
         }
     }

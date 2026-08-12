@@ -1,0 +1,16 @@
+circuit_breaker:
+  all:
+    failure_rate_threshold: 0.5
+    window_size: 100
+    min_requests: 10
+    open_duration: 30s
+    consecutive_failures: 5
+  subgraphs:
+    products:
+      consecutive_failures: 3
+  connector:
+    all:
+      open_duration: 10s
+    sources:
+      products.api:
+        enabled: false

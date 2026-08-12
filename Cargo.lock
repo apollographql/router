@@ -198,9 +198,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-configuration"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "811fb50d302d4bea931921bb6e2b4e144cef987785e13806930bd9906e787f56"
+version = "0.5.0"
 dependencies = [
  "apollo-configuration-macros",
  "apollo-errors",
@@ -225,9 +223,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-configuration-macros"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6342c3e108a1ddd490bc233716be5883c70979459a622c2ca00041cad877a1d0"
+version = "0.2.0"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -249,9 +245,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-errors"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f577548eb2bd2179db609f7f57a8e0e9cf3227720c33d8ca2ed526989f230a38"
+version = "0.8.0"
 dependencies = [
  "apollo-errors-derive",
  "http 1.5.0",
@@ -263,9 +257,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-errors-derive"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bf4b8684df707bfdbad5e39fb7d37c695714ab866d5c29d9957682db2619f70"
+version = "0.6.0"
 dependencies = [
  "heck",
  "http 1.5.0",
@@ -343,9 +335,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-opentelemetry"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da958e3fe37c87312608a4375061c980677f0147bbf60ee0049fbfbaadfa8325"
+version = "0.10.0"
 dependencies = [
  "apollo-configuration",
  "apollo-errors",
@@ -379,9 +369,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-opentelemetry-macros"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebd57147df93912fa936e236e1128e2fd9ecc0e3a7bab7e6ed4f1a85bd32108c"
+version = "0.4.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -390,9 +378,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-opentelemetry-stdout"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "283baf41a71eec3b3a59c7b9947e93017ac6a9d13b5b2b335443c60031dd813b"
+version = "0.3.0"
 dependencies = [
  "opentelemetry",
  "opentelemetry-proto",
@@ -414,9 +400,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-qos"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be14586fc56499b23ece45aab9a3b185ab92f7eabc117b467d7484e27f085626"
+version = "0.6.0"
 dependencies = [
  "apollo-configuration",
  "apollo-errors",
@@ -435,9 +419,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-redaction"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "879cf40f6ba6cf15a9e5d88cf5e0e832713b1fd98d06c4049048b9a6a2f36c53"
+version = "0.3.0"
 dependencies = [
  "schemars",
  "serde",
@@ -452,6 +434,7 @@ dependencies = [
  "ahash",
  "anyhow",
  "apollo-compiler",
+ "apollo-configuration",
  "apollo-environment-detector",
  "apollo-errors",
  "apollo-federation",
@@ -6846,7 +6829,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -7369,7 +7352,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -7669,7 +7652,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
  "windows-sys 0.52.0",
@@ -7682,7 +7665,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]

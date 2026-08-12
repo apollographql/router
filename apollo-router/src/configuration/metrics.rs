@@ -309,6 +309,22 @@ impl InstrumentData {
             opt.subgraph.deduplicate_query,
             "$[?(@.all.deduplicate_query == true || @.subgraphs..deduplicate_query == true)]"
         );
+        // Every block asks whether it is present *and* not switched off, because `enabled`
+        // defaults to true when a block omits it. Presence alone would count `circuit_breaker:
+        // {}` and `all: {enabled: false}` as deployments using circuit breaking, when neither
+        // wraps a single request.
+        populate_config_instrument!(
+            apollo.router.config.circuit_breaker,
+            "$.circuit_breaker[?((@.all && @.all.enabled != false) || @.subgraphs.*[?(@.enabled != false)] || (@.connector.all && @.connector.all.enabled != false) || @.connector.sources.*[?(@.enabled != false)])]",
+            opt.subgraph.all,
+            "$[?(@.all && @.all.enabled != false)]",
+            opt.subgraph.subgraphs,
+            "$.subgraphs.*[?(@.enabled != false)]",
+            opt.connector.all,
+            "$[?(@.connector.all && @.connector.all.enabled != false)]",
+            opt.connector.sources,
+            "$.connector.sources.*[?(@.enabled != false)]"
+        );
 
         populate_config_instrument!(
             apollo.router.config.response_cache,

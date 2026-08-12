@@ -1,0 +1,15 @@
+# Circuit breaking configured, and switched off everywhere: nothing here wraps a request, so
+# `apollo.router.config.circuit_breaker` must stay at zero and be left out of the snapshot.
+circuit_breaker:
+  all:
+    enabled: false
+    consecutive_failures: 5
+  subgraphs:
+    products:
+      enabled: false
+  connector:
+    all:
+      enabled: false
+    sources:
+      products.api:
+        enabled: false

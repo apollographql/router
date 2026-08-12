@@ -1,0 +1,13 @@
+---
+source: apollo-router/src/configuration/metrics.rs
+expression: "& metrics.non_zero()"
+---
+- name: apollo.router.config.circuit_breaker
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.connector.all: true
+          opt.connector.sources: false
+          opt.subgraph.all: true
+          opt.subgraph.subgraphs: true

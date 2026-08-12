@@ -171,6 +171,24 @@ pub(crate) async fn create_plugins(
     registrar.add_optional("rhai").await;
     registrar.add_optional("coprocessor").await;
     registrar.add_optional("response_cache").await;
+    // As close to the subgraph or connector it protects as it can get, because everything above
+    // it here is something the circuit must not see:
+    // - The response cache answers requests itself. Inside it, a cache hit is still served while
+    //   the circuit is open — it needs nothing from the target — and never counts towards the
+    //   circuit either way.
+    // - A coprocessor breaking a request, a rhai script throwing, and a timeout or rate limit
+    //   from traffic shaping are all the router failing a request on its own account. Counting
+    //   them would let a coprocessor outage open circuits on subgraphs that are answering fine.
+    //
+    // It stays above user plugins, and so above `experimental_mock_subgraphs` and the test
+    // harness's own hooks, for the opposite reason: a plugin that replaces the subgraph service
+    // instead of forwarding to it would take the circuit breaker out of the stack entirely.
+    // A user plugin's own failures are therefore counted against the target.
+    //
+    // Traffic shaping's timeout still bounds each request the circuit lets through, and a
+    // request the circuit rejects still flows back out through traffic shaping's response
+    // mapping, since both sit above this.
+    registrar.add_optional("circuit_breaker").await;
     registrar.add_user_plugins(user_plugins_config, extra).await;
 
     // Because this plugin intercepts subgraph requests

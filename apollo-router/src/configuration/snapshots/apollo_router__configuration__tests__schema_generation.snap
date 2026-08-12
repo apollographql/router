@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -970,6 +969,112 @@ expression: "&schema"
           "description": "Maximum number of bytes for the joined header value. When the joined value would exceed\nthis size, `experimental_on_overflow` decides what to do. Defaults to 16kb.",
           "format": "uint",
           "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "CircuitBreakerConnectorConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for circuit breaking on Apollo Connectors requests.",
+      "properties": {
+        "all": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CircuitBreakerTargetConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Applied to every connector source that has no entry of its own under `sources`."
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/CircuitBreakerTargetConfig"
+          },
+          "description": "Applied to specific connector sources, keyed by `<subgraph name>.<source name>`, in place\nof `all` rather than on top of it: a source listed here takes its options from its own\nblock alone, and the default for every option that block leaves out. Set `enabled: false`\nto opt a source out of `all` entirely.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "CircuitBreakerPluginConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for the circuit breaker plugin.",
+      "properties": {
+        "all": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CircuitBreakerTargetConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Applied to every subgraph that has no entry of its own under `subgraphs`."
+        },
+        "connector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CircuitBreakerConnectorConfig"
+            }
+          ],
+          "description": "Applied to Apollo Connectors requests."
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/CircuitBreakerTargetConfig"
+          },
+          "description": "Applied to specific subgraphs, in place of `all` rather than on top of it: a subgraph\nlisted here takes its options from its own block alone, and the default for every option\nthat block leaves out. Set `enabled: false` to opt a subgraph out of `all` entirely.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "CircuitBreakerTargetConfig": {
+      "additionalProperties": false,
+      "description": "Circuit breaking configuration for one subgraph or connector source, or for `all` of them.\n\nEverything apollo-qos takes, plus the router's own `enabled`, in one block. The switch is the\nrouter's because apollo-qos configs are present or absent rather than enabled or disabled:\nopting a single target out of an `all` block is this plugin's problem to express, and an\n`enabled` on [`CircuitBreakerConfig`] would be a field apollo-qos could only ignore.\n\n## Why the options are held as JSON\n\napollo-qos declares the constraints on its options as apollo-configuration attributes, and\napollo-configuration checks those against the JSON a configuration arrived as — a Rust value\ncannot carry them, and [`CircuitBreakerConfig`] has no `Serialize` to turn one back into JSON\nwith. So the block keeps its options as they came and hands them to [`parse_options`], which\ndeserializes them and checks them in the same pass.\n\n## Why `additionalProperties` is set by hand\n\nThis is the one config struct in the plugin without `#[serde(deny_unknown_fields)]`, because\nneither place it could go denies anything:\n\n- On this struct, serde rejects it outright as a compile error: it cannot know which keys\n  belong to a flattened field.\n- The one apollo-configuration already puts on [`CircuitBreakerConfig`] cannot fire while the\n  options are flattened. schemars drops the inner `additionalProperties: false` because, kept,\n  it would reject `enabled`.\n\nSo the denial goes in the generated schema instead, and `extend` puts it there. That is the\ncheck a user's `router.yaml` meets first, and the only one that can point at the offending key\nin the document rather than name it in a message. [`parse_options`] catches the same key a\nsecond time, over the JSON the options arrived as, which is what a configuration built in code\nrather than parsed from YAML meets instead.",
+      "properties": {
+        "consecutive_failures": {
+          "default": 5,
+          "description": "Number of consecutive failures that immediately trip the circuit.\n\nTrips the circuit before a full rate window fills — useful for catching hard failures\nfast. Must be ≥ 1. Defaults to `5`.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Whether to apply circuit breaking to this target. Set it to `false` to opt a subgraph or\nsource out of an `all` block, keeping any options set beside it for when it goes back on.",
+          "type": "boolean"
+        },
+        "failure_rate_threshold": {
+          "default": 0.5,
+          "description": "Fraction of requests that must fail before the circuit opens.\n\nEvaluated only once the window holds at least `min_requests`. Must be in the range\n(0.0, 1.0]: a value of `1.0` trips on 100% failure; a value of `0.5` trips on 50%.\nDefaults to `0.5`.",
+          "format": "double",
+          "type": "number"
+        },
+        "min_requests": {
+          "default": 10,
+          "description": "Minimum requests in the window before the failure rate is evaluated.\n\nPrevents the circuit from tripping on a handful of early failures. Must be ≥ 1 and\n≤ `window_size`. Defaults to `10`.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "open_duration": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Duration"
+            }
+          ],
+          "default": "30s",
+          "description": "How long the circuit stays open before allowing a single probe request through.\n\nAlso bounds the probe itself: one that has not reported an outcome within this long\ncounts as failed, and the circuit reopens. Must be greater than zero. Defaults to\n`30s`."
+        },
+        "window_size": {
+          "default": 100,
+          "description": "Number of most recent requests the failure rate is measured over.\n\nOlder outcomes drop out of the window as new ones arrive, so the rate always reflects\ncurrent behaviour rather than the lifetime of the process. Must be ≥ `min_requests` and\nat most `1000000`. Defaults to `100`.",
+          "format": "uint32",
+          "minimum": 1,
           "type": "integer"
         }
       },
@@ -3496,6 +3601,9 @@ expression: "&schema"
           "type": "string"
         }
       ]
+    },
+    "Duration": {
+      "type": "string"
     },
     "DurationUnit": {
       "oneOf": [
@@ -13041,6 +13149,9 @@ expression: "&schema"
         "subgraph": null
       },
       "description": "Batching configuration."
+    },
+    "circuit_breaker": {
+      "$ref": "#/definitions/CircuitBreakerPluginConfig"
     },
     "connectors": {
       "$ref": "#/definitions/ConnectorsConfig"
