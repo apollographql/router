@@ -4125,12 +4125,28 @@ mod tests {
             // should interrupt it before the delay expires.
             drop(gql_stream);
 
-            // Wait past the configured reconnect delay, not just "a few ms": a broken
-            // implementation that ignores the closing signal would sleep the full delay and then
-            // dial the stalling server, incrementing `connection_count` almost immediately after
-            // (the mock increments it on TCP accept, before the handshake stalls). A wait shorter
-            // than `reconnect_delay` can't tell "aborted correctly" apart from "still sleeping".
-            tokio::time::sleep(reconnect_delay + std::time::Duration::from_millis(300)).await;
+            // Wait for the forwarding task to reach its terminal teardown — the point,
+            // immediately before `handle_sink.close()`, where it emits this completion metric —
+            // instead of sleeping a fixed duration. A broken implementation that ignored the
+            // closing signal would sleep out the full delay and then dial the stalling server,
+            // hanging on its handshake forever; this metric would then never appear, so the wait
+            // below times out and fails the test instead of passing silently.
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                while !crate::metrics::collect_metrics().metric_exists(
+                    "apollo.router.operations.subscriptions.events",
+                    crate::metrics::test_utils::MetricType::Counter,
+                    &[
+                        opentelemetry::KeyValue::new("subscriptions.mode", "passthrough"),
+                        opentelemetry::KeyValue::new("subscriptions.complete", true),
+                    ],
+                ) {
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .expect(
+                "expected the closing signal to abort the reconnect delay and the forwarding task to complete",
+            );
 
             // The closing signal must have fired during the delay sleep — no reconnect
             // handshake should have been issued.
@@ -4145,11 +4161,6 @@ mod tests {
                 1,
                 "router must not attempt a reconnect after all clients disconnect"
             );
-            // NB: the `subscriptions.events{complete=true}` emission also happens on this
-            // client-disconnect teardown, but it races this assertion point (the client stream is
-            // dropped rather than awaited to completion, so there's no synchronization with the
-            // forwarding task's teardown). That emission is asserted deterministically in
-            // `test_websocket_complete_does_not_reconnect` instead.
 
             spawned_task.abort();
         }
@@ -4243,18 +4254,28 @@ mod tests {
             );
             drop(gql_stream);
 
-            // Give the closing signal time to propagate through the notification task and be
-            // picked up by the biased select! inside open_ws_gql_stream.
-            //
-            // NB: because `emulate_websocket_server_drops_then_stalls` never completes the
-            // handshake, `open_ws_gql_stream` — and thus the `reconnect` counter increment, which
-            // only fires after it returns — would also never resolve if the closing signal were
-            // ignored. No amount of waiting here can distinguish "aborted correctly" from "still
-            // hung on the stalled handshake" via this counter alone; the counter check below
-            // mainly guards against a regression that increments it speculatively before the
-            // handshake completes. `test_websocket_reconnect_closing_signal_during_delay` is the
-            // test that deterministically proves the closing signal aborts in-flight reconnects.
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            // Wait for the forwarding task to reach its terminal teardown — the point,
+            // immediately before `handle_sink.close()`, where it emits this completion metric —
+            // instead of a fixed sleep. Because `emulate_websocket_server_drops_then_stalls`
+            // never completes the handshake, a broken closing-signal abort would leave the task
+            // hung on it forever and this metric would never appear, so the wait below times out
+            // and fails the test instead of passing silently.
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                while !crate::metrics::collect_metrics().metric_exists(
+                    "apollo.router.operations.subscriptions.events",
+                    crate::metrics::test_utils::MetricType::Counter,
+                    &[
+                        opentelemetry::KeyValue::new("subscriptions.mode", "passthrough"),
+                        opentelemetry::KeyValue::new("subscriptions.complete", true),
+                    ],
+                ) {
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .expect(
+                "expected the closing signal to abort the in-flight handshake and the forwarding task to complete",
+            );
 
             // The handshake was aborted by the closing signal — the counter must NOT have
             // been incremented (it only fires after open_ws_gql_stream returns).

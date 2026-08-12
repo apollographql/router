@@ -5,7 +5,6 @@
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
 
 use futures::SinkExt;
 use futures::StreamExt;
@@ -13,6 +12,7 @@ use futures::future::BoxFuture;
 use http::HeaderValue;
 use serde::Serialize;
 use tokio::select;
+use tokio::time::Instant;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
