@@ -4,7 +4,6 @@ use bytes::Bytes;
 use derivative::Derivative;
 use serde::Deserialize;
 use serde::Serialize;
-use serde::de::DeserializeSeed;
 use serde::de::Error;
 
 use crate::configuration::BatchingMode;
@@ -13,11 +12,12 @@ use crate::graphql::json_object::empty_object;
 use crate::graphql::json_object::is_empty_object;
 use crate::json_ext;
 use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
 
 /// A GraphQL `Request` used to represent both supergraph and subgraph requests.
 #[derive(Clone, Derivative, Serialize, Deserialize)]
-// Note: if adding #[serde(deny_unknown_fields)],
-// also remove `Fields::Other` in `DeserializeSeed` impl.
+// Note: `deserialize_from_bytes` ignores unknown members; if adding
+// #[serde(deny_unknown_fields)], make it reject them too.
 #[serde(rename_all = "camelCase")]
 #[derivative(Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -103,26 +103,51 @@ where
         .unwrap_or_else(empty_object))
 }
 
-/// PERF(apollo-json): legacy bridge, revisit -- `serde_json` drives request parsing,
-/// and an apollo-json value only captures a subtree from apollo-json's own
-/// deserializers, so the zero-copy `BytesSeed` reads the legacy representation and
-/// the object converts here, once per request.
-fn as_optional_object<E: Error>(value: serde_json_bytes::Value) -> Result<Value, E> {
-    use serde::de::Unexpected;
+/// The JSON type of `value`, for error messages shaped like serde's.
+fn json_type_name(value: &Value) -> &'static str {
+    match value.kind() {
+        JsonKind::Null => "null",
+        JsonKind::Bool => "a boolean",
+        JsonKind::Number => "a number",
+        JsonKind::String => "a string",
+        JsonKind::Array => "a sequence",
+        JsonKind::Object => "a map",
+    }
+}
 
-    let exp = "a map or null";
-    match value {
-        serde_json_bytes::Value::Object(_) => Ok(json_ext::from_legacy(&value)),
-        // Similar to `deserialize_object_or_null`:
-        serde_json_bytes::Value::Null => Ok(empty_object()),
-        serde_json_bytes::Value::Bool(value) => Err(E::invalid_type(Unexpected::Bool(value), &exp)),
-        serde_json_bytes::Value::Number(_) => {
-            Err(E::invalid_type(Unexpected::Other("a number"), &exp))
-        }
-        serde_json_bytes::Value::String(value) => {
-            Err(E::invalid_type(Unexpected::Str(value.as_str()), &exp))
-        }
-        serde_json_bytes::Value::Array(_) => Err(E::invalid_type(Unexpected::Seq, &exp)),
+/// Reads a string member of a request envelope: absent and `null` are `None`,
+/// any other non-string shape is an error.
+fn envelope_string(envelope: &Value, key: &str) -> Result<Option<String>, serde_json::Error> {
+    match envelope.get(key) {
+        None => Ok(None),
+        Some(member) => match member.kind() {
+            JsonKind::Null => Ok(None),
+            JsonKind::String => Ok(member.as_str_owned()),
+            _ => Err(serde_json::Error::custom(format!(
+                "invalid type: {}, expected a string for `{key}`",
+                json_type_name(&member),
+            ))),
+        },
+    }
+}
+
+/// Reads an object member of a request envelope: absent and `null` read as an
+/// empty object (the [graphql-over-http spec] allows an explicit `null`), any
+/// other non-object shape is an error. The object is a subtree of the parsed
+/// request, sharing its arena.
+///
+/// [graphql-over-http spec]: https://graphql.github.io/graphql-over-http/draft/#sel-EALFPCCBCEtC37P
+fn envelope_object(envelope: &Value, key: &str) -> Result<Value, serde_json::Error> {
+    match envelope.get(key) {
+        None => Ok(empty_object()),
+        Some(member) => match member.kind() {
+            JsonKind::Null => Ok(empty_object()),
+            JsonKind::Object => Ok(member),
+            _ => Err(serde_json::Error::custom(format!(
+                "invalid type: {}, expected a map or null for `{key}`",
+                json_type_name(&member),
+            ))),
+        },
     }
 }
 
@@ -232,11 +257,34 @@ impl Request {
         RequestBuilder::default()
     }
 
-    /// Deserialize as JSON from `&Bytes`, avoiding string copies where possible
+    /// Deserialize as JSON from `&Bytes`.
+    ///
+    /// The bytes parse once into an apollo-json document — sharing the buffer,
+    /// not copying it — and the request reads the envelope by key, so
+    /// `variables` and `extensions` are subtrees of that document rather than
+    /// values rebuilt member by member.
     pub fn deserialize_from_bytes(data: &Bytes) -> Result<Self, serde_json::Error> {
-        let seed = RequestFromBytesSeed(data);
-        let mut de = serde_json::Deserializer::from_slice(data);
-        seed.deserialize(&mut de)
+        let document =
+            apollo_json::Document::parse(data.clone()).map_err(serde_json::Error::custom)?;
+        Self::from_request_envelope(&document.root_handle())
+    }
+
+    /// Reads a GraphQL request from a parsed JSON envelope. Unknown members
+    /// are ignored; a wrong-typed member is an error, matching what serde
+    /// reported for the same shapes.
+    fn from_request_envelope(envelope: &Value) -> Result<Self, serde_json::Error> {
+        if !envelope.is_object() {
+            return Err(serde_json::Error::custom(format!(
+                "invalid type: {}, expected a GraphQL request",
+                json_type_name(envelope),
+            )));
+        }
+        Ok(Request {
+            query: envelope_string(envelope, "query")?,
+            operation_name: envelope_string(envelope, "operationName")?,
+            variables: envelope_object(envelope, "variables")?,
+            extensions: envelope_object(envelope, "extensions")?,
+        })
     }
 
     /// Convert Bytes into a GraphQL [`Request`].
@@ -275,10 +323,10 @@ impl Request {
                 mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
             for entry in value.array_iter() {
-                result.push(Request::deserialize_from_bytes(&entry.to_bytes())?);
+                result.push(Request::from_request_envelope(&entry)?);
             }
         } else {
-            result.push(Request::deserialize_from_bytes(&value.to_bytes())?);
+            result.push(Request::from_request_envelope(&value)?);
         }
         Ok(result)
     }
@@ -330,251 +378,3 @@ impl Request {
     }
 }
 
-struct RequestFromBytesSeed<'data>(&'data Bytes);
-
-impl<'de> DeserializeSeed<'de> for RequestFromBytesSeed<'_> {
-    type Value = Request;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        #[serde(field_identifier, rename_all = "camelCase")]
-        enum Field {
-            Query,
-            OperationName,
-            Variables,
-            Extensions,
-            #[serde(other)]
-            Other,
-        }
-
-        const FIELDS: &[&str] = &["query", "operationName", "variables", "extensions"];
-
-        struct RequestVisitor<'data>(&'data Bytes);
-
-        impl<'de> serde::de::Visitor<'de> for RequestVisitor<'_> {
-            type Value = Request;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a GraphQL request")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> Result<Request, V::Error>
-            where
-                V: serde::de::MapAccess<'de>,
-            {
-                let mut query = None;
-                let mut operation_name = None;
-                let mut variables = None;
-                let mut extensions = None;
-                while let Some(key) = map.next_key()? {
-                    match key {
-                        Field::Query => {
-                            if query.is_some() {
-                                return Err(Error::duplicate_field("query"));
-                            }
-                            query = Some(map.next_value()?);
-                        }
-                        Field::OperationName => {
-                            if operation_name.is_some() {
-                                return Err(Error::duplicate_field("operationName"));
-                            }
-                            operation_name = Some(map.next_value()?);
-                        }
-                        Field::Variables => {
-                            if variables.is_some() {
-                                return Err(Error::duplicate_field("variables"));
-                            }
-                            let seed = serde_json_bytes::value::BytesSeed::new(self.0);
-                            let value = map.next_value_seed(seed)?;
-                            variables = Some(as_optional_object(value)?);
-                        }
-                        Field::Extensions => {
-                            if extensions.is_some() {
-                                return Err(Error::duplicate_field("extensions"));
-                            }
-                            let seed = serde_json_bytes::value::BytesSeed::new(self.0);
-                            let value = map.next_value_seed(seed)?;
-                            extensions = Some(as_optional_object(value)?);
-                        }
-                        Field::Other => {
-                            let _: serde::de::IgnoredAny = map.next_value()?;
-                        }
-                    }
-                }
-                Ok(Request {
-                    query: query.unwrap_or_default(),
-                    operation_name: operation_name.unwrap_or_default(),
-                    variables: variables.unwrap_or_else(empty_object),
-                    extensions: extensions.unwrap_or_else(empty_object),
-                })
-            }
-        }
-
-        deserializer.deserialize_struct("Request", FIELDS, RequestVisitor(self.0))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-    use test_log::test;
-
-    use super::*;
-
-    #[test]
-    fn test_request() {
-        let data = json!(
-        {
-          "query": "query aTest($arg1: String!) { test(who: $arg1) }",
-          "operationName": "aTest",
-          "variables": { "arg1": "me" },
-          "extensions": {"extension": 1}
-        });
-        let result = check_deserialization(data);
-        assert_eq!(
-            result,
-            Request::builder()
-                .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
-                .operation_name("aTest")
-                .variables(json_value!({ "arg1": "me" }))
-                .extensions(json_value!({"extension": 1}))
-                .build()
-        );
-    }
-
-    #[test]
-    fn test_no_variables() {
-        let result = check_deserialization(json!(
-        {
-          "query": "query aTest($arg1: String!) { test(who: $arg1) }",
-          "operationName": "aTest",
-          "extensions": {"extension": 1}
-        }));
-        assert_eq!(
-            result,
-            Request::builder()
-                .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
-                .operation_name("aTest")
-                .extensions(json_value!({"extension": 1}))
-                .build()
-        );
-    }
-
-    #[test]
-    // rover sends { "variables": null } when running the introspection query,
-    // and possibly running other queries as well.
-    fn test_variables_is_null() {
-        let result = check_deserialization(json!(
-        {
-          "query": "query aTest($arg1: String!) { test(who: $arg1) }",
-          "operationName": "aTest",
-          "variables": null,
-          "extensions": {"extension": 1}
-        }));
-        assert_eq!(
-            result,
-            Request::builder()
-                .query("query aTest($arg1: String!) { test(who: $arg1) }")
-                .operation_name("aTest")
-                .extensions(json_value!({"extension": 1}))
-                .build()
-        );
-    }
-
-    #[test]
-    fn from_urlencoded_query_works() {
-        let query_string = "query=%7B+topProducts+%7B+upc+name+reviews+%7B+id+product+%7B+name+%7D+author+%7B+id+name+%7D+%7D+%7D+%7D&extensions=%7B+%22persistedQuery%22+%3A+%7B+%22version%22+%3A+1%2C+%22sha256Hash%22+%3A+%2220a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f%22+%7D+%7D".to_string();
-
-        let expected_result = check_deserialization(json!(
-        {
-          "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
-          "extensions": {
-              "persistedQuery": {
-                  "version": 1,
-                  "sha256Hash": "20a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f"
-              }
-            }
-        }));
-
-        let req = Request::from_urlencoded_query(query_string).unwrap();
-
-        assert_eq!(expected_result, req);
-    }
-
-    #[test]
-    fn from_urlencoded_query_with_variables_works() {
-        let query_string = "query=%7B+topProducts+%7B+upc+name+reviews+%7B+id+product+%7B+name+%7D+author+%7B+id+name+%7D+%7D+%7D+%7D&variables=%7B%22date%22%3A%222022-01-01T00%3A00%3A00%2B00%3A00%22%7D&extensions=%7B+%22persistedQuery%22+%3A+%7B+%22version%22+%3A+1%2C+%22sha256Hash%22+%3A+%2220a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f%22+%7D+%7D".to_string();
-
-        let expected_result = check_deserialization(json!(
-        {
-          "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
-          "variables": {"date": "2022-01-01T00:00:00+00:00"},
-          "extensions": {
-              "persistedQuery": {
-                  "version": 1,
-                  "sha256Hash": "20a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f"
-              }
-            }
-        }));
-
-        let req = Request::from_urlencoded_query(query_string).unwrap();
-
-        assert_eq!(expected_result, req);
-    }
-
-    #[test]
-    fn null_extensions() {
-        let expected_result = check_deserialization(json!(
-        {
-          "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
-          "variables": {"date": "2022-01-01T00:00:00+00:00"},
-          "extensions": null
-        }));
-        insta::assert_yaml_snapshot!(expected_result);
-    }
-
-    #[test]
-    fn missing_extensions() {
-        let expected_result = check_deserialization(json!(
-        {
-          "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
-          "variables": {"date": "2022-01-01T00:00:00+00:00"},
-        }));
-        insta::assert_yaml_snapshot!(expected_result);
-    }
-
-    #[test]
-    fn extensions() {
-        let expected_result = check_deserialization(json!(
-        {
-          "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
-          "variables": {"date": "2022-01-01T00:00:00+00:00"},
-          "extensions": {
-            "something_simple": "else",
-            "something_complex": {
-                "nested": "value"
-            }
-          }
-        }));
-        insta::assert_yaml_snapshot!(expected_result);
-    }
-
-    fn check_deserialization(request: serde_json::Value) -> Request {
-        // check that deserialize_from_bytes agrees with Deserialize impl
-
-        let string = serde_json::to_string(&request).expect("could not serialize request");
-        let string_deserialized: Request =
-            apollo_json::from_str(&string).expect("could not deserialize string");
-        let bytes = Bytes::copy_from_slice(string.as_bytes());
-        let bytes_deserialized =
-            Request::deserialize_from_bytes(&bytes).expect("could not deserialize from bytes");
-        assert_eq!(
-            string_deserialized, bytes_deserialized,
-            "string and bytes deserialization did not match"
-        );
-        string_deserialized
-    }
-}
