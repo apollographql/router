@@ -1746,7 +1746,9 @@ async fn insert_entities_in_result(
         .or(subgraph_ttl);
 
     let mut new_entities = Vec::new();
-    let mut new_errors = Vec::new();
+    // Errors are collected with their position in the subgraph's error list so the reassembled
+    // list can be restored to the original order before it is returned.
+    let mut new_errors: Vec<(usize, Error)> = Vec::new();
 
     let mut inserted_types: HashMap<String, usize> = HashMap::new();
     let mut to_insert: Vec<_> = Vec::new();
@@ -1754,8 +1756,17 @@ async fn insert_entities_in_result(
     // those we cannot. Unattributed errors are passed through untouched at the end so that they
     // are not lost during reassembly, and they suppress caching for this whole batch because we
     // cannot tell which of the fetched entities they invalidate.
+    //
+    // Only the entities this reassembly is going to consume — one per cache miss — can be
+    // attributed to. A subgraph returning more entities than we asked representations for would
+    // otherwise get the errors of those extra entities silently dropped here.
+    let attributable_entity_count = result
+        .iter()
+        .filter(|r| r.cache_entry.is_none())
+        .count()
+        .min(entities.len());
     let (mut errors_by_entity_idx, unattributed_errors) =
-        attribute_errors_to_entities(errors, entities.len());
+        attribute_errors_to_entities(errors, attributable_entity_count);
     let has_unattributed_errors = !unattributed_errors.is_empty();
     let mut entities_it = entities.drain(..).enumerate();
 
@@ -1790,13 +1801,13 @@ async fn insert_entities_in_result(
 
                 let entity_errors = errors_by_entity_idx.remove(&entity_idx).unwrap_or_default();
                 let has_errors = !entity_errors.is_empty();
-                for mut error in entity_errors {
+                for (error_idx, mut error) in entity_errors {
                     // update the entity index, because it does not match with the original one
                     if let Some(path) = error.path.as_mut() {
                         path.0[1] = PathElement::Index(new_entity_idx);
                     }
 
-                    new_errors.push(error);
+                    new_errors.push((error_idx, error));
                 }
 
                 if !has_errors
@@ -1823,6 +1834,14 @@ async fn insert_entities_in_result(
     // paths cannot be rewritten to the reassembled entity indexes, but dropping them would hide
     // the failure from the client entirely.
     new_errors.extend(unattributed_errors);
+    debug_assert!(
+        errors_by_entity_idx.is_empty(),
+        "every attributed entity index is consumed by the loop above"
+    );
+    // Restore the order the subgraph sent the errors in: the loop above emits them grouped by
+    // reassembled entity, and the unattributed ones were appended after those.
+    new_errors.sort_by_key(|(error_idx, _)| *error_idx);
+    let new_errors: Vec<Error> = new_errors.into_iter().map(|(_, error)| error).collect();
 
     if !to_insert.is_empty() {
         let span = tracing::info_span!("cache_store");
@@ -1847,28 +1866,31 @@ async fn insert_entities_in_result(
 
 /// Split subgraph errors from an `_entities` fetch into the ones belonging to a specific fetched
 /// entity, keyed by its index in the subgraph response, and the ones that cannot be attributed.
+/// Every error is paired with its position in `errors` so the caller can put the reassembled list
+/// back in the order the subgraph sent it.
 ///
 /// An error is attributable when its path is of the form `["_entities", <index>, ...]` and the
-/// index refers to one of the `fetched_entity_count` entities the subgraph returned. Not every
+/// index refers to one of the `attributable_entity_count` entities being reassembled. Not every
 /// subgraph produces that index: async-graphql, for instance, resolves the `_entities` field
 /// without a context per list element and reports `["_entities", "fieldName"]`. Errors with no
 /// path at all, or with an out-of-range index, are unattributable too.
+#[allow(clippy::type_complexity)]
 fn attribute_errors_to_entities(
     errors: &[Error],
-    fetched_entity_count: usize,
-) -> (HashMap<usize, Vec<Error>>, Vec<Error>) {
-    let mut attributed: HashMap<usize, Vec<Error>> = HashMap::new();
-    let mut unattributed: Vec<Error> = Vec::new();
+    attributable_entity_count: usize,
+) -> (HashMap<usize, Vec<(usize, Error)>>, Vec<(usize, Error)>) {
+    let mut attributed: HashMap<usize, Vec<(usize, Error)>> = HashMap::new();
+    let mut unattributed: Vec<(usize, Error)> = Vec::new();
 
-    for error in errors {
+    for (error_idx, error) in errors.iter().enumerate() {
         match entity_index_from_error_path(error) {
-            Some(entity_idx) if entity_idx < fetched_entity_count => {
+            Some(entity_idx) if entity_idx < attributable_entity_count => {
                 attributed
                     .entry(entity_idx)
                     .or_default()
-                    .push(error.clone());
+                    .push((error_idx, error.clone()));
             }
-            _ => unattributed.push(error.clone()),
+            _ => unattributed.push((error_idx, error.clone())),
         }
     }
 
