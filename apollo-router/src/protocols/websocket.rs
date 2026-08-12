@@ -284,7 +284,7 @@ pub(crate) fn parse_client_message(bytes: &[u8]) -> serde_json::Result<ClientMes
         let payload = root
             .get("payload")
             .ok_or_else(|| serde_json::Error::custom(format!("`{tag}` without a `payload`")))?;
-        graphql::Request::deserialize_from_bytes(&payload.to_bytes())
+        graphql::Request::from_request_envelope(&payload)
     };
 
     match tag.as_str() {

@@ -272,7 +272,10 @@ impl Request {
     /// Reads a GraphQL request from a parsed JSON envelope. Unknown members
     /// are ignored; a wrong-typed member is an error, matching what serde
     /// reported for the same shapes.
-    fn from_request_envelope(envelope: &Value) -> Result<Self, serde_json::Error> {
+    ///
+    /// Use this over re-serializing a [`Value`] for [`Request::deserialize_from_bytes`]:
+    /// `variables` and `extensions` stay subtrees of the envelope's document.
+    pub(crate) fn from_request_envelope(envelope: &Value) -> Result<Self, serde_json::Error> {
         if !envelope.is_object() {
             return Err(serde_json::Error::custom(format!(
                 "invalid type: {}, expected a GraphQL request",
