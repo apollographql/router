@@ -608,7 +608,16 @@ impl<S> HeadersService<S> {
     fn modify_subgraph_request(operations: &Arc<Vec<Operation>>, req: &mut SubgraphRequest) {
         let mut already_propagated: HashSet<String> = HashSet::new();
 
-        let body_to_value = serde_json_bytes::value::to_value(req.supergraph_request.body()).ok();
+        // Serializing the whole request body -- query string and every
+        // variable -- is only ever read by `insert.from_body` rules, which
+        // almost no configuration has. Unconditional, it showed up as ~4% of
+        // router CPU in load-test flamegraphs; skip it unless a rule will
+        // actually look at it.
+        let body_to_value = operations
+            .iter()
+            .any(|operation| matches!(operation, Operation::Insert(Insert::FromBody(_))))
+            .then(|| serde_json_bytes::value::to_value(req.supergraph_request.body()).ok())
+            .flatten();
         let supergraph_headers = req.supergraph_request.headers();
         let context = &req.context;
         let headers_mut = req.subgraph_request.headers_mut();
@@ -634,7 +643,13 @@ impl<S> HeadersService<S> {
         let TransportRequest::Http(ref mut http_request) = req.transport_request else {
             return;
         };
-        let body_to_value = serde_json::from_str(http_request.inner.body()).ok();
+        // Parsing the connector body is only ever read by `insert.from_body`
+        // rules; skip it unless one exists, as in `modify_subgraph_request`.
+        let body_to_value = operations
+            .iter()
+            .any(|operation| matches!(operation, Operation::Insert(Insert::FromBody(_))))
+            .then(|| serde_json::from_str(http_request.inner.body()).ok())
+            .flatten();
         let supergraph_headers = req.supergraph_request.headers();
         let context = &req.context;
         // We need to know what headers were added prior to this processing to that we can properly override as needed
