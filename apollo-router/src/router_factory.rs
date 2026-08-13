@@ -402,7 +402,7 @@ pub(crate) async fn create_subgraph_services(
 pub(crate) async fn create_http_services(
     plugins: &Arc<Plugins>,
     schema: &Schema,
-    configuration: &Arc<Configuration>,
+    configuration: &Configuration,
 ) -> Result<
     (
         IndexMap<String, HttpClientServiceFactory>,
@@ -457,8 +457,7 @@ pub(crate) async fn create_http_services(
             shaping.subgraph_client_config(name),
         )?;
 
-        let http_service_factory =
-            HttpClientServiceFactory::new(http_service, plugins.clone(), configuration.clone());
+        let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
         http_services.insert(name.clone(), http_service_factory);
     }
 
@@ -478,8 +477,7 @@ pub(crate) async fn create_http_services(
             shaping.connector_client_config(name),
         )?;
 
-        let http_service_factory =
-            HttpClientServiceFactory::new(http_service, plugins.clone(), configuration.clone());
+        let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
         connector_http_services.insert(name.clone(), http_service_factory);
     }
 

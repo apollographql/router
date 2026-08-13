@@ -302,6 +302,13 @@ where
         let mut results = Vec::with_capacity(batch.len());
         let batch_size = batch.len();
 
+        // Modifying our Context extensions.
+        // If we are processing a batch (is_batch == true), insert our batching configuration.
+        // If subgraph batching configuration exists and is enabled for any of our subgraphs, we create our shared batch details
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert(self.config.clone()));
+
         let shared_batch_details = self
             .config
             .subgraph
@@ -362,6 +369,7 @@ where
                 if let Some(client_request_accepts) = client_request_accepts_opt {
                     lock.insert(client_request_accepts);
                 }
+                lock.insert(self.config.clone());
                 // We are only going to insert a BatchQuery if Subgraph processing is enabled
                 if let Some(b_for_index) = b_for_index_opt {
                     lock.insert(b_for_index);
