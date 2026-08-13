@@ -113,7 +113,8 @@ async fn call_http(
     } = request;
 
     // Used in batching to identify the query
-    // TODO(@goto-bus-stop): this should be in a batching-specific layer or done differently
+    // XXX(@goto-bus-stop): I would prefer not to hardcode this in here, but it would require I
+    // think a batching refactor to move away from query hashes entirely.
     context.extensions().with_lock(|lock| {
         lock.insert(query_hash);
     });
