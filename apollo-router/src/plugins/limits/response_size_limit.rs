@@ -88,6 +88,9 @@ where
     }
 
     fn call(&mut self, req: HttpRequest) -> Self::Future {
+        // XXX(@goto-bus-stop): The SubgraphResponseSizeLimit is stashed in context by the limits
+        // plugin. I think we could just do it inline here, but future readers can see what they
+        // think about that...
         let limit = req
             .context
             .extensions()
@@ -119,5 +122,141 @@ where
             }
             Ok(response)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tower::ServiceBuilder;
+    use tower::ServiceExt as _;
+
+    use super::*;
+    use crate::Context;
+    use crate::metrics::FutureMetricsExt as _;
+    use crate::services::router;
+
+    const SUBGRAPH_NAME: &str = "test-subgraph";
+
+    fn request_with_limit(limit: usize) -> HttpRequest {
+        let context = Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(SubgraphResponseSizeLimit(limit));
+        });
+
+        HttpRequest {
+            http_request: http::Request::builder()
+                .body(router::body::empty())
+                .unwrap(),
+            context,
+        }
+    }
+
+    fn response_of_size(size: usize) -> HttpResponse {
+        HttpResponse {
+            http_response: http::Response::builder()
+                .body(router::body::from_bytes(vec![0; size]))
+                .unwrap(),
+            context: Context::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_under_limit() {
+        const RESPONSE_SIZE: usize = 1_000;
+        const LIMIT: usize = 10_000;
+
+        let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+        let driver = tokio::spawn(async move {
+            let (_req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(response_of_size(RESPONSE_SIZE));
+        });
+
+        let service = ServiceBuilder::new()
+            .layer(SubgraphResponseSizeLimitLayer::new(SUBGRAPH_NAME))
+            .service(mock);
+
+        let response = service.oneshot(request_with_limit(LIMIT)).await.unwrap();
+
+        let _bytes = response
+            .http_response
+            .into_body()
+            .collect()
+            .await
+            .expect("small response should succeed");
+
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test]
+    async fn test_no_limit() {
+        const RESPONSE_SIZE: usize = 64_000;
+
+        let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+        let driver = tokio::spawn(async move {
+            let (_req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(response_of_size(RESPONSE_SIZE));
+        });
+
+        let service = ServiceBuilder::new()
+            .layer(SubgraphResponseSizeLimitLayer::new(SUBGRAPH_NAME))
+            .service(mock);
+
+        let request = HttpRequest {
+            http_request: http::Request::builder()
+                .body(router::body::empty())
+                .unwrap(),
+            context: Context::new(),
+        };
+
+        let response = service.oneshot(request).await.unwrap();
+
+        let _bytes = response
+            .http_response
+            .into_body()
+            .collect()
+            .await
+            .expect("any response size should succeed");
+
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test]
+    async fn test_over_limit() {
+        async {
+            const RESPONSE_SIZE: usize = 10_000;
+            const LIMIT: usize = 1_000;
+
+            let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let driver = tokio::spawn(async move {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(response_of_size(RESPONSE_SIZE));
+            });
+
+            let service = ServiceBuilder::new()
+                .layer(SubgraphResponseSizeLimitLayer::new(SUBGRAPH_NAME))
+                .service(mock);
+
+            let response = service.oneshot(request_with_limit(LIMIT)).await.unwrap();
+
+            let result = response.http_response.into_body().collect().await;
+
+            let Err(err) = result else {
+                panic!("response size should have been limited");
+            };
+            assert_eq!(
+                err.to_string(),
+                "subgraph response body exceeded limit of 1000 bytes"
+            );
+
+            crate::plugin::test::await_mock_driver(driver).await;
+
+            assert_counter!(
+                "apollo.router.limits.subgraph_response_size.exceeded",
+                1,
+                "subgraph.name" = SUBGRAPH_NAME.to_string()
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }
