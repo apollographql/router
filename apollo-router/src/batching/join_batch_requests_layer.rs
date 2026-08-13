@@ -547,126 +547,204 @@ pub(super) async fn process_batches(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::Arc;
-    use std::time::Duration;
 
-    use tokio::sync::oneshot;
+    use futures::future::join_all;
+    use rstest::rstest;
+    use tower::Service as _;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt as _;
 
-    use super::SubgraphBatchRequest;
-    use super::assemble_batch;
+    use super::JoinBatchRequestsLayer;
     use crate::Context;
-    use crate::batching::BatchQueryInfo;
+    use crate::batching::Batch;
+    use crate::configuration::Batching;
+    use crate::configuration::CommonBatchingConfig;
+    use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::graphql;
-    use crate::services::http::HttpClientServiceFactory;
     use crate::services::http::HttpRequest;
     use crate::services::http::HttpResponse;
     use crate::services::router::body;
+    use crate::spec::QueryHash;
+
+    fn graphql_request(query: &str, context: Context) -> HttpRequest {
+        let gql_request = graphql::Request::fake_builder().query(query).build();
+        let body = body::from_bytes(serde_json::to_vec(&gql_request).unwrap());
+        HttpRequest {
+            http_request: http::Request::builder().body(body).unwrap(),
+            context,
+        }
+    }
+
+    /// Set up all the required context for a subgraph batch query
+    async fn context_for_batch_index(batch: &Arc<Batch>, index: usize) -> Context {
+        // This gives us the same query hash every time, but as long as we only use one query each
+        // time, that's okay. The hashes identify nodes in a query plan, not individual requests in
+        // the batch.
+        let query_hash = Arc::new(QueryHash::default());
+        let query = Batch::query_for_index(batch.clone(), index).unwrap();
+        query
+            .set_query_hashes(vec![query_hash.clone()])
+            .await
+            .unwrap();
+
+        // Subgraph batching on for all subgraphs
+        let config = Batching {
+            enabled: true,
+            subgraph: Some(SubgraphConfiguration {
+                all: CommonBatchingConfig { enabled: true },
+                subgraphs: HashMap::new(),
+            }),
+            ..Default::default()
+        };
+
+        let context = Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(config);
+            lock.insert(query);
+            lock.insert(query_hash);
+        });
+        context
+    }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn it_assembles_batch() {
-        // Assemble a list of requests for testing
-        let (receivers, requests): (Vec<_>, Vec<_>) = (0..2)
-            .map(|index| {
-                let subgraph_name = Arc::from("test");
-                let (tx, rx) = oneshot::channel();
-                let gql_request = graphql::Request::fake_builder()
-                    .operation_name(format!("batch_test_{index}"))
-                    .query(format!("query batch_test {{ slot{index} }}"))
-                    .build();
+    async fn it_passes_through_unbatched_requests() {
+        let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
 
-                let body = body::from_bytes(serde_json::to_vec(&gql_request).unwrap());
-                let context = Context::new();
+        let driver = tokio::task::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+            let body = body::into_bytes(request.http_request.into_body())
+                .await
+                .unwrap();
+            let gql_request: graphql::Request = serde_json::from_slice(&body).unwrap();
+            assert_eq!(gql_request.query.as_deref(), Some("{ passthrough }"));
 
-                (
-                    rx,
-                    BatchQueryInfo {
-                        http_client: HttpClientServiceFactory::for_test(&subgraph_name),
-                        request: HttpRequest {
-                            http_request: http::Request::builder().body(body).unwrap(),
-                            context,
-                        },
-                        sender: tx,
-                        subgraph_name,
-                    },
-                )
-            })
-            .unzip();
-
-        // Create a vector of the input request context IDs for comparison
-        let input_context_ids = requests
-            .iter()
-            .map(|r| r.request.context.id.clone())
-            .collect::<Vec<String>>();
-        // Assemble them
-        let SubgraphBatchRequest {
-            http_client: _,
-            contexts,
-            request,
-            txs,
-        } = assemble_batch(requests)
-            .await
-            .expect("it can assemble a batch");
-
-        let output_context_ids = contexts
-            .iter()
-            .map(|context| context.id.clone())
-            .collect::<Vec<String>>();
-        // Make sure all of our contexts are preserved during assembly
-        assert_eq!(input_context_ids, output_context_ids);
-
-        // We should see the aggregation of all of the requests
-        let actual: Vec<graphql::Request> = serde_json::from_str(
-            std::str::from_utf8(&body::into_bytes(request.into_body()).await.unwrap()).unwrap(),
-        )
-        .unwrap();
-
-        let expected: Vec<_> = (0..2)
-            .map(|index| {
-                graphql::Request::fake_builder()
-                    .operation_name(format!("batch_test_{index}"))
-                    .query(format!("query batch_test {{ slot{index} }}"))
-                    .build()
-            })
-            .collect();
-        assert_eq!(actual, expected);
-
-        // We should also have all of the correct senders and they should be linked to the correct waiter
-        // Note: We reverse the senders since they should be in reverse order when assembled
-        assert_eq!(txs.len(), receivers.len());
-        for (index, (tx, rx)) in Iterator::zip(txs.into_iter(), receivers).enumerate() {
-            let data = serde_json_bytes::json!({
-                "data": {
-                    format!("slot{index}"): "valid"
-                }
+            let data = serde_json_bytes::json!({ "passthrough": true });
+            let response_body = body::from_bytes(
+                serde_json::to_vec(&graphql::Response::builder().data(data).build()).unwrap(),
+            );
+            responder.send_response(HttpResponse {
+                http_response: http::Response::builder().body(response_body).unwrap(),
+                context: request.context,
             });
-            let graphql_response = graphql::Response::builder().data(data.clone()).build();
-            let body = body::from_bytes(serde_json::to_vec(&graphql_response).unwrap());
+        });
 
-            let response = HttpResponse {
-                http_response: http::Response::builder()
-                    .header(
-                        http::header::CONTENT_TYPE,
-                        "application/graphql-response+json",
-                    )
-                    .body(body)
-                    .unwrap(),
-                context: Context::new(),
-            };
+        let mut service = ServiceBuilder::new()
+            .layer(JoinBatchRequestsLayer::new("test_subgraph"))
+            .service(mock);
 
-            assert!(tx.send(Ok(response)).is_ok());
+        // Without a `BatchQuery` extension, the request must go straight to the inner service
+        let request = graphql_request("{ passthrough }", Context::new());
+        let response = service.ready().await.unwrap().call(request).await.unwrap();
 
-            // We want to make sure that we don't hang the test if we don't get the correct message
-            let received = tokio::time::timeout(Duration::from_millis(10), rx)
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap();
+        let body = body::into_bytes(response.http_response.into_body())
+            .await
+            .unwrap();
+        let response: graphql::Response = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            response.data,
+            Some(serde_json_bytes::json!({ "passthrough": true }))
+        );
 
-            let body = body::into_bytes(received.http_response.into_body())
-                .await
-                .unwrap();
-            let body: graphql::Response = serde_json::from_slice(&body).unwrap();
-            assert_eq!(body.data, Some(data));
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_merges_batched_requests() {
+        let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+
+        let batch = Arc::new(Batch::spawn_handler(3));
+        let mut requests = Vec::with_capacity(3);
+        for index in 0..3 {
+            let context = context_for_batch_index(&batch, index).await;
+            requests.push(graphql_request(&format!("{{ slot{index} }}"), context));
         }
+
+        let driver = tokio::task::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+            let body = body::into_bytes(request.http_request.into_body())
+                .await
+                .unwrap();
+            let merged: Vec<graphql::Request> = serde_json::from_slice(&body).unwrap();
+            assert_eq!(
+                merged.iter().map(|r| r.query.clone()).collect::<Vec<_>>(),
+                (0..3)
+                    .map(|index| Some(format!("{{ slot{index} }}")))
+                    .collect::<Vec<_>>()
+            );
+
+            let response_body = body::from_bytes(
+                r#"[{"data":{"slot0":0}},{"data":{"slot1":1}},{"data":{"slot2":2}}]"#,
+            );
+            responder.send_response(HttpResponse {
+                http_response: http::Response::builder().body(response_body).unwrap(),
+                context: request.context,
+            });
+        });
+
+        let service = ServiceBuilder::new()
+            .layer(JoinBatchRequestsLayer::new("test_subgraph"))
+            .service(mock);
+
+        let futures = requests.into_iter().map(|request| {
+            let mut service = service.clone();
+            async move { service.ready().await.unwrap().call(request).await.unwrap() }
+        });
+        let responses = join_all(futures).await;
+
+        for (index, response) in responses.into_iter().enumerate() {
+            let body = body::into_bytes(response.http_response.into_body())
+                .await
+                .unwrap();
+            let response: graphql::Response = serde_json::from_slice(&body).unwrap();
+            assert_eq!(
+                response.data,
+                Some(serde_json_bytes::json!({ format!("slot{index}"): index }))
+            );
+        }
+
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[rstest]
+    #[case::wrong_length(r#"[{"data":{"slot0":0}},{"data":{"slot1":1}}]"#)]
+    #[case::invalid_shape(r#"{"not":"an array"}"#)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_propagates_subgraph_error(#[case] bad_body: &'static str) {
+        let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+
+        let batch = Arc::new(Batch::spawn_handler(3));
+        let mut requests = Vec::with_capacity(3);
+        for index in 0..3 {
+            let context = context_for_batch_index(&batch, index).await;
+            requests.push(graphql_request(&format!("{{ slot{index} }}"), context));
+        }
+
+        let driver = tokio::task::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+            responder.send_response(HttpResponse {
+                http_response: http::Response::builder()
+                    .body(body::from_bytes(bad_body))
+                    .unwrap(),
+                context: request.context,
+            });
+        });
+
+        let service = ServiceBuilder::new()
+            .layer(JoinBatchRequestsLayer::new("test_subgraph"))
+            .service(mock);
+
+        let futures = requests.into_iter().map(|request| {
+            let mut service = service.clone();
+            async move { service.ready().await.unwrap().call(request).await }
+        });
+        let results = join_all(futures).await;
+
+        for result in results {
+            assert!(result.is_err(), "expected error response for {bad_body:?}");
+        }
+
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 }
