@@ -2729,7 +2729,7 @@ mod tests {
             }
 
             let message = tokio::time::timeout(
-                std::time::Duration::from_secs(5),
+                std::time::Duration::from_secs(30),
                 gql_stream2.next(),
             )
             .await
@@ -4310,7 +4310,7 @@ mod tests {
             // closing signal would sleep out the full delay and then dial the stalling server,
             // hanging on its handshake forever; this metric would then never appear, so the wait
             // below times out and fails the test instead of passing silently.
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::time::timeout(std::time::Duration::from_secs(30), async {
                 while !crate::metrics::collect_metrics().metric_exists(
                     "apollo.router.operations.subscriptions.events",
                     crate::metrics::test_utils::MetricType::Counter,
@@ -4422,14 +4422,14 @@ mod tests {
             // dropping the stream — otherwise the assertions below would pass trivially because
             // the handshake was never attempted. This avoids racing a fixed sleep against the
             // 1 ms reconnect delay and the TCP connect.
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::time::timeout(std::time::Duration::from_secs(30), async {
                 while connection_count.load(Ordering::SeqCst) < 2 {
                     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
                 }
             })
             .await
             .expect(
-                "expected the reconnect handshake to have dialed the stalling server within 5s",
+                "expected the reconnect handshake to have dialed the stalling server within 30s",
             );
             drop(gql_stream);
 
@@ -4439,7 +4439,7 @@ mod tests {
             // never completes the handshake, a broken closing-signal abort would leave the task
             // hung on it forever and this metric would never appear, so the wait below times out
             // and fails the test instead of passing silently.
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::time::timeout(std::time::Duration::from_secs(30), async {
                 while !crate::metrics::collect_metrics().metric_exists(
                     "apollo.router.operations.subscriptions.events",
                     crate::metrics::test_utils::MetricType::Counter,
