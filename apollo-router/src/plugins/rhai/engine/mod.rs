@@ -76,6 +76,25 @@ const CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE: &str =
 
 const CANNOT_GET_ENVIRONMENT_VARIABLE: &str = "environment variable not found";
 
+/// Raised by a router Rhai function that has nothing to tell a client - a lookup that found
+/// nothing, for instance.
+///
+/// A router function's error is indistinguishable from a script's own `throw "..."`: both arrive as
+/// `EvalAltResult::ErrorRuntime` carrying a string, with nothing recording which side raised it.
+/// `super::process_error` therefore discriminates on the value, not the origin - it redacts an
+/// empty message and returns any other verbatim - and this constant is that value. Two consequences
+/// worth knowing:
+///
+/// - Giving this text would disclose it, and the Rhai function it came from, in client-facing error
+///   responses. That is why the router functions above raise nothing rather than something helpful.
+/// - A script's own `throw ""` is redacted by the same branch, because nothing can tell it apart.
+///
+/// Router functions that *do* raise text (`env::get`, `json::decode`) therefore reach clients with
+/// that text. Redacting them as well would take provenance rather than a value check: a distinct
+/// thrown type, or a variant other than `ErrorRuntime`, so the two can be told apart without
+/// inspecting the message. The Rhai customization docs carry this as a documented limitation.
+pub(super) const NO_CLIENT_MESSAGE: &str = "";
+
 pub(crate) use types::OptionDance;
 pub(crate) use types::SharedMut;
 
@@ -278,7 +297,7 @@ mod router_header_map {
         x: &mut HeaderMap,
         key: &str,
     ) -> Result<String, Box<EvalAltResult>> {
-        Ok(String::from_utf8_lossy(x.remove(key).ok_or("")?.as_bytes()).to_string())
+        Ok(String::from_utf8_lossy(x.remove(key).ok_or(NO_CLIENT_MESSAGE)?.as_bytes()).to_string())
     }
 
     // Register a HeaderMap indexer so we can get/set headers
@@ -296,7 +315,10 @@ mod router_header_map {
     ) -> Result<String, Box<EvalAltResult>> {
         let search_name =
             HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
-        Ok(String::from_utf8_lossy(x.get(search_name).ok_or("")?.as_bytes()).to_string())
+        Ok(
+            String::from_utf8_lossy(x.get(search_name).ok_or(NO_CLIENT_MESSAGE)?.as_bytes())
+                .to_string(),
+        )
     }
 
     #[rhai_fn(index_set, return_raw)]
