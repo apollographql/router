@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bytes::BytesMut;
+use bytes::Bytes;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use http_body_util::BodyExt as _;
@@ -19,6 +19,7 @@ use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
+use crate::graphql;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 use crate::services::router;
@@ -171,20 +172,22 @@ async fn assemble_batch(
 
     // Construct the actual byte body of the batched request
     let batch_body = {
-        let mut batch_body = BytesMut::new();
-        batch_body.extend_from_slice(b"[");
+        let mut batch_requests = Vec::with_capacity(body_streams.len());
         for body in body_streams {
-            let bytes = body.collect().await.unwrap().to_bytes();
-            batch_body.extend_from_slice(&bytes);
-            batch_body.extend_from_slice(b",");
+            let bytes = body
+                .collect()
+                .await
+                .map_err(|err| SubgraphBatchingError::ProcessingFailed(err.to_string()))?
+                .to_bytes();
+            let request: graphql::Request = serde_json::from_slice(&bytes)
+                .map_err(|err| SubgraphBatchingError::ProcessingFailed(err.to_string()))?;
+            batch_requests.push(request);
         }
 
-        // There's guaranteed to be a comma here, because `body_streams` is guaranteed to be non-empty,
-        // because we'd have returned with a RequestsIsEmpty error otherwise.
-        debug_assert_eq!(batch_body.last(), Some(&b','));
-        *batch_body.last_mut().unwrap() = b']';
-
-        batch_body.freeze()
+        Bytes::from(
+            serde_json::to_vec(&batch_requests)
+                .map_err(|err| SubgraphBatchingError::ProcessingFailed(err.to_string()))?,
+        )
     };
 
     // Generate the final request and pass it up
