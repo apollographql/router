@@ -3,6 +3,8 @@
 //! See [`Layer`] and [`tower::Service`] for more details.
 
 use std::collections::HashMap;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -38,7 +40,48 @@ where
 
 type CacheKey = (http_ext::Request<Request>, Arc<CacheKeyMetadata>);
 
-type WaitMap = Arc<Mutex<HashMap<CacheKey, Sender<Result<CloneSubgraphResponse, String>>>>>;
+/// A dedup key carrying its hash, computed once at construction. Hashing the
+/// key walks the whole request — query string and variables tree included —
+/// and the wait map hashes its key on lookup, insert, and removal; this pays
+/// that walk once per request instead of once per map operation.
+#[derive(Clone)]
+struct HashedCacheKey {
+    key: CacheKey,
+    hash: u64,
+}
+
+impl HashedCacheKey {
+    fn new(request: &SubgraphRequest) -> Self {
+        let key: CacheKey = (
+            (&request.subgraph_request).into(),
+            request.authorization.clone(),
+        );
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        key.hash(&mut hasher);
+        HashedCacheKey {
+            hash: hasher.finish(),
+            key,
+        }
+    }
+}
+
+impl PartialEq for HashedCacheKey {
+    fn eq(&self, other: &Self) -> bool {
+        // The cheap comparison first: unequal hashes prove unequal keys, so
+        // the full key comparison only runs on a genuine hash collision.
+        self.hash == other.hash && self.key == other.key
+    }
+}
+
+impl Eq for HashedCacheKey {}
+
+impl Hash for HashedCacheKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u64(self.hash);
+    }
+}
+
+type WaitMap = Arc<Mutex<HashMap<HashedCacheKey, Sender<Result<CloneSubgraphResponse, String>>>>>;
 
 struct CloneSubgraphResponse(SubgraphResponse);
 
@@ -86,10 +129,9 @@ where
         {
             return service.call(request).await;
         }
+        let cache_key = HashedCacheKey::new(&request);
         loop {
             let mut locked_wait_map = wait_map.lock().await;
-            let authorization_cache_key = request.authorization.clone();
-            let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
 
             match locked_wait_map.get_mut(&cache_key) {
                 Some(waiter) => {
@@ -117,13 +159,11 @@ where
                 None => {
                     let (tx, _rx) = broadcast::channel(1);
 
-                    locked_wait_map.insert(cache_key, tx.clone());
+                    locked_wait_map.insert(cache_key.clone(), tx.clone());
                     drop(locked_wait_map);
 
                     let context = request.context.clone();
-                    let authorization_cache_key = request.authorization.clone();
                     let id = request.id.clone();
-                    let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
                     let (res, handle) = {
                         // when _drop_signal is dropped, either by getting out of the block, returning
                         // the error from ready_oneshot or by cancellation, the drop_sentinel future will
