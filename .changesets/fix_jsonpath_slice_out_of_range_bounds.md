@@ -4,4 +4,4 @@ Telemetry selectors that take a JSONPath (`response_errors`, `response_errors_co
 
 Out-of-range slice bounds are now clamped to the array length, so `$[:10]` over a two-element array yields both elements.
 
-By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9999
