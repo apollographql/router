@@ -103,7 +103,6 @@ where
             let opt_batch_query = req.context.extensions().with_lock(|lock| {
                 lock.get::<Batching>()
                     .and_then(|batching_config| {
-                        // TODO(@goto-bus-stop): Instead we could use `.option_layer`
                         batching_config.batch_include(&subgraph_name).then_some(())
                     })
                     .and_then(|_| lock.get::<BatchQuery>().cloned())
