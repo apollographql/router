@@ -208,8 +208,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "2.16.1"
+version = "2.16.2"
 dependencies = [
+ "ahash",
  "apollo-compiler",
  "apollo-federation",
  "apollo-parser",
@@ -285,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "2.16.1"
+version = "2.16.2"
 dependencies = [
  "addr2line 0.26.1",
  "ahash",
@@ -461,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "2.16.1"
+version = "2.16.2"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -4163,9 +4164,9 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.18.0"
+version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a860605968fce16869fd239cf4237a82f3ac470723415db603b0e8b6c8d4fb9"
+checksum = "5d2f2f9b4ba7e6b24d95e7e899329d35be83bcded72c8540cdd5368932d1d90a"
 dependencies = [
  "hashbrown 0.17.0",
 ]
