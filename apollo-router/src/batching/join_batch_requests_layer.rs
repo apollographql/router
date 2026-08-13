@@ -15,7 +15,6 @@ use tracing::instrument;
 use crate::Context;
 use crate::batching::BatchQuery;
 use crate::batching::BatchQueryInfo;
-use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
@@ -92,20 +91,12 @@ where
         let subgraph_name = self.subgraph_name.clone();
 
         Box::pin(async move {
-            // We use configuration to determine if calls may be batched. If we have Batching
-            // configuration, then we check (batch_include()) if the current subgraph has batching enabled
-            // in configuration. If it does, we then start to process a potential batch.
-            //
             // If we are processing a batch, then we'd like to park tasks here, but we can't park them whilst
             // we have the context extensions lock held. That would be very bad...
             // We grab the (potential) BatchQuery and then operate on it later
             let opt_batch_query = req.context.extensions().with_lock(|lock| {
-                lock.get::<Batching>()
-                    .and_then(|batching_config| {
-                        // TODO(@goto-bus-stop): Instead we could use `.option_layer`
-                        batching_config.batch_include(&subgraph_name).then_some(())
-                    })
-                    .and_then(|_| lock.get::<BatchQuery>().cloned())
+                lock.get::<BatchQuery>()
+                    .cloned()
                     .and_then(|bq| (!bq.finished()).then_some(bq))
             });
 
