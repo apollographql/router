@@ -382,11 +382,11 @@ fn write_at_path<'v>(
     segments: &[PathSegment<'_>],
     value: impl Into<NewValue<'v>>,
 ) {
-    let mut builder = variables.detach().edit();
+    let mut builder = variables.compact().edit();
     builder
         .set_path(segments, value)
         .expect("the segments resolved against this object");
-    *variables = builder.seal().root_handle();
+    *variables = builder.seal();
 }
 
 #[test]
@@ -436,8 +436,11 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
         let SupergraphLayerResult { multipart, map } = supergraph_result;
 
         let variables = &mut req.subgraph_request.body_mut().variables;
-        let variable_names: Vec<serde_json_bytes::ByteString> =
-            variables.object_keys().into_iter().map(Into::into).collect();
+        let variable_names: Vec<serde_json_bytes::ByteString> = variables
+            .object_keys()
+            .into_iter()
+            .map(Into::into)
+            .collect();
         let subgraph_map = map.sugraph_map(&variable_names);
         if !subgraph_map.is_empty() {
             for variable_map in map.per_variable.values() {

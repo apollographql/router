@@ -1,14 +1,14 @@
 //! Object-shaped JSON values, as the GraphQL request, response, and error types carry them.
 
-use apollo_json::DocumentBuilder;
 use apollo_json::JsonKind;
 use apollo_json::NewValue;
+use apollo_json::ValueBuilder;
 
 use crate::json_ext::Value;
 
 /// A JSON object with no members.
 pub(crate) fn empty_object() -> Value {
-    DocumentBuilder::new().seal().root_handle()
+    ValueBuilder::new().seal()
 }
 
 /// Whether `value` carries no object members. A value of any other shape counts as empty.
@@ -20,20 +20,20 @@ pub(crate) fn is_empty_object(value: &Value) -> bool {
 pub(crate) fn insert_member<'v>(object: Value, key: &str, value: impl Into<NewValue<'v>>) -> Value {
     let mut builder = edit_object(object);
     set_member(&mut builder, key, value);
-    builder.seal().root_handle()
+    builder.seal()
 }
 
 /// A builder over a copy of `object`, or over a fresh empty object when `object` holds
 /// another shape.
-fn edit_object(object: Value) -> DocumentBuilder {
+fn edit_object(object: Value) -> ValueBuilder {
     if object.kind() == JsonKind::Object {
-        object.detach().edit()
+        object.compact().edit()
     } else {
-        DocumentBuilder::new()
+        ValueBuilder::new()
     }
 }
 
-fn set_member<'v>(builder: &mut DocumentBuilder, key: &str, value: impl Into<NewValue<'v>>) {
+fn set_member<'v>(builder: &mut ValueBuilder, key: &str, value: impl Into<NewValue<'v>>) {
     builder
         .set(key, value)
         .expect("an object root accepts any key holding a finite number");
@@ -57,9 +57,9 @@ impl ObjectAccumulator {
             Some(object) => {
                 let mut builder = edit_object(object);
                 for (key, value) in members.object_iter() {
-                    set_member(&mut builder, key.as_str(), value);
+                    set_member(&mut builder, &key, value);
                 }
-                self.0 = Some(builder.seal().root_handle());
+                self.0 = Some(builder.seal());
             }
         }
     }

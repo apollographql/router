@@ -2001,9 +2001,9 @@ mod test {
             selector
                 .on_response(
                     &crate::services::SubgraphResponse::fake_builder()
-                        .data(json_ext::from_legacy(&serde_json_bytes::json!({
+                        .data(apollo_json::json!({
                             "hello": "bonjour"
-                        })))
+                        }))
                         .build()
                 )
                 .unwrap(),
@@ -2014,9 +2014,9 @@ mod test {
             selector
                 .on_response(
                     &crate::services::SubgraphResponse::fake_builder()
-                        .data(json_ext::from_legacy(&serde_json_bytes::json!({
+                        .data(apollo_json::json!({
                             "hello": ["bonjour", "hello", "ciao"]
-                        })))
+                        }))
                         .build()
                 )
                 .unwrap(),
@@ -2034,9 +2034,9 @@ mod test {
             selector
                 .on_response(
                     &crate::services::SubgraphResponse::fake_builder()
-                        .data(json_ext::from_legacy(&serde_json_bytes::json!({
+                        .data(apollo_json::json!({
                             "hi": ["bonjour", "hello", "ciao"]
-                        })))
+                        }))
                         .build()
                 )
                 .is_none()
@@ -2050,7 +2050,7 @@ mod test {
             selector
                 .on_response(
                     &crate::services::SubgraphResponse::fake_builder()
-                        .data(json_ext::from_legacy(&serde_json_bytes::json!({
+                        .data(apollo_json::json!({
                             "hello": {
                                 "french": {
                                     "greeting": "bonjour"
@@ -2062,7 +2062,7 @@ mod test {
                                     "greeting": "ciao"
                                 }
                             }
-                        })))
+                        }))
                         .build()
                 )
                 .unwrap(),

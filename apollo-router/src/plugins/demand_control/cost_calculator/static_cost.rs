@@ -120,7 +120,7 @@ fn score_variable(
                 .cost_directive()
                 .map_or(1.0, |cost| cost.weight());
             for (arg_name, arg_val) in variable.object_iter() {
-                let arg_def = schema.input_field_definition(argument_definition.ty().name(), arg_name.as_str()).ok_or_else(|| {
+                let arg_def = schema.input_field_definition(argument_definition.ty().name(), &arg_name).ok_or_else(|| {
                     DemandControlError::QueryParseFailure(format!(
                         "Argument {} was found in query, but its type ({}) was not found in the schema",
                         argument_definition.name(),
@@ -807,9 +807,8 @@ mod tests {
     }
 
     fn parse_variables(variables_str: &str) -> Value {
-        apollo_json::Document::parse(variables_str.as_bytes().to_vec())
+        apollo_json::Value::parse(variables_str.as_bytes().to_vec())
             .expect("test variables are valid JSON")
-            .root_handle()
     }
 
     fn parse_schema_and_operation(

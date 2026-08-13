@@ -265,8 +265,8 @@ impl Request {
     /// values rebuilt member by member.
     pub fn deserialize_from_bytes(data: &Bytes) -> Result<Self, serde_json::Error> {
         let document =
-            apollo_json::Document::parse(data.clone()).map_err(serde_json::Error::custom)?;
-        Self::from_request_envelope(&document.root_handle())
+            apollo_json::Value::parse(data.clone()).map_err(serde_json::Error::custom)?;
+        Self::from_request_envelope(&document)
     }
 
     /// Reads a GraphQL request from a parsed JSON envelope. Unknown members
@@ -296,9 +296,9 @@ impl Request {
     /// turned into a valid GraphQL `Request`.
     pub(crate) fn batch_from_bytes(bytes: &[u8]) -> Result<Vec<Request>, serde_json::Error> {
         let document =
-            apollo_json::Document::parse(bytes.to_vec()).map_err(serde_json::Error::custom)?;
+            apollo_json::Value::parse(bytes.to_vec()).map_err(serde_json::Error::custom)?;
 
-        Request::process_batch_values(document.root_handle())
+        Request::process_batch_values(document)
     }
 
     fn allocate_result_array(value: &Value) -> Vec<Request> {
@@ -380,4 +380,3 @@ impl Request {
         Request::process_value(&urldecoded)
     }
 }
-

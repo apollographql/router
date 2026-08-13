@@ -250,7 +250,7 @@ dependencies = [
 [[package]]
 name = "apollo-errors"
 version = "0.7.1"
-source = "git+https://github.com/apollographql/apollo-platform-rs?rev=ba45732a#ba45732a04d8e432c85a2e239f2220748f754b7e"
+source = "git+https://github.com/apollographql/apollo-platform-rs?rev=478083bf#478083bf75e25969b2af2686e428c221372fd577"
 dependencies = [
  "apollo-errors-derive",
  "http 1.4.0",
@@ -263,7 +263,7 @@ dependencies = [
 [[package]]
 name = "apollo-errors-derive"
 version = "0.5.1"
-source = "git+https://github.com/apollographql/apollo-platform-rs?rev=ba45732a#ba45732a04d8e432c85a2e239f2220748f754b7e"
+source = "git+https://github.com/apollographql/apollo-platform-rs?rev=478083bf#478083bf75e25969b2af2686e428c221372fd577"
 dependencies = [
  "heck",
  "http 1.4.0",
@@ -342,7 +342,7 @@ dependencies = [
 [[package]]
 name = "apollo-json"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/apollo-platform-rs?rev=ba45732a#ba45732a04d8e432c85a2e239f2220748f754b7e"
+source = "git+https://github.com/apollographql/apollo-platform-rs?rev=478083bf#478083bf75e25969b2af2686e428c221372fd577"
 dependencies = [
  "ahash",
  "apollo-errors",
@@ -2546,7 +2546,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4939,7 +4939,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7672,7 +7672,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix",
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

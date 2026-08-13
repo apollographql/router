@@ -1780,7 +1780,6 @@ mod create_subgraph_services_tests {
     use crate::Context;
     use crate::configuration::SubgraphApq;
     use crate::graphql::Response;
-    use crate::json_ext::ObjectExt;
     use crate::query_planner::fetch::OperationKind;
     use crate::router_factory::create_subgraph_services;
     use crate::services::SubgraphRequest;
@@ -1859,7 +1858,7 @@ mod create_subgraph_services_tests {
         tokio::task::spawn(async move {
             serve(listener, |request| async move {
                 let graphql_request = parse_graphql_request(request.into_body()).await;
-                assert!(graphql_request.extensions.object_contains_key(PERSISTED_QUERY_KEY));
+                assert!(graphql_request.extensions.contains_key(PERSISTED_QUERY_KEY));
                 assert!(graphql_request.query.is_none());
                 Ok(http::Response::builder()
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
@@ -1915,7 +1914,7 @@ mod create_subgraph_services_tests {
         tokio::task::spawn(async move {
             serve(listener, |request| async move {
                 let graphql_request = parse_graphql_request(request.into_body()).await;
-                assert!(!graphql_request.extensions.object_contains_key(PERSISTED_QUERY_KEY));
+                assert!(!graphql_request.extensions.contains_key(PERSISTED_QUERY_KEY));
                 assert!(graphql_request.query.is_some());
                 Ok(http::Response::builder()
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
@@ -1975,15 +1974,11 @@ mod create_subgraph_services_tests {
 
                 match subgraph_name.as_str() {
                     "enabled_subgraph" => {
-                        assert!(
-                            graphql_request.extensions.object_contains_key(PERSISTED_QUERY_KEY)
-                        );
+                        assert!(graphql_request.extensions.contains_key(PERSISTED_QUERY_KEY));
                         assert!(graphql_request.query.is_none());
                     }
                     "disabled_subgraph" => {
-                        assert!(
-                            !graphql_request.extensions.object_contains_key(PERSISTED_QUERY_KEY)
-                        );
+                        assert!(!graphql_request.extensions.contains_key(PERSISTED_QUERY_KEY));
                         assert!(graphql_request.query.is_some());
                     }
                     other => panic!("unexpected subgraph name: {other}"),

@@ -16,8 +16,8 @@ use tower::ServiceExt;
 
 use crate::error::Error;
 use crate::graphql;
+use crate::graphql::json_object::empty_object;
 use crate::json_ext::ObjectExt;
-use crate::json_ext::object;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::services::SupergraphResponse;
@@ -115,7 +115,7 @@ impl IncludeSubgraphErrors {
                 );
                 // Redact fully if errors should not be included
                 error.message = REDACTED_ERROR_MESSAGE.to_string();
-                error.extensions = object([]); // Clear all extensions
+                error.extensions = empty_object(); // Clear all extensions
             } else {
                 tracing::debug!(
                     "Processing errors for subgraph '{}' based on config: {:?}",
@@ -148,7 +148,7 @@ impl IncludeSubgraphErrors {
                 // 3. Filter extensions based on allow list
                 if let Some(allow_keys) = &effective_config.allow_extensions_keys {
                     let mut original_extensions =
-                        std::mem::replace(&mut error.extensions, object([]));
+                        std::mem::replace(&mut error.extensions, empty_object());
                     for key in allow_keys {
                         if let Some((key, value)) =
                             original_extensions.object_remove_entry(key.as_str())

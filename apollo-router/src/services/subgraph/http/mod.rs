@@ -131,7 +131,8 @@ pub(super) fn http_response_to_graphql_response(
     // Any errors directly parsed from the response likely won't yet have the service name set,
     // but we need it for telemetry error counting
     for err in &mut graphql_response.errors {
-        err.extensions.object_insert_if_absent("service", service_name);
+        err.extensions
+            .object_insert_if_absent("service", service_name);
     }
 
     // Add an error for response codes that are not 2xx
@@ -341,7 +342,7 @@ mod tests {
                 "some_field": "some_value",
                 "error_field": null,
             },
-            "errors": [error],
+            "errors": [apollo_json::to_value(&error).expect("an error serializes")],
         });
 
         let (parts, body) = http::Response::builder()
@@ -376,7 +377,7 @@ mod tests {
                 "some_field": "some_value",
                 "error_field": null,
             },
-            "errors": [error],
+            "errors": [apollo_json::to_value(&error).expect("an error serializes")],
         });
 
         let (parts, body) = http::Response::builder()

@@ -156,10 +156,10 @@ impl Context {
         K: Into<String>,
         V: for<'de> serde::Deserialize<'de> + Serialize,
     {
-        match apollo_json::to_document(&value) {
+        match apollo_json::to_value(&value) {
             Ok(document) => self
                 .entries
-                .insert(key.into(), document.root_handle())
+                .insert(key.into(), document)
                 .map(|v| apollo_json::from_value(&v))
                 .transpose()
                 .map_err(|e| e.into()),
@@ -176,8 +176,7 @@ impl Context {
     {
         // A stored handle pins its whole source arena, so detaching stops a context entry from
         // holding an entire response document alive for the rest of the request.
-        self.entries
-            .insert(key.into(), value.detach().root_handle())
+        self.entries.insert(key.into(), value.compact())
     }
 
     /// Get a json value from the context using the provided key.
@@ -206,15 +205,15 @@ impl Context {
         V: for<'de> serde::Deserialize<'de> + Serialize + Default,
     {
         let key = key.into();
-        self.entries.entry(key.clone()).or_try_insert_with(|| {
-            apollo_json::to_document(&V::default()).map(|document| document.root_handle())
-        })?;
+        self.entries
+            .entry(key.clone())
+            .or_try_insert_with(|| apollo_json::to_value(&V::default()))?;
         let mut result = Ok(());
         self.entries.alter(&key, |_, v| {
             let deserialized = apollo_json::from_value(&v);
             match deserialized {
-                Ok(value) => match apollo_json::to_document(&(upsert)(value)) {
-                    Ok(document) => document.root_handle(),
+                Ok(value) => match apollo_json::to_value(&(upsert)(value)) {
+                    Ok(document) => document,
                     Err(e) => {
                         result = Err(e);
                         v
@@ -240,9 +239,8 @@ impl Context {
         K: Into<String>,
     {
         let key = key.into();
-        self.entries.entry(key.clone()).or_insert(Value::default());
-        self.entries
-            .alter(&key, |_, v| upsert(v).detach().root_handle());
+        self.entries.entry(key.clone()).or_default();
+        self.entries.alter(&key, |_, v| upsert(v).compact());
     }
 
     /// Convert the context into an iterator.

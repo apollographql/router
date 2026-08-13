@@ -665,7 +665,7 @@ mod tests {
 
     fn extract(schema: &str, query: &str) -> BTreeSet<String> {
         let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
-        let doc = Document::parse(query, "query.graphql").unwrap();
+        let doc = apollo_compiler::ast::Document::parse(query, "query.graphql").unwrap();
         let exec = doc.to_executable_validate(&schema).unwrap();
         let mut visitor = ScopeExtractionVisitor::new(&schema, &exec, false).unwrap();
         traverse::document(&mut visitor, &exec, None).unwrap();
@@ -696,7 +696,7 @@ mod tests {
     #[track_caller]
     fn filter(schema: &str, query: &str, scopes: HashSet<String>) -> (Document, Vec<Path>) {
         let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
-        let doc = Document::parse(query, "query.graphql").unwrap();
+        let doc = apollo_compiler::ast::Document::parse(query, "query.graphql").unwrap();
         doc.to_executable_validate(&schema).unwrap();
 
         let map = schema.implementers_map();

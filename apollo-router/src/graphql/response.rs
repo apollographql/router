@@ -237,11 +237,10 @@ impl Response {
     ///
     /// This will return an error (identifying the faulty service) if the input is invalid.
     pub(crate) fn from_bytes(b: Bytes) -> Result<Response, MalformedResponseError> {
-        let document =
-            apollo_json::Document::parse(b).map_err(|error| MalformedResponseError {
-                reason: error.to_string(),
-            })?;
-        Response::from_value(document.root_handle())
+        let document = apollo_json::Value::parse(b).map_err(|error| MalformedResponseError {
+            reason: error.to_string(),
+        })?;
+        Response::from_value(document)
     }
 
     pub(crate) fn from_value(value: Value) -> Result<Response, MalformedResponseError> {

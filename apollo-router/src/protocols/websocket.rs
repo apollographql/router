@@ -209,9 +209,8 @@ impl From<ServerError> for Vec<graphql::Error> {
 fn parse_server_message(bytes: &[u8]) -> serde_json::Result<ServerMessage> {
     use serde::de::Error as _;
 
-    let document =
-        apollo_json::Document::parse(bytes.to_vec()).map_err(serde_json::Error::custom)?;
-    let root = document.root_handle();
+    let document = apollo_json::Value::parse(bytes.to_vec()).map_err(serde_json::Error::custom)?;
+    let root = document;
     let tag = root
         .get("type")
         .and_then(|tag| tag.as_string())
@@ -229,7 +228,8 @@ fn parse_server_message(bytes: &[u8]) -> serde_json::Result<ServerMessage> {
             id: id().ok_or_else(|| serde_json::Error::custom("`complete` without an `id`"))?,
         }),
         "next" | "data" => Ok(ServerMessage::Next {
-            id: id().ok_or_else(|| serde_json::Error::custom(format!("`{tag}` without an `id`")))?,
+            id: id()
+                .ok_or_else(|| serde_json::Error::custom(format!("`{tag}` without an `id`")))?,
             payload: graphql::Response::from_value(payload(&tag)?)
                 .map_err(serde_json::Error::custom)?,
         }),
@@ -260,7 +260,6 @@ fn parse_server_message(bytes: &[u8]) -> serde_json::Result<ServerMessage> {
     }
 }
 
-
 /// Parses one message the router sent, for test servers to assert on. Manual
 /// for the same reason as [`parse_server_message`]: the enum is internally
 /// tagged and a `graphql::Request` cannot cross serde's buffering.
@@ -268,9 +267,8 @@ fn parse_server_message(bytes: &[u8]) -> serde_json::Result<ServerMessage> {
 pub(crate) fn parse_client_message(bytes: &[u8]) -> serde_json::Result<ClientMessage> {
     use serde::de::Error as _;
 
-    let document =
-        apollo_json::Document::parse(bytes.to_vec()).map_err(serde_json::Error::custom)?;
-    let root = document.root_handle();
+    let document = apollo_json::Value::parse(bytes.to_vec()).map_err(serde_json::Error::custom)?;
+    let root = document;
     let tag = root
         .get("type")
         .and_then(|tag| tag.as_string())
@@ -1248,10 +1246,7 @@ mod tests {
                 .as_str()
                 .contains(r#"Error(Error { message: "PAYLOAD_MESSAGE_ERROR"#)
         );
-        assert_eq!(
-            err.extensions.get("code").unwrap(),
-            "WEBSOCKET_ACK_ERROR".into()
-        );
+        assert_eq!(err.extensions.get("code").unwrap(), "WEBSOCKET_ACK_ERROR");
     }
 
     #[tokio::test]

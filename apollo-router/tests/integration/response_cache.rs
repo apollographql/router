@@ -1024,7 +1024,7 @@ async fn complex_entity_key_response_cache() {
     //
     assert!(body.errors.is_empty());
     let expectation: serde_json_bytes::Value = json!({"getStatus":{"id":"1","items":[{"id":"i1","name":"Item"}],"stuffDetails":"stuff we have","statusDetails":"status details"}}).into();
-    let expectation = apollo_json::Document::from_legacy(&expectation).root_handle();
+    let expectation = apollo_json::Value::from_legacy(&expectation);
     assert_eq!(body.data, Some(expectation));
     insta::assert_json_snapshot!(body.extensions, {
         ".apolloCacheDebugging.data[].key" => insta::dynamic_redaction(|value, _path| {
@@ -1118,7 +1118,7 @@ async fn test_cache_keys_nullable_data() {
 
     // NOTE: nulls here are what we're testing
     let expectation: serde_json_bytes::Value = json!({"getStatus":{"id":"1","items":[{"id":"i1","name": null}],"stuffDetails":"stuff we have","statusDetails":"status details"}}).into();
-    let expectation = apollo_json::Document::from_legacy(&expectation).root_handle();
+    let expectation = apollo_json::Value::from_legacy(&expectation);
     assert_eq!(body.data, Some(expectation));
     insta::assert_json_snapshot!(body.extensions, {
         ".apolloCacheDebugging.data[].key" => insta::dynamic_redaction(|value, _path| {

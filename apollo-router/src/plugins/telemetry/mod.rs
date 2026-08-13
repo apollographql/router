@@ -2097,6 +2097,7 @@ struct EnableSubgraphFtv1;
 //
 #[cfg(test)]
 mod tests {
+    use crate::graphql::json_object::empty_object;
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
@@ -3052,7 +3053,7 @@ mod tests {
                 tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
             let driver = tokio::spawn(async move {
                 let (req, responder) = handle.next_request().await.unwrap();
-                let mut extension = json_ext::object([]);
+                let mut extension = empty_object();
                 extension.object_insert("status", "custom_error_for_propagation");
                 let _ = req
                     .context

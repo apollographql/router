@@ -356,12 +356,11 @@ pub struct Response {
 /// `Response` omits `data` when serializing `None`, so keeping the `null` here
 /// would add a `data` member to bodies that previously had none.
 fn response_from_chunk(bytes: Bytes) -> Result<graphql::Response, graphql::MalformedResponseError> {
-    let document = apollo_json::Document::parse(bytes).map_err(|error| {
-        graphql::MalformedResponseError {
+    let document =
+        apollo_json::Value::parse(bytes).map_err(|error| graphql::MalformedResponseError {
             reason: error.to_string(),
-        }
-    })?;
-    let mut response = graphql::Response::from_value_lenient(document.root_handle())?;
+        })?;
+    let mut response = graphql::Response::from_value_lenient(document)?;
     if response.data.as_ref().is_some_and(|data| data.is_null()) {
         response.data = None;
     }
@@ -602,9 +601,7 @@ impl Response {
                 let mut body = http_body_util::BodyDataStream::new(self.response.into_body());
                 let res = body.next().await.and_then(|res| res.ok());
 
-                Either::Right(
-                    futures::stream::iter(res).map(response_from_chunk),
-                )
+                Either::Right(futures::stream::iter(res).map(response_from_chunk))
             },
         )
     }
@@ -1044,7 +1041,11 @@ impl InfallibleResponseBuilder {
         self
     }
 
-    pub(crate) fn extension<'v>(mut self, key: impl Into<String>, value: impl Into<NewValue<'v>>) -> Self {
+    pub(crate) fn extension<'v>(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<NewValue<'v>>,
+    ) -> Self {
         self.extensions.insert(key, value);
         self
     }

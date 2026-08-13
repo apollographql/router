@@ -31,11 +31,7 @@ fn split_path_last_element(path: &Path) -> Option<(Path, &PathElement)> {
 /// without `from` untouched. A `to` that already exists keeps its position and
 /// takes the moved value.
 fn rename_member(object: &mut ValueMut<'_>, from: &str, to: &str) {
-    let Some(value) = object
-        .value()
-        .get(from)
-        .map(|member| member.to_document().root_handle())
-    else {
+    let Some(value) = object.value().get(from).map(|member| member.to_value()) else {
         return;
     };
     object.remove(from);
@@ -148,11 +144,7 @@ mod tests {
     use super::*;
 
     /// Builds a [`Value`] from a `serde_json_bytes::json!` fixture.
-    macro_rules! json {
-        ($($json:tt)+) => {
-            apollo_json::Document::from_legacy(&serde_json_bytes::json!($($json)+)).root_handle()
-        };
-    }
+    use apollo_json::json;
 
     // The schema is not used for the tests
     // but we need a valid one

@@ -92,9 +92,7 @@ use crate::uplink::license_enforcement::LicenseState;
 
 /// Brings a `serde_json::json!` fixture into the router's JSON representation.
 pub(super) fn json_data(value: serde_json::Value) -> crate::json_ext::Value {
-    apollo_json::to_document(&value)
-        .expect("a serde_json value serializes into a document")
-        .root_handle()
+    apollo_json::to_value(&value).expect("a serde_json value serializes into a document")
 }
 
 macro_rules! assert_header {

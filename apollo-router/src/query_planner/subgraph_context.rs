@@ -13,8 +13,8 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
-use apollo_json::DocumentBuilder;
 use apollo_json::JsonKind;
+use apollo_json::ValueBuilder;
 
 use super::rewrites::DataKeyRenamer;
 use super::rewrites::DataRewrite;
@@ -114,7 +114,7 @@ impl<'a> SubgraphContext<'a> {
                         if !found_rewrites.contains(item.rename_key_to.as_str()) {
                             let wrapped_data_path = merge_context_path(path, &item.path);
                             if let Ok(data_path) = wrapped_data_path {
-                                let val = self.data.get_path(self.schema, &data_path);
+                                let val = self.data.select_path(self.schema, &data_path);
 
                                 if let Ok(mut new_value) = val {
                                     // add to found
@@ -154,7 +154,7 @@ impl<'a> SubgraphContext<'a> {
     // values of variables are entity dependent
     pub(crate) fn add_variables_and_get_args(
         &self,
-        variables: &mut DocumentBuilder,
+        variables: &mut ValueBuilder,
     ) -> Option<ContextualArguments> {
         let (extended_vars, contextual_args) = if let Some(first_map) = self.named_args.first() {
             if self.named_args.iter().all(|map| map == first_map) {

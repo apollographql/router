@@ -74,5 +74,5 @@ impl ValueExt for &Value {
 /// `serde_json_bytes::json!` and `serde_json::json!` share their syntax, so a fixture written
 /// for either macro reaches an API taking `apollo_json::Value` through this.
 pub(crate) fn json_value(value: serde_json_bytes::Value) -> apollo_json::Value {
-    apollo_json::Document::from_legacy(&value).root_handle()
+    apollo_json::Value::from_legacy(&value)
 }

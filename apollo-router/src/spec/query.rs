@@ -12,8 +12,8 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
-use apollo_json::DocumentBuilder;
 use apollo_json::NewValue;
+use apollo_json::ValueBuilder;
 use derivative::Derivative;
 use indexmap::IndexSet;
 use serde::Deserialize;
@@ -32,6 +32,7 @@ use crate::error::FetchError;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
+use crate::graphql::json_object::empty_object;
 use crate::graphql::json_object::insert_member;
 use crate::json_ext;
 use crate::json_ext::Path;
@@ -174,12 +175,12 @@ impl Query {
                             );
 
                             if !parameters.errors.is_empty()
-                                && let Ok(document) = apollo_json::to_document(&parameters.errors)
+                                && let Ok(document) = apollo_json::to_value(&parameters.errors)
                             {
                                 response.extensions = insert_member(
                                     std::mem::take(&mut response.extensions),
                                     EXTENSIONS_VALUE_COMPLETION_KEY,
-                                    document.root_handle(),
+                                    document,
                                 );
                             }
 
@@ -192,7 +193,7 @@ impl Query {
                             return parameters.nullified;
                         }
                         None => {
-                            response.data = Some(json_ext::object([]));
+                            response.data = Some(empty_object());
                             return vec![];
                         }
                     }
@@ -202,22 +203,22 @@ impl Query {
                     let all_variables: Value = if self.operation.variables.is_empty() {
                         variables
                     } else {
-                        let mut builder = DocumentBuilder::new();
+                        let mut builder = ValueBuilder::new();
                         for (name, Variable { default_value, .. }) in
                             self.operation.variables.iter()
                         {
                             if let Some(value) = default_value {
-                                builder
-                                    .set(name.as_str(), value.clone())
-                                    .expect("the variables builder always has an object root");
+                                // Writing a handle at a key of an object root
+                                // cannot fail; only a non-finite float can, and
+                                // a handle is not one.
+                                let _ = builder.set(name.as_str(), value.clone());
                             }
                         }
                         for (name, value) in variables.object_iter() {
-                            builder
-                                .set(name.as_str(), value)
-                                .expect("the variables builder always has an object root");
+                            // Infallible for the same reason as above.
+                            let _ = builder.set(&*name, value);
                         }
-                        builder.seal().root_handle()
+                        builder.seal()
                     };
 
                     let operation_type_name = schema
@@ -246,12 +247,12 @@ impl Query {
                         },
                     );
                     if !parameters.errors.is_empty()
-                        && let Ok(document) = apollo_json::to_document(&parameters.errors)
+                        && let Ok(document) = apollo_json::to_value(&parameters.errors)
                     {
                         response.extensions = insert_member(
                             std::mem::take(&mut response.extensions),
                             EXTENSIONS_VALUE_COMPLETION_KEY,
-                            document.root_handle(),
+                            document,
                         );
                     }
 
@@ -1233,7 +1234,7 @@ impl Query {
                 .variables
                 .object_iter()
                 .map(|(name, _)| name)
-                .filter(|name| !known_variables.contains(name.as_str()))
+                .filter(|name| !known_variables.contains(&**name))
                 .collect::<Vec<_>>();
             if !unknown_variables.is_empty() {
                 failfast_debug!(
@@ -1496,13 +1497,14 @@ impl<'a> OutputObject<'a> {
     /// Seals the whole pending tree into one document — one arena for the entire
     /// response, rather than one per object.
     fn into_response_value(self) -> Value {
-        let mut builder = DocumentBuilder::new();
+        let mut builder = ValueBuilder::new();
         for (key, member) in self.members {
-            builder
-                .set(&*key, member)
-                .expect("a fresh object root accepts any key");
+            // A fresh object root accepts any key, and formatting never emits
+            // the one failure `set` can report (a non-finite float): scalar
+            // formatters only re-adopt values that were already valid JSON.
+            let _ = builder.set(&*key, member);
         }
-        builder.seal().root_handle()
+        builder.seal()
     }
 }
 

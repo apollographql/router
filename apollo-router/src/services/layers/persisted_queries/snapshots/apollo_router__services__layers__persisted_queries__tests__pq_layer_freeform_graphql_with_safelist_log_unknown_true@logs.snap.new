@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/services/layers/persisted_queries/mod.rs
-assertion_line: 1127
+assertion_line: 1130
 expression: yaml
 ---
 - fields: {}

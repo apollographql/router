@@ -622,7 +622,10 @@ mod tests {
         .unwrap();
 
         let incoming_request = SupergraphRequest::fake_builder()
-            .extension("persistedQuery", json!({"version": 1, "sha256Hash": &id}))
+            .extension(
+                "persistedQuery",
+                json!({"version": 1, "sha256Hash": id.as_str()}),
+            )
             .build()
             .unwrap();
 

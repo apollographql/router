@@ -31,8 +31,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use sha2::Digest;
 
+use crate::graphql::json_object::empty_object;
 use crate::json_ext::Value as JsonValue;
-use crate::json_ext::object;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::QueryMetadata;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::spec::Fragments;
@@ -347,7 +347,7 @@ pub(crate) fn generate_usage_reporting(
         operation_name,
         schema,
         normalization_algorithm,
-        variables: &object([]),
+        variables: &empty_object(),
         fragments_map: HashMap::new(),
         fields_by_type: HashMap::new(),
         fields_by_interface: HashMap::new(),
@@ -839,8 +839,10 @@ impl UsageGenerator<'_> {
                 match var_value.kind() {
                     // For input objects, we store input object references and process each of the field variables
                     JsonKind::Object => {
-                        let var_value_map: HashMap<String, JsonValue> =
-                            var_value.object_iter().collect();
+                        let var_value_map: HashMap<String, JsonValue> = var_value
+                            .object_iter()
+                            .map(|(key, value)| (key.into_owned(), value))
+                            .collect();
 
                         for (field_name, field_def) in &input_object_type.fields {
                             let field_type = field_def.ty.inner_named_type().to_string();

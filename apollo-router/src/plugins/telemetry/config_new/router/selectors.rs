@@ -973,7 +973,7 @@ mod test {
         let response = crate::services::RouterResponse::fake_builder()
             .header("set-cookie", "session=abc123")
             .context(context)
-            .data(crate::json_ext::from_legacy(&serde_json_bytes::json!({})))
+            .data(apollo_json::json!({}))
             .build()
             .unwrap();
         assert_eq!(
@@ -1004,7 +1004,7 @@ mod test {
         let response = crate::services::RouterResponse::fake_builder()
             .header("set-cookie", "session=abc123")
             .context(context)
-            .data(crate::json_ext::from_legacy(&serde_json_bytes::json!({})))
+            .data(apollo_json::json!({}))
             .build()
             .unwrap();
         assert_eq!(

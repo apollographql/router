@@ -8,9 +8,9 @@ use std::task::Poll;
 
 use apollo_compiler::ast::Definition;
 use apollo_compiler::ast::Document;
-use apollo_json::DocumentBuilder;
 use apollo_json::JsonKind;
 use apollo_json::Value;
+use apollo_json::ValueBuilder;
 use futures::future;
 use http::HeaderMap;
 use http::HeaderName;
@@ -198,7 +198,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
             .get("subscription")
             .filter(|extension| extension.kind() == JsonKind::Object)
         {
-            let mut subscription_ext = subscription_ext.detach().edit();
+            let mut subscription_ext = subscription_ext.compact().edit();
 
             let callback_url = subscription_ext.value().get("callbackUrl").map(|url| {
                 url.as_str()
@@ -222,7 +222,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
             }
 
             body.extensions
-                .object_insert("subscription", subscription_ext.seal().root_handle());
+                .object_insert("subscription", subscription_ext.seal());
         }
 
         normalize(body);
@@ -251,7 +251,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
                 .extensions(
                     self.extensions
                         .clone()
-                        .unwrap_or_else(|| DocumentBuilder::new().seal().root_handle()),
+                        .unwrap_or_else(|| ValueBuilder::new().seal()),
                 )
                 .build();
             SubgraphResponse::fake_builder()

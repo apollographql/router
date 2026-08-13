@@ -883,11 +883,7 @@ mod test {
     use crate::test_harness::tracing_test;
 
     /// Builds a context value from a `serde_json_bytes::json!` fixture.
-    macro_rules! json {
-        ($($json:tt)+) => {
-            crate::json_ext::from_legacy(&serde_json_bytes::json!($($json)+))
-        };
-    }
+    use apollo_json::json;
 
     #[test]
     fn test_exp_defaults_to_max_when_no_jwt_claims_present() {

@@ -247,7 +247,10 @@ fn validate_input_value(
 
             // The keys are materialized up front so the `&str` borrows below outlive
             // the iterator: apollo-json yields owned key strings.
-            let input_field_names: Vec<String> = value.object_iter().map(|(key, _)| key).collect();
+            let input_field_names: Vec<String> = value
+                .object_iter()
+                .map(|(key, _)| key.into_owned())
+                .collect();
 
             let unknown_input_fields_iter = input_field_names
                 .iter()

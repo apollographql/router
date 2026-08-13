@@ -3,6 +3,7 @@ use test_log::test;
 
 use super::*;
 use crate::Configuration;
+use crate::graphql::json_object::empty_object;
 
 fn assert_expected_signature(actual: &UsageReporting, expected_sig: &str) {
     assert_eq!(actual.get_stats_report_key(), expected_sig);
@@ -52,7 +53,7 @@ fn generate_extended_refs(
     schema: &Valid<Schema>,
     variables: Option<&JsonValue>,
 ) -> ExtendedReferenceStats {
-    let default_vars = object([]);
+    let default_vars = empty_object();
     generate_extended_references(
         Arc::new(doc.clone()),
         operation_name,

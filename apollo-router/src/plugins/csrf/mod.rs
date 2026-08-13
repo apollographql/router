@@ -371,8 +371,8 @@ mod csrf_tests {
         // The fake response is `{}`, which Response::from_bytes rejects (a
         // response without data must carry an error), so look at the body
         // directly: passing the CSRF check means no error was injected.
-        let document = apollo_json::Document::parse(body.to_bytes().to_vec()).unwrap();
-        assert!(document.root_handle().get("errors").is_none());
+        let document = apollo_json::Value::parse(body.to_bytes().to_vec()).unwrap();
+        assert!(document.get("errors").is_none());
     }
 
     async fn assert_rejected(config: &'static str, request: router::Request) {

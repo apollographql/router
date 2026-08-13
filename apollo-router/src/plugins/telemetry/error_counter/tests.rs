@@ -1327,7 +1327,7 @@ async fn test_operation_errors_emitted_when_config_is_enabled() {
                 .data(json!({"data": null}))
                 .extension(EXTENSIONS_VALUE_COMPLETION_KEY, json!([{
                         "message": "Cannot return null for non-nullable field SomeType.someField",
-                        "path": Path::from("someType/someField")
+                        "path": apollo_json::to_value(&Path::from("someType/someField")).expect("a path serializes")
                     }]))
                 .errors(vec![
                     graphql::Error::builder()

@@ -618,10 +618,7 @@ mod tests {
             .extension_code("SUBREQUEST_HTTP_ERROR")
             .extension("reason", json_ext::string("invalid request"))
             .extension("service", json_ext::string("my_service"))
-            .extension(
-                "http",
-                json_ext::from_legacy(&serde_json_bytes::json!({"status": 400})),
-            )
+            .extension("http", apollo_json::json!({"status": 400}))
             .build();
 
         assert_error_eq_ignoring_id!(expected_gql_error, error.to_graphql_error(None));

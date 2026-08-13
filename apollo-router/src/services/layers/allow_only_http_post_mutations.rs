@@ -14,7 +14,7 @@ use tower::Service;
 use tower::ServiceBuilder;
 
 use crate::graphql::Error;
-use crate::json_ext;
+use crate::graphql::json_object::empty_object;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointService;
 use crate::services::SupergraphRequest;
@@ -71,7 +71,7 @@ where
                             ];
                             let res = SupergraphResponse::infallible_builder()
                                 .errors(errors)
-                                .extensions(json_ext::object([]))
+                                .extensions(empty_object())
                                 .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                                 .context(req.context.clone())
                                 .build();
@@ -98,7 +98,7 @@ where
                             ];
                             let res = SupergraphResponse::infallible_builder()
                                 .errors(errors)
-                                .extensions(json_ext::object([]))
+                                .extensions(empty_object())
                                 .status_code(StatusCode::METHOD_NOT_ALLOWED)
                                 .context(req.context)
                                 .build();
@@ -117,7 +117,7 @@ where
                                 ];
                                 let mut res = SupergraphResponse::builder()
                                     .errors(errors)
-                                    .extensions(json_ext::object([]))
+                                    .extensions(empty_object())
                                     .status_code(StatusCode::METHOD_NOT_ALLOWED)
                                     .context(req.context)
                                     .build()?;

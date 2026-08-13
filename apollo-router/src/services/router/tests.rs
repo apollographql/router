@@ -16,7 +16,6 @@ use tower_service::Service;
 
 use crate::Context;
 use crate::graphql;
-use crate::json_ext::ObjectExt;
 use crate::json_ext::json_value as json;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::assert_no_mock_calls;
@@ -172,7 +171,7 @@ async fn it_fails_on_empty_query() {
     let actual_error = response.errors[0].message.clone();
 
     assert_eq!(expected_error, actual_error);
-    assert!(response.errors[0].extensions.object_contains_key("code"));
+    assert!(response.errors[0].extensions.contains_key("code"));
     assert_no_mock_calls(handle).await;
 }
 
@@ -201,7 +200,7 @@ async fn it_fails_on_no_query() {
         .unwrap();
     let actual_error = response.errors[0].message.clone();
     assert_eq!(expected_error, actual_error);
-    assert!(response.errors[0].extensions.object_contains_key("code"));
+    assert!(response.errors[0].extensions.contains_key("code"));
     assert_no_mock_calls(handle).await;
 }
 

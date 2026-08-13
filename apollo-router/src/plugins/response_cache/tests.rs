@@ -449,7 +449,7 @@ async fn insert_with_custom_key() {
     let context = Context::new();
     context.insert_json_value(
         CONTEXT_CACHE_KEY,
-        json_ext::from_legacy(&serde_json_bytes::json!({
+        apollo_json::json!({
             "all": {
               "locale": "be"
             },
@@ -458,7 +458,7 @@ async fn insert_with_custom_key() {
                     "foo": "bar"
                 }
             }
-        })),
+        }),
     );
     let request = supergraph::Request::fake_builder()
         .query(query)

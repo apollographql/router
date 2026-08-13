@@ -438,13 +438,13 @@ mod tests {
             let (_request, responder) = handle.next_request().await.unwrap();
             responder.send_response(
                 graphql::Response::builder()
-                    .data(crate::json_ext::from_legacy(&serde_json_bytes::json!({
+                    .data(apollo_json::json!({
                         "__schema": {
                             "queryType": {
                                 "name": "Query",
                             },
                         },
-                    })))
+                    }))
                     .build(),
             );
         });
@@ -506,13 +506,13 @@ mod tests {
             let (_request, responder) = handle.next_request().await.unwrap();
             responder.send_response(
                 graphql::Response::builder()
-                    .data(crate::json_ext::from_legacy(&serde_json_bytes::json!({
+                    .data(apollo_json::json!({
                         "__schema": {
                             "queryType": {
                                 "name": "Query",
                             },
                         },
-                    })))
+                    }))
                     .build(),
             );
         });
@@ -585,9 +585,9 @@ mod tests {
 
         assert_eq!(
             response.data,
-            Some(crate::json_ext::from_legacy(&serde_json_bytes::json!({
+            Some(apollo_json::json!({
                 "x": "Query",
-            }))),
+            })),
         );
     }
 
@@ -613,10 +613,10 @@ mod tests {
 
         assert_eq!(
             response.data,
-            Some(crate::json_ext::from_legacy(&serde_json_bytes::json!({
+            Some(apollo_json::json!({
                 "x": "Query",
                 "__typename": "Query",
-            }))),
+            })),
         );
     }
 }

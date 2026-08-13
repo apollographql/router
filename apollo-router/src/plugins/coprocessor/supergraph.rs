@@ -648,6 +648,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::graphql::json_object::empty_object;
     use std::sync::Arc;
 
     use futures::future::BoxFuture;
@@ -659,7 +660,6 @@ mod tests {
     use super::*;
     use crate::json_ext::ValueExt;
     use crate::json_ext::json_value as json;
-    use crate::json_ext::object;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
@@ -739,7 +739,7 @@ mod tests {
                 supergraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(object([]))
+                    .extensions(empty_object())
                     .context(req.context)
                     .build()
                     .unwrap(),
@@ -923,7 +923,7 @@ mod tests {
                 supergraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(object([]))
+                    .extensions(empty_object())
                     .context(req.context)
                     .build()
                     .unwrap(),
@@ -1000,7 +1000,7 @@ mod tests {
                 supergraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(object([]))
+                    .extensions(empty_object())
                     .context(req.context)
                     .build()
                     .unwrap(),
@@ -1175,7 +1175,7 @@ mod tests {
 
                 // Copy the has_next from the body into the data for checking later
                 let has_next = deserialized_response.has_next.unwrap_or_default();
-                let mut body = deserialized_response.body.take().unwrap().detach().edit();
+                let mut body = deserialized_response.body.take().unwrap().compact().edit();
                 body.set_path(
                     &[
                         apollo_json::PathSegment::Key("data"),
@@ -1184,7 +1184,7 @@ mod tests {
                     has_next,
                 )
                 .unwrap();
-                deserialized_response.body = Some(body.seal().root_handle());
+                deserialized_response.body = Some(body.seal());
 
                 Ok(http::Response::builder()
                     .body(router::body::from_bytes(
@@ -1292,7 +1292,7 @@ mod tests {
 
                 // Copy the has_next from the body into the data for checking later
                 let has_next = deserialized_response.has_next.unwrap_or_default();
-                let mut body = deserialized_response.body.take().unwrap().detach().edit();
+                let mut body = deserialized_response.body.take().unwrap().compact().edit();
                 body.set_path(
                     &[
                         apollo_json::PathSegment::Key("data"),
@@ -1301,7 +1301,7 @@ mod tests {
                     has_next,
                 )
                 .unwrap();
-                deserialized_response.body = Some(body.seal().root_handle());
+                deserialized_response.body = Some(body.seal());
 
                 Ok(http::Response::builder()
                     .body(router::body::from_bytes(

@@ -2,12 +2,13 @@
 
 #![allow(missing_docs)] // FIXME
 
+use std::borrow::Cow;
 use std::fmt;
 
-use apollo_json::DocumentBuilder;
 use apollo_json::JsonKind;
 use apollo_json::NewValue;
 pub(crate) use apollo_json::Value;
+use apollo_json::ValueBuilder;
 use apollo_json::ValueMut;
 use num_traits::ToPrimitive;
 use once_cell::sync::Lazy;
@@ -91,7 +92,7 @@ pub(crate) trait ValueExt {
 
     /// Get a `Value` from a `Path`
     #[track_caller]
-    fn get_path(&self, schema: &Schema, path: &Path) -> Result<Value, FetchError>;
+    fn select_path(&self, schema: &Schema, path: &Path) -> Result<Value, FetchError>;
 
     /// Select all values matching a `Path`.
     ///
@@ -226,7 +227,7 @@ impl ValueExt for Value {
     }
 
     #[track_caller]
-    fn get_path(&self, schema: &Schema, path: &Path) -> Result<Value, FetchError> {
+    fn select_path(&self, schema: &Schema, path: &Path) -> Result<Value, FetchError> {
         let mut res = Err(FetchError::ExecutionPathNotFound {
             reason: "value not found".to_string(),
         });
@@ -255,10 +256,10 @@ impl ValueExt for Value {
     where
         F: FnMut(&Path, ValueMut<'_>),
     {
-        let mut builder = self.detach().edit();
+        let mut builder = self.compact().edit();
         let root = builder.root_mut();
         iterate_path_mut(schema, &mut Path::default(), &path.0, root, &mut f);
-        *self = builder.seal().root_handle();
+        *self = builder.seal();
     }
 
     #[track_caller]
@@ -320,7 +321,7 @@ impl ValueExt for Value {
 /// `variables`, coprocessor payloads.
 ///
 /// Each mutating method rebuilds the object through a
-/// [`DocumentBuilder`], so a sequence of writes costs one rebuild per
+/// [`ValueBuilder`], so a sequence of writes costs one rebuild per
 /// write. That suits objects of a handful of keys; response bodies build
 /// through a single long-lived builder instead.
 ///
@@ -349,9 +350,6 @@ pub(crate) trait ObjectExt {
     /// Removes `key`, returning the pair if it was present.
     fn object_remove_entry(&mut self, key: &str) -> Option<(String, Value)>;
 
-    /// Whether `key` is present.
-    fn object_contains_key(&self, key: &str) -> bool;
-
     /// The keys, in insertion order.
     fn object_keys(&self) -> Vec<String>;
 
@@ -376,14 +374,14 @@ impl ObjectExt for Value {
         // non-object could have held are none, so nothing is discarded that a
         // caller could observe.
         let mut builder = if self.kind() == JsonKind::Object {
-            self.detach().edit()
+            self.compact().edit()
         } else {
-            DocumentBuilder::new()
+            ValueBuilder::new()
         };
         builder
             .set(key.as_str(), value)
             .expect("an object root accepts any key");
-        *self = builder.seal().root_handle();
+        *self = builder.seal();
         previous
     }
 
@@ -402,9 +400,9 @@ impl ObjectExt for Value {
 
     fn object_remove(&mut self, key: &str) -> Option<Value> {
         let previous = self.get(key)?;
-        let mut builder = self.detach().edit();
+        let mut builder = self.compact().edit();
         builder.remove(key);
-        *self = builder.seal().root_handle();
+        *self = builder.seal();
         Some(previous)
     }
 
@@ -413,28 +411,28 @@ impl ObjectExt for Value {
         Some((key.to_owned(), value))
     }
 
-    fn object_contains_key(&self, key: &str) -> bool {
-        self.get(key).is_some()
-    }
-
     fn object_keys(&self) -> Vec<String> {
-        self.object_iter().map(|(key, _)| key).collect()
+        self.object_iter()
+            .map(|(key, _)| key.into_owned())
+            .collect()
     }
 
     fn object_entries(&self) -> Vec<(String, Value)> {
-        self.object_iter().collect()
+        self.object_iter()
+            .map(|(key, value)| (key.into_owned(), value))
+            .collect()
     }
 
     fn object_sort_keys(&mut self) {
-        let mut members: Vec<(String, Value)> = self.object_iter().collect();
+        let mut members: Vec<(Cow<'_, str>, Value)> = self.object_iter().collect();
         members.sort_by(|(a, _), (b, _)| a.cmp(b));
-        let mut builder = DocumentBuilder::new();
+        let mut builder = ValueBuilder::new();
         for (key, value) in members {
             builder
-                .set(key.as_str(), to_new_value(value))
+                .set(&*key, to_new_value(value))
                 .expect("a fresh object root accepts any key");
         }
-        *self = builder.seal().root_handle();
+        *self = builder.seal();
     }
 }
 
@@ -470,12 +468,7 @@ fn addressing_segments(path: &Path) -> (Vec<&PathElement>, bool) {
 /// instead, which is what building a fresh value from a path does.
 fn insert_segments(path: &Path) -> Vec<&PathElement> {
     path.iter()
-        .filter(|element| {
-            !matches!(
-                element,
-                PathElement::Flatten(_) | PathElement::Fragment(_)
-            )
-        })
+        .filter(|element| !matches!(element, PathElement::Flatten(_) | PathElement::Fragment(_)))
         .collect()
 }
 
@@ -493,7 +486,7 @@ fn shape_mismatch(shape: Shape) -> FetchError {
 /// Returns `base` with `leaf` written at `segments`.
 ///
 /// Every read here is on a sealed value. Writing through a
-/// [`DocumentBuilder`] would mean reading the document back as it is built,
+/// [`ValueBuilder`] would mean reading the document back as it is built,
 /// and a container that has grown is a `MutObject`/`MutArray` overlay that
 /// `ValueRef`'s `get`, `index` and `len` do not see -- lookups report members
 /// absent and lengths zero, so a write overwrites a sibling or pads an array
@@ -517,14 +510,14 @@ fn value_with_path(
                 let mut written = Some(value_with_path(&child, rest, leaf)?);
                 let mut members = Vec::with_capacity(base.len().unwrap_or(0) + 1);
                 for (existing, value) in base.object_iter() {
-                    if existing == *key {
+                    if existing == key.as_str() {
                         members.push((existing, written.take().expect("a key matches once")));
                     } else {
                         members.push((existing, value));
                     }
                 }
                 if let Some(appended) = written {
-                    members.push((key.clone(), appended));
+                    members.push((Cow::Borrowed(key.as_str()), appended));
                 }
                 Ok(object(members))
             }
@@ -583,9 +576,9 @@ fn merge_in_place(base: &mut Value, other: &Value, schema: Option<&Schema>) {
         }
     }
 
-    let mut builder = base.clone().into_document().edit();
+    let mut builder = base.clone().edit();
     merge_into_cursor(&mut builder.root_mut(), other, schema);
-    *base = builder.seal().root_handle();
+    *base = builder.seal();
 }
 
 /// Merges `other` into the container the cursor addresses. Both sides are the
@@ -692,7 +685,6 @@ fn keeps_more_specific_typename(
     schema.is_subtype(&incoming, &existing)
 }
 
-
 fn filter_type_conditions(value: Value, type_conditions: &Option<TypeConditions>) -> Value {
     if let Some(tc) = type_conditions {
         match value.kind() {
@@ -704,16 +696,16 @@ fn filter_type_conditions(value: Value, type_conditions: &Option<TypeConditions>
                 }
             }
             JsonKind::Array => {
-                let mut builder = DocumentBuilder::new();
+                let mut builder = ValueBuilder::new();
                 builder.remove(0usize);
-                let doc = apollo_json::Document::parse(b"[]".to_vec()).expect("`[]` is valid JSON");
+                let doc = apollo_json::Value::parse(b"[]".to_vec()).expect("`[]` is valid JSON");
                 let mut inner = doc.edit();
                 for item in value.array_iter() {
                     let filtered = filter_type_conditions(item, type_conditions);
                     let _ = inner.push(to_new_value(filtered));
                 }
                 let _ = builder;
-                return inner.seal().root_handle();
+                return inner.seal();
             }
             _ => {}
         }
@@ -1337,8 +1329,8 @@ impl fmt::Display for Path {
 /// A document whose root is `value`. A container passed as
 /// [`NewValue::Node`] is adopted by reference, sharing its arena rather than
 /// being copied.
-fn rooted_document<'v>(value: impl Into<NewValue<'v>>) -> apollo_json::Document {
-    let mut builder = DocumentBuilder::new();
+fn rooted_document<'v>(value: impl Into<NewValue<'v>>) -> apollo_json::Value {
+    let mut builder = ValueBuilder::new();
     builder
         .set_path(&[], value)
         .expect("an empty path replaces the builder root");
@@ -1347,7 +1339,7 @@ fn rooted_document<'v>(value: impl Into<NewValue<'v>>) -> apollo_json::Document 
 
 /// A standalone [`Value`] holding `value`.
 fn rooted_value<'v>(value: impl Into<NewValue<'v>>) -> Value {
-    rooted_document(value).root_handle()
+    rooted_document(value)
 }
 
 /// A JSON `null`.
@@ -1380,9 +1372,8 @@ pub(crate) fn from_i64(value: i64) -> Value {
 pub(crate) fn from_u64(value: u64) -> Value {
     match i64::try_from(value) {
         Ok(value) => from_i64(value),
-        Err(_) => apollo_json::Document::parse(value.to_string().into_bytes())
-            .expect("a decimal integer literal is valid JSON")
-            .root_handle(),
+        Err(_) => apollo_json::Value::parse(value.to_string().into_bytes())
+            .expect("a decimal integer literal is valid JSON"),
     }
 }
 
@@ -1400,26 +1391,26 @@ pub(crate) fn from_f64(value: f64) -> Value {
 /// A JSON array of `items`, each adopted by reference.
 #[allow(dead_code)]
 pub(crate) fn array(items: impl IntoIterator<Item = Value>) -> Value {
-    let mut builder = DocumentBuilder::new_array();
+    let mut builder = ValueBuilder::new_array();
     for item in items {
         builder
             .push(item)
             .expect("the builder root is an array, which accepts elements");
     }
-    builder.seal().root_handle()
+    builder.seal()
 }
 
 /// A JSON object of `entries`, each value adopted by reference. A repeated key
 /// keeps the value that came last.
 #[allow(dead_code)]
-pub(crate) fn object(entries: impl IntoIterator<Item = (String, Value)>) -> Value {
-    let mut builder = DocumentBuilder::new();
+pub(crate) fn object<K: AsRef<str>>(entries: impl IntoIterator<Item = (K, Value)>) -> Value {
+    let mut builder = ValueBuilder::new();
     for (key, value) in entries {
         builder
-            .set(key.as_str(), value)
+            .set(key.as_ref(), value)
             .expect("a fresh object root accepts any key");
     }
-    builder.seal().root_handle()
+    builder.seal()
 }
 
 /// Converts to `serde_json_bytes::Value` for the call sites that still speak
@@ -1434,7 +1425,7 @@ pub(crate) fn to_legacy(value: &Value) -> serde_json_bytes::Value {
 /// value, so it belongs on cold paths only — never on the response path.
 #[allow(dead_code)]
 pub(crate) fn from_legacy(value: &serde_json_bytes::Value) -> Value {
-    apollo_json::Document::from_legacy(value).root_handle()
+    apollo_json::Value::from_legacy(value)
 }
 
 /// The members of `object` as a `serde_json_bytes` map, for the call sites that
@@ -1444,7 +1435,7 @@ pub(crate) fn from_legacy(value: &serde_json_bytes::Value) -> Value {
 pub(crate) fn object_to_legacy(object: &Value) -> LegacyMap {
     object
         .object_iter()
-        .map(|(key, value)| (key.into(), to_legacy(&value)))
+        .map(|(key, value)| (key.into_owned().into(), to_legacy(&value)))
         .collect()
 }
 
@@ -1505,7 +1496,7 @@ pub(crate) fn to_value<T>(value: &T) -> Result<Value, apollo_json::JsonError>
 where
     T: Serialize + ?Sized,
 {
-    apollo_json::to_document(value).map(|document| document.root_handle())
+    apollo_json::to_value(value)
 }
 
 /// The value if it is object-shaped, or a message naming the expected shape.
@@ -1554,7 +1545,7 @@ macro_rules! extract_key_value_from_object {
 #[cfg(test)]
 macro_rules! json_value {
     ($($tokens:tt)*) => {
-        $crate::json_ext::from_legacy(&::serde_json_bytes::json!($($tokens)*))
+        ::apollo_json::json!($($tokens)*)
     };
 }
 
@@ -1565,17 +1556,7 @@ pub(crate) use json_value;
 mod tests {
     use super::*;
 
-    /// Builds an apollo-json `Value` from a `serde_json_bytes::json!` fixture,
-    /// bridging the legacy macro into this crate's representation for tests.
-    fn value(v: serde_json_bytes::Value) -> Value {
-        apollo_json::Document::from_legacy(&v).root_handle()
-    }
-
-    macro_rules! json {
-        ($($json:tt)+) => {
-            value(serde_json_bytes::json!($($json)+))
-        };
-    }
+    use apollo_json::json;
 
     macro_rules! assert_is_subset {
         ($a:expr, $b:expr $(,)?) => {

@@ -35,7 +35,7 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
-use crate::json_ext;
+use crate::graphql::json_object::empty_object;
 use crate::json_ext::Value;
 use crate::layers::InternalServiceBuilderExt as _;
 use crate::layers::ServiceBuilderExt as _;
@@ -253,12 +253,12 @@ pub(crate) async fn process_batch(
         service: service_name.clone(),
         reason: "no body in response".to_string(),
     })??;
-    let value: Value = apollo_json::Document::parse(body)
-        .map(|document| document.root_handle())
-        .map_err(|error| FetchError::SubrequestMalformedResponse {
+    let value: Value = apollo_json::Value::parse(body).map_err(|error| {
+        FetchError::SubrequestMalformedResponse {
             service: service_name.clone(),
             reason: error.to_string(),
-        })?;
+        }
+    })?;
 
     tracing::debug!("json value from body is: {value:?}");
 
@@ -666,7 +666,7 @@ async fn call_single_http(
                 .error(err.to_graphql_error(None))
                 .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                 .context(context)
-                .extensions(json_ext::object([]))
+                .extensions(empty_object())
                 .build());
         }
     };
@@ -848,7 +848,6 @@ mod tests {
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
-    use crate::json_ext::ObjectExt;
     use crate::json_ext::Value;
     use crate::json_ext::ValueExt;
     use crate::metrics::FutureMetricsExt;
@@ -1113,7 +1112,7 @@ mod tests {
 
                 socket
                     .send(Message::text(
-                        serde_json::to_string(&ServerMessage::Next { id: client_id, payload: graphql::Response::builder().data(crate::json_ext::from_legacy(&serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))).build() }).unwrap(),
+                        serde_json::to_string(&ServerMessage::Next { id: client_id, payload: graphql::Response::builder().data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
                     ))
                     .await
                     .unwrap();
@@ -1180,7 +1179,7 @@ mod tests {
 
                 socket
                     .send(Message::text(
-                        serde_json::to_string(&ServerMessage::Next { id: client_id.clone(), payload: graphql::Response::builder().data(crate::json_ext::from_legacy(&serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))).build() }).unwrap(),
+                        serde_json::to_string(&ServerMessage::Next { id: client_id.clone(), payload: graphql::Response::builder().data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
                     ))
                     .await
                     .unwrap();
@@ -1223,7 +1222,7 @@ mod tests {
                 .and_then(|bytes| graphql::Request::deserialize_from_bytes(&bytes).map_err(|_| ()))
                 .map_err(|_| "failed to parse the request body as JSON");
             let graphql_request = graphql_request.unwrap();
-            assert!(graphql_request.extensions.object_contains_key("subscription"));
+            assert!(graphql_request.extensions.contains_key("subscription"));
             let subscription_extension: crate::plugins::subscription::subgraph::SubscriptionExtension = apollo_json::from_value(
                 &graphql_request.extensions.get("subscription").unwrap(),
             )

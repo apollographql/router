@@ -175,9 +175,7 @@ impl UnauthorizedPaths {
             }
             ErrorLocation::Extensions => {
                 let serialized_auth_errors = unauthorized_path_errors.map(|err| {
-                    apollo_json::to_document(&err)
-                        .expect("error serialization should not fail")
-                        .root_handle()
+                    apollo_json::to_value(&err).expect("error serialization should not fail")
                 });
                 response.extensions.object_insert(
                     "authorizationErrors",

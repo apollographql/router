@@ -1249,14 +1249,16 @@ impl Request {
         hasher.update(b"\0V");
         sort_and_hash(
             &mut hasher,
-            body.variables.object_iter().map(|(k, v)| (k, v.to_bytes())),
+            body.variables
+                .object_iter()
+                .map(|(k, v)| (k.into_owned(), v.to_bytes())),
         );
         hasher.update(b"\0E");
         sort_and_hash(
             &mut hasher,
             body.extensions
                 .object_iter()
-                .map(|(k, v)| (k, v.to_bytes())),
+                .map(|(k, v)| (k.into_owned(), v.to_bytes())),
         );
 
         hex::encode(hasher.finalize())

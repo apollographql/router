@@ -13,7 +13,6 @@ use sha2::Digest;
 use sha2::Sha256;
 
 use crate::cache::DeduplicatingCache;
-use crate::json_ext::ObjectExt;
 use crate::json_ext::Value;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
@@ -217,7 +216,7 @@ async fn disabled_apq_request(
         .supergraph_request
         .body()
         .extensions
-        .object_contains_key("persistedQuery")
+        .contains_key("persistedQuery")
     {
         let errors = vec![
             crate::error::Error::builder()

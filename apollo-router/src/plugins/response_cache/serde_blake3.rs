@@ -346,12 +346,13 @@ impl<'a> SerializeStructVariant for Blake3Serializer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graphql::json_object::empty_object;
     use crate::json_ext;
     use crate::json_ext::ObjectExt;
 
     #[test]
     fn test_bytestring_map() {
-        let mut obj = json_ext::object([]);
+        let mut obj = empty_object();
         obj.object_insert("test", "test");
         obj.object_insert(
             "representations",
@@ -365,7 +366,7 @@ mod tests {
         let first_hash = hasher.finalize().to_hex().to_string();
         insta::assert_snapshot!(first_hash);
 
-        let mut obj = json_ext::object([]);
+        let mut obj = empty_object();
         obj.object_insert("test", "test");
         obj.object_insert(
             "representations",

@@ -71,6 +71,7 @@ mod tests {
     use super::super::*;
     use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Response;
+    use crate::graphql::json_object::empty_object;
     use crate::json_ext::Value;
     use crate::json_ext::ValueExt;
     use crate::json_ext::json_value as json;
@@ -593,7 +594,7 @@ mod tests {
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(object([]))
+                    .extensions(empty_object())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
@@ -740,7 +741,7 @@ mod tests {
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(object([]))
+                    .extensions(empty_object())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
@@ -887,7 +888,7 @@ mod tests {
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(object([]))
+                    .extensions(empty_object())
                     .context(req.context)
                     .subgraph_name(String::default())
                     .build(),
@@ -1095,7 +1096,7 @@ mod tests {
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(object([]))
+                    .extensions(empty_object())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
@@ -1226,7 +1227,7 @@ mod tests {
             responder.send_response(
                 subgraph::Response::builder()
                     .data(Value::default())
-                    .extensions(object([]))
+                    .extensions(empty_object())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
@@ -1341,7 +1342,7 @@ mod tests {
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(object([]))
+                    .extensions(empty_object())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
@@ -1500,7 +1501,7 @@ mod tests {
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(object([]))
+                    .extensions(empty_object())
                     .context(req.context)
                     .subgraph_name(String::default())
                     .build(),
@@ -3067,7 +3068,7 @@ mod tests {
                     router::Response::builder()
                         .data(json!({ "test": 1234_u32 }))
                         .errors(Vec::new())
-                        .extensions(object([]))
+                        .extensions(empty_object())
                         .context(req.context)
                         .build()
                         .unwrap(),
@@ -3559,7 +3560,7 @@ mod tests {
                     subgraph::Response::builder()
                         .data(json!({ "test": 1234_u32 }))
                         .errors(Vec::new())
-                        .extensions(object([]))
+                        .extensions(empty_object())
                         .subgraph_name("coprocessorMockSubgraph")
                         .context(req.context)
                         .id(req.id)
@@ -4377,7 +4378,7 @@ mod tests {
             responder.send_response(
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
-                    .extensions(object([]))
+                    .extensions(empty_object())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
@@ -4458,7 +4459,7 @@ mod tests {
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(object([]))
+                    .extensions(empty_object())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
@@ -7831,7 +7832,7 @@ mod tests {
                     subgraph::Response::builder()
                         .data(json!({ "test": 1234_u32 }))
                         .errors(Vec::new())
-                        .extensions(object([]))
+                        .extensions(empty_object())
                         .context(req.context)
                         .subgraph_name("test_subgraph".to_string())
                         .build(),

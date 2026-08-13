@@ -50,9 +50,8 @@ impl CallbackPayload {
     /// key, so a `next` payload is adopted from the body's own arena rather
     /// than copied.
     fn parse(bytes: &[u8]) -> Result<CallbackPayload, String> {
-        let document =
-            apollo_json::Document::parse(bytes.to_vec()).map_err(|err| err.to_string())?;
-        let root = document.root_handle();
+        let document = apollo_json::Value::parse(bytes.to_vec()).map_err(|err| err.to_string())?;
+        let root = document;
         let string_member = |name: &str| {
             root.get(name)
                 .and_then(|value| value.as_string())

@@ -1321,15 +1321,12 @@ async fn subscription_max_lifetime_exceeded() {
         .expect("timed out waiting for max_lifetime close")
         .unwrap();
     assert!(
-        timeout_response
-            .errors
-            .iter()
-            .any(|e| e
-                .extensions
-                .get("code")
-                .and_then(|v| v.as_str_owned())
-                .as_deref()
-                == Some("SUBSCRIPTION_MAX_LIFETIME_EXCEEDED")),
+        timeout_response.errors.iter().any(|e| e
+            .extensions
+            .get("code")
+            .and_then(|v| v.as_str_owned())
+            .as_deref()
+            == Some("SUBSCRIPTION_MAX_LIFETIME_EXCEEDED")),
         "expected SUBSCRIPTION_MAX_LIFETIME_EXCEEDED error, got: {timeout_response:?}"
     );
 }

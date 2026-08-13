@@ -472,9 +472,7 @@ impl JwtStatus {
 }
 
 fn jwt_status_value(status: JwtStatus) -> Value {
-    apollo_json::to_document(&status)
-        .expect("JwtStatus serializes to a JSON object")
-        .root_handle()
+    apollo_json::to_value(&status).expect("JwtStatus serializes to a JSON object")
 }
 
 const JWT_CONTEXT_KEY: &str = "apollo::authentication::jwt_status";

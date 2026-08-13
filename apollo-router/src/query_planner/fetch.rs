@@ -6,8 +6,8 @@ use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
-use apollo_json::DocumentBuilder;
 use apollo_json::JsonKind;
+use apollo_json::ValueBuilder;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -150,8 +150,8 @@ pub(crate) struct Variables {
 }
 
 /// A builder holding the entries of `body_variables` that this fetch declares a usage of.
-fn used_variables(variable_usages: &[Arc<str>], body_variables: &Value) -> DocumentBuilder {
-    let mut builder = DocumentBuilder::new();
+fn used_variables(variable_usages: &[Arc<str>], body_variables: &Value) -> ValueBuilder {
+    let mut builder = ValueBuilder::new();
     for key in variable_usages {
         if let Some(value) = body_variables.get(key.as_ref()) {
             builder
@@ -218,7 +218,7 @@ impl Variables {
                 .set("representations", representations)
                 .expect("the variables builder always has an object root");
             Some(Variables {
-                variables: variables.seal().root_handle(),
+                variables: variables.seal(),
                 inverted_paths,
                 contextual_arguments,
             })
@@ -230,7 +230,7 @@ impl Variables {
             // should not perform the next fetch
             if !current_dir.is_empty()
                 && data
-                    .get_path(schema, current_dir)
+                    .select_path(schema, current_dir)
                     .map(|value| value.is_null())
                     .unwrap_or(true)
             {
@@ -238,9 +238,7 @@ impl Variables {
             }
 
             Some(Variables {
-                variables: used_variables(variable_usages, &body.variables)
-                    .seal()
-                    .root_handle(),
+                variables: used_variables(variable_usages, &body.variables).seal(),
                 inverted_paths: Vec::new(),
                 contextual_arguments: None,
             })
@@ -554,11 +552,7 @@ mod tests {
     use crate::Configuration;
 
     /// Builds a [`Value`] from a `serde_json_bytes::json!` fixture.
-    macro_rules! json {
-        ($($json:tt)+) => {
-            apollo_json::Document::from_legacy(&serde_json_bytes::json!($($json)+)).root_handle()
-        };
-    }
+    use apollo_json::json;
 
     fn test_schema() -> Schema {
         let sdl = r#"

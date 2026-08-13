@@ -25,6 +25,7 @@ use crate::Context;
 use crate::context::OPERATION_NAME;
 use crate::error::FetchError;
 use crate::graphql;
+use crate::graphql::json_object::empty_object;
 use crate::json_ext;
 use crate::json_ext::ObjectExt;
 use crate::metrics::FutureMetricsExt;
@@ -200,7 +201,7 @@ async fn call_websocket(
         return Ok(SubgraphResponse::builder()
             .context(context)
             .subgraph_name(service_name)
-            .extensions(json_ext::object([]))
+            .extensions(empty_object())
             .build());
     }
 
@@ -535,7 +536,7 @@ async fn setup_callback(
             SubgraphResponse::builder()
                 .subgraph_name(service_name)
                 .context(context)
-                .extensions(json_ext::object([]))
+                .extensions(empty_object())
                 .build(),
         ));
     }

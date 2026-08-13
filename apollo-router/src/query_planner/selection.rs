@@ -125,7 +125,7 @@ pub(crate) fn execute_selection_set(
                     for (key, value) in selected.object_iter() {
                         match member_mut(&mut output, &key) {
                             Some(existing) => existing.type_aware_deep_merge(value, schema),
-                            None => output.push((key, value)),
+                            None => output.push((key.into_owned(), value)),
                         }
                     }
                 }
@@ -213,12 +213,7 @@ mod tests {
     use crate::graphql::Response;
     use crate::json_ext::Path;
 
-    /// Builds a [`Value`] from a `serde_json_bytes::json!` fixture.
-    macro_rules! bjson {
-        ($($json:tt)+) => {
-            apollo_json::Document::from_legacy(&serde_json_bytes::json!($($json)+)).root_handle()
-        };
-    }
+    use apollo_json::json as bjson;
 
     fn select(
         response: &Response,

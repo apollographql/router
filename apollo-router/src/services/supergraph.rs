@@ -1065,7 +1065,11 @@ impl InfallibleResponseBuilder {
         self
     }
 
-    pub(crate) fn extension<'v>(mut self, key: impl Into<String>, value: impl Into<NewValue<'v>>) -> Self {
+    pub(crate) fn extension<'v>(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<NewValue<'v>>,
+    ) -> Self {
         self.extensions.insert(key, value);
         self
     }

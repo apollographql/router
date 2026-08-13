@@ -58,6 +58,7 @@ use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::graphql::Error;
+use crate::graphql::json_object::empty_object;
 use crate::json_ext;
 use crate::json_ext::ObjectExt;
 use crate::json_ext::Path;
@@ -570,7 +571,7 @@ impl PluginPrivate for ResponseCache {
 
                     if debug_data.is_some() || cdn_invalidation_debug.is_some() {
                         return response.map_stream(move |mut body| {
-                            let mut payload = object([]);
+                            let mut payload = empty_object();
                             payload.object_insert("version", CACHE_DEBUGGER_VERSION);
                             // Always present, even when empty: `data` not being an empty array
                             // would be a shape change for existing consumers of this extension,
@@ -585,9 +586,7 @@ impl PluginPrivate for ResponseCache {
                             if let Some(cdn_debug) = cdn_invalidation_debug.clone() {
                                 payload.object_insert(
                                     "cdnInvalidation",
-                                    apollo_json::to_document(&cdn_debug)
-                                        .map(|document| document.root_handle())
-                                        .unwrap_or_default(),
+                                    apollo_json::to_value(&cdn_debug).unwrap_or_default(),
                                 );
                             }
                             body.extensions
@@ -1075,7 +1074,7 @@ impl CacheService {
                                 .extension_code("INVALID_CACHE_CONTROL_HEADER")
                                 .build(),
                         )
-                        .extensions(object([]))
+                        .extensions(empty_object())
                         .build());
                 }
             };
@@ -1109,7 +1108,7 @@ impl CacheService {
             .subgraph_request
             .body()
             .variables
-            .object_contains_key(REPRESENTATIONS);
+            .contains_key(REPRESENTATIONS);
 
         // the response will have a private scope but we don't have a way to differentiate users, so
         // we know we will not get or store anything in the cache
@@ -1504,7 +1503,7 @@ impl CacheService {
                         let (new_entities, new_errors) =
                             assemble_response_from_errors(&[graphql_error], &mut cache_result.0);
 
-                        let mut data = object([]);
+                        let mut data = empty_object();
                         data.object_insert(ENTITIES, json_ext::array(new_entities));
 
                         let mut response = subgraph::Response::builder()
@@ -1513,7 +1512,7 @@ impl CacheService {
                             .id(req_id)
                             .errors(new_errors)
                             .subgraph_name(self.name)
-                            .extensions(object([]))
+                            .extensions(empty_object())
                             .build();
                         CacheControl::default_no_store()
                             .update_response_headers(response.response.headers_mut())?;
@@ -1765,7 +1764,7 @@ async fn cache_lookup_root(
                     // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
                     // serde_json_bytes values
                     .data(json_ext::from_legacy(&value.data))
-                    .extensions(object([]))
+                    .extensions(empty_object())
                     .id(request.id)
                     .context(request.context)
                     .subgraph_name(request.subgraph_name.clone())
@@ -2077,11 +2076,10 @@ async fn cache_lookup_entities(
     // fetched -- empty on a full cache hit. The debugger records this body as
     // the subgraph request a cache entry stands in for, so it has to reflect
     // what would actually go to the subgraph after cache filtering.
-    request
-        .subgraph_request
-        .body_mut()
-        .variables
-        .object_insert(REPRESENTATIONS, json_ext::array(new_representations.iter().cloned()));
+    request.subgraph_request.body_mut().variables.object_insert(
+        REPRESENTATIONS,
+        json_ext::array(new_representations.iter().cloned()),
+    );
 
     if !new_representations.is_empty() {
         let cache_status = if cache_result.is_empty() {
@@ -2153,13 +2151,13 @@ async fn cache_lookup_entities(
             // serde_json_bytes values
             .map(|entry| json_ext::from_legacy(&entry.data))
             .collect::<Vec<_>>();
-        let mut data = object([]);
+        let mut data = empty_object();
         data.object_insert(ENTITIES, json_ext::array(entities));
 
         let mut response = subgraph::Response::builder()
             .data(data)
             .id(request.id.clone())
-            .extensions(object([]))
+            .extensions(empty_object())
             .subgraph_name(request.subgraph_name)
             .context(request.context)
             .build();
@@ -2328,7 +2326,7 @@ async fn cache_store_entities_from_response(
         let (new_entities, new_errors) =
             assemble_response_from_errors(&response.response.body().errors, &mut result_from_cache);
 
-        let mut data = object([]);
+        let mut data = empty_object();
         data.object_insert(ENTITIES, json_ext::array(new_entities));
 
         response.response.body_mut().data = Some(data);
@@ -2466,7 +2464,7 @@ fn extract_cache_keys(
         let entity_fields = object(
             representation
                 .object_iter()
-                .filter(|(key, _)| key.as_str() != TYPENAME),
+                .filter(|(key, _)| key != TYPENAME),
         );
 
         // Get the entity key from `representation`, only needed in debug for the cache debugger
@@ -2874,7 +2872,7 @@ fn get_entity_key_from_selection_set(
         let sorted_selections = selection_set
             .root_fields(&default_document)
             .sorted_by(|a, b| a.name.cmp(&b.name));
-        let mut state = object([]);
+        let mut state = empty_object();
         for field in sorted_selections {
             let key = field.name.as_str();
             let Some(val) = fields.get(key) else {
