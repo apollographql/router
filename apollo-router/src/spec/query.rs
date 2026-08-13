@@ -611,7 +611,10 @@ impl Query {
         }
 
         if input.is_object() {
-            if let Some(input_type) = input.get(TYPENAME).and_then(|val| val.as_str_owned()) {
+            // One member scan and one owned string for both uses below: the
+            // schema check here and the concrete-type resolution that follows.
+            let input_typename = input.get(TYPENAME).and_then(|val| val.as_str_owned());
+            if let Some(input_type) = &input_typename {
                 // If there is a __typename, make sure the pointed type is a valid type of the
                 // schema. Otherwise, something is wrong, and in case we might be inadvertently
                 // leaking some data for an @inacessible type or something, nullify the whole
@@ -645,9 +648,7 @@ impl Query {
                 _ => return Err(InvalidValue),
             };
 
-            let typename = input
-                .get(TYPENAME)
-                .and_then(|val| val.as_str_owned())
+            let typename = input_typename
                 .and_then(|s| apollo_compiler::ast::NamedType::new(&s).ok())
                 .map(apollo_compiler::ast::Type::Named);
 
@@ -835,6 +836,10 @@ impl Query {
         // the type under which we apply selections
         current_type: &executable::Type,
     ) -> Result<(), InvalidValue> {
+        // Subgraphs usually return fields in the order the query selected
+        // them, so member lookups resume from the previous hit instead of
+        // rescanning the object from the start for every field.
+        let mut member_cursor = 0;
         // For skip and include, using .unwrap_or is legit here because
         // validate_variables should have already checked that
         // the variable is present and it is of the correct type
@@ -874,7 +879,9 @@ impl Query {
                         continue;
                     }
 
-                    if let Some(input_value) = input.get(field_name.as_str()) {
+                    if let Some(input_value) =
+                        input.get_with_cursor(field_name.as_str(), &mut member_cursor)
+                    {
                         // if there's already a value for that key in the output it means either:
                         // - the value is a scalar and was already copied into output
                         // - the value was already null and is already present in output

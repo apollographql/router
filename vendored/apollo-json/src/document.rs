@@ -316,6 +316,55 @@ impl Value {
         Some(Value { arena, node })
     }
 
+    /// Looks up an object member like [`Value::get`], scanning from `*cursor`
+    /// and wrapping around, so a caller reading keys in (roughly) member order
+    /// pays one comparison per member instead of a scan per lookup. On a hit,
+    /// `*cursor` moves to the entry after the match; on a miss (or a non-object)
+    /// it is left unchanged. A cursor is only meaningful for the object it was
+    /// advanced on — start each object at `0`.
+    ///
+    /// In an object with repeated keys this returns the first match at or after
+    /// the cursor, where [`Value::get`] always returns the first in the object.
+    ///
+    /// ```
+    /// use apollo_json::Value;
+    ///
+    /// let doc = Value::parse(br#"{"a":1,"b":2,"c":3}"#.to_vec())?;
+    /// let mut cursor = 0;
+    /// assert_eq!(doc.get_with_cursor("a", &mut cursor).and_then(|v| v.as_i64()), Some(1));
+    /// assert_eq!(doc.get_with_cursor("c", &mut cursor).and_then(|v| v.as_i64()), Some(3));
+    /// // Wraps around: "b" is behind the cursor but still found.
+    /// assert_eq!(doc.get_with_cursor("b", &mut cursor).and_then(|v| v.as_i64()), Some(2));
+    /// assert_eq!(doc.get_with_cursor("d", &mut cursor), None);
+    /// # Ok::<(), apollo_json::JsonError>(())
+    /// ```
+    pub fn get_with_cursor(&self, key: &str, cursor: &mut usize) -> Option<Value> {
+        let Node::Object(slab) = self.arena.node(self.node) else {
+            return None;
+        };
+        let entries = self.arena.entries(slab);
+        if entries.is_empty() {
+            return None;
+        }
+        let start = if *cursor < entries.len() { *cursor } else { 0 };
+        let mut i = start;
+        loop {
+            let entry = &entries[i];
+            if self.arena.key_matches_str(entry.key, key) {
+                *cursor = i + 1;
+                let (arena, node) = self.arena.resolve_owner(entry.child);
+                return Some(Value { arena, node });
+            }
+            i += 1;
+            if i == entries.len() {
+                i = 0;
+            }
+            if i == start {
+                return None;
+            }
+        }
+    }
+
     /// Whether an object holds `key`; `false` for any other shape. Shorthand
     /// for `self.value().contains_key(key)`.
     pub fn contains_key(&self, key: &str) -> bool {
