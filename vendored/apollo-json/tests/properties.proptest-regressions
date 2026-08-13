@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5db4f23526f2106c893f718ff7b5480558ee382baa61b8265e70bb8ef90694ea # shrinks to target_model = Null, source_model = Array [Object {"": Number(982770976664.9391)}]
+cc 9e10608c8568abf49e175328537dae5cc4a027221d4a33f4e6dcbb704e819960 # shrinks to model = Array [Object {"": Array [Number(497619933537.69763)], "A": Array [], "¡": Array []}], ops = [(1, 1121, 25597, Null)], second_ops = [(0, 0, 0, Null)]
+cc caa5a181b54438791a644362528e90f780d6e40f4067c19b6d477bb7c2328cf4 # shrinks to models = [Null, Array [Null, Null, Null], Null], path_sels = [0, 0, 0], ops = [(231, 57227, 55698, Number(-213844361167.96802)), (26, 26797, 42491, Null), (143, 33458, 11241, Bool(false)), (152, 32994, 54144, String("/{")), (253, 28924, 36439, Number(-4464253358134234273)), (75, 29822, 5004, Number(-311126743414.2008))]

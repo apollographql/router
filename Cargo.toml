@@ -29,6 +29,10 @@ members = [
     "fuzz/subgraph",
     "xtask",
 ]
+exclude = [
+    # Standalone vendored crate; see vendored/apollo-json/Cargo.toml.
+    "vendored/apollo-json",
+]
 
 # this makes build scripts and proc macros faster to compile
 [profile.dev.build-override]
@@ -79,12 +83,3 @@ tempfile = "3.10.1"
 tokio = { version = "1.36.0", features = ["full"] }
 tower = { version = "0.5.1", features = ["full"] }
 
-# The spike's apollo-json git dependency pulls apollo-errors from its own
-# repository by path, while this workspace pulls it from crates.io. Cargo
-# treats those as two distinct crates, so the ERROR_REGISTRY distributed
-# slice is linked twice and linkme aborts at first use. Point the registry
-# dependency at the same copy. The rev matches apollo-json's, so one
-# checkout serves both.
-[patch.crates-io]
-apollo-errors = { git = "https://github.com/apollographql/apollo-platform-rs", rev = "478083bf" }
-apollo-errors-derive = { git = "https://github.com/apollographql/apollo-platform-rs", rev = "478083bf" }

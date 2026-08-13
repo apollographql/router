@@ -1,0 +1,42 @@
+# TEMPORARY (ROUTER-2044): vendored from
+# https://github.com/apollographql/apollo-platform-rs @ 478083bf
+# (branch agent/RR-1055, crate apollo-json/crates/apollo-json) so remote CI can
+# build this spike branch without access to that repository. Do not edit here;
+# change the source crate and re-vendor. apollo-errors comes from crates.io --
+# using the registry copy keeps its linkme ERROR_REGISTRY linked exactly once.
+[package]
+name = "apollo-json"
+version = "0.1.0"
+edition = "2024"
+license = "Elastic-2.0"
+repository = "https://github.com/apollographql/apollo-platform-rs"
+description = "Arena-backed JSON document model with structural sharing and zero-copy pass-through serialization"
+publish = false
+
+# Standalone: keeps the router workspace from adopting the vendored crate as a
+# member, so its tests and lints stay out of router CI.
+[workspace]
+
+[dependencies]
+ahash = "0.8.12"
+apollo-errors = "0.7.1"
+bytes = "1.0"
+# Number formatting into a stack buffer. These are the same crates serde_json
+# formats through, so the text matches byte for byte, without its per-number
+# String allocation.
+itoa = "1.0"
+memchr = "2.8"
+ryu = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+simdutf8 = "0.1.5"
+# `preserve_order` matches how the router consumes the legacy type; key order
+# is load-bearing for byte-identical serialization.
+serde_json_bytes = { version = "0.2.5", features = ["preserve_order"] }
+
+[dev-dependencies]
+proptest = "1.11"
+# The property tests diff serializer output against a serde_json reference
+# model; without `float_roundtrip` serde_json's float parsing is off by up
+# to 1 ulp and the comparison reports phantom divergences.
+serde_json = { version = "1.0", features = ["float_roundtrip"] }
