@@ -870,13 +870,24 @@ pub fn meter_provider() -> impl opentelemetry::metrics::MeterProvider {
 /// Bridges `opentelemetry::global::meter*` onto the router's own meter provider.
 ///
 /// Libraries cannot be handed a meter provider by their caller — per the OTel spec they create
-/// instruments from the global one. The router configures metrics through [`AggregateMeterProvider`] 
+/// instruments from the global one. The router configures metrics through [`AggregateMeterProvider`]
 /// and nothing ever populated the global, so those instruments resolved against
 /// `NoopMeterProvider` and reached no exporter.
 ///
-/// This resolves [`meter_provider_internal`] per call rather than capturing it once, so the
-/// bridge survives a config reload (in production the aggregate provider is a stable handle
-/// whose delegates are swapped) and works under test (where the provider is a task local).
+/// This resolves [`meter_provider_internal`] per call rather than capturing it once, so each
+/// `global::meter*` call is answered by whichever provider is current at that moment. That is
+/// what makes the bridge work under test, where the provider is a task local, and what makes a
+/// meter requested after a config reload resolve against the new delegates.
+///
+/// Note what this does *not* buy: an already-created instrument is not rebound by a reload.
+/// `AggregateMeterProvider::meter_with_scope` snapshots the current delegate meters into the
+/// returned `Meter`, and `AggregateMeterProvider::set` only invalidates the instruments the
+/// router's own macros registered — it cannot reach instruments a library is holding. A
+/// dependency that caches its instruments across a reload (in a `static`, say) would keep
+/// writing into the previous, now shut down, provider. The dependencies bridged today are safe
+/// because their instruments are created per pipeline: plugins are activated in
+/// `PluggableSupergraphServiceBuilder::build` before `RouterCreator::new` builds the service
+/// stack, so every reload recreates them against the freshly installed providers.
 struct DelegatingMeterProvider;
 
 impl opentelemetry::metrics::MeterProvider for DelegatingMeterProvider {
@@ -892,8 +903,14 @@ static GLOBAL_METER_PROVIDER_BRIDGE: OnceLock<()> = OnceLock::new();
 
 /// Installs the [`DelegatingMeterProvider`] as the process-wide OTel meter provider, once.
 ///
-/// Idempotent, and deliberately only ever set once: a custom router that installs its own global
-/// provider before the router's telemetry activates keeps it.
+/// Idempotent: the `OnceLock` keeps repeated activations from re-entering
+/// `opentelemetry::global::set_meter_provider`, which takes a write lock on OTel's global.
+///
+/// It does *not* protect anything the host application installed — `set_meter_provider`
+/// overwrites unconditionally and OTel offers no way to read back whether a provider was already
+/// set. Callers are responsible for only reaching this in a process whose telemetry the router
+/// owns; `Activation::reload_metrics` gates the call on `OPENTELEMETRY_TRACER_HANDLE`, matching
+/// how `reload_tracing` decides whether it may touch the global tracer provider.
 pub(crate) fn install_global_meter_provider_bridge() {
     GLOBAL_METER_PROVIDER_BRIDGE.get_or_init(|| {
         opentelemetry::global::set_meter_provider(DelegatingMeterProvider);
