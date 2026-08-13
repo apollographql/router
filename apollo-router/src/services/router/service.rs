@@ -492,8 +492,13 @@ where
                         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
                     let body: Result<String, BoxError> = tracing::trace_span!("serialize_response")
                         .in_scope(|| {
-                            let body = serde_json::to_string(&response)?;
-                            Ok(body)
+                            // `to_value` builds the small response envelope and
+                            // adopts the formatted `data` tree by reference, and
+                            // the native writer emits untouched input spans
+                            // verbatim — no per-node serde dispatch, and no
+                            // re-escaping of strings that arrived escaped from
+                            // the subgraph.
+                            Ok(apollo_json::to_value(&response)?.to_string())
                         });
                     let body = body?;
                     // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
