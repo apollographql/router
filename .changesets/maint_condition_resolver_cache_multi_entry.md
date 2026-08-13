@@ -2,7 +2,7 @@
 
 Extends the condition resolver cache introduced in #9740 to cache
 resolutions for all combinations of `@include`/`@skip` context and
-excluded conditions, not just the first combination seen per edge.
+excluded conditions, not only the first combination seen per edge.
 
 Previously, the cache stored a single `(resolution, excluded_destinations)`
 pair per edge, and bailed out entirely when the `OpGraphPathContext`

@@ -1,4 +1,4 @@
-### Add a `RedactedError` mode for JWT authentication errors
+### Add a `RedactedError` mode for JWT authentication errors ([PR #9928](https://github.com/apollographql/router/pull/9928))
 
 By default, when JWT authentication fails, the router returns a detailed error message describing the validation failure. Those messages can disclose details of your authentication setup to unauthenticated callers, including which signing algorithms the router accepts, the byte offsets at which token decoding failed, and the issuers and audiences the router is configured to trust.
 
