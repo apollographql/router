@@ -44,13 +44,8 @@ use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
-<<<<<<< HEAD
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
-use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
-use crate::plugins::telemetry::CLIENT_NAME;
-=======
->>>>>>> 4e8576840 (fix: ensure router selectors work for `apollo.router.operations.subscriptions.terminated.client` (#9605))
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
