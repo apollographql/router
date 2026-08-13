@@ -114,6 +114,48 @@ async fn it_supports_multi_subgraph_batching() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn it_rejects_a_batched_deferred_query() -> Result<(), BoxError> {
+    const REQUEST_COUNT: usize = 2;
+
+    let requests: Vec<_> = (0..REQUEST_COUNT)
+        .map(|index| {
+            Request::fake_builder()
+                .query(format!(
+                    "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ ... @defer {{ index }} }} }}"
+                ))
+                .build()
+        })
+        .collect();
+    let responses = helper::run_test(
+        CONFIG,
+        &requests,
+        None::<helper::Handler>,
+        None::<helper::Handler>,
+    )
+    .await?;
+
+    if graph_os_enabled() {
+        assert_eq!(responses.len(), REQUEST_COUNT);
+        for response in &responses {
+            assert_eq!(response.errors.len(), 1);
+            assert_eq!(
+                response.errors[0].message,
+                "Deferred responses and subscriptions aren't supported in batches"
+            );
+            assert_eq!(
+                response.errors[0]
+                    .extensions
+                    .get("code")
+                    .and_then(|v| v.as_str()),
+                Some("BATCHING_DEFER_UNSUPPORTED")
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn it_batches_with_errors_in_single_graph() -> Result<(), BoxError> {
     const REQUEST_COUNT: usize = 4;
 
