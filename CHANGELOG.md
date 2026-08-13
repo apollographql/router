@@ -2,6 +2,127 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.16.2] - 2026-08-13
+
+## 🐛 Fixes
+
+### Prevent connector composition failures for chained `->filter`/`->find` selections
+
+A `connect/v0.4` connector selection that places one of the iterative array methods after another array-producing method — for example `$.items->filter(@.a->eq("x"))->filter(@.b->gt(0)) { id name }` or `$.items->filter(@.a->eq("x"))->find(@.b->gt(0)) { id name }` — could fail to compose with a `SATISFIABILITY_ERROR`.
+
+`->filter` and `->find` shaped their condition against the whole input array instead of its element. A single method applied to an `Unknown` input happened to pass a lenient boolean check, but after a prior method handed it a concrete `List<…>`, the condition `@.field->…` was evaluated against the list, produced a spurious "condition must return a boolean value" error, and connector expansion collapsed the output object to a type with no fields — an invalid subgraph that surfaced downstream as a composition error.
+
+Both methods now shape their condition against the array element (`any_item`), matching the per-element runtime semantics, so chained selections expand and compose correctly. (`->map` already shaped its callback per element and was unaffected.)
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9643
+
+### Reuse condition planning cache during query planning and satisfiability validation ([PR #9740](https://github.com/apollographql/router/pull/9740))
+
+Router query planning and composition satisfiability validation have optimizations that cache the results of planning a "condition" (e.g. the fields of an `@key` or `@requires`). However, when this condition planning happened recursively, this resulted in new caches being constructed instead of reusing the existing cache. This behavior inhibited the reuse of previous condition planning work, increasing planning/validation time significantly in some circumstances. This code has now been changed to reuse the existing cache.
+
+By [@sachindshinde](https://github.com/sachindshinde) in https://github.com/apollographql/router/pull/9740
+
+## 🛠 Maintenance
+
+### Reduce allocations and use hash-based node comparison in the query planner ([PR #9803](https://github.com/apollographql/router/pull/9803))
+
+`can_merge_sibling_in` now compares potential merge candidates by node hash instead of a full data comparison; this doesn't change how grandchild-node merges are matched, which a previous commit already handles separately. Several other hot paths in query plan construction avoid needless clones: `subgraph_and_merge_at_key` uses a numeric hash instead of string formatting, `possible_types` iterates instead of cloning, `Copy`-type `NodeIndex` values are copied instead of cloned, and `flat_wrap_nodes` moves owned `Vec<PlanNode>` values instead of cloning them.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/9803
+
+### Cache condition resolutions across all context/exclusion combinations ([PR #9741](https://github.com/apollographql/router/pull/9741))
+
+Extends the condition resolver cache introduced in #9740 to cache
+resolutions for all combinations of `@include`/`@skip` context and
+excluded conditions, not only the first combination seen per edge.
+
+Previously, the cache stored a single `(resolution, excluded_destinations)`
+pair per edge, and bailed out entirely when the `OpGraphPathContext`
+(active `@include`/`@skip` directives) or `ExcludedConditions` were
+non-empty. For types with multiple `@key` directives, this meant only
+the first key's resolution was cached — all subsequent keys were
+re-evaluated from scratch every time they were encountered.
+
+Now the cache stores a `Vec<CachedConditionEntry>` per edge, where each
+entry records the full `(context, excluded_destinations,
+excluded_conditions)` triple. On lookup, entries are scanned for an
+exact match. On miss (no matching entry found), the new resolution is
+inserted — allowing the cache to accumulate results across all
+combinations encountered during planning.
+
+Example: A `Product` type with two keys across three subgraphs.
+
+```graphql
+# Subgraph "products"
+type Product @key(fields: "id") @key(fields: "sku") {
+  id: ID!
+  sku: String!
+}
+
+# Subgraph "pricing"
+type Product @key(fields: "id") { id: ID!, price: Int }
+
+# Subgraph "inventory"
+type Product @key(fields: "sku") { sku: String!, inStock: Boolean }
+```
+
+```graphql
+{ product { price inStock } }
+```
+
+When the planner evaluates how to reach `pricing` and `inventory` from
+`products`, it tries each key edge in order. The first key (`id`) is
+evaluated with `excluded_destinations: {pricing}`, and the second key
+(`sku`) is evaluated with `excluded_destinations: {pricing, inventory}`.
+These are different exclusion sets, so each produces a distinct cache
+entry for the same edge.
+
+With the old single-entry cache, only the first key's resolution was
+stored. The second key hit a different `excluded_destinations` value,
+returned `NotApplicable`, and was re-evaluated from scratch — every
+time, across every root field that touches `Product`.
+
+With the multi-entry cache, both resolutions are stored and looked up
+on subsequent encounters. Every additional root field returning
+`Product` reuses both cached key resolutions instead of re-evaluating
+them.
+
+The same applies to `@requires` conditions evaluated under different
+`@include`/`@skip` contexts — each distinct `(context,
+excluded_destinations, excluded_conditions)` combination is cached and
+reused independently.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/9741
+
+### Replace DFS transitive reduction with petgraph algorithm ([PR #9804](https://github.com/apollographql/router/pull/9804))
+
+The query planner's `reduce()` step previously used a hand-written DFS to compute the transitive reduction of the fetch dependency graph. This has been replaced with petgraph's `dag_transitive_reduction_closure`, which implements the Habib–Morvan–Rampon algorithm in O(V+E) time.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9804>
+
+### Add a `RedactedError` mode for JWT authentication errors ([PR #9928](https://github.com/apollographql/router/pull/9928))
+
+By default, when JWT authentication fails, the router returns a detailed error message describing the validation failure. Those messages can disclose details of your authentication setup to unauthenticated callers, including which signing algorithms the router accepts, the byte offsets at which token decoding failed, and the issuers and audiences the router is configured to trust.
+
+Setting `authentication.router.jwt.on_error` to `RedactedError` rejects failed requests with the same status codes as `Error`, but replaces every message with a generic `Authentication failed`:
+
+```yaml title="router.yaml"
+authentication:
+  router:
+    jwt:
+      jwks:
+        - url: https://auth.example.com/.well-known/jwks.json
+      on_error: RedactedError
+```
+
+The details of the failure are still available to you: the `apollo::authentication::jwt_status` context value carries the full message, code, and reason, and failures on the `apollo.router.operations.authentication.jwt` metric now carry an `authentication.jwt.failure_code` attribute (for example `CANNOT_DECODE_JWT` or `INVALID_AUDIENCE`) that you can use to break down why authentications fail.
+
+The default remains `Error`, so this change doesn't affect existing deployments.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9928
+
+
+
 # [2.16.1] - 2026-07-20
 
 ## 🐛 Fixes
