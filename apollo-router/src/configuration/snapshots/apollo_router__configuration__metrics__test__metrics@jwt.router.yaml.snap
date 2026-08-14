@@ -6,5 +6,6 @@ expression: "&metrics.non_zero()"
   data:
     datapoints:
       - value: 1
-        attributes: {}
+        attributes:
+          opt.on_error: RedactedError
 
