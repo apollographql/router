@@ -268,13 +268,39 @@ resourceSpans:
                 value:
                   stringValue: query
             droppedAttributesCount: 0
-            events: []
+            events:
+              - timeUnixNano: "[time]"
+                name: ""
+                attributes:
+                  - key: exception.message
+                    value:
+                      stringValue: Request failed
+                  - key: graphql.error.extensions.code
+                    value:
+                      stringValue: CONNECTOR_FETCH
+                  - key: graphql.error.path
+                    value:
+                      stringValue: "[redacted]"
+                droppedAttributesCount: 0
+              - timeUnixNano: "[time]"
+                name: ""
+                attributes:
+                  - key: exception.message
+                    value:
+                      stringValue: Request failed
+                  - key: graphql.error.extensions.code
+                    value:
+                      stringValue: CONNECTOR_FETCH
+                  - key: graphql.error.path
+                    value:
+                      stringValue: "[redacted]"
+                droppedAttributesCount: 0
             droppedEventsCount: 0
             links: []
             droppedLinksCount: 0
             status:
               message: ""
-              code: 0
+              code: 2
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
