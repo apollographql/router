@@ -1,0 +1,19 @@
+preview_file_uploads:
+  enabled: true
+  protocols:
+    multipart:
+      enabled: true
+      mode: stream
+      limits:
+        max_file_size: 1kb
+        max_files: 5
+        # Deliberately tiny so the derived whole-stream budget stays small enough to blow with
+        # a few KB of framing:
+        #   http_max_request_bytes (500) + map cap (10kb) + max_files * max_file_size (5kb)
+        #   + max_overhead_size (4kb) = ~20kb
+        max_overhead_size: 4kb
+limits:
+  router:
+    http_max_request_bytes: 500
+include_subgraph_errors:
+  all: true

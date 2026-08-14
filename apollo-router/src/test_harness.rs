@@ -414,6 +414,7 @@ impl<'a> TestHarness<'a> {
     pub async fn build_http_service(self) -> Result<HttpService, BoxError> {
         use crate::axum_factory::ListenAddrAndRouter;
         use crate::axum_factory::axum_http_server_factory::make_axum_router;
+        use crate::axum_factory::utils::connection_router_service;
 
         let (config, schema, supergraph_creator) = self.build_common().await?;
 
@@ -430,7 +431,6 @@ impl<'a> TestHarness<'a> {
         let web_endpoints = router_creator.web_endpoints();
 
         let routers = make_axum_router(
-            router_creator,
             &config,
             web_endpoints,
             Arc::new(LicenseState::Licensed {
@@ -438,6 +438,15 @@ impl<'a> TestHarness<'a> {
             }),
         )?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
+
+        // The router reads its pipeline from a request extension, which the server factory
+        // populates. Add the same extension here so the returned service is callable.
+        let router_service = connection_router_service(router_creator.create());
+        let router = ServiceBuilder::new()
+            .layer(tower_http::add_extension::AddExtensionLayer::new(
+                router_service,
+            ))
+            .service(router);
         Ok(router.boxed())
     }
 }

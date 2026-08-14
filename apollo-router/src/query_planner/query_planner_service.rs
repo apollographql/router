@@ -359,6 +359,8 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Backpressure is not exerted by the compute job pool currently, so we can only let the
+        // caller know about pool saturation once we actually try to submit a job.
         Poll::Ready(Ok(()))
     }
 

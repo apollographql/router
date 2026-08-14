@@ -33,7 +33,6 @@ use super::router::Event::UpdateSchema;
 use super::router::Event::{self};
 use crate::ApolloRouterError::NoLicense;
 use crate::configuration::Configuration;
-use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
 use crate::configuration::metrics::Metrics;
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
@@ -434,7 +433,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 match Self::try_start(
                     state_machine,
                     &mut server_handle,
-                    Some(&router_service_factory),
+                    Some(router_service_factory.clone()),
                     configuration.target().clone(),
                     schema.target().clone(),
                     license.target().clone(),
@@ -555,7 +554,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
     async fn try_start<S>(
         state_machine: &mut StateMachine<S, FA>,
         server_handle: &mut Option<HttpServerHandle>,
-        previous_router_service_factory: Option<&FA::RouterFactory>,
+        previous_router_service_factory: Option<FA::RouterFactory>,
         configuration: Arc<Configuration>,
         schema_state: Arc<SchemaState>,
         license: Arc<LicenseState>,
@@ -723,15 +722,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         listen_addresses_guard.extra_listen_addresses = server_handle.listen_addresses().to_vec();
         listen_addresses_guard.graphql_listen_address =
             server_handle.graphql_listen_address().clone();
-
-        // Log that we are using experimental features. It is best to do this here rather than config
-        // validation as it will actually log issues rather than return structured validation errors.
-        // Logging here also means that this is actually configuration that took effect
-        if let Some(yaml) = &configuration.validated_yaml {
-            let discussed = Discussed::new();
-            discussed.log_experimental_used(yaml);
-            discussed.log_preview_used(yaml);
-        }
 
         let metrics = apollo_opentelemetry_initialized()
             .then(|| Metrics::new(&configuration, Arc::as_ref(&license)));
@@ -966,7 +956,7 @@ mod tests {
     use crate::router_factory::RouterFactory;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::services::router;
-    use crate::services::router::pipeline_handle::PipelineRef;
+    use crate::services::router::pipeline_handle::PipelineHandle;
     use crate::uplink::schema::SchemaState;
 
     type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
@@ -2071,7 +2061,7 @@ mod tests {
             .in_sequence(&mut seq)
             .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2115,7 +2105,7 @@ mod tests {
             .in_sequence(&mut seq)
             .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2131,7 +2121,7 @@ mod tests {
             .withf(|_, configuration, _, _, _, _| configuration.homepage.enabled)
             .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2271,12 +2261,12 @@ mod tests {
         impl RouterSuperServiceFactory for MyRouterConfigurator {
             type RouterFactory = MockMyRouterFactory;
 
-            async fn create<'a>(
-                &'a mut self,
+            async fn create(
+                &mut self,
                 is_telemetry_disabled: bool,
                 configuration: Arc<Configuration>,
                 schema: Arc<Schema>,
-                previous_router_service_factory: Option<&'a MockMyRouterFactory>,
+                previous_router_service_factory: Option<MockMyRouterFactory>,
                 extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
                 license: Arc<LicenseState>
             ) -> Result<MockMyRouterFactory, BoxError>;
@@ -2290,7 +2280,7 @@ mod tests {
         impl RouterFactory for MyRouterFactory {
             fn create(&self) -> router::BoxCloneService;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
-            fn pipeline_ref(&self) -> Arc<PipelineRef>;
+            fn pipeline_handle(&self) -> Arc<PipelineHandle>;
         }
 
         impl Clone for MyRouterFactory {
@@ -2406,7 +2396,7 @@ mod tests {
             })
             .returning(move |_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2420,13 +2410,13 @@ mod tests {
                     move |_,
                           _configuration: &Arc<Configuration>,
                           _,
-                          previous_router_service_factory: &Option<&MockMyRouterFactory>,
+                          previous_router_service_factory: &Option<MockMyRouterFactory>,
                           _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>,
                           _| { previous_router_service_factory.is_some() },
                 )
                 .returning(move |_, _, _, _, _, _| {
                     let mut router = MockMyRouterFactory::new();
-                    router.expect_clone().return_once(MockMyRouterFactory::new);
+                    router.expect_clone().returning(MockMyRouterFactory::new);
                     router.expect_web_endpoints().returning(MultiMap::new);
                     Ok(router)
                 });
@@ -2445,7 +2435,7 @@ mod tests {
             .times(expect_times_called)
             .returning(move |_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2469,7 +2459,7 @@ mod tests {
 
         fn mock_router_ok() -> MockMyRouterFactory {
             let mut router = MockMyRouterFactory::new();
-            router.expect_clone().return_once(MockMyRouterFactory::new);
+            router.expect_clone().returning(MockMyRouterFactory::new);
             router.expect_web_endpoints().returning(MultiMap::new);
             router
         }

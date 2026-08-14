@@ -1,0 +1,8 @@
+description: telemetry.apollo.otlp_tracing_sampler has been removed. Router 3 uses OTLP exclusively for trace export to GraphOS.
+actions:
+  - type: log
+    level: warn
+    path: telemetry.apollo.otlp_tracing_sampler
+    log: "telemetry.apollo.otlp_tracing_sampler has been removed. Router 3 uses OTLP exclusively for traces. Remove this key from your config."
+  - type: delete
+    path: telemetry.apollo.otlp_tracing_sampler
