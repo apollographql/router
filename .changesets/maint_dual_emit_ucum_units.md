@@ -1,6 +1,6 @@
 ### Dual-emit duration and byte metrics under their UCUM-suffixed Prometheus names
 
-Several existing router metrics will gain a UCUM unit (`s` for durations, `By` for byte counts) in router 3.x. The `opentelemetry-prometheus` exporter auto-appends a suffix derived from the unit, so the rename is customer-visible — e.g. `apollo_router_cache_hit_time` becomes `apollo_router_cache_hit_time_seconds`.
+Several existing router metrics are gaining a UCUM unit (`s` for durations, `By` for byte counts). The `opentelemetry-prometheus` exporter auto-appends a suffix derived from the unit, so the rename is customer-visible — e.g. `apollo_router_cache_hit_time` becomes `apollo_router_cache_hit_time_seconds`.
 
 To give dashboards and alerts a migration window, the router now emits each affected metric under **both** names simultaneously:
 
@@ -9,7 +9,7 @@ To give dashboards and alerts a migration window, the router now emits each affe
 
 Affected metrics:
 
-| Legacy Prometheus name | Future Prometheus name (router 3.x canonical) |
+| Legacy Prometheus name | Future Prometheus name (canonical) |
 | --- | --- |
 | `apollo_router_cache_hit_time` | `apollo_router_cache_hit_time_seconds` |
 | `apollo_router_cache_invalidation_duration` | `apollo_router_cache_invalidation_duration_seconds` |
@@ -26,7 +26,7 @@ Affected metrics:
 | `apollo_router_operations_response_size_total` | `apollo_router_operations_response_size_bytes_total` |
 | `apollo_router_operations_file_uploads_file_size` | `apollo_router_operations_file_uploads_file_size_bytes` |
 
-**Action recommended:** update dashboards, alerts, and recording rules to the new suffixed names during the router 2.x window. The legacy unsuffixed names will be removed in router 3.x.
+**Action recommended:** update dashboards, alerts, and recording rules to the new suffixed names during this router 3.x dual-emit window. The legacy unsuffixed names will be removed in a future major version.
 
 **Cardinality note:** each affected metric now produces two series per attribute combination — distinguishable by the `otel_scope_name` label. The legacy series can be filtered out via `{otel_scope_name="apollo/router/ucum"}` in queries once dashboards have migrated.
 

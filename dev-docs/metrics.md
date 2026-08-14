@@ -129,16 +129,15 @@ some of which has been copied here for reference:
   technical reason to not do so.
 
 Migrating existing metrics to the `_with_unit!` macros is a customer-breaking change for any
-metric whose unit triggers a Prometheus suffix (e.g. `s` → `_seconds`, `By` → `_bytes`). The
-actual migration is scheduled for router 3.x. In router 2.x we **dual-emit** the affected
-metrics: each callsite registers a secondary instrument on the `apollo/router/ucum` meter
-scope with the rename target's UCUM unit, so the suffixed Prometheus name appears alongside
-the legacy unsuffixed one. Customer dashboards can migrate during the 2.x window before the
-legacy name is removed.
+metric whose unit triggers a Prometheus suffix (e.g. `s` → `_seconds`, `By` → `_bytes`). Router
+3.x **dual-emits** the affected metrics: each callsite registers a secondary instrument on the
+`apollo/router/ucum` meter scope with the rename target's UCUM unit, so the suffixed Prometheus
+name appears alongside the legacy unsuffixed one. Customer dashboards can migrate during this
+3.x window before the legacy name is removed in a future major version.
 
 The set of dual-emitted metrics is defined in `apollo-router/src/metrics/renames.rs`. To add
-to the set, append an entry to `rename_for`. To remove a legacy name in router 3.x, delete the
-entry and migrate the callsite to the matching `_with_unit!` macro. Annotation units
+to the set, append an entry to `rename_for`. To remove a legacy name in a future major version,
+delete the entry and migrate the callsite to the matching `_with_unit!` macro. Annotation units
 (`{request}`, `{event}`, …) do **not** trigger a Prometheus suffix; metrics whose natural unit
 is an annotation can migrate to `_with_unit!` directly without dual-emit.
 

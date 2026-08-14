@@ -22,11 +22,11 @@ The rest of this reference lists the available standard router instruments.
 
 <Note>
 
-**Upcoming Prometheus name changes in router 3.x.** Several duration and byte-count instruments will gain a UCUM unit (`s` for durations, `By` for bytes) in router 3.x. The Prometheus exporter appends a UCUM-derived suffix to the exported name when a unit is set — for example, `apollo_router_cache_hit_time` becomes `apollo_router_cache_hit_time_seconds`.
+**Prometheus name changes in router 3.x.** Several duration and byte-count instruments are gaining a UCUM unit (`s` for durations, `By` for bytes). The Prometheus exporter appends a UCUM-derived suffix to the exported name when a unit is set — for example, `apollo_router_cache_hit_time` becomes `apollo_router_cache_hit_time_seconds`.
 
-To give you time to migrate dashboards, alerts, and recording rules, router 2.x **dual-emits** each affected metric: the legacy unsuffixed series continues to appear on `otel_scope_name="apollo/router"`, and a new suffixed series appears in parallel on `otel_scope_name="apollo/router/ucum"`. The legacy series will be removed in router 3.x.
+To give you time to migrate dashboards, alerts, and recording rules, router 3.x **dual-emits** each affected metric: the legacy unsuffixed series continues to appear on `otel_scope_name="apollo/router"`, and a new suffixed series appears in parallel on `otel_scope_name="apollo/router/ucum"`. The legacy series will be removed in a future major version.
 
-| Legacy Prometheus name | Router 3.x canonical Prometheus name |
+| Legacy Prometheus name | Canonical Prometheus name |
 | --- | --- |
 | `apollo_router_cache_hit_time` | `apollo_router_cache_hit_time_seconds` |
 | `apollo_router_cache_invalidation_duration` | `apollo_router_cache_invalidation_duration_seconds` |

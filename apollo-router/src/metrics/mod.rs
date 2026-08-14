@@ -160,7 +160,7 @@ pub struct HistogramTimerGuard {
     histogram: opentelemetry::metrics::Histogram<f64>,
     /// Secondary UCUM-suffixed histogram registered via the rename table; records the same
     /// elapsed time on drop so customers can migrate dashboards before the legacy name is
-    /// removed in router 3.x. See `crate::metrics::renames`.
+    /// removed in a future major version. See `crate::metrics::renames`.
     secondary: Option<opentelemetry::metrics::Histogram<f64>>,
     attributes: Vec<opentelemetry::KeyValue>,
     start: Instant,

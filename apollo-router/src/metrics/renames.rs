@@ -1,11 +1,11 @@
 //! Legacy → UCUM rename table for ROUTER-1777.
 //!
 //! Each entry maps a legacy OTel metric name (currently emitted via a deprecated
-//! non-unit macro) to the OTel name + UCUM unit it will canonically use in router
-//! 3.x. During the router 2.x window, callsites whose name is in this table emit
-//! a secondary instrument on the `apollo/router/ucum` meter scope so customer
-//! dashboards can migrate to the suffixed Prometheus name before the legacy name
-//! is removed in 3.x.
+//! non-unit macro) to the OTel name + UCUM unit it will canonically use going
+//! forward. During this router 3.x dual-emit window, callsites whose name is in
+//! this table emit a secondary instrument on the `apollo/router/ucum` meter scope
+//! so customer dashboards can migrate to the suffixed Prometheus name before the
+//! legacy name is removed in a future major version.
 //!
 //! Scope rationale, including the 42 metrics that are intentionally NOT in this
 //! table because their natural UCUM unit is an annotation (e.g. `{request}`,
