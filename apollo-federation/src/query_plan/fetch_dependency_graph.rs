@@ -2314,6 +2314,13 @@ impl FetchDependencyGraph {
         // selection into `node_id`'s, which silently drops the dependency edge from any other
         // parent unless `node_id` already (transitively) depends on it. Without this check, an
         // unsatisfied `@requires` on `child` can be merged away entirely (RH-1396).
+        //
+        // Note this is conservative: some of those other parents may just be fetching `@key`
+        // fields (potentially a compound `@key`) for the very subgraph jump this merge would
+        // remove, in which case merging would still be safe and this rejects an optimization we
+        // could otherwise make. There's no cheap way to distinguish that case from a genuine
+        // unsatisfied dependency today, and it's a niche case -- plan correctness matters more
+        // than plan optimality here, so we accept the missed optimization.
         for other_parent_id in self.parents_of(child_id) {
             if other_parent_id != node_id && !self.is_descendant_of(node_id, other_parent_id) {
                 return Ok(false);
