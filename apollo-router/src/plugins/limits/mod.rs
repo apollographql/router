@@ -915,6 +915,7 @@ mod test {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         };
         let key = ResponseKey::RootField {

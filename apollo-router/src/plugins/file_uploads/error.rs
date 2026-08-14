@@ -67,11 +67,15 @@ pub(super) enum FileUploadError {
 impl FileUploadError {
     pub(super) fn http_status_code(&self) -> StatusCode {
         match self {
-            // Only "operations" and "map" have multer SizeLimits configured; file parts are
-            // checked separately in SubgraphFileProxyStream and return MaxFileSizeLimitExceeded.
-            FileUploadError::InvalidMultipartRequest(multer::Error::FieldSizeExceeded {
-                ..
-            }) => StatusCode::PAYLOAD_TOO_LARGE,
+            // FieldSizeExceeded: only "operations" and "map" have multer per-field SizeLimits
+            // configured; file parts are checked separately in SubgraphFileProxyStream and return
+            // MaxFileSizeLimitExceeded.
+            //
+            // StreamSizeExceeded: the whole-stream budget derived from the configured limits, which
+            // bounds multipart framing. See `whole_stream_size_limit` in multipart_request.rs.
+            FileUploadError::InvalidMultipartRequest(
+                multer::Error::FieldSizeExceeded { .. } | multer::Error::StreamSizeExceeded { .. },
+            ) => StatusCode::PAYLOAD_TOO_LARGE,
             _ => StatusCode::BAD_REQUEST,
         }
     }
@@ -88,6 +92,9 @@ impl From<FileUploadError> for graphql::Error {
                 FileUploadError::MaxFileSizeLimitExceeded { .. } => {
                     "FILE_UPLOADS_LIMITS_MAX_FILE_SIZE_EXCEEDED".to_string()
                 }
+                FileUploadError::InvalidMultipartRequest(multer::Error::StreamSizeExceeded {
+                    ..
+                }) => "FILE_UPLOADS_LIMITS_MAX_REQUEST_SIZE_EXCEEDED".to_string(),
                 _ => "FILE_UPLOADS_OPERATION_CANNOT_STREAM".to_string(),
             })
             .build()
