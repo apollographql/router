@@ -1,8 +1,4 @@
-//! Enforces the configured subgraph response size limit on the HTTP client service.
-//!
-//! Rather than eagerly buffering the response body to check its size, this replaces the body
-//! with an `http_body_util::Limited` wrapper, so the limit is enforced lazily as the body is
-//! read further up the stack.
+//! A layer enforcing configured subgraph response size limits on the HTTP client service.
 
 use std::sync::Arc;
 
