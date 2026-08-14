@@ -1,3 +1,29 @@
+//! Decides what the router serves, and what happens when it cannot serve what it has
+//! been given.
+//!
+//! `StateMachine::process_events` drives a single loop over one event stream. Each
+//! iteration accumulates the new input into the current state (`accumulate_inputs`,
+//! pure, no I/O) and then attempts a reload (`attempt_reload`, where all the work and
+//! all the I/O happen).
+//!
+//! Three things are worth knowing before changing anything here:
+//!
+//! - **The three inputs are independent.** Configuration, schema and license arrive
+//!   from unrelated sources and are never versioned together, so a reload is always a
+//!   combination that may never have been published as a set.
+//! - **A pending input is never discarded.** `PendingChange` keeps what is serving
+//!   (`committed()`) separately from what we are trying to apply (`target()`), and a
+//!   value that failed to apply is retained so that a later change to a *different*
+//!   input can make the combination succeed. This is deliberate and long-standing.
+//! - **The cheap checks and the permanent failures are the same set.** Schema parsing
+//!   and the two enforcement checks are pure; everything expensive and everything
+//!   retryable lives in `router_configurator.create()`, which builds the query planner,
+//!   initializes plugins, and warms the query plan cache inline.
+//!
+//! `dev-docs/reload-lifecycle.md` covers all of this properly, including the cost model,
+//! the retry budget, the change-notification rules, and the known sharp edges — notably
+//! that an input which can never be applied blocks every input behind it.
+
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
