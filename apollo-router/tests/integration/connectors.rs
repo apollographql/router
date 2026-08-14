@@ -749,6 +749,7 @@ mod telemetry {
             telemetry:
               apollo:
                 errors:
+                  extended_error_metrics: disabled
                   subgraph:
                     all:
                       send: true
@@ -786,6 +787,7 @@ mod telemetry {
                 telemetry:
                   apollo:
                     errors:
+                      extended_error_metrics: disabled
                       subgraph:
                         all:
                           send: false
