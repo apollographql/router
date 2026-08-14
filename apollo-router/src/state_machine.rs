@@ -49,6 +49,15 @@ use crate::uplink::schema::SchemaState;
 
 const STATE_CHANGE: &str = "state change";
 
+/// Upper bound on how many reloads may be coalesced (skipped) in a row before a
+/// build is forced. Coalescing collapses a burst of queued updates into one
+/// reload, but without a cap a relentless stream of ready events could defer the
+/// reload indefinitely and starve the router of any new state. Hitting the cap
+/// forces a build of the newest-merged-so-far target and resets the count, so we
+/// always make forward progress. More than this many rapid same-kind publishes
+/// queued at once is unusual and likely points to a problem upstream.
+const MAX_COALESCED_RELOADS: usize = 10;
+
 #[derive(Default, Clone)]
 pub(crate) struct ListenAddresses {
     pub(crate) graphql_listen_address: Option<ListenAddr>,
@@ -408,7 +417,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     &mut listen_addresses_guard,
                     vec![],
                 )
-                .map_ok_or_else(Errored, |f| f.0)
+                .map_ok_or_else(|err| Errored(ApolloRouterError::from(err)), |f| f.0)
                 .await
             }
 
@@ -471,11 +480,20 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         new_state
                     }
                     Err(e) if server_handle.is_some() => {
-                        // Decrement the retry budget (saturating so it stops at 0, not wrapping).
-                        let retries_remaining = retries_remaining.map(|n| n.saturating_sub(1));
+                        // Decrement the retry budget (saturating so it stops at 0, not
+                        // wrapping). A permanent error will fail identically on every
+                        // retry, so pin the budget at 0 to stop the retry timer.
+                        let is_transient = e.is_transient();
+                        let retries_remaining = if is_transient {
+                            retries_remaining.map(|n| n.saturating_sub(1))
+                        } else {
+                            Some(0)
+                        };
+                        let e: ApolloRouterError = e.into();
 
                         tracing::error!(
                             error = %e,
+                            transient_error = is_transient,
                             retries_remaining = retries_remaining
                                 .map_or("unlimited".to_string(), |n| n.to_string()),
                             event = STATE_CHANGE,
@@ -503,6 +521,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     // The point of no return was passed — server handle consumed
                     // before the failure. Fatal.
                     Err(e) => {
+                        let e: ApolloRouterError = e.into();
                         tracing::error!(
                             error = %e,
                             event = STATE_CHANGE,
@@ -560,14 +579,16 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         license: Arc<LicenseState>,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
         mut all_connections_stopped_signals: Vec<mpsc::Receiver<()>>,
-    ) -> Result<(State<FA>, Arc<Schema>), ApolloRouterError>
+    ) -> Result<(State<FA>, Arc<Schema>), ReloadError>
     where
         S: HttpServerFactory,
         FA: RouterSuperServiceFactory,
     {
         let schema = Arc::new(
-            Schema::parse_arc(schema_state.clone(), &configuration)
-                .map_err(|e| ServiceCreationError(e.to_string().into()))?,
+            Schema::parse_arc(schema_state.clone(), &configuration).map_err(|e| {
+                // A schema that fails to parse will fail identically on every retry.
+                ReloadError::Permanent(ServiceCreationError(e.to_string().into()))
+            })?,
         );
         // Check the license
         let report = LicenseEnforcementReport::build(&configuration, &schema, &license);
@@ -581,7 +602,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     );
                     return Err(ApolloRouterError::LicenseViolation(
                         report.restricted_features_in_use(),
-                    ));
+                    ))?;
                 } else {
                     tracing::debug!("A valid Apollo license has been detected.");
                     limits
@@ -595,7 +616,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     );
                     return Err(ApolloRouterError::LicenseViolation(
                         report.restricted_features_in_use(),
-                    ));
+                    ))?;
                 } else {
                     tracing::warn!(
                         "License warning period has started. The Router will stop serving requests after the license expires. In order to continue using these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{:?}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
@@ -642,7 +663,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 }
                 return Err(ApolloRouterError::LicenseViolation(
                     report.restricted_features_in_use(),
-                ));
+                ))?;
             }
             _ => {
                 tracing::debug!(
@@ -669,7 +690,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 "The schema contains preview features not enabled in configuration.\n\n{}",
                 feature_gate_violations.iter().join("\n")
             );
-            return Err(ApolloRouterError::FeatureGateViolation);
+            return Err(ApolloRouterError::FeatureGateViolation)?;
         }
 
         let router_service_factory = state_machine
@@ -738,6 +759,44 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             },
             schema,
         ))
+    }
+}
+
+/// A `try_start` failure, classified by whether retrying the same inputs could
+/// succeed. Drives the retry decision in `attempt_reload`.
+enum ReloadError {
+    /// A transient failure (e.g. a resource or network blip during creation) that
+    /// a later retry of the same inputs might resolve.
+    Transient(ApolloRouterError),
+    /// A permanent failure (bad schema/config/license) that will fail identically
+    /// on every retry; the caller should stop retrying these inputs.
+    Permanent(ApolloRouterError),
+}
+
+impl ReloadError {
+    fn is_transient(&self) -> bool {
+        matches!(self, ReloadError::Transient(_))
+    }
+}
+
+impl From<ApolloRouterError> for ReloadError {
+    fn from(err: ApolloRouterError) -> Self {
+        match err {
+            ApolloRouterError::FeatureGateViolation | ApolloRouterError::LicenseViolation(_) => {
+                ReloadError::Permanent(err)
+            }
+            // Default to treating failures as transient (this also covers any newly
+            // added error variants) so we retry rather than give up prematurely.
+            err => ReloadError::Transient(err),
+        }
+    }
+}
+
+impl From<ReloadError> for ApolloRouterError {
+    fn from(err: ReloadError) -> Self {
+        match err {
+            ReloadError::Transient(err) | ReloadError::Permanent(err) => err,
+        }
     }
 }
 
@@ -817,7 +876,7 @@ where
 
     pub(crate) async fn process_events(
         mut self,
-        mut messages: impl Stream<Item = Event> + Unpin,
+        messages: impl Stream<Item = Event> + Unpin,
     ) -> Result<(), ApolloRouterError> {
         tracing::debug!("starting");
         // The listen address guard is transferred to the startup state. It will get consumed when moving to running.
@@ -830,6 +889,15 @@ where
                 .take()
                 .expect("must have listen address guard"),
         };
+
+        // `peek` lets us inspect the next already-queued event without consuming
+        // it, so a run of input events can be coalesced without buffering them —
+        // only the single peeked event is ever held.
+        let mut messages = messages.peekable();
+
+        // How many reloads we've coalesced (skipped) in a row. Capped at
+        // MAX_COALESCED_RELOADS so a relentless burst can't defer a build forever.
+        let mut consecutive_coalesced: usize = 0;
 
         // Process events and retry-timer ticks until we reach a terminal state or
         // run out of events.
@@ -847,6 +915,31 @@ where
 
                 event = messages.next() => {
                     let Some(event) = event else { break };
+
+                    // Consider whether to skip this event in favor of the next one. If
+                    // another event of the *same kind* is already queued right behind it,
+                    // skip building this one — the next event will supersede it.
+                    //
+                    // We only coalesce same-kind updates so that, say, a failing license
+                    // or config publish queued alongside a schema publish can't prevent
+                    // the schema from being applied (they build separately).
+                    if can_be_superseded(&event) && consecutive_coalesced < MAX_COALESCED_RELOADS {
+                        let next_event = Pin::new(&mut messages).peek().now_or_never();
+                        if let Some(Some(next_event)) = next_event
+                            && std::mem::discriminant(&event) == std::mem::discriminant(next_event)
+                        {
+                            // A queued update supersedes this target; skip building it.
+                            consecutive_coalesced += 1;
+                            u64_counter_with_unit!(
+                                "apollo.router.state.reload.coalesced",
+                                "Number of intermediate reload targets skipped by coalescing queued updates",
+                                "{update}",
+                                1u64
+                            );
+                            continue;
+                        }
+                    }
+
                     let event_name = event.to_string();
                     let previous_state = format!("{state:?}");
 
@@ -867,12 +960,15 @@ where
                         NoMoreLicense => state.no_more_license().await,
                         Shutdown => state.shutdown().await,
                     };
+
                     state = state.attempt_reload(&mut self).await;
+                    consecutive_coalesced = 0;
                     (event_name, previous_state)
                 }
                 _ = retry_future => {
                     let previous_state = format!("{state:?}");
                     state = state.attempt_reload(&mut self).await;
+                    consecutive_coalesced = 0;
                     (String::from("retry"), previous_state)
                 }
             };
@@ -911,6 +1007,17 @@ where
             }
         }
     }
+}
+
+/// Whether this event's reload target can be superseded by a later update of the
+/// same kind — i.e. a schema, configuration, or license publish. Forced reloads
+/// (`Reload` / `RhaiReload`) and control events (`Shutdown` / `NoMore*`) are never
+/// coalesced away.
+fn can_be_superseded(event: &Event) -> bool {
+    matches!(
+        event,
+        UpdateConfiguration(_) | UpdateSchema(_) | UpdateLicense(_)
+    )
 }
 
 /// Computes the retry delay: base delay plus up to 25% random positive jitter.
@@ -2159,6 +2266,200 @@ mod tests {
         assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
 
+    // The transient/permanent classification decides whether attempt_reload keeps
+    // retrying the same inputs (transient) or gives up on them (permanent).
+    #[test]
+    fn reload_error_classification() {
+        // Bad config/license/schema won't build on retry → permanent.
+        assert!(!ReloadError::from(ApolloRouterError::FeatureGateViolation).is_transient());
+        assert!(!ReloadError::from(ApolloRouterError::LicenseViolation(vec![])).is_transient());
+        // Anything else (e.g. a service-creation blip) defaults to transient → retried.
+        assert!(
+            ReloadError::from(ApolloRouterError::ServiceCreationError(BoxError::from(
+                "boom"
+            )))
+            .is_transient()
+        );
+    }
+
+    // A schema that fails to parse must not take down the running router: it stays
+    // on the previously committed schema and shuts down cleanly. The unparseable
+    // schema fails before create(), so only the startup build happens.
+    #[test(tokio::test)]
+    async fn reload_with_unparseable_schema_keeps_running() {
+        let router_factory = create_mock_router_configurator(1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
+                    UpdateSchema(example_schema()),
+                    UpdateLicense(Default::default()),
+                    UpdateSchema(SchemaState {
+                        sdl: "this is not valid graphql".to_owned(),
+                        launch_id: None,
+                    }),
+                    Shutdown,
+                ])
+            )
+            .await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 1);
+    }
+
+    // A queued burst of same-kind updates collapses into a single build of the
+    // newest; the superseded intermediates are skipped and counted by the metric.
+    // Startup's config/schema/license are different kinds and so don't coalesce;
+    // the schema burst that follows does.
+    #[test(tokio::test)]
+    async fn coalesces_queued_burst_into_single_reload() {
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
+        let router_factory = create_mock_router_configurator(2);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+        async move {
+            assert_matches!(
+                execute_burst(
+                    server_factory,
+                    router_factory,
+                    stream::iter(vec![
+                        UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
+                        UpdateSchema(example_schema()),
+                        UpdateLicense(Default::default()),
+                        // A queued burst of schema updates — same kind, so coalesced.
+                        UpdateSchema(SchemaState {
+                            sdl: minimal_schema.to_owned(),
+                            launch_id: None,
+                        }),
+                        UpdateSchema(example_schema()),
+                        UpdateSchema(SchemaState {
+                            sdl: minimal_schema.to_owned(),
+                            launch_id: None,
+                        }),
+                        Shutdown,
+                    ])
+                )
+                .await,
+                Ok(())
+            );
+            // Startup builds once; the schema burst collapses to one more build for
+            // the newest, skipping the two intermediate schemas.
+            assert_eq!(shutdown_receivers.0.lock().len(), 2);
+            assert_counter!("apollo.router.state.reload.coalesced", 2);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    // Coalescing must apply the NEWEST value, not an intermediate. Two same-kind
+    // configs are queued back-to-back; only the newest (homepage enabled) is built.
+    #[test(tokio::test)]
+    async fn coalesced_burst_applies_newest_input() {
+        let mut router_factory = MockMyRouterConfigurator::new();
+        router_factory
+            .expect_create()
+            .times(1)
+            .withf(|_, configuration, _, _, _, _| configuration.homepage.enabled)
+            .returning(|_, _, _, _, _, _| {
+                let mut router = MockMyRouterFactory::new();
+                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_web_endpoints().returning(MultiMap::new);
+                Ok(router)
+            });
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+        assert_matches!(
+            execute_burst(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateSchema(example_schema()),
+                    UpdateLicense(Default::default()),
+                    // Two configs queued back-to-back (same kind → coalesced); only
+                    // the newest (homepage enabled) may reach create().
+                    UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
+                    UpdateConfiguration(Arc::new(
+                        Configuration::builder()
+                            .homepage(Homepage::builder().enabled(true).build())
+                            .build()
+                            .unwrap()
+                    )),
+                    Shutdown,
+                ])
+            )
+            .await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 1);
+    }
+
+    // Different-kind updates queued together are NOT coalesced: a schema and a
+    // config build separately, so an unrelated (possibly failing) config or license
+    // can't block a schema publish queued alongside it. Here the schema and the
+    // config each build, on top of startup, for three builds total.
+    #[test(tokio::test)]
+    async fn mixed_kind_updates_are_not_coalesced() {
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
+        let router_factory = create_mock_router_configurator(3);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(3);
+        assert_matches!(
+            execute_burst(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
+                    UpdateSchema(example_schema()),
+                    UpdateLicense(Default::default()),
+                    // A schema then a config, queued together but different kinds:
+                    // each is built separately rather than merged into one reload.
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None,
+                    }),
+                    UpdateConfiguration(Arc::new(
+                        Configuration::builder()
+                            .homepage(Homepage::builder().enabled(true).build())
+                            .build()
+                            .unwrap()
+                    )),
+                    Shutdown,
+                ])
+            )
+            .await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 3);
+    }
+
+    // Coalescing is capped: a burst larger than MAX_COALESCED_RELOADS forces an
+    // intermediate build so a relentless stream can't defer the reload forever.
+    // Without the cap this whole burst would collapse into a single build; the cap
+    // makes it two (one forced mid-burst, one for the final update).
+    #[test(tokio::test)]
+    async fn coalescing_is_capped() {
+        let mut events = vec![
+            UpdateSchema(example_schema()),
+            UpdateLicense(Default::default()),
+        ];
+        // Configuration has no equality check, so each fresh config is a distinct
+        // reload target. Queue more than the cap so it trips exactly once.
+        for _ in 0..(MAX_COALESCED_RELOADS + 5) {
+            events.push(UpdateConfiguration(Arc::new(
+                Configuration::builder().build().unwrap(),
+            )));
+        }
+        events.push(Shutdown);
+
+        let router_factory = create_mock_router_configurator(2);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+        assert_matches!(
+            execute_burst(server_factory, router_factory, stream::iter(events)).await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
+    }
+
     #[test(tokio::test)]
     async fn state_change_metrics() {
         let router_factory = create_mock_router_configurator(2);
@@ -2336,6 +2637,25 @@ mod tests {
         let is_telemetry_disabled = false;
         let state_machine =
             StateMachine::new(is_telemetry_disabled, server_factory, router_factory);
+        // Space the events apart so the coalescing drain in `process_events` sees an
+        // empty queue between them — mirroring production, where schema/config/
+        // license updates arrive spread out rather than all at once. Tests that
+        // specifically exercise coalescing feed a genuine burst via `execute_burst`.
+        let events = Box::pin(events.then(|event| async move {
+            tokio::task::yield_now().await;
+            event
+        }));
+        state_machine.process_events(events).await
+    }
+
+    /// Like `execute`, but feeds every event at once so `process_events` sees them
+    /// all already queued and coalesces the burst. Used to test coalescing.
+    async fn execute_burst(
+        server_factory: MockMyHttpServerFactory,
+        router_factory: MockMyRouterConfigurator,
+        events: impl Stream<Item = Event> + Unpin,
+    ) -> Result<(), ApolloRouterError> {
+        let state_machine = StateMachine::new(false, server_factory, router_factory);
         state_machine.process_events(events).await
     }
 
