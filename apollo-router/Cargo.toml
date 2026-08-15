@@ -13,6 +13,13 @@ edition = "2024"
 build = "build/main.rs"
 default-run = "router"
 
+# Every file in tests/*.rs would otherwise become its own test binary that
+# statically links the full ~720MB apollo-router rlib (a helper like
+# tests/common.rs gets a 220MB binary containing zero tests). Integration
+# tests must be declared explicitly as [[test]] targets below, or included as
+# modules of an existing binary via #[path].
+autotests = false
+
 [[bin]]
 name = "router"
 path = "src/main.rs"
@@ -60,7 +67,13 @@ addr2line = "0.27.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
 apollo-errors = "0.7.1"
-apollo-federation = { path = "../apollo-federation", version = "=2.17.0" }
+# The `correctness` feature is not used by the router; it is enabled so that
+# this build of apollo-federation is identical to the one apollo-federation's
+# own tests need (its dev-dependency on itself enables `correctness`), letting
+# workspace-wide test builds compile the ~160k-line crate once instead of twice.
+apollo-federation = { path = "../apollo-federation", version = "=2.17.0", features = [
+    "correctness",
+] }
 apollo-qos = "0.5.0"
 async-compression = { version = "0.4.6", features = [
     "tokio",
@@ -405,6 +418,22 @@ path = "tests/compute_backpressure.rs"
 name = "telemetry_resources"
 path = "tests/telemetry_resource_tests.rs"
 harness = false
+
+# The three Apollo OTel binaries below stay separate because they install
+# process-global tracer/meter providers and are serialized end-to-end by the
+# `serial-apollo-telemetry-integration` nextest test-group, which matches on
+# these binary ids (.config/nextest.toml).
+[[test]]
+name = "apollo_reports"
+path = "tests/apollo_reports.rs"
+
+[[test]]
+name = "apollo_otel_traces"
+path = "tests/apollo_otel_traces.rs"
+
+[[test]]
+name = "apollo_otel_http_proxy"
+path = "tests/apollo_otel_http_proxy.rs"
 
 [[bin]]
 name = "snapshot"

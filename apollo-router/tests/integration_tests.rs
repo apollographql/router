@@ -38,6 +38,13 @@ use walkdir::DirEntry;
 use walkdir::WalkDir;
 
 mod integration;
+// Small test suites folded into this binary rather than compiled as their own
+// [[test]] targets — each separate integration binary links the full ~720MB
+// apollo-router rlib.
+#[path = "set_context.rs"]
+mod set_context;
+#[path = "type_conditions.rs"]
+mod type_conditions;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn api_schema_hides_field() {

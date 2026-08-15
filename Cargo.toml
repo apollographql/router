@@ -30,6 +30,21 @@ members = [
     "xtask",
 ]
 
+# Line tables are enough for backtraces with file:line info; full DWARF for a
+# workspace this size costs gigabytes of target dir and most of every link.
+# For interactive debugging, build with `--profile dev-debug` instead.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev-debug]
+inherits = "dev"
+debug = true
+
+# Dependencies rarely need debugging at all; skipping their debuginfo makes
+# the target dir several times smaller and links much faster.
+[profile.dev.package."*"]
+debug = false
+
 # this makes build scripts and proc macros faster to compile
 [profile.dev.build-override]
 # If you un-comment the next line with 1.60.0, compile fails on circle-ci linux
