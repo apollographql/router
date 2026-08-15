@@ -76,12 +76,11 @@ base64 = "0.23.0"
 bloomfilter = "3.0.0"
 buildstructor = "0.6.0"
 bytes = "1.6.0"
-clap = { version = "4.5.8", default-features = false, features = [
-    "env",
-    "derive",
-    "std",
-    "help",
-] }
+# Default features are on (the router itself only needs env/derive/std/help):
+# the dev-only libtest-mimic dependency enables clap's defaults, and declaring
+# a smaller set here would give clap — and everything above it — two compiled
+# variants. See the feature pre-unification note below.
+clap = { version = "4.5.8", features = ["env", "derive"] }
 cookie = { version = "0.18.0", default-features = false }
 crossbeam-channel = "0.5.15"
 ci_info = { version = "0.14.14", features = ["serde-1"] }
@@ -299,6 +298,28 @@ scopeguard = "1.2.0"
 tokio-tar = { package = "astral-tokio-tar", version = "0.6.2" }
 blake3 = { version = "1.8.2", features = ["serde"] }
 
+# --- Feature pre-unification -------------------------------------------------
+# These transitive dependencies are not used directly. Dev-only dependencies
+# (ecdsa/p256, used by tests to mint license JWTs) enable extra features on
+# them. Without pre-unifying those features here, the feature set of these
+# crates differs between `cargo build` and `cargo test` builds, which gives
+# every crate above them in the graph — including apollo-router itself, a
+# ~720MB rlib — two compiled variants that cannot share artifacts.
+subtle = { version = "2.6.1", default-features = false, features = [
+    "const-generics",
+    "i128",
+] }
+ctutils = { version = "0.4.2", default-features = false, features = ["subtle"] }
+crypto-common = { version = "0.2.1", default-features = false, features = [
+    "getrandom",
+    "rand_core",
+] }
+hybrid-array = { version = "0.4.13", default-features = false, features = [
+    "alloc",
+    "subtle",
+    "zeroize",
+] }
+
 [target.'cfg(unix)'.dependencies]
 uname = "0.1.1"
 hyperlocal = { version = "0.9.1", default-features = false, features = [
@@ -358,6 +379,11 @@ serde_json.workspace = true
 [package.metadata.cargo-machete]
 ignored = [
     "socket2", # Only used to enable a transitive feature pending https://github.com/aembke/fred.rs/pull/369
+    # Feature pre-unification only, see the note in [dependencies]:
+    "subtle",
+    "ctutils",
+    "crypto-common",
+    "hybrid-array",
 ]
 
 [[test]]
