@@ -213,7 +213,6 @@ where
                 Err(CacheResolverError::Backpressure(_)) => {
                     record_warmup_backpressure(source, WarmUpPhase::Plan);
                 }
-                Err(_) => {}
             }
 
             result

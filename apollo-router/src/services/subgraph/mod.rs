@@ -2,7 +2,7 @@
 //!
 //! This module is organized as:
 //! - `types`: the `Request`/`Response` types that flow through the subgraph service pipeline.
-//! - `service`: the [`tower::Service`] implementation, batching, and the service factory.
+//! - `service`: the [`tower::Service`] implementation and the service factory.
 //! - `http`: low-level HTTP client utilities (TLS config, response parsing) used by `service`.
 
 pub(crate) mod http;

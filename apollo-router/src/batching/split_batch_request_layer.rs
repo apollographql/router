@@ -16,7 +16,6 @@ use tower::Service;
 use tower::ServiceExt as _;
 use tracing::Instrument as _;
 
-// FIXME(@goto-bus-stop): Ideally the batching layer shouldn't have to care about this
 use crate::Context;
 use crate::batching::Batch;
 use crate::batching::BatchQuery;
@@ -24,6 +23,7 @@ use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::graphql;
 use crate::services::router;
+// FIXME(@goto-bus-stop): Ideally the batching layer shouldn't have to care about this
 use crate::services::router::ClientRequestAccepts;
 use crate::services::router::Request as RouterRequest;
 use crate::services::router::Response as RouterResponse;
@@ -40,21 +40,24 @@ struct TranslateError {
 /// When the batching layer receives a batch query (a POST request with a JSON array in the body),
 /// it splits the requests into multiple requests that flow separately through the rest of the
 /// pipeline, and reassembles the responses into a single JSON array response.
-pub(super) struct BatchingLayer {
+///
+/// # Telemetry
+/// Emits the `apollo.router.operations.batching.size` metric for batch requests.
+pub(crate) struct SplitBatchRequestLayer {
     config: Batching,
 }
 
-impl BatchingLayer {
-    pub(super) fn new(config: Batching) -> Self {
+impl SplitBatchRequestLayer {
+    pub(crate) fn new(config: Batching) -> Self {
         Self { config }
     }
 }
 
-impl<S> tower::Layer<S> for BatchingLayer {
-    type Service = BatchingService<S>;
+impl<S> tower::Layer<S> for SplitBatchRequestLayer {
+    type Service = SplitBatchRequestService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        BatchingService {
+        SplitBatchRequestService {
             inner,
             config: self.config.clone(),
         }
@@ -62,11 +65,11 @@ impl<S> tower::Layer<S> for BatchingLayer {
 }
 
 #[derive(Clone)]
-pub(super) struct BatchingService<S> {
+pub(crate) struct SplitBatchRequestService<S> {
     inner: S,
     config: Batching,
 }
-impl<S> Service<RouterRequest> for BatchingService<S>
+impl<S> Service<RouterRequest> for SplitBatchRequestService<S>
 where
     S: Service<RouterRequest, Response = RouterResponse, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -226,7 +229,7 @@ where
     }
 }
 
-impl<S> BatchingService<S>
+impl<S> SplitBatchRequestService<S>
 where
     S: Service<RouterRequest, Response = RouterResponse, Error = BoxError> + Clone,
 {
@@ -234,11 +237,7 @@ where
         &self,
         bytes: &Bytes,
     ) -> Result<Option<Vec<graphql::Request>>, TranslateError> {
-        // REVIEW NOTE(@goto-bus-stop): Previously, batching first attempted to parse a single
-        // response, and only attempted to parse a batch if that failed. With batching as a
-        // separate layer, we can't do that anymore (as parsing is the responsibility of a
-        // downstream service), so to avoid re-parsing in the unbatched case we need an up front
-        // check for if it's likely to be a batch.
+        // Check if the body is probably a JSON array...
         let first_non_ws_character = bytes.iter().find(|byte| !byte.is_ascii_whitespace());
         if first_non_ws_character != Some(&b'[') {
             // Not a batch request
@@ -417,5 +416,393 @@ where
         //
         // Not ideal, but an improvement on the situation in Router 1.x.
         self.inner.oneshot(request).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use http::Method;
+    use http::StatusCode;
+    use tower::Service as _;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt as _;
+
+    use super::SplitBatchRequestLayer;
+    use crate::configuration::Batching;
+    use crate::configuration::BatchingMode;
+    use crate::graphql;
+    use crate::metrics::FutureMetricsExt as _;
+    use crate::services::router;
+    use crate::services::router::Request as RouterRequest;
+    use crate::services::router::Response as RouterResponse;
+
+    async fn assert_error_code(response: RouterResponse, code: &str) {
+        let bytes = router::body::into_bytes(response.response.into_body())
+            .await
+            .unwrap();
+        let graphql_response: graphql::Response = serde_json::from_slice(&bytes).unwrap();
+        assert!(
+            graphql_response.contains_error_code(code),
+            "expected error code {code}, got {graphql_response:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn it_passes_through_non_batch_requests() {
+        let (mock, mut handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
+        let driver = tokio::task::spawn(async move {
+            let (_request, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                RouterResponse::fake_builder()
+                    .data(serde_json_bytes::json!({"single": true}))
+                    .build()
+                    .unwrap(),
+            );
+        });
+
+        let mut service = ServiceBuilder::new()
+            .layer(SplitBatchRequestLayer::new(Batching::default()))
+            .service(mock);
+
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                router::Request::fake_builder()
+                    .method(Method::POST)
+                    .body(router::body::from_bytes(r#"{"query":"{ single }"}"#))
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.response.status(), StatusCode::OK);
+
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test]
+    async fn it_rejects_batches_when_batching_is_disabled() {
+        let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
+
+        let mut service = ServiceBuilder::new()
+            .layer(SplitBatchRequestLayer::new(Batching::default()))
+            .service(mock);
+
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                router::Request::fake_builder()
+                    .method(Method::POST)
+                    .body(router::body::from_bytes(
+                        r#"[{"query":"{ a }"},{"query":"{ b }"}]"#,
+                    ))
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.response.status(), StatusCode::BAD_REQUEST);
+        assert_error_code(response, "BATCHING_NOT_ENABLED").await;
+
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
+    #[tokio::test]
+    async fn it_rejects_non_json_body() {
+        let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
+
+        let config = Batching {
+            enabled: true,
+            mode: BatchingMode::BatchHttpLink,
+            ..Default::default()
+        };
+        let mut service = ServiceBuilder::new()
+            .layer(SplitBatchRequestLayer::new(config))
+            .service(mock);
+
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                router::Request::fake_builder()
+                    .method(Method::POST)
+                    .body(router::body::from_bytes(r#"[{"query": not valid json"#))
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.response.status(), StatusCode::BAD_REQUEST);
+        assert_error_code(response, "INVALID_GRAPHQL_REQUEST").await;
+
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
+    #[tokio::test]
+    async fn it_rejects_empty_batch_arrays() {
+        let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
+
+        let config = Batching {
+            enabled: true,
+            mode: BatchingMode::BatchHttpLink,
+            ..Default::default()
+        };
+        let mut service = ServiceBuilder::new()
+            .layer(SplitBatchRequestLayer::new(config))
+            .service(mock);
+
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                router::Request::fake_builder()
+                    .method(Method::POST)
+                    .body(router::body::from_bytes("[]"))
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.response.status(), StatusCode::BAD_REQUEST);
+        assert_error_code(response, "INVALID_GRAPHQL_REQUEST").await;
+
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
+    /// If a batch contains any non-GraphQL-shaped request, the whole request is rejected
+    #[tokio::test]
+    async fn it_rejects_batch_with_non_graphql_request() {
+        let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
+
+        let config = Batching {
+            enabled: true,
+            mode: BatchingMode::BatchHttpLink,
+            ..Default::default()
+        };
+        let mut service = ServiceBuilder::new()
+            .layer(SplitBatchRequestLayer::new(config))
+            .service(mock);
+
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                router::Request::fake_builder()
+                    .method(Method::POST)
+                    .body(router::body::from_bytes(
+                        r#"[{"query":"{ a }"},{"query":1234}]"#,
+                    ))
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.response.status(), StatusCode::BAD_REQUEST);
+        assert_error_code(response, "INVALID_GRAPHQL_REQUEST").await;
+
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
+    #[tokio::test]
+    async fn it_checks_maximum_size() {
+        let config = Batching {
+            enabled: true,
+            mode: BatchingMode::BatchHttpLink,
+            maximum_size: Some(2),
+            ..Default::default()
+        };
+
+        // 2 requests should be fine
+        {
+            let (mock, mut handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
+            let driver = tokio::task::spawn(async move {
+                let responses = vec![
+                    serde_json_bytes::json!({"a": true}),
+                    serde_json_bytes::json!({"b": true}),
+                ];
+                for data in responses {
+                    let (_request, responder) = handle.next_request().await.unwrap();
+                    responder
+                        .send_response(RouterResponse::fake_builder().data(data).build().unwrap());
+                }
+            });
+            let mut service = ServiceBuilder::new()
+                .layer(SplitBatchRequestLayer::new(config.clone()))
+                .service(mock);
+
+            let response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(
+                    router::Request::fake_builder()
+                        .method(Method::POST)
+                        .body(router::body::from_bytes(
+                            r#"[{"query":"{ a }"},{"query":"{ b }"}]"#,
+                        ))
+                        .build()
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.response.status(), StatusCode::OK);
+            crate::plugin::test::await_mock_driver(driver).await;
+        }
+
+        // 3 requests should not be fine
+        {
+            let (mock, handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
+            let mut service = ServiceBuilder::new()
+                .layer(SplitBatchRequestLayer::new(config))
+                .service(mock);
+
+            let response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(
+                    router::Request::fake_builder()
+                        .method(Method::POST)
+                        .body(router::body::from_bytes(
+                            r#"[{"query":"{ a }"},{"query":"{ b }"},{"query":"{ c }"}]"#,
+                        ))
+                        .build()
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            assert_error_code(response, "BATCH_LIMIT_EXCEEDED").await;
+
+            crate::plugin::test::assert_no_mock_calls(handle).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn it_reports_batching_size_metric() {
+        async {
+            let (mock, mut handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
+            let driver = tokio::task::spawn(async move {
+                let responses = vec![
+                    serde_json_bytes::json!({"a": true}),
+                    serde_json_bytes::json!({"b": true}),
+                    serde_json_bytes::json!({"c": true}),
+                ];
+                for data in responses {
+                    let (_request, responder) = handle.next_request().await.unwrap();
+                    responder
+                        .send_response(RouterResponse::fake_builder().data(data).build().unwrap());
+                }
+            });
+
+            let config = Batching {
+                enabled: true,
+                mode: BatchingMode::BatchHttpLink,
+                ..Default::default()
+            };
+            let mut service = ServiceBuilder::new()
+                .layer(SplitBatchRequestLayer::new(config))
+                .service(mock);
+
+            let response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(
+                    router::Request::fake_builder()
+                        .method(Method::POST)
+                        .body(router::body::from_bytes(
+                            r#"[{"query":"{ a }"},{"query":"{ b }"},{"query":"{ c }"}]"#,
+                        ))
+                        .build()
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.response.status(), StatusCode::OK);
+            crate::plugin::test::await_mock_driver(driver).await;
+
+            assert_histogram_sum!(
+                "apollo.router.operations.batching.size",
+                3,
+                "mode" = "batch_http_link"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn it_preserves_response_order() {
+        let (mock, mut handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
+        let driver = tokio::task::spawn(async move {
+            // Waiting for all requests to come in, then responding slowly in reverse order
+            let mut pending = Vec::new();
+            for _ in 0..3 {
+                pending.push(handle.next_request().await.unwrap());
+            }
+            let responses = vec![
+                serde_json_bytes::json!({"a": true}),
+                serde_json_bytes::json!({"b": true}),
+                serde_json_bytes::json!({"c": true}),
+            ];
+            for ((_request, responder), data) in pending.into_iter().zip(responses).rev() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                responder.send_response(RouterResponse::fake_builder().data(data).build().unwrap());
+            }
+        });
+
+        let config = Batching {
+            enabled: true,
+            mode: BatchingMode::BatchHttpLink,
+            ..Default::default()
+        };
+        let mut service = ServiceBuilder::new()
+            .layer(SplitBatchRequestLayer::new(config))
+            .service(mock);
+
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                router::Request::fake_builder()
+                    .method(Method::POST)
+                    .body(router::body::from_bytes(
+                        r#"[{"query":"{ a }"},{"query":"{ b }"},{"query":"{ c }"}]"#,
+                    ))
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.response.status(), StatusCode::OK);
+        crate::plugin::test::await_mock_driver(driver).await;
+
+        let bytes = router::body::into_bytes(response.response.into_body())
+            .await
+            .unwrap();
+        let results: Vec<graphql::Response> = serde_json::from_slice(&bytes).unwrap();
+        let queries = results
+            .into_iter()
+            .map(|r| r.data.unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            queries,
+            vec![
+                serde_json_bytes::json!({"a": true}),
+                serde_json_bytes::json!({"b": true}),
+                serde_json_bytes::json!({"c": true}),
+            ]
+        );
     }
 }
