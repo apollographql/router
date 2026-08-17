@@ -664,6 +664,56 @@ mod whole_query_rejection {
         status
     }
 
+    /// Fully filtering the executed operation while a sibling operation shares the
+    /// document reports `Filtered`, not `Emptied`: the emptiness check is document-wide.
+    /// Planning then fails to find the executed operation, so the client is told the
+    /// operation is unknown rather than refused.
+    ///
+    /// This pins the mismatch the `FIXME`s in `filter_query` point at. Resolving them
+    /// changes this response deliberately; the single-operation refusal contract is
+    /// pinned by the rest of this module.
+    #[tokio::test]
+    async fn fully_filtered_operation_beside_surviving_sibling_reports_unknown_operation() {
+        let (service, handles) = build_rejecting_router(serde_json::json!({
+            "enabled": true
+        }))
+        .await;
+
+        let req = graphql::Request {
+            query: Some(
+                "query A { orga(id: 1) { id } } query B { currentUser { name } }".to_string(),
+            ),
+            operation_name: Some("A".to_string()),
+            ..Default::default()
+        };
+        let response = service
+            .oneshot(router::Request {
+                context: Context::new(),
+                router_request: http::Request::builder()
+                    .method("POST")
+                    .header(CONTENT_TYPE, "application/json")
+                    .header(ACCEPT, "application/json")
+                    .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+                    .unwrap(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(response.response.status(), http::StatusCode::BAD_REQUEST);
+        let bytes = body::into_bytes(response.response.into_body())
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body.pointer("/errors/0/extensions/code"),
+            Some(&serde_json::json!("GRAPHQL_UNKNOWN_OPERATION_NAME")),
+            "body: {body}"
+        );
+        assert_eq!(body.get("data"), None);
+
+        assert_no_subgraph_calls(handles).await;
+    }
+
     #[tokio::test]
     async fn does_not_reach_execution() {
         let (service, handles) = build_router_rejecting_whole_query().await;

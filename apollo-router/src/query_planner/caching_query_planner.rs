@@ -1967,7 +1967,7 @@ mod tests {
         // The plan `QueryPlannerService::get` returns for a refused operation: no root
         // node, and the query marked as emptied.
         let mut refused_query = Query::empty_for_tests();
-        refused_query.unauthorized.operation_emptied = true;
+        refused_query.unauthorized.document_emptied = true;
         let refusal_plan = QueryPlan {
             usage_reporting: Arc::new(UsageReporting::Operation(Default::default())),
             root: None,

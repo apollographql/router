@@ -262,7 +262,7 @@ impl QueryPlannerService {
             unauthorized: UnauthorizedPaths {
                 paths: vec![],
                 errors: self.authorization_config.error_config(),
-                operation_emptied: false,
+                document_emptied: false,
             },
             subselections,
             defer_stats,
@@ -464,7 +464,7 @@ impl QueryPlannerService {
             FilterResult::Unchanged => {}
             FilterResult::Emptied { paths } => {
                 selections.unauthorized.paths = paths;
-                selections.unauthorized.operation_emptied = true;
+                selections.unauthorized.document_emptied = true;
 
                 // References come from the operation that ran, and nothing did.
                 let usage_reporting = generate_usage_reporting(
@@ -1132,8 +1132,8 @@ mod tests {
              cached under default metadata is reachable by any unauthenticated request"
         );
         assert!(
-            plan.query.unauthorized.operation_emptied,
-            "the plan must mark the operation as emptied, or the execution layer \
+            plan.query.unauthorized.document_emptied,
+            "the plan must mark the document as emptied, or the execution layer \
              would run the two-pass formatting instead of refusing"
         );
         assert_eq!(

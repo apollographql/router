@@ -135,13 +135,17 @@ pub(crate) enum ErrorLocation {
 pub(crate) struct UnauthorizedPaths {
     pub(crate) paths: Vec<Path>,
     pub(crate) errors: ErrorConfig,
-    /// Whether filtering removed every selection, leaving the operation with nothing to
-    /// execute.
+    /// Whether filtering removed every definition from the document.
     ///
-    /// A plan with no root node does not imply this on its own: an operation whose
-    /// surviving selections are all statically `@skip`ped also plans to no work.
+    /// The plan's shape does not imply this on its own. A plan with no root node also
+    /// describes a partially filtered operation whose surviving selections are all
+    /// statically `@skip`ped, and adding `filtered_query.is_none()` still matches a
+    /// `dry_run` over an all-skipped operation, which modifies nothing.
+    ///
+    /// Document, not operation: when another operation shares the document, fully
+    /// filtering the executed one leaves the document non-empty and this stays false.
     #[serde(default)]
-    pub(crate) operation_emptied: bool,
+    pub(crate) document_emptied: bool,
 }
 
 /// What [`AuthorizationPlugin::filter_query`] did to an operation.
@@ -153,7 +157,9 @@ pub(crate) enum FilterResult {
         paths: Vec<Path>,
         document: ast::Document,
     },
-    /// Filtering removed every selection, so nothing is left to plan.
+    /// Filtering removed every definition from the document, so nothing is left to
+    /// plan. A fully filtered operation in a document that other operations keep
+    /// non-empty is reported as `Filtered`.
     Emptied { paths: Vec<Path> },
 }
 
@@ -623,7 +629,7 @@ impl Plugin for AuthorizationPlugin {
             .checkpoint_async(move |request: execution::Request| async move {
                 let unauthorized = request.query_plan.query.unauthorized.clone();
 
-                if unauthorized.operation_emptied
+                if unauthorized.document_emptied
                     || (reject_unauthorized && !unauthorized.paths.is_empty())
                 {
                     unauthorized.log_unauthorized_paths();
