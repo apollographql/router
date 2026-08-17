@@ -35,7 +35,6 @@ use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::query_planner::QueryPlannerService;
 use crate::services::HasSchema;
-use crate::services::http::TraceContextPreservation; // BEGIN/END ROUTER-2060
 use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::Plugins;
 use crate::services::SubgraphService;
@@ -43,6 +42,7 @@ use crate::services::SupergraphCreator;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
+use crate::services::http::TraceContextPreservation; // BEGIN/END ROUTER-2060
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
@@ -457,7 +457,12 @@ pub(crate) async fn create_http_services(
     let subgraph_trace_context_preservation = TraceContextPreservation {
         enabled: telemetry_config
             .as_ref()
-            .map(|c| c.exporters.tracing.propagation.preserve_subgraph_trace_context)
+            .map(|c| {
+                c.exporters
+                    .tracing
+                    .propagation
+                    .preserve_subgraph_trace_context
+            })
             .unwrap_or(false),
         custom_header_name: telemetry_config
             .as_ref()
