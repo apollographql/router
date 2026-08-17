@@ -816,6 +816,47 @@ mod tests {
         }
     }
 
+    struct LicenseLayerManifest {
+        oci_manifest: OciManifest,
+        manifest_digest: String,
+        blob_digest: String,
+        license_data: Vec<u8>,
+    }
+
+    fn create_manifest_from_license_layer(
+        license_data: &[u8],
+        annotations: Option<BTreeMap<String, String>>,
+    ) -> LicenseLayerManifest {
+        let license_layer = ImageLayer {
+            data: license_data.to_vec(),
+            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let blob_digest = license_layer.sha256_digest();
+        let oci_manifest = OciManifest::Image(OciImageManifest {
+            schema_version: 2,
+            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+            config: Default::default(),
+            layers: vec![OciDescriptor {
+                media_type: license_layer.media_type.clone(),
+                digest: blob_digest.clone(),
+                size: license_layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+            }],
+            subject: None,
+            artifact_type: None,
+            annotations,
+        });
+        let manifest_digest = calculate_manifest_digest(&oci_manifest);
+        LicenseLayerManifest {
+            oci_manifest,
+            manifest_digest,
+            blob_digest,
+            license_data: license_layer.data,
+        }
+    }
+
     struct SequentialManifestDigests {
         digests: Mutex<VecDeque<String>>,
     }
@@ -2016,6 +2057,358 @@ mod tests {
         }
 
         // Verify that at least 10 seconds elapsed (the retry_after_secs from Retry-After header)
+        assert!(
+            elapsed >= Duration::from_secs(10),
+            "Should have slept for at least 10 seconds due to backoff, but elapsed time was {:?}",
+            elapsed
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_license_from_oci_success() {
+        let mock_server = &MockServer::start().await;
+        let license_layer = ImageLayer {
+            data: TEST_LICENSE_JWT.as_bytes().to_vec(),
+            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![license_layer], None).await;
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let results = stream_license_from_oci(oci_config)
+            .take(1)
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(results.len(), 1);
+        let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
+        match &results[0] {
+            Ok(license) => assert_eq!(license.claims, expected.claims),
+            Err(e) => panic!("expected success, got error: {e}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_license_from_oci_digest_unchanged_no_fetch() {
+        let mock_server = &MockServer::start().await;
+        let graph_id = "test-graph-id";
+        let reference = "latest";
+        let manifest_info = create_manifest_from_license_layer(TEST_LICENSE_JWT.as_bytes(), None);
+        let blob_url = Url::parse(&format!(
+            "{}/v2/{graph_id}/blobs/{}",
+            mock_server.uri(),
+            manifest_info.blob_digest
+        ))
+        .expect("url must be valid");
+
+        // Count blob requests: should only fire on the first poll.
+        let blob_request_count = Arc::new(AtomicUsize::new(0));
+        let blob_count = blob_request_count.clone();
+        let license_data = manifest_info.license_data;
+        Mock::given(method("GET"))
+            .and(path(blob_url.path()))
+            .respond_with(move |_request: &Request| {
+                blob_count.fetch_add(1, Ordering::Relaxed);
+                ResponseTemplate::new(200)
+                    .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                    .set_body_bytes(license_data.clone())
+            })
+            .mount(mock_server)
+            .await;
+
+        let manifest_url = Url::parse(&format!(
+            "{}/v2/{}/manifests/{}",
+            mock_server.uri(),
+            graph_id,
+            reference
+        ))
+        .expect("url must be valid");
+
+        // HEAD always returns the same digest.
+        let _ = Mock::given(method("HEAD"))
+            .and(path(manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
+            )
+            .mount(mock_server)
+            .await;
+
+        let _ = Mock::given(method("GET"))
+            .and(path(manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                    .set_body_bytes(serde_json::to_vec(&manifest_info.oci_manifest).unwrap()),
+            )
+            .mount(mock_server)
+            .await;
+
+        let image_reference = format!("{}/{graph_id}:{reference}", mock_server.address())
+            .parse::<Reference>()
+            .expect("url must be valid");
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let mut stream = stream_license_from_oci(oci_config);
+
+        // First poll: new digest, license should be fetched.
+        let first_result = stream.next().await;
+        assert!(first_result.is_some());
+        let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
+        match first_result.unwrap() {
+            Ok(license) => assert_eq!(license.claims, expected.claims),
+            Err(e) => panic!("expected success, got error: {e}"),
+        }
+        assert_eq!(
+            blob_request_count.load(Ordering::Relaxed),
+            1,
+            "Blob should be fetched once on first poll"
+        );
+
+        // Second poll: digest unchanged, blob should not be fetched again.
+        // Wait past one poll interval, then look for a stream item — a timeout
+        // means the stream correctly produced nothing.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let timeout_result = timeout(Duration::from_millis(100), stream.next()).await;
+        assert!(
+            timeout_result.is_err(),
+            "Expected no new result when digest is unchanged"
+        );
+        assert_eq!(
+            blob_request_count.load(Ordering::Relaxed),
+            1,
+            "Blob should not be fetched again when digest is unchanged"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_license_from_oci_digest_changed_fetches() {
+        let mock_server = &MockServer::start().await;
+        let graph_id = "test-graph-id";
+        let reference = "latest";
+
+        // Same license blob, two manifests with different annotations. That
+        // yields different manifest digests but the same blob digest, so the
+        // stream sees a "changed" manifest and re-fetches the (identical) blob.
+        // Using two distinct valid JWTs is impossible here — the JWKS bundled
+        // via `include_str!` only signs one test token.
+        let mut ann1 = BTreeMap::new();
+        ann1.insert("v".to_string(), "1".to_string());
+        let mut ann2 = BTreeMap::new();
+        ann2.insert("v".to_string(), "2".to_string());
+
+        let manifest_info1 =
+            create_manifest_from_license_layer(TEST_LICENSE_JWT.as_bytes(), Some(ann1));
+        let manifest_info2 =
+            create_manifest_from_license_layer(TEST_LICENSE_JWT.as_bytes(), Some(ann2));
+
+        assert_eq!(manifest_info1.blob_digest, manifest_info2.blob_digest);
+        assert_ne!(
+            manifest_info1.manifest_digest,
+            manifest_info2.manifest_digest
+        );
+
+        let blob_url = Url::parse(&format!(
+            "{}/v2/{graph_id}/blobs/{}",
+            mock_server.uri(),
+            manifest_info1.blob_digest
+        ))
+        .expect("url must be valid");
+
+        let blob_request_count = Arc::new(AtomicUsize::new(0));
+        let blob_count = blob_request_count.clone();
+        let license_data = manifest_info1.license_data.clone();
+        Mock::given(method("GET"))
+            .and(path(blob_url.path()))
+            .respond_with(move |_request: &Request| {
+                blob_count.fetch_add(1, Ordering::Relaxed);
+                ResponseTemplate::new(200)
+                    .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                    .set_body_bytes(license_data.clone())
+            })
+            .mount(mock_server)
+            .await;
+
+        let manifest_url = Url::parse(&format!(
+            "{}/v2/{}/manifests/{}",
+            mock_server.uri(),
+            graph_id,
+            reference
+        ))
+        .expect("url must be valid");
+
+        let _ = Mock::given(method("HEAD"))
+            .and(path(manifest_url.path()))
+            .respond_with(SequentialManifestDigests {
+                digests: Mutex::new(VecDeque::from([
+                    manifest_info1.manifest_digest.clone(),
+                    manifest_info2.manifest_digest.clone(),
+                ])),
+            })
+            .expect(2..=3)
+            .mount(mock_server)
+            .await;
+
+        let _ = Mock::given(method("GET"))
+            .and(path(manifest_url.path()))
+            .respond_with(SequentialManifests {
+                manifests: Mutex::new(VecDeque::from([
+                    (
+                        manifest_info1.manifest_digest.clone(),
+                        serde_json::to_vec(&manifest_info1.oci_manifest).unwrap(),
+                    ),
+                    (
+                        manifest_info2.manifest_digest.clone(),
+                        serde_json::to_vec(&manifest_info2.oci_manifest).unwrap(),
+                    ),
+                ])),
+            })
+            .expect(2..=3)
+            .mount(mock_server)
+            .await;
+
+        let image_reference = format!("{}/{graph_id}:{reference}", mock_server.address())
+            .parse::<Reference>()
+            .expect("url must be valid");
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let mut stream = stream_license_from_oci(oci_config);
+        let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
+
+        // First poll: manifest digest 1 is new → fetch.
+        let first_result = stream.next().await;
+        assert!(first_result.is_some());
+        match first_result.unwrap() {
+            Ok(license) => assert_eq!(license.claims, expected.claims),
+            Err(e) => panic!("expected success, got error: {e}"),
+        }
+
+        // Second poll: manifest digest 2 differs → refetch.
+        let second_result = stream.next().await;
+        assert!(second_result.is_some());
+        match second_result.unwrap() {
+            Ok(license) => assert_eq!(license.claims, expected.claims),
+            Err(e) => panic!("expected success, got error: {e}"),
+        }
+        assert_eq!(
+            blob_request_count.load(Ordering::Relaxed),
+            2,
+            "Blob should be fetched twice when manifest digest changes"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_license_from_oci_backoff_error_retry() {
+        let mock_server = &MockServer::start().await;
+        let graph_id = "test-graph-id";
+        let reference = "latest";
+
+        let manifest_info = create_manifest_from_license_layer(TEST_LICENSE_JWT.as_bytes(), None);
+        let blob_url = Url::parse(&format!(
+            "{}/v2/{graph_id}/blobs/{}",
+            mock_server.uri(),
+            manifest_info.blob_digest
+        ))
+        .expect("url must be valid");
+
+        Mock::given(method("GET"))
+            .and(path(blob_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                    .set_body_bytes(manifest_info.license_data.clone()),
+            )
+            .mount(mock_server)
+            .await;
+
+        let manifest_url = Url::parse(&format!(
+            "{}/v2/{}/manifests/{}",
+            mock_server.uri(),
+            graph_id,
+            reference
+        ))
+        .expect("url must be valid");
+
+        let oci_error_body = serde_json::json!({
+            "errors": [{
+                "code": "TOOMANYREQUESTS",
+                "message": "pull request limit exceeded",
+                "detail": { "retryAfter": 10 }
+            }]
+        });
+
+        let _ = Mock::given(method("HEAD"))
+            .and(path(manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
+            )
+            .expect(2)
+            .mount(mock_server)
+            .await;
+
+        // First GET: 429 with Retry-After. Second GET: 200 with the manifest.
+        let _ = Mock::given(method("GET"))
+            .and(path(manifest_url.path()))
+            .respond_with(SequentialBackoffResponse {
+                responses: Mutex::new(VecDeque::from([
+                    ResponseTemplate::new(429)
+                        .append_header("Retry-After", "10")
+                        .append_header(http::header::CONTENT_TYPE, "application/json")
+                        .set_body_json(&oci_error_body),
+                    ResponseTemplate::new(200)
+                        .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
+                        .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                        .set_body_bytes(serde_json::to_vec(&manifest_info.oci_manifest).unwrap()),
+                ])),
+            })
+            .mount(mock_server)
+            .await;
+
+        let image_reference = format!("{}/{graph_id}:{reference}", mock_server.address())
+            .parse::<Reference>()
+            .expect("url must be valid");
+        let oci_config = OciConfig {
+            apollo_key: "test-api-key".to_string(),
+            reference: image_reference.to_string(),
+            hot_reload: true,
+            poll_interval: Duration::from_millis(10),
+            use_ssl: false,
+        };
+
+        let start_time = tokio::time::Instant::now();
+        let mut stream = stream_license_from_oci(oci_config);
+
+        // First stream item should be the 429 error.
+        let result = timeout(Duration::from_secs(20), stream.next()).await;
+        assert!(
+            result.is_ok(),
+            "Stream should produce an error within timeout"
+        );
+        let first_result = result.unwrap();
+        assert!(
+            first_result.is_some() && first_result.as_ref().unwrap().is_err(),
+            "First result should be an error"
+        );
+
+        // Second item should be the successfully-parsed license after backoff.
+        let result = timeout(Duration::from_secs(20), stream.next()).await;
+        assert!(
+            result.is_ok(),
+            "Stream should produce a result after backoff within timeout"
+        );
+        let elapsed = start_time.elapsed();
+        let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
+
+        match result.unwrap() {
+            Some(Ok(license)) => assert_eq!(license.claims, expected.claims),
+            Some(Err(e)) => panic!("expected success after backoff retry, got error: {e}"),
+            None => panic!("expected stream to yield a result"),
+        }
+
         assert!(
             elapsed >= Duration::from_secs(10),
             "Should have slept for at least 10 seconds due to backoff, but elapsed time was {:?}",
