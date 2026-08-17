@@ -1866,45 +1866,28 @@ mod tests {
         (driver, calls)
     }
 
-    async fn caching_planner_for_test(
-        mock: tower_test::mock::Mock<QueryPlannerRequest, QueryPlannerResponse>,
-        schema: &Arc<Schema>,
-        configuration: &Configuration,
-    ) -> impl Service<query_planner::CachingRequest, Error = CacheResolverError> {
-        CachingQueryPlanner::for_test(
-            mock.map_err(|err| panic!("tower-test errored: {err}")),
-            schema.clone(),
-            Default::default(),
-            configuration,
-        )
-        .await
-        .unwrap()
-    }
-
-    /// A configuration and schema pair for which `AuthorizationPlugin::enable_directives` is
-    /// true. Without that, `plan` never calls `update_cache_key` and every request is keyed
-    /// under `CacheKeyMetadata::default()`, so no segmentation can be observed.
+    /// A configuration and schema pair that enables auth directives to work.
     fn authorization_enabled_config_and_schema() -> (Configuration, Arc<Schema>) {
         let configuration: Configuration = serde_json::from_value(serde_json::json!({
             "authorization": { "directives": { "enabled": true } }
         }))
         .unwrap();
-        // Links `requiresScopes`; a schema with no authorization spec keeps
-        // `enable_directives` false whatever the configuration says.
         let schema = include_str!("../../tests/fixtures/supergraph-auth.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
         (configuration, schema)
     }
 
-    /// Builds a request the way the router does: authorization state travels in the context
-    /// as JWT claims, and `plan` derives `CacheKeyMetadata` from them via
-    /// `AuthorizationPlugin::update_cache_key`. Inserting `CacheKeyMetadata` into the
-    /// context directly would not survive — `update_cache_key` overwrites it.
-    fn caching_request(
+    /// Builds a request the way the router does: authorization state travels in the
+    /// context as JWT claims, and `plan` derives `CacheKeyMetadata` from them via
+    /// `AuthorizationPlugin::update_cache_key`, overwriting any metadata inserted into
+    /// the context directly.
+    fn authorization_caching_request(
         query: &str,
-        doc: &ParsedDocument,
+        schema: &Schema,
+        configuration: &Configuration,
         authenticated: bool,
     ) -> query_planner::CachingRequest {
+        let doc = Query::parse_document(query, None, schema, configuration).unwrap();
         let context = Context::new();
         if authenticated {
             context
@@ -1912,7 +1895,7 @@ mod tests {
                 .unwrap();
         }
         context.extensions().with_lock(|lock| {
-            lock.insert::<ParsedDocument>(doc.clone());
+            lock.insert::<ParsedDocument>(doc);
         });
         query_planner::CachingRequest::new(query.to_string(), None, context)
     }
@@ -1935,10 +1918,16 @@ mod tests {
         );
 
         let (configuration, schema) = authorization_enabled_config_and_schema();
-        let mut service = caching_planner_for_test(mock, &schema, &configuration).await;
+        let mut service = CachingQueryPlanner::for_test(
+            mock.map_err(|err| panic!("tower-test errored: {err}")),
+            schema.clone(),
+            Default::default(),
+            &configuration,
+        )
+        .await
+        .unwrap();
 
         let query = "query ExampleQuery { me { name } }";
-        let doc = Query::parse_document(query, None, &schema, &configuration).unwrap();
 
         for authenticated in [
             false, true, // Repeats the first key, which must now hit the cache.
@@ -1948,7 +1937,12 @@ mod tests {
                 .ready()
                 .await
                 .unwrap()
-                .call(caching_request(query, &doc, authenticated))
+                .call(authorization_caching_request(
+                    query,
+                    &schema,
+                    &configuration,
+                    authenticated,
+                ))
                 .await
                 .unwrap();
         }
@@ -1989,17 +1983,28 @@ mod tests {
         );
 
         let (configuration, schema) = authorization_enabled_config_and_schema();
-        let mut service = caching_planner_for_test(mock, &schema, &configuration).await;
+        let mut service = CachingQueryPlanner::for_test(
+            mock.map_err(|err| panic!("tower-test errored: {err}")),
+            schema.clone(),
+            Default::default(),
+            &configuration,
+        )
+        .await
+        .unwrap();
 
         let query = "query ExampleQuery { me { name } }";
-        let doc = Query::parse_document(query, None, &schema, &configuration).unwrap();
 
         for _ in 0..2 {
             service
                 .ready()
                 .await
                 .unwrap()
-                .call(caching_request(query, &doc, false))
+                .call(authorization_caching_request(
+                    query,
+                    &schema,
+                    &configuration,
+                    false,
+                ))
                 .await
                 .unwrap();
         }
@@ -2014,7 +2019,12 @@ mod tests {
             .ready()
             .await
             .unwrap()
-            .call(caching_request(query, &doc, true))
+            .call(authorization_caching_request(
+                query,
+                &schema,
+                &configuration,
+                true,
+            ))
             .await
             .unwrap();
 

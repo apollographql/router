@@ -656,10 +656,9 @@ mod whole_query_rejection {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(
-            body.errors.first().map(|e| e.message.as_str()),
-            Some("Unauthorized field or type"),
-            "the operation was not rejected on authorization grounds"
+        assert!(
+            body.contains_error_code("UNAUTHORIZED_FIELD_OR_TYPE"),
+            "the operation was not rejected on authorization grounds: {body:?}"
         );
 
         status
@@ -674,14 +673,12 @@ mod whole_query_rejection {
         assert_no_subgraph_calls(handles).await;
     }
 
-    /// The status comes from the short-circuit in the query planner, not from response
-    /// formatting: `filter_query` returns `Err(Unauthorized)`, `QueryPlannerService::get`
-    /// builds a `graphql::Response` with `data: null` directly, and
-    /// `SupergraphResponse::new_from_graphql_response` wraps it with `http::Response::new`,
-    /// which is 200 regardless of errors or data shape. Execution and value completion never
-    /// run — see `does_not_reach_execution`. 200 with errors is the right answer for a
-    /// rejection with field-error semantics, so this pins that the short-circuit does not
-    /// pick up an error status along the way.
+    /// We historically treat authorization errors as field errors, even when the whole
+    /// operation is refused: null data, auth errors, and status code 200. The GraphQL
+    /// spec arguably calls for a request error here, with a 4xx status and `data` left
+    /// out entirely; `rejection_sends_null_data` pins the null-versus-absent side of
+    /// that on the wire. Until spec compliance changes deliberately, these pin what the
+    /// router sends.
     #[tokio::test]
     async fn returns_http_200() {
         let (service, _handles) = build_router_rejecting_whole_query().await;
