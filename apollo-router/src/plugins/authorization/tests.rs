@@ -765,6 +765,68 @@ mod whole_query_rejection {
     }
 }
 
+/// A partial filter can leave an operation with nothing to execute. Filtering removes
+/// `phone`, emptying `currentUser`, and `@skip(if: true)` removes the only other root
+/// field, so the plan comes back with no root node while the operation was filtered rather
+/// than refused.
+///
+/// The plan shape here matches what a refused operation produces, so anything deciding
+/// refusal from the absence of a root node together with the presence of unauthorized
+/// paths answers this operation as though the router had refused it.
+#[tokio::test]
+async fn partial_filter_leaving_no_executable_work() {
+    let handles: Arc<Mutex<Vec<tower_test::mock::Handle<subgraph::Request, subgraph::Response>>>> =
+        Arc::new(Mutex::new(Vec::new()));
+    let handles_clone = handles.clone();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "authorization": { "directives": { "enabled": true } }
+        }))
+        .unwrap()
+        .schema(AUTHENTICATED_SCHEMA)
+        .subgraph_hook(move |_name, _service| {
+            let (mock, handle) = tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+            handles_clone.lock().unwrap().push(handle);
+            mock.boxed_clone()
+        })
+        .build_router()
+        .await
+        .unwrap();
+
+    let req = graphql::Request {
+        query: Some(
+            "query { currentUser { phone } orga(id: 1) @skip(if: true) { name } }".to_string(),
+        ),
+        ..Default::default()
+    };
+    let response = service
+        .oneshot(router::Request {
+            context: Context::new(),
+            router_request: http::Request::builder()
+                .method("POST")
+                .header(CONTENT_TYPE, "application/json")
+                .header(ACCEPT, "application/json")
+                .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+                .unwrap(),
+        })
+        .await
+        .unwrap();
+    let bytes = body::into_bytes(response.response.into_body())
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+    // No subgraph answered, so the plan carried no executable work.
+    let handles: Vec<_> = handles.lock().unwrap().drain(..).collect();
+    assert!(!handles.is_empty(), "no subgraph services were created");
+    for handle in handles {
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
+    insta::assert_json_snapshot!(body);
+}
+
 #[tokio::test]
 async fn authenticated_directive_dry_run() {
     let _guard = tracing_test::dispatcher_guard();
