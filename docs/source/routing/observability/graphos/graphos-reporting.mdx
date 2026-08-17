@@ -426,13 +426,13 @@ telemetry:
             send: false
 ```
 
-#### Enabling extended error reporting
+#### Extended error reporting
 
 <div className="flex flex-row items-start gap-2 mt-2">
   <MinVersionBadge version="Router v2.1.2" />
 </div>
 
-Enable richer error reporting via `extended_error_metrics` and `redaction_policy` router configurations. Extended error metrics are enabled by default; set `extended_error_metrics: disabled` to opt out.
+By default, the router reports richer error information to Studio via the `extended_error_metrics` and `redaction_policy` configurations. To opt out, set `extended_error_metrics: disabled`.
 
 ```yaml title="router.yaml"
 telemetry:
