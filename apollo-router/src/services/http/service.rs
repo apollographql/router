@@ -9,6 +9,7 @@ use std::task::Poll;
 use ::serde::Deserialize;
 use bytes::Buf;
 use futures::future::BoxFuture;
+use http::HeaderName; // BEGIN/END ROUTER-2060
 use http::HeaderValue;
 use http::Request;
 use http::header::ACCEPT_ENCODING;
@@ -204,6 +205,18 @@ impl Display for Compression {
     }
 }
 
+// BEGIN ROUTER-2060
+/// Whether an already-present trace-context header on an outgoing subgraph request should be
+/// preserved instead of being overwritten by the router's own span context, and which header
+/// name carries the trace ID when a custom one is configured
+/// (`telemetry.exporters.tracing.propagation.request.header_name`).
+#[derive(Clone, Default)]
+pub(crate) struct TraceContextPreservation {
+    pub(crate) enabled: bool,
+    pub(crate) custom_header_name: Option<HeaderName>,
+}
+// END ROUTER-2060
+
 /// A set of clients (http, unix) for talking with external services like coprocessors, subgraphs,
 /// connectors-connected subgraphs, and so on, implemented as a tower service
 #[derive(Clone)]
@@ -215,6 +228,7 @@ pub(crate) struct HttpClientService {
     #[cfg(unix)]
     unix_client: UnixHTTPClient,
     service: Arc<str>,
+    trace_context_preservation: TraceContextPreservation, // BEGIN/END ROUTER-2060
 }
 
 impl HttpClientService {
@@ -231,7 +245,14 @@ impl HttpClientService {
         let service_target = ServiceTarget::Subgraph {
             name: Arc::from(service.into().as_str()),
         };
-        Self::new(service_target, tls_config, client_config)
+        // BEGIN ROUTER-2060
+        Self::new(
+            service_target,
+            tls_config,
+            client_config,
+            TraceContextPreservation::default(),
+        )
+        // END ROUTER-2060
     }
 
     /// Create a new HttpClientService using:
@@ -246,6 +267,7 @@ impl HttpClientService {
         service_target: ServiceTarget,
         tls_config: ClientConfig,
         client_config: crate::configuration::shared::Client,
+        trace_context_preservation: TraceContextPreservation, // BEGIN/END ROUTER-2060
     ) -> Result<Self, BoxError> {
         let service_name: Arc<str> = match &service_target {
             ServiceTarget::Coprocessor => Arc::from("coprocessor"),
@@ -330,6 +352,7 @@ impl HttpClientService {
             #[cfg(unix)]
             unix_client,
             service: service_name,
+            trace_context_preservation, // BEGIN/END ROUTER-2060
         })
     }
 
@@ -339,6 +362,7 @@ impl HttpClientService {
         configuration: &Configuration,
         tls_root_store: &RootCertStore,
         client_config: crate::configuration::shared::Client,
+        trace_context_preservation: TraceContextPreservation, // BEGIN/END ROUTER-2060
     ) -> Result<Self, BoxError> {
         let name: String = service.into();
         let default_client_cert_config = configuration
@@ -372,7 +396,14 @@ impl HttpClientService {
             name: Arc::from(name.as_str()),
         };
 
-        Self::new(service_target, tls_client_config, client_config)
+        // BEGIN ROUTER-2060
+        Self::new(
+            service_target,
+            tls_client_config,
+            client_config,
+            trace_context_preservation,
+        )
+        // END ROUTER-2060
     }
 
     /// Creates a client for talking to connectors-connected subgraphs
@@ -414,7 +445,14 @@ impl HttpClientService {
             name: Arc::from(name.as_str()),
         };
 
-        Self::new(service_target, tls_client_config, client_config)
+        // BEGIN ROUTER-2060: out of scope, this feature only applies to subgraph calls
+        Self::new(
+            service_target,
+            tls_client_config,
+            client_config,
+            TraceContextPreservation::default(),
+        )
+        // END ROUTER-2060
     }
 
     /// Creates a client for talking to coprocessors
@@ -427,7 +465,14 @@ impl HttpClientService {
         // Coprocessors don't use client certificates, so use no client auth
         let tls_client_config = generate_tls_client_config(tls_root_store.clone(), None)?;
 
-        Self::new(ServiceTarget::Coprocessor, tls_client_config, client_config)
+        // BEGIN ROUTER-2060: out of scope, this feature only applies to subgraph calls
+        Self::new(
+            ServiceTarget::Coprocessor,
+            tls_client_config,
+            client_config,
+            TraceContextPreservation::default(),
+        )
+        // END ROUTER-2060
     }
 
     /// Creates a root certificate store with native certificates. These are used for root-of-trust
@@ -477,7 +522,14 @@ impl HttpClientService {
         let service_target = ServiceTarget::Subgraph {
             name: Arc::from("test"),
         };
-        HttpClientService::new(service_target, tls_client_config, client_config)
+        // BEGIN ROUTER-2060
+        HttpClientService::new(
+            service_target,
+            tls_client_config,
+            client_config,
+            TraceContextPreservation::default(),
+        )
+        // END ROUTER-2060
     }
 }
 
@@ -529,12 +581,59 @@ impl tower::Service<HttpRequest> for HttpClientService {
         let service_name = self.service.clone();
         let http_req_span = Span::current();
 
+        // BEGIN ROUTER-2060
+        //
+        // If the router is configured to preserve an already-present trace-context header on
+        // this subgraph request, snapshot it before letting the propagator injection below run
+        // exactly as it always has. Afterward, restore the snapshotted value over whatever the
+        // injection just wrote. This never skips or conditions the injection call itself, so
+        // every other propagator (baggage, jaeger, zipkin, datadog, x-ray) behaves identically
+        // to today, regardless of this feature.
+        //
+        // Only one trace-ID-carrying header is preserved per call: if a custom trace ID header
+        // is configured and present and non-empty, it takes priority (mirroring the same
+        // precedence used when extracting trace context from inbound requests); otherwise we
+        // fall back to `traceparent`. `tracestate` has no custom-header equivalent, so it is
+        // always preserved independently when present.
+        let saved_trace_header = self
+            .trace_context_preservation
+            .enabled
+            .then(|| {
+                if let Some(custom_header) = &self.trace_context_preservation.custom_header_name
+                    && let Some(value) = http_request.headers().get(custom_header)
+                    && !value.is_empty()
+                {
+                    return Some((custom_header.clone(), value.clone()));
+                }
+                http_request
+                    .headers()
+                    .get("traceparent")
+                    .map(|v| (HeaderName::from_static("traceparent"), v.clone()))
+            })
+            .flatten();
+
+        let saved_tracestate = self
+            .trace_context_preservation
+            .enabled
+            .then(|| http_request.headers().get("tracestate").cloned())
+            .flatten();
+        // END ROUTER-2060
+
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
                 &prepare_context(http_req_span.context()),
                 &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
             );
         });
+
+        // BEGIN ROUTER-2060
+        if let Some((name, value)) = saved_trace_header {
+            http_request.headers_mut().insert(name, value);
+        }
+        if let Some(value) = saved_tracestate {
+            http_request.headers_mut().insert("tracestate", value);
+        }
+        // END ROUTER-2060
 
         let (parts, body) = http_request.into_parts();
         let content_encoding = parts.headers.get(&CONTENT_ENCODING);
@@ -672,6 +771,7 @@ mod tests {
     use crate::services::http::BoxService;
     use crate::services::http::HttpClientService;
     use crate::services::http::HttpRequest;
+    use crate::services::http::TraceContextPreservation; // BEGIN/END ROUTER-2060
     use crate::services::http::service::WireByteCount;
     use crate::services::router;
 
@@ -777,6 +877,7 @@ mod tests {
                 .expect("Able to load native roots")
                 .with_no_client_auth(),
             crate::configuration::shared::Client::builder().build(),
+            TraceContextPreservation::default(), // BEGIN/END ROUTER-2060
         )
         .expect("can create a HttpClientService");
 
@@ -929,6 +1030,7 @@ mod tests {
                 .expect("Able to load native roots")
                 .with_no_client_auth(),
             crate::configuration::shared::Client::builder().build(),
+            TraceContextPreservation::default(), // BEGIN/END ROUTER-2060
         )
         .expect("can create a HttpClientService");
 
@@ -1022,6 +1124,7 @@ mod tests {
                 .expect("read native TLS root certificates")
                 .with_no_client_auth(),
             crate::configuration::shared::Client::builder().build(),
+            TraceContextPreservation::default(), // BEGIN/END ROUTER-2060
         )
         .expect("can create a HttpClientService");
 

@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -8140,6 +8141,11 @@ expression: "&schema"
         "jaeger": {
           "default": false,
           "description": "Propagate Jaeger",
+          "type": "boolean"
+        },
+        "preserve_subgraph_trace_context": {
+          "default": false,
+          "description": "If a trace-context header (traceparent/tracestate, or the custom trace ID header if\nconfigured) is already present on an outgoing subgraph request, keep it instead of\noverwriting it with the router's own span context.",
           "type": "boolean"
         },
         "request": {

@@ -414,6 +414,12 @@ pub(crate) struct Propagation {
     pub(crate) zipkin: bool,
     /// Propagate AWS X-Ray
     pub(crate) aws_xray: bool,
+    // BEGIN ROUTER-2060
+    /// If a trace-context header (traceparent/tracestate, or the custom trace ID header if
+    /// configured) is already present on an outgoing subgraph request, keep it instead of
+    /// overwriting it with the router's own span context.
+    pub(crate) preserve_subgraph_trace_context: bool,
+    // END ROUTER-2060
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Default, PartialEq)]
