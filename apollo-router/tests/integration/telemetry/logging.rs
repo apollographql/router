@@ -242,13 +242,12 @@ async fn test_text_sampler_off() -> Result<(), BoxError> {
     Ok(())
 }
 
-/// The `Authorization error` event for a refused operation belongs to the
-/// `query_planning` span, where the query planner decides the refusal. The unit tests
-/// around authorization cannot pin the span: it takes the telemetry plugin, which only
-/// joins the pipeline when OpenTelemetry is initialised for the process, so a spawned
-/// router is the smallest thing that has the full span hierarchy.
+/// The `Authorization error` event for a refused operation belongs to the `execution`
+/// span. The unit tests around authorization cannot see this: the `execution` span comes
+/// from the telemetry plugin, which only joins the pipeline when OpenTelemetry is
+/// initialised for the process, so a spawned router is the smallest thing that has it.
 #[tokio::test(flavor = "multi_thread")]
-async fn test_authorization_error_event_in_query_planning_span() -> Result<(), BoxError> {
+async fn test_authorization_error_event_in_execution_span() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(include_str!(
             "fixtures/authorization_error_span.router.yaml"
@@ -296,8 +295,8 @@ async fn test_authorization_error_event_in_query_planning_span() -> Result<(), B
         .filter_map(|span| span.get("name").and_then(|name| name.as_str()))
         .collect();
     assert!(
-        span_names.contains(&"query_planning"),
-        "expected the event inside the query_planning span, got spans: {span_names:?}"
+        span_names.contains(&"execution"),
+        "expected the event inside the execution span, got spans: {span_names:?}"
     );
 
     router.graceful_shutdown().await;

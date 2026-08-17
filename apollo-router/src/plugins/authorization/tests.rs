@@ -43,8 +43,32 @@ fn assert_span_contains_authorization_error_event(span: &str) {
     assert!(contains_err_event_in_span.is_ok());
 }
 
+/// Asserts the `Authorization error` event for a refused operation was logged exactly
+/// once. One place decides a refusal, so a second event means two code paths both
+/// believe they own the log.
+///
+/// The span the event belongs to is asserted by
+/// `integration::telemetry::logging::test_authorization_error_event_in_execution_span`.
+/// This harness runs without the telemetry plugin, so the `execution` span does not
+/// exist here and the event lands directly in the `router` span.
 fn assert_logs_contain_entire_request_authorization_error() {
-    assert_span_contains_authorization_error_event("query_planning");
+    let event_regex =
+        Regex::new(r"ERROR .*Authorization error unauthorized_query_paths=\[.*]$").unwrap();
+
+    let exactly_one = tracing_test::logs_assert(|lines| {
+        match lines
+            .iter()
+            .filter(|line| event_regex.captures(line).is_some())
+            .count()
+        {
+            1 => Ok(()),
+            n => Err(format!(
+                "expected exactly one authorization error event, found {n}:\n{}",
+                lines.join("\n")
+            )),
+        }
+    });
+    assert!(exactly_one.is_ok(), "{exactly_one:?}");
 }
 
 fn assert_logs_contain_partial_authorization_error() {
@@ -667,20 +691,24 @@ mod whole_query_rejection {
         assert_eq!(status, http::StatusCode::OK);
     }
 
-    /// `CachingQueryPlanner` records usage reporting only for the `Plan` variant.
-    /// Telemetry still meters the rejection as one licensed operation but sends no
-    /// signature, referenced fields, or per-type stats, so Studio cannot attribute it.
+    /// A refused operation reaches `CachingQueryPlanner` as a plan, so its usage
+    /// reporting lands in the context like any other operation's and Studio can
+    /// attribute the refusal to an operation signature.
+    /// `licensed_operation_count_tests` pins what the report bills.
     #[tokio::test]
-    async fn does_not_record_usage_reporting() {
+    async fn records_usage_reporting() {
         let (service, _handles) = build_router_rejecting_whole_query().await;
         let context = Context::new();
 
         send_rejected_request(service, context.clone()).await;
 
+        let usage_reporting = context
+            .extensions()
+            .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
+            .expect("a refused operation records usage reporting");
         assert!(
-            !context
-                .extensions()
-                .with_lock(|lock| lock.contains_key::<Arc<UsageReporting>>())
+            matches!(*usage_reporting, UsageReporting::Operation(_)),
+            "the report must carry operation details, not an error key: {usage_reporting:?}"
         );
     }
 

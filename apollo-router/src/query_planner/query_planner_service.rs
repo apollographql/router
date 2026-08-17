@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 use std::task::Poll;
 use std::time::Instant;
 
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
@@ -15,7 +16,6 @@ use futures::future::BoxFuture;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
-use serde_json_bytes::Value;
 use tower::Service;
 
 use super::PlanNode;
@@ -29,7 +29,6 @@ use crate::error::FederationErrorBridge;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::error::ValidationErrors;
-use crate::graphql;
 use crate::metrics::meter_provider;
 use crate::plugins::authorization;
 use crate::plugins::authorization::AuthorizationPlugin;
@@ -263,6 +262,7 @@ impl QueryPlannerService {
             unauthorized: UnauthorizedPaths {
                 paths: vec![],
                 errors: self.authorization_config.error_config(),
+                operation_emptied: false,
             },
             subselections,
             defer_stats,
@@ -462,20 +462,27 @@ impl QueryPlannerService {
 
         match filter_res {
             FilterResult::Unchanged => {}
-            FilterResult::Refused { paths } => {
-                let mut response = graphql::Response::builder().data(Value::Null).build();
+            FilterResult::Emptied { paths } => {
+                selections.unauthorized.paths = paths;
+                selections.unauthorized.operation_emptied = true;
 
-                if !paths.is_empty() {
-                    let unauthorized = UnauthorizedPaths {
-                        paths,
-                        errors: self.authorization_config.error_config(),
-                    };
-                    unauthorized.log_unauthorized_paths();
-                    unauthorized.update_response_with_unauthorized_path_errors(&mut response);
-                }
+                // References come from the operation that ran, and nothing did.
+                let usage_reporting = generate_usage_reporting(
+                    &doc.executable,
+                    &ExecutableDocument::new(),
+                    &key.operation_name,
+                    self.schema.supergraph_schema(),
+                    &self.signature_normalization_algorithm,
+                );
 
-                return Ok(QueryPlannerContent::Response {
-                    response: Box::new(response),
+                return Ok(QueryPlannerContent::Plan {
+                    plan: Arc::new(super::QueryPlan {
+                        usage_reporting: Arc::new(usage_reporting),
+                        root: None,
+                        formatted_query_plan: None,
+                        query: Arc::new(selections),
+                        estimated_size: Default::default(),
+                    }),
                 });
             }
             FilterResult::Filtered {
@@ -1132,21 +1139,29 @@ mod tests {
             .await
             .unwrap();
 
-        match content {
-            QueryPlannerContent::Response { response } => {
-                assert_eq!(
-                    response.errors.first().map(|e| e.message.as_str()),
-                    Some("Unauthorized field or type")
-                );
-            }
-            QueryPlannerContent::Plan { .. } => {
-                panic!(
-                    "planner returned a query plan for an unauthenticated request; \
-                     filtering must reject instead, or an unfiltered plan would be handed \
-                     back for caching under default metadata"
-                )
-            }
-        }
+        let QueryPlannerContent::Plan { plan } = content else {
+            panic!(
+                "a refusal must arrive as a plan, so the caching layer records its usage reporting"
+            )
+        };
+        assert!(
+            plan.root.is_none(),
+            "an unauthenticated request must not plan any work; a plan with fetches \
+             cached under default metadata is reachable by any unauthenticated request"
+        );
+        assert!(
+            plan.query.unauthorized.operation_emptied,
+            "the plan must mark the operation as emptied, or the execution layer \
+             would run the two-pass formatting instead of refusing"
+        );
+        assert_eq!(
+            plan.query
+                .unauthorized
+                .paths
+                .first()
+                .map(ToString::to_string),
+            Some("/me".to_string())
+        );
     }
 
     #[tokio::test]
