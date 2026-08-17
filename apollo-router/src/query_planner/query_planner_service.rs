@@ -7,7 +7,6 @@ use std::task::Poll;
 use std::time::Instant;
 
 use apollo_compiler::Name;
-use apollo_compiler::ast;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
@@ -31,11 +30,11 @@ use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::error::ValidationErrors;
 use crate::graphql;
-use crate::json_ext::Path;
 use crate::metrics::meter_provider;
 use crate::plugins::authorization;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::authorization::FilterResult;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
@@ -439,9 +438,6 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
     }
 }
 
-// Appease clippy::type_complexity
-pub(crate) type FilteredQuery = (Vec<Path>, ast::Document);
-
 impl QueryPlannerService {
     async fn get(
         &self,
@@ -459,49 +455,52 @@ impl QueryPlannerService {
 
         // TODO(@goto-bus-stop): this is not a query planning concern
         let filter_res = if self.enable_authorization_directives {
-            match AuthorizationPlugin::filter_query(&self.authorization_config, &key, &self.schema)
-            {
-                Err(QueryPlannerError::Unauthorized(paths)) => {
-                    let mut response = graphql::Response::builder().data(Value::Null).build();
-
-                    if !paths.is_empty() {
-                        let unauthorized = UnauthorizedPaths {
-                            paths,
-                            errors: self.authorization_config.error_config(),
-                        };
-                        unauthorized.log_unauthorized_paths();
-                        unauthorized.update_response_with_unauthorized_path_errors(&mut response);
-                    }
-
-                    return Ok(QueryPlannerContent::Response {
-                        response: Box::new(response),
-                    });
-                }
-                other => other?,
-            }
+            AuthorizationPlugin::filter_query(&self.authorization_config, &key, &self.schema)?
         } else {
-            None
+            FilterResult::Unchanged
         };
 
-        if let Some((unauthorized_paths, new_doc)) = filter_res {
-            let new_query = new_doc.to_string();
-            let new_hash = self
-                .schema
-                .schema_id
-                .operation_hash(&new_query, key.operation_name.as_deref());
+        match filter_res {
+            FilterResult::Unchanged => {}
+            FilterResult::Refused { paths } => {
+                let mut response = graphql::Response::builder().data(Value::Null).build();
 
-            key.filtered_query = new_query;
-            let executable_document = new_doc
-                .to_executable_validate(self.schema.api_schema())
-                .map_err(|e| QueryPlannerError::from(SpecError::ValidationError(e.into())))?;
-            doc = ParsedDocumentInner::new(
-                new_doc,
-                Arc::new(executable_document),
-                key.operation_name.as_deref(),
-                Arc::new(new_hash),
-            )
-            .map_err(QueryPlannerError::from)?;
-            selections.unauthorized.paths = unauthorized_paths;
+                if !paths.is_empty() {
+                    let unauthorized = UnauthorizedPaths {
+                        paths,
+                        errors: self.authorization_config.error_config(),
+                    };
+                    unauthorized.log_unauthorized_paths();
+                    unauthorized.update_response_with_unauthorized_path_errors(&mut response);
+                }
+
+                return Ok(QueryPlannerContent::Response {
+                    response: Box::new(response),
+                });
+            }
+            FilterResult::Filtered {
+                paths,
+                document: new_doc,
+            } => {
+                let new_query = new_doc.to_string();
+                let new_hash = self
+                    .schema
+                    .schema_id
+                    .operation_hash(&new_query, key.operation_name.as_deref());
+
+                key.filtered_query = new_query;
+                let executable_document = new_doc
+                    .to_executable_validate(self.schema.api_schema())
+                    .map_err(|e| QueryPlannerError::from(SpecError::ValidationError(e.into())))?;
+                doc = ParsedDocumentInner::new(
+                    new_doc,
+                    Arc::new(executable_document),
+                    key.operation_name.as_deref(),
+                    Arc::new(new_hash),
+                )
+                .map_err(QueryPlannerError::from)?;
+                selections.unauthorized.paths = paths;
+            }
         }
 
         if key.filtered_query != key.original_query {

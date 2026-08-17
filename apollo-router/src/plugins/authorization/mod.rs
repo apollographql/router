@@ -34,7 +34,6 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
-use crate::query_planner::FilteredQuery;
 use crate::query_planner::QueryKey;
 use crate::services::execution;
 use crate::services::supergraph;
@@ -136,6 +135,20 @@ pub(crate) enum ErrorLocation {
 pub(crate) struct UnauthorizedPaths {
     pub(crate) paths: Vec<Path>,
     pub(crate) errors: ErrorConfig,
+}
+
+/// What [`AuthorizationPlugin::filter_query`] did to an operation.
+pub(crate) enum FilterResult {
+    /// The operation asks for nothing the request lacks authorization for.
+    Unchanged,
+    /// `document` is the operation with `paths` removed.
+    Filtered {
+        paths: Vec<Path>,
+        document: ast::Document,
+    },
+    /// The whole operation is refused: filtering emptied the document, or
+    /// `reject_unauthorized` is set and the operation lost at least one path.
+    Refused { paths: Vec<Path> },
 }
 
 impl UnauthorizedPaths {
@@ -346,7 +359,7 @@ impl AuthorizationPlugin {
         configuration: &Conf,
         key: &QueryKey,
         schema: &Schema,
-    ) -> Result<Option<FilteredQuery>, QueryPlannerError> {
+    ) -> Result<FilterResult, QueryPlannerError> {
         let reject_unauthorized = configuration.directives.reject_unauthorized;
         let dry_run = configuration.directives.dry_run;
 
@@ -375,7 +388,9 @@ impl AuthorizationPlugin {
 
                 // FIXME: consider only `filtered_doc.operations.get(key.operation_name)`?
                 if filtered_doc.definitions.is_empty() {
-                    return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
+                    return Ok(FilterResult::Refused {
+                        paths: unauthorized_paths,
+                    });
                 }
 
                 is_filtered = true;
@@ -393,7 +408,9 @@ impl AuthorizationPlugin {
 
                 // FIXME: consider only `filtered_doc.operations.get(key.operation_name)`?
                 if filtered_doc.definitions.is_empty() {
-                    return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
+                    return Ok(FilterResult::Refused {
+                        paths: unauthorized_paths,
+                    });
                 }
 
                 is_filtered = true;
@@ -411,7 +428,9 @@ impl AuthorizationPlugin {
 
                 // FIXME: consider only `filtered_doc.operations.get(key.operation_name)`?
                 if filtered_doc.definitions.is_empty() {
-                    return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
+                    return Ok(FilterResult::Refused {
+                        paths: unauthorized_paths,
+                    });
                 }
 
                 is_filtered = true;
@@ -421,13 +440,18 @@ impl AuthorizationPlugin {
         };
 
         if reject_unauthorized && !unauthorized_paths.is_empty() {
-            return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
+            return Ok(FilterResult::Refused {
+                paths: unauthorized_paths,
+            });
         }
 
         if is_filtered {
-            Ok(Some((unauthorized_paths, doc)))
+            Ok(FilterResult::Filtered {
+                paths: unauthorized_paths,
+                document: doc,
+            })
         } else {
-            Ok(None)
+            Ok(FilterResult::Unchanged)
         }
     }
 
