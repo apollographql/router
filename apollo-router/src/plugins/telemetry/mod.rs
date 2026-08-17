@@ -3545,3 +3545,103 @@ mod tests {
         .await;
     }
 }
+
+#[cfg(test)]
+mod licensed_operation_count_tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use crate::Context;
+    use crate::apollo_studio_interop::UsageReporting;
+    use crate::apollo_studio_interop::UsageReportingOperationDetails;
+    use crate::metrics::FutureMetricsExt as _;
+    use crate::plugins::telemetry::EnabledFeatures;
+    use crate::plugins::telemetry::Telemetry;
+    use crate::plugins::telemetry::apollo::SingleReport;
+    use crate::plugins::telemetry::apollo_exporter::Sender;
+    use crate::query_planner::OperationKind;
+
+    /// Drives `update_apollo_metrics` over a context and returns the licensed operation
+    /// count Studio would be billed for.
+    async fn licensed_operation_count_for(context: Context) -> u64 {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        Telemetry::update_apollo_metrics(
+            &context,
+            0.0,
+            Sender::Apollo(tx),
+            false,
+            Duration::from_millis(1),
+            OperationKind::Query,
+            None,
+            HashMap::new(),
+            EnabledFeatures {
+                distributed_apq_cache: false,
+                response_cache: false,
+            },
+        );
+
+        let report = rx
+            .recv()
+            .await
+            .expect("update_apollo_metrics must send a stats report");
+        match report {
+            SingleReport::Stats(stats) => stats
+                .licensed_operation_count_by_type
+                .map(|by_type| by_type.licensed_operation_count)
+                .unwrap_or(0),
+            SingleReport::Traces(_) => panic!("expected a stats report"),
+        }
+    }
+
+    /// An operation the query planner rejected on authorization grounds records no
+    /// `UsageReporting`, and is still billed as one licensed operation. Billing does not
+    /// depend on the operation reaching execution.
+    ///
+    /// Anything that changes what a rejected operation puts in the context has to keep this
+    /// at 1. See `usage_reporting_error_is_not_billed` for the way that goes wrong.
+    #[tokio::test]
+    async fn missing_usage_reporting_is_billed_as_one_operation() {
+        async {
+            assert_eq!(licensed_operation_count_for(Context::new()).await, 1);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// `UsageReporting::Error` bills nothing. It is the tempting variant to reach for when
+    /// an operation produced no plan, and choosing it drops that operation off the bill.
+    #[tokio::test]
+    async fn usage_reporting_error_is_not_billed() {
+        async {
+            let context = Context::new();
+            context.extensions().with_lock(|lock| {
+                lock.insert::<Arc<UsageReporting>>(Arc::new(UsageReporting::Error(
+                    "some error key".to_string(),
+                )))
+            });
+
+            assert_eq!(licensed_operation_count_for(context).await, 0);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// An operation that carries real reporting details is billed the same as one carrying
+    /// none, so attributing a rejected operation does not change what it costs.
+    #[tokio::test]
+    async fn operation_details_are_billed_as_one_operation() {
+        async {
+            let context = Context::new();
+            context.extensions().with_lock(|lock| {
+                lock.insert::<Arc<UsageReporting>>(Arc::new(UsageReporting::Operation(
+                    UsageReportingOperationDetails::default(),
+                )))
+            });
+
+            assert_eq!(licensed_operation_count_for(context).await, 1);
+        }
+        .with_metrics()
+        .await;
+    }
+}
