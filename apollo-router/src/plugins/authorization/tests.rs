@@ -453,6 +453,79 @@ async fn authenticated_directive_reject_unauthorized() {
     assert_logs_contain_entire_request_authorization_error();
 }
 
+/// A subgraph can return more than the operation selected, so the data reaching response
+/// formatting is not bounded by what authorization left in the query. `ExecutionService`
+/// handles that by formatting twice: the filtered query projects the data onto the
+/// authorized shape, then the original query expands it to the shape the client asked
+/// for.
+///
+/// `User.phone` is `@authenticated`, so filtering removes it from an unauthenticated
+/// operation while this subgraph returns it anyway. `Some(Value::Null)` pins both halves
+/// of that arrangement in one assertion: `phone` is present, so the original query
+/// restored the requested shape, and it is null rather than `"1234"`, so the filtered
+/// query stripped the value the client may not see.
+///
+/// Removing either property changes this key: drop the filtered pass and it holds
+/// `"1234"`, run the passes in the other order and it disappears from the response.
+#[tokio::test]
+async fn overfetched_unauthorized_field_is_not_returned() {
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "authorization": { "directives": { "enabled": true } }
+        }))
+        .unwrap()
+        .schema(AUTHENTICATED_SCHEMA)
+        .subgraph_hook(|_name, _service| {
+            let (mock, mut handle) =
+                tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+            tokio::spawn(async move {
+                while let Some((req, responder)) = handle.next_request().await {
+                    // `phone` is not in the filtered operation this subgraph was sent.
+                    responder.send_response(
+                        subgraph::Response::fake_builder()
+                            .context(req.context)
+                            .data(serde_json::json! {{
+                                "currentUser": { "name": "Ada", "phone": "1234" }
+                            }})
+                            .build(),
+                    );
+                }
+            });
+            mock.boxed_clone()
+        })
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query("query { currentUser { name phone } }")
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    let current_user = response
+        .data
+        .as_ref()
+        .expect("the operation kept `name`, so it must not reject outright")
+        .get("currentUser")
+        .expect("`currentUser` must survive; only `phone` is @authenticated");
+
+    assert_eq!(
+        current_user.get("phone"),
+        Some(&serde_json_bytes::Value::Null),
+        "the subgraph returned `phone` outside the filtered operation, so it must reach \
+         the client as null rather than as its value"
+    );
+    assert_eq!(current_user.get("name"), Some(&json!("Ada")));
+}
+
 mod whole_query_rejection {
     use super::*;
 
