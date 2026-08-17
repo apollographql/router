@@ -46,8 +46,8 @@ use wiremock::matchers::path_regex;
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::namespace;
 use crate::integration::redis_monitor::Monitor as RedisMonitor;
-use crate::integration::response_cache::namespace;
 
 const REDIS_STANDALONE_PORT: [&str; 1] = ["6379"];
 const REDIS_CLUSTER_PORTS: [&str; 6] = ["7000", "7001", "7002", "7003", "7004", "7005"];
@@ -63,6 +63,7 @@ fn make_redis_url(ports: &[&str]) -> Option<String> {
     Some(url)
 }
 
+#[cfg(feature = "mock_subgraphs_testing")]
 fn subgraphs_with_many_entities(count: usize) -> serde_json::Value {
     let mut reviews = vec![];
     let mut top_products = vec![];
@@ -616,6 +617,7 @@ async fn test_redis_emits_request_size_avg_metric() {
         .await;
 }
 
+#[cfg(feature = "mock_subgraphs_testing")]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_redis_emits_configuration_error_metric() {
     if !graph_os_enabled() {

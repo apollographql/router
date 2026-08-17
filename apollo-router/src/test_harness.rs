@@ -60,6 +60,12 @@ pub(crate) mod http_snapshot;
 /// On the subgraph side, this test harness never makes network requests to subgraphs
 /// unless [`with_subgraph_network_requests`][Self::with_subgraph_network_requests] is called.
 ///
+/// Subgraph mocking is implemented by an internal plugin gated behind the `mock_subgraphs_testing`
+/// Cargo feature (always enabled for `cfg(test)` builds of this crate). Consumers outside this
+/// crate that build in release mode, or without that feature, must either enable it or call
+/// [`with_subgraph_network_requests`][Self::with_subgraph_network_requests] — otherwise building
+/// the harness returns an error rather than silently making real network requests.
+///
 /// Compared to running a full [`RouterHttpServer`][crate::RouterHttpServer],
 /// this test harness is lacking:
 ///
@@ -298,6 +304,10 @@ impl<'a> TestHarness<'a> {
     /// (unless [`schema`][Self::schema] is also not called).
     /// This behavior can be changed by implementing [`Plugin::subgraph_service`]
     /// on a plugin given to [`extra_plugin`][Self::extra_plugin].
+    ///
+    /// Not calling this requires the `mock_subgraphs_testing` Cargo feature (or a `cfg(test)`
+    /// build of this crate) to provide the mocking; without it, building the harness fails with
+    /// an error instead of silently making real network requests.
     pub fn with_subgraph_network_requests(mut self) -> Self {
         self.subgraph_network_requests = true;
         self
@@ -328,6 +338,15 @@ impl<'a> TestHarness<'a> {
                     .entry("experimental_mock_subgraphs")
                     .or_insert(serde_json::json!({}));
             }
+        }
+        #[cfg(not(any(test, feature = "mock_subgraphs_testing")))]
+        if !self.subgraph_network_requests {
+            return Err(
+                "TestHarness subgraph mocking requires the `mock_subgraphs_testing` \
+                 Cargo feature on `apollo-router`; either enable it or call \
+                 `.with_subgraph_network_requests()` to opt into making real network requests"
+                    .into(),
+            );
         }
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = self.schema.unwrap_or(canned_schema);
