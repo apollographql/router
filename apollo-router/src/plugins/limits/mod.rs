@@ -2,6 +2,7 @@ mod layer;
 mod limited;
 pub(crate) mod operation_limits;
 pub(crate) mod operation_limits_layer;
+pub(crate) mod response_size_limit;
 
 use std::error::Error;
 
@@ -27,6 +28,7 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
 use crate::plugins::limits::layer::RequestSizeLimitError;
+use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
 use crate::services::SubgraphRequest;
 use crate::services::connector;
 use crate::services::router;
@@ -197,10 +199,6 @@ pub(crate) struct SubgraphLimits {
     #[schemars(with = "Option<String>", default)]
     pub(crate) http_max_response_size: Option<ByteSize>,
 }
-
-/// Extension type placed on the request context to signal the subgraph response size limit.
-#[derive(Clone, Copy, Debug, Ord, PartialOrd, PartialEq, Eq)]
-pub(crate) struct SubgraphResponseSizeLimit(pub usize);
 
 /// Per-connector-source response size limits.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -415,8 +413,8 @@ mod test {
 
     use crate::Context;
     use crate::plugins::limits::LimitsPlugin;
-    use crate::plugins::limits::SubgraphResponseSizeLimit;
     use crate::plugins::limits::layer::BodyLimitControl;
+    use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::router;
 
@@ -718,7 +716,7 @@ mod test {
         use crate::configuration::subgraph::SubgraphConfiguration;
         use crate::plugins::limits::Config;
         use crate::plugins::limits::SubgraphLimits;
-        use crate::plugins::limits::SubgraphResponseSizeLimit;
+        use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
 
         #[test]
         fn get_response_limit_no_config() {
@@ -915,6 +913,7 @@ mod test {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         };
         let key = ResponseKey::RootField {

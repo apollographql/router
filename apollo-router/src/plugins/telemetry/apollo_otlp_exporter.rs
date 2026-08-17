@@ -284,3 +284,149 @@ impl SpanExporter for ApolloOtlpExporter {
         self.otlp_exporter.shutdown_with_timeout(timeout)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::time::SystemTime;
+
+    use opentelemetry::Key;
+    use opentelemetry::Value;
+    use opentelemetry::trace::SpanId;
+    use opentelemetry::trace::SpanKind;
+    use opentelemetry::trace::Status;
+    use opentelemetry::trace::TraceId;
+    use url::Url;
+
+    use super::ApolloOtlpExporter;
+    use crate::plugins::telemetry::apollo::ErrorsConfiguration;
+    use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
+    use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Error;
+    use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Node;
+    use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
+    use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
+    use crate::plugins::telemetry::otlp::Protocol;
+    use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+    use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_FTV1;
+    use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
+    use crate::plugins::telemetry::tracing::apollo_telemetry::LightSpanData;
+    use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
+    use crate::plugins::telemetry::tracing::apollo_telemetry::encode_ftv1_trace;
+
+    fn test_exporter(errors_configuration: ErrorsConfiguration) -> ApolloOtlpExporter {
+        // The builder performs no network I/O, so a dummy endpoint is fine for exercising
+        // the span-preparation logic (`prepare_for_export` / `prepare_subgraph_span`).
+        ApolloOtlpExporter::new(
+            &Url::parse("https://example.com:4317").unwrap(),
+            &Protocol::Grpc,
+            &BatchProcessorConfig::default(),
+            "test-key",
+            "test-graph@current",
+            "test-schema-id",
+            &errors_configuration,
+        )
+        .expect("could not build test exporter")
+    }
+
+    fn light_span(name: &'static str, attributes: HashMap<Key, Value>) -> LightSpanData {
+        LightSpanData {
+            trace_id: TraceId::from(1u128),
+            span_id: SpanId::from(1u64),
+            parent_span_id: SpanId::INVALID,
+            span_kind: SpanKind::Internal,
+            name: name.into(),
+            start_time: SystemTime::UNIX_EPOCH,
+            end_time: SystemTime::UNIX_EPOCH,
+            attributes,
+            status: Status::Unset,
+            droppped_attribute_count: 0,
+            events: Vec::new(),
+        }
+    }
+
+    fn ftv1_attribute_with_error() -> (Key, Value) {
+        let trace = Trace {
+            root: Some(Node {
+                error: vec![Error {
+                    message: "boom".to_string(),
+                    location: Vec::new(),
+                    time_ns: 5,
+                    json: String::from(r#"{"extensions":{"code":"OOPS"}}"#),
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        (
+            APOLLO_PRIVATE_FTV1,
+            Value::String(encode_ftv1_trace(&trace).into()),
+        )
+    }
+
+    /// A trace is only exported if its supergraph span carries the operation signature.
+    /// This is what excludes introspection queries (see `prepare_for_export`).
+    #[tokio::test]
+    async fn drops_trace_without_operation_signature() {
+        let exporter = test_exporter(ErrorsConfiguration::default());
+        let spans = vec![light_span(SUPERGRAPH_SPAN_NAME, HashMap::new())];
+
+        assert!(
+            exporter.prepare_for_export(spans).is_none(),
+            "trace without an operation signature must be dropped"
+        );
+    }
+
+    #[tokio::test]
+    async fn keeps_trace_with_operation_signature() {
+        let exporter = test_exporter(ErrorsConfiguration::default());
+        let mut attributes = HashMap::new();
+        attributes.insert(
+            APOLLO_PRIVATE_OPERATION_SIGNATURE,
+            Value::String("query { __typename }".into()),
+        );
+        let spans = vec![light_span(SUPERGRAPH_SPAN_NAME, attributes)];
+
+        let prepared = exporter
+            .prepare_for_export(spans)
+            .expect("trace with an operation signature must be kept");
+        assert_eq!(prepared.len(), 1);
+    }
+
+    /// A subgraph span whose ftv1 trace contains errors is marked as errored, and the
+    /// (redacted) trace is re-encoded back into the ftv1 attribute.
+    #[tokio::test]
+    async fn subgraph_span_with_ftv1_errors_sets_error_status_and_reencodes() {
+        let exporter = test_exporter(ErrorsConfiguration::default());
+        let mut attributes = HashMap::new();
+        let (ftv1_key, ftv1_value) = ftv1_attribute_with_error();
+        attributes.insert(ftv1_key, ftv1_value);
+        let span = light_span(SUBGRAPH_SPAN_NAME, attributes);
+
+        let prepared = exporter.prepare_subgraph_span(span);
+
+        assert_eq!(prepared.status, Status::error("ftv1"));
+
+        let reencoded = prepared
+            .attributes
+            .iter()
+            .find(|kv| kv.key == APOLLO_PRIVATE_FTV1)
+            .and_then(|kv| match &kv.value {
+                Value::String(s) => decode_ftv1_trace(s.as_str()),
+                _ => None,
+            })
+            .expect("ftv1 attribute must be present and decodable after re-encode");
+        // Default config redacts errors, so the re-encoded trace proves both that the
+        // decode/re-encode round-trip ran and that redaction was applied.
+        assert_eq!(reencoded.root.unwrap().error[0].message, "<redacted>");
+    }
+
+    #[tokio::test]
+    async fn subgraph_span_without_ftv1_is_unset() {
+        let exporter = test_exporter(ErrorsConfiguration::default());
+        let span = light_span(SUBGRAPH_SPAN_NAME, HashMap::new());
+
+        let prepared = exporter.prepare_subgraph_span(span);
+
+        assert_eq!(prepared.status, Status::Unset);
+    }
+}

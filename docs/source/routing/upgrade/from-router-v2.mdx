@@ -69,6 +69,17 @@ telemetry:
         protocol: http
 ```
 
+### Removed legacy Apollo trace transport and `otlp_tracing_sampler`
+
+In v1.x and v2.x, traces could be sent to GraphOS either via the legacy Apollo Usage Reporting protocol or via OTLP, with the split between the two controlled by `telemetry.apollo.otlp_tracing_sampler`. In v3.x, the legacy trace transport is removed: traces are always reported to GraphOS via OTLP, and the `otlp_tracing_sampler` option no longer exists.
+
+This only affects trace export. Usage report metrics are unchanged and continue to use the Apollo Usage Reporting protocol.
+
+**Upgrade step**:
+
+- Remove `telemetry.apollo.otlp_tracing_sampler` from your router config. The `router config upgrade` command does this for you.
+- To control how many traces are sent to GraphOS, use `telemetry.apollo.sampler` or the common tracing sampler. See [trace reporting via OTLP](/graphos/routing/observability/graphos/graphos-reporting#trace-reporting-via-otlp).
+
 ### Default rustls crypto provider switched from `ring` to `aws-lc-rs`
 
 The router's default process-wide rustls `CryptoProvider` is now `aws-lc-rs` instead of `ring`. This only affects consumers embedding `apollo-router` as a library:

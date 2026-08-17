@@ -189,7 +189,7 @@ expression: "&schema"
         },
         "endpoint": {
           "default": "https://usage-reporting.api.apollographql.com/api/ingress/traces",
-          "description": "The Apollo Studio endpoint for exporting traces and metrics.",
+          "description": "The Apollo Studio endpoint for exporting usage report metrics.",
           "type": "string"
         },
         "errors": {
@@ -267,14 +267,6 @@ expression: "&schema"
           ],
           "default": "grpc",
           "description": "OTLP protocol used for OTel traces.\nNote this only applies if OTel traces are enabled and is only intended for use in tests."
-        },
-        "otlp_tracing_sampler": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/SamplerOption"
-            }
-          ],
-          "description": "Percentage of traces to send via the OTel protocol when sending to Apollo Studio."
         },
         "sampler": {
           "anyOf": [
@@ -6902,7 +6894,7 @@ expression: "&schema"
               "$ref": "#/definitions/OnError"
             }
           ],
-          "description": "Control the behavior when an error occurs during the authentication process.\n\nDefaults to `Error`. When set to `Continue`, requests that fail JWT authentication will\ncontinue to be processed by the router, but without the JWT claims in the context. When set\nto `Error`, requests that fail JWT authentication will be rejected with a HTTP 403 error."
+          "description": "Control the behavior when an error occurs during the authentication process.\n\nDefaults to `Error`.\n\n* When set to `Continue`, requests that fail JWT authentication will continue to be\n  processed by the router, but without the JWT claims in the context.\n* When set to `Error`, requests that fail JWT authentication will be rejected with a\n  HTTP 403 error.\n* When set to `RedactedError`, requests that fail JWT authentication are rejected in the\n  same way as `Error`, but the response contains a generic error message instead of the\n  details of the validation failure. The details remain available in the\n  `apollo::authentication::jwt_status` context value and in the\n  `apollo.router.operations.authentication.jwt` metric."
         },
         "sources": {
           "description": "Alternative sources to extract the JWT",
@@ -7408,14 +7400,19 @@ expression: "&schema"
       "description": "Request limits for a multipart request",
       "properties": {
         "max_file_size": {
-          "description": "The maximum size of each file, in bytes (default: 5MB)",
+          "description": "The maximum size of each file (default: 1MB)",
           "type": "string"
         },
         "max_files": {
-          "description": "The maximum amount of files allowed for a single query (default: 4)",
+          "description": "The maximum amount of files allowed for a single query (default: 5)",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
+        },
+        "max_overhead_size": {
+          "default": "2.0 MB",
+          "description": "The maximum amount of multipart framing — the preamble, part headers, boundary delimiters,\nand transport padding — permitted in a single upload request.\n\nThe parser cannot tell a framing byte from a content byte. The router therefore adds this\nallowance to the content the other limits already permit. It enforces the sum as a limit on\nthe whole request. A request over that sum gets a `413 Payload Too Large`. The sum grows\nwith `max_files` and `max_file_size`.",
+          "type": "string"
         },
         "operation_body_timeout": {
           "default": null,
@@ -7533,7 +7530,8 @@ expression: "&schema"
     "OnError": {
       "enum": [
         "Continue",
-        "Error"
+        "Error",
+        "RedactedError"
       ],
       "type": "string"
     },
