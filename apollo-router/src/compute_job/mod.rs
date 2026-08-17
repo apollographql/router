@@ -124,7 +124,7 @@ impl<E: std::error::Error + 'static> std::error::Error for MaybeBackPressureErro
 
 impl ComputeBackPressureError {
     pub(crate) fn to_graphql_error(&self) -> crate::graphql::Error {
-        crate::graphql::Error::builder()
+        crate::graphql::Error::request_error_builder()
             .message("Your request has been concurrency limited during query processing")
             .extension_code("REQUEST_CONCURRENCY_LIMITED")
             .build()

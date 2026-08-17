@@ -439,13 +439,13 @@ impl Query {
                     // Null value from the subgraph (explicit null for a non-null position) without
                     // coercion error from formatting. Emit errors here.
                     parameters.errors.push(
-                        Error::builder()
+                        Error::execution_error_builder()
                             .message(&message)
                             .path(Path::from_response_slice(path))
                             .build(),
                     );
                     parameters.insert_coercion_error(
-                        Error::builder()
+                        Error::execution_error_builder()
                             .message(message)
                             .path(Path::from_response_slice(path))
                             .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
@@ -473,7 +473,7 @@ impl Query {
                         );
                     if !inner_emitted_error {
                         parameters.errors.push(
-                            Error::builder()
+                            Error::execution_error_builder()
                                 .message(message)
                                 .path(Path::from_response_slice(path))
                                 .build(),
@@ -534,7 +534,7 @@ impl Query {
             // We don't want to emit multiple errors for a nested list type like [[Int!]!]!.
             if !inner_type.is_list() {
                 parameters.insert_coercion_error(
-                    Error::builder()
+                    Error::execution_error_builder()
                         .message(format!(
                             "Invalid value found inside the array of type [{inner_type}]"
                         ))
@@ -661,7 +661,7 @@ impl Query {
                 Ok(())
             } else {
                 parameters.insert_coercion_error(
-                    Error::builder()
+                    Error::execution_error_builder()
                         .message("Invalid value found for the type Int")
                         .path(Path::from_response_slice(path))
                         .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
@@ -689,7 +689,7 @@ impl Query {
                 Ok(())
             } else {
                 parameters.insert_coercion_error(
-                    Error::builder()
+                    Error::execution_error_builder()
                         .message("Invalid value found for the type Float")
                         .path(Path::from_response_slice(path))
                         .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
@@ -717,7 +717,7 @@ impl Query {
                 Ok(())
             } else {
                 parameters.insert_coercion_error(
-                    Error::builder()
+                    Error::execution_error_builder()
                         .message("Invalid value found for the type Boolean")
                         .path(Path::from_response_slice(path))
                         .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
@@ -745,7 +745,7 @@ impl Query {
                 Ok(())
             } else {
                 parameters.insert_coercion_error(
-                    Error::builder()
+                    Error::execution_error_builder()
                         .message("Invalid value found for the type String")
                         .path(Path::from_response_slice(path))
                         .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
@@ -773,7 +773,7 @@ impl Query {
                 Ok(())
             } else {
                 parameters.insert_coercion_error(
-                    Error::builder()
+                    Error::execution_error_builder()
                         .message("Invalid value found for the type ID")
                         .path(Path::from_response_slice(path))
                         .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
@@ -1355,9 +1355,12 @@ fn emit_missing_field<'b>(
             field_type.0.inner_named_type()
         );
         let parent_path = Path::from_response_slice(path);
-        parameters
-            .errors
-            .push(Error::builder().message(message).path(parent_path).build());
+        parameters.errors.push(
+            Error::execution_error_builder()
+                .message(message)
+                .path(parent_path)
+                .build(),
+        );
     }
 
     // response.errors: nullable and non-null both, gated by coercion config.
@@ -1366,7 +1369,7 @@ fn emit_missing_field<'b>(
         let field_path = Path::from_response_slice(path);
         path.pop();
         parameters.insert_coercion_error(
-            Error::builder()
+            Error::execution_error_builder()
                 .message("Missing field")
                 .path(field_path)
                 .extension("code", ERROR_CODE_RESPONSE_VALIDATION)

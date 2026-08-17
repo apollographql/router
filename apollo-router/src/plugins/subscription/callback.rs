@@ -172,7 +172,7 @@ impl Service<router::Request> for CallbackService {
                             Err(err) => {
                                 return router::Response::error_builder()
                                     .status_code(StatusCode::BAD_REQUEST)
-                                    .error(graphql::Error::builder()
+                                    .error(graphql::Error::request_error_builder()
                                         .message(err)
                                         .extension_code(StatusCode::BAD_REQUEST.to_string())
                                         .build()
@@ -201,7 +201,7 @@ impl Service<router::Request> for CallbackService {
                         if hashed_verifier != expected_hashed_verifier {
                             return router::Response::error_builder()
                                 .status_code(StatusCode::UNAUTHORIZED)
-                                .error(graphql::Error::builder()
+                                .error(graphql::Error::request_error_builder()
                                     .message("verifier doesn't match")
                                     .extension_code(StatusCode::UNAUTHORIZED.to_string())
                                     .build()
@@ -224,7 +224,7 @@ impl Service<router::Request> for CallbackService {
                                     None => {
                                         return router::Response::error_builder()
                                             .status_code(StatusCode::NOT_FOUND)
-                                            .error(graphql::Error::builder()
+                                            .error(graphql::Error::request_error_builder()
                                                 .message("subscription doesn't exist")
                                                 .extension_code(StatusCode::NOT_FOUND.to_string())
                                                 .build()
@@ -254,7 +254,7 @@ impl Service<router::Request> for CallbackService {
                                     router::Response::error_builder()
                                         .status_code(StatusCode::NO_CONTENT)
                                         .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
-                                        .error(graphql::Error::builder()
+                                        .error(graphql::Error::request_error_builder()
                                             .message(String::default())
                                             .extension_code(StatusCode::NO_CONTENT.to_string())
                                             .build()
@@ -265,7 +265,7 @@ impl Service<router::Request> for CallbackService {
                                     router::Response::error_builder()
                                         .status_code(StatusCode::NOT_FOUND)
                                         .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
-                                        .error(graphql::Error::builder()
+                                        .error(graphql::Error::request_error_builder()
                                             .message("subscription doesn't exist")
                                             .extension_code(StatusCode::NOT_FOUND.to_string())
                                             .build()
@@ -282,7 +282,7 @@ impl Service<router::Request> for CallbackService {
                                 if !ids.contains(&id) {
                                     return router::Response::error_builder()
                                         .status_code(StatusCode::UNAUTHORIZED)
-                                        .error(graphql::Error::builder()
+                                        .error(graphql::Error::request_error_builder()
                                             .message("id used for the verifier is not part of ids array")
                                             .extension_code(StatusCode::UNAUTHORIZED.to_string())
                                             .build()
@@ -295,7 +295,7 @@ impl Service<router::Request> for CallbackService {
                                 if invalid_ids.is_empty() {
                                     router::Response::error_builder()
                                         .status_code(StatusCode::NO_CONTENT)
-                                        .error(graphql::Error::builder()
+                                        .error(graphql::Error::request_error_builder()
                                             .message(String::default())
                                             .extension_code(StatusCode::NO_CONTENT.to_string())
                                             .build()
@@ -305,7 +305,7 @@ impl Service<router::Request> for CallbackService {
                                 } else if valid_ids.is_empty() {
                                     router::Response::error_builder()
                                         .status_code(StatusCode::NOT_FOUND)
-                                        .error(graphql::Error::builder()
+                                        .error(graphql::Error::request_error_builder()
                                             .message("subscriptions don't exist")
                                             .extension_code(StatusCode::NOT_FOUND.to_string())
                                             .build()
@@ -329,7 +329,7 @@ impl Service<router::Request> for CallbackService {
                                     };
                                     router::Response::error_builder()
                                         .status_code(StatusCode::NOT_FOUND)
-                                        .error(graphql::Error::builder()
+                                        .error(graphql::Error::request_error_builder()
                                             .message(serde_json::to_string_pretty(&InvalidIdsPayload{
                                                 invalid_ids,
                                                 id,
@@ -352,7 +352,7 @@ impl Service<router::Request> for CallbackService {
                                          Err(NotifyError::UnknownTopic) => {
                                             return router::Response::error_builder()
                                                 .status_code(StatusCode::NOT_FOUND)
-                                                .error(graphql::Error::builder()
+                                                .error(graphql::Error::request_error_builder()
                                                     .message("unknown topic")
                                                     .extension_code(StatusCode::NOT_FOUND.to_string())
                                                     .build()
@@ -363,7 +363,7 @@ impl Service<router::Request> for CallbackService {
                                          Err(err) => {
                                             return router::Response::error_builder()
                                                 .status_code(StatusCode::NOT_FOUND)
-                                                .error(graphql::Error::builder()
+                                                .error(graphql::Error::request_error_builder()
                                                     .message(err.to_string())
                                                     .extension_code(StatusCode::NOT_FOUND.to_string())
                                                     .build()
@@ -384,7 +384,7 @@ impl Service<router::Request> for CallbackService {
                                     ) {
                                        return router::Response::error_builder()
                                             .status_code(StatusCode::NOT_FOUND)
-                                            .error(graphql::Error::builder()
+                                            .error(graphql::Error::request_error_builder()
                                                 .message("cannot send errors to the client")
                                                 .extension_code(StatusCode::NOT_FOUND.to_string())
                                                 .build()
@@ -396,7 +396,7 @@ impl Service<router::Request> for CallbackService {
                                 if let Err(_err) = notify.force_delete(id).await {
                                     return router::Response::error_builder()
                                         .status_code(StatusCode::NOT_FOUND)
-                                        .error(graphql::Error::builder()
+                                        .error(graphql::Error::request_error_builder()
                                             .message("cannot force delete")
                                             .extension_code(StatusCode::NOT_FOUND.to_string())
                                             .build()
@@ -417,7 +417,7 @@ impl Service<router::Request> for CallbackService {
                     }
                     _ => router::Response::error_builder()
                         .status_code(StatusCode::METHOD_NOT_ALLOWED)
-                        .error(graphql::Error::builder()
+                        .error(graphql::Error::request_error_builder()
                             .message(String::default())
                             .extension_code(StatusCode::METHOD_NOT_ALLOWED.to_string())
                             .build()
@@ -453,7 +453,7 @@ fn ensure_id_consistency(
         Err(router::Response::error_builder()
             .status_code(StatusCode::BAD_REQUEST)
             .error(
-                graphql::Error::builder()
+                graphql::Error::request_error_builder()
                     .message("id from url path and id from body are different")
                     .extension_code(StatusCode::BAD_REQUEST.to_string())
                     .build(),

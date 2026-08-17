@@ -214,7 +214,7 @@ impl ExecutionService {
                             response = Response::builder()
                                 .has_next(false)
                                 .error(
-                                    Error::builder()
+                                    Error::request_error_builder()
                                         .message(
                                             "deferred response closed because the JWT has expired",
                                         )
@@ -677,12 +677,15 @@ mod tests {
         Arc::new(query)
     }
 
-    fn make_error_at(p: Path, message: &str) -> Error {
-        Error::builder().message(message).path(p).build()
+    fn make_execution_error(p: Path, message: &str) -> Error {
+        Error::execution_error_builder()
+            .message(message)
+            .path(p)
+            .build()
     }
 
-    fn make_error_no_path(message: &str) -> Error {
-        Error::builder().message(message).build()
+    fn make_request_error(message: &str) -> Error {
+        Error::request_error_builder().message(message).build()
     }
 
     #[rstest]
@@ -763,13 +766,13 @@ mod tests {
 
     #[rstest]
     #[case::exact_path(
-        vec![make_error_at(path(vec![key("topProducts"), index(0)]), "err")],
+        vec![make_execution_error(path(vec![key("topProducts"), index(0)]), "err")],
         vec![(path(vec![key("topProducts"), index(0)]), Value::Object(Object::default()))],
         vec![1],
         vec![vec!["err"]]
     )]
     #[case::deeper_error(
-        vec![make_error_at(
+        vec![make_execution_error(
             path(vec![key("topProducts"), index(0), key("reviews"), index(0), key("author")]),
             "deep err",
         )],
@@ -778,13 +781,13 @@ mod tests {
         vec![vec!["deep err"]]
     )]
     #[case::parent_error(
-        vec![make_error_at(path(vec![key("topProducts")]), "parent err")],
+        vec![make_execution_error(path(vec![key("topProducts")]), "parent err")],
         vec![(path(vec![key("topProducts"), index(0)]), Value::Object(Object::default()))],
         vec![1],
         vec![vec!["parent err"]]
     )]
     #[case::parent_fans_out(
-        vec![make_error_at(path(vec![key("topProducts")]), "parent err")],
+        vec![make_execution_error(path(vec![key("topProducts")]), "parent err")],
         vec![
             (path(vec![key("topProducts"), index(0)]), Value::Object(Object::default())),
             (path(vec![key("topProducts"), index(1)]), Value::Object(Object::default())),
@@ -794,21 +797,21 @@ mod tests {
         vec![vec!["parent err"], vec!["parent err"], vec!["parent err"]]
     )]
     #[case::no_path(
-        vec![make_error_no_path("no path")],
+        vec![make_request_error("no path")],
         vec![(path(vec![key("topProducts"), index(0)]), Value::Object(Object::default()))],
         vec![0],
         vec![vec![]]
     )]
     #[case::wrong_index(
-        vec![make_error_at(path(vec![key("topProducts"), index(1), key("name")]), "wrong index")],
+        vec![make_execution_error(path(vec![key("topProducts"), index(1), key("name")]), "wrong index")],
         vec![(path(vec![key("topProducts"), index(0)]), Value::Object(Object::default()))],
         vec![0],
         vec![vec![]]
     )]
     #[case::multi_error_distribution(
         vec![
-            make_error_at(path(vec![key("topProducts"), index(0), key("name")]), "err for 0"),
-            make_error_at(path(vec![key("topProducts"), index(1), key("name")]), "err for 1"),
+            make_execution_error(path(vec![key("topProducts"), index(0), key("name")]), "err for 0"),
+            make_execution_error(path(vec![key("topProducts"), index(1), key("name")]), "err for 1"),
         ],
         vec![
             (path(vec![key("topProducts"), index(0)]), Value::Object(Object::default())),
@@ -872,7 +875,7 @@ mod tests {
     fn null_data_sub_response_with_errors_is_kept() {
         let query = make_test_query();
         let response = Response::builder()
-            .errors(vec![make_error_at(
+            .errors(vec![make_execution_error(
                 path(vec![key("topProducts"), index(0)]),
                 "err",
             )])

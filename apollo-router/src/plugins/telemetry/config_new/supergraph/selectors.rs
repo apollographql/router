@@ -1563,7 +1563,11 @@ mod test {
             on_graphql_error: true,
         };
         let chunk_with_errors = graphql::Response::builder()
-            .error(graphql::Error::builder().message("oops").build())
+            .error(
+                graphql::Error::request_error_builder()
+                    .message("oops")
+                    .build(),
+            )
             .build();
         assert_eq!(
             selector_true.on_response_event(&chunk_with_errors, &crate::Context::default()),

@@ -10,7 +10,6 @@ use apollo_router::services::supergraph;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -70,7 +69,7 @@ impl Plugin for AllowClientIdFromFile {
                 res = Some(
                     supergraph::Response::error_builder()
                         .error(
-                            graphql::Error::builder()
+                            graphql::Error::request_error_builder()
                                 .message(format!("Missing '{header_key}' header"))
                                 .extension_code("AUTH_ERROR")
                                 .build(),
@@ -104,9 +103,8 @@ impl Plugin for AllowClientIdFromFile {
                             // Prepare an HTTP 403 response with a GraphQL error message
                             res = Some(
                                 supergraph::Response::builder()
-                                    .data(Value::default())
                                     .error(
-                                        graphql::Error::builder()
+                                        graphql::Error::request_error_builder()
                                             .message("client-id is not allowed")
                                             .extension_code("UNAUTHORIZED_CLIENT_ID")
                                             .build(),
@@ -123,7 +121,7 @@ impl Plugin for AllowClientIdFromFile {
                         res = Some(
                             supergraph::Response::error_builder()
                                 .error(
-                                    graphql::Error::builder()
+                                    graphql::Error::request_error_builder()
                                         .message(format!("'{header_key}' value is not a string"))
                                         .extension_code("BAD_CLIENT_ID")
                                         .build(),

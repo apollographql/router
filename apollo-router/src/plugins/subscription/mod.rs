@@ -309,7 +309,7 @@ impl Plugin for Subscription {
                             .context(req.context)
                             .subgraph_name(req.subgraph_name)
                             .error(
-                                graphql::Error::builder()
+                                graphql::Error::request_error_builder()
                                     .message("cannot execute a subscription if it's not enabled in the configuration")
                                     .extension_code("SUBSCRIPTION_DISABLED")
                                     .build(),
@@ -729,7 +729,7 @@ mod tests {
                 callback::SubscriptionPayload::Complete {
                     id: new_sub_id.clone(),
                     errors: Some(vec![
-                        graphql::Error::builder()
+                        graphql::Error::request_error_builder()
                             .message("cannot complete the subscription")
                             .extension_code("SUBSCRIPTION_ERROR")
                             .build(),
@@ -747,7 +747,7 @@ mod tests {
             msg,
             graphql::Response::builder()
                 .errors(vec![
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .message("cannot complete the subscription")
                         .extension_code("SUBSCRIPTION_ERROR")
                         .build()
@@ -823,7 +823,7 @@ mod tests {
             &graphql::Response::builder()
                 .data(serde_json_bytes::Value::Null)
                 .error(
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .message(
                             "cannot execute a subscription if it's not enabled in the configuration"
                         )

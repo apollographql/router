@@ -419,12 +419,12 @@ impl Configuration {
             .ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS))
             .heartbeat_error_message(
                 graphql::Response::builder()
-                .errors(vec![
-                    graphql::Error::builder()
+                .error(
+                    graphql::Error::request_error_builder()
                     .message("the connection has been closed because it hasn't heartbeat for a while")
                     .extension_code("SUBSCRIPTION_HEARTBEAT_ERROR")
                     .build()
-                ])
+                )
                 .build()
             ).build())
     }

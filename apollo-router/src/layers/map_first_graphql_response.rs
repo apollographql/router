@@ -101,9 +101,9 @@ mod tests {
                     service
                         .map_first_graphql_response(|_context, http_parts, mut graphql_response| {
                             graphql_response.errors.push(
-                                graphql::Error::builder()
+                                graphql::Error::request_error_builder()
                                     .message("oh no!")
-                                    .extension_code("FOO".to_string())
+                                    .extension_code("FOO")
                                     .build(),
                             );
                             (http_parts, graphql_response)

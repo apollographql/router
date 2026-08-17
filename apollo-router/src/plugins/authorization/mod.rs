@@ -161,7 +161,7 @@ impl UnauthorizedPaths {
         response: &mut graphql::Response,
     ) {
         let unauthorized_path_errors = self.paths.iter().map(|path| {
-            graphql::Error::builder()
+            graphql::Error::execution_error_builder()
                 .message("Unauthorized field or type")
                 .path(path.clone())
                 .extension_code("UNAUTHORIZED_FIELD_OR_TYPE")
@@ -561,7 +561,7 @@ impl Plugin for AuthorizationPlugin {
                         tracing::error!("rejecting unauthenticated request");
                         let response = supergraph::Response::error_builder()
                             .error(
-                                graphql::Error::builder()
+                                graphql::Error::request_error_builder()
                                     .message("unauthenticated".to_string())
                                     .extension_code("AUTH_ERROR")
                                     .build(),

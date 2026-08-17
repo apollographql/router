@@ -1068,7 +1068,7 @@ impl CacheService {
                         .id(request.id)
                         .context(request.context)
                         .error(
-                            graphql::Error::builder()
+                            graphql::Error::request_error_builder()
                                 .message(format!("cannot get cache-control header: {err}"))
                                 .extension_code("INVALID_CACHE_CONTROL_HEADER")
                                 .build(),

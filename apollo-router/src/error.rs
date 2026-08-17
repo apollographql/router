@@ -156,7 +156,9 @@ impl FetchError {
             }
         }
 
-        Error::builder()
+        // We'll use an unchecked builder as the error could be a request error or an execution
+        // error
+        Error::unchecked_builder()
             .message(self.to_string())
             .locations(Vec::default())
             .and_path(path)
@@ -330,13 +332,13 @@ impl IntoGraphQLErrors for FederationErrorBridge {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
             FederationErrorBridge::UnknownOperation(msg) => Ok(vec![
-                Error::builder()
+                Error::request_error_builder()
                     .message(msg)
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
                     .build(),
             ]),
             FederationErrorBridge::OperationNameNotProvided(msg) => Ok(vec![
-                Error::builder()
+                Error::request_error_builder()
                     .message(msg)
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
                     .build(),
@@ -352,7 +354,7 @@ impl IntoGraphQLErrors for Vec<apollo_compiler::response::GraphQLError> {
         Ok(self
             .into_iter()
             .map(|err| {
-                Error::builder()
+                Error::request_error_builder()
                     .message(err.message)
                     .locations(
                         err.locations
@@ -482,7 +484,7 @@ impl IntoGraphQLErrors for ParseErrors {
             .errors
             .iter()
             .map(|diagnostic| {
-                Error::builder()
+                Error::request_error_builder()
                     .message(diagnostic.error.to_string())
                     .locations(
                         diagnostic
@@ -514,7 +516,7 @@ impl ValidationErrors {
         self.errors
             .iter()
             .map(|diagnostic| {
-                Error::builder()
+                Error::request_error_builder()
                     .message(diagnostic.message.to_string())
                     .locations(
                         diagnostic
@@ -601,7 +603,7 @@ mod tests {
             service: String::from("my_service"),
             reason: String::from("invalid request"),
         };
-        let expected_gql_error = graphql::Error::builder()
+        let expected_gql_error = graphql::Error::request_error_builder()
             .message("HTTP fetch failed: invalid request")
             .extension_code("SUBREQUEST_HTTP_ERROR")
             .extension("reason", Value::String("invalid request".into()))

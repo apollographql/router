@@ -150,7 +150,7 @@ impl Service<SupergraphRequest> for SupergraphService {
         )
         .or_else(|error: BoxError| async move {
             let errors = vec![
-                crate::error::Error::builder()
+                crate::error::Error::request_error_builder()
                     .message(error.to_string())
                     .extension_code("INTERNAL_SERVER_ERROR")
                     .build(),
@@ -305,7 +305,7 @@ async fn service_call(
                 let mut response = SupergraphResponse::new_from_graphql_response(
                     graphql::Response::builder()
                         .errors(vec![
-                            crate::error::Error::builder()
+                            crate::error::Error::request_error_builder()
                                 .message(error_message)
                                 .extension_code(error_code)
                                 .build(),

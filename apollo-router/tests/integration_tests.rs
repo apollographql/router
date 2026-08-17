@@ -144,7 +144,7 @@ async fn simple_queries_should_not_work() {
 
     let actual = query_with_router(router, get_request).await;
 
-    let expected_error = graphql::Error::builder()
+    let expected_error = graphql::Error::unchecked_builder()
         .message(message)
         .extension_code("CSRF_ERROR")
         // Overwrite error ID to avoid comparing random Uuids
@@ -181,7 +181,7 @@ async fn empty_posts_should_not_work() {
     let mut extensions_map = serde_json_bytes::map::Map::new();
     extensions_map.insert("code", "INVALID_GRAPHQL_REQUEST".into());
     extensions_map.insert("details", "failed to deserialize the request body into JSON: EOF while parsing a value at line 1 column 0".into());
-    let expected_error = graphql::Error::builder()
+    let expected_error = graphql::Error::unchecked_builder()
         .message(message)
         .extension_code("INVALID_GRAPHQL_REQUEST")
         .extensions(extensions_map)
@@ -269,7 +269,7 @@ async fn service_errors_should_be_propagated() {
 
     let (actual, registry) = query_rust(request).await;
 
-    let expected_error = apollo_router::graphql::Error::builder()
+    let expected_error = apollo_router::graphql::Error::unchecked_builder()
         .message(message)
         .extensions(extensions_map)
         .extension_code("VALIDATION_ERROR")
@@ -429,7 +429,7 @@ async fn automated_persisted_queries() {
 
     let actual = query_with_router(router.clone(), apq_only_request.try_into().unwrap()).await;
 
-    let expected_apq_miss_error = apollo_router::graphql::Error::builder()
+    let expected_apq_miss_error = apollo_router::graphql::Error::unchecked_builder()
         .message("PersistedQueryNotFound")
         .extension_code("PERSISTED_QUERY_NOT_FOUND")
         .apollo_id(actual.errors[0].apollo_id())
@@ -561,7 +561,7 @@ async fn persisted_queries() {
     assert_eq!(
         actual.errors,
         vec![
-            apollo_router::graphql::Error::builder()
+            apollo_router::graphql::Error::unchecked_builder()
                 .message(format!(
                     "Persisted query '{UNKNOWN_QUERY_ID}' not found in the persisted query list"
                 ))
@@ -671,13 +671,13 @@ async fn missing_variables() {
     normalized_actual_errors.sort_by_key(|e| e.message.clone());
 
     let mut expected_errors = vec![
-        graphql::Error::builder()
+        graphql::Error::unchecked_builder()
             .message("missing variable `$missingVariable`: for required GraphQL type `Int!`")
             .extension_code("VALIDATION_INVALID_TYPE_VARIABLE")
             .extension("name", "missingVariable")
             .apollo_id(Uuid::nil())
             .build(),
-        graphql::Error::builder()
+        graphql::Error::unchecked_builder()
             .message(
                 "missing variable `$yetAnotherMissingVariable`: for required GraphQL type `ID!`",
             )
@@ -1894,7 +1894,7 @@ fn normalize_errors(errors: Vec<Error>) -> Vec<Error> {
     errors
         .into_iter()
         .map(|e| {
-            Error::builder()
+            Error::unchecked_builder()
                 // Overwrite error ID to avoid comparing random Uuids
                 .apollo_id(Uuid::nil())
                 .message(e.message)

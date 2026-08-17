@@ -218,7 +218,7 @@ impl IntoGraphQLErrors for DemandControlError {
                 extensions.insert("cost.estimated", estimated_cost.into());
                 extensions.insert("cost.max", max_cost.into());
                 Ok(vec![
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .extension_code(self.code())
                         .extensions(extensions)
                         .message(self.to_string())
@@ -235,7 +235,7 @@ impl IntoGraphQLErrors for DemandControlError {
                 extensions.insert("cost.subgraph.estimated", estimated_cost.into());
                 extensions.insert("cost.subgraph.max", max_cost.into());
                 Ok(vec![
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .extension_code(self.code())
                         .extensions(extensions)
                         .message(self.to_string())
@@ -250,7 +250,7 @@ impl IntoGraphQLErrors for DemandControlError {
                 extensions.insert("cost.actual", actual_cost.into());
                 extensions.insert("cost.max", max_cost.into());
                 Ok(vec![
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .extension_code(self.code())
                         .extensions(extensions)
                         .message(self.to_string())
@@ -258,25 +258,25 @@ impl IntoGraphQLErrors for DemandControlError {
                 ])
             }
             DemandControlError::QueryParseFailure(_) => Ok(vec![
-                graphql::Error::builder()
+                graphql::Error::request_error_builder()
                     .extension_code(self.code())
                     .message(self.to_string())
                     .build(),
             ]),
             DemandControlError::SubgraphOperationNotInitialized(_) => Ok(vec![
-                graphql::Error::builder()
+                graphql::Error::request_error_builder()
                     .extension_code(self.code())
                     .message(self.to_string())
                     .build(),
             ]),
             DemandControlError::ContextSerializationError(_) => Ok(vec![
-                graphql::Error::builder()
+                graphql::Error::request_error_builder()
                     .extension_code(self.code())
                     .message(self.to_string())
                     .build(),
             ]),
             DemandControlError::FederationError(_) => Ok(vec![
-                graphql::Error::builder()
+                graphql::Error::request_error_builder()
                     .extension_code(self.code())
                     .message(self.to_string())
                     .build(),

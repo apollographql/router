@@ -2421,7 +2421,7 @@ mod tests {
                         .context(req.context)
                         .status_code(StatusCode::BAD_REQUEST)
                         .errors(vec![
-                            crate::graphql::Error::builder()
+                            crate::graphql::Error::request_error_builder()
                                 .message("nope")
                                 .extension_code("NOPE")
                                 .build(),
@@ -2758,11 +2758,11 @@ mod tests {
                     let mut headers = HeaderMap::new();
                     headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
                     let errors = vec![
-                        graphql::Error::builder()
+                        graphql::Error::request_error_builder()
                             .message("nope".to_string())
                             .extension_code("NOPE")
                             .build(),
-                        graphql::Error::builder()
+                        graphql::Error::request_error_builder()
                             .message("nok".to_string())
                             .extension_code("NOK")
                             .build(),
@@ -2866,11 +2866,11 @@ mod tests {
                     let mut headers = HeaderMap::new();
                     headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
                     let errors = vec![
-                        graphql::Error::builder()
+                        graphql::Error::request_error_builder()
                             .message("nope".to_string())
                             .extension_code("NOPE")
                             .build(),
-                        graphql::Error::builder()
+                        graphql::Error::request_error_builder()
                             .message("nok".to_string())
                             .extension_code("NOK")
                             .build(),
@@ -3046,7 +3046,7 @@ mod tests {
                     SubgraphResponse::fake_builder()
                         .context(req.context)
                         .error(
-                            Error::builder()
+                            Error::request_error_builder()
                                 .message(String::from("an error occured"))
                                 .extensions(extension)
                                 .extension_code("FETCH_ERROR")

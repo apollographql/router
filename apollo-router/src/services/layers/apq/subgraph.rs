@@ -190,7 +190,7 @@ mod tests {
     fn pqnf_message_response(context: Context) -> SubgraphResponse {
         SubgraphResponse::fake_builder()
             .errors(vec![
-                Error::builder()
+                Error::request_error_builder()
                     .message(PERSISTED_QUERY_NOT_FOUND_MESSAGE)
                     .build(),
             ])
@@ -201,7 +201,7 @@ mod tests {
     fn pqns_message_response(context: Context) -> SubgraphResponse {
         SubgraphResponse::fake_builder()
             .errors(vec![
-                Error::builder()
+                Error::request_error_builder()
                     .message(PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE)
                     .build(),
             ])
@@ -212,7 +212,7 @@ mod tests {
     fn pqnf_extension_code_response(context: Context) -> SubgraphResponse {
         SubgraphResponse::fake_builder()
             .errors(vec![
-                Error::builder()
+                Error::request_error_builder()
                     .message("Random message")
                     .extension_code(PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE)
                     .build(),
@@ -224,7 +224,7 @@ mod tests {
     fn pqns_extension_code_response(context: Context) -> SubgraphResponse {
         SubgraphResponse::fake_builder()
             .errors(vec![
-                Error::builder()
+                Error::request_error_builder()
                     .message("Random message")
                     .extension_code(PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE)
                     .build(),
@@ -761,7 +761,7 @@ mod tests {
                             assert!(graphql_request.query.is_none());
                             let pqnf_response = Response {
                                 errors: vec![
-                                    Error::builder()
+                                    Error::request_error_builder()
                                         .message(PERSISTED_QUERY_NOT_FOUND_MESSAGE)
                                         .build(),
                                 ],

@@ -93,7 +93,7 @@ where
                     // (i.e. programmer error: this layer must run after `ParseQueryLayer`), but
                     // do something better than panicking just in case.
                     let errors = vec![
-                        Error::builder()
+                        Error::request_error_builder()
                             .message("Cannot find executable document".to_string())
                             .extension_code("MISSING_EXECUTABLE_DOCUMENT")
                             .build(),

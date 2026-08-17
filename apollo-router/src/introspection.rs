@@ -150,7 +150,7 @@ impl tower::Service<IntrospectionRequest> for IntrospectionDisabledService {
     }
 
     fn call(&mut self, _req: IntrospectionRequest) -> Self::Future {
-        let error = graphql::Error::builder()
+        let error = graphql::Error::request_error_builder()
             .message(String::from("introspection has been disabled"))
             .extension_code("INTROSPECTION_DISABLED")
             .build();
@@ -211,7 +211,7 @@ where
             .root_fields(&req.document.executable)
             .any(|field| !matches!(field.name.as_str(), "__typename" | "__schema" | "__type"))
         {
-            let error = graphql::Error::builder()
+            let error = graphql::Error::request_error_builder()
                 .message(
                     "\
                     Mixed queries with both schema introspection and concrete fields \

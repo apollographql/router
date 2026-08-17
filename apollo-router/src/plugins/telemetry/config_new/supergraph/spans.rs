@@ -182,7 +182,7 @@ mod test {
         let values = spans.attributes.on_response_event(
             &graphql::Response::builder()
                 .error(
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .message("foo")
                         .extension_code("MY_EXTENSION_CODE")
                         .build(),

@@ -51,7 +51,7 @@ impl From<RuntimeError> for graphql::Error {
     fn from(error: RuntimeError) -> Self {
         let path: Path = (&error.path).into();
 
-        let mut err = graphql::Error::builder()
+        let mut err = graphql::Error::execution_error_builder()
             .message(&error.message)
             .extensions(error.extensions())
             .extension_code(error.code())

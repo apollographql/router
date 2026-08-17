@@ -261,7 +261,7 @@ impl PersistedQueryExpander {
                 None => {
                     // For some reason, QueryAnalysis didn't give us a document?
                     return Err(supergraph_err(
-                        graphql_err(
+                        graphql_request_error(
                             "MISSING_PARSED_OPERATION",
                             "internal error: executable document missing",
                         ),
@@ -407,7 +407,7 @@ fn graphql_err_operation_not_found(
     persisted_query_id: &str,
     operation_name: Option<String>,
 ) -> GraphQLError {
-    let mut builder = GraphQLError::builder()
+    let mut builder = GraphQLError::request_error_builder()
         .extension_code("PERSISTED_QUERY_NOT_IN_LIST")
         .message(format!(
             "Persisted query '{persisted_query_id}' not found in the persisted query list"
@@ -434,7 +434,7 @@ fn supergraph_err_operation_not_found(
 }
 
 fn graphql_err_cannot_send_id_and_body() -> GraphQLError {
-    graphql_err(
+    graphql_request_error(
         "CANNOT_SEND_PQ_ID_AND_BODY",
         "Sending a persisted query ID and a body in the same request is disallowed",
     )
@@ -452,7 +452,7 @@ fn supergraph_err_cannot_send_id_and_body_with_apq_disabled(
 }
 
 fn graphql_err_operation_not_in_safelist() -> GraphQLError {
-    graphql_err(
+    graphql_request_error(
         "QUERY_NOT_IN_SAFELIST",
         "The operation body was not found in the persisted query safelist",
     )
@@ -468,7 +468,7 @@ fn supergraph_err_operation_not_in_safelist(request: SupergraphRequest) -> Super
 }
 
 fn graphql_err_pq_id_required() -> GraphQLError {
-    graphql_err(
+    graphql_request_error(
         "PERSISTED_QUERY_ID_REQUIRED",
         "This endpoint does not allow freeform GraphQL requests; operations must be sent by ID in the persisted queries GraphQL extension.",
     )
@@ -483,8 +483,8 @@ fn supergraph_err_pq_id_required(request: SupergraphRequest) -> SupergraphRespon
     )
 }
 
-fn graphql_err(code: &str, message: &str) -> GraphQLError {
-    GraphQLError::builder()
+fn graphql_request_error(code: &str, message: &str) -> GraphQLError {
+    GraphQLError::request_error_builder()
         .extension_code(code)
         .message(message)
         .build()

@@ -137,9 +137,8 @@ async fn apq_request(
             } else {
                 tracing::debug!("apq: graphql request doesn't match provided sha256Hash");
                 let errors = vec![
-                    crate::error::Error::builder()
+                    crate::error::Error::request_error_builder()
                         .message("provided sha does not match query".to_string())
-                        .locations(Default::default())
                         .extension_code("PERSISTED_QUERY_HASH_MISMATCH")
                         .build(),
                 ];
@@ -168,9 +167,8 @@ async fn apq_request(
                 let _ = request.context.insert(PERSISTED_QUERY_CACHE_HIT, false);
                 tracing::trace!("apq: cache miss");
                 let errors = vec![
-                    crate::error::Error::builder()
+                    crate::error::Error::request_error_builder()
                         .message("PersistedQueryNotFound".to_string())
-                        .locations(Default::default())
                         .extension_code("PERSISTED_QUERY_NOT_FOUND")
                         .build(),
                 ];
@@ -219,9 +217,8 @@ async fn disabled_apq_request(
         .contains_key("persistedQuery")
     {
         let errors = vec![
-            crate::error::Error::builder()
+            crate::error::Error::request_error_builder()
                 .message("PersistedQueryNotSupported".to_string())
-                .locations(Default::default())
                 .extension_code("PERSISTED_QUERY_NOT_SUPPORTED")
                 .build(),
         ];
@@ -263,9 +260,8 @@ mod apq_tests {
         let hash = Cow::from("ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38");
         let hash2 = hash.clone();
 
-        let expected_apq_miss_error = Error::builder()
+        let expected_apq_miss_error = Error::request_error_builder()
             .message("PersistedQueryNotFound".to_string())
-            .locations(Default::default())
             .extension_code("PERSISTED_QUERY_NOT_FOUND")
             .build();
 
@@ -393,9 +389,8 @@ mod apq_tests {
         let hash = Cow::from("ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36");
         let hash2 = hash.clone();
 
-        let expected_apq_miss_error = Error::builder()
+        let expected_apq_miss_error = Error::request_error_builder()
             .message("PersistedQueryNotFound".to_string())
-            .locations(Default::default())
             .extension_code("PERSISTED_QUERY_NOT_FOUND")
             .build();
 
@@ -497,9 +492,8 @@ mod apq_tests {
             .await
             .unwrap()
             .unwrap();
-        let expected_apq_insert_failed_error = Error::builder()
+        let expected_apq_insert_failed_error = Error::request_error_builder()
             .message("provided sha does not match query".to_string())
-            .locations(Default::default())
             .extension_code("PERSISTED_QUERY_HASH_MISMATCH")
             .build();
         assert_error_eq_ignoring_id!(expected_apq_insert_failed_error, graphql_response.errors[0]);
@@ -549,9 +543,8 @@ mod apq_tests {
 
     #[tokio::test]
     async fn return_not_supported_when_disabled() {
-        let expected_apq_miss_error = Error::builder()
+        let expected_apq_miss_error = Error::request_error_builder()
             .message("PersistedQueryNotSupported".to_string())
-            .locations(Default::default())
             .extension_code("PERSISTED_QUERY_NOT_SUPPORTED")
             .build();
 

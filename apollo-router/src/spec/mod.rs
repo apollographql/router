@@ -131,7 +131,7 @@ impl IntoGraphQLErrors for SpecError {
                 Ok(e.errors
                     .into_iter()
                     .map(|error| {
-                        crate::graphql::Error::builder()
+                        crate::graphql::Error::request_error_builder()
                             .message(format!("parsing error: {}", error.message))
                             .locations(
                                 error
@@ -153,12 +153,12 @@ impl IntoGraphQLErrors for SpecError {
             }
             _ => {
                 let gql_err = match self.custom_extension_details() {
-                    Some(extension_details) => crate::graphql::Error::builder()
+                    Some(extension_details) => crate::graphql::Error::request_error_builder()
                         .message(self.to_string())
                         .extension_code(self.extension_code())
                         .extensions(extension_details)
                         .build(),
-                    None => crate::graphql::Error::builder()
+                    None => crate::graphql::Error::request_error_builder()
                         .message(self.to_string())
                         .extension_code(self.extension_code())
                         .build(),

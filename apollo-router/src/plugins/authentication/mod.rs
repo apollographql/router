@@ -531,7 +531,7 @@ fn authenticate(
 
         let response = router::Response::infallible_builder()
             .error(
-                graphql::Error::builder()
+                graphql::Error::request_error_builder()
                     .message(message)
                     .extension_code("AUTH_ERROR")
                     .build(),

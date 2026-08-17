@@ -1304,11 +1304,13 @@ mod test {
         let selector = RouterSelector::ResponseErrors {
             response_errors: JsonPathInst::new("$.[0]").unwrap(),
         };
+        // XXX(@goto-bus-stop): this returns partial data + a request error, which is not allowed by
+        // graphql spec
         let res = &crate::services::RouterResponse::fake_builder()
             .status_code(StatusCode::BAD_REQUEST)
             .data("some data")
             .errors(vec![
-                crate::graphql::Error::builder()
+                crate::graphql::Error::unchecked_builder()
                     .message("Something went wrong")
                     .locations(vec![crate::graphql::Location { line: 1, column: 1 }])
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
@@ -1414,19 +1416,21 @@ mod test {
         let selector = RouterSelector::ResponseErrorsCount {
             response_errors_count: JsonPathInst::new("$[*]").unwrap(),
         };
+        // XXX(@goto-bus-stop): this returns partial data + a request error, which is not allowed by
+        // graphql spec
         let res = &crate::services::RouterResponse::fake_builder()
             .status_code(StatusCode::BAD_REQUEST)
             .data("some data")
             .errors(vec![
-                crate::graphql::Error::builder()
+                crate::graphql::Error::unchecked_builder()
                     .message("First error")
                     .extension_code("ERROR_ONE")
                     .build(),
-                crate::graphql::Error::builder()
+                crate::graphql::Error::unchecked_builder()
                     .message("Second error")
                     .extension_code("ERROR_TWO")
                     .build(),
-                crate::graphql::Error::builder()
+                crate::graphql::Error::unchecked_builder()
                     .message("Third error")
                     .extension_code("NOT_FOUND")
                     .build(),
@@ -1463,7 +1467,7 @@ mod test {
         let res_single_error = &crate::services::RouterResponse::fake_builder()
             .status_code(StatusCode::GATEWAY_TIMEOUT)
             .errors(vec![
-                crate::graphql::Error::builder()
+                crate::graphql::Error::request_error_builder()
                     .message("Your request has been timed out")
                     .extension_code("GATEWAY_TIMEOUT")
                     .build(),
@@ -1594,7 +1598,7 @@ mod test {
         };
         let res_with_locations = &crate::services::RouterResponse::fake_builder()
             .errors(vec![
-                crate::graphql::Error::builder()
+                crate::graphql::Error::request_error_builder()
                     .message("Error with locations")
                     .location(crate::graphql::Location { line: 1, column: 1 })
                     .location(crate::graphql::Location { line: 2, column: 3 })

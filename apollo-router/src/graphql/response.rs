@@ -312,24 +312,24 @@ mod tests {
         let uuid1 = Uuid::new_v4();
         let uuid2 = Uuid::new_v4();
         let expected_errors = vec![
-            Error::builder()
+            Error::unchecked_builder()
                 .message("Something terrible happened!")
                 .path(Path::from("here"))
                 .apollo_id(uuid1)
                 .build(),
-            Error::builder()
+            Error::unchecked_builder()
                 .message("I mean for real")
                 .apollo_id(uuid2)
                 .build(),
         ];
 
         let mut errors_to_append = vec![
-            Error::builder()
+            Error::unchecked_builder()
                 .message("Something terrible happened!")
                 .path(Path::from("here"))
                 .apollo_id(uuid1)
                 .build(),
-            Error::builder()
+            Error::unchecked_builder()
                 .message("I mean for real")
                 .apollo_id(uuid2)
                 .build(),
@@ -405,7 +405,7 @@ mod tests {
                   }
                 }))
                 .errors(vec![
-                    Error::builder()
+                    Error::execution_error_builder()
                         .message("Name for character with ID 1002 could not be fetched.")
                         .locations(vec!(Location { line: 6, column: 7 }))
                         .path(Path::from("hero/heroFriends/1/name"))
@@ -499,7 +499,7 @@ mod tests {
                 }))
                 .path(Path::from("hero/heroFriends/1/name"))
                 .errors(vec![
-                    Error::builder()
+                    Error::execution_error_builder()
                         .message("Name for character with ID 1002 could not be fetched.")
                         .locations(vec!(Location { line: 6, column: 7 }))
                         .path(Path::from("hero/heroFriends/1/name"))

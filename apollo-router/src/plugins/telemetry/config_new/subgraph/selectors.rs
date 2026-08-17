@@ -2084,7 +2084,7 @@ mod test {
         };
         let response_with_error = crate::services::SubgraphResponse::fake_builder()
             .error(
-                graphql::Error::builder()
+                graphql::Error::request_error_builder()
                     .message("not found")
                     .extension_code("NOT_FOUND")
                     .build(),

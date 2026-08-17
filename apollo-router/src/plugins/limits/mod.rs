@@ -370,7 +370,7 @@ impl RequestSizeLimitError {
     fn into_response(self, ctx: Context) -> router::Response {
         router::Response::error_builder()
             .error(
-                graphql::Error::builder()
+                graphql::Error::request_error_builder()
                     .message(self.to_string())
                     .extension_code("INVALID_GRAPHQL_REQUEST")
                     .extension("details", self.to_string())

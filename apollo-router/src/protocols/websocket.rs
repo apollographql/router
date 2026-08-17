@@ -258,7 +258,7 @@ where
             None => ClientMessage::ConnectionInit { payload: None },
         };
         stream.send(connection_init_msg).await.map_err(|_err| {
-            graphql::Error::builder()
+            graphql::Error::request_error_builder()
                 .message("cannot send connection init through websocket connection")
                 .extension_code("WEBSOCKET_INIT_ERROR")
                 .build()
@@ -286,13 +286,13 @@ where
         let resp = tokio::time::timeout(CONNECTION_ACK_TIMEOUT, first_non_ping_payload)
             .await
             .map_err(|_| {
-                graphql::Error::builder()
+                graphql::Error::request_error_builder()
                     .message("cannot receive connection ack from websocket connection")
                     .extension_code("WEBSOCKET_ACK_ERROR_TIMEOUT")
                     .build()
             })?;
         if !matches!(resp, Some(Ok(ServerMessage::ConnectionAck))) {
-            return Err(graphql::Error::builder()
+            return Err(graphql::Error::request_error_builder()
                 .message(format!("didn't receive the connection ack from websocket connection but instead got: {resp:?}"))
                 .extension_code("WEBSOCKET_ACK_ERROR")
                 .build());
@@ -317,7 +317,7 @@ where
                 SubscriptionStream::new(self.stream, self.id, self.protocol, heartbeat_interval)
             })
             .map_err(|_err| {
-                graphql::Error::builder()
+                graphql::Error::request_error_builder()
                     .message("cannot send to websocket connection")
                     .extension_code("WEBSOCKET_CONNECTION_ERROR")
                     .build()
@@ -386,7 +386,7 @@ where
                     Ok(ServerMessage::Error {
                         id: Some(id.to_string()),
                         payload: ServerError::Error(
-                            graphql::Error::builder()
+                            graphql::Error::request_error_builder()
                                 .message(format!("websocket connection has been closed with error code '{code}' and reason '{reason}'"))
                                 .extension_code("WEBSOCKET_CLOSE_ERROR")
                                 .build(),
@@ -401,7 +401,7 @@ where
                 Ok(ServerMessage::Error {
                     id: Some(id.to_string()),
                     payload: ServerError::Error(
-                        graphql::Error::builder()
+                        graphql::Error::request_error_builder()
                             .message("cannot read message from websocket")
                             .extension_code("WEBSOCKET_MESSAGE_ERROR")
                             .build(),
@@ -577,7 +577,7 @@ where
                     Err(err) => Poll::Ready(
                         graphql::Response::builder()
                             .error(
-                                graphql::Error::builder()
+                                graphql::Error::request_error_builder()
                                     .message(format!(
                                         "cannot deserialize websocket server message: {err:?}"
                                     ))
@@ -613,7 +613,7 @@ where
             Poll::Pending => Poll::Pending,
         }
         .map_err(|err| {
-            graphql::Error::builder()
+            graphql::Error::request_error_builder()
                 .message(format!("cannot establish websocket connection: {err}"))
                 .extension_code("WEBSOCKET_CONNECTION_ERROR")
                 .build()
@@ -624,7 +624,7 @@ where
         let mut this = self.project();
 
         Pin::new(&mut this.stream).start_send(item).map_err(|_err| {
-            graphql::Error::builder()
+            graphql::Error::request_error_builder()
                 .message("cannot send to websocket connection")
                 .extension_code("WEBSOCKET_CONNECTION_ERROR")
                 .build()
@@ -637,7 +637,7 @@ where
     ) -> Poll<Result<(), Self::Error>> {
         let mut this = self.project();
         Pin::new(&mut this.stream).poll_flush(cx).map_err(|_err| {
-            graphql::Error::builder()
+            graphql::Error::request_error_builder()
                 .message("cannot flush to websocket connection")
                 .extension_code("WEBSOCKET_CONNECTION_ERROR")
                 .build()
@@ -701,7 +701,7 @@ where
         }
 
         Pin::new(&mut this.stream).poll_close(cx).map_err(|_err| {
-            graphql::Error::builder()
+            graphql::Error::request_error_builder()
                 .message("cannot close websocket connection")
                 .extension_code("WEBSOCKET_CONNECTION_ERROR")
                 .build()
@@ -1020,7 +1020,7 @@ mod tests {
             let next_payload = gql_read_stream.next().await.unwrap();
             assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
                 .error(
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .message(
                             "cannot deserialize websocket server message: Error(\"expected value\", line: 1, column: 1)".to_string())
                         .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
@@ -1180,7 +1180,7 @@ mod tests {
             let next_payload = gql_read_stream.next().await.unwrap();
             assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
                 .error(
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .message(
                             "cannot deserialize websocket server message: Error(\"expected value\", line: 1, column: 1)".to_string())
                         .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")

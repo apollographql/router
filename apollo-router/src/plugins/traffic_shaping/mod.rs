@@ -634,21 +634,21 @@ impl TrafficShaping {
 }
 
 fn concurrency_limit_error() -> graphql::Error {
-    graphql::Error::builder()
+    graphql::Error::request_error_builder()
         .message("Your request has been concurrency limited")
         .extension_code("REQUEST_CONCURRENCY_LIMITED")
         .build()
 }
 
 fn gateway_timeout_error() -> graphql::Error {
-    graphql::Error::builder()
+    graphql::Error::request_error_builder()
         .message("Your request has been timed out")
         .extension_code("GATEWAY_TIMEOUT")
         .build()
 }
 
 fn rate_limit_error() -> graphql::Error {
-    graphql::Error::builder()
+    graphql::Error::request_error_builder()
         .message("Your request has been rate limited")
         .extension_code("REQUEST_RATE_LIMITED")
         .build()

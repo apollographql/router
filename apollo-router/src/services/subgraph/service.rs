@@ -501,7 +501,7 @@ mod tests {
                 .body(
                     serde_json::to_string(&Response {
                         errors: vec![
-                            Error::builder()
+                            Error::request_error_builder()
                                 .message("This went wrong")
                                 .extension_code("FETCH_ERROR")
                                 .build(),

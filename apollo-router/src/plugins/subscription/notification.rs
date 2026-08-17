@@ -635,7 +635,7 @@ where
 
     fn start_send(self: Pin<&mut Self>, item: V) -> Result<(), Self::Error> {
         self.msg_sender.send(Some(item)).map_err(|_err| {
-            graphql::Error::builder()
+            graphql::Error::request_error_builder()
                 .message("cannot send payload through pubsub")
                 .extension_code("NOTIFICATION_HANDLE_SEND_ERROR")
                 .build()

@@ -86,7 +86,7 @@ where
                 };
                 let mut response = execution::Response::new_from_graphql_response(
                         graphql::Response::builder()
-                        .error(crate::error::Error::builder()
+                        .error(crate::error::Error::request_error_builder()
                             .message("Deferred responses and subscriptions aren't supported in batches")
                             .extension_code(code)
                             .build())

@@ -427,7 +427,7 @@ where
             Err(err) => {
                 return router::Response::error_builder()
                     .error(
-                        graphql::Error::builder()
+                        graphql::Error::request_error_builder()
                             .message(String::from("Invalid GraphQL request"))
                             .extension_code(err.extension_code)
                             .extension("details", err.extension_details)
@@ -565,7 +565,7 @@ where
                     // this should be unreachable due to a previous check, but just to be sure...
                     Ok(router::Response::error_builder()
                         .error(
-                            graphql::Error::builder()
+                            graphql::Error::request_error_builder()
                                 .message(format!(
                                     r#"'accept' header must be one of: \"*/*\", {:?}, {:?}, {:?} or {:?}"#,
                                     APPLICATION_JSON.essence_str(),

@@ -1076,7 +1076,7 @@ where
         let graphql_response = match body_as_value {
             Value::Null => graphql::Response::builder()
                 .errors(vec![
-                    Error::builder()
+                    Error::request_error_builder()
                         .message(co_processor_output.body.take().unwrap_or_default())
                         .extension_code(COPROCESSOR_ERROR_EXTENSION)
                         .build(),
@@ -1528,7 +1528,7 @@ where
             let graphql_response = match co_processor_output.body.unwrap_or(Value::Null) {
                 Value::String(s) => graphql::Response::builder()
                     .errors(vec![
-                        Error::builder()
+                        Error::request_error_builder()
                             .message(s.as_str().to_owned())
                             .extension_code(COPROCESSOR_ERROR_EXTENSION)
                             .build(),
@@ -1893,7 +1893,7 @@ pub(super) fn deserialize_coprocessor_response(
         graphql::Response::from_value(body_as_value).unwrap_or_else(|error| {
             graphql::Response::builder()
                 .errors(vec![
-                    Error::builder()
+                    Error::request_error_builder()
                         .message(format!(
                             "couldn't deserialize coprocessor output body: {error}"
                         ))
@@ -1907,7 +1907,7 @@ pub(super) fn deserialize_coprocessor_response(
         serde_json_bytes::from_value(body_as_value).unwrap_or_else(|error| {
             graphql::Response::builder()
                 .errors(vec![
-                    Error::builder()
+                    Error::request_error_builder()
                         .message(format!(
                             "couldn't deserialize coprocessor output body: {error}"
                         ))

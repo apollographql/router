@@ -720,7 +720,7 @@ async fn it_can_process_om_subgraph_forbidden_with_graphql_payload() {
         processed_error.body.unwrap(),
         graphql::Response::builder()
             .errors(vec![{
-                Error::builder()
+                Error::request_error_builder()
                     .message("I have raised a 403")
                     .extension_code("ACCESS_DENIED")
                     .build()

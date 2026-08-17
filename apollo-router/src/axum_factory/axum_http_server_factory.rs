@@ -484,7 +484,7 @@ where
 
     // This intentionally doesn't include an error message as this could represent leakage of internal information.
     // The error message is logged above.
-    let error = graphql::Error::builder()
+    let error = graphql::Error::request_error_builder()
         .message("internal server error")
         .extension_code("INTERNAL_SERVER_ERROR")
         .build();

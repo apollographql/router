@@ -3857,7 +3857,7 @@ mod tests {
                 .header("x-my-header", "TEST")
                 .header("content-length", "35")
                 .errors(vec![
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .message("nope")
                         .extension_code("NOPE")
                         .build(),
@@ -3871,7 +3871,7 @@ mod tests {
                         "price": 500
                     }))
                     .errors(vec![
-                        graphql::Error::builder()
+                        graphql::Error::request_error_builder()
                             .message("nope")
                             .extension_code("NOPE")
                             .build(),
@@ -3918,7 +3918,7 @@ mod tests {
                 .header("content-type", "application/json")
                 .header("content-length", "35")
                 .errors(vec![
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .message("nope")
                         .extension_code("NOPE")
                         .build(),
@@ -3927,12 +3927,14 @@ mod tests {
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
             custom_instruments.on_response_event(
+                // XXX(@goto-bus-stop): this reports partial data and a request error, which is
+                // not allowed by graphql spec
                 &graphql::Response::builder()
                     .data(json!({
                         "price": 500
                     }))
                     .errors(vec![
-                        graphql::Error::builder()
+                        graphql::Error::unchecked_builder()
                             .message("nope")
                             .extension_code("NOPE")
                             .build(),

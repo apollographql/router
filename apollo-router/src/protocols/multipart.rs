@@ -802,7 +802,7 @@ mod tests {
                     .build(),
                 graphql::Response::builder()
                     .error(
-                        graphql::Error::builder()
+                        graphql::Error::request_error_builder()
                             .message("subscription has been closed due to a schema reload")
                             .extension_code("SUBSCRIPTION_SCHEMA_RELOAD")
                             .build(),
@@ -855,7 +855,7 @@ mod tests {
                 // Config reload error response
                 graphql::Response::builder()
                     .error(
-                        graphql::Error::builder()
+                        graphql::Error::request_error_builder()
                             .message("subscription has been closed due to a configuration reload")
                             .extension_code("SUBSCRIPTION_CONFIG_RELOAD")
                             .build(),
@@ -907,7 +907,7 @@ mod tests {
                     .build(),
                 graphql::Response::builder()
                     .error(
-                        graphql::Error::builder()
+                        graphql::Error::request_error_builder()
                             .message(
                                 "subscription closed because the maximum lifetime has been reached",
                             )
@@ -1100,7 +1100,7 @@ mod tests {
                 .build(),
             graphql::Response::builder()
                 .error(
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .message("HTTP fetch failed from 'reviews': 500 Internal Server Error")
                         .extension_code("SUBREQUEST_HTTP_ERROR")
                         .build(),
@@ -1136,7 +1136,7 @@ mod tests {
         let responses = vec![
             graphql::Response::builder()
                 .error(
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .message("HTTP fetch failed from 'products': connection refused")
                         .extension_code("SUBREQUEST_HTTP_ERROR")
                         .build(),
@@ -1209,7 +1209,7 @@ mod tests {
             graphql::Response::builder()
                 .data(serde_json_bytes::Value::String(ByteString::from("partial")))
                 .error(
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .message("HTTP fetch failed from 'inventory': 500 Internal Server Error")
                         .extension_code("SUBREQUEST_HTTP_ERROR")
                         .build(),
@@ -1515,7 +1515,7 @@ mod tests {
             let responses = vec![
                 graphql::Response::builder()
                     .error(
-                        graphql::Error::builder()
+                        graphql::Error::request_error_builder()
                             .message("cannot read message from websocket")
                             .extension_code("WEBSOCKET_MESSAGE_ERROR")
                             .build(),
@@ -1568,7 +1568,7 @@ mod tests {
 
             let responses = vec![graphql::Response::builder()
                 .error(
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .message(
                             "websocket connection has been closed with error code '1011' and reason 'internal error'",
                         )

@@ -44,7 +44,7 @@ impl Plugin for ForbidMutations {
             ServiceBuilder::new()
                 .checkpoint_async(|req: ExecutionRequest| async move {
                     if req.query_plan.contains_mutations() {
-                        let error = Error::builder()
+                        let error = Error::request_error_builder()
                             .message("Mutations are forbidden".to_string())
                             .extension_code("MUTATION_FORBIDDEN")
                             .build();
@@ -112,7 +112,7 @@ mod forbid_http_get_mutations_tests {
 
     #[tokio::test]
     async fn it_doesnt_let_mutations_pass_through() {
-        let expected_error = Error::builder()
+        let expected_error = Error::request_error_builder()
             .message("Mutations are forbidden".to_string())
             .extension_code("MUTATION_FORBIDDEN")
             .build();

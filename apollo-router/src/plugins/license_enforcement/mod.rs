@@ -62,7 +62,7 @@ impl PluginPrivate for LicenseEnforcement {
                     match response {
                         Ok(ok) => Ok(ok),
                         Err(err) if err.http_status() == StatusCode::TOO_MANY_REQUESTS.as_u16() => {
-                            let error = graphql::Error::builder()
+                            let error = graphql::Error::request_error_builder()
                                 .message("Your request has been rate limited. You've reached the limits for the Free plan. Consider upgrading to a higher plan for increased limits.")
                                 .extension_code("ROUTER_FREE_PLAN_RATE_LIMIT_REACHED")
                                 .build();

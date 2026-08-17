@@ -230,7 +230,7 @@ impl PlanNode {
                         tracing::error!("No subscription handle provided for a subscription");
                         value = Value::default();
                         errors = vec![
-                            Error::builder()
+                            Error::request_error_builder()
                                 .message("no subscription handle provided for a subscription")
                                 .extension_code("NO_SUBSCRIPTION_HANDLE")
                                 .build(),

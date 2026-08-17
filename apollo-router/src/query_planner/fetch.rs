@@ -373,7 +373,7 @@ impl FetchNode {
                                     inverted_paths.get(*i).iter().flat_map(|v| v.iter())
                                 {
                                     errors.push(
-                                        Error::builder()
+                                        Error::unchecked_builder()
                                             .locations(error.locations.clone())
                                             // append to the entity's path the error's path without
                                             //`_entities` and the index
@@ -465,7 +465,7 @@ impl FetchNode {
                         })
                         .unwrap_or_else(|| current_dir.clone());
 
-                    Error::builder()
+                    Error::unchecked_builder()
                         .locations(error.locations.clone())
                         .path(path)
                         .message(error.message.clone())
@@ -625,8 +625,13 @@ mod tests {
 
     fn make_error(path: Option<Path>) -> graphql::Error {
         match path {
-            Some(p) => graphql::Error::builder().message("err").path(p).build(),
-            None => graphql::Error::builder().message("err").build(),
+            Some(p) => graphql::Error::execution_error_builder()
+                .message("err")
+                .path(p)
+                .build(),
+            None => graphql::Error::request_error_builder()
+                .message("err")
+                .build(),
         }
     }
 
@@ -725,18 +730,24 @@ mod tests {
         let current_dir = Path(vec![key("root")]);
         let response = graphql::Response::builder()
             .error(
-                graphql::Error::builder()
+                graphql::Error::execution_error_builder()
                     .message("error 1")
                     .path(Path(vec![key("a")]))
                     .build(),
             )
             .error(
-                graphql::Error::builder()
+                graphql::Error::execution_error_builder()
                     .message("error 2")
                     .path(Path(vec![key("b")]))
                     .build(),
             )
-            .error(graphql::Error::builder().message("error 3").build())
+            // XXX(@goto-bus-stop): we have a mix of execution errors and request errors here, is
+            // that correct?
+            .error(
+                graphql::Error::unchecked_builder()
+                    .message("error 3")
+                    .build(),
+            )
             .build();
 
         let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
@@ -760,7 +771,7 @@ mod tests {
         let current_dir = Path(vec![key("root")]);
         let response = graphql::Response::builder()
             .error(
-                graphql::Error::builder()
+                graphql::Error::execution_error_builder()
                     .message("auth error")
                     .extension_code("UNAUTHORIZED")
                     .path(Path(vec![key("field")]))
@@ -974,7 +985,7 @@ mod tests {
         let response = graphql::Response::builder()
             .data(json!({"_entities": [null, null]}))
             .error(
-                graphql::Error::builder()
+                graphql::Error::execution_error_builder()
                     .message("entity error")
                     .path(Path(vec![key("_entities"), index(1), key("name")]))
                     .build(),
@@ -1000,7 +1011,7 @@ mod tests {
         let response = graphql::Response::builder()
             .data(json!({"_entities": [null]}))
             .error(
-                graphql::Error::builder()
+                graphql::Error::execution_error_builder()
                     .message("err")
                     .locations(vec![graphql::Location { line: 1, column: 5 }])
                     .path(Path(vec![key("_entities"), index(0), key("x")]))
@@ -1032,7 +1043,7 @@ mod tests {
         let response = graphql::Response::builder()
             .data(json!({"_entities": [null]}))
             .error(
-                graphql::Error::builder()
+                graphql::Error::execution_error_builder()
                     .message("err")
                     .path(Path(vec![key("_entities"), index(0), key("name")]))
                     .build(),
@@ -1061,7 +1072,7 @@ mod tests {
         let response = graphql::Response::builder()
             .data(json!({"_entities": []}))
             .error(
-                graphql::Error::builder()
+                graphql::Error::execution_error_builder()
                     .message("oob")
                     .path(Path(vec![key("_entities"), index(5), key("f")]))
                     .build(),
@@ -1082,7 +1093,7 @@ mod tests {
         let response = graphql::Response::builder()
             .data(json!({"_entities": [null]}))
             .error(
-                graphql::Error::builder()
+                graphql::Error::execution_error_builder()
                     .message("forbidden")
                     .extension_code("FORBIDDEN")
                     .path(Path(vec![key("_entities"), index(0)]))
@@ -1110,7 +1121,7 @@ mod tests {
         let response = graphql::Response::builder()
             .data(json!({"_entities": [null]}))
             .error(
-                graphql::Error::builder()
+                graphql::Error::execution_error_builder()
                     .message("nested err")
                     .path(Path(vec![
                         key("_entities"),
@@ -1140,7 +1151,7 @@ mod tests {
         let response = graphql::Response::builder()
             .data(json!({"something": "else"}))
             .error(
-                graphql::Error::builder()
+                graphql::Error::request_error_builder()
                     .message("permission denied")
                     .build(),
             )
@@ -1174,7 +1185,11 @@ mod tests {
         let node = make_fetch_node(make_requires());
         let current_dir = Path(vec![key("field")]);
         let response = graphql::Response::builder()
-            .error(graphql::Error::builder().message("subgraph error").build())
+            .error(
+                graphql::Error::request_error_builder()
+                    .message("subgraph error")
+                    .build(),
+            )
             .build();
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
@@ -1190,15 +1205,21 @@ mod tests {
         let current_dir = Path(vec![key("users"), flatten(), key("reviews")]);
         let expected_fallback = Path(vec![key("users")]);
         let response = graphql::Response::builder()
-            .error(graphql::Error::builder().message("pathless error").build())
+            // XXX(@goto-bus-stop): we have a mix of execution errors and request errors here, is
+            // that correct?
             .error(
-                graphql::Error::builder()
+                graphql::Error::unchecked_builder()
+                    .message("pathless error")
+                    .build(),
+            )
+            .error(
+                graphql::Error::execution_error_builder()
                     .message("non-entities path")
                     .path(Path(vec![key("something")]))
                     .build(),
             )
             .error(
-                graphql::Error::builder()
+                graphql::Error::execution_error_builder()
                     .message("entities no index")
                     .path(Path(vec![key("_entities")]))
                     .build(),
@@ -1227,13 +1248,15 @@ mod tests {
         let expected_fallback = Path(vec![key("items")]);
         let response = graphql::Response::builder()
             .data(json!({"something": "else"}))
+            // XXX(@goto-bus-stop): we have a mix of execution errors and request errors here, is
+            // that correct?
             .error(
-                graphql::Error::builder()
+                graphql::Error::unchecked_builder()
                     .message("permission denied")
                     .build(),
             )
             .error(
-                graphql::Error::builder()
+                graphql::Error::execution_error_builder()
                     .message("other error")
                     .path(Path(vec![key("unrelated")]))
                     .build(),
@@ -1275,9 +1298,15 @@ mod tests {
         let node = make_fetch_node(make_requires());
         let current_dir = Path(vec![key("products"), flatten()]);
         let expected_fallback = Path(vec![key("products")]);
+        // XXX(@goto-bus-stop): we have partial data + a request error here, which is invalid by
+        // graphql spec. Should this use an execution error instead?
         let response = graphql::Response::builder()
             .data(json!({"_entities": 42}))
-            .error(graphql::Error::builder().message("bad entities").build())
+            .error(
+                graphql::Error::unchecked_builder()
+                    .message("bad entities")
+                    .build(),
+            )
             .build();
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
@@ -1293,9 +1322,15 @@ mod tests {
         let node = make_fetch_node(make_requires());
         let current_dir = Path(vec![key("orders"), flatten(), key("items")]);
         let expected_fallback = Path(vec![key("orders")]);
+        // XXX(@goto-bus-stop): we have partial data + a request error here, which is invalid by
+        // graphql spec. Should this use an execution error instead?
         let response = graphql::Response {
             data: Some(Value::Null),
-            errors: vec![graphql::Error::builder().message("null data error").build()],
+            errors: vec![
+                graphql::Error::unchecked_builder()
+                    .message("null data error")
+                    .build(),
+            ],
             ..Default::default()
         };
 
@@ -1318,18 +1353,24 @@ mod tests {
         let response = graphql::Response::builder()
             .data(json!({"_entities": [{"name": "Alice"}, null]}))
             .error(
-                graphql::Error::builder()
+                graphql::Error::execution_error_builder()
                     .message("entity 1 error")
                     .path(Path(vec![key("_entities"), index(1), key("field")]))
                     .build(),
             )
             .error(
-                graphql::Error::builder()
+                graphql::Error::execution_error_builder()
                     .message("general error")
                     .path(Path(vec![key("other")]))
                     .build(),
             )
-            .error(graphql::Error::builder().message("pathless").build())
+            // XXX(@goto-bus-stop): we have a mix of execution errors and request errors here, is
+            // that correct?
+            .error(
+                graphql::Error::unchecked_builder()
+                    .message("pathless")
+                    .build(),
+            )
             .build();
 
         let (_, errors) =

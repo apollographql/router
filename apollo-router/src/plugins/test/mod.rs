@@ -917,7 +917,7 @@ mod test_for_harness {
         let service = test_harness.router_service(|_req| async {
             Ok(router::Response::fake_builder()
                 .error(
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .message("Test error")
                         .extension_code("TEST_ERROR")
                         .build(),
@@ -944,7 +944,7 @@ mod test_for_harness {
         let service = test_harness.supergraph_service(|_req| async {
             Ok(supergraph::Response::fake_builder()
                 .error(
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .message("Test error")
                         .extension_code("TEST_ERROR")
                         .build(),
@@ -971,7 +971,7 @@ mod test_for_harness {
         let service = test_harness.subgraph_service("test_subgraph", |_req| async {
             Ok(subgraph::Response::fake_builder()
                 .error(
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .message("Test error")
                         .extension_code("TEST_ERROR")
                         .build(),
