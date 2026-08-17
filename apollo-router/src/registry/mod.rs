@@ -723,6 +723,7 @@ async fn fetch_license_from_reference(
 mod tests {
     use std::collections::BTreeMap;
     use std::collections::VecDeque;
+    use std::str::FromStr;
     use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
@@ -752,6 +753,11 @@ mod tests {
 
     use super::*;
     use crate::registry::OciError::LayerMissingTitle;
+
+    // Same test JWT used by `license_enforcement::test_license_parse`. Signed
+    // against the JWKS bundled at `src/uplink/license.jwks.json` via
+    // `include_str!`, so this token verifies in any test in the crate.
+    const TEST_LICENSE_JWT: &str = "eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLCJzdWIiOiJhcG9sbG8iLCJhdWQiOiJTRUxGX0hPU1RFRCIsIndhcm5BdCI6MTY3NjgwODAwMCwiaGFsdEF0IjoxNjc4MDE3NjAwfQ.tXexfjZ2SQeqSwkWQ7zD4XBoxS_Hc5x7tSNJ3ln-BCL_GH7i3U9hsIgdRQTczCAjA_jjk34w39DeSV0nTc5WBw"; // gitleaks:allow
 
     fn calculate_manifest_digest(manifest: &OciManifest) -> String {
         let manifest_bytes = serde_json::to_vec(manifest).unwrap();
@@ -1056,6 +1062,154 @@ mod tests {
         } else {
             panic!("expected missing title error, got {result:?}");
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetch_license_success() {
+        let mock_server = &MockServer::start().await;
+        let mut client = Client::new(ClientConfig {
+            protocol: ClientProtocol::Http,
+            ..Default::default()
+        });
+        let license_layer = ImageLayer {
+            data: TEST_LICENSE_JWT.as_bytes().to_vec(),
+            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![license_layer], None).await;
+
+        let result = fetch_license_from_reference(
+            &mut client,
+            &RegistryAuth::Anonymous,
+            &image_reference,
+            None,
+        )
+        .await
+        .expect("failed to fetch license");
+
+        let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
+        assert_eq!(result.claims, expected.claims);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetch_license_ignores_extra_layers() {
+        let mock_server = &MockServer::start().await;
+        let mut client = Client::new(ClientConfig {
+            protocol: ClientProtocol::Http,
+            ..Default::default()
+        });
+        let license_layer = ImageLayer {
+            data: TEST_LICENSE_JWT.as_bytes().to_vec(),
+            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let unrelated_layer = ImageLayer {
+            data: "foo_bar".into(),
+            media_type: "foo_bar".to_string(),
+            annotations: None,
+        };
+        let image_reference =
+            setup_mocks(mock_server, vec![license_layer, unrelated_layer], None).await;
+
+        let result = fetch_license_from_reference(
+            &mut client,
+            &RegistryAuth::Anonymous,
+            &image_reference,
+            None,
+        )
+        .await
+        .expect("failed to fetch license");
+
+        let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
+        assert_eq!(result.claims, expected.claims);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetch_license_missing_layer() {
+        let mock_server = &MockServer::start().await;
+        let mut client = Client::new(ClientConfig {
+            protocol: ClientProtocol::Http,
+            ..Default::default()
+        });
+        let unrelated_layer = ImageLayer {
+            data: "foo_bar".to_string().into_bytes(),
+            media_type: "foo_bar".to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![unrelated_layer], None).await;
+
+        let err = fetch_license_from_reference(
+            &mut client,
+            &RegistryAuth::Anonymous,
+            &image_reference,
+            None,
+        )
+        .await
+        .expect_err("expected missing entitlements layer");
+
+        assert!(
+            matches!(err, OciError::LayerMissingTitle),
+            "expected LayerMissingTitle, got {err:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetch_license_bad_utf8() {
+        let mock_server = &MockServer::start().await;
+        let mut client = Client::new(ClientConfig {
+            protocol: ClientProtocol::Http,
+            ..Default::default()
+        });
+        // 0xFF/0xFE are not valid UTF-8 start bytes.
+        let license_layer = ImageLayer {
+            data: vec![0xFF, 0xFE, 0xFD],
+            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![license_layer], None).await;
+
+        let err = fetch_license_from_reference(
+            &mut client,
+            &RegistryAuth::Anonymous,
+            &image_reference,
+            None,
+        )
+        .await
+        .expect_err("expected utf8 conversion error");
+
+        assert!(
+            matches!(err, OciError::LayerParse(_)),
+            "expected LayerParse, got {err:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetch_license_bad_jwt() {
+        let mock_server = &MockServer::start().await;
+        let mut client = Client::new(ClientConfig {
+            protocol: ClientProtocol::Http,
+            ..Default::default()
+        });
+        let license_layer = ImageLayer {
+            data: b"not a jwt".to_vec(),
+            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![license_layer], None).await;
+
+        let err = fetch_license_from_reference(
+            &mut client,
+            &RegistryAuth::Anonymous,
+            &image_reference,
+            None,
+        )
+        .await
+        .expect_err("expected JWT parse error");
+
+        assert!(
+            matches!(err, OciError::LicenseParse(_)),
+            "expected LicenseParse, got {err:?}"
+        );
     }
 
     #[rstest::rstest]
