@@ -21,6 +21,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::instrument::WithSubscriber;
 use url::Url;
 
+use crate::uplink::license_enforcement::Error as LicenseError;
+use crate::uplink::license_enforcement::License;
 use crate::uplink::schema::SchemaState;
 
 /// Type of OCI reference
@@ -124,11 +126,15 @@ pub(crate) enum OciError {
     Parse(oci_client::ParseError),
     #[error("unable to parse layer: {0}")]
     LayerParse(FromUtf8Error),
+    #[error("unable to parse license: {0}")]
+    LicenseParse(LicenseError),
 }
 
 const APOLLO_REGISTRY_ENDING: &str = "apollographql.com";
 const APOLLO_REGISTRY_USERNAME: &str = "apollo-registry";
 const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
+//  Keep in sync with value in mdg-private/monorepo/libs/entitlements/oci/model/src/main/kotlin/apollo/entitlements/oci/model/EntitlementArtifact.kt:15
+const ENTITLEMENTS_MEDIA_TYPE: &str = "application/apollo.entitlements";
 const APOLLO_MANIFEST_LAUNCH_ID_ANNOTATION: &str = "com.apollograph.launch.id";
 
 impl From<oci_client::ParseError> for OciError {
@@ -146,6 +152,12 @@ impl From<OciDistributionError> for OciError {
 impl From<FromUtf8Error> for OciError {
     fn from(value: FromUtf8Error) -> Self {
         OciError::LayerParse(value)
+    }
+}
+
+impl From<LicenseError> for OciError {
+    fn from(value: LicenseError) -> Self {
+        OciError::LicenseParse(value)
     }
 }
 
@@ -575,6 +587,130 @@ fn parse_rate_limit_error(error: &OciError) -> Option<Duration> {
             .map(Duration::from_secs);
     }
     None
+}
+
+#[warn(dead_code)]
+type OciLicenseStream = Pin<Box<dyn Stream<Item = Result<License, OciError>> + Send>>;
+
+#[warn(dead_code)]
+pub(crate) fn create_oci_license_stream(
+    oci_config: OciConfig,
+) -> Result<OciLicenseStream, anyhow::Error> {
+    // Validate the reference to determine its type
+    validate_oci_reference(&oci_config.reference)?;
+    Ok(Box::pin(stream_license_from_oci(oci_config)))
+}
+
+#[warn(dead_code)]
+fn stream_license_from_oci(
+    oci_config: OciConfig,
+) -> impl Stream<Item = Result<License, OciError>> {
+    let (sender, receiver) = channel(2);
+
+    let task = async move {
+        let mut last_digest: Option<String> = None;
+        let mut polling_time = oci_config.poll_interval;
+        loop {
+            match fetch_oci_manifest_digest(&oci_config).await {
+                Ok(current_digest) => {
+                    if last_digest.as_deref() == Some(current_digest.as_str()) {
+                    } else {
+                        match fetch_license_oci(&oci_config).await {
+                            Ok(license) => {
+                                if let Err(e) = sender.send(Ok(license)).await {
+                                    break;
+                                } else {
+                                    last_digest = Some(current_digest);
+                                }
+                            }
+                            Err(err) => {
+                                if let Some(retry_after) = parse_rate_limit_error(&err) {
+                                    polling_time = retry_after.max(Duration::from_secs(10)); 
+                                }
+                                if let Err(e) = sender.send(Err(err)).await {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    if let Some(retry_after) = parse_rate_limit_error(&err) {
+                        polling_time = retry_after.max(Duration::from_secs(10)); // Minimum 10 second backoff
+                    }
+                    if let Err(e) = sender.send(Err(err)).await {
+                        break;
+                    }
+                }
+            }
+            tokio::time::sleep(polling_time).await;
+            polling_time = oci_config.poll_interval;
+        }
+    };
+    drop(tokio::task::spawn(task.with_current_subscriber()));
+    ReceiverStream::new(receiver).boxed()
+}
+
+#[warn(dead_code)]
+async fn fetch_license_oci(
+    oci_config: &OciConfig,
+) -> Result<License, OciError> {
+    let reference: Reference = oci_config.reference.as_str().parse()?;
+    let auth = build_auth(&reference, &oci_config.apollo_key);
+    let protocol = oci_config.client_protocol();
+
+    tracing::debug!(
+        "prepared to fetch license from oci over {:?}, auth anonymous? {:?}",
+        protocol,
+        auth == RegistryAuth::Anonymous
+    );
+
+    match fetch_license_from_reference(
+        &mut Client::new(ClientConfig {
+            protocol,
+            ..Default::default()
+        }),
+        &auth,
+        &reference,
+        Some(oci_config),
+    )
+    .await
+    {
+        Ok(license) => Ok(license),
+        Err(err) => {
+            tracing::error!("error fetching license from oci registry: {}", err);
+            Err(err.into())
+        }
+    }
+}
+
+#[warn(dead_code)]
+async fn fetch_license_from_reference(
+    client: &mut Client,
+    auth: &RegistryAuth,
+    reference: &Reference,
+    oci_config: Option<&OciConfig>,
+) -> Result<License, OciError> {
+    tracing::debug!("pulling oci manifest for license");
+    let (manifest, _) = fetch_oci_manifest(client, auth, reference, oci_config).await?;
+
+    // Expect a layer with a media_type for license information
+    // You may want to adjust the media type string for your license blob
+    let license_layer = manifest
+        .layers
+        .iter()
+        .find(|layer| layer.media_type == ENTITLEMENTS_MEDIA_TYPE)
+        .ok_or(OciError::LayerMissingTitle)?
+        .clone();
+
+    tracing::debug!("pulling oci blob for license layer");
+    let license_blob_bytes = fetch_oci_blob(client, reference, &license_layer).await?;
+
+    // Convert the license blob bytes into a License object (assuming it's json)
+    let jwt = String::from_utf8(license_blob_bytes)?;
+    let license: License = jwt.parse::<License>()?;
+
+    Ok(license)
 }
 
 #[cfg(test)]
