@@ -599,9 +599,7 @@ pub(crate) fn create_oci_license_stream(
     Ok(Box::pin(stream_license_from_oci(oci_config)))
 }
 
-fn stream_license_from_oci(
-    oci_config: OciConfig,
-) -> impl Stream<Item = Result<License, OciError>> {
+fn stream_license_from_oci(oci_config: OciConfig) -> impl Stream<Item = Result<License, OciError>> {
     let (sender, receiver) = channel(2);
 
     let task = async move {
@@ -611,20 +609,31 @@ fn stream_license_from_oci(
             match fetch_oci_manifest_digest(&oci_config).await {
                 Ok(current_digest) => {
                     if last_digest.as_deref() == Some(current_digest.as_str()) {
+                        tracing::debug!("oci manifest digest unchanged, skip fetching license");
                     } else {
+                        tracing::debug!("oci manifest digest changed, fetch license");
                         match fetch_license_oci(&oci_config).await {
                             Ok(license) => {
+                                tracing::debug!("fetched license from oci registry");
                                 if let Err(e) = sender.send(Ok(license)).await {
+                                    tracing::debug!(
+                                        "failed to send license to stream. This is likely to be because the router is shutting down: {e}"
+                                    );
                                     break;
                                 } else {
+                                    // Only update the digest if the license fetch was successful
                                     last_digest = Some(current_digest);
                                 }
                             }
                             Err(err) => {
+                                tracing::debug!("failed to fetch license");
                                 if let Some(retry_after) = parse_rate_limit_error(&err) {
-                                    polling_time = retry_after.max(Duration::from_secs(10)); 
+                                    polling_time = retry_after.max(Duration::from_secs(10));
                                 }
                                 if let Err(e) = sender.send(Err(err)).await {
+                                    tracing::debug!(
+                                        "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
+                                    );
                                     break;
                                 }
                             }
@@ -632,10 +641,14 @@ fn stream_license_from_oci(
                     }
                 }
                 Err(err) => {
+                    tracing::debug!("failed to fetch oci manifest digest");
                     if let Some(retry_after) = parse_rate_limit_error(&err) {
                         polling_time = retry_after.max(Duration::from_secs(10)); // Minimum 10 second backoff
                     }
                     if let Err(e) = sender.send(Err(err)).await {
+                        tracing::debug!(
+                            "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
+                        );
                         break;
                     }
                 }
@@ -648,9 +661,7 @@ fn stream_license_from_oci(
     ReceiverStream::new(receiver).boxed()
 }
 
-async fn fetch_license_oci(
-    oci_config: &OciConfig,
-) -> Result<License, OciError> {
+async fn fetch_license_oci(oci_config: &OciConfig) -> Result<License, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
     let protocol = oci_config.client_protocol();
@@ -675,7 +686,7 @@ async fn fetch_license_oci(
         Ok(license) => Ok(license),
         Err(err) => {
             tracing::error!("error fetching license from oci registry: {}", err);
-            Err(err.into())
+            Err(err)
         }
     }
 }
