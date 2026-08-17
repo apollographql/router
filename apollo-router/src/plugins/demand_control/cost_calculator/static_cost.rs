@@ -877,10 +877,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        let query_plan = match planner_res.content.unwrap() {
-            QueryPlannerContent::Plan { plan } => plan,
-            _ => panic!("Query planner returned unexpected non-plan content"),
-        };
+        let QueryPlannerContent::Plan { plan: query_plan } = planner_res.content.unwrap();
 
         let schema = DemandControlledSchema::new(Arc::new(supergraph_schema)).unwrap();
         let mut demand_controlled_subgraph_schemas = HashMap::new();

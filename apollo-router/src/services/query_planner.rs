@@ -102,7 +102,6 @@ pub(crate) struct Response {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum QueryPlannerContent {
     Plan { plan: Arc<QueryPlan> },
-    Response { response: Box<graphql::Response> },
 }
 
 #[buildstructor::buildstructor]

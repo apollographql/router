@@ -271,9 +271,6 @@ async fn service_call(
     }
 
     match content {
-        Some(QueryPlannerContent::Response { response }) => Ok(
-            SupergraphResponse::new_from_graphql_response(*response, context),
-        ),
         Some(QueryPlannerContent::Plan { plan }) => {
             let is_deferred = plan.is_deferred(&variables);
             let is_subscription = plan.is_subscription();

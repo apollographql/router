@@ -605,11 +605,10 @@ where
 
             match res {
                 Ok(content) => {
-                    if let QueryPlannerContent::Plan { plan, .. } = &content {
-                        context.extensions().with_lock(|lock| {
-                            lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
-                        });
-                    }
+                    let QueryPlannerContent::Plan { plan } = &content;
+                    context.extensions().with_lock(|lock| {
+                        lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
+                    });
 
                     Ok(QueryPlannerResponse::builder().content(content).build())
                 }
@@ -696,7 +695,6 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
     fn estimated_size(&self) -> Option<usize> {
         match self {
             Ok(QueryPlannerContent::Plan { plan }) => Some(plan.estimated_size()),
-            Ok(QueryPlannerContent::Response { response }) => Some(estimate_size(response)),
             Err(e) => Some(estimate_size(e)),
         }
     }
@@ -1966,29 +1964,27 @@ mod tests {
         crate::plugin::test::await_mock_driver(driver).await;
     }
 
-    /// `entry.insert` does not discriminate on the `QueryPlannerContent` variant, so the
-    /// cache stores an authorization rejection like any other planner output — and, like any
-    /// other planner output, it stays keyed by authorization state, so a rejection cached for
-    /// an unauthenticated request is never served to an authenticated one.
+    /// The cache stores a refused operation's plan like any other — and, like any other,
+    /// it stays keyed by authorization state, so a refusal cached for an unauthenticated
+    /// request is never served to an authenticated one.
     #[test(tokio::test)]
-    async fn rejection_response_is_cached() {
+    async fn refused_operation_plan_is_cached() {
         let (mock, handle) = tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
+        // The plan `QueryPlannerService::get` returns for a refused operation: no root
+        // node, and the query marked as emptied.
+        let mut refused_query = Query::empty_for_tests();
+        refused_query.unauthorized.operation_emptied = true;
+        let refusal_plan = QueryPlan {
+            usage_reporting: Arc::new(UsageReporting::Operation(Default::default())),
+            root: None,
+            formatted_query_plan: None,
+            query: Arc::new(refused_query),
+            estimated_size: Default::default(),
+        };
         let (driver, planner_calls) = spawn_counting_planner(
             handle,
-            // The content `QueryPlannerService::get` returns for a whole-query rejection:
-            // null data carrying the unauthorized-path errors.
-            QueryPlannerContent::Response {
-                response: Box::new(
-                    crate::graphql::Response::builder()
-                        .data(crate::json_ext::Value::Null)
-                        .error(
-                            crate::graphql::Error::builder()
-                                .message("Unauthorized field or type")
-                                .extension_code("UNAUTHORIZED_FIELD_OR_TYPE")
-                                .build(),
-                        )
-                        .build(),
-                ),
+            QueryPlannerContent::Plan {
+                plan: Arc::new(refusal_plan),
             },
         );
 

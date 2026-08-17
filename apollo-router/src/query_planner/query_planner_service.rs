@@ -661,19 +661,11 @@ mod tests {
             .await
             .unwrap();
 
-        if let QueryPlannerContent::Plan { plan, .. } =
-            response.content.expect("successful response")
-        {
-            insta::with_settings!({sort_maps => true}, {
-                insta::assert_json_snapshot!("plan_usage_reporting", plan.usage_reporting);
-            });
-            insta::assert_debug_snapshot!(
-                "plan_root",
-                plan.root.as_deref().expect("non-empty plan")
-            );
-        } else {
-            panic!("unexpected query planner content")
-        }
+        let QueryPlannerContent::Plan { plan } = response.content.expect("successful response");
+        insta::with_settings!({sort_maps => true}, {
+            insta::assert_json_snapshot!("plan_usage_reporting", plan.usage_reporting);
+        });
+        insta::assert_debug_snapshot!("plan_root", plan.root.as_deref().expect("non-empty plan"));
     }
 
     #[test(tokio::test)]
@@ -736,10 +728,7 @@ mod tests {
 
         let content = response.content.expect("expected a successful response");
 
-        let plan = match content {
-            QueryPlannerContent::Plan { plan, .. } => plan,
-            _ => panic!("expected a Plan response, received {content:?}"),
-        };
+        let QueryPlannerContent::Plan { plan } = content;
 
         assert_eq!(plan.root, None, "expected an empty plan");
     }
@@ -1072,27 +1061,24 @@ mod tests {
             .await
             .unwrap();
 
-        if let QueryPlannerContent::Plan { plan, .. } = result {
-            check_query_plan_coverage(
-                plan.root.as_ref().expect("non-empty query plan"),
-                None,
-                &plan.query.subselections,
-            );
+        let QueryPlannerContent::Plan { plan } = result;
+        check_query_plan_coverage(
+            plan.root.as_ref().expect("non-empty query plan"),
+            None,
+            &plan.query.subselections,
+        );
 
-            let mut keys: Vec<String> = Vec::new();
-            for (key, value) in plan.query.subselections.iter() {
-                let mut serialized = String::from("query");
-                serialize_selection_set(&value.selection_set, &mut serialized);
-                keys.push(format!(
-                    "{:?} {} {}",
-                    key.defer_label, key.defer_conditions.bits, serialized
-                ))
-            }
-            keys.sort();
-            keys.join("\n")
-        } else {
-            panic!()
+        let mut keys: Vec<String> = Vec::new();
+        for (key, value) in plan.query.subselections.iter() {
+            let mut serialized = String::from("query");
+            serialize_selection_set(&value.selection_set, &mut serialized);
+            keys.push(format!(
+                "{:?} {} {}",
+                key.defer_label, key.defer_conditions.bits, serialized
+            ))
         }
+        keys.sort();
+        keys.join("\n")
     }
 
     /// Warm-up reaches this service with `CacheKeyMetadata::default()`, the same metadata an
@@ -1139,11 +1125,7 @@ mod tests {
             .await
             .unwrap();
 
-        let QueryPlannerContent::Plan { plan } = content else {
-            panic!(
-                "a refusal must arrive as a plan, so the caching layer records its usage reporting"
-            )
-        };
+        let QueryPlannerContent::Plan { plan } = content;
         assert!(
             plan.root.is_none(),
             "an unauthenticated request must not plan any work; a plan with fetches \
