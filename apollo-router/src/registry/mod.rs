@@ -589,10 +589,8 @@ fn parse_rate_limit_error(error: &OciError) -> Option<Duration> {
     None
 }
 
-#[warn(dead_code)]
 type OciLicenseStream = Pin<Box<dyn Stream<Item = Result<License, OciError>> + Send>>;
 
-#[warn(dead_code)]
 pub(crate) fn create_oci_license_stream(
     oci_config: OciConfig,
 ) -> Result<OciLicenseStream, anyhow::Error> {
@@ -601,7 +599,6 @@ pub(crate) fn create_oci_license_stream(
     Ok(Box::pin(stream_license_from_oci(oci_config)))
 }
 
-#[warn(dead_code)]
 fn stream_license_from_oci(
     oci_config: OciConfig,
 ) -> impl Stream<Item = Result<License, OciError>> {
@@ -651,7 +648,6 @@ fn stream_license_from_oci(
     ReceiverStream::new(receiver).boxed()
 }
 
-#[warn(dead_code)]
 async fn fetch_license_oci(
     oci_config: &OciConfig,
 ) -> Result<License, OciError> {
@@ -684,7 +680,6 @@ async fn fetch_license_oci(
     }
 }
 
-#[warn(dead_code)]
 async fn fetch_license_from_reference(
     client: &mut Client,
     auth: &RegistryAuth,
