@@ -38,6 +38,7 @@ use crate::Endpoint;
 use crate::ListenAddr;
 use crate::apollo_studio_interop::extended_references_layer::ExtendedReferencesLayer;
 use crate::axum_factory::CanceledRequest;
+use crate::batching::SplitBatchRequestLayer;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::graphql;
@@ -78,7 +79,6 @@ use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::query_parsing;
 use crate::services::router;
-use crate::services::router::batching::BatchingLayer;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::supergraph;
@@ -120,7 +120,7 @@ impl RouterService {
 
         let service = ServiceBuilder::new()
             .layer(DisplayRouterRequestLayer)
-            .layer(BatchingLayer::new(batching))
+            .layer(SplitBatchRequestLayer::new(batching))
             .layer(RouterToSupergraphRequestLayer)
             .layer(ExpandIdsLayer::new(persisted_queries.clone()))
             .layer(APQCachingLayer::new(apq_expander))

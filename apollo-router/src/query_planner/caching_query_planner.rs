@@ -54,7 +54,6 @@ enum Outcome {
     Success = 3,
     Error = 4,
     Backpressure = 5,
-    BatchingError = 6,
 }
 
 impl std::fmt::Display for Outcome {
@@ -66,7 +65,6 @@ impl std::fmt::Display for Outcome {
             Outcome::Success => write!(f, "success"),
             Outcome::Error => write!(f, "error"),
             Outcome::Backpressure => write!(f, "backpressure"),
-            Outcome::BatchingError => write!(f, "batching_error"),
         }
     }
 }
@@ -596,9 +594,6 @@ where
                     }
                     Err(CacheResolverError::Backpressure(_)) => {
                         record_outcome_if_none(&outcome_recorded, Outcome::Backpressure);
-                    }
-                    Err(CacheResolverError::BatchingError(_)) => {
-                        record_outcome_if_none(&outcome_recorded, Outcome::BatchingError);
                     }
                 };
             })
