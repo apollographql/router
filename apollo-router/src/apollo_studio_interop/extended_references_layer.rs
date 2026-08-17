@@ -86,7 +86,7 @@ where
                     // We shouldn't ever reach here unless the pipeline was set up improperly
                     // (i.e. programmer error), but do something better than panicking just in case.
                     let errors = vec![
-                        Error::builder()
+                        Error::request_error_builder()
                             .message("Cannot find executable document".to_string())
                             .extension_code("MISSING_EXECUTABLE_DOCUMENT")
                             .build(),

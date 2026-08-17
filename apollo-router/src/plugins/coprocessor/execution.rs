@@ -604,7 +604,7 @@ where
                 tracing::error!("coprocessor error handling deferred execution response: {e}");
                 graphql::Response::builder()
                     .error(
-                        Error::builder()
+                        Error::request_error_builder()
                             .message("Internal error handling deferred response")
                             .extension_code("INTERNAL_ERROR")
                             .build(),

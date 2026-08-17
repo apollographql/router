@@ -4158,11 +4158,13 @@ mod tests {
         let subgraph_driver = tokio::spawn(async move {
             let (req, responder) = handle_subgraph.next_request().await.unwrap();
             use crate::graphql::Error;
+            // XXX(@goto-bus-stop): we use a response with partial data + a request error here,
+            // which is not valid by graphql spec
             responder.send_response(
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .error(
-                        Error::builder()
+                        Error::request_error_builder()
                             .message("test error")
                             .extension_code("TEST_ERROR")
                             .build(),
@@ -4255,11 +4257,13 @@ mod tests {
         let subgraph_driver = tokio::spawn(async move {
             let (req, responder) = handle_subgraph.next_request().await.unwrap();
             use crate::graphql::Error;
+            // XXX(@goto-bus-stop): we use a response with partial data + a request error here,
+            // which is not valid by graphql spec
             responder.send_response(
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .error(
-                        Error::builder()
+                        Error::request_error_builder()
                             .message("test error")
                             .extension_code("TEST_ERROR")
                             .build(),
@@ -4632,11 +4636,11 @@ mod tests {
             .build()
     }
 
-    fn valid_response_with_errors() -> crate::graphql::Response {
+    fn valid_response_with_request_error() -> crate::graphql::Response {
         use crate::graphql::Error;
         crate::graphql::Response::builder()
             .errors(vec![
-                Error::builder()
+                Error::request_error_builder()
                     .message("error")
                     .extension_code("TEST")
                     .build(),
@@ -4660,7 +4664,7 @@ mod tests {
     fn test_minimal_graphql_validation() {
         assert!(is_graphql_response_minimally_valid(&valid_response()));
         assert!(is_graphql_response_minimally_valid(
-            &valid_response_with_errors()
+            &valid_response_with_request_error()
         ));
         assert!(!is_graphql_response_minimally_valid(&invalid_response()));
     }
@@ -4743,10 +4747,14 @@ mod tests {
         assert!(body.get("data").is_some());
 
         // Test selective: only errors
+        // XXX(@goto-bus-stop): we use a response with data + a request error here, which is not
+        // valid by graphql spec
         let response_with_errors = graphql::Response::builder()
             .data(serde_json_bytes::json!({"test": "data"}))
             .errors(vec![
-                graphql::Error::builder().message("test error").build(),
+                graphql::Error::request_error_builder()
+                    .message("test error")
+                    .build(),
             ])
             .extensions(serde_json_bytes::Map::from_iter([(
                 "ext_key".into(),
@@ -4874,7 +4882,9 @@ mod tests {
         // When data is configured but is None, should send data: null
         let response_no_data = graphql::Response::builder()
             .errors(vec![
-                graphql::Error::builder().message("test error").build(),
+                graphql::Error::request_error_builder()
+                    .message("test error")
+                    .build(),
             ])
             .build();
 
@@ -4888,6 +4898,8 @@ mod tests {
         );
         assert!(result.is_some());
         let body = result.unwrap();
+        // XXX(@goto-bus-stop): this is not really up to graphql spec: if there are request errors,
+        // data is required to be *absent* rather than null
         assert!(
             body.get("data").is_some(),
             "data field should be included even when null"
@@ -4996,9 +5008,15 @@ mod tests {
         use crate::plugins::coprocessor::BodyFieldsConf;
 
         // Original response with data, errors, and extensions
+        // XXX(@goto-bus-stop): we use a response with data + a request error here, which is not
+        // valid by graphql spec
         let original = graphql::Response::builder()
             .data(json!({"original": "data"}))
-            .error(Error::builder().message("original error").build())
+            .error(
+                Error::request_error_builder()
+                    .message("original error")
+                    .build(),
+            )
             .extension("original_ext", json!("original_value"))
             .build();
 
@@ -5910,7 +5928,9 @@ mod tests {
                     // Chunk 2: response with errors — condition will fire
                     Response::builder()
                         .errors(vec![
-                            GraphQLError::builder().message("deferred error").build(),
+                            GraphQLError::request_error_builder()
+                                .message("deferred error")
+                                .build(),
                         ])
                         .build(),
                 ];

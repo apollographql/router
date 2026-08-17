@@ -208,7 +208,7 @@ where
                         .body(router::body::from_bytes(
                             serde_json::json!({
                                 "errors": [
-                                    graphql::Error::builder()
+                                    graphql::Error::request_error_builder()
                                         .message(format!(
                                             r#"'content-type' header must be one of: {:?} or {:?}"#,
                                             APPLICATION_JSON.essence_str(),
@@ -234,7 +234,7 @@ where
                         .body(router::body::from_bytes(
                             serde_json::json!({
                                 "errors": [
-                                    graphql::Error::builder()
+                                    graphql::Error::request_error_builder()
                                         .message(format!("GET request 'content-type' header may only contain: {:?}", APPLICATION_JSON.essence_str()))
                                         .extension_code("INVALID_CONTENT_TYPE_HEADER")
                                         .build()
@@ -266,7 +266,7 @@ where
                         .body(router::body::from_bytes(
                             serde_json::json!({
                                 "errors": [
-                                    graphql::Error::builder()
+                                    graphql::Error::request_error_builder()
                                         .message(format!(
                                             r#"'accept' header must be one of: \"*/*\", {:?}, {:?}, {:?} or {:?}"#,
                                             APPLICATION_JSON.essence_str(),

@@ -31,7 +31,7 @@ pub(super) fn request_failure(
     } else {
         crate::services::router::Response::error_builder()
             .errors(vec![
-                Error::builder()
+                Error::request_error_builder()
                     .message(error_details.message.unwrap_or_default())
                     .build(),
             ])
@@ -60,7 +60,7 @@ pub(super) fn response_failure(
     } else {
         crate::services::router::Response::error_builder()
             .errors(vec![
-                Error::builder()
+                Error::request_error_builder()
                     .message(error_details.message.unwrap_or_default())
                     .build(),
             ])

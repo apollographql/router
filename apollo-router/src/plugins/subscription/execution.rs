@@ -153,7 +153,7 @@ fn subscription_fatal_error(message: impl Into<String>, extension_code: &str) ->
         .subscribed(false)
         .extension(SUBSCRIPTION_ERROR_EXTENSION_KEY, true)
         .error(
-            graphql::Error::builder()
+            graphql::Error::request_error_builder()
                 .message(message)
                 .extension_code(extension_code)
                 .build(),

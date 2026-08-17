@@ -64,7 +64,7 @@ where
                             // improperly (i.e. programmer error), but do something better than
                             // panicking just in case.
                             let errors = vec![
-                                Error::builder()
+                                Error::request_error_builder()
                                     .message("Cannot find executable document".to_string())
                                     .extension_code("MISSING_EXECUTABLE_DOCUMENT")
                                     .build(),
@@ -91,7 +91,7 @@ where
                             // We shouldn't end up here if the request is valid, and validation
                             // should happen well before this, but do something just in case.
                             let errors = vec![
-                                Error::builder()
+                                Error::request_error_builder()
                                     .message("Cannot find operation".to_string())
                                     .extension_code("MISSING_OPERATION")
                                     .build(),
@@ -108,7 +108,7 @@ where
                         Ok(op) => {
                             if op.operation_type == OperationType::Mutation {
                                 let errors = vec![
-                                    Error::builder()
+                                    Error::request_error_builder()
                                         .message(
                                             "Mutations can only be sent over HTTP POST".to_string(),
                                         )
@@ -211,7 +211,7 @@ mod forbid_http_get_mutations_tests {
 
     #[tokio::test]
     async fn it_doesnt_let_non_http_post_mutations_pass_through() {
-        let expected_error = Error::builder()
+        let expected_error = Error::request_error_builder()
             .message("Mutations can only be sent over HTTP POST".to_string())
             .extension_code("MUTATION_FORBIDDEN")
             .build();

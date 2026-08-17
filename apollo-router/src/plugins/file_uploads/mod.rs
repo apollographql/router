@@ -200,7 +200,7 @@ fn operation_body_timeout_error(
     router::Response::error_builder()
         .status_code(StatusCode::GATEWAY_TIMEOUT)
         .errors(vec![
-            graphql::Error::builder()
+            graphql::Error::request_error_builder()
                 .message("The file upload operation body took too long to arrive")
                 .extension_code("GATEWAY_TIMEOUT")
                 .build(),

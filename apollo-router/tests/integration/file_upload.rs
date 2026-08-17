@@ -1912,7 +1912,7 @@ mod helper {
 
     impl IntoResponse for FileUploadError {
         fn into_response(self) -> axum::response::Response {
-            let error = apollo_router::graphql::Error::builder()
+            let error = apollo_router::graphql::Error::request_error_builder()
                 .message(self.to_string().as_str())
                 .extension_code("FILE_UPLOAD_ERROR") // Without this line, the error cannot be built...
                 .build();

@@ -215,7 +215,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
                 req.id,
             )
         } else {
-            let error = crate::error::Error::builder()
+            let error = crate::error::Error::request_error_builder()
                 .message(format!(
                     "couldn't find mock for query {}",
                     serde_json::to_string(body).unwrap()

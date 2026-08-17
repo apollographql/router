@@ -1059,7 +1059,7 @@ mod tests {
                         .context(req.context)
                         .status_code(StatusCode::BAD_REQUEST)
                         .errors(vec![
-                            crate::graphql::Error::builder()
+                            crate::graphql::Error::request_error_builder()
                                 .message("nope")
                                 .extension_code("NOPE")
                                 .build(),

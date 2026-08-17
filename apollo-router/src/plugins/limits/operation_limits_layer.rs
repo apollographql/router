@@ -85,7 +85,7 @@ where
                     .status_code(http::StatusCode::INTERNAL_SERVER_ERROR)
                     .context(req.context)
                     .error(
-                        graphql::Error::builder()
+                        graphql::Error::request_error_builder()
                             .message("Cannot find executable document")
                             .extension_code("MISSING_EXECUTABLE_DOCUMENT")
                             .build(),
@@ -126,7 +126,7 @@ where
                 let mut build = |exceeded, code, message| {
                     if exceeded {
                         errors.push(
-                            graphql::Error::builder()
+                            graphql::Error::request_error_builder()
                                 .message(message)
                                 .extension_code(code)
                                 .build(),

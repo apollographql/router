@@ -180,7 +180,7 @@ async fn test_subgraph_layer_error_emits_metric() {
                 graphql::Response::builder()
                     .data(json!({"data": null}))
                     .errors(vec![
-                        graphql::Error::builder()
+                        graphql::Error::execution_error_builder()
                             .message("error in subgraph layer")
                             .extension_code(expected_error_code)
                             .extension("service", expected_service)
@@ -259,7 +259,7 @@ async fn test_subgraph_layer_entities_error_emits_metric() {
                 graphql::Response::builder()
                     .data(json!({"data": {"_entities": [{"name": null}]}}))
                     .errors(vec![
-                        graphql::Error::builder()
+                        graphql::Error::execution_error_builder()
                             .message("error in subgraph layer")
                             // Explicitly exclude setting service as it should get populated by subgraph_service
                             .extension_code(expected_error_code)
@@ -341,7 +341,7 @@ async fn test_include_subgraph_error_disabled_does_not_redact_error_metrics() {
                 graphql::Response::builder()
                     .data(json!({"data": null}))
                     .errors(vec![
-                        graphql::Error::builder()
+                        graphql::Error::execution_error_builder()
                             .message("error in subgraph layer")
                             .extension_code(expected_error_code)
                             .extension("service", expected_service)

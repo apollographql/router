@@ -108,7 +108,7 @@ fn subscription_with_subgraph_service(
             Ok((
                 Value::default(),
                 vec![
-                    Error::builder()
+                    Error::request_error_builder()
                         .message("can't open new subscription, limit reached")
                         .extension_code("SUBSCRIPTION_MAX_LIMIT")
                         .build(),
@@ -126,7 +126,7 @@ fn subscription_with_subgraph_service(
                 Ok((
                     Value::default(),
                     vec![
-                        Error::builder()
+                        Error::request_error_builder()
                             .message("subscription support is not enabled")
                             .extension_code("SUBSCRIPTION_DISABLED")
                             .build(),
@@ -193,7 +193,7 @@ fn subscription_with_subgraph_service(
                         None => {
                             return Ok((
                                 Value::default(),
-                                vec![Error::builder()
+                                vec![Error::request_error_builder()
                             .message("no subscription conf sender provided for a subscription")
                             .extension_code("NO_SUBSCRIPTION_CONF_TX")
                             .build()],
@@ -205,7 +205,7 @@ fn subscription_with_subgraph_service(
                     return Ok((
                         Value::default(),
                         vec![
-                            Error::builder()
+                            Error::request_error_builder()
                                 .message(format!("cannot send the subscription data: {err:?}"))
                                 .extension_code("SUBSCRIPTION_DATA_SEND_ERROR")
                                 .build(),
@@ -228,7 +228,7 @@ fn subscription_with_subgraph_service(
             }
             None => {
                 vec![
-                    Error::builder()
+                    Error::request_error_builder()
                         .message("subscription mode is not configured for this subgraph")
                         .extension_code("INVALID_SUBSCRIPTION_MODE")
                         .extension("service", service_name.as_ref())

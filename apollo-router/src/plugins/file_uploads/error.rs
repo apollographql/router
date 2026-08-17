@@ -83,7 +83,7 @@ impl FileUploadError {
 
 impl From<FileUploadError> for graphql::Error {
     fn from(value: FileUploadError) -> Self {
-        Self::builder()
+        Self::request_error_builder()
             .message(value.to_string())
             .extension_code(match &value {
                 FileUploadError::MaxFilesLimitExceeded(_) => {

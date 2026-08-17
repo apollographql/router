@@ -127,7 +127,7 @@ where
                 Err(err) => {
                     return router::Response::error_builder()
                         .error(
-                            graphql::Error::builder()
+                            graphql::Error::request_error_builder()
                                 .message(String::from("Invalid GraphQL request"))
                                 .extension_code(err.extension_code)
                                 .extension("details", err.extension_details)
@@ -145,7 +145,7 @@ where
                 Err(err) => {
                     return router::Response::error_builder()
                         .error(
-                            graphql::Error::builder()
+                            graphql::Error::request_error_builder()
                                 .message(String::from("Invalid GraphQL request"))
                                 .extension_code(err.extension_code)
                                 .extension("details", err.extension_details)

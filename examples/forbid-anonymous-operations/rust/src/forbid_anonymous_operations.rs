@@ -59,7 +59,7 @@ impl Plugin for ForbidAnonymousOperations {
                     // Prepare an HTTP 400 response with a GraphQL error message
                     let res = supergraph::Response::error_builder()
                         .error(
-                            graphql::Error::builder()
+                            graphql::Error::request_error_builder()
                                 .message("Anonymous operations are not allowed")
                                 .extension_code("ANONYMOUS_OPERATION")
                                 .build(),

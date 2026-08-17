@@ -546,7 +546,7 @@ async fn error_through_real_pipeline(config: Value) -> graphql::Response {
                         subgraph::Response::fake_builder()
                             .context(req.context)
                             .error(
-                                graphql::Error::builder()
+                                graphql::Error::request_error_builder()
                                     .message("the subgraph blew up")
                                     .extension_code("SUBGRAPH_BOOM")
                                     .build(),

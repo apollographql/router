@@ -626,7 +626,7 @@ where
                 tracing::error!("coprocessor error handling deferred supergraph response: {e}");
                 graphql::Response::builder()
                     .error(
-                        Error::builder()
+                        Error::request_error_builder()
                             .message("Internal error handling deferred response")
                             .extension_code("INTERNAL_ERROR")
                             .build(),
@@ -1390,7 +1390,7 @@ mod tests {
                         .response(
                             graphql::Response::builder()
                                 .error(
-                                    crate::graphql::Error::builder()
+                                    crate::graphql::Error::request_error_builder()
                                         .message("deferred error")
                                         .build(),
                                 )

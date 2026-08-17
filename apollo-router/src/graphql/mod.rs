@@ -101,48 +101,74 @@ impl Default for Error {
 
 #[buildstructor::buildstructor]
 impl Error {
-    /// Returns a builder that builds a GraphQL [`Error`] from its components.
+    /// Returns a builder that builds a GraphQL [Request Error].
     ///
-    /// Builder methods:
+    /// Request errors do not have paths.
     ///
-    /// * `.message(impl Into<`[`String`]`>)`
-    ///   Required.
-    ///   Sets [`Error::message`].
+    /// ## Builder methods
+    /// - `.message(impl Into<`[`String`]`>` - Required: a human-readable error description
+    /// - `.extension_code(impl Into<`[`String`]`>` - Recommended: a machine-readable error code
+    /// - `.location(impl Into<`[`Location`]`>` - Optional: location in GraphQL source text that
+    ///   caused the error
+    /// - `.extension(impl Into<`[`ByteString`]`>, impl Into<`[`Value`]`>)` - Optional: add a field
+    ///   to the extensions object.
     ///
-    /// * `.locations(impl Into<`[`Vec`]`<`[`Location`]`>>)`
-    ///   Optional.
-    ///   Sets the entire `Vec` of [`Error::locations`], which defaults to the empty.
-    ///
-    /// * `.location(impl Into<`[`Location`]`>)`
-    ///   Optional, may be called multiple times.
-    ///   Adds one item at the end of [`Error::locations`].
-    ///
-    /// * `.path(impl Into<`[`Path`]`>)`
-    ///   Optional.
-    ///   Sets [`Error::path`].
-    ///
-    /// * `.extensions(impl Into<`[`serde_json_bytes::Map`]`<`[`ByteString`]`, `[`Value`]`>>)`
-    ///   Optional.
-    ///   Sets the entire [`Error::extensions`] map, which defaults to empty.
-    ///
-    /// * `.extension(impl Into<`[`ByteString`]`>, impl Into<`[`Value`]`>)`
-    ///   Optional, may be called multiple times.
-    ///   Adds one item to the [`Error::extensions`] map.
-    ///
-    /// * `.extension_code(impl Into<`[`String`]`>)`
-    ///   Optional.
-    ///   Sets the "code" in the extension map. Will be ignored if extension already has this key
-    ///   set.
-    ///
-    /// * `.apollo_id(impl Into<`[`Uuid`]`>)`
-    ///   Optional.
-    ///   Sets the unique identifier for this Error. This should only be used in cases of
-    ///   deserialization or testing. If not given, the ID will be auto-generated.
-    ///
-    /// * `.build()`
-    ///   Finishes the builder and returns a GraphQL [`Error`].
+    /// [Request Error]: https://spec.graphql.org/October2021/#sec-Errors.Request-errors
     #[builder(visibility = "pub")]
-    fn new(
+    fn request_error_new(
+        message: String,
+        extension_code: Option<String>,
+        locations: Vec<Location>,
+        extensions: JsonMap<ByteString, Value>,
+    ) -> Self {
+        Self::unchecked_builder()
+            .message(message)
+            .locations(locations)
+            .and_extension_code(extension_code)
+            .extensions(extensions)
+            .build()
+    }
+
+    /// Returns a builder that builds a GraphQL [Execution Error].
+    ///
+    /// Execution errors occur during execution of specific fields.
+    ///
+    /// ## Builder methods
+    /// - `.message(impl Into<`[`String`]`>` - Required: a human-readable error description
+    /// - `.path(impl Into<`[`Path`]`>` - Required: path to the field that emitted the error
+    /// - `.extension_code(impl Into<`[`String`]`>` - Recommended: a machine-readable error code
+    /// - `.location(impl Into<`[`Location`]`>` - Optional: location in GraphQL source text that
+    ///   caused the error
+    /// - `.extension(impl Into<`[`ByteString`]`>, impl Into<`[`Value`]`>)` - Optional: add a field
+    ///   to the extensions object.
+    ///
+    /// [Execution Error]: https://spec.graphql.org/October2021/#sec-Errors.Field-errors
+    #[builder(visibility = "pub")]
+    fn execution_error_new(
+        message: String,
+        path: Path,
+        extension_code: Option<String>,
+        locations: Vec<Location>,
+        extensions: JsonMap<ByteString, Value>,
+    ) -> Self {
+        Self::unchecked_builder()
+            .message(message)
+            .path(path)
+            .and_extension_code(extension_code)
+            .locations(locations)
+            .extensions(extensions)
+            .build()
+    }
+
+    /// Dangerously build any kind of GraphQL error.
+    ///
+    /// **Always** prefer [Error::request_error_builder] or [Error::execution_error_builder] to
+    /// show explicitly what kind of error you're building.
+    ///
+    /// This variant exists purely to support non-spec use cases and to support overriding fields
+    /// that are normally automatically populated.
+    #[builder(visibility = "pub")]
+    fn unchecked_new(
         message: String,
         locations: Vec<Location>,
         path: Option<Path>,
@@ -187,7 +213,7 @@ impl Error {
                 reason: format!("invalid `message` within error: {err}"),
             }),
         }?;
-        let locations = extract_key_value_from_object!(object, "locations")
+        let locations: Vec<Location> = extract_key_value_from_object!(object, "locations")
             .map(skip_invalid_locations)
             .map(serde_json_bytes::from_value)
             .transpose()
@@ -195,7 +221,7 @@ impl Error {
                 reason: format!("invalid `locations` within error: {err}"),
             })?
             .unwrap_or_default();
-        let path = extract_key_value_from_object!(object, "path")
+        let path: Option<Path> = extract_key_value_from_object!(object, "path")
             .map(serde_json_bytes::from_value)
             .transpose()
             .map_err(|err| MalformedResponseError {
@@ -216,9 +242,14 @@ impl Error {
         })
         .transpose()?;
 
-        Ok(Self::new(
-            message, locations, path, None, extensions, apollo_id,
-        ))
+        // We'll use an unchecked builder as it could be either a request error or an execution error
+        Ok(Self::unchecked_builder()
+            .message(message)
+            .and_path(path)
+            .locations(locations)
+            .extensions(extensions)
+            .and_apollo_id(apollo_id)
+            .build())
     }
 
     pub(crate) fn from_value_completion_value(value: &Value) -> Option<Error> {
@@ -249,10 +280,15 @@ impl Error {
                     serde_json_bytes::from_value(p.clone()).ok()
                 });
 
-        Some(Self::new(
-            message, locations, path, None, extensions,
-            None, // apollo_id is not serialized, so it will never exist in a serialized vc error
-        ))
+        // We'll use an unchecked builder as it could be either a request error or an execution error
+        Some(
+            Self::unchecked_builder()
+                .message(message)
+                .and_path(path)
+                .locations(locations)
+                .extensions(extensions)
+                .build(),
+        )
     }
 
     /// Extract the error code from [`Error::extensions`] as a String if it is set.

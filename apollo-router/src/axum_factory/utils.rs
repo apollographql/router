@@ -117,7 +117,7 @@ async fn shed_as_503(
             Ok(router::Response::error_builder()
                 .status_code(StatusCode::SERVICE_UNAVAILABLE)
                 .error(
-                    graphql::Error::builder()
+                    graphql::Error::request_error_builder()
                         .message("Your request has been concurrency limited waiting for the router")
                         .extension_code("REQUEST_CONCURRENCY_LIMITED")
                         .build(),

@@ -70,7 +70,7 @@ async fn test_count_supergraph_errors_with_no_previously_counted_errors() {
                 .context(context)
                 .status_code(StatusCode::BAD_REQUEST)
                 .errors(vec![
-                    graphql::Error::builder()
+                    graphql::Error::unchecked_builder()
                         .message("You did a bad request.")
                         .extension_code("GRAPHQL_VALIDATION_FAILED")
                         .apollo_id(error_id)
@@ -137,14 +137,14 @@ async fn test_count_supergraph_errors_with_previously_counted_errors() {
                 .context(context)
                 .status_code(StatusCode::BAD_REQUEST)
                 .error(
-                    graphql::Error::builder()
+                    graphql::Error::unchecked_builder()
                         .message("You did a bad request.")
                         .extension_code("GRAPHQL_VALIDATION_FAILED")
                         .apollo_id(validation_error_id)
                         .build(),
                 )
                 .error(
-                    graphql::Error::builder()
+                    graphql::Error::unchecked_builder()
                         .message("Custom error text")
                         .extension_code("CUSTOM_ERROR")
                         .apollo_id(custom_error_id)
@@ -233,7 +233,7 @@ async fn test_count_subgraph_errors_with_include_subgraphs_enabled() {
                 .subgraph_name("some-subgraph".to_string())
                 .status_code(StatusCode::BAD_REQUEST)
                 .errors(vec![
-                    graphql::Error::builder()
+                    graphql::Error::unchecked_builder()
                         .message("You did a bad request.")
                         .path(Path::from("obj/field"))
                         .extension_code("GRAPHQL_VALIDATION_FAILED")
@@ -301,7 +301,7 @@ async fn test_count_subgraph_errors_with_include_subgraphs_disabled() {
                 .subgraph_name("some-subgraph".to_string())
                 .status_code(StatusCode::BAD_REQUEST)
                 .errors(vec![
-                    graphql::Error::builder()
+                    graphql::Error::unchecked_builder()
                         .message("You did a bad request.")
                         .path(Path::from("obj/field"))
                         .extension_code("GRAPHQL_VALIDATION_FAILED")
@@ -366,7 +366,7 @@ async fn test_count_subgraph_errors_emits_span_event_with_error_code() {
             .context(context)
             .status_code(StatusCode::BAD_REQUEST)
             .errors(vec![
-                graphql::Error::builder()
+                graphql::Error::unchecked_builder()
                     .message("subgraph went boom")
                     .extension_code("SUBGRAPH_HTTP_ERROR")
                     .apollo_id(error_id)
@@ -408,7 +408,7 @@ async fn test_count_execution_errors() {
                 .context(context)
                 .status_code(StatusCode::BAD_REQUEST)
                 .errors(vec![
-                    graphql::Error::builder()
+                    graphql::Error::unchecked_builder()
                         .message("You did a bad request.")
                         .path(Path::from("obj/field"))
                         .extension_code("GRAPHQL_VALIDATION_FAILED")
@@ -468,7 +468,7 @@ async fn test_count_operation_errors_skips_span_event_when_marker_is_set() {
         let _ = context.insert(CLIENT_NAME, "client-1".to_string());
         let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
 
-        let mut pre_emitted = graphql::Error::builder()
+        let mut pre_emitted = graphql::Error::unchecked_builder()
             .message("connector went boom")
             .extension_code("ALREADY_EMITTED_CODE")
             .apollo_id(Uuid::new_v4())
@@ -532,7 +532,7 @@ async fn test_count_execution_errors_emits_span_event_with_error_code() {
             .context(context)
             .status_code(StatusCode::BAD_REQUEST)
             .errors(vec![
-                graphql::Error::builder()
+                graphql::Error::unchecked_builder()
                     .message("execution went boom")
                     .extension_code("EXECUTION_ERROR_CODE")
                     .apollo_id(error_id)
@@ -575,7 +575,7 @@ async fn test_count_router_errors() {
                 .context(context)
                 .status_code(StatusCode::BAD_REQUEST)
                 .errors(vec![
-                    graphql::Error::builder()
+                    graphql::Error::unchecked_builder()
                         .message("You did a bad request.")
                         .path(Path::from("obj/field"))
                         .extension_code("GRAPHQL_VALIDATION_FAILED")
@@ -633,7 +633,7 @@ async fn test_count_operation_errors_with_extended_config_enabled() {
         let _ = context.insert(CLIENT_NAME, "client-1".to_string());
         let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
 
-        let error = graphql::Error::builder()
+        let error = graphql::Error::unchecked_builder()
             .message("some error")
             .extension_code("SOME_ERROR_CODE")
             .extension("service", "mySubgraph")
@@ -846,14 +846,14 @@ async fn test_subgraph_error_counting() {
         let example_response = graphql::Response::builder()
             .data(json!({"data": null}))
             .errors(vec![
-                graphql::Error::builder()
+                graphql::Error::unchecked_builder()
                     .message("previously counted error")
                     .extension_code("ERROR_CODE")
                     .extension("service", subgraph_name)
                     .path(Path::from("obj/field"))
                     .apollo_id(previously_counted_error_id)
                     .build(),
-                graphql::Error::builder()
+                graphql::Error::unchecked_builder()
                     .message("error in supergraph layer")
                     .extension_code("SUPERGRAPH_CODE")
                     .extension("service", subgraph_name)
@@ -965,14 +965,14 @@ async fn test_execution_error_counting() {
         let example_response = graphql::Response::builder()
             .data(json!({"data": null}))
             .errors(vec![
-                graphql::Error::builder()
+                graphql::Error::unchecked_builder()
                     .message("previously counted error")
                     .extension_code("ERROR_CODE")
                     .extension("service", subgraph_name)
                     .path(Path::from("obj/field"))
                     .apollo_id(previously_counted_error_id)
                     .build(),
-                graphql::Error::builder()
+                graphql::Error::unchecked_builder()
                     .message("error in supergraph layer")
                     .extension_code("SUPERGRAPH_CODE")
                     .extension("service", subgraph_name)
@@ -1086,14 +1086,14 @@ async fn test_supergraph_error_counting() {
         let example_response = graphql::Response::builder()
             .data(json!({"data": null}))
             .errors(vec![
-                graphql::Error::builder()
+                graphql::Error::unchecked_builder()
                     .message("previously counted error")
                     .extension_code("ERROR_CODE")
                     .extension("service", subgraph_name)
                     .path(Path::from("obj/field"))
                     .apollo_id(previously_counted_error_id)
                     .build(),
-                graphql::Error::builder()
+                graphql::Error::unchecked_builder()
                     .message("error in supergraph layer")
                     .extension_code("SUPERGRAPH_CODE")
                     .extension("service", subgraph_name)
@@ -1244,14 +1244,14 @@ async fn test_router_error_counting() {
             responder.send_response(
                 RouterResponse::fake_builder()
                     .errors(vec![
-                        graphql::Error::builder()
+                        graphql::Error::unchecked_builder()
                             .message("previously counted error")
                             .extension_code("ERROR_CODE")
                             .extension("service", subgraph_name)
                             .path(Path::from("obj/field"))
                             .apollo_id(previously_counted_error_id)
                             .build(),
-                        graphql::Error::builder()
+                        graphql::Error::unchecked_builder()
                             .message("error in supergraph layer")
                             .extension_code("SUPERGRAPH_CODE")
                             .extension("service", subgraph_name)
@@ -1374,19 +1374,19 @@ async fn test_operation_errors_emitted_when_config_is_enabled() {
                         "path": Path::from("someType/someField")
                     }]))
                 .errors(vec![
-                    graphql::Error::builder()
+                    graphql::Error::unchecked_builder()
                         .message("some error")
                         .extension_code("SOME_ERROR_CODE")
                         .extension("service", "mySubgraph")
                         .path(Path::from("obj/field"))
                         .build(),
-                    graphql::Error::builder()
+                    graphql::Error::unchecked_builder()
                         .message("some other error")
                         .extension_code("SOME_OTHER_ERROR_CODE")
                         .extension("service", "myOtherSubgraph")
                         .path(Path::from("obj/arr/@/firstElementField"))
                         .build(),
-                    graphql::Error::builder()
+                    graphql::Error::unchecked_builder()
                         .message("some ignored error")
                         .extension_code("SOME_IGNORED_ERROR_CODE")
                         .extension("service", "myIgnoredSubgraph")

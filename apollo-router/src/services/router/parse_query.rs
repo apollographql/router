@@ -14,7 +14,7 @@ use crate::apollo_studio_interop::UsageReporting;
 use crate::compute_job::MaybeBackPressureError;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
-use crate::error::Error as RouterError;
+use crate::graphql;
 use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
 use crate::query_planner::OperationKind;
@@ -106,7 +106,7 @@ where
             let query = req.supergraph_request.body().query.as_ref();
             if query.is_none() || query.unwrap().trim().is_empty() {
                 let errors = vec![
-                    RouterError::builder()
+                    graphql::Error::request_error_builder()
                         .message("Must provide query string.".to_string())
                         .extension_code("MISSING_QUERY_STRING")
                         .build(),
@@ -165,7 +165,7 @@ where
                     let errors = match errors.into_graphql_errors() {
                         Ok(v) => v,
                         Err(errors) => vec![
-                            crate::graphql::Error::builder()
+                            crate::graphql::Error::request_error_builder()
                                 .message(errors.to_string())
                                 .extension_code(errors.extension_code())
                                 .build(),

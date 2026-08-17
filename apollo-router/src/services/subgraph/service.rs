@@ -446,7 +446,7 @@ mod tests {
                 .body(
                     serde_json::to_string(&Response {
                         errors: vec![
-                            Error::builder()
+                            Error::request_error_builder()
                                 .message("This went wrong")
                                 .extension_code("FETCH_ERROR")
                                 .build(),
@@ -2119,7 +2119,7 @@ mod tests {
                                 serde_json::to_string(&ServerMessage::Error {
                                     id: Some(client_id),
                                     payload: ServerError::Error(
-                                        Error::builder()
+                                        Error::unchecked_builder()
                                             .message("boom")
                                             .extension_code("MY_SUBGRAPH_ERROR")
                                             .build(),

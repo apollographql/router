@@ -194,7 +194,7 @@ impl Service<router::Request> for InvalidationService {
                         .status_code(StatusCode::UNAUTHORIZED)
                         .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                         .error(
-                            graphql::Error::builder()
+                            graphql::Error::request_error_builder()
                                 .message(String::from("Missing authorization header"))
                                 .extension_code(StatusCode::UNAUTHORIZED.to_string())
                                 .build(),
@@ -248,7 +248,7 @@ impl Service<router::Request> for InvalidationService {
                                         .status_code(StatusCode::UNAUTHORIZED)
                                         .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                                         .error(
-                                            graphql::Error::builder()
+                                            graphql::Error::request_error_builder()
                                                 .message(String::from(
                                                     "Invalid authorization header",
                                                 ))
@@ -283,7 +283,7 @@ impl Service<router::Request> for InvalidationService {
                                         .status_code(StatusCode::BAD_REQUEST)
                                         .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                                         .error(
-                                            graphql::Error::builder()
+                                            graphql::Error::request_error_builder()
                                                 .message(message)
                                                 .extension_code(
                                                     StatusCode::BAD_REQUEST.to_string(),
@@ -319,7 +319,7 @@ impl Service<router::Request> for InvalidationService {
                                             .status_code(StatusCode::BAD_REQUEST)
                                             .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                                             .error(
-                                                graphql::Error::builder()
+                                                graphql::Error::request_error_builder()
                                                     .message(err.to_string())
                                                     .extension_code(
                                                         StatusCode::BAD_REQUEST.to_string(),
@@ -337,7 +337,7 @@ impl Service<router::Request> for InvalidationService {
                                     .status_code(StatusCode::BAD_REQUEST)
                                     .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                                     .error(
-                                        graphql::Error::builder()
+                                        graphql::Error::request_error_builder()
                                             .message(err)
                                             .extension_code(StatusCode::BAD_REQUEST.to_string())
                                             .build(),
@@ -353,7 +353,7 @@ impl Service<router::Request> for InvalidationService {
                             .status_code(StatusCode::METHOD_NOT_ALLOWED)
                             .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
                             .error(
-                                graphql::Error::builder()
+                                graphql::Error::request_error_builder()
                                     .message("".to_string())
                                     .extension_code(StatusCode::METHOD_NOT_ALLOWED.to_string())
                                     .build(),

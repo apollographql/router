@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn it_converts_http_with_graphql_errors_to_graphql() {
-        let error = graphql::Error::builder()
+        let error = graphql::Error::request_error_builder()
             .message("error was encountered for test")
             .extension_code("SOME_EXTENSION")
             .extension("service", "test_service")
@@ -315,7 +315,7 @@ mod tests {
 
     #[test]
     fn it_converts_error_http_with_graphql_errors_to_graphql() {
-        let error = graphql::Error::builder()
+        let error = graphql::Error::request_error_builder()
             .message("error was encountered for test")
             .extension_code("SOME_EXTENSION")
             .extension("service", "test_service")
