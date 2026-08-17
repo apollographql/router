@@ -537,20 +537,18 @@ mod whole_query_rejection {
     type SubgraphHandles =
         Arc<Mutex<Vec<tower_test::mock::Handle<subgraph::Request, subgraph::Response>>>>;
 
-    /// Builds a router that rejects `REJECTED_QUERY`, replacing every subgraph with a
-    /// `tower_test` mock. The mocks hold no canned responses, so reaching one fails.
-    async fn build_router_rejecting_whole_query() -> (router::BoxCloneService, SubgraphHandles) {
+    /// Builds a router that rejects `REJECTED_QUERY` under the given `directives` config,
+    /// replacing every subgraph with a `tower_test` mock. The mocks hold no canned
+    /// responses, so reaching one fails.
+    async fn build_rejecting_router(
+        directives: serde_json::Value,
+    ) -> (router::BoxCloneService, SubgraphHandles) {
         let handles: SubgraphHandles = Arc::new(Mutex::new(Vec::new()));
         let handles_clone = handles.clone();
 
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({
-                "authorization": {
-                    "directives": {
-                        "enabled": true,
-                        "reject_unauthorized": true
-                    }
-                }
+                "authorization": { "directives": directives }
             }))
             .unwrap()
             .schema(AUTHENTICATED_SCHEMA)
@@ -565,6 +563,31 @@ mod whole_query_rejection {
             .unwrap();
 
         (service, handles)
+    }
+
+    async fn build_router_rejecting_whole_query() -> (router::BoxCloneService, SubgraphHandles) {
+        build_rejecting_router(serde_json::json!({
+            "enabled": true,
+            "reject_unauthorized": true
+        }))
+        .await
+    }
+
+    /// Sends `REJECTED_QUERY` and parses the response body as it goes on the wire.
+    ///
+    /// `into_graphql_response_stream` deserializes into `graphql::Response`, where
+    /// `data: Option<Value>` turns JSON `null` into `None` and then skips it on
+    /// re-serialization. Anything asserting on whether `data` is present has to read the
+    /// bytes instead.
+    async fn rejected_response_body(service: router::BoxCloneService) -> serde_json::Value {
+        let response = service
+            .oneshot(rejected_request(Context::new()))
+            .await
+            .unwrap();
+        let bytes = body::into_bytes(response.response.into_body())
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
     }
 
     /// Fails if any subgraph mock received a request, or if the router built no subgraph
@@ -659,6 +682,86 @@ mod whole_query_rejection {
                 .extensions()
                 .with_lock(|lock| lock.contains_key::<Arc<UsageReporting>>())
         );
+    }
+
+    /// The rejection sends `data: null`, not an absent `data`. GraphQL gives those two
+    /// different meanings — an absent `data` marks a request error, a null one marks a
+    /// field error that propagated to the root — so the presence of the key is part of the
+    /// response contract. The snapshot tests cannot cover this, because they assert on a
+    /// `graphql::Response` that has already lost the distinction.
+    #[tokio::test]
+    async fn rejection_sends_null_data() {
+        let (service, _handles) = build_router_rejecting_whole_query().await;
+
+        let body = rejected_response_body(service).await;
+
+        assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
+    }
+
+    /// `errors.response: disabled` suppresses the authorization errors, so `data: null` is
+    /// the only thing left telling the client the operation produced nothing.
+    #[tokio::test]
+    async fn rejection_with_errors_disabled_sends_null_data_and_no_errors() {
+        let (service, _handles) = build_rejecting_router(serde_json::json!({
+            "enabled": true,
+            "reject_unauthorized": true,
+            "errors": { "response": "disabled" }
+        }))
+        .await;
+
+        let body = rejected_response_body(service).await;
+
+        assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
+        assert_eq!(body.get("errors"), None);
+    }
+
+    /// `errors.response: extensions` moves the authorization errors under
+    /// `extensions.authorizationErrors` and leaves `errors` out of the response.
+    #[tokio::test]
+    async fn rejection_with_errors_in_extensions() {
+        let (service, _handles) = build_rejecting_router(serde_json::json!({
+            "enabled": true,
+            "reject_unauthorized": true,
+            "errors": { "response": "extensions" }
+        }))
+        .await;
+
+        let body = rejected_response_body(service).await;
+
+        assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
+        assert_eq!(body.get("errors"), None);
+        let authorization_errors = body
+            .pointer("/extensions/authorizationErrors")
+            .and_then(|value| value.as_array())
+            .expect("the errors must move under extensions.authorizationErrors");
+        assert_eq!(
+            authorization_errors.len(),
+            2,
+            "one error per unauthorized path: `orga.id` and `orga.creatorUser.phone`"
+        );
+    }
+
+    /// `dry_run` and `reject_unauthorized` combine rather than cancelling out: `dry_run`
+    /// reports the paths without modifying the operation, and `reject_unauthorized` then
+    /// refuses it anyway.
+    ///
+    /// This matters for any change that treats an emptied document as the trigger for
+    /// rejection. `dry_run` never empties the document, so a rejection here can only come
+    /// from the config, and getting that wrong turns `dry_run` into a mode that silently
+    /// stops enforcing.
+    #[tokio::test]
+    async fn dry_run_with_reject_unauthorized_still_rejects() {
+        let (service, handles) = build_rejecting_router(serde_json::json!({
+            "enabled": true,
+            "reject_unauthorized": true,
+            "dry_run": true
+        }))
+        .await;
+
+        let body = rejected_response_body(service).await;
+
+        assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
+        assert_no_subgraph_calls(handles).await;
     }
 }
 
