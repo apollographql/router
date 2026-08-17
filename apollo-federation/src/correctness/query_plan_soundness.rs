@@ -8,6 +8,7 @@ use apollo_compiler::executable::Name;
 use itertools::Itertools;
 
 use super::query_plan_analysis::AnalysisContext;
+use super::response_shape::BoolExpr;
 use super::response_shape::Clause;
 use super::response_shape::PossibleDefinitions;
 use super::response_shape::ResponseShape;
@@ -230,7 +231,7 @@ fn collect_require_condition(
                 parent_type.clone(),
                 requires_application.fields,
             )?;
-            result.merge_with(&rs.add_boolean_conditions(variant.boolean_clause()))?;
+            result.merge_with(&rs.add_boolean_expr_conditions(variant.boolean_clause()))?;
         }
     }
     Ok(result)
@@ -277,7 +278,7 @@ fn key_directive_matches(
     }
     let final_require_shape = condition.add_boolean_conditions(boolean_clause);
     let path_constraint = SubgraphConstraint::at_root(context.subgraphs_by_name());
-    let assumption = Clause::default(); // empty assumption at the top level
+    let assumption = BoolExpr::always_true();
     compare_response_shapes_with_constraint(
         &path_constraint,
         &assumption,
@@ -636,7 +637,7 @@ mod key_only_response_shape_compare {
                 }
             }
         }
-        Some(first.with_updated_fields(Clause::default(), result_sub))
+        Some(first.with_updated_fields(BoolExpr::always_true(), result_sub))
     }
 
     fn key_only_compare_definition_variant(

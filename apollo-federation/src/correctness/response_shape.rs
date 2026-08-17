@@ -532,6 +532,231 @@ impl PartialEq for Clause {
     }
 }
 
+/// A boolean formula in disjunctive normal form (OR of ANDs).
+/// - Empty vec = false (unsatisfiable).
+/// - Vec containing one empty Clause = true (always satisfied).
+/// - Clauses sorted and deduplicated.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoolExpr(Vec<Clause>);
+
+impl BoolExpr {
+    /// Returns true if this expression is always true (contains an empty clause).
+    pub fn is_always_true(&self) -> bool {
+        self.0.iter().any(|c| c.is_always_true())
+    }
+
+    /// Returns true if this expression is unsatisfiable (empty vec).
+    pub fn is_unsatisfiable(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Wraps a single clause as a DNF expression.
+    pub fn from_clause(c: Clause) -> Self {
+        BoolExpr(vec![c])
+    }
+
+    /// Returns the always-true expression (one empty clause).
+    pub fn always_true() -> Self {
+        BoolExpr(vec![Clause::default()])
+    }
+
+    /// Returns the unsatisfiable expression (no clauses).
+    pub fn unsatisfiable() -> Self {
+        BoolExpr(vec![])
+    }
+
+    /// Access the inner clauses.
+    pub fn clauses(&self) -> &[Clause] {
+        &self.0
+    }
+
+    /// If this expression is a single clause, return a reference to it.
+    pub fn as_single_clause(&self) -> Option<&Clause> {
+        if self.0.len() == 1 {
+            Some(&self.0[0])
+        } else {
+            None
+        }
+    }
+
+    /// Logical AND: distribute each clause in self with each clause in other.
+    /// Drop conflicting products (where Clause::concatenate returns None).
+    pub fn and(&self, other: &BoolExpr) -> BoolExpr {
+        if self.is_unsatisfiable() || other.is_unsatisfiable() {
+            return BoolExpr::unsatisfiable();
+        }
+        if self.is_always_true() {
+            return other.clone();
+        }
+        if other.is_always_true() {
+            return self.clone();
+        }
+        let mut result = Vec::new();
+        for c1 in &self.0 {
+            for c2 in &other.0 {
+                if let Some(combined) = c1.concatenate(c2) {
+                    result.push(combined);
+                }
+            }
+        }
+        let mut expr = BoolExpr(result);
+        expr.simplify();
+        expr
+    }
+
+    /// Logical AND with a single clause.
+    pub fn and_clause(&self, clause: &Clause) -> BoolExpr {
+        if clause.is_always_true() {
+            return self.clone();
+        }
+        self.and(&BoolExpr::from_clause(clause.clone()))
+    }
+
+    /// Logical OR: append clause lists, simplify.
+    pub fn or(&self, other: &BoolExpr) -> BoolExpr {
+        if self.is_always_true() || other.is_always_true() {
+            return BoolExpr::always_true();
+        }
+        if self.is_unsatisfiable() {
+            return other.clone();
+        }
+        if other.is_unsatisfiable() {
+            return self.clone();
+        }
+        let mut result = self.0.clone();
+        result.extend(other.0.iter().cloned());
+        let mut expr = BoolExpr(result);
+        expr.simplify();
+        expr
+    }
+
+    /// Logical NOT using De Morgan's laws.
+    /// NOT(C1 OR C2 OR ...) = NOT(C1) AND NOT(C2) AND ...
+    /// NOT(a AND b AND c) = (!a OR !b OR !c) which is already DNF (each negated literal
+    /// is a single-literal clause).
+    pub fn not(&self) -> BoolExpr {
+        if self.is_unsatisfiable() {
+            return BoolExpr::always_true();
+        }
+        if self.is_always_true() {
+            return BoolExpr::unsatisfiable();
+        }
+        // Negate each clause to get a DNF, then AND them together.
+        let mut result = BoolExpr::always_true();
+        for clause in &self.0 {
+            // NOT(a AND b AND c) = (!a OR !b OR !c)
+            let negated_clause = Self::negate_clause(clause);
+            result = result.and(&negated_clause);
+        }
+        result
+    }
+
+    /// Negate a single clause: NOT(a AND b AND c) = (!a OR !b OR !c)
+    fn negate_clause(clause: &Clause) -> BoolExpr {
+        if clause.is_always_true() {
+            return BoolExpr::unsatisfiable();
+        }
+        let clauses: Vec<Clause> = clause
+            .literals()
+            .iter()
+            .map(|lit| {
+                let negated = match lit {
+                    Literal::Pos(name) => Literal::Neg(name.clone()),
+                    Literal::Neg(name) => Literal::Pos(name.clone()),
+                };
+                Clause::from_literals(&[negated])
+            })
+            .collect();
+        let mut expr = BoolExpr(clauses);
+        expr.simplify();
+        expr
+    }
+
+    /// Check if self implies other (self entails other).
+    /// Uses semantic implication: self AND NOT(other) is unsatisfiable.
+    /// Fast-path checks handle common cases without computing NOT.
+    pub fn implies(&self, other: &BoolExpr) -> bool {
+        if self.is_unsatisfiable() {
+            // False implies anything.
+            return true;
+        }
+        if other.is_always_true() {
+            // Anything implies true.
+            return true;
+        }
+        if other.is_unsatisfiable() {
+            // Only false implies false.
+            return self.is_unsatisfiable();
+        }
+        // Fast path: literal-subset check (sound but incomplete).
+        // If every clause in self implies at least one clause in other, we're done.
+        let all_covered = self.0.iter().all(|self_clause| {
+            other
+                .0
+                .iter()
+                .any(|other_clause| self_clause.implies(other_clause))
+        });
+        if all_covered {
+            return true;
+        }
+        // Full semantic check: self AND NOT(other) is unsatisfiable.
+        self.and(&other.not()).is_unsatisfiable()
+    }
+
+    /// Subsumption elimination: drop clause A if there exists clause B where
+    /// B's literal set is a subset of A's (B is more general, so A is redundant).
+    /// Also sort and dedup.
+    fn simplify(&mut self) {
+        // Sort clauses by length then lexicographically
+        self.0.sort_by(|a, b| {
+            a.literals().len().cmp(&b.literals().len()).then_with(|| {
+                a.literals()
+                    .iter()
+                    .zip(b.literals().iter())
+                    .map(|(la, lb)| {
+                        la.variable()
+                            .cmp(lb.variable())
+                            .then_with(|| la.polarity().cmp(&lb.polarity()))
+                    })
+                    .find(|o| !o.is_eq())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+        });
+        self.0.dedup();
+
+        // Subsumption: drop clause A if clause B is strictly more general
+        // (B's literals are a subset of A's literals, meaning A implies B).
+        let clauses = self.0.clone();
+        self.0.retain(|a| {
+            !clauses
+                .iter()
+                .any(|b| b.literals().len() < a.literals().len() && a.implies(b))
+        });
+    }
+}
+
+impl fmt::Display for BoolExpr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.is_unsatisfiable() {
+            write!(f, "false")
+        } else if self.0.len() == 1 {
+            write!(f, "{}", self.0[0])
+        } else {
+            for (i, clause) in self.0.iter().enumerate() {
+                if i > 0 {
+                    write!(f, " ∨ ")?;
+                }
+                if clause.literals().len() > 1 {
+                    write!(f, "({})", clause)?;
+                } else {
+                    write!(f, "{}", clause)?;
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
 //==================================================================================================
 // Normalization of Field Selection
 
@@ -662,8 +887,8 @@ fn field_display(field: &Field) -> Field {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DefinitionVariant {
-    /// Boolean clause is the secondary key after NormalizedTypeCondition as primary key.
-    boolean_clause: Clause,
+    /// Boolean expression (DNF) is the secondary key after NormalizedTypeCondition as primary key.
+    boolean_clause: BoolExpr,
 
     /// Representative field selection for definition/display (see `fn field_display`).
     /// - This is the first field of the same field selection key in depth-first order as
@@ -675,7 +900,7 @@ pub struct DefinitionVariant {
 }
 
 impl DefinitionVariant {
-    pub fn boolean_clause(&self) -> &Clause {
+    pub fn boolean_clause(&self) -> &BoolExpr {
         &self.boolean_clause
     }
 
@@ -687,7 +912,7 @@ impl DefinitionVariant {
         self.sub_selection_response_shape.as_ref()
     }
 
-    pub fn with_updated_clause(&self, boolean_clause: Clause) -> Self {
+    pub fn with_updated_clause(&self, boolean_clause: BoolExpr) -> Self {
         DefinitionVariant {
             boolean_clause,
             representative_field: self.representative_field.clone(),
@@ -705,7 +930,7 @@ impl DefinitionVariant {
 
     pub fn with_updated_fields(
         &self,
-        boolean_clause: Clause,
+        boolean_clause: BoolExpr,
         sub_selection_response_shape: Option<ResponseShape>,
     ) -> Self {
         DefinitionVariant {
@@ -716,7 +941,7 @@ impl DefinitionVariant {
     }
 
     pub fn new(
-        boolean_clause: Clause,
+        boolean_clause: BoolExpr,
         representative_field: Field,
         sub_selection_response_shape: Option<ResponseShape>,
     ) -> Self {
@@ -842,7 +1067,7 @@ impl PossibleDefinitions {
     fn insert_possible_definition(
         &mut self,
         type_conditions: NormalizedTypeCondition,
-        boolean_clause: Clause, // the aggregate boolean condition of the current selection set
+        boolean_clause: BoolExpr,
         representative_field: Field,
         sub_selection_response_shape: Option<ResponseShape>,
     ) -> Result<(), FederationError> {
@@ -1059,7 +1284,7 @@ impl ResponseShapeContext {
             .or_default();
         value.insert_possible_definition(
             self.type_condition.clone(),
-            field_clause,
+            BoolExpr::from_clause(field_clause),
             field_display(field),
             sub_selection_response_shape,
         )

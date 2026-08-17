@@ -1,16 +1,12 @@
 // Compare response shapes from a query plan and an input operation.
 
-use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
-use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::Field;
-use itertools::Itertools;
 
-use super::response_shape::Clause;
+use super::response_shape::BoolExpr;
 use super::response_shape::DefinitionVariant;
 use super::response_shape::FieldSelectionKey;
-use super::response_shape::Literal;
 use super::response_shape::NormalizedTypeCondition;
 use super::response_shape::PossibleDefinitions;
 use super::response_shape::PossibleDefinitionsPerTypeCondition;
@@ -96,17 +92,17 @@ pub fn compare_response_shapes(
     this: &ResponseShape,
     other: &ResponseShape,
 ) -> Result<(), ComparisonError> {
-    let assumption = Clause::default(); // empty assumption at the top level
+    let assumption = BoolExpr::always_true();
     compare_response_shapes_with_constraint(&DummyPathConstraint, &assumption, this, other)
 }
 
 /// Check if `this` is a subset of `other`, but also use the `PathConstraint` to ignore infeasible
 /// type conditions in `other`.
-/// - `assumption`: Boolean literals that are assumed to be true. This may affect the
+/// - `assumption`: Boolean condition that is assumed to hold. This may affect the
 ///   interpretation of the `this` and `other` response shapes.
 pub(crate) fn compare_response_shapes_with_constraint<T: PathConstraint>(
     path_constraint: &T,
-    assumption: &Clause,
+    assumption: &BoolExpr,
     this: &ResponseShape,
     other: &ResponseShape,
 ) -> Result<(), ComparisonError> {
@@ -175,7 +171,7 @@ fn detail_single_object_type_condition(type_cond: &NormalizedTypeCondition) -> S
 
 fn compare_possible_definitions<T: PathConstraint>(
     path_constraint: &T,
-    assumption: &Clause,
+    assumption: &BoolExpr,
     this: &PossibleDefinitions,
     other: &PossibleDefinitions,
 ) -> Result<(), ComparisonError> {
@@ -254,7 +250,7 @@ fn compare_possible_definitions<T: PathConstraint>(
 
 fn compare_possible_definitions_per_type_condition<T: PathConstraint>(
     path_constraint: &T,
-    assumption: &Clause,
+    assumption: &BoolExpr,
     this: &PossibleDefinitionsPerTypeCondition,
     other: &PossibleDefinitionsPerTypeCondition,
 ) -> Result<(), ComparisonError> {
@@ -274,154 +270,76 @@ fn compare_possible_definitions_per_type_condition<T: PathConstraint>(
 
 /// Under the given `assumption` and `this_variant`'s clause, match `this_variant` against
 /// `other`'s variants.
-/// - `this_variant` may match a set of `other`'s variants collectively, even if there are no
-///   individual matching variant. Thus, this function tries to collect/merge all implied variants
-///   and then compare.
-/// - Note that we may need to case-split over Boolean variables. It happens when there are more
-///   Boolean variables used in the `other`'s variants. This function tries to find the smallest
-///   set of missing Boolean variables to case-split. It starts with the empty set, then tries
-///   increasingly larger sets until a matching subset is found. For each set of variables, it
-///   checks if every possible combination of Boolean values (hypothesis) has a match.
+/// - Computes the coverage (OR of all applicable `other` variant conditions).
+/// - Checks if `this_variant`'s condition implies the coverage.
+/// - If so, collects and merges the covered variants for comparison.
 fn solve_boolean_constraints<T: PathConstraint>(
     path_constraint: &T,
-    assumption: &Clause,
+    assumption: &BoolExpr,
     this_variant: &DefinitionVariant,
     other: &PossibleDefinitionsPerTypeCondition,
 ) -> Result<(), ComparisonError> {
-    let Some(base_clause) = this_variant.boolean_clause().concatenate(assumption) else {
+    let this_cond = this_variant.boolean_clause().and(assumption);
+    if this_cond.is_unsatisfiable() {
         // This variant is infeasible. Skip.
         return Ok(());
+    }
+
+    // Compute coverage = OR of all other variant conditions
+    let mut coverage = BoolExpr::unsatisfiable();
+    for variant in other.conditional_variants() {
+        coverage = coverage.or(variant.boolean_clause());
+    }
+
+    // Check if this_cond implies coverage
+    if !this_cond.implies(&coverage) {
+        return Err(ComparisonError::new(format!(
+            "Failed to solve Boolean constraints: condition {this_cond} \
+             is not covered by other variants (coverage: {coverage})"
+        )));
+    }
+
+    // Collect all variants from `other` that are implied by this_cond and merge them.
+    let Some(other_variant) = collect_variants_for_boolean_expr(other, &this_cond)? else {
+        return Err(ComparisonError::new(format!(
+            "no variants found for Boolean condition in solve_boolean_constraints: {this_cond}"
+        )));
     };
-    let hypothesis_groups = extract_boolean_hypotheses(&base_clause, other);
-    // Try each hypothesis group and see if any one works
-    let mut errors = Vec::new();
-    for group in &hypothesis_groups {
-        // In each group, every hypothesis must match.
-        let result = group.iter().try_for_each(|hypothesis| {
-            let Some(full_clause) = base_clause.concatenate(hypothesis) else {
-                // Inconsistent hypothesis (a bug in extract_boolean_hypotheses)
-                return Err(ComparisonError::new(format!(
-                    "Internal error: inconsistent generated hypothesis {hypothesis}\n\
-                     - assumption: {assumption}\n\
-                     - this_clause: {this_clause}",
-                     this_clause = this_variant.boolean_clause()
-                )));
-            };
-            let Some(other_variant) = collect_variants_for_boolean_condition(other, &full_clause)? else {
-                return Err(ComparisonError::new(format!(
-                    "no variants found for Boolean condition in solve_boolean_constraints: {full_clause}"
-                )));
-            };
-            compare_definition_variant(path_constraint, &full_clause, this_variant, &other_variant)
-                .map_err(|e| {
-                    e.add_description(&format!(
-                        "mismatched variants for hypothesis: {hypothesis}\n\
-                         - Assumption: {assumption}\n\
-                         - this_clause: {this_clause}\n\
-                         - Full condition: {full_clause}",
-                        this_clause = this_variant.boolean_clause())
-                    )
-                })
-        });
-        match result {
-            Ok(()) => {
-                return Ok(());
-            }
-            Err(e) => {
-                let group_str = group.iter().join(", ");
-                errors.push(format!(
-                    "solve_boolean_constraints: group: {group_str}\n\
-                    detail: {e}",
-                ));
-            }
-        }
-    }
-    // None worked => error
-    Err(ComparisonError::new(format!(
-        "Failed to solve Boolean constraints w/ assumption {assumption}\n\
-         this_variant: {this_variant}\n\
-         other: {other}\n\
-         detail: {}",
-        errors.iter().join("\n")
-    )))
+
+    compare_definition_variant(path_constraint, &this_cond, this_variant, &other_variant).map_err(
+        |e| {
+            e.add_description(&format!(
+                "mismatched variants\n\
+                 - Assumption: {assumption}\n\
+                 - this_clause: {this_clause}\n\
+                 - Full condition: {this_cond}",
+                this_clause = this_variant.boolean_clause()
+            ))
+        },
+    )
 }
 
-/// A set of variable names.
-/// Must be sorted by the variable name.
-type BooleanVariables = Vec<Name>;
-
-/// Generate sets of hypotheses to case-split over that are applicable to the target `defs`.
-/// - Construct hypotheses based on the variables used in the Boolean conditions in `defs`.
-/// - Excludes the literals in the `assumption` since it's already assumed to be true.
-/// - If there are variants with no extra Boolean variables, it will generate a no-hypothesis
-///   group, which contains only one empty clause.
-fn extract_boolean_hypotheses(
-    assumption: &Clause,
+/// Like `collect_variants_for_boolean_condition`, but filters using a `BoolExpr`.
+/// A variant is included if `filter_expr AND variant.boolean_clause()` is satisfiable
+/// (i.e., the two conditions are consistent — there exists an assignment satisfying both).
+pub(crate) fn collect_variants_for_boolean_expr(
     defs: &PossibleDefinitionsPerTypeCondition,
-) -> Vec<Vec<Clause>> {
-    // Collect sets of variables that can be used to case-split over.
-    let mut variable_groups = IndexSet::default();
-    for variant in defs.conditional_variants() {
-        let Some(remaining_condition) = variant.boolean_clause().subtract(assumption) else {
-            // Skip unsatisfiable variants.
-            continue;
-        };
-        // Collect variables from the remaining condition.
-        // Invariant: Clauses are expected to be sorted by the variable name.
-        let vars: BooleanVariables = remaining_condition
-            .literals()
-            .iter()
-            .map(|lit| lit.variable())
-            .cloned()
-            .collect();
-        variable_groups.insert(vars);
-    }
-    // Generate groups of Boolean hypotheses.
-    variable_groups
-        .into_iter()
-        .map(|group| generate_clauses(&group))
-        .collect()
-}
-
-/// Generate all possible clauses from the given variables.
-/// - If `vars` is empty, it will return a single empty clause.
-fn generate_clauses(vars: &[Name]) -> Vec<Clause> {
-    let mut state = Vec::new();
-    let mut result = Vec::new();
-    fn inner_generate(state: &mut Vec<Literal>, result: &mut Vec<Clause>, remaining_vars: &[Name]) {
-        match remaining_vars {
-            [] => {
-                result.push(Clause::from_literals(state));
-            }
-            [var, rest @ ..] => {
-                state.push(Literal::Pos(var.clone()));
-                inner_generate(state, result, rest);
-                state.pop();
-                state.push(Literal::Neg(var.clone()));
-                inner_generate(state, result, rest);
-                state.pop();
-            }
-        }
-    }
-    inner_generate(&mut state, &mut result, vars);
-    result
-}
-
-/// Collect all variants implied by the Boolean condition and merge them into one.
-/// Returns `None` if no variants are applicable.
-pub(crate) fn collect_variants_for_boolean_condition(
-    defs: &PossibleDefinitionsPerTypeCondition,
-    filter_cond: &Clause,
+    filter_expr: &BoolExpr,
 ) -> Result<Option<DefinitionVariant>, ComparisonError> {
-    let mut iter = defs
+    let mut matching_variants: Vec<&DefinitionVariant> = defs
         .conditional_variants()
         .iter()
-        .filter(|variant| filter_cond.implies(variant.boolean_clause()));
-    let Some(first) = iter.next() else {
+        .filter(|variant| {
+            // A variant is applicable if filter_expr and the variant's condition are consistent.
+            !filter_expr.and(variant.boolean_clause()).is_unsatisfiable()
+        })
+        .collect();
+    if matching_variants.is_empty() {
         return Ok(None);
-    };
+    }
+    let first = matching_variants.remove(0);
     let mut result_sub = first.sub_selection_response_shape().cloned();
-    for variant in iter {
+    for variant in matching_variants {
         compare_representative_field(variant.representative_field(), first.representative_field())
             .map_err(|e| {
                 e.add_description("mismatch in representative_field under definition variant")
@@ -441,14 +359,14 @@ pub(crate) fn collect_variants_for_boolean_condition(
         }
     }
     Ok(Some(
-        first.with_updated_fields(filter_cond.clone(), result_sub),
+        first.with_updated_fields(filter_expr.clone(), result_sub),
     ))
 }
 
 /// Precondition: this.boolean_clause() + hypothesis implies other.boolean_clause().
 fn compare_definition_variant<T: PathConstraint>(
     path_constraint: &T,
-    hypothesis: &Clause,
+    hypothesis: &BoolExpr,
     this: &DefinitionVariant,
     other: &DefinitionVariant,
 ) -> Result<(), ComparisonError> {

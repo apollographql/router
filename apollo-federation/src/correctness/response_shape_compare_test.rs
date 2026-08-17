@@ -340,3 +340,102 @@ fn test_boolean_condition_case_split_5() {
     "#;
     assert_compare_operation_docs(x, y);
 }
+
+#[test]
+fn test_disjunctive_coverage_across_variables() {
+    // x requires `id` unconditionally.
+    let x = r#"
+        query {
+            test_i {
+                id
+            }
+        }
+    "#;
+    // y fetches `id` under three mutually exclusive conditions on two
+    // variables that form a tautology: ($v0) ∨ ($v1 ∧ ¬$v0) ∨ (¬$v0 ∧ ¬$v1).
+    // Exercises the BoolExpr implies-based coverage check.
+    let y = r#"
+        query($v0: Boolean!, $v1: Boolean!) {
+            test_i @include(if: $v0) {
+                id
+            }
+            ... @skip(if: $v0) {
+                test_i @include(if: $v1) {
+                    id
+                }
+                ... @skip(if: $v1) {
+                    test_i {
+                        id
+                    }
+                }
+            }
+        }
+    "#;
+    assert_compare_operation_docs(x, y);
+}
+
+#[test]
+fn test_disjunctive_coverage_incomplete() {
+    // x requires `id` unconditionally.
+    let x = r#"
+        query {
+            test_i {
+                id
+            }
+        }
+    "#;
+    // y only fetches `id` under $v0 or ($v1 ∧ ¬$v0), but not when both are
+    // false. This should fail — the plan doesn't cover all cases.
+    let y = r#"
+        query($v0: Boolean!, $v1: Boolean!) {
+            test_i @include(if: $v0) {
+                id
+            }
+            ... @skip(if: $v0) {
+                test_i @include(if: $v1) {
+                    id
+                }
+            }
+        }
+    "#;
+    assert!(compare_operation_docs(x, y).is_err());
+}
+
+#[test]
+fn test_cross_variable_group_coverage() {
+    // x requires `id` unconditionally.
+    let x = r#"
+        query {
+            test_i {
+                id
+            }
+        }
+    "#;
+    // y fetches `id` under four conditions using three variables:
+    //   (v0 ∧ v1) ∨ (v0 ∧ ¬v1) ∨ (¬v0 ∧ v2) ∨ (¬v0 ∧ ¬v2) = true
+    // The variables are split across variant groups — [v0,v1] vs [v0,v2] —
+    // so no single variable group covers all hypotheses. The old brute-force
+    // enumeration extracted variable groups from individual variant clauses
+    // and tried each independently, causing a false positive here.
+    let y = r#"
+        query($v0: Boolean!, $v1: Boolean!, $v2: Boolean!) {
+            ... @include(if: $v0) {
+                test_i @include(if: $v1) {
+                    id
+                }
+                test_i @skip(if: $v1) {
+                    id
+                }
+            }
+            ... @skip(if: $v0) {
+                test_i @include(if: $v2) {
+                    id
+                }
+                test_i @skip(if: $v2) {
+                    id
+                }
+            }
+        }
+    "#;
+    assert_compare_operation_docs(x, y);
+}

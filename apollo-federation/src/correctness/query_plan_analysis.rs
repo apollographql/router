@@ -9,6 +9,7 @@ use apollo_compiler::executable::Name;
 use itertools::Itertools;
 
 use super::query_plan_soundness::check_requires;
+use super::response_shape::BoolExpr;
 use super::response_shape::Clause;
 use super::response_shape::DefinitionVariant;
 use super::response_shape::Literal;
@@ -19,7 +20,7 @@ use super::response_shape::ResponseShape;
 use super::response_shape::compute_response_shape_for_entity_fetch_operation;
 use super::response_shape::compute_response_shape_for_operation;
 use super::response_shape_compare::collect_definitions_for_type_condition;
-use super::response_shape_compare::collect_variants_for_boolean_condition;
+use super::response_shape_compare::collect_variants_for_boolean_expr;
 use crate::FederationError;
 use crate::SingleFederationError;
 use crate::bail;
@@ -57,16 +58,32 @@ impl ResponseShape {
                         .conditional_variants()
                         .iter()
                         .filter_map(|variant| {
-                            let new_clause = variant.boolean_clause().clone();
-                            inherited_clause.concatenate_and_simplify(&new_clause).map(
-                                |(inherited_clause, field_clause)| {
-                                    let sub_rs =
-                                        variant.sub_selection_response_shape().as_ref().map(|rs| {
-                                            rs.inner_simplify_boolean_conditions(&inherited_clause)
-                                        });
-                                    variant.with_updated_fields(field_clause, sub_rs)
-                                },
-                            )
+                            let simplified_clauses: Vec<(Clause, Clause)> = variant
+                                .boolean_clause()
+                                .clauses()
+                                .iter()
+                                .filter_map(|clause| {
+                                    inherited_clause.concatenate_and_simplify(clause)
+                                })
+                                .collect();
+                            if simplified_clauses.is_empty() {
+                                return None;
+                            }
+                            // Simplify per-clause and merge: each clause may imply
+                            // different literals, so a single-clause context would
+                            // prune variants reachable under the others.
+                            let sub_rs =
+                                variant.sub_selection_response_shape().as_ref().map(|rs| {
+                                    simplify_sub_selection_per_clause(rs, &simplified_clauses)
+                                });
+                            let field_clauses: Vec<Clause> =
+                                simplified_clauses.into_iter().map(|(_, fc)| fc).collect();
+                            let bool_expr = field_clauses
+                                .into_iter()
+                                .fold(BoolExpr::unsatisfiable(), |acc, c| {
+                                    acc.or(&BoolExpr::from_clause(c))
+                                });
+                            Some(variant.with_updated_fields(bool_expr, sub_rs))
                         });
                 let updated_defs_per_type_cond = defs_per_type_cond
                     .with_updated_conditional_variants(updated_variants.collect());
@@ -93,20 +110,34 @@ impl ResponseShape {
                         .conditional_variants()
                         .iter()
                         .filter_map(|variant| {
-                            let new_clause = if added_clause.is_always_true() {
+                            let new_bool_expr = if added_clause.is_always_true() {
                                 variant.boolean_clause().clone()
                             } else {
-                                variant.boolean_clause().concatenate(added_clause)?
+                                variant.boolean_clause().and_clause(added_clause)
                             };
-                            inherited_clause.concatenate_and_simplify(&new_clause).map(
-                                |(inherited_clause, field_clause)| {
-                                    let sub_rs =
-                                        variant.sub_selection_response_shape().as_ref().map(|rs| {
-                                            rs.inner_simplify_boolean_conditions(&inherited_clause)
-                                        });
-                                    variant.with_updated_fields(field_clause, sub_rs)
-                                },
-                            )
+                            // Process each clause in the BoolExpr individually
+                            let simplified_clauses: Vec<(Clause, Clause)> = new_bool_expr
+                                .clauses()
+                                .iter()
+                                .filter_map(|clause| {
+                                    inherited_clause.concatenate_and_simplify(clause)
+                                })
+                                .collect();
+                            if simplified_clauses.is_empty() {
+                                return None;
+                            }
+                            let sub_rs =
+                                variant.sub_selection_response_shape().as_ref().map(|rs| {
+                                    simplify_sub_selection_per_clause(rs, &simplified_clauses)
+                                });
+                            let field_clauses: Vec<Clause> =
+                                simplified_clauses.into_iter().map(|(_, fc)| fc).collect();
+                            let bool_expr = field_clauses
+                                .into_iter()
+                                .fold(BoolExpr::unsatisfiable(), |acc, c| {
+                                    acc.or(&BoolExpr::from_clause(c))
+                                });
+                            Some(variant.with_updated_fields(bool_expr, sub_rs))
                         });
                 let updated_defs_per_type_cond = defs_per_type_cond
                     .with_updated_conditional_variants(updated_variants.collect());
@@ -117,11 +148,62 @@ impl ResponseShape {
         result
     }
 
-    /// Add a new condition to a ResponseShape.
+    /// Add a new condition (Clause) to a ResponseShape.
     /// - This method is intended for the top-level response shape.
     pub(crate) fn add_boolean_conditions(&self, clause: &Clause) -> Self {
         self.concatenate_and_simplify_boolean_conditions(&Clause::default(), clause)
     }
+
+    /// Add a new condition (BoolExpr) to a ResponseShape.
+    /// - Each clause in the BoolExpr is ANDed with each variant's clause.
+    pub(crate) fn add_boolean_expr_conditions(&self, expr: &BoolExpr) -> Self {
+        // For single-clause BoolExprs (common case), delegate to the Clause version.
+        if let Some(clause) = expr.as_single_clause() {
+            return self.add_boolean_conditions(clause);
+        }
+        // For multi-clause BoolExprs, AND the expr with each variant's boolean_clause.
+        let mut result = ResponseShape::new(self.default_type_condition().clone());
+        for (key, defs) in self.iter() {
+            let mut updated_defs = PossibleDefinitions::default();
+            for (type_cond, defs_per_type_cond) in defs.iter() {
+                let updated_variants: Vec<_> = defs_per_type_cond
+                    .conditional_variants()
+                    .iter()
+                    .map(|variant| {
+                        let new_expr = variant.boolean_clause().and(expr);
+                        variant.with_updated_clause(new_expr)
+                    })
+                    .filter(|variant| !variant.boolean_clause().is_unsatisfiable())
+                    .collect();
+                let updated_defs_per_type_cond =
+                    defs_per_type_cond.with_updated_conditional_variants(updated_variants);
+                updated_defs.insert(type_cond.clone(), updated_defs_per_type_cond);
+            }
+            result.insert(key.clone(), updated_defs);
+        }
+        result
+    }
+}
+
+/// Simplify a sub-selection response shape under each clause's inherited
+/// context individually, then merge the results.  When all clauses share
+/// the same inherited context (the common single-clause case) this is
+/// equivalent to simplifying once.
+fn simplify_sub_selection_per_clause(
+    rs: &ResponseShape,
+    simplified_clauses: &[(Clause, Clause)],
+) -> ResponseShape {
+    let mut iter = simplified_clauses.iter();
+    let first = iter.next().expect("non-empty simplified_clauses");
+    let mut merged = rs.inner_simplify_boolean_conditions(&first.0);
+    for (inherited, _) in iter {
+        if *inherited != first.0 {
+            let simplified = rs.inner_simplify_boolean_conditions(inherited);
+            // merge_with is infallible for structurally compatible shapes
+            let _ = merged.merge_with(&simplified);
+        }
+    }
+    merged
 }
 
 //==================================================================================================
@@ -798,7 +880,7 @@ fn interpret_plan_node_under_type_condition(
 fn interpret_plan_node_under_boolean_condition(
     context: &AnalysisContext,
     state_def: &PossibleDefinitionsPerTypeCondition,
-    variant_clause: &Clause,
+    variant_clause: &BoolExpr,
     conditions: &[Literal],
     next_type_condition: &Option<Vec<Name>>,
     next_path: &[FetchDataPathElement],
@@ -806,18 +888,20 @@ fn interpret_plan_node_under_boolean_condition(
 ) -> Result<Option<ResponseShape>, String> {
     // We are considering variants that satisfy both the `variant_clause` and the fetch
     // `conditions`. We concatenate them into a single full condition.
-    let Some(full_clause) = variant_clause.concatenate(&Clause::from_literals(conditions)) else {
+    let cond_clause = Clause::from_literals(conditions);
+    let full_expr = variant_clause.and_clause(&cond_clause);
+    if full_expr.is_unsatisfiable() {
         // This variant's clause is false under the current conditions => skip infeasible variant
         return Ok(None);
-    };
+    }
     // Collect all applicable variants into a single merged one for the same reason as explained
     // in the `interpret_plan_node_under_type_condition` function.
-    let Some(merged_variant) = collect_variants_for_boolean_condition(state_def, &full_clause)
+    let Some(merged_variant) = collect_variants_for_boolean_expr(state_def, &full_expr)
         .map_err(|e| e.description().to_string())?
     else {
         // We must have at least one variant for the given clause.
         return Err(format!(
-            "Internal error: failed to collect applicable variants for full clause `{full_clause}`"
+            "Internal error: failed to collect applicable variants for full clause `{full_expr}`"
         ));
     };
     let Some(sub_state) = merged_variant.sub_selection_response_shape() else {
@@ -850,8 +934,6 @@ fn interpret_flatten_node(
     )?;
     let Some(response_shape) = response_shape else {
         // `flatten.path` is addressing a non-existing response object.
-        // Ideally, this should not happen, but QP may try to fetch infeasible selections.
-        // TODO: Report this as a over-fetching later.
         return Ok(ResponseShape::new(state.default_type_condition().clone()));
     };
     Ok(response_shape.simplify_boolean_conditions())
