@@ -1903,10 +1903,6 @@ mod tests {
     /// `CacheKeyMetadata` is part of `CachingQueryKey`'s `Hash`/`Eq`, so the same query
     /// under different authorization state reaches the inner planner again. That keeps an
     /// unauthenticated request from receiving a plan built for an authenticated one.
-    ///
-    /// Drives it through the producer that runs in production — `update_cache_key`, reading
-    /// the request's JWT claims — because that call overwrites the context's
-    /// `CacheKeyMetadata` before the cache key is built.
     #[test(tokio::test)]
     async fn plan_cache_is_segmented_by_authorization_metadata() {
         let (mock, handle) = tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();

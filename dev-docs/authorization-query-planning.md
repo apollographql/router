@@ -211,6 +211,44 @@ The one wrinkle: with `errors.response: disabled`, an emptied operation returns 
 nulls with no errors, indistinguishable from every root field genuinely being null.
 Operators choosing `disabled` have opted out of the signal.
 
+## Outstanding: `data: null` versus `data` absent
+
+The router answers a `reject_unauthorized` refusal with HTTP 200 and `"data": null`.
+The GraphQL specification defines two error classes, and the refusal fits neither
+shape the router sends:
+
+> "A *request error* is an error raised during a *request* which results in no response
+> data." ... "If a request error is raised, the *response* must be a *request error
+> result*. The `data` entry in this map must not be present."
+
+A refusal happens before execution and produces no response data, so it is a request
+error: `data` absent, not `data: null`. The GraphQL-over-HTTP specification then binds
+the status to the body for `application/graphql-response+json`:
+
+> "If the GraphQL response contains the data entry and it is not null, then the server
+> MUST reply with a `2xx` status code." ... "If the GraphQL response does not contain
+> the data entry then the server MUST reply with an appropriate `4xx` or `5xx` status
+> code."
+
+Resolving this carries three coupled decisions:
+
+1. Status by content type. Data-absent with 200 violates a MUST for
+   `application/graphql-response+json`; the legacy `application/json` media type keeps
+   200 regardless. The response shape therefore depends on the negotiated content
+   type, which `ClientRequestAccepts` already tracks.
+2. Error shape. The spec attaches `path` to errors "associated to a particular field
+   in the GraphQL result"; a request error has no result, so the per-path
+   `UNAUTHORIZED_FIELD_OR_TYPE` errors need restructuring or lose their paths.
+3. `errors.response: disabled`. The spec requires non-empty `errors` when `data` is
+   absent, so a request-error refusal with suppressed errors is an invalid response;
+   the option has to override the shape or be rejected for this combination.
+
+`apollo-errors` models per-error HTTP status and per-format rendering, which fits
+decision 1; it does not yet model multi-error responses with paths or the
+absent-versus-null `data` distinction, which live on the response rather than the
+error. `returns_http_200` and `rejection_sends_null_data` hold the current shape and
+flip when this resolves.
+
 ## Still open elsewhere
 
 Keying the plan cache on the filtered query text (making `CacheKeyMetadata` redundant

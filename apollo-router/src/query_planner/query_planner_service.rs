@@ -1079,20 +1079,19 @@ mod tests {
         keys.join("\n")
     }
 
-    /// Warm-up reaches this service with `CacheKeyMetadata::default()`, the same metadata an
-    /// unauthenticated request produces: `queries_to_warm_up` supplies no metadata for
-    /// persisted queries, and for re-warmed cache entries `update_cache_key` derives default
-    /// metadata from warm-up's claimless context. This asserts what the service does with
-    /// those inputs — filtering rejects the operation instead of handing back a plan.
+    /// Warm-up reaches this service with `CacheKeyMetadata::default()`, the same metadata
+    /// an unauthenticated request produces: `queries_to_warm_up` supplies no metadata for
+    /// persisted queries, and for re-warmed cache entries `update_cache_key` derives
+    /// default metadata from warm-up's claimless context. Filtering empties the operation
+    /// under those inputs, so the plan carries no work rather than the unfiltered fetches.
     ///
-    /// Scope: this is not a warm-up-specific code path. `compute_job_type` only selects the
-    /// compute-pool priority and the metric label, and `get` filters before reading it, so
-    /// `QueryPlanningWarmup` behaves exactly like `QueryPlanning` here. Nor does this observe
-    /// the plan cache, which sits above this service; that a rejection is what gets cached,
-    /// and that it stays keyed by authorization state, is covered by
-    /// `caching_query_planner::tests::rejection_response_is_cached`.
+    /// Scope: `compute_job_type` only selects the compute-pool priority and the metric
+    /// label, and `get` filters before reading it, so `QueryPlanningWarmup` behaves
+    /// exactly like `QueryPlanning` here. The plan cache sits above this service; that
+    /// the empty plan is cached keyed by authorization state is covered by
+    /// `caching_query_planner::tests::emptied_operation_plan_is_cached`.
     #[test(tokio::test)]
-    async fn planning_unauthenticated_rejects_rather_than_returning_unfiltered_plan() {
+    async fn planning_unauthenticated_returns_empty_plan_not_unfiltered_plan() {
         let configuration: Configuration = serde_json::from_value(serde_json::json!({
             "authorization": { "directives": { "enabled": true } }
         }))

@@ -3594,12 +3594,9 @@ mod licensed_operation_count_tests {
         }
     }
 
-    /// An operation the query planner rejected on authorization grounds records no
-    /// `UsageReporting`, and is still billed as one licensed operation. Billing does not
-    /// depend on the operation reaching execution.
-    ///
-    /// Anything that changes what a rejected operation puts in the context has to keep this
-    /// at 1. See `usage_reporting_error_is_not_billed` for the way that goes wrong.
+    /// A context holding no `UsageReporting` bills one licensed operation. Billing does
+    /// not depend on the operation reaching execution or reporting anything about
+    /// itself.
     #[tokio::test]
     async fn missing_usage_reporting_is_billed_as_one_operation() {
         async {
@@ -3609,8 +3606,8 @@ mod licensed_operation_count_tests {
         .await;
     }
 
-    /// `UsageReporting::Error` bills nothing. It is the tempting variant to reach for when
-    /// an operation produced no plan, and choosing it drops that operation off the bill.
+    /// `UsageReporting::Error` bills nothing: it is the one variant that zeroes the
+    /// licensed operation count, so an operation reported with it drops off the bill.
     #[tokio::test]
     async fn usage_reporting_error_is_not_billed() {
         async {
@@ -3627,8 +3624,8 @@ mod licensed_operation_count_tests {
         .await;
     }
 
-    /// An operation that carries real reporting details is billed the same as one carrying
-    /// none, so attributing a rejected operation does not change what it costs.
+    /// `UsageReporting::Operation` bills one licensed operation, the same as a context
+    /// holding no reporting at all: attribution does not change what an operation costs.
     #[tokio::test]
     async fn operation_details_are_billed_as_one_operation() {
         async {

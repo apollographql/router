@@ -7676,9 +7676,8 @@ const AUTHENTICATED_INTERFACE_SCHEMA: &str = r#"
 /// Plans `query_str` as an unauthenticated request and returns the original `Query` with
 /// `filtered_query` populated, alongside the schema.
 ///
-/// `QueryPlannerService` builds this pair in production: `filter_query` produces the
-/// filtered document and the planner marks it `is_original = false`. Hand-writing the
-/// filtered query risks pinning a shape filtering never produces.
+/// The pair comes from `QueryPlannerService`, so the filtered `Query` is the one
+/// `filter_query` produces, marked `is_original = false` by the planner.
 async fn authorization_filtered_query(query_str: &str) -> (Arc<Query>, Arc<Schema>) {
     let configuration: Configuration = serde_json::from_value(serde_json::json!({
         "authorization": { "directives": { "enabled": true } }
@@ -7748,9 +7747,8 @@ fn format_filtered_then_original(query: &Query, schema: &Schema, data: Value) ->
 /// `__typename` into its output for the original pass to resolve the type condition on
 /// `... on Foo`, so `inline` survives only if the copy happened.
 ///
-/// A query carrying an inline fragment and a fragment spread together would not pin this:
-/// each form copies `__typename` independently, so either one alone keeps both fields
-/// alive. Hence one query form per test.
+/// One fragment form per test: each form copies `__typename` independently, so a query
+/// carrying both keeps its fields alive when either copy runs.
 #[tokio::test]
 async fn filtered_query_keeps_typename_for_inline_fragment() {
     // `secret` is `@authenticated`, so filtering drops it and leaves `inline`.

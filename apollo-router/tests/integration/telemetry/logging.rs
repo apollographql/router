@@ -242,10 +242,10 @@ async fn test_text_sampler_off() -> Result<(), BoxError> {
     Ok(())
 }
 
-/// The `Authorization error` event for a refused operation belongs to the `execution`
-/// span. The unit tests around authorization cannot see this: the `execution` span comes
-/// from the telemetry plugin, which only joins the pipeline when OpenTelemetry is
-/// initialised for the process, so a spawned router is the smallest thing that has it.
+/// The `Authorization error` event for an unauthorized operation lands under the
+/// `execution` span, exactly once per request. The `execution` span comes from the
+/// telemetry plugin, which only joins the pipeline when OpenTelemetry is initialised for
+/// the process, so a spawned router is the smallest thing that has it.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_authorization_error_event_in_execution_span() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
@@ -277,8 +277,8 @@ async fn test_authorization_error_event_in_execution_span() -> Result<(), BoxErr
         .map(|line| serde_json::from_str(line).expect("log line is JSON"))
         .collect();
 
-    // Exactly once: a refusal is decided at a single place, so a second event for the
-    // same request means two code paths both believe they own the log.
+    // A second event for the same request means two code paths both believe they own
+    // the log.
     assert_eq!(events.len(), 1, "events: {events:?}");
 
     let event = &events[0];

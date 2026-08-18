@@ -550,21 +550,28 @@ async fn overfetched_unauthorized_field_is_not_returned() {
     assert_eq!(current_user.get("name"), Some(&json!("Ada")));
 }
 
-mod whole_query_rejection {
+mod whole_operation_authorization {
+    //! Outcomes for operations that authorization affects as a whole, asserted on the
+    //! bytes the router sends.
+
     use super::*;
 
-    /// `Organization.id` and `User.phone` are both `@authenticated`, so filtering removes
-    /// paths from an unauthenticated request and `reject_unauthorized` turns that into a
-    /// whole-query rejection.
+    /// `Organization.id` and `User.phone` are both `@authenticated`, so filtering
+    /// removes paths from an unauthenticated request, and `reject_unauthorized` turns
+    /// that into a whole-operation refusal.
     const REJECTED_QUERY: &str = "query { orga(id: 1) { id creatorUser { id name phone } } }";
+
+    /// `A` asks for nothing unauthorized; `B` asks for `orga.id`, which is
+    /// `@authenticated`. Tests execute `A`.
+    const MULTI_OP_QUERY: &str = "query A { currentUser { name } } query B { orga(id: 1) { id } }";
 
     type SubgraphHandles =
         Arc<Mutex<Vec<tower_test::mock::Handle<subgraph::Request, subgraph::Response>>>>;
 
-    /// Builds a router that rejects `REJECTED_QUERY` under the given `directives` config,
-    /// replacing every subgraph with a `tower_test` mock. The mocks hold no canned
-    /// responses, so reaching one fails.
-    async fn build_rejecting_router(
+    /// Builds a router with the given `directives` config, replacing every subgraph
+    /// with a `tower_test` mock. The mocks hold no canned responses, so reaching one
+    /// fails the test.
+    async fn router_with_unresponsive_subgraphs(
         directives: serde_json::Value,
     ) -> (router::BoxCloneService, SubgraphHandles) {
         let handles: SubgraphHandles = Arc::new(Mutex::new(Vec::new()));
@@ -589,33 +596,17 @@ mod whole_query_rejection {
         (service, handles)
     }
 
-    async fn build_router_rejecting_whole_query() -> (router::BoxCloneService, SubgraphHandles) {
-        build_rejecting_router(serde_json::json!({
+    /// A router configured to refuse `REJECTED_QUERY`.
+    async fn rejecting_router() -> (router::BoxCloneService, SubgraphHandles) {
+        router_with_unresponsive_subgraphs(serde_json::json!({
             "enabled": true,
             "reject_unauthorized": true
         }))
         .await
     }
 
-    /// Sends `REJECTED_QUERY` and parses the response body as it goes on the wire.
-    ///
-    /// `into_graphql_response_stream` deserializes into `graphql::Response`, where
-    /// `data: Option<Value>` turns JSON `null` into `None` and then skips it on
-    /// re-serialization. Anything asserting on whether `data` is present has to read the
-    /// bytes instead.
-    async fn rejected_response_body(service: router::BoxCloneService) -> serde_json::Value {
-        let response = service
-            .oneshot(rejected_request(Context::new()))
-            .await
-            .unwrap();
-        let bytes = body::into_bytes(response.response.into_body())
-            .await
-            .unwrap();
-        serde_json::from_slice(&bytes).unwrap()
-    }
-
-    /// Fails if any subgraph mock received a request, or if the router built no subgraph
-    /// service at all, which would make the check vacuous.
+    /// Fails if any subgraph mock received a request, or if the router built no
+    /// subgraph service at all, which would make the check vacuous.
     async fn assert_no_subgraph_calls(handles: SubgraphHandles) {
         let handles: Vec<_> = handles.lock().unwrap().drain(..).collect();
         assert!(!handles.is_empty(), "no subgraph services were created");
@@ -624,9 +615,14 @@ mod whole_query_rejection {
         }
     }
 
-    fn rejected_request(context: Context) -> router::Request {
+    fn graphql_post(
+        query: &str,
+        operation_name: Option<&str>,
+        context: Context,
+    ) -> router::Request {
         let req = graphql::Request {
-            query: Some(REJECTED_QUERY.to_string()),
+            query: Some(query.to_string()),
+            operation_name: operation_name.map(str::to_string),
             ..Default::default()
         };
         router::Request {
@@ -640,116 +636,177 @@ mod whole_query_rejection {
         }
     }
 
-    /// Sends `REJECTED_QUERY`, asserts the router rejected it on authorization grounds,
-    /// and returns the HTTP status.
-    async fn send_rejected_request(
-        service: router::BoxCloneService,
-        context: Context,
-    ) -> http::StatusCode {
-        let response = service.oneshot(rejected_request(context)).await.unwrap();
-        let status = response.response.status();
-
-        let body = response
-            .into_graphql_response_stream()
-            .await
-            .next()
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(
-            body.contains_error_code("UNAUTHORIZED_FIELD_OR_TYPE"),
-            "the operation was not rejected on authorization grounds: {body:?}"
-        );
-
-        status
-    }
-
-    /// Fully filtering the executed operation while a sibling operation shares the
-    /// document reports `Filtered`, not `Emptied`: the emptiness check is document-wide.
-    /// Planning then fails to find the executed operation, so the client is told the
-    /// operation is unknown rather than refused.
+    /// Sends the request and parses the body as it goes on the wire.
     ///
-    /// This pins the mismatch the `FIXME`s in `filter_query` point at. Resolving them
-    /// changes this response deliberately; the single-operation refusal contract is
-    /// pinned by the rest of this module.
-    #[tokio::test]
-    async fn fully_filtered_operation_beside_surviving_sibling_reports_unknown_operation() {
-        let (service, handles) = build_rejecting_router(serde_json::json!({
-            "enabled": true
-        }))
-        .await;
-
-        let req = graphql::Request {
-            query: Some(
-                "query A { orga(id: 1) { id } } query B { currentUser { name } }".to_string(),
-            ),
-            operation_name: Some("A".to_string()),
-            ..Default::default()
-        };
-        let response = service
-            .oneshot(router::Request {
-                context: Context::new(),
-                router_request: http::Request::builder()
-                    .method("POST")
-                    .header(CONTENT_TYPE, "application/json")
-                    .header(ACCEPT, "application/json")
-                    .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
-                    .unwrap(),
-            })
-            .await
-            .unwrap();
-
-        assert_eq!(response.response.status(), http::StatusCode::BAD_REQUEST);
+    /// Deserializing into [`graphql::Response`] collapses a JSON `null` under `data`
+    /// into an absent key, so assertions on whether `data` is present read the bytes.
+    async fn wire_response(
+        service: router::BoxCloneService,
+        request: router::Request,
+    ) -> (http::StatusCode, serde_json::Value) {
+        let response = service.oneshot(request).await.unwrap();
+        let status = response.response.status();
         let bytes = body::into_bytes(response.response.into_body())
             .await
             .unwrap();
-        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    /// Sends `REJECTED_QUERY`, asserts the router refused it on authorization grounds,
+    /// and returns the HTTP status and wire body.
+    async fn send_rejected_request(
+        service: router::BoxCloneService,
+        context: Context,
+    ) -> (http::StatusCode, serde_json::Value) {
+        let (status, body) =
+            wire_response(service, graphql_post(REJECTED_QUERY, None, context)).await;
         assert_eq!(
             body.pointer("/errors/0/extensions/code"),
-            Some(&serde_json::json!("GRAPHQL_UNKNOWN_OPERATION_NAME")),
-            "body: {body}"
+            Some(&serde_json::json!("UNAUTHORIZED_FIELD_OR_TYPE")),
+            "the operation was not refused on authorization grounds: {body}"
         );
-        assert_eq!(body.get("data"), None);
+        (status, body)
+    }
+
+    #[tokio::test]
+    async fn does_not_reach_execution() {
+        let (service, handles) = rejecting_router().await;
+
+        send_rejected_request(service, Context::new()).await;
 
         assert_no_subgraph_calls(handles).await;
     }
 
-    /// Without `reject_unauthorized`, an operation that filtering empties runs through
-    /// the same pipeline as a partial filter: an empty plan executes nothing, and
-    /// response formatting against the original operation shapes the result. The client
-    /// receives each requested root field as null alongside the path errors, exactly as
-    /// it would if some fields had survived.
+    /// A refusal answers as a field error: HTTP 200 with `data: null` and the
+    /// authorization errors, not as a GraphQL request error, which carries a 4xx status
+    /// and no `data` entry. `rejection_sends_null_data` holds the data side of that
+    /// line; this holds the status.
+    #[tokio::test]
+    async fn returns_http_200() {
+        let (service, _handles) = rejecting_router().await;
+
+        let (status, _body) = send_rejected_request(service, Context::new()).await;
+
+        assert_eq!(status, http::StatusCode::OK);
+    }
+
+    /// `data` is `null` and present. An absent `data` marks a request error; a null one
+    /// marks a field error that propagated to the root. The key's presence is part of
+    /// the response contract.
+    #[tokio::test]
+    async fn rejection_sends_null_data() {
+        let (service, _handles) = rejecting_router().await;
+
+        let (_status, body) = send_rejected_request(service, Context::new()).await;
+
+        assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
+    }
+
+    /// A refused operation reaches `CachingQueryPlanner` as a plan, so its usage
+    /// reporting lands in the context like any other operation's and Studio can
+    /// attribute the refusal to an operation signature.
+    /// `licensed_operation_count_tests` holds what the report bills.
+    #[tokio::test]
+    async fn records_usage_reporting() {
+        let (service, _handles) = rejecting_router().await;
+        let context = Context::new();
+
+        send_rejected_request(service, context.clone()).await;
+
+        let usage_reporting = context
+            .extensions()
+            .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
+            .expect("a refused operation records usage reporting");
+        assert!(
+            matches!(*usage_reporting, UsageReporting::Operation(_)),
+            "the report must carry operation details, not an error key: {usage_reporting:?}"
+        );
+    }
+
+    /// `errors.response: disabled` suppresses the authorization errors, so `data: null`
+    /// is the only thing telling the client the operation produced nothing.
+    #[tokio::test]
+    async fn rejection_with_errors_disabled_sends_null_data_and_no_errors() {
+        let (service, _handles) = router_with_unresponsive_subgraphs(serde_json::json!({
+            "enabled": true,
+            "reject_unauthorized": true,
+            "errors": { "response": "disabled" }
+        }))
+        .await;
+
+        let (_status, body) =
+            wire_response(service, graphql_post(REJECTED_QUERY, None, Context::new())).await;
+
+        assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
+        assert_eq!(body.get("errors"), None);
+    }
+
+    /// `errors.response: extensions` moves the authorization errors under
+    /// `extensions.authorizationErrors` and leaves `errors` out of the response.
+    #[tokio::test]
+    async fn rejection_with_errors_in_extensions() {
+        let (service, _handles) = router_with_unresponsive_subgraphs(serde_json::json!({
+            "enabled": true,
+            "reject_unauthorized": true,
+            "errors": { "response": "extensions" }
+        }))
+        .await;
+
+        let (_status, body) =
+            wire_response(service, graphql_post(REJECTED_QUERY, None, Context::new())).await;
+
+        assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
+        assert_eq!(body.get("errors"), None);
+        let authorization_errors = body
+            .pointer("/extensions/authorizationErrors")
+            .and_then(|value| value.as_array())
+            .expect("the errors must move under extensions.authorizationErrors");
+        assert_eq!(
+            authorization_errors.len(),
+            2,
+            "one error per unauthorized path: `orga.id` and `orga.creatorUser.phone`"
+        );
+    }
+
+    /// `dry_run` and `reject_unauthorized` combine rather than cancelling out: `dry_run`
+    /// reports the paths without modifying the operation, and `reject_unauthorized`
+    /// refuses on the reported paths. A refusal here can only come from configuration,
+    /// since `dry_run` never empties the document.
+    #[tokio::test]
+    async fn dry_run_with_reject_unauthorized_still_rejects() {
+        let (service, handles) = router_with_unresponsive_subgraphs(serde_json::json!({
+            "enabled": true,
+            "reject_unauthorized": true,
+            "dry_run": true
+        }))
+        .await;
+
+        let (_status, body) = send_rejected_request(service, Context::new()).await;
+
+        assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
+        assert_no_subgraph_calls(handles).await;
+    }
+
+    /// Without `reject_unauthorized`, an emptied operation runs the same pipeline as a
+    /// partial filter: an empty plan executes nothing, and response formatting against
+    /// the original operation shapes the result. Each requested root field arrives as
+    /// null alongside the path errors.
     #[tokio::test]
     async fn emptied_operation_without_reject_returns_shaped_data() {
-        let (service, handles) = build_rejecting_router(serde_json::json!({
+        let (service, handles) = router_with_unresponsive_subgraphs(serde_json::json!({
             "enabled": true
         }))
         .await;
 
-        let req = graphql::Request {
-            // `orga.id` is `@authenticated` and the only selection, so filtering
-            // removes everything.
-            query: Some("query { orga(id: 1) { id } }".to_string()),
-            ..Default::default()
-        };
-        let response = service
-            .oneshot(router::Request {
-                context: Context::new(),
-                router_request: http::Request::builder()
-                    .method("POST")
-                    .header(CONTENT_TYPE, "application/json")
-                    .header(ACCEPT, "application/json")
-                    .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
-                    .unwrap(),
-            })
-            .await
-            .unwrap();
+        // `orga.id` is `@authenticated` and the only selection, so filtering removes
+        // everything.
+        let (status, body) = wire_response(
+            service,
+            graphql_post("query { orga(id: 1) { id } }", None, Context::new()),
+        )
+        .await;
 
-        assert_eq!(response.response.status(), http::StatusCode::OK);
-        let bytes = body::into_bytes(response.response.into_body())
-            .await
-            .unwrap();
-        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(status, http::StatusCode::OK);
         assert_eq!(
             body.get("data"),
             Some(&serde_json::json!({ "orga": null })),
@@ -769,51 +826,58 @@ mod whole_query_rejection {
         assert_no_subgraph_calls(handles).await;
     }
 
-    fn multi_op_request() -> router::Request {
-        let req = graphql::Request {
-            // `A` asks for nothing unauthorized; `B` asks for `orga.id`, which is
-            // `@authenticated`.
-            query: Some(
-                "query A { currentUser { name } } query B { orga(id: 1) { id } }".to_string(),
+    /// The emptiness check in `filter_query` is document-wide, marked by its `FIXME`s:
+    /// fully filtering the executed operation while a sibling keeps the document
+    /// non-empty reports `Filtered`, planning fails to find the executed operation, and
+    /// the client is told the operation is unknown rather than refused.
+    #[tokio::test]
+    async fn fully_filtered_operation_beside_surviving_sibling_reports_unknown_operation() {
+        let (service, handles) = router_with_unresponsive_subgraphs(serde_json::json!({
+            "enabled": true
+        }))
+        .await;
+
+        let (status, body) = wire_response(
+            service,
+            graphql_post(
+                "query A { orga(id: 1) { id } } query B { currentUser { name } }",
+                Some("A"),
+                Context::new(),
             ),
-            operation_name: Some("A".to_string()),
-            ..Default::default()
-        };
-        router::Request {
-            context: Context::new(),
-            router_request: http::Request::builder()
-                .method("POST")
-                .header(CONTENT_TYPE, "application/json")
-                .header(ACCEPT, "application/json")
-                .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
-                .unwrap(),
-        }
+        )
+        .await;
+
+        assert_eq!(status, http::StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body.pointer("/errors/0/extensions/code"),
+            Some(&serde_json::json!("GRAPHQL_UNKNOWN_OPERATION_NAME")),
+            "body: {body}"
+        );
+        assert_eq!(body.get("data"), None);
+
+        assert_no_subgraph_calls(handles).await;
     }
 
     /// `filter_query` collects unauthorized paths from the whole document, and the
-    /// execution layer's `reject_unauthorized` check reads those paths without knowing
-    /// which operation they came from. A fully authorized operation is therefore refused
-    /// when a sibling operation in the same document asks for unauthorized fields, and
-    /// the error cites a path that does not exist in the executed operation.
-    ///
-    /// Fail-closed: scoping the paths to the executed operation without scoping this
-    /// check changes the refusal into an execution, which some operators may rely on
-    /// not happening.
+    /// execution layer's `reject_unauthorized` check reads them without knowing which
+    /// operation they came from. A fully authorized operation is refused when a sibling
+    /// operation asks for unauthorized fields, and the error cites a path from the
+    /// operation nobody ran.
     #[tokio::test]
     async fn authorized_operation_beside_unauthorized_sibling_is_refused() {
-        let (service, handles) = build_rejecting_router(serde_json::json!({
+        let (service, handles) = router_with_unresponsive_subgraphs(serde_json::json!({
             "enabled": true,
             "reject_unauthorized": true
         }))
         .await;
 
-        let response = service.oneshot(multi_op_request()).await.unwrap();
+        let (status, body) = wire_response(
+            service,
+            graphql_post(MULTI_OP_QUERY, Some("A"), Context::new()),
+        )
+        .await;
 
-        assert_eq!(response.response.status(), http::StatusCode::OK);
-        let bytes = body::into_bytes(response.response.into_body())
-            .await
-            .unwrap();
-        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(status, http::StatusCode::OK);
         assert_eq!(
             body.get("data"),
             Some(&serde_json::Value::Null),
@@ -835,8 +899,8 @@ mod whole_query_rejection {
     }
 
     /// Without `reject_unauthorized`, the authorized operation executes and returns its
-    /// data, and the sibling's filtering leaves an error whose path was truncated away:
-    /// `B`'s path matches nothing in `A`'s shape, so the error arrives with a code and
+    /// data. Error-path reconciliation drops the sibling's path, since it matches
+    /// nothing in the executed operation's shape, so its error arrives with a code and
     /// no path on a successful response.
     #[tokio::test]
     async fn authorized_operation_beside_unauthorized_sibling_executes() {
@@ -865,13 +929,13 @@ mod whole_query_rejection {
             .await
             .unwrap();
 
-        let response = service.oneshot(multi_op_request()).await.unwrap();
+        let (status, body) = wire_response(
+            service,
+            graphql_post(MULTI_OP_QUERY, Some("A"), Context::new()),
+        )
+        .await;
 
-        assert_eq!(response.response.status(), http::StatusCode::OK);
-        let bytes = body::into_bytes(response.response.into_body())
-            .await
-            .unwrap();
-        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(status, http::StatusCode::OK);
         assert_eq!(
             body.pointer("/data/currentUser/name"),
             Some(&serde_json::json!("Ada")),
@@ -883,131 +947,6 @@ mod whole_query_rejection {
             "body: {body}"
         );
         assert_eq!(body.pointer("/errors/0/path"), None, "body: {body}");
-    }
-
-    #[tokio::test]
-    async fn does_not_reach_execution() {
-        let (service, handles) = build_router_rejecting_whole_query().await;
-
-        send_rejected_request(service, Context::new()).await;
-
-        assert_no_subgraph_calls(handles).await;
-    }
-
-    /// We historically treat authorization errors as field errors, even when the whole
-    /// operation is refused: null data, auth errors, and status code 200. The GraphQL
-    /// spec arguably calls for a request error here, with a 4xx status and `data` left
-    /// out entirely; `rejection_sends_null_data` pins the null-versus-absent side of
-    /// that on the wire. Until spec compliance changes deliberately, these pin what the
-    /// router sends.
-    #[tokio::test]
-    async fn returns_http_200() {
-        let (service, _handles) = build_router_rejecting_whole_query().await;
-
-        let status = send_rejected_request(service, Context::new()).await;
-
-        assert_eq!(status, http::StatusCode::OK);
-    }
-
-    /// A refused operation reaches `CachingQueryPlanner` as a plan, so its usage
-    /// reporting lands in the context like any other operation's and Studio can
-    /// attribute the refusal to an operation signature.
-    /// `licensed_operation_count_tests` pins what the report bills.
-    #[tokio::test]
-    async fn records_usage_reporting() {
-        let (service, _handles) = build_router_rejecting_whole_query().await;
-        let context = Context::new();
-
-        send_rejected_request(service, context.clone()).await;
-
-        let usage_reporting = context
-            .extensions()
-            .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
-            .expect("a refused operation records usage reporting");
-        assert!(
-            matches!(*usage_reporting, UsageReporting::Operation(_)),
-            "the report must carry operation details, not an error key: {usage_reporting:?}"
-        );
-    }
-
-    /// The rejection sends `data: null`, not an absent `data`. GraphQL gives those two
-    /// different meanings — an absent `data` marks a request error, a null one marks a
-    /// field error that propagated to the root — so the presence of the key is part of the
-    /// response contract. The snapshot tests cannot cover this, because they assert on a
-    /// `graphql::Response` that has already lost the distinction.
-    #[tokio::test]
-    async fn rejection_sends_null_data() {
-        let (service, _handles) = build_router_rejecting_whole_query().await;
-
-        let body = rejected_response_body(service).await;
-
-        assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
-    }
-
-    /// `errors.response: disabled` suppresses the authorization errors, so `data: null` is
-    /// the only thing left telling the client the operation produced nothing.
-    #[tokio::test]
-    async fn rejection_with_errors_disabled_sends_null_data_and_no_errors() {
-        let (service, _handles) = build_rejecting_router(serde_json::json!({
-            "enabled": true,
-            "reject_unauthorized": true,
-            "errors": { "response": "disabled" }
-        }))
-        .await;
-
-        let body = rejected_response_body(service).await;
-
-        assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
-        assert_eq!(body.get("errors"), None);
-    }
-
-    /// `errors.response: extensions` moves the authorization errors under
-    /// `extensions.authorizationErrors` and leaves `errors` out of the response.
-    #[tokio::test]
-    async fn rejection_with_errors_in_extensions() {
-        let (service, _handles) = build_rejecting_router(serde_json::json!({
-            "enabled": true,
-            "reject_unauthorized": true,
-            "errors": { "response": "extensions" }
-        }))
-        .await;
-
-        let body = rejected_response_body(service).await;
-
-        assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
-        assert_eq!(body.get("errors"), None);
-        let authorization_errors = body
-            .pointer("/extensions/authorizationErrors")
-            .and_then(|value| value.as_array())
-            .expect("the errors must move under extensions.authorizationErrors");
-        assert_eq!(
-            authorization_errors.len(),
-            2,
-            "one error per unauthorized path: `orga.id` and `orga.creatorUser.phone`"
-        );
-    }
-
-    /// `dry_run` and `reject_unauthorized` combine rather than cancelling out: `dry_run`
-    /// reports the paths without modifying the operation, and `reject_unauthorized` then
-    /// refuses it anyway.
-    ///
-    /// This matters for any change that treats an emptied document as the trigger for
-    /// rejection. `dry_run` never empties the document, so a rejection here can only come
-    /// from the config, and getting that wrong turns `dry_run` into a mode that silently
-    /// stops enforcing.
-    #[tokio::test]
-    async fn dry_run_with_reject_unauthorized_still_rejects() {
-        let (service, handles) = build_rejecting_router(serde_json::json!({
-            "enabled": true,
-            "reject_unauthorized": true,
-            "dry_run": true
-        }))
-        .await;
-
-        let body = rejected_response_body(service).await;
-
-        assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
-        assert_no_subgraph_calls(handles).await;
     }
 }
 
