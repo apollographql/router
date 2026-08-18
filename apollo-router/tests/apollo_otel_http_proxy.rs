@@ -255,15 +255,15 @@ async fn setup(
     .unwrap();
     config = jsonpath_lib::replace_with(
         config,
-        "$.telemetry.apollo.otlp_tracing_sampler",
-        &mut |_| Some(serde_json::Value::String("always_on".to_string())),
-    )
-    .unwrap();
-    config = jsonpath_lib::replace_with(
-        config,
         "$.telemetry.apollo.otlp_tracing_protocol",
         &mut |_| Some(serde_json::Value::String("http".to_string())),
     )
+    .unwrap();
+    // The shared reports fixtures set `sampler: always_off` so the reports tests don't export
+    // traces to an unmocked endpoint. This test mocks the OTLP collector, so re-enable it.
+    config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.sampler", &mut |_| {
+        Some(serde_json::Value::String("always_on".to_string()))
+    })
     .unwrap();
 
     // 4. Route OTLP HTTP traffic through the in-process proxy.

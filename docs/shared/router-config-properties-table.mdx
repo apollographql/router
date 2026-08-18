@@ -748,14 +748,13 @@ telemetry:
     otlp_tracing_protocol: grpc
     field_level_instrumentation_sampler: 0.0
     metrics_reference_mode: extended
-    otlp_tracing_sampler: 0.0
     send_headers:
       only:
       - example_only_item
     send_variable_values:
       only:
       - example_only_item
-    signature_normalization_algorithm: legacy
+    signature_normalization_algorithm: enhanced
   exporters:
     logging:
       common:

@@ -61,7 +61,6 @@ use uuid::Uuid;
 use self::apollo::ForwardValues;
 use self::apollo::LicensedOperationCountByType;
 use self::apollo::OperationSubType;
-use self::apollo::SingleReport;
 use self::apollo_exporter::Sender;
 use self::apollo_exporter::proto;
 use self::config::Conf;
@@ -159,6 +158,7 @@ pub(crate) mod metrics;
 /// Opentelemetry utils
 pub(crate) mod otel;
 mod otlp;
+pub(crate) mod pipeline_bypass;
 pub(crate) mod reload;
 pub(crate) mod resource;
 pub(crate) mod span_ext;
@@ -1699,7 +1699,7 @@ impl Telemetry {
                 ..Default::default()
             }
         };
-        sender.send(SingleReport::Stats(metrics));
+        sender.send(metrics);
     }
 
     /// Returns `[(subgraph_name, trace), …]`
@@ -3558,7 +3558,6 @@ mod licensed_operation_count_tests {
     use crate::metrics::FutureMetricsExt as _;
     use crate::plugins::telemetry::EnabledFeatures;
     use crate::plugins::telemetry::Telemetry;
-    use crate::plugins::telemetry::apollo::SingleReport;
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::query_planner::OperationKind;
 
@@ -3581,17 +3580,12 @@ mod licensed_operation_count_tests {
             },
         );
 
-        let report = rx
-            .recv()
+        rx.recv()
             .await
-            .expect("update_apollo_metrics must send a stats report");
-        match report {
-            SingleReport::Stats(stats) => stats
-                .licensed_operation_count_by_type
-                .map(|by_type| by_type.licensed_operation_count)
-                .unwrap_or(0),
-            SingleReport::Traces(_) => panic!("expected a stats report"),
-        }
+            .expect("update_apollo_metrics must send a stats report")
+            .licensed_operation_count_by_type
+            .map(|by_type| by_type.licensed_operation_count)
+            .unwrap_or(0)
     }
 
     /// A context holding no `UsageReporting` bills one licensed operation. Billing does

@@ -54,7 +54,6 @@ enum Outcome {
     Success = 3,
     Error = 4,
     Backpressure = 5,
-    BatchingError = 6,
 }
 
 impl std::fmt::Display for Outcome {
@@ -66,7 +65,6 @@ impl std::fmt::Display for Outcome {
             Outcome::Success => write!(f, "success"),
             Outcome::Error => write!(f, "error"),
             Outcome::Backpressure => write!(f, "backpressure"),
-            Outcome::BatchingError => write!(f, "batching_error"),
         }
     }
 }
@@ -226,6 +224,13 @@ where
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> task::Poll<Result<(), Self::Error>> {
+        // We don't propagate backpressure from the query planner itself,
+        // because compared to short-lived work, query planning can take a long time and is
+        // more sensitive to pool saturation. In that case, we want the router to stop serving
+        // requests containing _new_ queries, but it's still capable of serving requests with
+        // already planned queries.
+        // XXX(@goto-bus-stop): to maintain this behaviour once we adopt apollo-cache layers, we can
+        // add a load shed layer on the query planner.
         task::Poll::Ready(Ok(()))
     }
 
@@ -589,9 +594,6 @@ where
                     }
                     Err(CacheResolverError::Backpressure(_)) => {
                         record_outcome_if_none(&outcome_recorded, Outcome::Backpressure);
-                    }
-                    Err(CacheResolverError::BatchingError(_)) => {
-                        record_outcome_if_none(&outcome_recorded, Outcome::BatchingError);
                     }
                 };
             })

@@ -43,7 +43,18 @@ async fn test_metrics_reloading() {
     let mut config_value: serde_yaml::Value =
         serde_yaml::from_str(PROMETHEUS_CONFIG).expect("fixture is valid YAML");
     let apollo_block: serde_yaml::Value = serde_yaml::from_str(
-        "field_level_instrumentation_sampler: always_on\notlp_tracing_protocol: http\notlp_metrics_protocol: http\nbatch_processor:\n  scheduled_delay: 100ms\n",
+        r#"
+        field_level_instrumentation_sampler: always_on
+        otlp_tracing_protocol: http
+        otlp_metrics_protocol: http
+        tracing:
+          batch_processor:
+            scheduled_delay: 100ms
+        metrics:
+          usage_reports:
+            batch_processor:
+              scheduled_delay: 100ms
+        "#,
     )
     .unwrap();
     config_value

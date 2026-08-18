@@ -245,6 +245,24 @@ mod test {
                 1,
                 code = "ROUTER_FREE_PLAN_RATE_LIMIT_REACHED"
             );
+
+            // * and the rate limiting layer's own counter reached the meter provider. The layer
+            //   lives in `apollo-qos` and creates its instruments from `opentelemetry::global`,
+            //   so this only holds while the global meter provider is bridged onto the router's.
+            assert_counter!(
+                "apollo.platform.qos.limits.requests",
+                1u64,
+                "limit.kind" = "rate",
+                "limit.name" = "license",
+                "limit.status" = "accepted"
+            );
+            assert_counter!(
+                "apollo.platform.qos.limits.requests",
+                1u64,
+                "limit.kind" = "rate",
+                "limit.name" = "license",
+                "limit.status" = "rejected"
+            );
         }
         .with_metrics()
         .await;
