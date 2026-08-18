@@ -152,6 +152,35 @@ Pinned by `fully_filtered_operation_beside_surviving_sibling_reports_unknown_ope
 in `plugins/authorization/tests.rs`, which asserts the 400, the error code, the absent
 `data` key, and that no subgraph was contacted.
 
+### Cross-operation effects, measured
+
+Unauthorized paths accumulate document-wide, so a sibling operation affects the
+executed one. With `A` fully authorized and executed, and `B` asking for an
+`@authenticated` field:
+
+```
+reject_unauthorized on:  200 {"data":null, "errors":[{...,"path":["orga","id"]}]}
+reject_unauthorized off: 200 {"data":{"currentUser":{"name":"Ada"}},
+                              "errors":[{..., no path}]}
+```
+
+With `reject_unauthorized`, the router refuses the fully authorized operation because
+the sibling's paths are indistinguishable from the executed operation's, and the error
+cites a path from an operation nobody ran. Fail-closed, so it denies rather than
+leaks. Without it, `A` executes and returns its data, and `B`'s error survives with
+its path truncated away: the path matches nothing in `A`'s shape.
+
+No shape of the multi-operation case leaks data. Filtering removes unauthorized
+fields from the document before planning, so no plan ever contains a fetch for them,
+whichever operation executes; the plan cache keys on document text, operation name,
+and authorization metadata, so entries never cross operations or grant sets.
+
+For whoever scopes the emptiness check per-operation: scoping `paths` to the executed
+operation without scoping the execution layer's `reject_unauthorized` check turns the
+fail-closed refusal above into an execution. Both behaviours are pinned by
+`authorized_operation_beside_unauthorized_sibling_is_refused` and
+`..._executes`.
+
 ## Emptied operations run the normal pipeline
 
 An emptied operation carries no marker. The planner returns a plan with `root: None`,

@@ -769,6 +769,122 @@ mod whole_query_rejection {
         assert_no_subgraph_calls(handles).await;
     }
 
+    fn multi_op_request() -> router::Request {
+        let req = graphql::Request {
+            // `A` asks for nothing unauthorized; `B` asks for `orga.id`, which is
+            // `@authenticated`.
+            query: Some(
+                "query A { currentUser { name } } query B { orga(id: 1) { id } }".to_string(),
+            ),
+            operation_name: Some("A".to_string()),
+            ..Default::default()
+        };
+        router::Request {
+            context: Context::new(),
+            router_request: http::Request::builder()
+                .method("POST")
+                .header(CONTENT_TYPE, "application/json")
+                .header(ACCEPT, "application/json")
+                .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+                .unwrap(),
+        }
+    }
+
+    /// `filter_query` collects unauthorized paths from the whole document, and the
+    /// execution layer's `reject_unauthorized` check reads those paths without knowing
+    /// which operation they came from. A fully authorized operation is therefore refused
+    /// when a sibling operation in the same document asks for unauthorized fields, and
+    /// the error cites a path that does not exist in the executed operation.
+    ///
+    /// Fail-closed: scoping the paths to the executed operation without scoping this
+    /// check changes the refusal into an execution, which some operators may rely on
+    /// not happening.
+    #[tokio::test]
+    async fn authorized_operation_beside_unauthorized_sibling_is_refused() {
+        let (service, handles) = build_rejecting_router(serde_json::json!({
+            "enabled": true,
+            "reject_unauthorized": true
+        }))
+        .await;
+
+        let response = service.oneshot(multi_op_request()).await.unwrap();
+
+        assert_eq!(response.response.status(), http::StatusCode::OK);
+        let bytes = body::into_bytes(response.response.into_body())
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body.get("data"),
+            Some(&serde_json::Value::Null),
+            "body: {body}"
+        );
+        assert_eq!(
+            body.pointer("/errors/0/extensions/code"),
+            Some(&serde_json::json!("UNAUTHORIZED_FIELD_OR_TYPE")),
+            "body: {body}"
+        );
+        // The path belongs to `B`, which nobody executed.
+        assert_eq!(
+            body.pointer("/errors/0/path"),
+            Some(&serde_json::json!(["orga", "id"])),
+            "body: {body}"
+        );
+
+        assert_no_subgraph_calls(handles).await;
+    }
+
+    /// Without `reject_unauthorized`, the authorized operation executes and returns its
+    /// data, and the sibling's filtering leaves an error whose path was truncated away:
+    /// `B`'s path matches nothing in `A`'s shape, so the error arrives with a code and
+    /// no path on a successful response.
+    #[tokio::test]
+    async fn authorized_operation_beside_unauthorized_sibling_executes() {
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({
+                "authorization": { "directives": { "enabled": true } }
+            }))
+            .unwrap()
+            .schema(AUTHENTICATED_SCHEMA)
+            .subgraph_hook(|_name, _service| {
+                let (mock, mut handle) =
+                    tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+                tokio::spawn(async move {
+                    while let Some((req, responder)) = handle.next_request().await {
+                        responder.send_response(
+                            subgraph::Response::fake_builder()
+                                .context(req.context)
+                                .data(serde_json::json! {{ "currentUser": { "name": "Ada" } }})
+                                .build(),
+                        );
+                    }
+                });
+                mock.boxed_clone()
+            })
+            .build_router()
+            .await
+            .unwrap();
+
+        let response = service.oneshot(multi_op_request()).await.unwrap();
+
+        assert_eq!(response.response.status(), http::StatusCode::OK);
+        let bytes = body::into_bytes(response.response.into_body())
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body.pointer("/data/currentUser/name"),
+            Some(&serde_json::json!("Ada")),
+            "body: {body}"
+        );
+        assert_eq!(
+            body.pointer("/errors/0/extensions/code"),
+            Some(&serde_json::json!("UNAUTHORIZED_FIELD_OR_TYPE")),
+            "body: {body}"
+        );
+        assert_eq!(body.pointer("/errors/0/path"), None, "body: {body}");
+    }
+
     #[tokio::test]
     async fn does_not_reach_execution() {
         let (service, handles) = build_router_rejecting_whole_query().await;
