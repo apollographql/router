@@ -1,40 +1,117 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::LazyLock;
 
 use http::StatusCode;
 
 use crate::integration::IntegrationTest;
+use crate::integration::common::LICENSE_SIX_MONTHS_SECS;
 use crate::integration::common::TEST_JWKS_ENDPOINT;
-
-// NOTE: if these tests fail for haltAt/warnAt related reasons (that they're in the past), go to
-// jwt.io and doublecheck that those claims are still sensible. There's an issue when using
-// Instants to schedule things (like we do for license streams) if those Instants are derived from
-// some far-future SystemTime: tokio has an upper bound for how far out it schedules, putting a
-// pretty hard limit (about a year) for what we can set the haltAt/warnAt values in JWTs to
+use crate::integration::common::mint_license_jwt;
 
 const LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG: &str =
     "license violation, the router is using features not available for your license";
 const LICENSE_EXPIRED_MESSAGE: &str =
     "License has expired. The Router will no longer serve requests.";
 
-const JWT_WITH_EMPTY_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiYWxsb3dlZEZlYXR1cmVzIjogW10sCiAgImlzcyI6ICJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLAogICJzdWIiOiAiYXBvbGxvIiwKICAiYXVkIjogIlNFTEZfSE9TVEVEIiwgCiAgIndhcm5BdCI6IDE3ODcwMDAwMDAsCiAgImhhbHRBdCI6IDE3ODcwMDAwMDAKfQ.nERzNxBzt7KLgBD4ouHydbht6_1jgyCYF8aKzFKGjhI"; // gitleaks:allow
+// The license JWTs below are minted at runtime with `warnAt`/`haltAt` relative
+// to now, so they can never silently expire the way pinned tokens used to.
+// `LICENSE_SIX_MONTHS_SECS` keeps future claims within tokio's DelayQueue
+// scheduler cap (about a year) — see `mint_license_jwt` in common.rs.
 
-const JWT_WITH_COPROCESSORS_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiYWxsb3dlZEZlYXR1cmVzIjogWyJjb3Byb2Nlc3NvcnMiXSwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhdWQiOiAiU0VMRl9IT1NURUQiLCAKICAid2FybkF0IjogMTc4NzAwMDAwMCwKICAiaGFsdEF0IjogMTc4NzAwMDAwMAp9.UD2JZtyvCSY6oXeDOsmWZehNGQjDqdhOiw-1f2TW4Og"; // gitleaks:allow
+static JWT_WITH_EMPTY_ALLOWED_FEATURES: LazyLock<String> =
+    LazyLock::new(|| mint_license_jwt(Some(&[]), LICENSE_SIX_MONTHS_SECS, LICENSE_SIX_MONTHS_SECS));
 
-const JWT_WITH_COPROCESSORS_SUBSCRIPTION_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiYWxsb3dlZEZlYXR1cmVzIjogWwogICAgImNvcHJvY2Vzc29ycyIsCiAgICAic3Vic2NyaXB0aW9ucyIKICBdLAogICJpc3MiOiAiaHR0cHM6Ly93d3cuYXBvbGxvZ3JhcGhxbC5jb20vIiwKICAic3ViIjogImFwb2xsbyIsCiAgImF1ZCI6ICJTRUxGX0hPU1RFRCIsIAogICJ3YXJuQXQiOiAxNzg3MDAwMDAwLAogICJoYWx0QXQiOiAxNzg3MDAwMDAwCn0.MxjeQOea7wBjvs1J0-44oEfdoaVwKuEexy-JdgZ-3R8"; // gitleaks:allow
+static JWT_WITH_COPROCESSORS_IN_ALLOWED_FEATURES: LazyLock<String> = LazyLock::new(|| {
+    mint_license_jwt(
+        Some(&["coprocessors"]),
+        LICENSE_SIX_MONTHS_SECS,
+        LICENSE_SIX_MONTHS_SECS,
+    )
+});
 
-const JWT_WITH_ALLOWED_FEATURES_NONE: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhdWQiOiAiU0VMRl9IT1NURUQiLCAKICAid2FybkF0IjogMTc4NzAwMDAwMCwKICAiaGFsdEF0IjogMTc4NzAwMDAwMAp9.LPNJgPY20DH054mXgrzaxEFiME656ZJ-ge5y9Zh3kkc"; // gitleaks:allow
+// In the CI environment we only install Redis on x86_64 Linux; this jwt is part of testing that
+// flow
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+static JWT_WITH_ENTITY_CACHING_COPROCESSORS_IN_ALLOWED_FEATURES: LazyLock<String> =
+    LazyLock::new(|| {
+        mint_license_jwt(
+            Some(&["entity_caching", "coprocessors"]),
+            LICENSE_SIX_MONTHS_SECS,
+            LICENSE_SIX_MONTHS_SECS,
+        )
+    });
 
-const JWT_WITH_ALLOWED_FEATURES_COPROCESSOR_WITH_FEATURE_UNDEFINED_IN_ROUTER: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiYWxsb3dlZEZlYXR1cmVzIjogWwogICAgImNvcHJvY2Vzc29ycyIsCiAgICAicmFuZG9tIiwKICAgICJzdWJzY3JpcHRpb25zIgogIF0sCiAgImlzcyI6ICJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLAogICJzdWIiOiAiYXBvbGxvIiwKICAiYXVkIjogIlNFTEZfSE9TVEVEIiwgCiAgIndhcm5BdCI6IDE3ODcwMDAwMDAsCiAgImhhbHRBdCI6IDE3ODcwMDAwMDAKfQ.l4O-YLwIu2hjoSq1HseJQMS_9qFNL9v304I7gfLqV3w"; // gitleaks:allow
+static JWT_WITH_COPROCESSORS_SUBSCRIPTION_IN_ALLOWED_FEATURES: LazyLock<String> =
+    LazyLock::new(|| {
+        mint_license_jwt(
+            Some(&["coprocessors", "subscriptions"]),
+            LICENSE_SIX_MONTHS_SECS,
+            LICENSE_SIX_MONTHS_SECS,
+        )
+    });
 
-const JWT_WITH_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhbGxvd2VkRmVhdHVyZXMiOiBbImVudGl0eV9jYWNoaW5nIiwgImNvcHJvY2Vzc29ycyIsICJ0cmFmZmljX3NoYXBpbmciXSwKICAiYXVkIjogIlNFTEZfSE9TVEVEIiwgCiAgIndhcm5BdCI6IDE3ODcwMDAwMDAsIAogICJoYWx0QXQiOiAxNzg3MDAwMDAwCn0.HHfLHmDAjTdQwouAJguvWnpxnHsLzTWswQl70gmkMEM"; // gitleaks:allow
+static JWT_WITH_ALLOWED_FEATURES_NONE: LazyLock<String> =
+    LazyLock::new(|| mint_license_jwt(None, LICENSE_SIX_MONTHS_SECS, LICENSE_SIX_MONTHS_SECS));
 
-const JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_SUBSCRIPTIONS_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhbGxvd2VkRmVhdHVyZXMiOiBbImNvcHJvY2Vzc29ycyIsICJlbnRpdHlfY2FjaGluZyIsICJ0cmFmZmljX3NoYXBpbmciLCAic3Vic2NyaXB0aW9ucyJdLAogICJhdWQiOiAiU0VMRl9IT1NURUQiLCAKICAid2FybkF0IjogMTc1NTMwMjQwMCwgCiAgImhhbHRBdCI6IDE3NTUzMDI0MDAKfQ.2TPyUd9BUn3NCc2Kq8WsJS_6V16s2lgitElhf0lNcwg"; // gitleaks:allow
+static JWT_WITH_ALLOWED_FEATURES_COPROCESSOR_WITH_FEATURE_UNDEFINED_IN_ROUTER: LazyLock<String> =
+    LazyLock::new(|| {
+        mint_license_jwt(
+            Some(&["coprocessors", "random", "subscriptions"]),
+            LICENSE_SIX_MONTHS_SECS,
+            LICENSE_SIX_MONTHS_SECS,
+        )
+    });
 
-const JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhbGxvd2VkRmVhdHVyZXMiOiBbImNvcHJvY2Vzc29ycyIsICJlbnRpdHlfY2FjaGluZyIsICJ0cmFmZmljX3NoYXBpbmciXSwKICAiYXVkIjogIlNFTEZfSE9TVEVEIiwgCiAgIndhcm5BdCI6IDE3NTUzMDI0MDAsIAogICJoYWx0QXQiOiAxNzU1MzAyNDAwCn0.CERblSGfOVmKt6PtfB2LjnY-ahzMsNB4EGajXZfKWU4"; // gitleaks:allow
+static JWT_WITH_ENTITY_CACHING_COPROCESSORS_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES: LazyLock<String> =
+    LazyLock::new(|| {
+        mint_license_jwt(
+            Some(&["entity_caching", "coprocessors", "traffic_shaping"]),
+            LICENSE_SIX_MONTHS_SECS,
+            LICENSE_SIX_MONTHS_SECS,
+        )
+    });
 
-const JWT_PAST_WARN_AT_BUT_NOT_EXPIRED_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhbGxvd2VkRmVhdHVyZXMiOiBbImVudGl0eV9jYWNoaW5nIiwgImNvcHJvY2Vzc29ycyIsICJ0cmFmZmljX3NoYXBpbmciXSwKICAiYXVkIjogIlNFTEZfSE9TVEVEIiwgCiAgIndhcm5BdCI6IDE3NjU5MTA0MDAsIAogICJoYWx0QXQiOiAxNzg3MDAwMDAwCn0.33EWawSaU8dv5KqI8QbAzYFa0KKTcvqTXGaJfRkg-DU"; // gitleaks:allow
-const JWT_PAST_WARN_AT_BUT_NOT_EXPIRED_WITH_COPROCESSORS_SUBSCRIPTIONS_IN_ALLOWED_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhbGxvd2VkRmVhdHVyZXMiOiBbInN1YnNjcmlwdGlvbnMiLCAiY29wcm9jZXNzb3JzIl0sCiAgImF1ZCI6ICJTRUxGX0hPU1RFRCIsIAogICJ3YXJuQXQiOiAxNzU1MzAyNDAwLCAKICAiaGFsdEF0IjogMTc4NzAwMDAwMAp9.nxyKlFquWBijtIOtL8FnknNfAwvBaZh9TFIDcG7NtiE"; // gitleaks:allow
+static JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_SUBSCRIPTIONS_IN_ALLOWED_FEATURES:
+    LazyLock<String> = LazyLock::new(|| {
+    mint_license_jwt(
+        Some(&[
+            "coprocessors",
+            "entity_caching",
+            "traffic_shaping",
+            "subscriptions",
+        ]),
+        -LICENSE_SIX_MONTHS_SECS,
+        -LICENSE_SIX_MONTHS_SECS,
+    )
+});
+
+static JWT_PAST_EXPIRY_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES:
+    LazyLock<String> = LazyLock::new(|| {
+    mint_license_jwt(
+        Some(&["coprocessors", "entity_caching", "traffic_shaping"]),
+        -LICENSE_SIX_MONTHS_SECS,
+        -LICENSE_SIX_MONTHS_SECS,
+    )
+});
+
+static JWT_PAST_WARN_AT_BUT_NOT_EXPIRED_WITH_COPROCESSORS_ENTITY_CACHING_TRAFFIC_SHAPING_IN_ALLOWED_FEATURES:
+    LazyLock<String> = LazyLock::new(|| {
+    mint_license_jwt(
+        Some(&["entity_caching", "coprocessors", "traffic_shaping"]),
+        -LICENSE_SIX_MONTHS_SECS,
+        LICENSE_SIX_MONTHS_SECS,
+    )
+});
+
+static JWT_PAST_WARN_AT_BUT_NOT_EXPIRED_WITH_COPROCESSORS_SUBSCRIPTIONS_IN_ALLOWED_FEATURES:
+    LazyLock<String> = LazyLock::new(|| {
+    mint_license_jwt(
+        Some(&["subscriptions", "coprocessors"]),
+        -LICENSE_SIX_MONTHS_SECS,
+        LICENSE_SIX_MONTHS_SECS,
+    )
+});
 
 const SUBSCRIPTION_CONFIG: &str = include_str!("subscriptions/fixtures/subscription.router.yaml");
 const SUBSCRIPTION_COPROCESSOR_CONFIG: &str =
