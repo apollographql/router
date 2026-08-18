@@ -305,7 +305,7 @@ pub enum CompositionError {
 impl CompositionError {
     pub fn code(&self) -> ErrorCode {
         match self {
-            Self::ConnectorsValidationError { code, .. } => ErrorCode::Connectors(*code),
+            Self::ConnectorsValidationError { code, .. } => ErrorCode::ConnectorsValidation(*code),
             Self::SubgraphError { error, .. } => error.code(),
             Self::MergeError { error, .. } => error.code(),
             Self::MergeValidationError { error, .. } => error.code(),
@@ -2615,10 +2615,10 @@ static MISSING_TRANSITIVE_AUTH_REQUIREMENTS: LazyLock<ErrorCodeDefinition> = Laz
 
 #[derive(Debug, PartialEq)]
 pub enum ErrorCode {
-    /// An error raised by the connectors (`@source`/`@connect`) subgraph validations. Those codes
+    /// An error raised by one of the connectors (`@source`/`@connect`) validations. Those codes
     /// live in their own enum but are part of the same global code namespace as the rest of the
     /// composition error codes.
-    Connectors(ConnectorsCode),
+    ConnectorsValidation(ConnectorsCode),
     ErrorCodeMissing,
     Internal,
     ExtensionWithNoBase,
@@ -2731,7 +2731,7 @@ pub enum ErrorCode {
 impl ErrorCode {
     pub fn definition(&self) -> &'static ErrorCodeDefinition {
         match self {
-            ErrorCode::Connectors(code) => connectors_error_code_definition(*code),
+            ErrorCode::ConnectorsValidation(code) => connectors_error_code_definition(*code),
             ErrorCode::Internal => &INTERNAL,
             ErrorCode::ExtensionWithNoBase => &EXTENSION_WITH_NO_BASE,
             ErrorCode::InvalidGraphQL => &INVALID_GRAPHQL,

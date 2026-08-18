@@ -258,7 +258,7 @@ impl Subgraph<Source> {
                     })
                 }
                 ConnectorsSeverity::Warning => hints.push(CompositionHint {
-                    definition: HintCode::Connectors(message.code).definition(),
+                    definition: HintCode::ConnectorsHint(message.code).definition(),
                     message: message.message,
                     locations,
                 }),
