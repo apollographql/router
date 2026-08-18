@@ -306,6 +306,7 @@ mod tests {
 
         let actual = http_response_to_graphql_response("test_service", body, &parts);
 
+        // XXX(@goto-bus-stop): we use data + a request error here, this is incorrect
         let expected = graphql::Response::builder()
             .data(json["data"].take())
             .error(error)
@@ -338,6 +339,7 @@ mod tests {
 
         let actual = http_response_to_graphql_response("test_service", body, &parts);
 
+        // XXX(@goto-bus-stop): we use data + a request error here, this is incorrect
         let expected = graphql::Response::builder()
             .data(json["data"].take())
             .error(

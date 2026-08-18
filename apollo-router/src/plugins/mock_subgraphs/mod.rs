@@ -206,11 +206,12 @@ fn subgraph_call(
         .raw_variable_values(&request.variables)
         .execute_sync(&initial_value);
     match result {
-        Ok(response) => Ok(graphql::Response::builder()
-            .data(Some(JsonValue::from(response.data)))
+        Ok(response) => Ok(graphql::Response::execution_builder()
+            .data(JsonValue::from(response.data))
             .errors(response.errors.into_iter().map(Into::into).collect())
             .extensions(response_extensions.into_inner())
-            .build()),
+            .build()
+            .expect("errors are execution errors")),
         Err(request_error) => Err(vec![request_error.to_graphql_error(&doc.sources)]),
     }
 }

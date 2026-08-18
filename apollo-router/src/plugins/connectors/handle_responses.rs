@@ -292,10 +292,11 @@ pub(crate) fn aggregate_responses(
     Ok(Response {
         response: http::Response::builder()
             .body(
-                graphql::Response::builder()
+                graphql::Response::execution_builder()
                     .data(data)
                     .errors(errors.into_iter().map(|e| e.into()).collect())
-                    .build(),
+                    .build()
+                    .expect("errors are all execution errors"),
             )
             .unwrap(),
     })

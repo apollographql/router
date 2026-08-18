@@ -8,6 +8,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
+use tower::BoxError;
 
 use crate::error::Error;
 use crate::graphql::IntoGraphQLErrors;
@@ -65,9 +66,10 @@ pub struct Response {
 
 #[buildstructor::buildstructor]
 impl Response {
-    /// Returns a builder that builds a GraphQL [Request Error] response with a single error.
+    /// Returns a builder that builds a GraphQL [Request Error Result] response with a single
+    /// [Request Error].
     ///
-    /// Produces a GraphQL response of the shape:
+    /// This produces a GraphQL response of the shape:
     /// ```json
     /// {
     ///   "errors": [{
@@ -85,7 +87,8 @@ impl Response {
     /// - `.extension(impl Into<`[`ByteString`]`>, impl Into<`[`Value`]`>)` - Optional: add a field
     ///   to the error's extensions object.
     ///
-    /// [Request Error]: https://spec.graphql.org/October2021/#sec-Errors.Request-errors
+    /// [Request Error Result]: https://spec.graphql.org/September2025/#sec-Request-Error-Result
+    /// [Request Error]: https://spec.graphql.org/September2025/#sec-Errors.Request-Errors
     #[builder(visibility = "pub")]
     fn request_error_new(
         message: String,
@@ -103,14 +106,43 @@ impl Response {
         Self::builder().error(error).build()
     }
 
-    /// Returns a builder that builds a GraphQL response with data and optional extensions.
+    /// Returns a builder that builds a GraphQL [Execution Result] response with data and optional extensions.
     ///
     /// Data can be null but must be present.
     ///
     /// GraphQL Errors are not supported by this builder.
+    ///
+    /// [Execution Result]: https://spec.graphql.org/September2025/#sec-Execution-Result
     #[builder(visibility = "pub(crate)")]
     fn data_new(data: Value, extensions: Map<ByteString, Value>) -> Self {
         Self::builder().data(data).extensions(extensions).build()
+    }
+
+    /// Returns a builder that builds a GraphQL [Execution Result] response.
+    /// An Execution Result contains (partial) data and optional [Execution Error]s. Data can be null but must be present.
+    ///
+    /// ## Errors
+    /// This builder returns an error if any of the `.error()` or `.errors()` calls
+    /// contain [Request Error]s. A GraphQL response with data must only contain [Execution Error]s.
+    ///
+    /// [Execution Result]: https://spec.graphql.org/September2025/#sec-Execution-Result
+    /// [Request Error]: https://spec.graphql.org/September2025/#sec-Errors.Request-Errors
+    /// [Execution Error]: https://spec.graphql.org/September2025/#sec-Errors.Execution-Errors
+    #[builder(visibility = "pub(crate)")]
+    fn execution_new(
+        data: Value,
+        errors: Vec<Error>,
+        extensions: Map<ByteString, Value>,
+    ) -> Result<Self, BoxError> {
+        if errors.iter().any(|error| !error.is_execution_error()) {
+            return Err("Response::execution_builder() received a request error, but only execution errors are allowed".into());
+        }
+
+        Ok(Self::builder()
+            .data(data)
+            .errors(errors)
+            .extensions(extensions)
+            .build())
     }
 
     /// DO NOT USE!
