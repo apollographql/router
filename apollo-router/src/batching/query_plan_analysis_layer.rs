@@ -85,14 +85,12 @@ where
                     "BATCHING_SUBSCRIPTION_UNSUPPORTED"
                 };
                 let mut response = execution::Response::new_from_graphql_response(
-                        graphql::Response::builder()
-                        .error(crate::error::Error::request_error_builder()
-                            .message("Deferred responses and subscriptions aren't supported in batches")
-                            .extension_code(code)
-                            .build())
-                            .build(),
-                        req.context,
-                    );
+                    graphql::Response::request_error_builder()
+                        .message("Deferred responses and subscriptions aren't supported in batches")
+                        .extension_code(code)
+                        .build(),
+                    req.context,
+                );
                 *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
                 return Ok(response);
             }

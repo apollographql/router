@@ -145,13 +145,9 @@ impl PluginPrivate for MockSubgraphsPlugin {
                                 .build()
                         })
                 } else {
-                    graphql::Response::builder()
-                        .error(
-                            graphql::Error::request_error_builder()
-                                .message("subgraph mock not configured")
-                                .extension_code("SUBGRAPH_MOCK_NOT_CONFIGURED")
-                                .build(),
-                        )
+                    graphql::Response::request_error_builder()
+                        .message("subgraph mock not configured")
+                        .extension_code("SUBGRAPH_MOCK_NOT_CONFIGURED")
                         .build()
                 };
                 let response = response.body(body).unwrap();

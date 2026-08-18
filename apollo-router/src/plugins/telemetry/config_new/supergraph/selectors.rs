@@ -1562,12 +1562,8 @@ mod test {
         let selector_true = SupergraphSelector::OnGraphQLError {
             on_graphql_error: true,
         };
-        let chunk_with_errors = graphql::Response::builder()
-            .error(
-                graphql::Error::request_error_builder()
-                    .message("oops")
-                    .build(),
-            )
+        let chunk_with_errors = graphql::Response::request_error_builder()
+            .message("oops")
             .build();
         assert_eq!(
             selector_true.on_response_event(&chunk_with_errors, &crate::Context::default()),

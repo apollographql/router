@@ -706,15 +706,11 @@ where
                     // A message we cannot deserialize. The connection itself is still readable, so
                     // this is a transient error on a live stream, not a drop — keep the stream open.
                     Poll::Ready(Some(SubscriptionEvent::TransientError(
-                        graphql::Response::builder()
-                            .error(
-                                graphql::Error::request_error_builder()
-                                    .message(format!(
-                                        "cannot deserialize websocket server message: {err:?}"
-                                    ))
-                                    .extension_code(INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE)
-                                    .build(),
-                            )
+                        graphql::Response::request_error_builder()
+                            .message(format!(
+                                "cannot deserialize websocket server message: {err:?}"
+                            ))
+                            .extension_code(INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE)
                             .build(),
                     )))
                 }
@@ -1162,17 +1158,13 @@ mod tests {
                 .unwrap();
 
             // The connection ack is not counted as a subscription event.
-
             let next_payload = response_of(gql_read_stream.next().await.unwrap());
-            assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
-                .error(
-                    graphql::Error::request_error_builder()
-                        .message(
-                            "cannot deserialize websocket server message: Error(\"expected value\", line: 1, column: 1)".to_string())
-                        .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
-                        .build(),
-                )
-                .build()
+            assert_response_eq_ignoring_error_id!(
+                next_payload,
+                graphql::Response::request_error_builder()
+                    .message(r#"cannot deserialize websocket server message: Error("expected value", line: 1, column: 1)"#.to_string())
+                    .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
+                    .build()
             );
             // Counts 1 for the invalid message
             assert_counter!(
@@ -1317,17 +1309,13 @@ mod tests {
                 .unwrap();
 
             // The connection ack is not counted as a subscription event.
-
             let next_payload = response_of(gql_read_stream.next().await.unwrap());
-            assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
-                .error(
-                    graphql::Error::request_error_builder()
-                        .message(
-                            "cannot deserialize websocket server message: Error(\"expected value\", line: 1, column: 1)".to_string())
-                        .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
-                        .build(),
-                )
-                .build()
+            assert_response_eq_ignoring_error_id!(
+                next_payload,
+                graphql::Response::request_error_builder()
+                    .message(r#"cannot deserialize websocket server message: Error("expected value", line: 1, column: 1)"#.to_string())
+                    .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
+                    .build()
             );
             // Counts 2 for the keepalive and invalid message
             assert_counter!(

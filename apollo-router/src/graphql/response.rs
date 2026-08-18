@@ -11,6 +11,7 @@ use serde_json_bytes::Map;
 
 use crate::error::Error;
 use crate::graphql::IntoGraphQLErrors;
+use crate::graphql::Location;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
@@ -64,7 +65,45 @@ pub struct Response {
 
 #[buildstructor::buildstructor]
 impl Response {
-    /// Constructor
+    /// Returns a builder that builds a GraphQL [Request Error] response with a single error.
+    ///
+    /// Produces a GraphQL response of the shape:
+    /// ```json
+    /// {
+    ///   "errors": [{
+    ///     "message": "",
+    ///     "extensions": { "code": "" }
+    ///   }]
+    /// }
+    /// ```
+    ///
+    /// ## Builder methods
+    /// - `.message(impl Into<`[`String`]`>` - Required: a human-readable error description
+    /// - `.extension_code(impl Into<`[`String`]`>` - Recommended: a machine-readable error code
+    /// - `.location(impl Into<`[`Location`]`>` - Optional: location in GraphQL source text that
+    ///   caused the error
+    /// - `.extension(impl Into<`[`ByteString`]`>, impl Into<`[`Value`]`>)` - Optional: add a field
+    ///   to the error's extensions object.
+    ///
+    /// [Request Error]: https://spec.graphql.org/October2021/#sec-Errors.Request-errors
+    #[builder(visibility = "pub")]
+    fn request_error_new(
+        message: String,
+        extension_code: Option<String>,
+        locations: Vec<Location>,
+        extensions: Map<ByteString, Value>,
+    ) -> Self {
+        let error = Error::request_error_builder()
+            .message(message)
+            .locations(locations)
+            .extensions(extensions)
+            .and_extension_code(extension_code)
+            .build();
+
+        Self::builder().error(error).build()
+    }
+
+    /// DO NOT USE!
     #[builder(visibility = "pub")]
     fn new(
         label: Option<String>,
