@@ -340,3 +340,128 @@ fn test_boolean_condition_case_split_5() {
     "#;
     assert_compare_operation_docs(x, y);
 }
+
+#[test]
+fn test_disjunctive_coverage_across_variables() {
+    // x requires `id` unconditionally.
+    let x = r#"
+        query {
+            test_i {
+                id
+            }
+        }
+    "#;
+    // y fetches `id` under three mutually exclusive conditions on two
+    // variables that form a tautology: ($v0) ∨ ($v1 ∧ ¬$v0) ∨ (¬$v0 ∧ ¬$v1).
+    let y = r#"
+        query($v0: Boolean!, $v1: Boolean!) {
+            test_i @include(if: $v0) {
+                id
+            }
+            ... @skip(if: $v0) {
+                test_i @include(if: $v1) {
+                    id
+                }
+                ... @skip(if: $v1) {
+                    test_i {
+                        id
+                    }
+                }
+            }
+        }
+    "#;
+    assert_compare_operation_docs(x, y);
+}
+
+#[test]
+fn test_disjunctive_coverage_incomplete() {
+    // x requires `id` unconditionally.
+    let x = r#"
+        query {
+            test_i {
+                id
+            }
+        }
+    "#;
+    // y only fetches `id` under $v0 or ($v1 ∧ ¬$v0), but not when both are
+    // false. This must fail — y doesn't cover all cases.
+    let y = r#"
+        query($v0: Boolean!, $v1: Boolean!) {
+            test_i @include(if: $v0) {
+                id
+            }
+            ... @skip(if: $v0) {
+                test_i @include(if: $v1) {
+                    id
+                }
+            }
+        }
+    "#;
+    assert!(compare_operation_docs(x, y).is_err());
+}
+
+#[test]
+fn test_cross_variable_group_coverage() {
+    // x requires `id` unconditionally.
+    let x = r#"
+        query {
+            test_i {
+                id
+            }
+        }
+    "#;
+    // y fetches `id` under four conditions using three variables:
+    //   (v0 ∧ v1) ∨ (v0 ∧ ¬v1) ∨ (¬v0 ∧ v2) ∨ (¬v0 ∧ ¬v2) = true
+    // The variables are split across variant groups — [v0,v1] vs [v0,v2] —
+    // so no single variant's variable group covers all hypotheses. Only the
+    // union group [v0,v1,v2] can verify full coverage.
+    let y = r#"
+        query($v0: Boolean!, $v1: Boolean!, $v2: Boolean!) {
+            ... @include(if: $v0) {
+                test_i @include(if: $v1) {
+                    id
+                }
+                test_i @skip(if: $v1) {
+                    id
+                }
+            }
+            ... @skip(if: $v0) {
+                test_i @include(if: $v2) {
+                    id
+                }
+                test_i @skip(if: $v2) {
+                    id
+                }
+            }
+        }
+    "#;
+    assert_compare_operation_docs(x, y);
+}
+
+#[test]
+fn test_nested_partial_coverage_should_fail() {
+    // x requires `data` unconditionally.
+    let x = r#"
+        query {
+            test_i {
+                id
+                data(arg: 1)
+            }
+        }
+    "#;
+    // y's `test_i` variants jointly cover all cases at the top level, but
+    // `data` is only fetched when $v0 is true. The per-hypothesis case-split
+    // must catch the nested gap under ¬v0.
+    let y = r#"
+        query($v0: Boolean!) {
+            test_i @include(if: $v0) {
+                id
+                data(arg: 1)
+            }
+            test_i @skip(if: $v0) {
+                id
+            }
+        }
+    "#;
+    assert!(compare_operation_docs(x, y).is_err());
+}
