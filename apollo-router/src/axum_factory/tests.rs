@@ -2101,12 +2101,13 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
                 .build(),
             graphql::Response::builder()
                 .incremental(vec![
-                    graphql::IncrementalResponse::builder()
+                    graphql::IncrementalResponse::defer_payload_builder()
                         .data(json!({
                             "name": "Ada"
                         }))
                         .path(Path::from("me"))
-                        .build(),
+                        .build()
+                        .expect("no request errors added"),
                 ])
                 .has_next(true)
                 .build(),

@@ -434,7 +434,8 @@ impl ExecutionService {
         let incremental = sub_responses
             .into_iter()
             .filter_map(move |(path, data)| {
-                // filter errors that match the path of this incremental response
+                // filter errors that match the path of this incremental response.
+                // This also narrows it down to only Execution Errors (i.e. errors that have a path)
                 let errors = response
                     .errors
                     .iter()
@@ -484,13 +485,14 @@ impl ExecutionService {
                 // send it
                 if !data.is_null() || !errors.is_empty() || !extensions.is_empty() {
                     Some(
-                        IncrementalResponse::builder()
+                        IncrementalResponse::defer_payload_builder()
                             .and_label(rewritten_label.clone())
                             .data(data)
                             .path(path)
                             .errors(errors)
                             .extensions(extensions)
-                            .build(),
+                            .build()
+                            .expect("errors are only execution errors"),
                     )
                 } else {
                     None
