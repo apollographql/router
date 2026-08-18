@@ -394,8 +394,7 @@ pub struct IntegrationTest {
     log: String,
     subgraph_context: Arc<Mutex<Option<SpanContext>>>,
     logs: Vec<String>,
-    /// Exit status of the router process, recorded by `assert_shutdown_with_deadline` when it
-    /// reaps the process. `None` until the router has exited. Read via `assert_clean_exit`.
+    /// Exit status of the router process, or `None` until the router has exited.
     exit_status: Option<std::process::ExitStatus>,
     port_replacements: HashMap<String, u16>,
     jwt: Option<String>,
