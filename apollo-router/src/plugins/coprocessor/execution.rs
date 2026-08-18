@@ -602,13 +602,9 @@ where
             Ok(response) => response,
             Err(e) => {
                 tracing::error!("coprocessor error handling deferred execution response: {e}");
-                graphql::Response::builder()
-                    .error(
-                        Error::request_error_builder()
-                            .message("Internal error handling deferred response")
-                            .extension_code("INTERNAL_ERROR")
-                            .build(),
-                    )
+                graphql::Response::request_error_builder()
+                    .message("Internal error handling deferred response")
+                    .extension_code("INTERNAL_ERROR")
                     .build()
             }
         });

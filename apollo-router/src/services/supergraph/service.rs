@@ -303,13 +303,9 @@ async fn service_call(
                     )
                 };
                 let mut response = SupergraphResponse::new_from_graphql_response(
-                    graphql::Response::builder()
-                        .errors(vec![
-                            crate::error::Error::request_error_builder()
-                                .message(error_message)
-                                .extension_code(error_code)
-                                .build(),
-                        ])
+                    graphql::Response::request_error_builder()
+                        .message(error_message)
+                        .extension_code(error_code)
                         .build(),
                     context,
                 );

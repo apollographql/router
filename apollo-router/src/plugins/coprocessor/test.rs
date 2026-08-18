@@ -71,6 +71,7 @@ mod tests {
 
     use super::super::*;
     use crate::assert_response_eq_ignoring_error_id;
+    use crate::graphql;
     use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::json_ext::Value;
@@ -4157,14 +4158,13 @@ mod tests {
             tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
         let subgraph_driver = tokio::spawn(async move {
             let (req, responder) = handle_subgraph.next_request().await.unwrap();
-            use crate::graphql::Error;
             // XXX(@goto-bus-stop): we use a response with partial data + a request error here,
             // which is not valid by graphql spec
             responder.send_response(
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .error(
-                        Error::request_error_builder()
+                        graphql::Error::request_error_builder()
                             .message("test error")
                             .extension_code("TEST_ERROR")
                             .build(),
@@ -4637,14 +4637,9 @@ mod tests {
     }
 
     fn valid_response_with_request_error() -> crate::graphql::Response {
-        use crate::graphql::Error;
-        crate::graphql::Response::builder()
-            .errors(vec![
-                Error::request_error_builder()
-                    .message("error")
-                    .extension_code("TEST")
-                    .build(),
-            ])
+        graphql::Response::request_error_builder()
+            .message("error")
+            .extension_code("TEST")
             .build()
     }
 
@@ -4880,12 +4875,8 @@ mod tests {
         );
 
         // When data is configured but is None, should send data: null
-        let response_no_data = graphql::Response::builder()
-            .errors(vec![
-                graphql::Error::request_error_builder()
-                    .message("test error")
-                    .build(),
-            ])
+        let response_no_data = graphql::Response::request_error_builder()
+            .message("test error")
             .build();
 
         let result = filter_graphql_response_body(
@@ -5013,7 +5004,7 @@ mod tests {
         let original = graphql::Response::builder()
             .data(json!({"original": "data"}))
             .error(
-                Error::request_error_builder()
+                graphql::Error::request_error_builder()
                     .message("original error")
                     .build(),
             )

@@ -1080,12 +1080,13 @@ async fn issuer_check() {
                     .unwrap(),
             )
             .unwrap();
-            assert_response_eq_ignoring_error_id!(response, graphql::Response::builder()
-        .errors(vec![graphql::Error::request_error_builder()
-            .extension_code("AUTH_ERROR")
-            .message("Invalid issuer: the token's `iss` was 'hallo', but signed with a key from JWKS configured to only accept from 'hello'")
-            .build()
-        ]).build());
+            assert_response_eq_ignoring_error_id!(
+                response,
+                graphql::Response::request_error_builder()
+                    .extension_code("AUTH_ERROR")
+                    .message("Invalid issuer: the token's `iss` was 'hallo', but signed with a key from JWKS configured to only accept from 'hello'")
+                    .build()
+            );
         }
         ControlFlow::Continue(req) => {
             println!("got req with issuer check");
@@ -1126,13 +1127,9 @@ async fn issuer_check() {
             .unwrap();
             assert_response_eq_ignoring_error_id!(
                 response,
-                graphql::Response::builder()
-                    .error(
-                        graphql::Error::request_error_builder()
-                            .extension_code("AUTH_ERROR")
-                            .message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from JWKS configured to only accept from 'goodbye, hello'")
-                            .build(),
-                    )
+                graphql::Response::request_error_builder()
+                    .extension_code("AUTH_ERROR")
+                    .message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from JWKS configured to only accept from 'goodbye, hello'")
                     .build()
             );
         }
@@ -1170,13 +1167,9 @@ async fn issuer_check() {
             .unwrap();
             assert_eq!(
                 response,
-                graphql::Response::builder()
-                    .error(
-                        graphql::Error::request_error_builder()
-                            .extension_code("AUTH_ERROR")
-                            .message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from JWKS configured to only accept from 'hello'")
-                            .build(),
-                    )
+                graphql::Response::request_error_builder()
+                    .extension_code("AUTH_ERROR")
+                    .message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from JWKS configured to only accept from 'hello'")
                     .build(),
             );
         }
@@ -1326,13 +1319,13 @@ async fn audience_check() {
                     .unwrap(),
             )
             .unwrap();
-            assert_response_eq_ignoring_error_id!(response, graphql::Response::builder()
-                .errors(vec![
-                    graphql::Error::request_error_builder()
-                        .extension_code("AUTH_ERROR")
-                        .message("Invalid audience: the token's `aud` was 'AAAA', but 'goodbye, hello' was expected")
-                        .build()
-                ]).build());
+            assert_response_eq_ignoring_error_id!(
+                response,
+                graphql::Response::request_error_builder()
+                    .extension_code("AUTH_ERROR")
+                    .message("Invalid audience: the token's `aud` was 'AAAA', but 'goodbye, hello' was expected")
+                    .build()
+            );
         }
         ControlFlow::Continue(_) => {
             panic!("audience check should have failed")

@@ -418,15 +418,14 @@ impl Configuration {
             .and_queue_size(notify_queue_cap)
             .ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS))
             .heartbeat_error_message(
-                graphql::Response::builder()
-                .error(
-                    graphql::Error::request_error_builder()
-                    .message("the connection has been closed because it hasn't heartbeat for a while")
+                graphql::Response::request_error_builder()
+                    .message(
+                        "the connection has been closed because it hasn't heartbeat for a while",
+                    )
                     .extension_code("SUBSCRIPTION_HEARTBEAT_ERROR")
-                    .build()
-                )
-                .build()
-            ).build())
+                    .build(),
+            )
+            .build())
     }
 
     pub(crate) fn rust_query_planner_config(

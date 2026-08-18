@@ -1038,13 +1038,9 @@ async fn subscription_with_callback() {
     // error happened
     notify
         .broadcast(
-            graphql::Response::builder()
-                .error(
-                    graphql::Error::request_error_builder()
-                        .message("cannot fetch the name")
-                        .extension_code("INVALID")
-                        .build(),
-                )
+            graphql::Response::request_error_builder()
+                .message("cannot fetch the name")
+                .extension_code("INVALID")
                 .build(),
         )
         .await
@@ -1209,13 +1205,9 @@ async fn subscription_with_callback_with_limit() {
     // error happened
     notify
         .broadcast(
-            graphql::Response::builder()
-                .error(
-                    graphql::Error::request_error_builder()
-                        .message("cannot fetch the name")
-                        .extension_code("INVALID")
-                        .build(),
-                )
+            graphql::Response::request_error_builder()
+                .message("cannot fetch the name")
+                .extension_code("INVALID")
                 .build(),
         )
         .await

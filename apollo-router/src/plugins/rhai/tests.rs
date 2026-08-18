@@ -28,7 +28,6 @@ use crate::Context;
 use crate::assert_response_eq_ignoring_error_id;
 use crate::assert_snapshot_subscriber;
 use crate::graphql;
-use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::http_ext;
 use crate::metrics::FutureMetricsExt;
@@ -718,13 +717,9 @@ async fn it_can_process_om_subgraph_forbidden_with_graphql_payload() {
     assert_eq!(processed_error.status, StatusCode::FORBIDDEN);
     assert_response_eq_ignoring_error_id!(
         processed_error.body.unwrap(),
-        graphql::Response::builder()
-            .errors(vec![{
-                Error::request_error_builder()
-                    .message("I have raised a 403")
-                    .extension_code("ACCESS_DENIED")
-                    .build()
-            }])
+        graphql::Response::request_error_builder()
+            .message("I have raised a 403")
+            .extension_code("ACCESS_DENIED")
             .build()
     );
 }

@@ -29,7 +29,6 @@ use tower::util::MapFutureLayer;
 
 use crate::Context;
 use crate::configuration::shared::Client;
-use crate::error::Error;
 use crate::graphql;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
@@ -1074,13 +1073,9 @@ where
         // Now we have some JSON, let's see if it's the right "shape" to create a graphql_response.
         // If it isn't, we create a graphql error response
         let graphql_response = match body_as_value {
-            Value::Null => graphql::Response::builder()
-                .errors(vec![
-                    Error::request_error_builder()
-                        .message(co_processor_output.body.take().unwrap_or_default())
-                        .extension_code(COPROCESSOR_ERROR_EXTENSION)
-                        .build(),
-                ])
+            Value::Null => graphql::Response::request_error_builder()
+                .message(co_processor_output.body.take().unwrap_or_default())
+                .extension_code(COPROCESSOR_ERROR_EXTENSION)
                 .build(),
             _ => deserialize_coprocessor_response(body_as_value, response_validation),
         };
@@ -1526,13 +1521,9 @@ where
 
         let res = {
             let graphql_response = match co_processor_output.body.unwrap_or(Value::Null) {
-                Value::String(s) => graphql::Response::builder()
-                    .errors(vec![
-                        Error::request_error_builder()
-                            .message(s.as_str().to_owned())
-                            .extension_code(COPROCESSOR_ERROR_EXTENSION)
-                            .build(),
-                    ])
+                Value::String(s) => graphql::Response::request_error_builder()
+                    .message(s.as_str().to_owned())
+                    .extension_code(COPROCESSOR_ERROR_EXTENSION)
                     .build(),
                 value => deserialize_coprocessor_response(value, response_validation),
             };
@@ -1891,29 +1882,21 @@ pub(super) fn deserialize_coprocessor_response(
 ) -> graphql::Response {
     if response_validation {
         graphql::Response::from_value(body_as_value).unwrap_or_else(|error| {
-            graphql::Response::builder()
-                .errors(vec![
-                    Error::request_error_builder()
-                        .message(format!(
-                            "couldn't deserialize coprocessor output body: {error}"
-                        ))
-                        .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
-                        .build(),
-                ])
+            graphql::Response::request_error_builder()
+                .message(format!(
+                    "couldn't deserialize coprocessor output body: {error}"
+                ))
+                .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
                 .build()
         })
     } else {
         // When validation is disabled, use the old behavior - just deserialize without GraphQL validation
         serde_json_bytes::from_value(body_as_value).unwrap_or_else(|error| {
-            graphql::Response::builder()
-                .errors(vec![
-                    Error::request_error_builder()
-                        .message(format!(
-                            "couldn't deserialize coprocessor output body: {error}"
-                        ))
-                        .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
-                        .build(),
-                ])
+            graphql::Response::request_error_builder()
+                .message(format!(
+                    "couldn't deserialize coprocessor output body: {error}"
+                ))
+                .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
                 .build()
         })
     }

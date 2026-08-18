@@ -575,15 +575,11 @@ where
                         }
                     }
                     Err(err) => Poll::Ready(
-                        graphql::Response::builder()
-                            .error(
-                                graphql::Error::request_error_builder()
-                                    .message(format!(
-                                        "cannot deserialize websocket server message: {err:?}"
-                                    ))
-                                    .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
-                                    .build(),
-                            )
+                        graphql::Response::request_error_builder()
+                            .message(format!(
+                                "cannot deserialize websocket server message: {err:?}"
+                            ))
+                            .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
                             .build()
                             .into(),
                     ),
@@ -1018,15 +1014,12 @@ mod tests {
             );
 
             let next_payload = gql_read_stream.next().await.unwrap();
-            assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
-                .error(
-                    graphql::Error::request_error_builder()
-                        .message(
-                            "cannot deserialize websocket server message: Error(\"expected value\", line: 1, column: 1)".to_string())
-                        .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
-                        .build(),
-                )
-                .build()
+            assert_response_eq_ignoring_error_id!(
+                next_payload,
+                graphql::Response::request_error_builder()
+                    .message(r#"cannot deserialize websocket server message: Error("expected value", line: 1, column: 1)"#.to_string())
+                    .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
+                    .build()
             );
             // Increments to 2 for the invalid message
             assert_counter!(
@@ -1178,15 +1171,12 @@ mod tests {
             );
 
             let next_payload = gql_read_stream.next().await.unwrap();
-            assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
-                .error(
-                    graphql::Error::request_error_builder()
-                        .message(
-                            "cannot deserialize websocket server message: Error(\"expected value\", line: 1, column: 1)".to_string())
-                        .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
-                        .build(),
-                )
-                .build()
+            assert_response_eq_ignoring_error_id!(
+                next_payload,
+                graphql::Response::request_error_builder()
+                    .message(r#"cannot deserialize websocket server message: Error("expected value", line: 1, column: 1)"#.to_string())
+                    .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
+                    .build()
             );
             // Increments to 3 for the keepalive and invalid message
             assert_counter!(

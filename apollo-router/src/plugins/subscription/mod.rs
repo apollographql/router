@@ -745,13 +745,9 @@ mod tests {
         let msg = handler.next().await.unwrap();
         assert_response_eq_ignoring_error_id!(
             msg,
-            graphql::Response::builder()
-                .errors(vec![
-                    graphql::Error::request_error_builder()
-                        .message("cannot complete the subscription")
-                        .extension_code("SUBSCRIPTION_ERROR")
-                        .build()
-                ])
+            graphql::Response::request_error_builder()
+                .message("cannot complete the subscription")
+                .extension_code("SUBSCRIPTION_ERROR")
                 .build()
         );
 
@@ -820,6 +816,7 @@ mod tests {
 
         assert_response_eq_ignoring_error_id!(
             subgraph_response.response.body(),
+            // XXX(@goto-bus-stop): data: null + a request error is not valid GraphQL
             &graphql::Response::builder()
                 .data(serde_json_bytes::Value::Null)
                 .error(
