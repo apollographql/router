@@ -1363,7 +1363,6 @@ mod tests {
         .await;
     }
 
-
     /// WebSocket server that sends one event per connection and then holds the connection open
     /// indefinitely (never closes it, never errors) — so a forwarding task reading from it can
     /// only end via its client-departure path (the closing signal), never via the subgraph
@@ -1451,7 +1450,7 @@ mod tests {
             )
             .layer(
                 SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
+                    .expect("can create a SubgraphService"),
             );
 
             let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
@@ -1549,7 +1548,7 @@ mod tests {
             // Configure reconnect — the Complete should suppress it entirely.
             let subgraph_service = with_subscription_layer_reconnect(
                 SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
+                    .expect("can create a SubgraphService"),
                 5,
             );
 
@@ -2272,7 +2271,7 @@ mod tests {
 
         let subgraph_service = with_subscription_layer_reconnect(
             SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-            .expect("can create a SubgraphService"),
+                .expect("can create a SubgraphService"),
             1,
         );
 
@@ -2351,7 +2350,7 @@ mod tests {
 
         let subgraph_service = with_subscription_layer_reconnect_protocol(
             SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-            .expect("can create a SubgraphService"),
+                .expect("can create a SubgraphService"),
             1,
             WebSocketProtocol::SubscriptionsTransportWs,
         );
@@ -2422,7 +2421,7 @@ mod tests {
 
             let subgraph_service = with_subscription_layer_reconnect(
                 SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
+                    .expect("can create a SubgraphService"),
                 1,
             );
 
@@ -2522,7 +2521,7 @@ mod tests {
 
             let subgraph_service = with_subscription_layer_reconnect(
                 SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
+                    .expect("can create a SubgraphService"),
                 0,
             );
 
@@ -2621,7 +2620,7 @@ mod tests {
 
             let subgraph_service = with_subscription_layer_reconnect(
                 SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
+                    .expect("can create a SubgraphService"),
                 1,
             );
 
@@ -2702,7 +2701,7 @@ mod tests {
 
             let subgraph_service = with_subscription_layer_reconnect(
                 SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
+                    .expect("can create a SubgraphService"),
                 1,
             );
 
@@ -2792,7 +2791,7 @@ mod tests {
 
         let subgraph_service = with_subscription_layer_reconnect(
             SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-            .expect("can create a SubgraphService"),
+                .expect("can create a SubgraphService"),
             1,
         );
 
@@ -2871,7 +2870,7 @@ mod tests {
             // Reconnect is configured — the terminal Error must suppress it entirely.
             let subgraph_service = with_subscription_layer_reconnect(
                 SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
+                    .expect("can create a SubgraphService"),
                 5,
             );
 
