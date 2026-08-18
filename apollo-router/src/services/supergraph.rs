@@ -548,7 +548,7 @@ mod test {
             .clone();
         assert_eq!(
             response.next_response().await.unwrap(),
-            graphql::Response::builder()
+            graphql::Response::data_builder()
                 .extensions(extensions)
                 .data(json!({}))
                 .build()

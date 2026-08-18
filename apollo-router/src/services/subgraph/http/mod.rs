@@ -225,7 +225,7 @@ mod tests {
 
         let actual = http_response_to_graphql_response("test_service", body, &parts);
 
-        let expected = graphql::Response::builder()
+        let expected = graphql::Response::data_builder()
             .data(json["data"].take())
             .build();
         assert_eq!(actual, expected);

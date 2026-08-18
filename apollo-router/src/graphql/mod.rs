@@ -192,6 +192,20 @@ impl Error {
         }
     }
 
+    /// Returns true if this error is a [Request Error], meaning it doesn't have a path.
+    ///
+    /// [Request Error]: https://spec.graphql.org/October2021/#sec-Errors.Request-errors
+    pub(crate) fn is_request_error(&self) -> bool {
+        self.path.is_none()
+    }
+
+    /// Returns true if this error is an [Execution Error], meaning it resulted from executing a field.
+    ///
+    /// [Execution Error]: https://spec.graphql.org/October2021/#sec-Errors.Field-errors
+    pub(crate) fn is_execution_error(&self) -> bool {
+        self.path.is_some()
+    }
+
     pub(crate) fn from_value(value: Value) -> Result<Error, MalformedResponseError> {
         let mut object = ensure_object!(value).map_err(|error| MalformedResponseError {
             reason: format!("invalid error within `errors`: {error}"),

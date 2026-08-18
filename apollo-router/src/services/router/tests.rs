@@ -69,7 +69,7 @@ async fn it_extracts_query_and_operation_name() {
     let operation_name = "operationName";
     let expected_operation_name = operation_name;
 
-    let expected_response = graphql::Response::builder()
+    let expected_response = graphql::Response::data_builder()
         .data(json!({"response": "yay"}))
         .build();
 

@@ -573,7 +573,7 @@ async fn it_displays_sandbox_with_different_supergraph_path() {
 
 #[tokio::test]
 async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
-    let expected_response = graphql::Response::builder()
+    let expected_response = graphql::Response::data_builder()
         .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
         .build();
     let example_response = expected_response.clone();
@@ -667,7 +667,7 @@ async fn gzip(json: serde_json::Value) -> Vec<u8> {
 async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
     let original_body = json!({ "query": "query { me { name } }" });
     let compressed_body = gzip(original_body).await;
-    let expected_response = graphql::Response::builder()
+    let expected_response = graphql::Response::data_builder()
         .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
         .build();
     let example_response = expected_response.clone();
@@ -796,7 +796,7 @@ async fn malformed_request() -> Result<(), ApolloRouterError> {
 
 #[tokio::test]
 async fn response() -> Result<(), ApolloRouterError> {
-    let expected_response = graphql::Response::builder()
+    let expected_response = graphql::Response::data_builder()
         .data(json!({"response": "yay"}))
         .build();
     let example_response = expected_response.clone();
@@ -895,7 +895,7 @@ async fn bad_response() -> Result<(), ApolloRouterError> {
 
 #[tokio::test]
 async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
-    let expected_response = graphql::Response::builder()
+    let expected_response = graphql::Response::data_builder()
         .data(json!({"response": "yay"}))
         .build();
     let example_response = expected_response.clone();
@@ -989,7 +989,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
 
 #[tokio::test]
 async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
-    let expected_response = graphql::Response::builder()
+    let expected_response = graphql::Response::data_builder()
         .data(json!({"response": "yay"}))
         .build();
     let example_response = expected_response.clone();
@@ -1062,7 +1062,7 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
 
 #[tokio::test]
 async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError> {
-    let expected_response = graphql::Response::builder()
+    let expected_response = graphql::Response::data_builder()
         .data(json!({"response": "yay"}))
         .build();
     let example_response = expected_response.clone();
@@ -1134,7 +1134,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
 
 #[tokio::test]
 async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterError> {
-    let expected_response = graphql::Response::builder()
+    let expected_response = graphql::Response::data_builder()
         .data(json!({"response": "yay"}))
         .build();
     let example_response = expected_response.clone();
@@ -1390,7 +1390,7 @@ async fn it_validates_get_request_content_type() -> Result<(), ApolloRouterError
         for _ in 0..4 {
             let (req, responder) = handle.next_request().await.unwrap();
             responder.send_response(SupergraphResponse::new_from_graphql_response(
-                graphql::Response::builder()
+                graphql::Response::data_builder()
                     .data(json!({"response": "hey"}))
                     .build(),
                 req.context,
@@ -2040,7 +2040,7 @@ async fn response_shape() -> Result<(), ApolloRouterError> {
     let driver = tokio::spawn(async move {
         let (req, responder) = handle.next_request().await.unwrap();
         responder.send_response(SupergraphResponse::new_from_graphql_response(
-            graphql::Response::builder()
+            graphql::Response::data_builder()
                 .data(json!({
                     "test": "hello"
                 }))
@@ -2607,7 +2607,7 @@ async fn test_defer_is_not_buffered_with_compression() {
 #[cfg(unix)]
 async fn listening_to_unix_socket() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let expected_response = graphql::Response::builder()
+    let expected_response = graphql::Response::data_builder()
         .data(json!({"response": "yay"}))
         .build();
     let example_response = expected_response.clone();

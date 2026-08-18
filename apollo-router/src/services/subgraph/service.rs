@@ -673,40 +673,56 @@ mod tests {
         ) -> Result<impl IntoResponse, Infallible> {
             // finalize the upgrade process by returning upgrade callback.
             // we can customize the callback by sending additional info such as address.
-            let res = ws.protocols(["graphql-transport-ws"]).on_upgrade(move |mut socket| async move {
-                let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
-                assert!(matches!(ack_msg, ClientMessage::ConnectionInit { .. }));
+            let res =
+                ws.protocols(["graphql-transport-ws"])
+                    .on_upgrade(move |mut socket| async move {
+                        let connection_ack =
+                            socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                        let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
+                        assert!(matches!(ack_msg, ClientMessage::ConnectionInit { .. }));
 
-                socket
-                    .send(Message::text(
-                        serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
-                    ))
-                    .await
-                    .unwrap();
-                let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let subscribe_msg: ClientMessage = serde_json::from_str(&new_message).unwrap();
-                assert!(matches!(subscribe_msg, ClientMessage::Subscribe { .. }));
-                let client_id = if let ClientMessage::Subscribe { payload, id } = subscribe_msg {
-                    assert_eq!(
+                        socket
+                            .send(Message::text(
+                                serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
+                            ))
+                            .await
+                            .unwrap();
+                        let new_message =
+                            socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                        let subscribe_msg: ClientMessage =
+                            serde_json::from_str(&new_message).unwrap();
+                        assert!(matches!(subscribe_msg, ClientMessage::Subscribe { .. }));
+                        let client_id =
+                            if let ClientMessage::Subscribe { payload, id } = subscribe_msg {
+                                assert_eq!(
                         payload,
                         Request::builder()
                             .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
                             .build()
                     );
 
-                    id
-                } else {
-                    panic!("subscribe message should be sent");
-                };
+                                id
+                            } else {
+                                panic!("subscribe message should be sent");
+                            };
 
-                socket
-                    .send(Message::text(
-                        serde_json::to_string(&ServerMessage::Next { id: client_id, payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
-                    ))
-                    .await
-                    .unwrap();
-            });
+                        socket
+                            .send(Message::text(
+                                serde_json::to_string(&ServerMessage::Next {
+                                    id: client_id,
+                                    payload: graphql::Response::data_builder()
+                                        .data(serde_json_bytes::json!({
+                                            "userWasCreated": {
+                                                "username": "ada_lovelace",
+                                            },
+                                        }))
+                                        .build(),
+                                })
+                                .unwrap(),
+                            ))
+                            .await
+                            .unwrap();
+                    });
 
             Ok(res)
         }
@@ -742,45 +758,62 @@ mod tests {
             ws: WebSocketUpgrade,
             ConnectInfo(_addr): ConnectInfo<SocketAddr>,
         ) -> Result<impl IntoResponse, Infallible> {
-            let res = ws.protocols(["graphql-transport-ws"]).on_upgrade(move |mut socket| async move {
-                let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
-                assert!(matches!(ack_msg, ClientMessage::ConnectionInit { .. }));
+            let res =
+                ws.protocols(["graphql-transport-ws"])
+                    .on_upgrade(move |mut socket| async move {
+                        let connection_ack =
+                            socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                        let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
+                        assert!(matches!(ack_msg, ClientMessage::ConnectionInit { .. }));
 
-                socket
-                    .send(Message::text(
-                        serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
-                    ))
-                    .await
-                    .unwrap();
-                let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let subscribe_msg: ClientMessage = serde_json::from_str(&new_message).unwrap();
-                let client_id = if let ClientMessage::Subscribe { payload, id } = subscribe_msg {
-                    assert_eq!(
+                        socket
+                            .send(Message::text(
+                                serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
+                            ))
+                            .await
+                            .unwrap();
+                        let new_message =
+                            socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                        let subscribe_msg: ClientMessage =
+                            serde_json::from_str(&new_message).unwrap();
+                        let client_id =
+                            if let ClientMessage::Subscribe { payload, id } = subscribe_msg {
+                                assert_eq!(
                         payload,
                         Request::builder()
                             .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
                             .build()
                     );
-                    id
-                } else {
-                    panic!("subscribe message should be sent");
-                };
+                                id
+                            } else {
+                                panic!("subscribe message should be sent");
+                            };
 
-                socket
-                    .send(Message::text(
-                        serde_json::to_string(&ServerMessage::Next { id: client_id.clone(), payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
-                    ))
-                    .await
-                    .unwrap();
+                        socket
+                            .send(Message::text(
+                                serde_json::to_string(&ServerMessage::Next {
+                                    id: client_id.clone(),
+                                    payload: graphql::Response::data_builder()
+                                        .data(serde_json_bytes::json!({
+                                            "userWasCreated": {
+                                                "username": "ada_lovelace",
+                                            },
+                                        }))
+                                        .build(),
+                                })
+                                .unwrap(),
+                            ))
+                            .await
+                            .unwrap();
 
-                socket
-                    .send(Message::text(
-                        serde_json::to_string(&ServerMessage::Complete { id: client_id }).unwrap(),
-                    ))
-                    .await
-                    .unwrap();
-            });
+                        socket
+                            .send(Message::text(
+                                serde_json::to_string(&ServerMessage::Complete { id: client_id })
+                                    .unwrap(),
+                            ))
+                            .await
+                            .unwrap();
+                    });
 
             Ok(res)
         }

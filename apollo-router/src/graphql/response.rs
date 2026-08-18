@@ -103,6 +103,16 @@ impl Response {
         Self::builder().error(error).build()
     }
 
+    /// Returns a builder that builds a GraphQL response with data and optional extensions.
+    ///
+    /// Data can be null but must be present.
+    ///
+    /// GraphQL Errors are not supported by this builder.
+    #[builder(visibility = "pub(crate)")]
+    fn data_new(data: Value, extensions: Map<ByteString, Value>) -> Self {
+        Self::builder().data(data).extensions(extensions).build()
+    }
+
     /// DO NOT USE!
     #[builder(visibility = "pub")]
     fn new(

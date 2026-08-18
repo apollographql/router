@@ -437,7 +437,7 @@ mod tests {
         let driver = tokio::task::spawn(async move {
             let (_request, responder) = handle.next_request().await.unwrap();
             responder.send_response(
-                graphql::Response::builder()
+                graphql::Response::data_builder()
                     .data(serde_json_bytes::json!({
                         "__schema": {
                             "queryType": {
@@ -505,7 +505,7 @@ mod tests {
         let driver = tokio::task::spawn(async move {
             let (_request, responder) = handle.next_request().await.unwrap();
             responder.send_response(
-                graphql::Response::builder()
+                graphql::Response::data_builder()
                     .data(serde_json_bytes::json!({
                         "__schema": {
                             "queryType": {

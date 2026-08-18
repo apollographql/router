@@ -464,7 +464,7 @@ impl QueryPlannerService {
             match AuthorizationPlugin::filter_query(&self.authorization_config, &key, &self.schema)
             {
                 Err(QueryPlannerError::Unauthorized(paths)) => {
-                    let mut response = graphql::Response::builder().data(Value::Null).build();
+                    let mut response = graphql::Response::data_builder().data(Value::Null).build();
 
                     if !paths.is_empty() {
                         let unauthorized = UnauthorizedPaths {

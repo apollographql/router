@@ -732,121 +732,151 @@ mod tests {
         port: Option<u16>,
     ) -> SocketAddr {
         let ws_handler = move |ws: WebSocketUpgrade| async move {
-            let res = ws.protocols([GRAPHQL_WS_SUBPROTOCOL]).on_upgrade(move |mut socket| async move {
-                let connection_init = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let init_msg: ClientMessage = serde_json::from_str(&connection_init).unwrap();
-                if let ClientMessage::ConnectionInit { payload } = init_msg {
-                    assert_eq!(payload, Some(serde_json_bytes::json!({"connectionParams": {
-                        "token": "XXX"
-                    }})));
-                } else {
-                   panic!("it should be a connection init message");
-                }
+            let res =
+                ws.protocols([GRAPHQL_WS_SUBPROTOCOL])
+                    .on_upgrade(move |mut socket| async move {
+                        let connection_init =
+                            socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                        let init_msg: ClientMessage =
+                            serde_json::from_str(&connection_init).unwrap();
+                        if let ClientMessage::ConnectionInit { payload } = init_msg {
+                            assert_eq!(
+                                payload,
+                                Some(serde_json_bytes::json!({"connectionParams": {
+                                    "token": "XXX"
+                                }}))
+                            );
+                        } else {
+                            panic!("it should be a connection init message");
+                        }
 
-                if send_ping {
-                    // It turns out some servers may send Pings before they even ack the connection.
-                    socket
-                        .send(AxumWsMessage::Ping(Bytes::new()))
-                        .await
-                        .unwrap();
+                        if send_ping {
+                            // It turns out some servers may send Pings before they even ack the connection.
+                            socket
+                                .send(AxumWsMessage::Ping(Bytes::new()))
+                                .await
+                                .unwrap();
 
-                    let pong_message = socket.recv().await.unwrap().unwrap();
-                    assert_eq!(pong_message, AxumWsMessage::Pong(Bytes::new()));
-                }
+                            let pong_message = socket.recv().await.unwrap().unwrap();
+                            assert_eq!(pong_message, AxumWsMessage::Pong(Bytes::new()));
+                        }
 
-                socket
-                    .send(AxumWsMessage::text(
-                        serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
-                    ))
-                    .await
-                    .unwrap();
-                let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let subscribe_msg: ClientMessage = serde_json::from_str(&new_message).unwrap();
-                assert!(matches!(subscribe_msg, ClientMessage::Subscribe { .. }));
-                #[allow(unused_assignments)]
-                let mut client_id = None;
-                if let ClientMessage::Subscribe { payload, id } = subscribe_msg {
-                    client_id = Some(id);
-                    assert_eq!(
-                        payload,
-                        Request::builder()
-                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
-                            .build()
-                    );
-                } else {
-                    panic!("we should receive a subscribe message");
-                }
+                        socket
+                            .send(AxumWsMessage::text(
+                                serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
+                            ))
+                            .await
+                            .unwrap();
+                        let new_message =
+                            socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                        let subscribe_msg: ClientMessage =
+                            serde_json::from_str(&new_message).unwrap();
+                        assert!(matches!(subscribe_msg, ClientMessage::Subscribe { .. }));
+                        #[allow(unused_assignments)]
+                        let mut client_id = None;
+                        if let ClientMessage::Subscribe { payload, id } = subscribe_msg {
+                            client_id = Some(id);
+                            assert_eq!(
+                                payload,
+                                Request::builder()
+                                    .query(
+                                        "subscription {\n  userWasCreated {\n    username\n  }\n}"
+                                    )
+                                    .build()
+                            );
+                        } else {
+                            panic!("we should receive a subscribe message");
+                        }
 
-                socket
-                    .send(AxumWsMessage::text("coucou"))
-                    .await
-                    .unwrap();
+                        socket.send(AxumWsMessage::text("coucou")).await.unwrap();
 
-                if let Some(duration) = heartbeat_interval {
-                   tokio::time::pause();
-                   assert!(
-                       socket.next().now_or_never().is_none(),
-                       "It should be no pending messages"
-                   );
+                        if let Some(duration) = heartbeat_interval {
+                            tokio::time::pause();
+                            assert!(
+                                socket.next().now_or_never().is_none(),
+                                "It should be no pending messages"
+                            );
 
-                   // Use `advance` (deterministic) rather than `sleep` (which can auto-advance
-                   // further while we await network I/O below, firing extra heartbeat ticks
-                   // and racing the "no pending messages" assertion that follows).
-                   tokio::time::advance(duration).await;
+                            // Use `advance` (deterministic) rather than `sleep` (which can auto-advance
+                            // further while we await network I/O below, firing extra heartbeat ticks
+                            // and racing the "no pending messages" assertion that follows).
+                            tokio::time::advance(duration).await;
 
-                   // Resume real time BEFORE awaiting the network read of the heartbeat ping.
-                   // While paused, awaiting I/O can trigger tokio's idle auto-advance, which
-                   // would cause the client's heartbeat interval to tick again (every 60s of
-                   // virtual time) and produce additional pending messages. Once resumed, the
-                   // next interval tick is 60s of real time away, well past the test lifetime.
-                   tokio::time::resume();
+                            // Resume real time BEFORE awaiting the network read of the heartbeat ping.
+                            // While paused, awaiting I/O can trigger tokio's idle auto-advance, which
+                            // would cause the client's heartbeat interval to tick again (every 60s of
+                            // virtual time) and produce additional pending messages. Once resumed, the
+                            // next interval tick is 60s of real time away, well past the test lifetime.
+                            tokio::time::resume();
 
-                   let ping_message = socket.next().await.unwrap().unwrap();
-                   assert_eq!(ping_message, AxumWsMessage::text(
-                       serde_json::to_string(&ClientMessage::Ping { payload: None }).unwrap(),
-                   ));
+                            let ping_message = socket.next().await.unwrap().unwrap();
+                            assert_eq!(
+                                ping_message,
+                                AxumWsMessage::text(
+                                    serde_json::to_string(&ClientMessage::Ping { payload: None })
+                                        .unwrap(),
+                                )
+                            );
 
-                   assert!(
-                       socket.next().now_or_never().is_none(),
-                       "It should be no pending messages"
-                   );
-                }
+                            assert!(
+                                socket.next().now_or_never().is_none(),
+                                "It should be no pending messages"
+                            );
+                        }
 
-                socket
-                    .send(AxumWsMessage::text(
-                        serde_json::to_string(&ServerMessage::Next { id: client_id.clone().unwrap(), payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
-                    ))
-                    .await
-                    .unwrap();
+                        socket
+                            .send(AxumWsMessage::text(
+                                serde_json::to_string(&ServerMessage::Next {
+                                    id: client_id.clone().unwrap(),
+                                    payload: graphql::Response::data_builder()
+                                        .data(serde_json_bytes::json!({
+                                            "userWasCreated": {
+                                                "username": "ada_lovelace",
+                                            },
+                                        }))
+                                        .build(),
+                                })
+                                .unwrap(),
+                            ))
+                            .await
+                            .unwrap();
 
-                socket
-                    .send(AxumWsMessage::Ping(Bytes::new()))
-                    .await
-                    .unwrap();
+                        socket
+                            .send(AxumWsMessage::Ping(Bytes::new()))
+                            .await
+                            .unwrap();
 
-                let pong_message = socket.next().await.unwrap().unwrap();
-                assert_eq!(pong_message, AxumWsMessage::Pong(Bytes::new()));
+                        let pong_message = socket.next().await.unwrap().unwrap();
+                        assert_eq!(pong_message, AxumWsMessage::Pong(Bytes::new()));
 
-                socket
-                    .send(AxumWsMessage::Ping(Bytes::new()))
-                    .await
-                    .unwrap();
+                        socket
+                            .send(AxumWsMessage::Ping(Bytes::new()))
+                            .await
+                            .unwrap();
 
-                let pong_message = socket.next().await.unwrap().unwrap();
-                assert_eq!(pong_message, AxumWsMessage::Pong(Bytes::new()));
+                        let pong_message = socket.next().await.unwrap().unwrap();
+                        assert_eq!(pong_message, AxumWsMessage::Pong(Bytes::new()));
 
-                socket
-                    .send(AxumWsMessage::text(
-                        serde_json::to_string(&ServerMessage::Complete { id: client_id.unwrap() }).unwrap(),
-                    ))
-                    .await
-                    .unwrap();
+                        socket
+                            .send(AxumWsMessage::text(
+                                serde_json::to_string(&ServerMessage::Complete {
+                                    id: client_id.unwrap(),
+                                })
+                                .unwrap(),
+                            ))
+                            .await
+                            .unwrap();
 
-                let terminate_sub = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let terminate_msg: ClientMessage = serde_json::from_str(&terminate_sub).unwrap();
-                assert!(matches!(terminate_msg, ClientMessage::OldConnectionTerminate));
-                socket.close().await.unwrap();
-            });
+                        let terminate_sub =
+                            socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                        let terminate_msg: ClientMessage =
+                            serde_json::from_str(&terminate_sub).unwrap();
+                        assert!(matches!(
+                            terminate_msg,
+                            ClientMessage::OldConnectionTerminate
+                        ));
+                        socket.close().await.unwrap();
+                    });
 
             Ok::<_, Infallible>(res)
         };
@@ -867,77 +897,91 @@ mod tests {
         port: Option<u16>,
     ) -> SocketAddr {
         let ws_handler = move |ws: WebSocketUpgrade| async move {
-            let res = ws.protocols([SUBSCRIPTIONS_TRANSPORT_WS_SUBPROTOCOL]).on_upgrade(move |mut socket| async move {
-                let init_connection = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let init_msg: ClientMessage = serde_json::from_str(&init_connection).unwrap();
-                assert!(matches!(init_msg, ClientMessage::ConnectionInit { .. }));
+            let res = ws
+                .protocols([SUBSCRIPTIONS_TRANSPORT_WS_SUBPROTOCOL])
+                .on_upgrade(move |mut socket| async move {
+                    let init_connection =
+                        socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                    let init_msg: ClientMessage = serde_json::from_str(&init_connection).unwrap();
+                    assert!(matches!(init_msg, ClientMessage::ConnectionInit { .. }));
 
-                if send_ping {
-                    // It turns out some servers may send Pings before they even ack the connection.
+                    if send_ping {
+                        // It turns out some servers may send Pings before they even ack the connection.
+                        socket
+                            .send(AxumWsMessage::Ping(Bytes::new()))
+                            .await
+                            .unwrap();
+                        let pong_message = socket.recv().await.unwrap().unwrap();
+                        assert_eq!(pong_message, AxumWsMessage::Pong(Bytes::new()));
+                    }
                     socket
-                        .send(AxumWsMessage::Ping(Bytes::new()))
+                        .send(AxumWsMessage::text(
+                            serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
+                        ))
                         .await
                         .unwrap();
-                    let pong_message = socket.recv().await.unwrap().unwrap();
-                    assert_eq!(pong_message, AxumWsMessage::Pong(Bytes::new()));
-                }
-                socket
-                    .send(AxumWsMessage::text(
-                        serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
-                    ))
-                    .await
-                    .unwrap();
-                socket
-                    .send(AxumWsMessage::text(
-                        serde_json::to_string(&ServerMessage::KeepAlive).unwrap(),
-                    ))
-                    .await
-                    .unwrap();
-                let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let subscribe_msg: ClientMessage = serde_json::from_str(&new_message).unwrap();
-                assert!(matches!(subscribe_msg, ClientMessage::OldStart { .. }));
-                #[allow(unused_assignments)]
-                let mut client_id = None;
-                if let ClientMessage::OldStart { payload, id } = subscribe_msg {
-                    client_id = Some(id);
-                    assert_eq!(
-                        payload,
-                        Request::builder()
-                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
-                            .build()
-                    );
-                } else {
-                    panic!("we should receive a subscribe message");
-                }
+                    socket
+                        .send(AxumWsMessage::text(
+                            serde_json::to_string(&ServerMessage::KeepAlive).unwrap(),
+                        ))
+                        .await
+                        .unwrap();
+                    let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                    let subscribe_msg: ClientMessage = serde_json::from_str(&new_message).unwrap();
+                    assert!(matches!(subscribe_msg, ClientMessage::OldStart { .. }));
+                    #[allow(unused_assignments)]
+                    let mut client_id = None;
+                    if let ClientMessage::OldStart { payload, id } = subscribe_msg {
+                        client_id = Some(id);
+                        assert_eq!(
+                            payload,
+                            Request::builder()
+                                .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                                .build()
+                        );
+                    } else {
+                        panic!("we should receive a subscribe message");
+                    }
 
-                socket
-                    .send(AxumWsMessage::text("coucou"))
-                    .await
-                    .unwrap();
+                    socket.send(AxumWsMessage::text("coucou")).await.unwrap();
 
-                socket
-                    .send(AxumWsMessage::text(
-                        serde_json::to_string(&ServerMessage::Next { id: client_id.clone().unwrap(), payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
-                    ))
-                    .await
-                    .unwrap();
-                socket
-                    .send(AxumWsMessage::text(
-                        serde_json::to_string(&ServerMessage::KeepAlive).unwrap(),
-                    ))
-                    .await
-                    .unwrap();
+                    socket
+                        .send(AxumWsMessage::text(
+                            serde_json::to_string(&ServerMessage::Next {
+                                id: client_id.clone().unwrap(),
+                                payload: graphql::Response::data_builder()
+                                    .data(serde_json_bytes::json!({
+                                        "userWasCreated": {
+                                            "username": "ada_lovelace",
+                                        },
+                                    }))
+                                    .build(),
+                            })
+                            .unwrap(),
+                        ))
+                        .await
+                        .unwrap();
+                    socket
+                        .send(AxumWsMessage::text(
+                            serde_json::to_string(&ServerMessage::KeepAlive).unwrap(),
+                        ))
+                        .await
+                        .unwrap();
 
-                let stop_sub = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let stop_msg: ClientMessage = serde_json::from_str(&stop_sub).unwrap();
-                assert!(matches!(stop_msg, ClientMessage::OldStop { .. }));
+                    let stop_sub = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                    let stop_msg: ClientMessage = serde_json::from_str(&stop_sub).unwrap();
+                    assert!(matches!(stop_msg, ClientMessage::OldStop { .. }));
 
-                let terminate_sub = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let terminate_msg: ClientMessage = serde_json::from_str(&terminate_sub).unwrap();
-                assert!(matches!(terminate_msg, ClientMessage::OldConnectionTerminate));
+                    let terminate_sub = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                    let terminate_msg: ClientMessage =
+                        serde_json::from_str(&terminate_sub).unwrap();
+                    assert!(matches!(
+                        terminate_msg,
+                        ClientMessage::OldConnectionTerminate
+                    ));
 
-                socket.close().await.unwrap();
-            });
+                    socket.close().await.unwrap();
+                });
 
             Ok::<_, Infallible>(res)
         };

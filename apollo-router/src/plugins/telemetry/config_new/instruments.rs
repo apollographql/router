@@ -3984,7 +3984,7 @@ mod tests {
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
             custom_instruments.on_response_event(
-                &graphql::Response::builder()
+                &graphql::Response::data_builder()
                     .data(serde_json_bytes::json!({"foo": "bar"}))
                     .build(),
                 &supergraph_req.context,

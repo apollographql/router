@@ -735,7 +735,7 @@ async fn it_can_process_om_subgraph_200_with_graphql_data() {
     assert_eq!(
         processed_error.body,
         Some(
-            graphql::Response::builder()
+            graphql::Response::data_builder()
                 .data(serde_json::json!({ "name": "Ada Lovelace"}))
                 .build()
         )

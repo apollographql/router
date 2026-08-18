@@ -801,7 +801,7 @@ mod tests {
         let router_driver = tokio::spawn(async move {
             let (req, responder) = router_handle.next_request().await.unwrap();
             responder.send_response(SupergraphResponse::new_from_graphql_response(
-                graphql::Response::builder()
+                graphql::Response::data_builder()
                     .data(json!({"response": "yay"}))
                     .build(),
                 req.context,

@@ -879,7 +879,7 @@ mod tests {
             vec![Path(vec![key("topField"), index(0)])],
             vec![Path(vec![key("topField"), index(1)])],
         ];
-        let response = graphql::Response::builder()
+        let response = graphql::Response::data_builder()
             .data(json!({
                 "_entities": [
                     {"name": "Alice"},
@@ -907,7 +907,7 @@ mod tests {
             Path(vec![key("field"), index(0)]),
             Path(vec![key("field"), index(2)]),
         ]];
-        let response = graphql::Response::builder()
+        let response = graphql::Response::data_builder()
             .data(json!({
                 "_entities": [{"name": "Alice"}]
             }))
@@ -933,7 +933,7 @@ mod tests {
         let schema = test_schema();
         let node = make_fetch_node(make_requires());
         let current_dir = Path(vec![key("field")]);
-        let response = graphql::Response::builder()
+        let response = graphql::Response::data_builder()
             .data(json!({"_entities": []}))
             .build();
 
@@ -949,7 +949,7 @@ mod tests {
         let node = make_fetch_node(make_requires());
         let current_dir = Path(vec![key("f"), flatten()]);
         let inverted_paths = vec![vec![Path(vec![key("f"), index(0)])]];
-        let response = graphql::Response::builder()
+        let response = graphql::Response::data_builder()
             .data(json!({
                 "_entities": [
                     {"name": "Alice"},
@@ -1169,7 +1169,7 @@ mod tests {
         let schema = test_schema();
         let node = make_fetch_node(make_requires());
         let current_dir = Path(vec![key("users")]);
-        let response = graphql::Response::builder()
+        let response = graphql::Response::data_builder()
             .data(json!({"something": "else"}))
             .build();
 
@@ -1184,12 +1184,8 @@ mod tests {
         let schema = test_schema();
         let node = make_fetch_node(make_requires());
         let current_dir = Path(vec![key("field")]);
-        let response = graphql::Response::builder()
-            .error(
-                graphql::Error::request_error_builder()
-                    .message("subgraph error")
-                    .build(),
-            )
+        let response = graphql::Response::request_error_builder()
+            .message("subgraph error")
             .build();
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
@@ -1282,7 +1278,7 @@ mod tests {
         let schema = test_schema();
         let node = make_fetch_node(make_requires());
         let current_dir = Path(vec![key("field")]);
-        let response = graphql::Response::builder()
+        let response = graphql::Response::data_builder()
             .data(json!({"_entities": "not_an_array"}))
             .build();
 
