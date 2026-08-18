@@ -142,7 +142,7 @@ fn init_query_plan_from_redis(
     subgraph_schemas: &SubgraphSchemas,
     cache_entry: &mut Result<QueryPlannerContent, Arc<QueryPlannerError>>,
 ) -> Result<(), String> {
-    if let Ok(QueryPlannerContent::Plan { plan }) = cache_entry {
+    if let Ok(plan) = cache_entry {
         // Arc freshly deserialized from Redis should be unique, so this doesn't clone:
         let plan = Arc::make_mut(plan);
         if let Some(root) = plan.root.as_mut() {
@@ -401,7 +401,7 @@ where
                         }
 
                         // This will be overridden by the Rust usage reporting implementation
-                        if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
+                        if let Some(plan) = &content {
                             context.extensions().with_lock(|lock| {
                                 lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
                             });
@@ -607,7 +607,7 @@ where
 
             match res {
                 Ok(content) => {
-                    let QueryPlannerContent::Plan { plan } = &content;
+                    let plan = &content;
                     context.extensions().with_lock(|lock| {
                         lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
                     });
@@ -696,7 +696,7 @@ impl Hasher for StructHasher {
 impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
     fn estimated_size(&self) -> Option<usize> {
         match self {
-            Ok(QueryPlannerContent::Plan { plan }) => Some(plan.estimated_size()),
+            Ok(plan) => Some(plan.estimated_size()),
             Err(e) => Some(estimate_size(e)),
         }
     }
@@ -810,9 +810,7 @@ mod tests {
                 } else {
                     // In measurement mode, this should complete successfully even after timeout
                     let plan = Arc::new(QueryPlan::fake_new(None, None));
-                    Ok(QueryPlannerResponse::builder()
-                        .content(QueryPlannerContent::Plan { plan })
-                        .build())
+                    Ok(QueryPlannerResponse::builder().content(plan).build())
                 }
             })
         }
@@ -848,9 +846,7 @@ mod tests {
                 } else {
                     // In measurement mode, this should complete successfully even after exceeding the memory limit
                     let plan = Arc::new(QueryPlan::fake_new(None, None));
-                    Ok(QueryPlannerResponse::builder()
-                        .content(QueryPlannerContent::Plan { plan })
-                        .build())
+                    Ok(QueryPlannerResponse::builder().content(plan).build())
                 }
             })
         }
@@ -1729,7 +1725,7 @@ mod tests {
             let plan = Arc::new(query_plan);
 
             while let Some((_request, responder)) = handle.next_request().await {
-                let qp_content = QueryPlannerContent::Plan { plan: plan.clone() };
+                let qp_content = plan.clone();
                 responder
                     .send_response(QueryPlannerResponse::builder().content(qp_content).build());
             }
@@ -1793,9 +1789,7 @@ mod tests {
                 .await
                 .expect("should receive one request");
 
-            let content = QueryPlannerContent::Plan {
-                plan: Arc::new(QueryPlan::fake_new(None, None)),
-            };
+            let content = Arc::new(QueryPlan::fake_new(None, None));
 
             responder.send_response(QueryPlannerResponse::builder().content(content).build());
         });
@@ -1908,12 +1902,8 @@ mod tests {
     #[test(tokio::test)]
     async fn plan_cache_is_segmented_by_authorization_metadata() {
         let (mock, handle) = tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
-        let (driver, planner_calls) = spawn_counting_planner(
-            handle,
-            QueryPlannerContent::Plan {
-                plan: Arc::new(QueryPlan::fake_new(None, None)),
-            },
-        );
+        let (driver, planner_calls) =
+            spawn_counting_planner(handle, Arc::new(QueryPlan::fake_new(None, None)));
 
         let (configuration, schema) = authorization_enabled_config_and_schema();
         let mut service = CachingQueryPlanner::for_test(
@@ -1972,12 +1962,7 @@ mod tests {
             query: Arc::new(emptied_query),
             estimated_size: Default::default(),
         };
-        let (driver, planner_calls) = spawn_counting_planner(
-            handle,
-            QueryPlannerContent::Plan {
-                plan: Arc::new(emptied_plan),
-            },
-        );
+        let (driver, planner_calls) = spawn_counting_planner(handle, Arc::new(emptied_plan));
 
         let (configuration, schema) = authorization_enabled_config_and_schema();
         let mut service = CachingQueryPlanner::for_test(

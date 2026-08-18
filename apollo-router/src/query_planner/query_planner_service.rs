@@ -20,6 +20,7 @@ use tower::Service;
 
 use super::PlanNode;
 use super::QueryKey;
+use super::QueryPlan;
 use crate::Configuration;
 use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::compute_job;
@@ -337,15 +338,13 @@ impl QueryPlannerService {
             evaluated_plan_paths
         );
 
-        Ok(QueryPlannerContent::Plan {
-            plan: Arc::new(super::QueryPlan {
-                usage_reporting: Arc::new(usage_reporting),
-                root: query_plan_root_node,
-                formatted_query_plan,
-                query: Arc::new(selections),
-                estimated_size: Default::default(),
-            }),
-        })
+        Ok(Arc::new(QueryPlan {
+            usage_reporting: Arc::new(usage_reporting),
+            root: query_plan_root_node,
+            formatted_query_plan,
+            query: Arc::new(selections),
+            estimated_size: Default::default(),
+        }))
     }
 }
 
@@ -475,15 +474,13 @@ impl QueryPlannerService {
                     &self.signature_normalization_algorithm,
                 );
 
-                return Ok(QueryPlannerContent::Plan {
-                    plan: Arc::new(super::QueryPlan {
-                        usage_reporting: Arc::new(usage_reporting),
-                        root: None,
-                        formatted_query_plan: None,
-                        query: Arc::new(selections),
-                        estimated_size: Default::default(),
-                    }),
-                });
+                return Ok(Arc::new(QueryPlan {
+                    usage_reporting: Arc::new(usage_reporting),
+                    root: None,
+                    formatted_query_plan: None,
+                    query: Arc::new(selections),
+                    estimated_size: Default::default(),
+                }));
             }
             FilterResult::Filtered {
                 paths,
@@ -661,7 +658,7 @@ mod tests {
             .await
             .unwrap();
 
-        let QueryPlannerContent::Plan { plan } = response.content.expect("successful response");
+        let plan = response.content.expect("successful response");
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!("plan_usage_reporting", plan.usage_reporting);
         });
@@ -728,7 +725,7 @@ mod tests {
 
         let content = response.content.expect("expected a successful response");
 
-        let QueryPlannerContent::Plan { plan } = content;
+        let plan = content;
 
         assert_eq!(plan.root, None, "expected an empty plan");
     }
@@ -1061,7 +1058,7 @@ mod tests {
             .await
             .unwrap();
 
-        let QueryPlannerContent::Plan { plan } = result;
+        let plan = result;
         check_query_plan_coverage(
             plan.root.as_ref().expect("non-empty query plan"),
             None,
@@ -1124,7 +1121,7 @@ mod tests {
             .await
             .unwrap();
 
-        let QueryPlannerContent::Plan { plan } = content;
+        let plan = content;
         assert!(
             plan.root.is_none(),
             "an unauthenticated request must not plan any work; a plan with fetches \

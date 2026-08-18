@@ -788,7 +788,6 @@ mod tests {
     use crate::compute_job::ComputeJobType;
     use crate::plugins::authorization::CacheKeyMetadata;
     use crate::query_planner::QueryPlannerService;
-    use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerRequest;
     use crate::services::query_parsing::ParsedDocument;
     use crate::services::query_planner::PlanOptions;
@@ -909,7 +908,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        let QueryPlannerContent::Plan { plan: query_plan } = planner_res.content.unwrap();
+        let query_plan = planner_res.content.unwrap();
 
         let schema = DemandControlledSchema::new(Arc::new(supergraph_schema)).unwrap();
         let mut demand_controlled_subgraph_schemas = HashMap::new();

@@ -9,7 +9,6 @@ use crate::compute_job::ComputeJobType;
 use crate::json_ext::ValueExt;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::query_planner_service::QueryPlannerService;
-use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::query_planner::PlanOptions;
 
@@ -7701,7 +7700,7 @@ async fn authorization_filtered_query(query_str: &str) -> (Arc<Query>, Arc<Schem
         .unwrap();
 
     let query = match response.content {
-        Some(QueryPlannerContent::Plan { plan }) => plan.query.clone(),
+        Some(plan) => plan.query.clone(),
         _ => panic!("filtering removed only `secret`, so the planner must return a plan"),
     };
     assert!(

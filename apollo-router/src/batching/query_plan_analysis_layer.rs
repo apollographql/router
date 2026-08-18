@@ -215,7 +215,6 @@ mod tests {
     use crate::graphql;
     use crate::query_planner::QueryPlan;
     use crate::query_planner::QueryPlannerService;
-    use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerRequest;
     use crate::services::execution;
     use crate::spec::Query;
@@ -228,24 +227,21 @@ mod tests {
     ) -> Arc<QueryPlan> {
         let document = Query::parse_document(query, None, &schema, &configuration).unwrap();
 
-        let QueryPlannerContent::Plan { plan: query_plan } =
-            QueryPlannerService::for_test(schema, configuration)
-                .unwrap()
-                .oneshot(
-                    QueryPlannerRequest::builder()
-                        .query(query)
-                        .document(document)
-                        .metadata(crate::plugins::authorization::CacheKeyMetadata::default())
-                        .plan_options(crate::services::PlanOptions::default())
-                        .compute_job_type(ComputeJobType::QueryPlanning)
-                        .build(),
-                )
-                .await
-                .unwrap()
-                .content
-                .unwrap();
-
-        query_plan
+        QueryPlannerService::for_test(schema, configuration)
+            .unwrap()
+            .oneshot(
+                QueryPlannerRequest::builder()
+                    .query(query)
+                    .document(document)
+                    .metadata(crate::plugins::authorization::CacheKeyMetadata::default())
+                    .plan_options(crate::services::PlanOptions::default())
+                    .compute_job_type(ComputeJobType::QueryPlanning)
+                    .build(),
+            )
+            .await
+            .unwrap()
+            .content
+            .unwrap()
     }
 
     #[tokio::test]
