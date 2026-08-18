@@ -30,18 +30,6 @@ static JWT_WITH_COPROCESSORS_IN_ALLOWED_FEATURES: LazyLock<String> = LazyLock::n
     )
 });
 
-// In the CI environment we only install Redis on x86_64 Linux; this jwt is part of testing that
-// flow
-#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
-static JWT_WITH_ENTITY_CACHING_COPROCESSORS_IN_ALLOWED_FEATURES: LazyLock<String> =
-    LazyLock::new(|| {
-        mint_license_jwt(
-            Some(&["entity_caching", "coprocessors"]),
-            LICENSE_SIX_MONTHS_SECS,
-            LICENSE_SIX_MONTHS_SECS,
-        )
-    });
-
 static JWT_WITH_COPROCESSORS_SUBSCRIPTION_IN_ALLOWED_FEATURES: LazyLock<String> =
     LazyLock::new(|| {
         mint_license_jwt(
