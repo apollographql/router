@@ -622,7 +622,7 @@ mod tests {
 
             let data = serde_json_bytes::json!({ "passthrough": true });
             let response_body = body::from_bytes(
-                serde_json::to_vec(&graphql::Response::builder().data(data).build()).unwrap(),
+                serde_json::to_vec(&graphql::Response::data_builder().data(data).build()).unwrap(),
             );
             responder.send_response(HttpResponse {
                 http_response: http::Response::builder().body(response_body).unwrap(),

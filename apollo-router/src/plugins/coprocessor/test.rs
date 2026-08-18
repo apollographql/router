@@ -3394,7 +3394,7 @@ mod tests {
 
     #[test]
     fn test_handle_graphql_response_validation_enabled() {
-        let original = graphql::Response::builder()
+        let original = graphql::Response::data_builder()
             .data(json!({"test": "original"}))
             .build();
 
@@ -3428,7 +3428,7 @@ mod tests {
 
     #[test]
     fn test_handle_graphql_response_validation_disabled() {
-        let original = graphql::Response::builder()
+        let original = graphql::Response::data_builder()
             .data(json!({"test": "original"}))
             .build();
 
@@ -3466,7 +3466,7 @@ mod tests {
 
     #[test]
     fn test_handle_graphql_response_validation_disabled_empty_response() {
-        let original = graphql::Response::builder()
+        let original = graphql::Response::data_builder()
             .data(json!({"test": "original"}))
             .build();
 
@@ -3489,7 +3489,7 @@ mod tests {
 
     #[test]
     fn test_handle_graphql_response_validation_enabled_empty_response() {
-        let original = graphql::Response::builder()
+        let original = graphql::Response::data_builder()
             .data(json!({"test": "original"}))
             .build();
 
@@ -4631,7 +4631,7 @@ mod tests {
 
     // Helper functions for readable tests
     fn valid_response() -> crate::graphql::Response {
-        crate::graphql::Response::builder()
+        crate::graphql::Response::data_builder()
             .data(json!({"field": "value"}))
             .build()
     }
@@ -4827,7 +4827,7 @@ mod tests {
         // This ensures coprocessors receive a consistent structure
 
         // Response with data but no errors or extensions
-        let response_data_only = graphql::Response::builder()
+        let response_data_only = graphql::Response::data_builder()
             .data(serde_json_bytes::json!({"test": "data"}))
             .build();
 

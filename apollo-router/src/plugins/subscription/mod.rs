@@ -468,7 +468,7 @@ mod tests {
         .body(router::body::from_bytes(
             serde_json::to_vec(&callback::CallbackPayload::Subscription(callback::SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
-                payload: Box::new(graphql::Response::builder()
+                payload: Box::new(graphql::Response::data_builder()
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                     .build()),
                 verifier: verifier.clone(),
@@ -497,7 +497,7 @@ mod tests {
         .body(router::body::from_bytes(
             serde_json::to_vec(&callback::CallbackPayload::Subscription(callback::SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
-                payload: Box::new(graphql::Response::builder()
+                payload: Box::new(graphql::Response::data_builder()
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                     .build()),
                 verifier: verifier.clone(),
@@ -607,7 +607,7 @@ mod tests {
         .body(router::body::from_bytes(
             serde_json::to_vec(&callback::CallbackPayload::Subscription(callback::SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
-                payload: Box::new(graphql::Response::builder()
+                payload: Box::new(graphql::Response::data_builder()
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                     .build()),
                 verifier: verifier.clone(),
@@ -708,7 +708,7 @@ mod tests {
         .body(router::body::from_bytes(
             serde_json::to_vec(&callback::CallbackPayload::Subscription(callback::SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
-                payload: Box::new(graphql::Response::builder()
+                payload: Box::new(graphql::Response::data_builder()
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                     .build()),
                 verifier: verifier.clone(),
@@ -766,7 +766,7 @@ mod tests {
         .body(router::body::from_bytes(
             serde_json::to_vec(&callback::CallbackPayload::Subscription(callback::SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
-                payload: Box::new(graphql::Response::builder()
+                payload: Box::new(graphql::Response::data_builder()
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                     .build()),
                 verifier,

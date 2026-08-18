@@ -7885,7 +7885,7 @@ fn filtered_defer_fragment() {
 
     query.filtered_query = Some(Arc::new(filtered));
 
-    let mut response = crate::graphql::Response::builder()
+    let mut response = crate::graphql::Response::data_builder()
         .data(json! {{
             "a": {
                 "b": "b",
