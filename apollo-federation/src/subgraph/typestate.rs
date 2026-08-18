@@ -250,11 +250,13 @@ impl Subgraph<Source> {
                 })
                 .collect();
             match message.code.severity() {
-                ConnectorsSeverity::Error => errors.push(CompositionError::ConnectorsError {
-                    code: message.code,
-                    message: message.message,
-                    locations,
-                }),
+                ConnectorsSeverity::Error => {
+                    errors.push(CompositionError::ConnectorsValidationError {
+                        code: message.code,
+                        message: message.message,
+                        locations,
+                    })
+                }
                 ConnectorsSeverity::Warning => hints.push(CompositionHint {
                     definition: HintCode::Connectors(message.code).definition(),
                     message: message.message,

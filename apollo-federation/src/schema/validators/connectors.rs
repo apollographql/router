@@ -65,7 +65,7 @@ pub(crate) fn validate_override_on_connector<T: HasMetadata>(
                     continue;
                 }
 
-                errors.push(CompositionError::ConnectorsError {
+                errors.push(CompositionError::ConnectorsValidationError {
                     code: ConnectorsCode::OverrideOnConnector,
                     message: format!(
                         r#"Field "{type_name}.{field_name}" on subgraph "{subgraph_name}" is trying to override connector-enabled subgraph "{from}", which is not yet supported. See https://go.apollo.dev/connectors/limitations#override-is-partially-unsupported"#,
