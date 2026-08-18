@@ -183,10 +183,11 @@ pub(crate) fn shutdown_installed_tracer_provider() {
 
 /// Shuts `provider` down, if there is one, and reports failures.
 ///
-/// Shutting the provider down — rather than dropping it — is what makes this reliable: any
-/// `SdkTracer` still held by [`OPENTELEMETRY_TRACER_HANDLE`] keeps a strong clone alive, so a drop
-/// of any one clone is not enough. A tracer left pointing at a shut-down provider produces
-/// non-recording spans, so the live tracer does not need swapping out first.
+/// Calling `shutdown()` rather than dropping the provider guarantees its span processors
+/// are flushed and stopped. `SdkTracerProvider` is refcounted, so its `Drop` reaches the
+/// processors only when the *last* clone goes away, and the `SdkTracer` in
+/// [`OPENTELEMETRY_TRACER_HANDLE`] holds one for the whole process lifetime. `shutdown()` ignores
+/// the refcount and reaches the processors regardless.
 fn shutdown_tracer_provider(provider: Option<SdkTracerProvider>) {
     let Some(provider) = provider else {
         return;
