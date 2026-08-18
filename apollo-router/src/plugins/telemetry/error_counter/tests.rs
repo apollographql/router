@@ -840,7 +840,7 @@ async fn test_subgraph_error_counting() {
         let previously_counted_error_id = Uuid::new_v4();
         let subgraph_name = "mySubgraph";
         let subgraph_request_id = SubgraphRequestId("5678".to_string());
-        let example_response = graphql::Response::builder()
+        let example_response = graphql::Response::execution_builder()
             .data(json!({"data": null}))
             .errors(vec![
                 graphql::Error::unchecked_builder()
@@ -850,14 +850,15 @@ async fn test_subgraph_error_counting() {
                     .path(Path::from("obj/field"))
                     .apollo_id(previously_counted_error_id)
                     .build(),
-                graphql::Error::unchecked_builder()
+                graphql::Error::execution_error_builder()
                     .message("error in supergraph layer")
                     .extension_code("SUPERGRAPH_CODE")
                     .extension("service", subgraph_name)
                     .path(Path::from("obj/field"))
                     .build(),
             ])
-            .build();
+            .build()
+            .expect("errors are execution errors");
         let config = json!({
             "telemetry":{
                 "apollo": {
@@ -955,7 +956,7 @@ async fn test_execution_error_counting() {
         let client_version = "version";
         let previously_counted_error_id = Uuid::new_v4();
         let subgraph_name = "mySubgraph";
-        let example_response = graphql::Response::builder()
+        let example_response = graphql::Response::execution_builder()
             .data(json!({"data": null}))
             .errors(vec![
                 graphql::Error::unchecked_builder()
@@ -965,14 +966,15 @@ async fn test_execution_error_counting() {
                     .path(Path::from("obj/field"))
                     .apollo_id(previously_counted_error_id)
                     .build(),
-                graphql::Error::unchecked_builder()
+                graphql::Error::execution_error_builder()
                     .message("error in supergraph layer")
                     .extension_code("SUPERGRAPH_CODE")
                     .extension("service", subgraph_name)
                     .path(Path::from("obj/field"))
                     .build(),
             ])
-            .build();
+            .build()
+            .expect("errors are execution errors");
         let config = json!({
             "telemetry":{
                 "apollo": {
@@ -1067,7 +1069,7 @@ async fn test_supergraph_error_counting() {
         let client_version = "version";
         let previously_counted_error_id = Uuid::new_v4();
         let subgraph_name = "mySubgraph";
-        let example_response = graphql::Response::builder()
+        let example_response = graphql::Response::execution_builder()
             .data(json!({"data": null}))
             .errors(vec![
                 graphql::Error::unchecked_builder()
@@ -1077,14 +1079,15 @@ async fn test_supergraph_error_counting() {
                     .path(Path::from("obj/field"))
                     .apollo_id(previously_counted_error_id)
                     .build(),
-                graphql::Error::unchecked_builder()
+                graphql::Error::execution_error_builder()
                     .message("error in supergraph layer")
                     .extension_code("SUPERGRAPH_CODE")
                     .extension("service", subgraph_name)
                     .path(Path::from("obj/field"))
                     .build(),
             ])
-            .build();
+            .build()
+            .expect("errors are execution errors");
         let config = json!({
             "telemetry":{
                 "apollo": {
@@ -1324,33 +1327,34 @@ async fn test_operation_errors_emitted_when_config_is_enabled() {
 
         let router_service =
             test_harness.supergraph_service(|req| async {
-                let example_response = graphql::Response::builder()
-                .data(json!({"data": null}))
-                .extension(EXTENSIONS_VALUE_COMPLETION_KEY, json!([{
+                let example_response = graphql::Response::execution_builder()
+                    .data(json!(null))
+                    .extension(EXTENSIONS_VALUE_COMPLETION_KEY, json!([{
                         "message": "Cannot return null for non-nullable field SomeType.someField",
                         "path": Path::from("someType/someField")
                     }]))
-                .errors(vec![
-                    graphql::Error::unchecked_builder()
-                        .message("some error")
-                        .extension_code("SOME_ERROR_CODE")
-                        .extension("service", "mySubgraph")
-                        .path(Path::from("obj/field"))
-                        .build(),
-                    graphql::Error::unchecked_builder()
-                        .message("some other error")
-                        .extension_code("SOME_OTHER_ERROR_CODE")
-                        .extension("service", "myOtherSubgraph")
-                        .path(Path::from("obj/arr/@/firstElementField"))
-                        .build(),
-                    graphql::Error::unchecked_builder()
-                        .message("some ignored error")
-                        .extension_code("SOME_IGNORED_ERROR_CODE")
-                        .extension("service", "myIgnoredSubgraph")
-                        .path(Path::from("obj/arr/@/firstElementField"))
-                        .build(),
-                ])
-                .build();
+                    .errors(vec![
+                        graphql::Error::execution_error_builder()
+                            .message("some error")
+                            .extension_code("SOME_ERROR_CODE")
+                            .extension("service", "mySubgraph")
+                            .path(Path::from("obj/field"))
+                            .build(),
+                        graphql::Error::execution_error_builder()
+                            .message("some other error")
+                            .extension_code("SOME_OTHER_ERROR_CODE")
+                            .extension("service", "myOtherSubgraph")
+                            .path(Path::from("obj/arr/@/firstElementField"))
+                            .build(),
+                        graphql::Error::execution_error_builder()
+                            .message("some ignored error")
+                            .extension_code("SOME_IGNORED_ERROR_CODE")
+                            .extension("service", "myIgnoredSubgraph")
+                            .path(Path::from("obj/arr/@/firstElementField"))
+                            .build(),
+                    ])
+                    .build()
+                    .expect("errors are execution errors");
                 Ok(SupergraphResponse::new_from_graphql_response(
                     example_response,
                     req.context,

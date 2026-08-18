@@ -195,6 +195,7 @@ impl Error {
     /// Returns true if this error is a [Request Error], meaning it doesn't have a path.
     ///
     /// [Request Error]: https://spec.graphql.org/October2021/#sec-Errors.Request-errors
+    #[allow(dead_code)] // TODO(@goto-bus-stop): i'll probably use this
     pub(crate) fn is_request_error(&self) -> bool {
         self.path.is_none()
     }

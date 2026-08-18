@@ -3865,6 +3865,7 @@ mod tests {
                 .build()
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
+            // XXX(@goto-bus-stop): we can have data + a request error here, this is incorrect
             custom_instruments.on_response_event(
                 &graphql::Response::builder()
                     .data(json!({

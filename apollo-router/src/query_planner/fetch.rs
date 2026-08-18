@@ -728,6 +728,8 @@ mod tests {
         let schema = test_schema();
         let node = make_fetch_node(vec![]);
         let current_dir = Path(vec![key("root")]);
+        // XXX(@goto-bus-stop): we have a mix of execution errors and request errors here, is
+        // that correct?
         let response = graphql::Response::builder()
             .error(
                 graphql::Error::execution_error_builder()
@@ -741,8 +743,6 @@ mod tests {
                     .path(Path(vec![key("b")]))
                     .build(),
             )
-            // XXX(@goto-bus-stop): we have a mix of execution errors and request errors here, is
-            // that correct?
             .error(
                 graphql::Error::unchecked_builder()
                     .message("error 3")
@@ -769,7 +769,8 @@ mod tests {
         let schema = test_schema();
         let node = make_fetch_node(vec![]);
         let current_dir = Path(vec![key("root")]);
-        let response = graphql::Response::builder()
+        let response = graphql::Response::execution_builder()
+            .data(json!(null))
             .error(
                 graphql::Error::execution_error_builder()
                     .message("auth error")
@@ -777,7 +778,8 @@ mod tests {
                     .path(Path(vec![key("field")]))
                     .build(),
             )
-            .build();
+            .build()
+            .expect("errors are execution errors");
 
         let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
@@ -824,6 +826,8 @@ mod tests {
         let schema = test_schema();
         let node = make_fetch_node(make_requires());
         let current_dir = Path(dir_elements);
+        // XXX@(goto-bus-stop): we can have data + a request error here when `error_path` is None,
+        // this is incorrect
         let response = graphql::Response::builder()
             .data(json!({"_entities": []}))
             .error(make_error(error_path))
@@ -859,6 +863,8 @@ mod tests {
         let schema = test_schema();
         let node = make_fetch_node(make_requires());
         let current_dir = Path(dir_elements);
+        // XXX@(goto-bus-stop): we can have data + a request error here when `error_path` is None,
+        // this is incorrect
         let response = graphql::Response::builder()
             .data(json!({"_entities": []}))
             .error(make_error(error_path))
@@ -982,7 +988,7 @@ mod tests {
             vec![Path(vec![key("users"), index(0)])],
             vec![Path(vec![key("users"), index(1)])],
         ];
-        let response = graphql::Response::builder()
+        let response = graphql::Response::execution_builder()
             .data(json!({"_entities": [null, null]}))
             .error(
                 graphql::Error::execution_error_builder()
@@ -990,7 +996,8 @@ mod tests {
                     .path(Path(vec![key("_entities"), index(1), key("name")]))
                     .build(),
             )
-            .build();
+            .build()
+            .expect("errors are execution errors");
 
         let (_, errors) =
             node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
@@ -1008,7 +1015,7 @@ mod tests {
         let schema = test_schema();
         let node = make_fetch_node(make_requires());
         let current_dir = Path(vec![key("data")]);
-        let response = graphql::Response::builder()
+        let response = graphql::Response::execution_builder()
             .data(json!({"_entities": [null]}))
             .error(
                 graphql::Error::execution_error_builder()
@@ -1017,7 +1024,8 @@ mod tests {
                     .path(Path(vec![key("_entities"), index(0), key("x")]))
                     .build(),
             )
-            .build();
+            .build()
+            .expect("errors are execution errors");
 
         let (_, errors) = node.response_at_path(
             &schema,
@@ -1040,7 +1048,7 @@ mod tests {
             Path(vec![key("items"), index(0)]),
             Path(vec![key("items"), index(3)]),
         ]];
-        let response = graphql::Response::builder()
+        let response = graphql::Response::execution_builder()
             .data(json!({"_entities": [null]}))
             .error(
                 graphql::Error::execution_error_builder()
@@ -1048,7 +1056,8 @@ mod tests {
                     .path(Path(vec![key("_entities"), index(0), key("name")]))
                     .build(),
             )
-            .build();
+            .build()
+            .expect("errors are execution errors");
 
         let (_, errors) =
             node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
@@ -1069,7 +1078,7 @@ mod tests {
         let schema = test_schema();
         let node = make_fetch_node(make_requires());
         let current_dir = Path(vec![key("x")]);
-        let response = graphql::Response::builder()
+        let response = graphql::Response::execution_builder()
             .data(json!({"_entities": []}))
             .error(
                 graphql::Error::execution_error_builder()
@@ -1077,7 +1086,8 @@ mod tests {
                     .path(Path(vec![key("_entities"), index(5), key("f")]))
                     .build(),
             )
-            .build();
+            .build()
+            .expect("errors are execution errors");
 
         let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
@@ -1090,7 +1100,7 @@ mod tests {
         let node = make_fetch_node(make_requires());
         let current_dir = Path(vec![key("users"), flatten()]);
         let inverted_paths = vec![vec![Path(vec![key("users"), index(0)])]];
-        let response = graphql::Response::builder()
+        let response = graphql::Response::execution_builder()
             .data(json!({"_entities": [null]}))
             .error(
                 graphql::Error::execution_error_builder()
@@ -1099,7 +1109,8 @@ mod tests {
                     .path(Path(vec![key("_entities"), index(0)]))
                     .build(),
             )
-            .build();
+            .build()
+            .expect("errors are execution errors");
 
         let (_, errors) =
             node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
@@ -1118,7 +1129,7 @@ mod tests {
         let node = make_fetch_node(make_requires());
         let current_dir = Path(vec![key("data"), flatten()]);
         let inverted_paths = vec![vec![Path(vec![key("data"), index(0)])]];
-        let response = graphql::Response::builder()
+        let response = graphql::Response::execution_builder()
             .data(json!({"_entities": [null]}))
             .error(
                 graphql::Error::execution_error_builder()
@@ -1131,7 +1142,8 @@ mod tests {
                     ]))
                     .build(),
             )
-            .build();
+            .build()
+            .expect("errors are execution errors");
 
         let (_, errors) =
             node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
@@ -1148,6 +1160,7 @@ mod tests {
         let schema = test_schema();
         let node = make_fetch_node(make_requires());
         let current_dir = Path(vec![key("users"), flatten()]);
+        // XXX(@goto-bus-stop): we use data + a request error here, this is incorrect
         let response = graphql::Response::builder()
             .data(json!({"something": "else"}))
             .error(
