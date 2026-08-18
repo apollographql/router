@@ -3,7 +3,7 @@ use apollo_compiler::coord;
 use apollo_compiler::schema::ExtendedType;
 use apollo_federation::composition::Supergraph;
 use apollo_federation::error::ErrorCode;
-use apollo_federation::subgraph::typestate::Initial;
+use apollo_federation::subgraph::typestate::Source;
 use apollo_federation::subgraph::typestate::Subgraph;
 use apollo_federation::supergraph::Satisfiable;
 use test_log::test;
@@ -173,8 +173,8 @@ fn check_cost_and_listsize_directives(
     );
 }
 
-fn subgraph_with_cost() -> Subgraph<Initial> {
-    Subgraph::parse(
+fn subgraph_with_cost() -> Subgraph<Source> {
+    Subgraph::from_sdl(
         "subgraphWithCost",
         "",
         r#"
@@ -211,8 +211,8 @@ fn subgraph_with_cost() -> Subgraph<Initial> {
     .unwrap()
 }
 
-fn subgraph_with_listsize() -> Subgraph<Initial> {
-    Subgraph::parse("subgraphWithListSize", "", r#"
+fn subgraph_with_listsize() -> Subgraph<Source> {
+    Subgraph::from_sdl("subgraphWithListSize", "", r#"
     extend schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
         @link(url: "https://specs.apollo.dev/federation/v2.9")
@@ -229,8 +229,8 @@ fn subgraph_with_listsize() -> Subgraph<Initial> {
     "#).unwrap()
 }
 
-fn subgraph_with_renamed_cost() -> Subgraph<Initial> {
-    Subgraph::parse("subgraphWithCost", "", r#"
+fn subgraph_with_renamed_cost() -> Subgraph<Source> {
+    Subgraph::from_sdl("subgraphWithCost", "", r#"
     extend schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
         @link(url: "https://specs.apollo.dev/cost/v0.1", import: [{ name: "@cost", as: "@renamedCost" }])
@@ -261,8 +261,8 @@ fn subgraph_with_renamed_cost() -> Subgraph<Initial> {
     "#).unwrap().into_fed2_test_subgraph(false).unwrap()
 }
 
-fn subgraph_with_renamed_listsize() -> Subgraph<Initial> {
-    Subgraph::parse("subgraphWithListSize", "", r#"
+fn subgraph_with_renamed_listsize() -> Subgraph<Source> {
+    Subgraph::from_sdl("subgraphWithListSize", "", r#"
     extend schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
         @link(url: "https://specs.apollo.dev/cost/v0.1", import: [{ name: "@listSize", as: "@renamedListSize" }])
@@ -278,8 +278,8 @@ fn subgraph_with_renamed_listsize() -> Subgraph<Initial> {
     "#).unwrap().into_fed2_test_subgraph(false).unwrap()
 }
 
-fn subgraph_with_cost_from_federation_spec() -> Subgraph<Initial> {
-    Subgraph::parse(
+fn subgraph_with_cost_from_federation_spec() -> Subgraph<Source> {
+    Subgraph::from_sdl(
         "subgraphWithCost",
         "",
         r#"
@@ -313,8 +313,8 @@ fn subgraph_with_cost_from_federation_spec() -> Subgraph<Initial> {
     .unwrap()
 }
 
-fn subgraph_with_listsize_from_federation_spec() -> Subgraph<Initial> {
-    Subgraph::parse("subgraphWithListSize", "", r#"
+fn subgraph_with_listsize_from_federation_spec() -> Subgraph<Source> {
+    Subgraph::from_sdl("subgraphWithListSize", "", r#"
     type HasInts {
       ints: [Int!]
     }
@@ -326,8 +326,8 @@ fn subgraph_with_listsize_from_federation_spec() -> Subgraph<Initial> {
     "#).unwrap().into_fed2_test_subgraph(true).unwrap()
 }
 
-fn subgraph_with_renamed_cost_from_federation_spec() -> Subgraph<Initial> {
-    Subgraph::parse("subgraphWithCost", "", r#"
+fn subgraph_with_renamed_cost_from_federation_spec() -> Subgraph<Source> {
+    Subgraph::from_sdl("subgraphWithCost", "", r#"
       extend schema @link(url: "https://specs.apollo.dev/federation/v2.9", import: [{ name: "@cost", as: "@renamedCost" }])
 
       enum AorB @renamedCost(weight: 15) {
@@ -356,8 +356,8 @@ fn subgraph_with_renamed_cost_from_federation_spec() -> Subgraph<Initial> {
     "#).unwrap()
 }
 
-fn subgraph_with_renamed_listsize_from_federation_spec() -> Subgraph<Initial> {
-    Subgraph::parse("subgraphWithListSize", "", r#"
+fn subgraph_with_renamed_listsize_from_federation_spec() -> Subgraph<Source> {
+    Subgraph::from_sdl("subgraphWithListSize", "", r#"
       extend schema @link(url: "https://specs.apollo.dev/federation/v2.9", import: [{ name: "@listSize", as: "@renamedListSize" }])
 
       type HasInts {
@@ -371,8 +371,8 @@ fn subgraph_with_renamed_listsize_from_federation_spec() -> Subgraph<Initial> {
     "#).unwrap()
 }
 
-fn subgraph_with_unimported_cost() -> Subgraph<Initial> {
-    Subgraph::parse(
+fn subgraph_with_unimported_cost() -> Subgraph<Source> {
+    Subgraph::from_sdl(
         "subgraphWithCost",
         "",
         r#"
@@ -409,8 +409,8 @@ fn subgraph_with_unimported_cost() -> Subgraph<Initial> {
     .unwrap()
 }
 
-fn subgraph_with_unimported_listsize() -> Subgraph<Initial> {
-    Subgraph::parse("subgraphWithListSize", "", r#"
+fn subgraph_with_unimported_listsize() -> Subgraph<Source> {
+    Subgraph::from_sdl("subgraphWithListSize", "", r#"
         extend schema
             @link(url: "https://specs.apollo.dev/link/v1.0")
             @link(url: "https://specs.apollo.dev/federation/v2.9")
@@ -485,7 +485,7 @@ fn composes_fully_qualified_directive_names() {
 
 #[test]
 fn errors_when_subgraphs_use_different_names() {
-    let subgraph_with_default_name = Subgraph::parse(
+    let subgraph_with_default_name = Subgraph::from_sdl(
         "subgraphWithDefaultName",
         "",
         r#"
@@ -500,7 +500,7 @@ fn errors_when_subgraphs_use_different_names() {
     "#,
     )
     .unwrap();
-    let subgraph_with_different_name = Subgraph::parse("subgraphWithDifferentName", "", r#"
+    let subgraph_with_different_name = Subgraph::from_sdl("subgraphWithDifferentName", "", r#"
         extend schema
             @link(url: "https://specs.apollo.dev/link/v1.0")
             @link(url: "https://specs.apollo.dev/federation/v2.9")
@@ -528,7 +528,7 @@ fn errors_when_subgraphs_use_different_names() {
 
 #[test]
 fn hints_when_merging_cost_arguments() {
-    let subgraph_a = Subgraph::parse(
+    let subgraph_a = Subgraph::from_sdl(
         "subgraph-a",
         "",
         r#"
@@ -542,7 +542,7 @@ fn hints_when_merging_cost_arguments() {
     "#,
     )
     .unwrap();
-    let subgraph_b = Subgraph::parse(
+    let subgraph_b = Subgraph::from_sdl(
         "subgraph-b",
         "",
         r#"
@@ -579,7 +579,7 @@ fn hints_when_merging_cost_arguments() {
 
 #[test]
 fn hints_when_merging_listsize_arguments() {
-    let subgraph_a = Subgraph::parse(
+    let subgraph_a = Subgraph::from_sdl(
         "subgraph-a",
         "",
         r#"
@@ -594,7 +594,7 @@ fn hints_when_merging_listsize_arguments() {
     "#,
     )
     .unwrap();
-    let subgraph_b = Subgraph::parse(
+    let subgraph_b = Subgraph::from_sdl(
         "subgraph-b",
         "",
         r#"

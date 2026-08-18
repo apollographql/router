@@ -1424,7 +1424,7 @@ fn from_context_field_in_all_subgraphs_preserves_join_field() {
     use apollo_federation::subgraph::typestate::Subgraph;
 
     // s1: owns T with @context, U.f has @fromContext on its argument
-    let s1 = Subgraph::parse(
+    let s1 = Subgraph::from_sdl(
         "s1",
         "http://s1",
         r#"
@@ -1462,7 +1462,7 @@ fn from_context_field_in_all_subgraphs_preserves_join_field() {
     .unwrap();
 
     // s2: also has U.f with same type but no @fromContext
-    let s2 = Subgraph::parse(
+    let s2 = Subgraph::from_sdl(
         "s2",
         "http://s2",
         r#"

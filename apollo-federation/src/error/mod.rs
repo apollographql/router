@@ -1,6 +1,7 @@
 pub(crate) mod suggestion;
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
@@ -13,7 +14,9 @@ use apollo_compiler::ast::OperationType;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
+use strum::IntoEnumIterator;
 
+pub use crate::connectors::validation::Code as ConnectorsCode;
 use crate::subgraph::SubgraphError;
 use crate::subgraph::spec::FederationSpecError;
 use crate::subgraph::typestate::HasMetadata;
@@ -289,11 +292,19 @@ pub enum CompositionError {
         message: String,
         locations: Locations,
     },
+    /// An error reported by the `@source`/`@connect` (connectors) subgraph validations.
+    #[error("{message}")]
+    ConnectorsError {
+        code: ConnectorsCode,
+        message: String,
+        locations: Locations,
+    },
 }
 
 impl CompositionError {
     pub fn code(&self) -> ErrorCode {
         match self {
+            Self::ConnectorsError { code, .. } => ErrorCode::Connectors(*code),
             Self::SubgraphError { error, .. } => error.code(),
             Self::MergeError { error, .. } => error.code(),
             Self::MergeValidationError { error, .. } => error.code(),
@@ -499,7 +510,8 @@ impl CompositionError {
             | Self::OverrideLabelInvalid { .. }
             | Self::OverrideOnInterface { .. }
             | Self::OverrideSourceHasOverride { .. }
-            | Self::QueryRootMissing { .. } => self,
+            | Self::QueryRootMissing { .. }
+            | Self::ConnectorsError { .. } => self,
         }
     }
 
@@ -538,7 +550,8 @@ impl CompositionError {
             | Self::MergeError { locations, .. }
             | Self::ArgumentDefaultMismatch { locations, .. }
             | Self::InputFieldDefaultMismatch { locations, .. }
-            | Self::InterfaceFieldNoImplem { locations, .. } => locations,
+            | Self::InterfaceFieldNoImplem { locations, .. }
+            | Self::ConnectorsError { locations, .. } => locations,
             _ => &[],
         }
     }
@@ -2274,6 +2287,29 @@ static INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE: LazyLock<ErrorCodeDefinition> 
     },
 );
 
+/// Connectors validation errors carry their own code enum, so instead of duplicating every one of
+/// them as an [`ErrorCode`] variant we derive the definitions from that enum. The code string is
+/// the only part consumers rely on today, hence the generic description.
+static CONNECTORS_ERROR_CODE_DEFINITIONS: LazyLock<HashMap<ConnectorsCode, ErrorCodeDefinition>> =
+    LazyLock::new(|| {
+        ConnectorsCode::iter()
+            .map(|code| {
+                let definition = ErrorCodeDefinition::new(
+                    <&'static str>::from(code).to_owned(),
+                    "A connectors (`@source`/`@connect`) validation error.".to_owned(),
+                    None,
+                );
+                (code, definition)
+            })
+            .collect()
+    });
+
+fn connectors_error_code_definition(code: ConnectorsCode) -> &'static ErrorCodeDefinition {
+    CONNECTORS_ERROR_CODE_DEFINITIONS
+        .get(&code)
+        .unwrap_or(&ERROR_CODE_MISSING)
+}
+
 static INTERNAL: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "INTERNAL".to_owned(),
@@ -2576,8 +2612,12 @@ static MISSING_TRANSITIVE_AUTH_REQUIREMENTS: LazyLock<ErrorCodeDefinition> = Laz
         )
 });
 
-#[derive(Debug, PartialEq, strum_macros::EnumIter)]
+#[derive(Debug, PartialEq)]
 pub enum ErrorCode {
+    /// An error raised by the connectors (`@source`/`@connect`) subgraph validations. Those codes
+    /// live in their own enum but are part of the same global code namespace as the rest of the
+    /// composition error codes.
+    Connectors(ConnectorsCode),
     ErrorCodeMissing,
     Internal,
     ExtensionWithNoBase,
@@ -2690,6 +2730,7 @@ pub enum ErrorCode {
 impl ErrorCode {
     pub fn definition(&self) -> &'static ErrorCodeDefinition {
         match self {
+            ErrorCode::Connectors(code) => connectors_error_code_definition(*code),
             ErrorCode::Internal => &INTERNAL,
             ErrorCode::ExtensionWithNoBase => &EXTENSION_WITH_NO_BASE,
             ErrorCode::InvalidGraphQL => &INVALID_GRAPHQL,

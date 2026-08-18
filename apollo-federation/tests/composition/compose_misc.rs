@@ -291,7 +291,7 @@ fn misc_handles_fragments_in_requires_using_inaccessible_types() {
 
 #[test]
 fn misc_existing_authenticated_directive_with_fed1() {
-    let subgraph_a = Subgraph::parse(
+    let subgraph_a = Subgraph::from_sdl(
         "subgraphA",
         "http://subgraphA",
         r#"
@@ -305,7 +305,7 @@ fn misc_existing_authenticated_directive_with_fed1() {
     )
     .expect("valid subgraph");
 
-    let subgraph_b = Subgraph::parse(
+    let subgraph_b = Subgraph::from_sdl(
         "subgraphB",
         "http://subgraphB",
         r#"
@@ -459,9 +459,9 @@ fn test_satisfiability_handles_extra_implicit_downcast() {
         }
     "#;
 
-    let parsed_a = Subgraph::parse("subgraph-a", "http://subgraph-a", subgraph_a)
+    let parsed_a = Subgraph::from_sdl("subgraph-a", "http://subgraph-a", subgraph_a)
         .expect("Failed to parse subgraph-a");
-    let parsed_b = Subgraph::parse("subgraph-b", "http://subgraph-b", subgraph_b)
+    let parsed_b = Subgraph::from_sdl("subgraph-b", "http://subgraph-b", subgraph_b)
         .expect("Failed to parse subgraph-b");
 
     // Before the fix, this would fail with:
@@ -624,7 +624,7 @@ mod supergraph_spec_imports {
             }
         "#;
         let subgraph =
-            Subgraph::parse("accounts", "http://accounts/graphql", sdl).expect("valid subgraph");
+            Subgraph::from_sdl("accounts", "http://accounts/graphql", sdl).expect("valid subgraph");
 
         let supergraph = compose(vec![subgraph]).expect("composition should succeed");
         assert_snapshot!(supergraph.schema().schema());
@@ -647,7 +647,7 @@ mod supergraph_spec_imports {
                 internalCode: String @inaccessible
             }
         "#;
-        let subgraph = Subgraph::parse("products", "http://products/graphql", sdl)
+        let subgraph = Subgraph::from_sdl("products", "http://products/graphql", sdl)
             .expect("successfully parsed");
         let result = compose(vec![subgraph]);
         assert_composition_errors(
@@ -678,7 +678,7 @@ mod supergraph_spec_imports {
             }
         "#;
         let subgraph =
-            Subgraph::parse("accounts", "http://accounts/graphql", sdl).expect("valid subgraph");
+            Subgraph::from_sdl("accounts", "http://accounts/graphql", sdl).expect("valid subgraph");
         let result = compose(vec![subgraph]);
         assert_composition_errors(
             &result,
@@ -719,7 +719,7 @@ mod supergraph_spec_imports {
             }
         "#;
         let subgraph =
-            Subgraph::parse("accounts", "http://accounts/graphql", sdl).expect("valid subgraph");
+            Subgraph::from_sdl("accounts", "http://accounts/graphql", sdl).expect("valid subgraph");
 
         let supergraph = compose(vec![subgraph]).expect("composition should succeed");
         assert_snapshot!(supergraph.schema().schema());
@@ -746,7 +746,7 @@ mod supergraph_spec_imports {
             }
         "#;
         let subgraph =
-            Subgraph::parse("products", "http://products/graphql", sdl).expect("valid subgraph");
+            Subgraph::from_sdl("products", "http://products/graphql", sdl).expect("valid subgraph");
         let result = compose(vec![subgraph]);
         assert_composition_errors(
             &result,
@@ -783,7 +783,7 @@ mod supergraph_spec_imports {
             }
         "#;
         let subgraph =
-            Subgraph::parse("accounts", "http://accounts/graphql", sdl).expect("valid subgraph");
+            Subgraph::from_sdl("accounts", "http://accounts/graphql", sdl).expect("valid subgraph");
 
         let supergraph = compose(vec![subgraph]).expect("composition should succeed");
         let schema = supergraph.schema().schema();
