@@ -280,8 +280,10 @@ impl Response {
     }
 }
 
-/// A graphql incremental response.
-/// Used with `@defer`
+/// A GraphQL incremental response for `@defer` or `@stream`.
+///
+/// This is based on a spec draft:
+/// <https://github.com/robrichard/graphql-spec/blob/c630301560d9819d33255d3ba00f548e8abbcdc6/spec/Section%207%20--%20Response.md#incremental>
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
@@ -309,27 +311,38 @@ pub struct IncrementalResponse {
 
 #[buildstructor::buildstructor]
 impl IncrementalResponse {
-    /// Constructor
-    #[builder(visibility = "pub")]
-    fn new(
+    /// Returns a builder for a [Defer Payload], following the 2022-08-24 state of the spec draft.
+    ///
+    /// > A defer payload is a map that may appear as an item in the `incremental` entry of a response.
+    /// > A defer payload is the result of an associated `@defer` directive in the operation.
+    /// > A defer payload must contain `data` and `path` entries and may contain `label`, `errors`, and `extensions` entries.
+    ///
+    /// ## Errors
+    /// This builder returns an error if any of the `.error()` or `.errors()` calls
+    /// contain [Request Error]s. A defer payload must only contain [Execution Error]s.
+    ///
+    /// [Defer Payload]: https://github.com/robrichard/graphql-spec/blob/c630301560d9819d33255d3ba00f548e8abbcdc6/spec/Section%207%20--%20Response.md#defer-payload
+    /// [Request Error]: https://spec.graphql.org/September2025/#sec-Errors.Request-Errors
+    /// [Execution Error]: https://spec.graphql.org/September2025/#sec-Errors.Execution-Errors
+    #[builder(visibility = "pub(crate)")]
+    fn defer_payload_new(
         label: Option<String>,
-        data: Option<Value>,
-        path: Option<Path>,
+        data: Value,
+        path: Path,
         errors: Vec<Error>,
         extensions: Map<ByteString, Value>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, BoxError> {
+        if errors.iter().any(|error| !error.is_execution_error()) {
+            return Err("IncrementalResponse::defer_payload_builder() received a request error, but only execution errors are allowed".into());
+        }
+
+        Ok(Self {
             label,
-            data,
-            path,
+            data: Some(data),
+            path: Some(path),
             errors,
             extensions,
-        }
-    }
-
-    /// append_errors default the errors `path` with the one provided.
-    pub fn append_errors(&mut self, errors: &mut Vec<Error>) {
-        self.errors.append(errors)
+        })
     }
 }
 
