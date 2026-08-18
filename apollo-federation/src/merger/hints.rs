@@ -10,7 +10,7 @@ use crate::supergraph::HintLevel;
 #[derive(Clone, Debug)]
 pub enum HintCode {
     /// A warning raised by the connectors (`@source`/`@connect`) subgraph validations.
-    Connectors(ConnectorsCode),
+    ConnectorsHint(ConnectorsCode),
     InconsistentButCompatibleFieldType,
     InconsistentButCompatibleArgumentType,
     InconsistentDefaultValuePresence,
@@ -47,7 +47,7 @@ pub enum HintCode {
 impl HintCode {
     pub fn definition(&self) -> &'static HintCodeDefinition {
         match self {
-            HintCode::Connectors(code) => connectors_hint_definition(*code),
+            HintCode::ConnectorsHint(code) => connectors_hint_definition(*code),
             HintCode::InconsistentButCompatibleFieldType => &INCONSISTENT_BUT_COMPATIBLE_FIELD_TYPE,
             HintCode::InconsistentButCompatibleArgumentType => {
                 &INCONSISTENT_BUT_COMPATIBLE_ARGUMENT_TYPE
