@@ -5277,9 +5277,9 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-datadog"
-version = "0.20.1"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c97d6c9bb625ee2d428d7024ead37060d1eddde759057d51ddfeb1bf00792a4"
+checksum = "6c4d9a8329def0001b3d9fc4befc13821f96a3c3646be8afb5ed615f65ebf422"
 dependencies = [
  "ahash",
  "http 1.5.0",
