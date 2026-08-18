@@ -135,17 +135,6 @@ pub(crate) enum ErrorLocation {
 pub(crate) struct UnauthorizedPaths {
     pub(crate) paths: Vec<Path>,
     pub(crate) errors: ErrorConfig,
-    /// Whether filtering removed every definition from the document.
-    ///
-    /// The plan's shape does not imply this on its own. A plan with no root node also
-    /// describes a partially filtered operation whose surviving selections are all
-    /// statically `@skip`ped, and adding `filtered_query.is_none()` still matches a
-    /// `dry_run` over an all-skipped operation, which modifies nothing.
-    ///
-    /// Document, not operation: when another operation shares the document, fully
-    /// filtering the executed one leaves the document non-empty and this stays false.
-    #[serde(default)]
-    pub(crate) document_emptied: bool,
 }
 
 /// What [`AuthorizationPlugin::filter_query`] did to an operation.
@@ -158,8 +147,9 @@ pub(crate) enum FilterResult {
         document: ast::Document,
     },
     /// Filtering removed every definition from the document, so nothing is left to
-    /// plan. A fully filtered operation in a document that other operations keep
-    /// non-empty is reported as `Filtered`.
+    /// plan and the operation proceeds as a plan with no work. A fully filtered
+    /// operation in a document that other operations keep non-empty is reported as
+    /// `Filtered`.
     Emptied { paths: Vec<Path> },
 }
 
@@ -627,11 +617,8 @@ impl Plugin for AuthorizationPlugin {
         ServiceBuilder::new()
             // Ahead of the counter below, so a refused operation stays uncounted.
             .checkpoint_async(move |request: execution::Request| async move {
-                let unauthorized = request.query_plan.query.unauthorized.clone();
-
-                if unauthorized.document_emptied
-                    || (reject_unauthorized && !unauthorized.paths.is_empty())
-                {
+                if reject_unauthorized && !request.query_plan.query.unauthorized.paths.is_empty() {
+                    let unauthorized = request.query_plan.query.unauthorized.clone();
                     unauthorized.log_unauthorized_paths();
 
                     let mut response = graphql::Response::builder().data(Value::Null).build();

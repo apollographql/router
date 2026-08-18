@@ -714,6 +714,61 @@ mod whole_query_rejection {
         assert_no_subgraph_calls(handles).await;
     }
 
+    /// Without `reject_unauthorized`, an operation that filtering empties runs through
+    /// the same pipeline as a partial filter: an empty plan executes nothing, and
+    /// response formatting against the original operation shapes the result. The client
+    /// receives each requested root field as null alongside the path errors, exactly as
+    /// it would if some fields had survived.
+    #[tokio::test]
+    async fn emptied_operation_without_reject_returns_shaped_data() {
+        let (service, handles) = build_rejecting_router(serde_json::json!({
+            "enabled": true
+        }))
+        .await;
+
+        let req = graphql::Request {
+            // `orga.id` is `@authenticated` and the only selection, so filtering
+            // removes everything.
+            query: Some("query { orga(id: 1) { id } }".to_string()),
+            ..Default::default()
+        };
+        let response = service
+            .oneshot(router::Request {
+                context: Context::new(),
+                router_request: http::Request::builder()
+                    .method("POST")
+                    .header(CONTENT_TYPE, "application/json")
+                    .header(ACCEPT, "application/json")
+                    .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+                    .unwrap(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(response.response.status(), http::StatusCode::OK);
+        let bytes = body::into_bytes(response.response.into_body())
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body.get("data"),
+            Some(&serde_json::json!({ "orga": null })),
+            "body: {body}"
+        );
+        assert_eq!(
+            body.pointer("/errors/0/extensions/code"),
+            Some(&serde_json::json!("UNAUTHORIZED_FIELD_OR_TYPE")),
+            "body: {body}"
+        );
+        assert_eq!(
+            body.pointer("/errors/0/path"),
+            Some(&serde_json::json!(["orga", "id"])),
+            "body: {body}"
+        );
+
+        assert_no_subgraph_calls(handles).await;
+    }
+
     #[tokio::test]
     async fn does_not_reach_execution() {
         let (service, handles) = build_router_rejecting_whole_query().await;

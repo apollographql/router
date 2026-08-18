@@ -1958,27 +1958,26 @@ mod tests {
         crate::plugin::test::await_mock_driver(driver).await;
     }
 
-    /// The cache stores a refused operation's plan like any other — and, like any other,
-    /// it stays keyed by authorization state, so a refusal cached for an unauthenticated
-    /// request is never served to an authenticated one.
+    /// The cache stores an emptied operation's plan like any other — and, like any
+    /// other, it stays keyed by authorization state, so a plan cached for an
+    /// unauthenticated request is never served to an authenticated one.
     #[test(tokio::test)]
-    async fn refused_operation_plan_is_cached() {
+    async fn emptied_operation_plan_is_cached() {
         let (mock, handle) = tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
-        // The plan `QueryPlannerService::get` returns for a refused operation: no root
-        // node, and the query marked as emptied.
-        let mut refused_query = Query::empty_for_tests();
-        refused_query.unauthorized.document_emptied = true;
-        let refusal_plan = QueryPlan {
+        // The plan `QueryPlannerService::get` returns for an emptied operation: no
+        // root node.
+        let emptied_query = Query::empty_for_tests();
+        let emptied_plan = QueryPlan {
             usage_reporting: Arc::new(UsageReporting::Operation(Default::default())),
             root: None,
             formatted_query_plan: None,
-            query: Arc::new(refused_query),
+            query: Arc::new(emptied_query),
             estimated_size: Default::default(),
         };
         let (driver, planner_calls) = spawn_counting_planner(
             handle,
             QueryPlannerContent::Plan {
-                plan: Arc::new(refusal_plan),
+                plan: Arc::new(emptied_plan),
             },
         );
 
