@@ -300,7 +300,7 @@ pub enum Code {
     ///
     /// Unlike every other code here, this one is not raised by the subgraph validations in this
     /// module — it comes from a post-merge composition check, which needs all subgraphs at once.
-    /// See [`validate_override_on_connector`](crate::schema::validators::connectors::validate_override_on_connector).
+    /// See `schema::validators::connectors::validate_override_on_connector`.
     OverrideOnConnector,
 }
 
