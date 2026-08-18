@@ -603,7 +603,7 @@ fn override_from_nonexistent_subgraph_hint_has_subgraph_location() {
 /// for the `query` root operation type" errors.
 #[test]
 fn supergraph_sdl_is_reparseable_when_subgraphs_use_extend_schema() {
-    let sub1 = Subgraph::parse(
+    let sub1 = Subgraph::from_sdl(
         "s1",
         "http://s1",
         r#"
@@ -634,7 +634,7 @@ fn supergraph_sdl_is_reparseable_when_subgraphs_use_extend_schema() {
     )
     .unwrap();
 
-    let sub2 = Subgraph::parse(
+    let sub2 = Subgraph::from_sdl(
         "s2",
         "http://s2",
         r#"

@@ -14,8 +14,8 @@ use apollo_federation::bail;
 use apollo_federation::composition;
 use apollo_federation::composition::CompositionFailure;
 use apollo_federation::composition::CompositionOptions;
-use apollo_federation::composition::compose_with_connectors;
-use apollo_federation::composition::validate_satisfiability_with_connectors;
+use apollo_federation::composition::compose;
+use apollo_federation::composition::validate_satisfiability;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
 use apollo_federation::error::CompositionError;
@@ -277,7 +277,7 @@ fn compose_files_inner(
         let doc_str = std::fs::read_to_string(path).unwrap();
         let url = format!("file://{}", path.to_str().unwrap());
         let basename = path.file_stem().unwrap().to_str().unwrap();
-        let result = typestate::Subgraph::parse(basename, &url, &doc_str);
+        let result = typestate::Subgraph::from_sdl(basename, &url, &doc_str);
         match result {
             Ok(subgraph) => {
                 subgraphs.push(subgraph);
@@ -295,7 +295,7 @@ fn compose_files_inner(
         return Err(CompositionFailure::from_errors(composition_errors));
     }
 
-    compose_with_connectors(subgraphs, CompositionOptions::default())
+    compose(subgraphs, CompositionOptions::default())
 }
 
 /// Compose a supergraph from a Rover config YAML file.
@@ -343,7 +343,7 @@ fn compose_from_config_inner(
             ]));
         };
 
-        let result = typestate::Subgraph::parse(&name, &subgraph_config.routing_url, &doc_str);
+        let result = typestate::Subgraph::from_sdl(&name, &subgraph_config.routing_url, &doc_str);
         match result {
             Ok(subgraph) => {
                 subgraphs.push(subgraph);
@@ -362,7 +362,7 @@ fn compose_from_config_inner(
         return Err(CompositionFailure::from_errors(composition_errors));
     }
 
-    compose_with_connectors(subgraphs, CompositionOptions::default())
+    compose(subgraphs, CompositionOptions::default())
 }
 
 /// Compose a supergraph from multiple subgraph files.
@@ -545,7 +545,7 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), AnyError> {
 fn cmd_satisfiability(file_path: &Path) -> Result<(), AnyError> {
     let doc_str = read_input(file_path);
     let supergraph = new_supergraph::Supergraph::parse(&doc_str).unwrap();
-    match validate_satisfiability_with_connectors(supergraph, &CompositionOptions::default()) {
+    match validate_satisfiability(supergraph, &CompositionOptions::default()) {
         Ok(_) => {
             println!("[SUCCESS]");
             Ok(())

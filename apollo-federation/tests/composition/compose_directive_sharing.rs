@@ -544,7 +544,7 @@ fn interface_object_key_field_is_shareable() {
 
 #[test]
 fn federation_directive_handles_renamed_federation_directives() {
-    let subgraph_a = Subgraph::parse(
+    let subgraph_a = Subgraph::from_sdl(
         "subgraphA", 
         "http://subgraphA",
         r#"
@@ -566,7 +566,7 @@ fn federation_directive_handles_renamed_federation_directives() {
         "#,
     ).expect("subgraphA should parse successfully");
 
-    let subgraph_b = Subgraph::parse(
+    let subgraph_b = Subgraph::from_sdl(
         "subgraphB",
         "http://subgraphB",
         r#"
@@ -609,7 +609,7 @@ fn composition_with_shareable_on_interface_object_field() {
     // copying AST nodes from the subgraph. This sometimes wrongly copied subgraph-only directives
     // to the supergraph.
 
-    let subgraph_a = Subgraph::parse(
+    let subgraph_a = Subgraph::from_sdl(
         "subgraphA",
         "http://subgraphA",
         r#"
@@ -634,7 +634,7 @@ fn composition_with_shareable_on_interface_object_field() {
     )
     .expect("subgraphA should parse successfully");
 
-    let subgraph_b = Subgraph::parse(
+    let subgraph_b = Subgraph::from_sdl(
         "subgraphB",
         "http://subgraphB",
         r#"

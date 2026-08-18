@@ -404,7 +404,7 @@ mod value_type_fields {
 
     #[test]
     fn use_of_federation_key_does_not_raise_hint() {
-        let subgraph1 = Subgraph::parse(
+        let subgraph1 = Subgraph::from_sdl(
             "subgraph1",
             "http://localhost:4001",
             r#"
@@ -425,7 +425,7 @@ mod value_type_fields {
         )
         .unwrap();
 
-        let subgraph2 = Subgraph::parse(
+        let subgraph2 = Subgraph::from_sdl(
             "subgraph2",
             "http://localhost:4002",
             r#"
@@ -1957,7 +1957,7 @@ type Query @shareable {
     http: {
       GET: "/resources"
     }
-    selection: ""
+    selection: "id description"
   )
 }
 
@@ -1967,14 +1967,14 @@ type Resource {
 }
         "#;
 
-        let already_newest = Subgraph::parse(
+        let already_newest = Subgraph::from_sdl(
             "already-newest",
             "http://localhost:4001",
             newer_federation_schema,
         )
         .unwrap();
 
-        let old_but_not_upgraded = Subgraph::parse(
+        let old_but_not_upgraded = Subgraph::from_sdl(
             "old-but-not-upgraded",
             "http://localhost:4002",
             older_federation_schema,
@@ -1982,14 +1982,14 @@ type Resource {
         .unwrap();
 
         let upgraded =
-            Subgraph::parse("upgraded", "http://localhost:4003", auto_upgraded_schema).unwrap();
+            Subgraph::from_sdl("upgraded", "http://localhost:4003", auto_upgraded_schema).unwrap();
 
         let result = compose(vec![already_newest, old_but_not_upgraded, upgraded]).unwrap();
 
         assert_has_hint(
             &result,
             "IMPLICITLY_UPGRADED_FEDERATION_VERSION",
-            "Subgraph upgraded has been implicitly upgraded from federation v2.5 to v2.10",
+            "Subgraph upgraded has been implicitly upgraded from federation v2.5 to v2.11",
         );
     }
 
@@ -2010,7 +2010,16 @@ type Query @shareable {
     http: {
       GET: "/resources"
     }
-    selection: ""
+    selection: "id description"
+  )
+
+  resource(id: ID!): Resource @connect(
+    source: "v1"
+    http: {
+      GET: "/resources/{$args.id}"
+    }
+    selection: "id description"
+    entity: true
   )
 }
 
@@ -2021,22 +2030,24 @@ type Resource @shareable @key(fields: "id") {
         "#;
 
         let upgraded_1 =
-            Subgraph::parse("upgraded-1", "http://localhost:4001", auto_upgraded_schema).unwrap();
+            Subgraph::from_sdl("upgraded-1", "http://localhost:4001", auto_upgraded_schema)
+                .unwrap();
 
         let upgraded_2 =
-            Subgraph::parse("upgraded-2", "http://localhost:4002", auto_upgraded_schema).unwrap();
+            Subgraph::from_sdl("upgraded-2", "http://localhost:4002", auto_upgraded_schema)
+                .unwrap();
 
         let result = compose(vec![upgraded_1, upgraded_2]).unwrap();
 
         assert_has_hint(
             &result,
             "IMPLICITLY_UPGRADED_FEDERATION_VERSION",
-            "Subgraph upgraded-1 has been implicitly upgraded from federation v2.5 to v2.10",
+            "Subgraph upgraded-1 has been implicitly upgraded from federation v2.5 to v2.11",
         );
         assert_has_hint(
             &result,
             "IMPLICITLY_UPGRADED_FEDERATION_VERSION",
-            "Subgraph upgraded-2 has been implicitly upgraded from federation v2.5 to v2.10",
+            "Subgraph upgraded-2 has been implicitly upgraded from federation v2.5 to v2.11",
         );
     }
 
@@ -2060,14 +2071,14 @@ type Query {
 }
         "#;
 
-        let already_newest = Subgraph::parse(
+        let already_newest = Subgraph::from_sdl(
             "already-newest",
             "http://localhost:4001",
             newer_federation_schema,
         )
         .unwrap();
 
-        let old_but_not_upgraded = Subgraph::parse(
+        let old_but_not_upgraded = Subgraph::from_sdl(
             "old-but-not-upgraded",
             "http://localhost:4002",
             older_federation_schema,
