@@ -282,7 +282,7 @@ fn upgrade_does_not_add_shareable_to_key_fields_in_partial_schemas() {
 /// in the supergraph.
 #[test]
 fn fed1_requires_with_cross_subgraph_inline_fragment_type_condition() {
-    let subgraph_a = Subgraph::parse(
+    let subgraph_a = Subgraph::from_sdl(
         "subgraphA",
         "",
         r#"
@@ -307,7 +307,7 @@ fn fed1_requires_with_cross_subgraph_inline_fragment_type_condition() {
     )
     .expect("parses subgraphA");
 
-    let subgraph_b = Subgraph::parse(
+    let subgraph_b = Subgraph::from_sdl(
         "subgraphB",
         "",
         r#"

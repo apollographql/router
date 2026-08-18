@@ -1,10 +1,16 @@
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use strum::IntoEnumIterator;
+
+use crate::error::ConnectorsCode;
 use crate::supergraph::HintCodeDefinition;
 use crate::supergraph::HintLevel;
 
 #[derive(Clone, Debug)]
 pub enum HintCode {
+    /// A warning raised by the connectors (`@source`/`@connect`) subgraph validations.
+    Connectors(ConnectorsCode),
     InconsistentButCompatibleFieldType,
     InconsistentButCompatibleArgumentType,
     InconsistentDefaultValuePresence,
@@ -41,6 +47,7 @@ pub enum HintCode {
 impl HintCode {
     pub fn definition(&self) -> &'static HintCodeDefinition {
         match self {
+            HintCode::Connectors(code) => connectors_hint_definition(*code),
             HintCode::InconsistentButCompatibleFieldType => &INCONSISTENT_BUT_COMPATIBLE_FIELD_TYPE,
             HintCode::InconsistentButCompatibleArgumentType => {
                 &INCONSISTENT_BUT_COMPATIBLE_ARGUMENT_TYPE
@@ -108,6 +115,36 @@ impl HintCode {
     pub fn code(&self) -> &str {
         self.definition().code()
     }
+}
+
+/// Like the connectors error codes, connectors warnings reuse the connectors code enum rather than
+/// duplicating a [`HintCode`] variant per code.
+static CONNECTORS_HINT_DEFINITIONS: LazyLock<HashMap<ConnectorsCode, HintCodeDefinition>> =
+    LazyLock::new(|| {
+        ConnectorsCode::iter()
+            .map(|code| {
+                let definition = HintCodeDefinition::new(
+                    <&'static str>::from(code),
+                    HintLevel::Warn,
+                    "A connectors (`@source`/`@connect`) validation warning.",
+                );
+                (code, definition)
+            })
+            .collect()
+    });
+
+static UNKNOWN_CONNECTORS_HINT: LazyLock<HintCodeDefinition> = LazyLock::new(|| {
+    HintCodeDefinition::new(
+        "UNKNOWN_CONNECTORS_WARNING",
+        HintLevel::Warn,
+        "A connectors (`@source`/`@connect`) validation warning with an unknown code.",
+    )
+});
+
+fn connectors_hint_definition(code: ConnectorsCode) -> &'static HintCodeDefinition {
+    CONNECTORS_HINT_DEFINITIONS
+        .get(&code)
+        .unwrap_or(&UNKNOWN_CONNECTORS_HINT)
 }
 
 pub(crate) static INCONSISTENT_BUT_COMPATIBLE_FIELD_TYPE: LazyLock<HintCodeDefinition> =

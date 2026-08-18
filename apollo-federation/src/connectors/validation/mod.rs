@@ -18,6 +18,7 @@ use apollo_compiler::schema::SchemaBuilder;
 use itertools::Itertools;
 pub(crate) use schema::field_set_is_subset;
 use strum_macros::Display;
+use strum_macros::EnumIter;
 use strum_macros::IntoStaticStr;
 
 use crate::connectors::ConnectSpec;
@@ -183,7 +184,7 @@ pub struct Message {
 ///
 /// Note that these codes are global, not scoped to connectors, so they should attempt to be
 /// unique across all pieces of composition, including JavaScript components.
-#[derive(Clone, Copy, Debug, Display, Eq, IntoStaticStr, PartialEq)]
+#[derive(Clone, Copy, Debug, Display, EnumIter, Eq, Hash, IntoStaticStr, PartialEq)]
 #[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
 pub enum Code {
     /// A problem with GraphQL syntax or semantics was found. These will usually be caught before
@@ -295,6 +296,12 @@ pub enum Code {
     /// is transport-agnostic so that if/when a `sql:` (or other) transport
     /// joins `http:`, this same code keeps describing the same condition.
     RequestlessSelectionUsesRequestData,
+    /// A field uses `@override(from:)` to override a connector-enabled subgraph.
+    ///
+    /// Unlike every other code here, this one is not raised by the subgraph validations in this
+    /// module — it comes from a post-merge composition check, which needs all subgraphs at once.
+    /// See [`validate_override_on_connector`](crate::schema::validators::connectors::validate_override_on_connector).
+    OverrideOnConnector,
 }
 
 impl Code {

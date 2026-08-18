@@ -500,8 +500,8 @@ fn specs_compose_in_consistent_order() {
           dob: String! @policy(policies: [["user"]])
         }
     "#;
-    let users =
-        Subgraph::parse("users", "http://users/graphql", users_sdl).expect("valid users subgraph");
+    let users = Subgraph::from_sdl("users", "http://users/graphql", users_sdl)
+        .expect("valid users subgraph");
 
     let address_sdl = r#"
         extend schema @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@key", "@requiresScopes"])
@@ -511,7 +511,7 @@ fn specs_compose_in_consistent_order() {
           address: String
         }
     "#;
-    let address = Subgraph::parse("address", "http://address/graphql", address_sdl)
+    let address = Subgraph::from_sdl("address", "http://address/graphql", address_sdl)
         .expect("valid address subgraph");
 
     let result = compose(vec![users.clone(), address.clone()]).expect("composes successfully");
@@ -1563,7 +1563,7 @@ fn verify_auth_works_with_older_federation_version() {
         }
     "#;
     let orders =
-        Subgraph::parse("orders", "http://orders/graphql", orders_sdl).expect("valid subgraph");
+        Subgraph::from_sdl("orders", "http://orders/graphql", orders_sdl).expect("valid subgraph");
 
     let users_sdl = r#"
         extend schema
@@ -1580,7 +1580,7 @@ fn verify_auth_works_with_older_federation_version() {
         }
     "#;
     let users =
-        Subgraph::parse("users", "http://users/graphql", users_sdl).expect("valid subgraph");
+        Subgraph::from_sdl("users", "http://users/graphql", users_sdl).expect("valid subgraph");
 
     let result = compose(vec![orders, users]).expect("composition should succeed");
     let schema = result.schema().schema();
@@ -2429,13 +2429,13 @@ mod propagate_auth {
         };
 
         let subgraphs = vec![
-            Subgraph::parse(
+            Subgraph::from_sdl(
                 subgraph1.name,
                 &format!("http://{}", subgraph1.name),
                 subgraph1.type_defs,
             )
             .expect("valid subgraph"),
-            Subgraph::parse(
+            Subgraph::from_sdl(
                 subgraph2.name,
                 &format!("http://{}", subgraph2.name),
                 subgraph2.type_defs,

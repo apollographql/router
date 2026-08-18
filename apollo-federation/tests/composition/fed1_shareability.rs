@@ -21,10 +21,10 @@ fn test_fed1_fields_are_implicitly_shareable() {
         }
     "#;
 
-    let subgraph1 =
-        Subgraph::parse("fed1", "http://fed1", fed1_subgraph).expect("Fed 1 subgraph should parse");
-    let subgraph2 =
-        Subgraph::parse("fed2", "http://fed2", fed2_subgraph).expect("Fed 2 subgraph should parse");
+    let subgraph1 = Subgraph::from_sdl("fed1", "http://fed1", fed1_subgraph)
+        .expect("Fed 1 subgraph should parse");
+    let subgraph2 = Subgraph::from_sdl("fed2", "http://fed2", fed2_subgraph)
+        .expect("Fed 2 subgraph should parse");
 
     // This should succeed because Fed 1 fields are implicitly shareable
     let result = compose(vec![subgraph1, subgraph2]);
@@ -53,10 +53,10 @@ fn test_fed1_with_custom_root_type_names() {
         }
     "#;
 
-    let subgraph1 =
-        Subgraph::parse("fed1", "http://fed1", fed1_subgraph).expect("Fed 1 subgraph should parse");
-    let subgraph2 =
-        Subgraph::parse("fed2", "http://fed2", fed2_subgraph).expect("Fed 2 subgraph should parse");
+    let subgraph1 = Subgraph::from_sdl("fed1", "http://fed1", fed1_subgraph)
+        .expect("Fed 1 subgraph should parse");
+    let subgraph2 = Subgraph::from_sdl("fed2", "http://fed2", fed2_subgraph)
+        .expect("Fed 2 subgraph should parse");
 
     // This should succeed even though root types have different names
     // The upgrader should recognize that Query and RootQueryType are both query root types
@@ -98,10 +98,10 @@ fn test_fed1_non_root_types_are_shareable() {
         }
     "#;
 
-    let subgraph1 =
-        Subgraph::parse("fed1", "http://fed1", fed1_subgraph).expect("Fed 1 subgraph should parse");
-    let subgraph2 =
-        Subgraph::parse("fed2", "http://fed2", fed2_subgraph).expect("Fed 2 subgraph should parse");
+    let subgraph1 = Subgraph::from_sdl("fed1", "http://fed1", fed1_subgraph)
+        .expect("Fed 1 subgraph should parse");
+    let subgraph2 = Subgraph::from_sdl("fed2", "http://fed2", fed2_subgraph)
+        .expect("Fed 2 subgraph should parse");
 
     // This should succeed - Fed 1 types are implicitly shareable
     let result = compose(vec![subgraph1, subgraph2]);
@@ -128,9 +128,9 @@ fn test_multiple_fed1_subgraphs_sharing_fields() {
         }
     "#;
 
-    let subgraph1 = Subgraph::parse("fed1a", "http://fed1a", fed1_subgraph_a)
+    let subgraph1 = Subgraph::from_sdl("fed1a", "http://fed1a", fed1_subgraph_a)
         .expect("Fed 1 subgraph A should parse");
-    let subgraph2 = Subgraph::parse("fed1b", "http://fed1b", fed1_subgraph_b)
+    let subgraph2 = Subgraph::from_sdl("fed1b", "http://fed1b", fed1_subgraph_b)
         .expect("Fed 1 subgraph B should parse");
 
     // This should succeed - all Fed 1 fields are implicitly shareable

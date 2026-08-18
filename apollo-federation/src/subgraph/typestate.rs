@@ -20,7 +20,11 @@ use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
 use crate::bail;
 use crate::compat::coerce_and_validate_schema_values;
+use crate::connectors::validation::Severity as ConnectorsSeverity;
+use crate::connectors::validation::ValidationResult;
+use crate::connectors::validation::validate as validate_connectors;
 use crate::ensure;
+use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::Locations;
 use crate::error::MultipleFederationErrors;
@@ -44,6 +48,7 @@ use crate::link::link_spec_definition::LINK_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec_definition::SpecDefinition;
+use crate::merger::hints::HintCode;
 use crate::query_graph::build_query_graph::FEDERATED_GRAPH_ROOT_SOURCE;
 use crate::schema::FederationSchema;
 use crate::schema::blueprint::FederationBlueprint;
@@ -61,6 +66,7 @@ use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecificati
 use crate::schema::type_and_directive_specification::UnionTypeSpecification;
 use crate::subgraph::SubgraphError;
 use crate::supergraph::ANY_TYPE_SPEC;
+use crate::supergraph::CompositionHint;
 use crate::supergraph::EMPTY_QUERY_TYPE_SPEC;
 use crate::supergraph::FEDERATION_ANY_TYPE_NAME;
 use crate::supergraph::FEDERATION_ENTITIES_FIELD_NAME;
@@ -71,6 +77,17 @@ use crate::supergraph::GRAPHQL_MUTATION_TYPE_NAME;
 use crate::supergraph::GRAPHQL_QUERY_TYPE_NAME;
 use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
 use crate::supergraph::SERVICE_TYPE_SPEC;
+
+/// A subgraph as the user wrote it: the schema document, not yet parsed.
+///
+/// Validations that work on the document rather than on the parsed schema belong here, so that the
+/// locations they report point back at what the user actually wrote, and so that they can rewrite
+/// the document before it is parsed. Today that means the connectors (`@source`/`@connect`)
+/// validations, which is why [`Subgraph::validate_connectors`] is the only way out of this state.
+#[derive(Clone, Debug)]
+pub struct Source {
+    sdl: String,
+}
 
 #[derive(Clone, Debug)]
 pub struct Initial {
@@ -186,6 +203,125 @@ pub struct Subgraph<S> {
     pub state: S,
 }
 
+impl Subgraph<Source> {
+    /// Creates a subgraph from the schema document the user wrote.
+    pub fn from_sdl(
+        name: &str,
+        url: &str,
+        sdl: impl Into<String>,
+    ) -> Result<Subgraph<Source>, SubgraphError> {
+        check_subgraph_name(name)?;
+        Ok(Subgraph {
+            name: name.to_string(),
+            url: url.to_string(),
+            state: Source { sdl: sdl.into() },
+        })
+    }
+
+    pub fn sdl(&self) -> &str {
+        &self.state.sdl
+    }
+
+    /// Validates the connectors (`@source`/`@connect`) directives, then parses the document.
+    ///
+    /// Warnings are appended to `hints`; errors are returned and are fatal for this subgraph.
+    /// Parsing is part of this transition because the validations may rewrite the document — today
+    /// they auto-upgrade `connect/v0.1` to `v0.2` — and it is the rewritten document that the rest
+    /// of composition must work from.
+    // PORT_NOTE: Mirrors `validate_connector_subgraphs` from the apollo-composition crate.
+    pub fn validate_connectors(
+        self,
+        hints: &mut Vec<CompositionHint>,
+    ) -> Result<Subgraph<Initial>, Vec<CompositionError>> {
+        let ValidationResult {
+            errors: messages,
+            transformed,
+            ..
+        } = validate_connectors(self.state.sdl, &self.name);
+
+        let mut errors = vec![];
+        for message in messages {
+            let locations = message
+                .locations
+                .into_iter()
+                .map(|range| SubgraphLocation {
+                    subgraph: self.name.clone(),
+                    range,
+                })
+                .collect();
+            match message.code.severity() {
+                ConnectorsSeverity::Error => errors.push(CompositionError::ConnectorsError {
+                    code: message.code,
+                    message: message.message,
+                    locations,
+                }),
+                ConnectorsSeverity::Warning => hints.push(CompositionHint {
+                    definition: HintCode::Connectors(message.code).definition(),
+                    message: message.message,
+                    locations,
+                }),
+            }
+        }
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+
+        Subgraph::parse(&self.name, &self.url, &transformed)
+            .map_err(|e| e.to_composition_errors().collect())
+    }
+
+    /// Given a document that is assumed to _not_ be a fed2 schema (it does not have a `@link` to
+    /// the federation spec), converts it to a fed2 schema by adding a `@link` to the last known
+    /// federation spec.
+    ///
+    /// - It is assumed to have no `@link` to the federation spec.
+    /// - Returns an equivalent subgraph with a `@link` added with latest federation spec.
+    /// - Based on the `include_all_imports` param, we either import ALL directive definitions OR just up to fed v2.4
+    /// - This is mainly for testing and not optimized.
+    // PORT_NOTE: Corresponds to `asFed2SubgraphDocument` function in JS, but simplified.
+    pub fn into_fed2_test_subgraph(self, include_all_imports: bool) -> Result<Self, SubgraphError> {
+        let federation_spec = FederationSpecDefinition::latest();
+        let spec_to_import = if include_all_imports {
+            federation_spec
+        } else {
+            FederationSpecDefinition::auto_expanded_federation_spec()
+        };
+        let imports = spec_to_import
+            .directive_specs()
+            .iter()
+            .map(|d| format!(r#""@{}""#, d.name()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let link = format!(
+            r#"extend schema @link(url: "{url}", import: [{imports}])"#,
+            url = federation_spec.url(),
+        );
+
+        // Test documents are written as raw strings that open with a newline, so the `@link` goes
+        // on that otherwise-empty first line rather than pushing every line of the document down by
+        // one. Locations reported against the document then still match what the test author wrote.
+        let sdl = match self.state.sdl.strip_prefix('\n') {
+            Some(rest) => format!("{link}\n{rest}"),
+            None => format!("{link}\n{}", self.state.sdl),
+        };
+        Self::from_sdl(&self.name, &self.url, sdl)
+    }
+}
+
+fn check_subgraph_name(name: &str) -> Result<(), SubgraphError> {
+    // We use this name as the "source" of root nodes in our federated query graph.
+    if name == FEDERATED_GRAPH_ROOT_SOURCE {
+        Err(SubgraphError::new_without_locations(
+            name.to_string(),
+            SingleFederationError::InvalidSubgraphName {
+                message: format!("Invalid name {name} for a subgraph: this name is reserved"),
+            },
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 impl Subgraph<Initial> {
     pub fn new(
         name: &str,
@@ -193,24 +329,15 @@ impl Subgraph<Initial> {
         schema: Schema,
         orphan_extension_types: HashSet<Name>,
     ) -> Result<Subgraph<Initial>, SubgraphError> {
-        // We use this name as the "source" of root nodes in our federated query graph.
-        if name == FEDERATED_GRAPH_ROOT_SOURCE {
-            Err(SubgraphError::new_without_locations(
-                name.to_string(),
-                SingleFederationError::InvalidSubgraphName {
-                    message: format!("Invalid name {name} for a subgraph: this name is reserved"),
-                },
-            ))
-        } else {
-            Ok(Subgraph {
-                name: name.to_string(),
-                url: url.to_string(),
-                state: Initial {
-                    schema,
-                    orphan_extension_types,
-                },
-            })
-        }
+        check_subgraph_name(name)?;
+        Ok(Subgraph {
+            name: name.to_string(),
+            url: url.to_string(),
+            state: Initial {
+                schema,
+                orphan_extension_types,
+            },
+        })
     }
 
     pub fn parse(
