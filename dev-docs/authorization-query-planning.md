@@ -74,7 +74,7 @@ sequenceDiagram
         CQP->>QPS: QueryPlannerRequest
         QPS->>QPS: filter_query, no reject_unauthorized input
         alt FilterResult::Emptied
-            QPS-->>CQP: Plan with root None,<br/>document_emptied set,<br/>usage reporting from the ORIGINAL query
+            QPS-->>CQP: Plan with root None,<br/>usage reporting from the ORIGINAL query
         else Filtered or Unchanged
             QPS-->>CQP: Plan
         end
@@ -84,12 +84,12 @@ sequenceDiagram
 
     CQP-->>SG: Plan
     SG->>AL: execution Request
-    Note over AL: refuse when document_emptied,<br/>or reject_unauthorized (held from config)<br/>and paths are present
+    Note over AL: refuse when reject_unauthorized<br/>(held from config) and paths are present
     alt refused
         AL-->>C: 200, data null and errors,<br/>logs Authorization error once,<br/>inside the EXECUTION span
     else continue
         AL->>ES: request (authorization counter fires here)
-        ES->>SUB: fetches from the filtered plan
+        ES->>SUB: fetches from the filtered plan, none for an empty one
         Note over ES: errors, then format twice:<br/>FILTERED shape, ORIGINAL shape
         ES-->>C: 200, nulls and authorization errors
     end
@@ -100,16 +100,16 @@ Key references, on the branch:
 | What | Where |
 | --- | --- |
 | `FilterResult` (Unchanged / Filtered / Emptied) | `plugins/authorization/mod.rs:152` |
-| `document_emptied` on `UnauthorizedPaths` | `plugins/authorization/mod.rs:148` |
 | `filter_query`, no config-driven refusal | `plugins/authorization/mod.rs:371` |
 | The layer: `checkpoint_async` ahead of the counter | `plugins/authorization/mod.rs:629` |
 | Planner's `Emptied` arm, empty plan | `query_planner/query_planner_service.rs:465` |
 | Single-variant `QueryPlannerContent` | `services/query_planner.rs:103` |
 | Two-pass formatting (unchanged) | `services/execution/service.rs:291` |
 
-Behaviour intentionally identical to before, byte-level, in every `ErrorLocation` mode.
-Two observable changes, both in the changeset: refusals reach Studio attributed, and the
-`Authorization error` event moves from the `query_planning` span to `execution`.
+Observable changes, all in the changesets: refusals reach Studio attributed, the
+`Authorization error` event moves from `query_planning` to under `execution`, and an
+emptied operation without `reject_unauthorized` returns shaped data with null roots
+instead of `data: null` (the breaking changeset).
 
 ## Known gap, pinned but unresolved: multi-operation documents
 
@@ -152,63 +152,35 @@ Pinned by `fully_filtered_operation_beside_surviving_sibling_reports_unknown_ope
 in `plugins/authorization/tests.rs`, which asserts the 400, the error code, the absent
 `data` key, and that no subgraph was contacted.
 
-## Dropping `document_emptied`
+## Emptied operations run the normal pipeline
 
-Measured by deleting the layer's `document_emptied` clause and sending an emptied
-operation (`{ orga(id: 1) { id } }`, `orga.id` `@authenticated`, unauthenticated,
-directives enabled, no `reject_unauthorized`):
+An emptied operation carries no marker. The planner returns a plan with `root: None`,
+execution fetches nothing, and response formatting against the original operation
+shapes the result, exactly as for a partial filter whose surviving selections are all
+statically `@skip`ped:
 
 ```
-with the flag:     200 {"data":null,          "errors":[{...,"path":["orga","id"]}]}
-without the flag:  200 {"data":{"orga":null}, "errors":[{...,"path":["orga","id"]}]}
+without reject_unauthorized: 200 {"data":{"orga":null}, "errors":[{...,"path":["orga","id"]}]}
+with reject_unauthorized:    200 {"data":null,          "errors":[{...,"path":["orga","id"]}]}
 ```
 
-Same status, same errors, same paths. The flag's entire effect is `data: null` versus a
-shaped `data` with null roots.
+The `reject_unauthorized` response comes from the execution-service layer, which holds
+the flag from configuration and answers before execution.
 
-What actually gets deleted: the field, its serialization, and the layer's first clause.
-The `FilterResult::Emptied` variant stays — an empty document fails executable
-validation, so the planner cannot treat it as ordinary `Filtered`; it still returns the
-empty plan. `reject_unauthorized` is untouched: the layer holds it from config and keeps
-answering `data: null` for those.
+A refusal marker on the plan was considered and rejected. It would preserve
+`data: null` for the emptied-without-reject case, and that is its entire effect: the
+shaped response discloses nothing the errors do not already name, subgraphs are
+unreachable either way (`root: None` has no fetch nodes), and the cache keys plans by
+authorization state with or without a marker. The marker also cannot be derived from
+the plan (a rootless plan equally describes an all-`@skip`ped partial filter, and
+`filtered_query` absence equally describes `dry_run`), so it would have to be carried
+as a serialized field for one byte-level difference. The shaped response is also the
+field-error reading of the GraphQL spec; the remaining open question, field error
+versus request error (4xx, no `data` key), belongs to the spec-compliance follow-up.
 
-The shaped response is the more spec-aligned of the two: a field error on a nullable
-root field nulls that field; `data: null` belongs to non-null propagation reaching the
-root. Neither matches the other candidate reading, a request error (4xx, no `data` key).
-Deciding between those two is the spec-compliance follow-up; today's `data: null` at 200
-is a third shape that satisfies neither and survives as preserved history.
-
-### Security consequences
-
-None found. The load-bearing properties do not involve the flag:
-
-- Subgraphs are unreachable either way. The refusal's plan has `root: None`, so
-  execution has no fetch nodes; the flag only decides who formats the empty result.
-  The `@authenticated` field's value never leaves a subgraph because no subgraph is
-  asked.
-- Over-fetch stripping is untouched. The filtered-then-original formatting passes and
-  their ordering (`overfetched_unauthorized_field_is_not_returned`) sit below the
-  layer and do not read the flag.
-- Cache poisoning is unchanged. The refusal plan is cached keyed by
-  `CacheKeyMetadata`, flag or no flag; an unauthenticated request can only ever hit an
-  entry planned for unauthenticated metadata.
-- The error paths disclose the same information in both shapes: the paths in the
-  errors already name every refused field, so `{"orga": null}` reveals nothing that
-  `data: null` conceals.
-
-The one behavioural wrinkle: with `errors.response: disabled`, an emptied operation
-returns shaped nulls with no errors instead of `data: null` with no errors — a response
-indistinguishable from every root field genuinely being null. `data: null` today is
-almost as ambiguous. Operators choosing `disabled` have opted out of the signal either
-way; noted for the changeset if the flag goes.
-
-### Cost of keeping it
-
-One serialized bool, the layer clause, a nine-line field doc carrying two
-counterexamples (`@skip`-emptied partial filters, `dry_run` over all-skipped
-operations), and the recurring explanation of why the flag cannot be derived from the
-plan. The flag is scaffolding for one byte-level compatibility: delete it the moment
-the spec follow-up decides the refusal shape.
+The one wrinkle: with `errors.response: disabled`, an emptied operation returns shaped
+nulls with no errors, indistinguishable from every root field genuinely being null.
+Operators choosing `disabled` have opted out of the signal.
 
 ## Still open elsewhere
 
