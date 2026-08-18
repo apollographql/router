@@ -292,9 +292,10 @@ pub enum CompositionError {
         message: String,
         locations: Locations,
     },
-    /// An error reported by the `@source`/`@connect` (connectors) subgraph validations.
+    /// An error reported by one of the connectors (`@source`/`@connect`) validations, whether it
+    /// ran against a subgraph or against the whole composition.
     #[error("{message}")]
-    ConnectorsError {
+    ConnectorsValidationError {
         code: ConnectorsCode,
         message: String,
         locations: Locations,
@@ -304,7 +305,7 @@ pub enum CompositionError {
 impl CompositionError {
     pub fn code(&self) -> ErrorCode {
         match self {
-            Self::ConnectorsError { code, .. } => ErrorCode::Connectors(*code),
+            Self::ConnectorsValidationError { code, .. } => ErrorCode::Connectors(*code),
             Self::SubgraphError { error, .. } => error.code(),
             Self::MergeError { error, .. } => error.code(),
             Self::MergeValidationError { error, .. } => error.code(),
@@ -511,7 +512,7 @@ impl CompositionError {
             | Self::OverrideOnInterface { .. }
             | Self::OverrideSourceHasOverride { .. }
             | Self::QueryRootMissing { .. }
-            | Self::ConnectorsError { .. } => self,
+            | Self::ConnectorsValidationError { .. } => self,
         }
     }
 
@@ -551,7 +552,7 @@ impl CompositionError {
             | Self::ArgumentDefaultMismatch { locations, .. }
             | Self::InputFieldDefaultMismatch { locations, .. }
             | Self::InterfaceFieldNoImplem { locations, .. }
-            | Self::ConnectorsError { locations, .. } => locations,
+            | Self::ConnectorsValidationError { locations, .. } => locations,
             _ => &[],
         }
     }
