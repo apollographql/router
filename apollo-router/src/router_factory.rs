@@ -451,7 +451,7 @@ pub(crate) async fn create_http_services(
     // BEGIN ROUTER-2060
     let telemetry_config = plugins
         .iter()
-        .find(|i| i.0.as_str() == "telemetry")
+        .find(|i| i.0.as_str() == "apollo.telemetry") // BEGIN/END ROUTER-2060: registered as "{group}.{name}", see PluginFactory::new_private
         .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Telemetry>())
         .map(|t| t.config.clone());
     let subgraph_trace_context_preservation = TraceContextPreservation {
@@ -461,13 +461,21 @@ pub(crate) async fn create_http_services(
                 c.exporters
                     .tracing
                     .propagation
-                    .preserve_subgraph_trace_context
+                    .preserve_trace_context_on_subgraph_requests
             })
             .unwrap_or(false),
         custom_header_name: telemetry_config
             .as_ref()
             .and_then(|c| c.exporters.tracing.propagation.request.header_name.clone()),
     };
+    // TEMP DEBUG ROUTER-2060 - remove after validation
+    tracing::warn!(
+        telemetry_plugin_found = telemetry_config.is_some(),
+        enabled = subgraph_trace_context_preservation.enabled,
+        custom_header_name = ?subgraph_trace_context_preservation.custom_header_name,
+        "ROUTER-2060 DEBUG: resolved trace_context_preservation for subgraph HttpClientServices"
+    );
+    // END TEMP DEBUG ROUTER-2060
     // END ROUTER-2060
 
     let connector_subgraphs: HashSet<String> = schema

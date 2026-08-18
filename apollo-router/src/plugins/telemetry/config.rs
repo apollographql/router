@@ -418,7 +418,7 @@ pub(crate) struct Propagation {
     /// If a trace-context header (traceparent/tracestate, or the custom trace ID header if
     /// configured) is already present on an outgoing subgraph request, keep it instead of
     /// overwriting it with the router's own span context.
-    pub(crate) preserve_subgraph_trace_context: bool,
+    pub(crate) preserve_trace_context_on_subgraph_requests: bool,
     // END ROUTER-2060
 }
 

@@ -581,6 +581,16 @@ impl tower::Service<HttpRequest> for HttpClientService {
         let service_name = self.service.clone();
         let http_req_span = Span::current();
 
+        // TEMP DEBUG ROUTER-2060 - remove after validation
+        tracing::warn!(
+            preserve_enabled = self.trace_context_preservation.enabled,
+            custom_header_name = ?self.trace_context_preservation.custom_header_name,
+            traceparent_before = ?http_request.headers().get("traceparent"),
+            tracestate_before = ?http_request.headers().get("tracestate"),
+            "ROUTER-2060 DEBUG: entering call(), state before snapshot"
+        );
+        // END TEMP DEBUG ROUTER-2060
+
         // BEGIN ROUTER-2060
         //
         // If the router is configured to preserve an already-present trace-context header on
@@ -619,12 +629,28 @@ impl tower::Service<HttpRequest> for HttpClientService {
             .flatten();
         // END ROUTER-2060
 
+        // TEMP DEBUG ROUTER-2060 - remove after validation
+        tracing::warn!(
+            ?saved_trace_header,
+            ?saved_tracestate,
+            "ROUTER-2060 DEBUG: snapshot captured (this is what will be restored, if Some)"
+        );
+        // END TEMP DEBUG ROUTER-2060
+
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
                 &prepare_context(http_req_span.context()),
                 &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
             );
         });
+
+        // TEMP DEBUG ROUTER-2060 - remove after validation
+        tracing::warn!(
+            traceparent_after_injection = ?http_request.headers().get("traceparent"),
+            tracestate_after_injection = ?http_request.headers().get("tracestate"),
+            "ROUTER-2060 DEBUG: state right after router's own propagator injection, before restore"
+        );
+        // END TEMP DEBUG ROUTER-2060
 
         // BEGIN ROUTER-2060
         if let Some((name, value)) = saved_trace_header {
@@ -634,6 +660,14 @@ impl tower::Service<HttpRequest> for HttpClientService {
             http_request.headers_mut().insert("tracestate", value);
         }
         // END ROUTER-2060
+
+        // TEMP DEBUG ROUTER-2060 - remove after validation
+        tracing::warn!(
+            traceparent_final = ?http_request.headers().get("traceparent"),
+            tracestate_final = ?http_request.headers().get("tracestate"),
+            "ROUTER-2060 DEBUG: final state about to be sent to the subgraph"
+        );
+        // END TEMP DEBUG ROUTER-2060
 
         let (parts, body) = http_request.into_parts();
         let content_encoding = parts.headers.get(&CONTENT_ENCODING);
