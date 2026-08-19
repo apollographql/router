@@ -12,6 +12,27 @@ const SCHEMA_STR: &str = r#"
         test_j: J!
         test_u: U!
         test_v: V!
+        test_entity: Entity!
+    }
+
+    interface Entity {
+        id: ID!
+        next: Entity!
+    }
+
+    type ObjectA implements Entity {
+        id: ID!
+        next: ObjectA! # covariant field return
+    }
+
+    type ObjectB implements Entity {
+        id: ID!
+        next: ObjectB! # covariant field return
+    }
+
+    type ObjectC implements Entity {
+        id: ID!
+        next: Entity!
     }
 
     interface I {
@@ -436,6 +457,91 @@ fn test_cross_variable_group_coverage() {
         }
     "#;
     assert_compare_operation_docs(x, y);
+}
+
+#[test]
+fn test_type_condition_case_split_with_covariant_fields() {
+    // x demands `next` at the interface scope, so its sub-selection shape is
+    // computed at the `Entity` scope.
+    let x = r#"
+        query {
+            test_entity {
+                next {
+                    id
+                }
+            }
+        }
+    "#;
+    // y covers the same demand partitioned by runtime type. Each branch's
+    // `next` sub-selection shape lives at the covariantly narrowed object
+    // scope (e.g. `ObjectA.next: ObjectA!`). Matching the `ObjectA` case
+    // requires remembering that case when comparing the sub-selections:
+    // under it, `next` can only be `ObjectA`, so x's `Entity`-scoped child
+    // must only be checked against the `ObjectA` case.
+    let y = r#"
+        query {
+            test_entity {
+                ... on ObjectA { next { id } }
+                ... on ObjectB { next { id } }
+                ... on ObjectC { next { id } }
+            }
+        }
+    "#;
+    assert_compare_operation_docs(x, y);
+    // The two operations are equivalent; the other direction has always worked.
+    assert_compare_operation_docs(y, x);
+}
+
+#[test]
+fn test_type_condition_case_split_with_covariant_fields_nested() {
+    // Same as above, but the type-condition case must survive two levels of
+    // field traversal: under the `ObjectA` case, both `next` and `next.next`
+    // can only be `ObjectA`.
+    let x = r#"
+        query {
+            test_entity {
+                next {
+                    next {
+                        id
+                    }
+                }
+            }
+        }
+    "#;
+    let y = r#"
+        query {
+            test_entity {
+                ... on ObjectA { next { next { id } } }
+                ... on ObjectB { next { next { id } } }
+                ... on ObjectC { next { next { id } } }
+            }
+        }
+    "#;
+    assert_compare_operation_docs(x, y);
+}
+
+#[test]
+fn test_type_condition_case_split_incomplete_coverage_should_fail() {
+    // x demands `next` for every runtime type of `Entity`.
+    let x = r#"
+        query {
+            test_entity {
+                next {
+                    id
+                }
+            }
+        }
+    "#;
+    // y misses the `ObjectB` case — this must still fail.
+    let y = r#"
+        query {
+            test_entity {
+                ... on ObjectA { next { id } }
+                ... on ObjectC { next { id } }
+            }
+        }
+    "#;
+    assert!(compare_operation_docs(x, y).is_err());
 }
 
 #[test]
