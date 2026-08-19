@@ -7734,15 +7734,16 @@ fn format_filtered_then_original(query: &Query, schema: &Schema, data: Value) ->
         .clone()
 }
 
-/// `Thing` is an interface, so `apply_selection_set` takes the concrete type from the
-/// response `__typename` rather than from the schema. The filtered pass has to copy
-/// `__typename` into its output for the original pass to resolve the type condition on
-/// `... on Foo`, so `inline` survives only if the copy happened.
+/// Double-applying response formatting on an abstract type should apply the
+/// correct fragment spread.
+/// `__typename` is not selected by the input query, but internally we have to
+/// pass it along to the final formatting pass, else it wouldn't know which concrete
+/// type it's working on.
 ///
-/// One fragment form per test: each form copies `__typename` independently, so a query
-/// carrying both keeps its fields alive when either copy runs.
+/// One fragment form per test: each form passes `__typename` along independently, so a
+/// query carrying both keeps its fields alive when either does.
 #[tokio::test]
-async fn filtered_query_keeps_typename_for_inline_fragment() {
+async fn filtered_inline_fragment_on_abstract_type() {
     // `secret` is `@authenticated`, so filtering drops it and leaves `inline`.
     let (query, schema) =
         authorization_filtered_query("{ thing { id ... on Foo { inline secret } } }").await;
@@ -7757,10 +7758,10 @@ async fn filtered_query_keeps_typename_for_inline_fragment() {
     assert_eq!(thing.get("inline"), Some(&json!("inline")));
 }
 
-/// The fragment-spread counterpart of `filtered_query_keeps_typename_for_inline_fragment`,
+/// The fragment-spread counterpart of `filtered_inline_fragment_on_abstract_type`,
 /// covering the second `!is_original` branch in `apply_selection_set`.
 #[tokio::test]
-async fn filtered_query_keeps_typename_for_fragment_spread() {
+async fn filtered_fragment_spread_on_abstract_type() {
     let (query, schema) = authorization_filtered_query(
         "{ thing { id ...Spread } } fragment Spread on Foo { spread secret }",
     )
