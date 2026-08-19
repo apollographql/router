@@ -73,7 +73,7 @@ sequenceDiagram
     alt cache miss
         CQP->>QPS: QueryPlannerRequest
         QPS->>QPS: filter_query, no reject_unauthorized input
-        alt FilterResult::Emptied
+        alt FilterResult::Filtered with an empty document
             QPS-->>CQP: Plan with root None,<br/>usage reporting from the ORIGINAL query
         else Filtered or Unchanged
             QPS-->>CQP: Plan
@@ -99,10 +99,10 @@ Key references, on the branch:
 
 | What | Where |
 | --- | --- |
-| `FilterResult` (Unchanged / Filtered / Emptied) | `plugins/authorization/mod.rs:152` |
+| `FilterResult` (Unchanged / Filtered) | `plugins/authorization/mod.rs` |
 | `filter_query`, no config-driven refusal | `plugins/authorization/mod.rs:371` |
 | The layer: `checkpoint_async` ahead of the counter | `plugins/authorization/mod.rs:629` |
-| Planner's `Emptied` arm, empty plan | `query_planner/query_planner_service.rs:465` |
+| Planner's empty-document arm, empty plan | `query_planner/query_planner_service.rs` |
 | Single-variant `QueryPlannerContent` | `services/query_planner.rs:103` |
 | Two-pass formatting (unchanged) | `services/execution/service.rs:291` |
 
@@ -113,7 +113,7 @@ instead of `data: null` (the breaking changeset).
 
 ## Known gap, pinned but unresolved: multi-operation documents
 
-`Emptied` means the *document* emptied, not the executed operation. `filter_query`
+The emptiness check covers the *document*, not the executed operation. `filter_query`
 checks `filtered_doc.definitions.is_empty()` after each directive stage, and
 definitions include every operation and fragment in the document, executed or not.
 
@@ -127,7 +127,7 @@ query B { currentUser { name } }
 ```
 
 Filtering empties `A` and removes it from the document. `B` keeps the document
-non-empty, so `filter_query` reports `Filtered`, not `Emptied`. The planner then looks
+non-empty, so the document is filtered rather than empty. The planner then looks
 up operation `A` in a document that no longer contains it:
 
 ```
@@ -248,6 +248,30 @@ decision 1; it does not yet model multi-error responses with paths or the
 absent-versus-null `data` distinction, which live on the response rather than the
 error. `returns_http_200` and `rejection_sends_null_data` hold the current shape and
 flip when this resolves.
+
+## Outstanding: raised in review, deferred
+
+Validation gates outrank authorization. Variable validation and the subscription and
+`@defer` accept-header checks run in the supergraph service, before the execution
+layer answers a refusal, so an operation failing both receives the validation error
+alone. Changeset `breaking_bryn_router_1973_gate_ordering` describes it;
+`variable_validation_answers_before_the_refusal` pins the variable case. The
+subscription and `@defer` cases have no pin: they need a schema with subscriptions.
+
+`graphql::Response` cannot represent `data: null`. Deserializing collapses a JSON
+`null` under `data` into an absent key, so anything downstream of deserialization
+loses the distinction — including responses parsed *from subgraphs*, which may
+misreport a subgraph's `data: null` as no data at all. Wire-level tests read bytes to
+route around it.
+
+Partial filtering nulls the parent, not the field. Filtering `currentUser.phone` out
+of an operation yields `{"currentUser": null}` where field-error semantics call for
+`{"currentUser": {"phone": null}}` when `phone` is nullable. Whether filtering should
+preserve the unfiltered parent shape is unresolved.
+
+Spec compliance for refused operations is ROUTER-2063: request error, `data` absent,
+status by negotiated content type, and the `errors.response` modes that conflict with
+an absent `data`.
 
 ## Still open elsewhere
 
