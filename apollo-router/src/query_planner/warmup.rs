@@ -370,9 +370,7 @@ mod tests {
         let schema_hash = SchemaHash::new("");
 
         fn empty_query_plan() -> Result<QueryPlannerContent, Arc<QueryPlannerError>> {
-            Ok(QueryPlannerContent::Plan {
-                plan: Arc::new(QueryPlan::fake_new(None, None)),
-            })
+            Ok(Arc::new(QueryPlan::fake_new(None, None)))
         }
 
         {

@@ -50,7 +50,6 @@ use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::warmup;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
-use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerResponse;
 use crate::services::SubgraphServiceFactory;
 use crate::services::SupergraphRequest;
@@ -269,10 +268,7 @@ async fn service_call(
     }
 
     match content {
-        Some(QueryPlannerContent::Response { response }) => Ok(
-            SupergraphResponse::new_from_graphql_response(*response, context),
-        ),
-        Some(QueryPlannerContent::Plan { plan }) => {
+        Some(plan) => {
             let is_deferred = plan.is_deferred(&variables);
             let is_subscription = plan.is_subscription();
 

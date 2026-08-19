@@ -3839,7 +3839,6 @@ async fn test_cache_warmup() {
 
     use crate::query_planner::QueryPlan;
     use crate::services::PluggableSupergraphServiceBuilder;
-    use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerResponse;
     use crate::services::layers::persisted_queries::PersistedQueryExpander;
     use crate::services::query_planner;
@@ -3865,9 +3864,7 @@ async fn test_cache_warmup() {
     /// Return an empty plan that doesn't require any subgraph requests to fulfill.
     fn empty_query_plan() -> QueryPlannerResponse {
         let plan = Arc::new(QueryPlan::fake_new(None, None));
-        QueryPlannerResponse::builder()
-            .content(QueryPlannerContent::Plan { plan })
-            .build()
+        QueryPlannerResponse::builder().content(plan).build()
     }
 
     /// Execute a constant mock query against the given supergraph service.

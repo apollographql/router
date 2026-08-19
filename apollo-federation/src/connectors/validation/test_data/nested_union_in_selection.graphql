@@ -1,0 +1,44 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.11")
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+  )
+  @source(
+    name: "api"
+    http: { baseURL: "https://api.example.com/" }
+  )
+
+type Summary {
+  brief: String!
+}
+
+type FullText {
+  content: String!
+}
+
+union Detail = Summary | FullText
+
+type Item {
+  detail: Detail
+}
+
+type Query {
+  item: Item
+    @connect(
+      source: "api"
+      http: { GET: "/item" }
+      selection: """
+        detail: kind->match(
+          ["short", {
+            __typename: "Summary",
+            brief: text
+          }],
+          [@, {
+            __typename: "FullText",
+            content: text
+          }]
+        )
+      """
+    )
+}

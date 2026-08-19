@@ -271,10 +271,6 @@ pub(crate) enum QueryPlannerError {
     /// spec error: {0}
     SpecError(SpecError),
 
-    // Safe to cache because user scopes and policies are included in the cache key.
-    /// Unauthorized field or type
-    Unauthorized(Vec<Path>),
-
     /// Federation error: {0}
     FederationError(FederationErrorBridge),
 

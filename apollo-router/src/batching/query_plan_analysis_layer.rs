@@ -215,7 +215,6 @@ mod tests {
     use crate::graphql;
     use crate::query_planner::QueryPlan;
     use crate::query_planner::QueryPlannerService;
-    use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerRequest;
     use crate::services::execution;
     use crate::spec::Query;
@@ -228,9 +227,7 @@ mod tests {
     ) -> Arc<QueryPlan> {
         let document = Query::parse_document(query, None, &schema, &configuration).unwrap();
 
-        let QueryPlannerContent::Plan {
-            plan: query_plan, ..
-        } = QueryPlannerService::for_test(schema, configuration)
+        QueryPlannerService::for_test(schema, configuration)
             .unwrap()
             .oneshot(
                 QueryPlannerRequest::builder()
@@ -245,11 +242,6 @@ mod tests {
             .unwrap()
             .content
             .unwrap()
-        else {
-            panic!("unexpected query planner output");
-        };
-
-        query_plan
     }
 
     #[tokio::test]
