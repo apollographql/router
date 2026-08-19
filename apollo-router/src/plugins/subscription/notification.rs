@@ -649,10 +649,16 @@ where
 
     fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let topic = self.handle_guard.topic.as_ref().clone();
-        let _ = self
+        if let Err(e) = self
             .handle_guard
             .pubsub_sender
-            .try_send(Notification::ForceDelete { topic });
+            .try_send(Notification::ForceDelete { topic })
+        {
+            tracing::warn!(
+                "subscription ForceDelete dropped under channel saturation: {e} — \
+                 deduplicated clients may not receive a stream termination signal"
+            );
+        }
         Poll::Ready(Ok(()))
     }
 }

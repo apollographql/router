@@ -1,0 +1,7 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+assertion_line: 335
+expression: result.errors
+input_file: apollo-federation/src/connectors/validation/test_data/nested_interface_in_selection.graphql
+---
+[]
