@@ -1,4 +1,6 @@
 use apollo_compiler::Schema;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 
 use crate::error::Locations;
@@ -22,7 +24,7 @@ pub(crate) fn apply_fed3_compat(schema: &mut Schema) -> Vec<CompositionHint> {
 
     // Collect interface field deprecation status up front so we aren't
     // borrowing the schema while mutating it.
-    let interface_deprecated_fields = collect_interface_deprecated_fields(schema);
+    let iface_deprecated = collect_interface_deprecated_fields(schema);
 
     for ty in schema.types.values_mut() {
         match ty {
@@ -34,20 +36,10 @@ pub(crate) fn apply_fed3_compat(schema: &mut Schema) -> Vec<CompositionHint> {
                 }
 
                 for iface_name in &object.implements_interfaces {
-                    if let Some(iface_fields) = interface_deprecated_fields
-                        .iter()
-                        .find(|(name, _)| name == &iface_name.name)
-                        .map(|(_, fields)| fields)
-                    {
+                    if let Some(deprecated_fields) = iface_deprecated.get(&iface_name.name) {
                         for field in object.fields.values_mut() {
                             let field_name = field.name.clone();
-                            let interface_field_is_deprecated = iface_fields
-                                .iter()
-                                .find(|(name, _)| *name == field_name)
-                                .map(|(_, deprecated)| *deprecated)
-                                .unwrap_or(false);
-
-                            if !interface_field_is_deprecated {
+                            if !deprecated_fields.contains(&field_name) {
                                 let field_def = field.make_mut();
                                 strip_deprecated_without_interface(
                                     &mut hints,
@@ -69,20 +61,12 @@ pub(crate) fn apply_fed3_compat(schema: &mut Schema) -> Vec<CompositionHint> {
                 }
 
                 for parent_iface_name in &interface.implements_interfaces {
-                    if let Some(parent_fields) = interface_deprecated_fields
-                        .iter()
-                        .find(|(name, _)| name == &parent_iface_name.name)
-                        .map(|(_, fields)| fields)
+                    if let Some(deprecated_fields) =
+                        iface_deprecated.get(&parent_iface_name.name)
                     {
                         for field in interface.fields.values_mut() {
                             let field_name = field.name.clone();
-                            let parent_field_is_deprecated = parent_fields
-                                .iter()
-                                .find(|(name, _)| *name == field_name)
-                                .map(|(_, deprecated)| *deprecated)
-                                .unwrap_or(false);
-
-                            if !parent_field_is_deprecated {
+                            if !deprecated_fields.contains(&field_name) {
                                 let field_def = field.make_mut();
                                 strip_deprecated_without_interface(
                                     &mut hints,
@@ -102,23 +86,21 @@ pub(crate) fn apply_fed3_compat(schema: &mut Schema) -> Vec<CompositionHint> {
     hints
 }
 
-/// Returns a list of (interface_name, [(field_name, is_deprecated)]) for every
-/// interface type in the schema.
+/// Returns a map from interface name to the set of deprecated field names
+/// for every interface type in the schema.
 fn collect_interface_deprecated_fields(
     schema: &Schema,
-) -> Vec<(apollo_compiler::Name, Vec<(apollo_compiler::Name, bool)>)> {
-    let mut result = Vec::new();
+) -> IndexMap<apollo_compiler::Name, IndexSet<apollo_compiler::Name>> {
+    let mut result = IndexMap::default();
     for ty in schema.types.values() {
         if let ExtendedType::Interface(interface) = ty {
-            let fields: Vec<_> = interface
+            let deprecated_fields: IndexSet<_> = interface
                 .fields
                 .iter()
-                .map(|(name, field)| {
-                    let is_deprecated = has_deprecated(&field.directives);
-                    (name.clone(), is_deprecated)
-                })
+                .filter(|(_, field)| has_deprecated(&field.directives))
+                .map(|(name, _)| name.clone())
                 .collect();
-            result.push((interface.name.clone(), fields));
+            result.insert(interface.name.clone(), deprecated_fields);
         }
     }
     result
@@ -148,12 +130,8 @@ fn strip_deprecated_reason_null(
             directive.arguments.retain(|arg| arg.name != "reason");
             hints.push(CompositionHint {
                 definition: &DEPRECATED_REASON_NULL,
-                message: "`@deprecated(reason: null)` is not valid in the GraphQL \
-                          September 2025 specification because the `reason` argument \
-                          is now non-nullable. The `reason: null` argument has been \
-                          removed, so the field will use the default deprecation \
-                          reason. Update your subgraph to either remove the \
-                          `reason: null` argument or provide a non-null reason string."
+                message: "Stripped `reason: null` from `@deprecated` for Router 3 compatibility. \
+                          Use a non-null reason or omit the argument."
                     .to_string(),
                 locations: Locations::default(),
             });
@@ -175,13 +153,9 @@ fn strip_deprecated_without_interface(
         hints.push(CompositionHint {
             definition: &DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE,
             message: format!(
-                "Field `{type_name}.{field_name}` is marked `@deprecated` but \
-                 the corresponding field on interface `{interface_name}` is not \
-                 deprecated. The GraphQL September 2025 specification does not \
-                 allow this. The `@deprecated` directive has been removed for \
-                 Router 3 compatibility. Either deprecate \
-                 `{interface_name}.{field_name}` or remove `@deprecated` from \
-                 `{type_name}.{field_name}`."
+                "Stripped `@deprecated` from `{type_name}.{field_name}` because \
+                 `{interface_name}.{field_name}` is not deprecated. Either deprecate \
+                 the interface field or remove `@deprecated` from the implementation."
             ),
             locations: Locations::default(),
         });
@@ -190,30 +164,18 @@ fn strip_deprecated_without_interface(
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::coord;
+
     use crate::composition::CompositionOptions;
     use crate::subgraph::typestate::Subgraph;
+    use crate::supergraph::Supergraph;
 
-    fn compose_and_get_hints(sdl: &str) -> (Vec<String>, bool) {
+    fn compose_supergraph(sdl: &str) -> (Supergraph<crate::supergraph::Satisfiable>, Vec<String>) {
         let subgraph = Subgraph::parse("test", "http://localhost", sdl).unwrap();
-        let result = crate::composition::compose(vec![subgraph], CompositionOptions::default());
-        match result {
-            Ok(supergraph) => {
-                let hints: Vec<_> = supergraph
-                    .hints()
-                    .iter()
-                    .map(|h| h.code().to_string())
-                    .collect();
-                (hints, true)
-            }
-            Err(failure) => {
-                let hints: Vec<_> = failure
-                    .hints
-                    .iter()
-                    .map(|h| h.code().to_string())
-                    .collect();
-                (hints, false)
-            }
-        }
+        let result =
+            crate::composition::compose(vec![subgraph], CompositionOptions::default()).unwrap();
+        let hints: Vec<_> = result.hints().iter().map(|h| h.code().to_string()).collect();
+        (result, hints)
     }
 
     #[test]
@@ -223,11 +185,23 @@ mod tests {
                 field: String @deprecated(reason: null)
             }
         "#;
-        let (hints, success) = compose_and_get_hints(sdl);
-        assert!(success, "Composition should succeed");
+        let (supergraph, hints) = compose_supergraph(sdl);
         assert!(
             hints.contains(&"DEPRECATED_REASON_NULL".to_string()),
             "Expected DEPRECATED_REASON_NULL hint, got: {hints:?}"
+        );
+
+        let schema = supergraph.schema().schema();
+        let c = coord!(Query.field);
+        let field = schema.type_field(&c.ty, &c.attribute).unwrap();
+        assert!(
+            field.directives.has("deprecated"),
+            "Field should still have @deprecated (only reason: null stripped)"
+        );
+        let deprecated = field.directives.get("deprecated").unwrap();
+        assert!(
+            deprecated.specified_argument_by_name("reason").is_none(),
+            "reason argument should have been stripped"
         );
     }
 
@@ -239,11 +213,19 @@ mod tests {
                 newField: String
             }
         "#;
-        let (hints, success) = compose_and_get_hints(sdl);
-        assert!(success, "Composition should succeed");
+        let (supergraph, hints) = compose_supergraph(sdl);
         assert!(
             !hints.contains(&"DEPRECATED_REASON_NULL".to_string()),
             "Should not emit DEPRECATED_REASON_NULL, got: {hints:?}"
+        );
+
+        let schema = supergraph.schema().schema();
+        let c = coord!(Query.field);
+        let field = schema.type_field(&c.ty, &c.attribute).unwrap();
+        let deprecated = field.directives.get("deprecated").unwrap();
+        assert!(
+            deprecated.specified_argument_by_name("reason").is_some(),
+            "reason argument should be preserved for valid reasons"
         );
     }
 
@@ -268,13 +250,18 @@ mod tests {
                 displayName: String
             }
         "#;
-        let (hints, success) = compose_and_get_hints(sdl);
-        assert!(success, "Composition should succeed");
+        let (supergraph, hints) = compose_supergraph(sdl);
         assert!(
-            hints.contains(
-                &"DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE".to_string()
-            ),
+            hints.contains(&"DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE".to_string()),
             "Expected DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE hint, got: {hints:?}"
+        );
+
+        let schema = supergraph.schema().schema();
+        let c = coord!(User.name);
+        let field = schema.type_field(&c.ty, &c.attribute).unwrap();
+        assert!(
+            !field.directives.has("deprecated"),
+            "@deprecated should have been stripped from User.name"
         );
     }
 
@@ -299,14 +286,18 @@ mod tests {
                 displayName: String
             }
         "#;
-        let (hints, success) = compose_and_get_hints(sdl);
-        assert!(success, "Composition should succeed");
+        let (supergraph, hints) = compose_supergraph(sdl);
         assert!(
-            !hints.contains(
-                &"DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE".to_string()
-            ),
+            !hints.contains(&"DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE".to_string()),
             "Should not emit DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE, got: {hints:?}"
         );
-    }
 
+        let schema = supergraph.schema().schema();
+        let c = coord!(User.name);
+        let field = schema.type_field(&c.ty, &c.attribute).unwrap();
+        assert!(
+            field.directives.has("deprecated"),
+            "@deprecated should be preserved when interface field is also deprecated"
+        );
+    }
 }

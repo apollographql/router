@@ -384,7 +384,7 @@ pub(crate) static DEPRECATED_REASON_NULL: LazyLock<HintCodeDefinition> = LazyLoc
     HintCodeDefinition::new(
         "DEPRECATED_REASON_NULL",
         HintLevel::Warn,
-        "`@deprecated(reason: null)` is invalid under the GraphQL September 2025 specification; the `reason: null` argument has been stripped for Router 3 compatibility",
+        "`@deprecated(reason: null)` is invalid in the 2025 GraphQL spec; `reason: null` stripped for Router 3 compatibility",
     )
 });
 
@@ -393,6 +393,6 @@ pub(crate) static DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE: LazyLock<Hint
         HintCodeDefinition::new(
             "DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE",
             HintLevel::Warn,
-            "An implementing field is `@deprecated` but the corresponding interface field is not, which is invalid under the GraphQL September 2025 specification",
+            "Implementing field is `@deprecated` but interface field is not; invalid in the 2025 GraphQL spec",
         )
     });
