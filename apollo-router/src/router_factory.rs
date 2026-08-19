@@ -468,14 +468,6 @@ pub(crate) async fn create_http_services(
             .as_ref()
             .and_then(|c| c.exporters.tracing.propagation.request.header_name.clone()),
     };
-    // TEMP DEBUG ROUTER-2060 - remove after validation
-    tracing::warn!(
-        telemetry_plugin_found = telemetry_config.is_some(),
-        enabled = subgraph_trace_context_preservation.enabled,
-        custom_header_name = ?subgraph_trace_context_preservation.custom_header_name,
-        "ROUTER-2060 DEBUG: resolved trace_context_preservation for subgraph HttpClientServices"
-    );
-    // END TEMP DEBUG ROUTER-2060
     // END ROUTER-2060
 
     let connector_subgraphs: HashSet<String> = schema

@@ -581,16 +581,6 @@ impl tower::Service<HttpRequest> for HttpClientService {
         let service_name = self.service.clone();
         let http_req_span = Span::current();
 
-        // TEMP DEBUG ROUTER-2060 - remove after validation
-        tracing::warn!(
-            preserve_enabled = self.trace_context_preservation.enabled,
-            custom_header_name = ?self.trace_context_preservation.custom_header_name,
-            traceparent_before = ?http_request.headers().get("traceparent"),
-            tracestate_before = ?http_request.headers().get("tracestate"),
-            "ROUTER-2060 DEBUG: entering call(), state before snapshot"
-        );
-        // END TEMP DEBUG ROUTER-2060
-
         // BEGIN ROUTER-2060
         //
         // If the router is configured to preserve an already-present trace-context header on
@@ -629,28 +619,12 @@ impl tower::Service<HttpRequest> for HttpClientService {
             .flatten();
         // END ROUTER-2060
 
-        // TEMP DEBUG ROUTER-2060 - remove after validation
-        tracing::warn!(
-            ?saved_trace_header,
-            ?saved_tracestate,
-            "ROUTER-2060 DEBUG: snapshot captured (this is what will be restored, if Some)"
-        );
-        // END TEMP DEBUG ROUTER-2060
-
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
                 &prepare_context(http_req_span.context()),
                 &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
             );
         });
-
-        // TEMP DEBUG ROUTER-2060 - remove after validation
-        tracing::warn!(
-            traceparent_after_injection = ?http_request.headers().get("traceparent"),
-            tracestate_after_injection = ?http_request.headers().get("tracestate"),
-            "ROUTER-2060 DEBUG: state right after router's own propagator injection, before restore"
-        );
-        // END TEMP DEBUG ROUTER-2060
 
         // BEGIN ROUTER-2060
         if let Some((name, value)) = saved_trace_header {
@@ -660,14 +634,6 @@ impl tower::Service<HttpRequest> for HttpClientService {
             http_request.headers_mut().insert("tracestate", value);
         }
         // END ROUTER-2060
-
-        // TEMP DEBUG ROUTER-2060 - remove after validation
-        tracing::warn!(
-            traceparent_final = ?http_request.headers().get("traceparent"),
-            tracestate_final = ?http_request.headers().get("tracestate"),
-            "ROUTER-2060 DEBUG: final state about to be sent to the subgraph"
-        );
-        // END TEMP DEBUG ROUTER-2060
 
         let (parts, body) = http_request.into_parts();
         let content_encoding = parts.headers.get(&CONTENT_ENCODING);
@@ -784,11 +750,15 @@ mod tests {
     use std::sync::Arc;
     use std::sync::Mutex;
 
+    // BEGIN ROUTER-2060
+    use http::HeaderName;
+    use http::HeaderValue;
     use http::StatusCode;
     use http::Uri;
     use http::header::CONTENT_TYPE;
     use hyper_rustls::ConfigBuilderExt;
     use mime::APPLICATION_JSON;
+    use opentelemetry_sdk::propagation::TraceContextPropagator;
     use tokio::net::TcpListener;
     use tower::ServiceExt;
     use tracing::Subscriber;
@@ -808,6 +778,7 @@ mod tests {
     use crate::services::http::TraceContextPreservation; // BEGIN/END ROUTER-2060
     use crate::services::http::service::WireByteCount;
     use crate::services::router;
+    // END ROUTER-2060
 
     async fn emulate_subgraph_with_status_code(listener: TcpListener, status_code: StatusCode) {
         crate::services::http::tests::serve(listener, move |_| async move {
@@ -1197,4 +1168,230 @@ mod tests {
             "WireByteCount should equal the compressed (wire) size, not the decompressed size"
         );
     }
+
+    // BEGIN ROUTER-2060
+    //
+    // These tests exercise the snapshot/restore logic in `call()` end-to-end, which requires a
+    // genuinely valid, sampled span context (via `otel::layer().force_sampling()` + the
+    // telemetry plugin's `http_client_service` wrapping, which is what actually creates the
+    // "http_request" span `Span::current()` sees inside `call()`) and a real globally-registered
+    // `TraceContextPropagator` (otherwise `get_text_map_propagator` is a no-op and every
+    // assertion here would pass for the wrong reason). `set_text_map_propagator` mutates
+    // process-wide OTel state, so these tests are serialized by the mutex below, following the
+    // same pattern already used for `Telemetry::activate()` in
+    // `plugins::telemetry::mod::tests` (see `.config/nextest.toml`'s
+    // `serial-router-2060-trace-context-preservation-unit` group for the nextest-side guard).
+    static TRACE_CONTEXT_PRESERVATION_TEST: once_cell::sync::Lazy<Arc<tokio::sync::Mutex<()>>> =
+        once_cell::sync::Lazy::new(Default::default);
+
+    async fn make_telemetry_http_client_with_preservation(
+        service_name: &str,
+        trace_context_preservation: TraceContextPreservation,
+    ) -> BoxService {
+        let full_config = serde_json::json!({
+            "telemetry": {}
+        });
+        let telemetry_config = full_config
+            .as_object()
+            .expect("must be an object")
+            .get("telemetry")
+            .expect("telemetry must be a root key");
+        let init = crate::plugin::PluginInit::fake_builder()
+            .config(telemetry_config.clone())
+            .full_config(full_config)
+            .build()
+            .with_deserialized_config()
+            .expect("unable to deserialize telemetry config");
+        let plugin = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.telemetry")
+            .expect("Plugin not found")
+            .create_instance(init)
+            .await
+            .expect("unable to create telemetry plugin");
+
+        let service_target = ServiceTarget::Subgraph {
+            name: Arc::from(service_name),
+        };
+        let http_client_service = HttpClientService::new(
+            service_target,
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("Able to load native roots")
+                .with_no_client_auth(),
+            crate::configuration::shared::Client::builder().build(),
+            trace_context_preservation,
+        )
+        .expect("can create a HttpClientService");
+
+        plugin.http_client_service(service_name, BoxService::new(http_client_service))
+    }
+
+    /// Emulates a subgraph that records the headers of the first request it receives.
+    async fn emulate_subgraph_capturing_headers(
+        listener: TcpListener,
+        captured: Arc<Mutex<Option<http::HeaderMap>>>,
+    ) {
+        crate::services::http::tests::serve(listener, move |req| {
+            let captured = captured.clone();
+            async move {
+                *captured.lock().unwrap() = Some(req.headers().clone());
+                Ok(http::Response::builder()
+                    .status(StatusCode::OK)
+                    .body(r#"{}"#.into())
+                    .unwrap())
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    /// Sends one request through a telemetry-wrapped `HttpClientService` configured with
+    /// `preservation`, with `initial_headers` already present on the outgoing request before it
+    /// reaches the service (emulating a coprocessor/Rhai/header-propagation rewrite that already
+    /// happened upstream), and returns the headers the mock subgraph actually received.
+    async fn run_preservation_scenario(
+        preservation: TraceContextPreservation,
+        initial_headers: Vec<(HeaderName, &'static str)>,
+    ) -> http::HeaderMap {
+        let _propagator_guard = TRACE_CONTEXT_PRESERVATION_TEST.lock().await;
+        opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let captured: Arc<Mutex<Option<http::HeaderMap>>> = Arc::new(Mutex::new(None));
+        tokio::task::spawn(emulate_subgraph_capturing_headers(
+            listener,
+            captured.clone(),
+        ));
+
+        let service = make_telemetry_http_client_with_preservation("test", preservation).await;
+        let (_tracing_guard, _recording_layer) = setup_tracing();
+
+        let mut builder = http::Request::builder()
+            .uri(Uri::from_str(&format!("http://{socket_addr}")).unwrap())
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str());
+        for (name, value) in initial_headers {
+            builder = builder.header(name, HeaderValue::from_static(value));
+        }
+
+        let response = service
+            .oneshot(HttpRequest {
+                http_request: builder
+                    .body(router::body::from_bytes(r#"{"query":"{ me { name } }"#))
+                    .unwrap(),
+                context: Context::new(),
+            })
+            .await
+            .unwrap();
+
+        let (parts, _) = response.http_response.into_parts();
+        assert_eq!(parts.status, StatusCode::OK);
+
+        captured
+            .lock()
+            .unwrap()
+            .take()
+            .expect("subgraph should have received a request")
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_preserve_disabled_overwrites_existing_traceparent() {
+        let fake_traceparent = "00-11111111111111111111111111111111-1111111111111111-01";
+        let headers = run_preservation_scenario(
+            TraceContextPreservation::default(),
+            vec![(HeaderName::from_static("traceparent"), fake_traceparent)],
+        )
+        .await;
+
+        let received = headers
+            .get("traceparent")
+            .expect("traceparent should still be set by the router's own injection");
+        assert_ne!(
+            received.to_str().unwrap(),
+            fake_traceparent,
+            "with preservation disabled, the router must overwrite a pre-existing traceparent \
+             with its own span context (this is the pre-existing, correct default behavior)"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_preserve_enabled_restores_traceparent_and_tracestate() {
+        let fake_traceparent = "00-22222222222222222222222222222222-2222222222222222-01";
+        let fake_tracestate = "vendor=abc123";
+        let headers = run_preservation_scenario(
+            TraceContextPreservation {
+                enabled: true,
+                custom_header_name: None,
+            },
+            vec![
+                (HeaderName::from_static("traceparent"), fake_traceparent),
+                (HeaderName::from_static("tracestate"), fake_tracestate),
+            ],
+        )
+        .await;
+
+        assert_eq!(
+            headers.get("traceparent").and_then(|v| v.to_str().ok()),
+            Some(fake_traceparent),
+            "with preservation enabled, a pre-existing traceparent must survive verbatim"
+        );
+        assert_eq!(
+            headers.get("tracestate").and_then(|v| v.to_str().ok()),
+            Some(fake_tracestate),
+            "tracestate must be preserved independently of traceparent"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_preserve_enabled_custom_header_takes_priority_over_traceparent() {
+        let fake_traceparent = "00-33333333333333333333333333333333-3333333333333333-01";
+        let fake_custom_trace_id = "custom-trace-id-value";
+        let headers = run_preservation_scenario(
+            TraceContextPreservation {
+                enabled: true,
+                custom_header_name: Some(HeaderName::from_static("x-trace-id")),
+            },
+            vec![
+                (HeaderName::from_static("traceparent"), fake_traceparent),
+                (HeaderName::from_static("x-trace-id"), fake_custom_trace_id),
+            ],
+        )
+        .await;
+
+        assert_eq!(
+            headers.get("x-trace-id").and_then(|v| v.to_str().ok()),
+            Some(fake_custom_trace_id),
+            "the configured custom trace ID header takes priority and must be preserved"
+        );
+        assert_ne!(
+            headers.get("traceparent").and_then(|v| v.to_str().ok()),
+            Some(fake_traceparent),
+            "when the custom header wins, traceparent itself is not separately protected and \
+             is overwritten by the router's own injection"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_preserve_enabled_falls_back_to_traceparent_when_custom_header_empty() {
+        let fake_traceparent = "00-44444444444444444444444444444444-4444444444444444-01";
+        let headers = run_preservation_scenario(
+            TraceContextPreservation {
+                enabled: true,
+                custom_header_name: Some(HeaderName::from_static("x-trace-id")),
+            },
+            vec![
+                (HeaderName::from_static("traceparent"), fake_traceparent),
+                (HeaderName::from_static("x-trace-id"), ""),
+            ],
+        )
+        .await;
+
+        assert_eq!(
+            headers.get("traceparent").and_then(|v| v.to_str().ok()),
+            Some(fake_traceparent),
+            "an empty custom header must not be treated as present; traceparent should survive \
+             via the fallback path (mirrors the extraction-side precedent fixed in PR #9984)"
+        );
+    }
+    // END ROUTER-2060
 }
