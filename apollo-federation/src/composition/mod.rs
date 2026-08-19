@@ -1,3 +1,4 @@
+pub(crate) mod fed3_compat;
 mod satisfiability;
 
 use std::sync::Arc;

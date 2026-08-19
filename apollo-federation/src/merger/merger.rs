@@ -718,7 +718,11 @@ impl Merger {
                     hints,
                 });
             }
-            let merged = self.merged;
+            let mut merged = self.merged;
+            let compat_hints =
+                crate::composition::fed3_compat::apply_fed3_compat(merged.schema_mut());
+            let mut hints = hints;
+            hints.extend(compat_hints);
             match Self::validate_supergraph_schema(merged, &self.subgraphs) {
                 Ok(supergraph) => Ok(MergeResult {
                     supergraph: Some(supergraph),
