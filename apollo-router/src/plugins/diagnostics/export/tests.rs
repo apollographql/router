@@ -93,7 +93,7 @@ async fn test_create_archive() {
 
     // Create the archive with test configuration
     let test_full_config = serde_json::json!({
-        "diagnostics": {
+        "experimental_diagnostics": {
             "enabled": true,
             "shared_secret": "test-secret"
         }
@@ -343,7 +343,7 @@ async fn test_tar_gz_format_compatibility() {
         "server": {
             "listen": "127.0.0.1:4000"
         },
-        "diagnostics": {
+        "experimental_diagnostics": {
             "enabled": true,
             "shared_secret": "test-secret"
         }
@@ -396,7 +396,7 @@ async fn test_tar_gz_format_compatibility() {
         "router.yaml should contain configuration data"
     );
     assert!(
-        router_yaml_content.contains("diagnostics"),
+        router_yaml_content.contains("experimental_diagnostics"),
         "router.yaml should contain diagnostics config"
     );
 
@@ -470,7 +470,7 @@ async fn test_manual_archive_inspection() {
 
     let test_full_config = serde_json::json!({
         "server": {"listen": "127.0.0.1:4000"},
-        "diagnostics": {"enabled": true, "shared_secret": "test-secret"}
+        "experimental_diagnostics": {"enabled": true, "shared_secret": "test-secret"}
     });
     let archive_data = collect_streaming_archive(&config, "supergraph_schema", &test_full_config)
         .await
@@ -539,7 +539,7 @@ async fn test_archive_format_with_system_tar() {
 
     let test_full_config = serde_json::json!({
         "server": {"listen": "127.0.0.1:4000"},
-        "diagnostics": {"enabled": true}
+        "experimental_diagnostics": {"enabled": true}
     });
     let archive_data = collect_streaming_archive(&config, "supergraph_schema", &test_full_config)
         .await

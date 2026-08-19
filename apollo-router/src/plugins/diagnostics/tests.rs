@@ -84,7 +84,7 @@ async fn test_diagnostics_disabled_by_default() {
     let test_harness: PluginTestHarness<DiagnosticsPlugin> = PluginTestHarness::builder()
         .config(
             r#"
-            diagnostics:
+            experimental_diagnostics:
                 enabled: false
                 output_directory: "/tmp/test-diagnostics"
         "#,
@@ -104,7 +104,7 @@ async fn test_diagnostics_enabled_creates_endpoint() {
     let test_harness: PluginTestHarness<DiagnosticsPlugin> = PluginTestHarness::builder()
         .config(&format!(
             r#"
-            diagnostics:
+            experimental_diagnostics:
                 enabled: true
                 listen: "{}"
                 output_directory: "/tmp/test-diagnostics"
@@ -143,7 +143,7 @@ async fn test_diagnostics_endpoints_accessible() {
     let test_harness: PluginTestHarness<DiagnosticsPlugin> = PluginTestHarness::builder()
         .config(&format!(
             r#"
-            diagnostics:
+            experimental_diagnostics:
                 enabled: true
                 listen: "{}"
                 output_directory: "/tmp/test-diagnostics"

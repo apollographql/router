@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -1983,6 +1982,10 @@ expression: "&schema"
       "type": "object"
     },
     "Config4": {
+      "description": "The enhanced client-awareness plugin has no configuration.",
+      "type": "object"
+    },
+    "Config5": {
       "additionalProperties": false,
       "description": "Configuration for the diagnostics plugin\n\n**Platform Requirements**: This plugin is supported on all platforms.\nHeap dump functionality is only available on Linux platforms due to\njemalloc requirements. Other diagnostic features work across platforms.",
       "properties": {
@@ -2006,10 +2009,6 @@ expression: "&schema"
           "type": "string"
         }
       },
-      "type": "object"
-    },
-    "Config5": {
-      "description": "The enhanced client-awareness plugin has no configuration.",
       "type": "object"
     },
     "Config6": {
@@ -13076,11 +13075,8 @@ expression: "&schema"
     "demand_control": {
       "$ref": "#/definitions/DemandControlConfig"
     },
-    "diagnostics": {
-      "$ref": "#/definitions/Config4"
-    },
     "enhanced_client_awareness": {
-      "$ref": "#/definitions/Config5"
+      "$ref": "#/definitions/Config4"
     },
     "experimental_chaos": {
       "allOf": [
@@ -13093,6 +13089,9 @@ expression: "&schema"
         "force_schema_reload": null
       },
       "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don’t want this in production!"
+    },
+    "experimental_diagnostics": {
+      "$ref": "#/definitions/Config5"
     },
     "experimental_hoist_orphan_errors": {
       "allOf": [

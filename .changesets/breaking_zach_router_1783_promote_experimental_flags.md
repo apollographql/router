@@ -26,11 +26,6 @@ plugins:
 expose_query_plan: true
 ```
 
-The internal `apollo.experimental_diagnostics` plugin has been renamed to
-`apollo.diagnostics` (its configuration key changes from
-`experimental_diagnostics` to `diagnostics`); this one has no migration path
-since it isn't a documented, user-facing config surface.
-
 Default values are unchanged. Configurations using the old field and plugin
 names are migrated automatically at startup once the router reaches the next
 major version.
