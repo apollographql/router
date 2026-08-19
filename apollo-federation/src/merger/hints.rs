@@ -384,7 +384,7 @@ pub(crate) static DEPRECATED_REASON_NULL: LazyLock<HintCodeDefinition> = LazyLoc
     HintCodeDefinition::new(
         "DEPRECATED_REASON_NULL",
         HintLevel::Warn,
-        "`@deprecated(reason: null)` is invalid under the GraphQL September 2025 specification and has been removed for Router 3 compatibility",
+        "`@deprecated(reason: null)` is invalid under the GraphQL September 2025 specification; the `reason: null` argument has been stripped for Router 3 compatibility",
     )
 });
 

@@ -12,9 +12,8 @@ use crate::supergraph::CompositionHint;
 ///
 /// Currently handles two patterns:
 /// 1. `@deprecated(reason: null)` — the `reason` argument is non-nullable in the
-///    2025 spec. The directive is stripped entirely because `reason: null` caused
-///    graphql-js to report `isDeprecated: false` anyway, so removing it preserves
-///    the existing runtime behavior.
+///    2025 spec. The `reason: null` argument is stripped, leaving a bare
+///    `@deprecated` (which receives the default reason "No longer supported").
 /// 2. `@deprecated` on an implementing field whose corresponding interface field
 ///    is *not* deprecated — disallowed by the 2025 spec. The directive is stripped
 ///    from the implementing field.
@@ -115,7 +114,7 @@ fn collect_interface_deprecated_fields(
                 .fields
                 .iter()
                 .map(|(name, field)| {
-                    let is_deprecated = has_effective_deprecated(&field.directives);
+                    let is_deprecated = has_deprecated(&field.directives);
                     (name.clone(), is_deprecated)
                 })
                 .collect();
@@ -125,46 +124,40 @@ fn collect_interface_deprecated_fields(
     result
 }
 
-/// Returns true if the directive list contains `@deprecated` with an effective
-/// deprecation (i.e. NOT `@deprecated(reason: null)`, which graphql-js treats
-/// as not deprecated).
-fn has_effective_deprecated(directives: &apollo_compiler::ast::DirectiveList) -> bool {
-    directives.0.iter().any(|d| {
-        d.name == "deprecated"
-            && !d
-                .specified_argument_by_name("reason")
-                .is_some_and(|v| v.is_null())
-    })
+/// Returns true if the directive list contains any `@deprecated` application.
+fn has_deprecated(directives: &apollo_compiler::ast::DirectiveList) -> bool {
+    directives.0.iter().any(|d| d.name == "deprecated")
 }
 
-/// Strip `@deprecated(reason: null)` from a directive list, emitting a hint
-/// for each occurrence.
+/// Strip the `reason: null` argument from `@deprecated(reason: null)`,
+/// leaving a bare `@deprecated` (which receives the default reason
+/// "No longer supported"). Emits a hint for each occurrence.
 fn strip_deprecated_reason_null(
     hints: &mut Vec<CompositionHint>,
     directives: &mut apollo_compiler::ast::DirectiveList,
 ) {
-    let had_deprecated_reason_null = directives.0.iter().any(|d| {
-        d.name == "deprecated"
-            && d.specified_argument_by_name("reason")
-                .is_some_and(|v| v.is_null())
-    });
-
-    if had_deprecated_reason_null {
-        directives.0.retain(|d| {
-            !(d.name == "deprecated"
-                && d.specified_argument_by_name("reason")
-                    .is_some_and(|v| v.is_null()))
-        });
-        hints.push(CompositionHint {
-            definition: &DEPRECATED_REASON_NULL,
-            message: "`@deprecated(reason: null)` is not valid in the GraphQL \
-                      September 2025 specification because the `reason` argument is \
-                      now non-nullable. The directive has been removed to maintain \
-                      compatibility with Router 3. Update your subgraph to remove \
-                      the `reason: null` argument."
-                .to_string(),
-            locations: Locations::default(),
-        });
+    for directive in directives.0.iter_mut() {
+        if directive.name != "deprecated" {
+            continue;
+        }
+        let has_reason_null = directive
+            .specified_argument_by_name("reason")
+            .is_some_and(|v| v.is_null());
+        if has_reason_null {
+            let directive = directive.make_mut();
+            directive.arguments.retain(|arg| arg.name != "reason");
+            hints.push(CompositionHint {
+                definition: &DEPRECATED_REASON_NULL,
+                message: "`@deprecated(reason: null)` is not valid in the GraphQL \
+                          September 2025 specification because the `reason` argument \
+                          is now non-nullable. The `reason: null` argument has been \
+                          removed, so the field will use the default deprecation \
+                          reason. Update your subgraph to either remove the \
+                          `reason: null` argument or provide a non-null reason string."
+                    .to_string(),
+                locations: Locations::default(),
+            });
+        }
     }
 }
 
