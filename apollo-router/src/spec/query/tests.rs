@@ -7712,19 +7712,12 @@ async fn authorization_filtered_query(query_str: &str) -> (Arc<Query>, Arc<Schem
     (query, schema)
 }
 
-/// Runs the two passes `ExecutionService` runs over a filtered operation and returns the
-/// resulting `thing` object.
+/// Formats `data` through [`Query::format_response_filtered_then_original`] and returns
+/// the resulting `thing` object.
 fn format_filtered_then_original(query: &Query, schema: &Schema, data: Value) -> Value {
     let mut response = crate::graphql::Response::builder().data(data).build();
 
-    query.filtered_query.as_ref().unwrap().format_response(
-        &mut response,
-        Object::new(),
-        schema.api_schema(),
-        BooleanValues { bits: 0 },
-        true,
-    );
-    query.format_response(
+    query.format_response_filtered_then_original(
         &mut response,
         Object::new(),
         schema.api_schema(),

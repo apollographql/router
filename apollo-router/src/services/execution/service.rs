@@ -289,7 +289,6 @@ impl ExecutionService {
         let variables_set = query.defer_variables_set(variables);
 
         tracing::debug_span!("format_response").in_scope(|| {
-            let mut paths = Vec::new();
             if !query.unauthorized.paths.is_empty() {
                 query.unauthorized.log_unauthorized_paths();
                 query
@@ -297,30 +296,13 @@ impl ExecutionService {
                     .update_response_with_unauthorized_path_errors(&mut response);
             }
 
-            // Two passes, in this order. The filtered query projects the data onto the
-            // authorized shape, discarding fields the subgraphs returned beyond it
-            // (via @requires, or a misbehaving subgraph). The original query then
-            // expands the result to the shape the client requested, nulling what the
-            // filtered pass removed. One pass cannot do both: formatting with the
-            // original alone returns unauthorized values, formatting with the filtered
-            // alone drops requested fields from the response.
-            if let Some(filtered_query) = query.filtered_query.as_ref() {
-                paths = filtered_query.format_response(
-                    &mut response,
-                    variables.clone(),
-                    schema.api_schema(),
-                    variables_set,
-                    insert_result_coercion_errors,
-                );
-            }
-
-            paths.extend(query.format_response(
+            let paths = query.format_response_filtered_then_original(
                 &mut response,
                 variables.clone(),
                 schema.api_schema(),
                 variables_set,
                 insert_result_coercion_errors,
-            ));
+            );
 
             for error in response.errors.iter_mut() {
                 if let Some(path) = &mut error.path {
