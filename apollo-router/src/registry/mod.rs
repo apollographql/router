@@ -2477,4 +2477,116 @@ mod tests {
         let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
         assert_eq!(license.claims, expected.claims);
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetch_license_oci_surfaces_fetch_error() {
+        // MockServer with no mounts — every request 404s. Proves the outer
+        // wrapper doesn't swallow the underlying `OciDistributionError` and
+        // maps it through `?` into `OciError` cleanly.
+        let mock_server = &MockServer::start().await;
+        let image_reference = format!("{}/test-graph-id:latest", mock_server.address());
+        let oci_config = mock_oci_config_with_reference(image_reference);
+
+        let err = fetch_license_oci(&oci_config)
+            .await
+            .expect_err("fetch should fail when the registry returns nothing");
+
+        assert!(
+            matches!(err, OciError::Distribution(_)),
+            "expected OciError::Distribution, got {err:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_license_from_oci_yields_error_and_continues() {
+        // First blob GET returns 500, second returns the license. This proves
+        // three things at once:
+        //   1. an error from `fetch_license_oci` propagates as a stream Err item,
+        //   2. the poll loop keeps running after emitting an error, and
+        //   3. `last_digest` is NOT updated on a failed fetch — otherwise the
+        //      second poll would see an "unchanged" digest and skip refetching,
+        //      and the stream would never emit an Ok item.
+        let mock_server = &MockServer::start().await;
+        let graph_id = "test-graph-id";
+        let reference = "latest";
+        let manifest_info = create_manifest_from_license_layer(TEST_LICENSE_JWT.as_bytes(), None);
+
+        // Manifest HEAD/GET always succeed with the same digest.
+        let manifest_url = Url::parse(&format!(
+            "{}/v2/{}/manifests/{}",
+            mock_server.uri(),
+            graph_id,
+            reference
+        ))
+        .expect("url must be valid");
+        let _ = Mock::given(method("HEAD"))
+            .and(path(manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
+            )
+            .mount(mock_server)
+            .await;
+        let _ = Mock::given(method("GET"))
+            .and(path(manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                    .set_body_bytes(serde_json::to_vec(&manifest_info.oci_manifest).unwrap()),
+            )
+            .mount(mock_server)
+            .await;
+
+        // Blob GET fails once, then succeeds.
+        let blob_url = Url::parse(&format!(
+            "{}/v2/{graph_id}/blobs/{}",
+            mock_server.uri(),
+            manifest_info.blob_digest
+        ))
+        .expect("url must be valid");
+        let license_data = manifest_info.license_data.clone();
+        let _ = Mock::given(method("GET"))
+            .and(path(blob_url.path()))
+            .respond_with(SequentialBackoffResponse {
+                responses: Mutex::new(VecDeque::from([
+                    ResponseTemplate::new(500),
+                    ResponseTemplate::new(200)
+                        .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                        .set_body_bytes(license_data),
+                ])),
+            })
+            .mount(mock_server)
+            .await;
+
+        let image_reference = format!("{}/{graph_id}:{reference}", mock_server.address())
+            .parse::<Reference>()
+            .expect("url must be valid");
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let mut stream = stream_license_from_oci(oci_config);
+
+        // Poll 1: blob 500 → stream emits Err.
+        let first_result = timeout(Duration::from_secs(5), stream.next())
+            .await
+            .expect("first item should arrive")
+            .expect("stream should not have closed");
+        assert!(
+            first_result.is_err(),
+            "expected first result to be an error, got {first_result:?}"
+        );
+
+        // Poll 2: same manifest digest, but because the previous fetch failed
+        // `last_digest` is still None, so the stream refetches and succeeds.
+        let second_result = timeout(Duration::from_secs(5), stream.next())
+            .await
+            .expect("second item should arrive")
+            .expect("stream should not have closed");
+        let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
+        match second_result {
+            Ok(license) => assert_eq!(license.claims, expected.claims),
+            Err(e) => panic!("expected success after retry, got error: {e}"),
+        }
+    }
 }
