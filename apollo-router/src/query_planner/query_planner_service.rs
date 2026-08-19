@@ -6,8 +6,8 @@ use std::sync::OnceLock;
 use std::task::Poll;
 use std::time::Instant;
 
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
-use apollo_compiler::ast;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
@@ -16,11 +16,11 @@ use futures::future::BoxFuture;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
-use serde_json_bytes::Value;
 use tower::Service;
 
 use super::PlanNode;
 use super::QueryKey;
+use super::QueryPlan;
 use crate::Configuration;
 use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::compute_job;
@@ -30,12 +30,11 @@ use crate::error::FederationErrorBridge;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::error::ValidationErrors;
-use crate::graphql;
-use crate::json_ext::Path;
 use crate::metrics::meter_provider;
 use crate::plugins::authorization;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::authorization::FilterResult;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
@@ -339,15 +338,13 @@ impl QueryPlannerService {
             evaluated_plan_paths
         );
 
-        Ok(QueryPlannerContent::Plan {
-            plan: Arc::new(super::QueryPlan {
-                usage_reporting: Arc::new(usage_reporting),
-                root: query_plan_root_node,
-                formatted_query_plan,
-                query: Arc::new(selections),
-                estimated_size: Default::default(),
-            }),
-        })
+        Ok(Arc::new(QueryPlan {
+            usage_reporting: Arc::new(usage_reporting),
+            root: query_plan_root_node,
+            formatted_query_plan,
+            query: Arc::new(selections),
+            estimated_size: Default::default(),
+        }))
     }
 }
 
@@ -441,9 +438,6 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
     }
 }
 
-// Appease clippy::type_complexity
-pub(crate) type FilteredQuery = (Vec<Path>, ast::Document);
-
 impl QueryPlannerService {
     async fn get(
         &self,
@@ -461,49 +455,58 @@ impl QueryPlannerService {
 
         // TODO(@goto-bus-stop): this is not a query planning concern
         let filter_res = if self.enable_authorization_directives {
-            match AuthorizationPlugin::filter_query(&self.authorization_config, &key, &self.schema)
-            {
-                Err(QueryPlannerError::Unauthorized(paths)) => {
-                    let mut response = graphql::Response::builder().data(Value::Null).build();
-
-                    if !paths.is_empty() {
-                        let unauthorized = UnauthorizedPaths {
-                            paths,
-                            errors: self.authorization_config.error_config(),
-                        };
-                        unauthorized.log_unauthorized_paths();
-                        unauthorized.update_response_with_unauthorized_path_errors(&mut response);
-                    }
-
-                    return Ok(QueryPlannerContent::Response {
-                        response: Box::new(response),
-                    });
-                }
-                other => other?,
-            }
+            AuthorizationPlugin::filter_query(&self.authorization_config, &key, &self.schema)?
         } else {
-            None
+            FilterResult::Unchanged
         };
 
-        if let Some((unauthorized_paths, new_doc)) = filter_res {
-            let new_query = new_doc.to_string();
-            let new_hash = self
-                .schema
-                .schema_id
-                .operation_hash(&new_query, key.operation_name.as_deref());
+        match filter_res {
+            FilterResult::Unchanged => {}
+            // Filtering can empty the document; the federation planner cannot plan a
+            // document with no definitions, so answer with a plan that carries no work.
+            FilterResult::Filtered { paths, document } if document.definitions.is_empty() => {
+                selections.unauthorized.paths = paths;
 
-            key.filtered_query = new_query;
-            let executable_document = new_doc
-                .to_executable_validate(self.schema.api_schema())
-                .map_err(|e| QueryPlannerError::from(SpecError::ValidationError(e.into())))?;
-            doc = ParsedDocumentInner::new(
-                new_doc,
-                Arc::new(executable_document),
-                key.operation_name.as_deref(),
-                Arc::new(new_hash),
-            )
-            .map_err(QueryPlannerError::from)?;
-            selections.unauthorized.paths = unauthorized_paths;
+                // References come from the operation that ran, and nothing did.
+                let usage_reporting = generate_usage_reporting(
+                    &doc.executable,
+                    &ExecutableDocument::new(),
+                    &key.operation_name,
+                    self.schema.supergraph_schema(),
+                    &self.signature_normalization_algorithm,
+                );
+
+                return Ok(Arc::new(QueryPlan {
+                    usage_reporting: Arc::new(usage_reporting),
+                    root: None,
+                    formatted_query_plan: None,
+                    query: Arc::new(selections),
+                    estimated_size: Default::default(),
+                }));
+            }
+            FilterResult::Filtered {
+                paths,
+                document: new_doc,
+            } => {
+                let new_query = new_doc.to_string();
+                let new_hash = self
+                    .schema
+                    .schema_id
+                    .operation_hash(&new_query, key.operation_name.as_deref());
+
+                key.filtered_query = new_query;
+                let executable_document = new_doc
+                    .to_executable_validate(self.schema.api_schema())
+                    .map_err(|e| QueryPlannerError::from(SpecError::ValidationError(e.into())))?;
+                doc = ParsedDocumentInner::new(
+                    new_doc,
+                    Arc::new(executable_document),
+                    key.operation_name.as_deref(),
+                    Arc::new(new_hash),
+                )
+                .map_err(QueryPlannerError::from)?;
+                selections.unauthorized.paths = paths;
+            }
         }
 
         if key.filtered_query != key.original_query {
@@ -657,19 +660,11 @@ mod tests {
             .await
             .unwrap();
 
-        if let QueryPlannerContent::Plan { plan, .. } =
-            response.content.expect("successful response")
-        {
-            insta::with_settings!({sort_maps => true}, {
-                insta::assert_json_snapshot!("plan_usage_reporting", plan.usage_reporting);
-            });
-            insta::assert_debug_snapshot!(
-                "plan_root",
-                plan.root.as_deref().expect("non-empty plan")
-            );
-        } else {
-            panic!("unexpected query planner content")
-        }
+        let plan = response.content.expect("successful response");
+        insta::with_settings!({sort_maps => true}, {
+            insta::assert_json_snapshot!("plan_usage_reporting", plan.usage_reporting);
+        });
+        insta::assert_debug_snapshot!("plan_root", plan.root.as_deref().expect("non-empty plan"));
     }
 
     #[test(tokio::test)]
@@ -732,10 +727,7 @@ mod tests {
 
         let content = response.content.expect("expected a successful response");
 
-        let plan = match content {
-            QueryPlannerContent::Plan { plan, .. } => plan,
-            _ => panic!("expected a Plan response, received {content:?}"),
-        };
+        let plan = content;
 
         assert_eq!(plan.root, None, "expected an empty plan");
     }
@@ -1068,27 +1060,70 @@ mod tests {
             .await
             .unwrap();
 
-        if let QueryPlannerContent::Plan { plan, .. } = result {
-            check_query_plan_coverage(
-                plan.root.as_ref().expect("non-empty query plan"),
-                None,
-                &plan.query.subselections,
-            );
+        let plan = result;
+        check_query_plan_coverage(
+            plan.root.as_ref().expect("non-empty query plan"),
+            None,
+            &plan.query.subselections,
+        );
 
-            let mut keys: Vec<String> = Vec::new();
-            for (key, value) in plan.query.subselections.iter() {
-                let mut serialized = String::from("query");
-                serialize_selection_set(&value.selection_set, &mut serialized);
-                keys.push(format!(
-                    "{:?} {} {}",
-                    key.defer_label, key.defer_conditions.bits, serialized
-                ))
-            }
-            keys.sort();
-            keys.join("\n")
-        } else {
-            panic!()
+        let mut keys: Vec<String> = Vec::new();
+        for (key, value) in plan.query.subselections.iter() {
+            let mut serialized = String::from("query");
+            serialize_selection_set(&value.selection_set, &mut serialized);
+            keys.push(format!(
+                "{:?} {} {}",
+                key.defer_label, key.defer_conditions.bits, serialized
+            ))
         }
+        keys.sort();
+        keys.join("\n")
+    }
+
+    /// An unauthenticated client requesting only fields that require authentication gets
+    /// an empty query plan: nothing to execute, and every requested field in
+    /// `unauthorized.paths`.
+    #[test(tokio::test)]
+    async fn fully_unauthorized_operation_plans_no_work() {
+        let configuration: Configuration = serde_json::from_value(serde_json::json!({
+            "authorization": { "directives": { "enabled": true } }
+        }))
+        .unwrap();
+        let configuration = Arc::new(configuration);
+
+        // `Query.me` requires the `profile` scope.
+        let schema = include_str!("../../tests/fixtures/supergraph-auth.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+        let planner = QueryPlannerService::for_test(schema.clone(), configuration.clone()).unwrap();
+
+        let query = "query { me { name } }";
+        let doc = Query::parse_document(query, None, &schema, &configuration).unwrap();
+
+        let response = planner
+            .oneshot(QueryPlannerRequest {
+                query: query.to_string(),
+                operation_name: None,
+                document: doc,
+                metadata: CacheKeyMetadata::default(),
+                plan_options: PlanOptions::default(),
+                compute_job_type: ComputeJobType::QueryPlanning,
+            })
+            .await
+            .unwrap();
+
+        let plan = response.content.expect("planning succeeded");
+        assert!(
+            plan.root.is_none(),
+            "the plan must carry no fetches when every requested field failed authorization"
+        );
+        assert_eq!(
+            plan.query
+                .unauthorized
+                .paths
+                .first()
+                .map(ToString::to_string),
+            Some("/me".to_string())
+        );
     }
 
     #[tokio::test]
