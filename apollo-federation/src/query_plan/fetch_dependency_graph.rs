@@ -2302,9 +2302,32 @@ impl FetchDependencyGraph {
         let parent_relation = self.parent_relation(child_id, node_id);
 
         // we compare the subgraph names last because on average it improves performance
-        Ok(parent_relation.is_some_and(|r| r.path_in_parent.is_some())
+        if !(parent_relation.is_some_and(|r| r.path_in_parent.is_some())
             && node.defer_ref == child.defer_ref
             && node.subgraph_name == child.subgraph_name)
+        {
+            return Ok(false);
+        }
+
+        // `child` may have other parents besides `node_id` -- for instance, a node created to
+        // satisfy `child`'s own `@requires`. Merging `child` into `node_id` collapses `child`'s
+        // selection into `node_id`'s, which silently drops the dependency edge from any other
+        // parent unless `node_id` already (transitively) depends on it. Without this check, an
+        // unsatisfied `@requires` on `child` can be merged away entirely (RH-1396).
+        //
+        // Note this is conservative: some of those other parents may just be fetching `@key`
+        // fields (potentially a compound `@key`) for the very subgraph jump this merge would
+        // remove, in which case merging would still be safe and this rejects an optimization we
+        // could otherwise make. There's no cheap way to distinguish that case from a genuine
+        // unsatisfied dependency today, and it's a niche case -- plan correctness matters more
+        // than plan optimality here, so we accept the missed optimization.
+        for other_parent_id in self.parents_of(child_id) {
+            if other_parent_id != node_id && !self.is_descendant_of(node_id, other_parent_id) {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 
     /// We only allow merging sibling on the same subgraph, same "merge_at" and when the common parent is their only parent:

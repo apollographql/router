@@ -257,6 +257,14 @@ pub(crate) struct WebSocketConfiguration {
     /// Heartbeat interval for graphql-ws protocol (default: disabled)
     #[serde(default = "HeartbeatInterval::new_disabled")]
     pub(crate) heartbeat_interval: HeartbeatInterval,
+    /// Maximum number of times to attempt to reconnect a dropped WebSocket subscription connection.
+    /// The default is 0 (no reconnection attempts).
+    #[serde(default)]
+    pub(crate) max_reconnect_attempts: u32,
+    /// Delay before each WebSocket reconnection attempt. Accepts durations like '1s', '500ms'. When unset (null) the default is 1 second; use '0s' for no delay.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) reconnect_delay: Option<Duration>,
 }
 
 fn default_callback_path() -> String {
@@ -1145,6 +1153,46 @@ mod tests {
         .unwrap();
 
         assert!(config_no_lifetime.max_lifetime.is_none());
+    }
+
+    #[test]
+    fn it_test_subscription_config_reconnect() {
+        // Reconnect policy lives on the per-subgraph passthrough WebSocketConfiguration, with the
+        // `all` block providing the default and per-subgraph entries overriding it.
+        let config: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "mode": {
+                "passthrough": {
+                    "all": {
+                        "path": "/subscriptions",
+                        "max_reconnect_attempts": 5,
+                        "reconnect_delay": "2s"
+                    },
+                    "subgraphs": {
+                        "no_reconnect": {
+                            "path": "/subscriptions"
+                        }
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        // The `all` default carries the reconnect policy.
+        let all_cfg = match config.mode.get_subgraph_config("some_other_subgraph") {
+            Some(SubscriptionMode::Passthrough(ws)) => ws,
+            other => panic!("expected passthrough config, got {other:?}"),
+        };
+        assert_eq!(all_cfg.max_reconnect_attempts, 5);
+        assert_eq!(all_cfg.reconnect_delay, Some(Duration::from_secs(2)));
+
+        // A subgraph that doesn't set the fields falls back to their defaults (no reconnection).
+        let no_reconnect_cfg = match config.mode.get_subgraph_config("no_reconnect") {
+            Some(SubscriptionMode::Passthrough(ws)) => ws,
+            other => panic!("expected passthrough config, got {other:?}"),
+        };
+        assert_eq!(no_reconnect_cfg.max_reconnect_attempts, 0);
+        assert!(no_reconnect_cfg.reconnect_delay.is_none());
     }
 }
 
