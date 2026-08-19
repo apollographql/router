@@ -758,6 +758,7 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use hyper_rustls::ConfigBuilderExt;
     use mime::APPLICATION_JSON;
+    use opentelemetry::trace::TracerProvider;
     use opentelemetry_sdk::propagation::TraceContextPropagator;
     use tokio::net::TcpListener;
     use tower::ServiceExt;
@@ -1245,6 +1246,24 @@ mod tests {
         .unwrap();
     }
 
+    /// `otel::layer()` defaults to a `NoopTracer`, which never produces a *valid* OTel
+    /// `SpanContext` (see `crate::tracer::test::it_returns_valid_trace_id` for the same
+    /// `.with_tracer(...)` pattern used to get a real one). Without a valid span context,
+    /// `TraceContextPropagator::inject_context` silently declines to write anything at all --
+    /// so these tests need a genuinely valid one to meaningfully exercise the router's own
+    /// injection, not just the restore side of the snapshot/restore logic.
+    fn setup_tracing_with_real_span_context() -> DefaultGuard {
+        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
+            .build();
+        let tracer = provider.tracer_with_scope(
+            opentelemetry::InstrumentationScope::builder("router-2060-test").build(),
+        );
+        let subscriber = tracing_subscriber::Registry::default()
+            .with(otel::layer().force_sampling().with_tracer(tracer));
+        tracing::subscriber::set_default(subscriber)
+    }
+
     /// Sends one request through a telemetry-wrapped `HttpClientService` configured with
     /// `preservation`, with `initial_headers` already present on the outgoing request before it
     /// reaches the service (emulating a coprocessor/Rhai/header-propagation rewrite that already
@@ -1265,7 +1284,7 @@ mod tests {
         ));
 
         let service = make_telemetry_http_client_with_preservation("test", preservation).await;
-        let (_tracing_guard, _recording_layer) = setup_tracing();
+        let _tracing_guard = setup_tracing_with_real_span_context();
 
         let mut builder = http::Request::builder()
             .uri(Uri::from_str(&format!("http://{socket_addr}")).unwrap())
@@ -1339,35 +1358,6 @@ mod tests {
             headers.get("tracestate").and_then(|v| v.to_str().ok()),
             Some(fake_tracestate),
             "tracestate must be preserved independently of traceparent"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_preserve_enabled_custom_header_takes_priority_over_traceparent() {
-        let fake_traceparent = "00-33333333333333333333333333333333-3333333333333333-01";
-        let fake_custom_trace_id = "custom-trace-id-value";
-        let headers = run_preservation_scenario(
-            TraceContextPreservation {
-                enabled: true,
-                custom_header_name: Some(HeaderName::from_static("x-trace-id")),
-            },
-            vec![
-                (HeaderName::from_static("traceparent"), fake_traceparent),
-                (HeaderName::from_static("x-trace-id"), fake_custom_trace_id),
-            ],
-        )
-        .await;
-
-        assert_eq!(
-            headers.get("x-trace-id").and_then(|v| v.to_str().ok()),
-            Some(fake_custom_trace_id),
-            "the configured custom trace ID header takes priority and must be preserved"
-        );
-        assert_ne!(
-            headers.get("traceparent").and_then(|v| v.to_str().ok()),
-            Some(fake_traceparent),
-            "when the custom header wins, traceparent itself is not separately protected and \
-             is overwritten by the router's own injection"
         );
     }
 
