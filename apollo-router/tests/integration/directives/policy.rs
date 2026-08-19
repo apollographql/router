@@ -226,7 +226,7 @@ async fn policy_directive_should_not_pass_if_coproc_disallowed() -> Result<(), B
         .unwrap();
 
     // THEN
-    //   * we get NO data back for the private field!
+    //   * the private field is null
     let data = supergraph_harness
         .oneshot(request)
         .await
@@ -236,7 +236,7 @@ async fn policy_directive_should_not_pass_if_coproc_disallowed() -> Result<(), B
         .unwrap()
         .data
         .unwrap();
-    assert!(data.is_null());
+    assert_eq!(data.get("private"), Some(&serde_json_bytes::Value::Null));
 
     Ok(())
 }
@@ -460,7 +460,7 @@ async fn interface_with_different_implementation_policies_should_require_auth() 
     let data = response.data.unwrap();
     let error = response.errors.first().unwrap();
 
-    assert!(data.is_null());
+    assert_eq!(data.get("secure"), Some(&serde_json_bytes::Value::Null));
     assert_eq!(
         error.extension_code().unwrap(),
         "UNAUTHORIZED_FIELD_OR_TYPE".to_string()
@@ -553,7 +553,7 @@ mod all_unauthorized_paths {
     ///   * the router configuration described in `send_request`
     ///   * authorization configured to put errors into extensions rather than the errors array
     /// Then:
-    ///   * data is null
+    ///   * `secure` is null
     ///   * errors array is empty
     ///   * the authorization error appears in extensions["authorizationErrors"]
     #[tokio::test(flavor = "multi_thread")]
@@ -565,7 +565,10 @@ mod all_unauthorized_paths {
         });
         let response = send_request(authorization_conf).await.unwrap();
 
-        assert!(response.data.unwrap().is_null());
+        assert_eq!(
+            response.data.unwrap().get("secure"),
+            Some(&serde_json_bytes::Value::Null)
+        );
         assert!(response.errors.is_empty());
         assert!(!response.extensions.is_empty());
 
@@ -578,7 +581,7 @@ mod all_unauthorized_paths {
     ///   * the router configuration described in `send_request`
     ///   * authorization configured to put errors into the errors array
     /// Then:
-    ///   * data is null
+    ///   * `secure` is null
     ///   * the authorization error appears in errors
     ///   * extensions has no `authorizationErrors`
     #[tokio::test(flavor = "multi_thread")]
@@ -590,7 +593,10 @@ mod all_unauthorized_paths {
         });
         let response = send_request(authorization_conf).await.unwrap();
 
-        assert!(response.data.unwrap().is_null());
+        assert_eq!(
+            response.data.unwrap().get("secure"),
+            Some(&serde_json_bytes::Value::Null)
+        );
         assert!(!response.errors.is_empty());
         assert!(!response.extensions.contains_key("authorizationErrors"));
 
@@ -603,7 +609,7 @@ mod all_unauthorized_paths {
     ///   * the router configuration described in `send_request`
     ///   * authorization configured to suppress errors entirely
     /// Then:
-    ///   * data is null
+    ///   * `secure` is null
     ///   * errors array is empty
     ///   * extensions has no `authorizationErrors`
     #[tokio::test(flavor = "multi_thread")]
@@ -615,7 +621,10 @@ mod all_unauthorized_paths {
         });
         let response = send_request(authorization_conf).await.unwrap();
 
-        assert!(response.data.unwrap().is_null());
+        assert_eq!(
+            response.data.unwrap().get("secure"),
+            Some(&serde_json_bytes::Value::Null)
+        );
         assert!(response.errors.is_empty());
         assert!(!response.extensions.contains_key("authorizationErrors"));
     }
