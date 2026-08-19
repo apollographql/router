@@ -609,6 +609,11 @@ impl Plugin for AuthorizationPlugin {
                     let unauthorized = request.query_plan.query.unauthorized.clone();
                     unauthorized.log_unauthorized_paths();
 
+                    // We knowingly build an invalid response here. Execution was prevented,
+                    // so we should respond with a request error and no data. Instead, we're
+                    // responding with execution errors and a fake/incorrect `data: null`. We
+                    // maintain backwards compatibility for the time being.
+                    // Tracked in ROUTER-2063.
                     let mut response = graphql::Response::builder().data(Value::Null).build();
                     unauthorized.update_response_with_unauthorized_path_errors(&mut response);
 
