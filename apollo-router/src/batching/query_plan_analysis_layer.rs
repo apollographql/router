@@ -1,10 +1,17 @@
+use std::sync::Arc;
+
 use futures::future::BoxFuture;
 use http::StatusCode;
 use tower::BoxError;
 
 use crate::batching::BatchQuery;
 use crate::graphql;
+use crate::json_ext::Object;
+use crate::query_planner::PlanNode;
+use crate::query_planner::QueryPlan;
 use crate::services::execution;
+use crate::spec::Query;
+use crate::spec::QueryHash;
 
 /// Analyze the query plan for a batch query.
 ///
@@ -96,7 +103,7 @@ where
                 .extensions()
                 .with_lock(|lock| lock.get::<BatchQuery>().cloned());
             if let Some(batch_query) = batch_query_opt {
-                let query_hashes = plan.query_hashes(batching, variables)?;
+                let query_hashes = query_hashes(plan, &batching, variables)?;
                 batch_query.set_query_hashes(query_hashes).await?;
                 tracing::debug!("batch registered: {}", batch_query);
             }
@@ -104,6 +111,90 @@ where
             inner.call(req).await.map_err(Into::into)
         })
     }
+}
+
+/// Error type for a case that's supposed to be unreachable, but we'd rather not panic anyways
+#[derive(Debug, thiserror::Error)]
+#[error("Tried to compute query hashes for @defer or subscriptions in a batch, this is a bug")]
+struct BatchingUnsupportedError;
+
+fn query_hashes(
+    plan: &QueryPlan,
+    batching_config: &crate::configuration::Batching,
+    variables: &Object,
+) -> Result<Vec<Arc<QueryHash>>, BatchingUnsupportedError> {
+    match &plan.root {
+        Some(root) => plan_node_query_hashes(root, batching_config, variables, &plan.query),
+        None => Ok(vec![]),
+    }
+}
+
+/// Iteratively populate a Vec of QueryHashes representing Fetches in this plan.
+///
+/// Do not include any operations which contain "requires" elements.
+///
+/// # Errors
+/// This function is specifically designed to be used within the context of simple batching. It
+/// explicitly fails if nodes which should *not* be encountered within that context are
+/// encountered. e.g.: PlanNode::Defer
+///
+/// It's unlikely/impossible that PlanNode::Defer or PlanNode::Subscription will ever be
+/// supported, but it may be that PlanNode::Condition must eventually be supported (or other
+/// new nodes types that are introduced). Explicitly fail each type to provide extra error
+/// details and don't use _ so that future node types must be handled here.
+fn plan_node_query_hashes(
+    root_node: &PlanNode,
+    batching_config: &crate::configuration::Batching,
+    variables: &Object,
+    query: &Query,
+) -> Result<Vec<Arc<QueryHash>>, BatchingUnsupportedError> {
+    let mut query_hashes = vec![];
+    let mut new_targets = vec![root_node];
+
+    loop {
+        let targets = new_targets;
+        if targets.is_empty() {
+            break;
+        }
+
+        new_targets = vec![];
+        for target in targets {
+            match target {
+                PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
+                    new_targets.extend(nodes);
+                }
+                PlanNode::Fetch(node) => {
+                    // If requires.is_empty() we may be able to batch it!
+                    if node.requires.is_empty() && batching_config.batch_include(&node.service_name)
+                    {
+                        query_hashes.push(node.schema_aware_hash.clone());
+                    }
+                }
+                PlanNode::Flatten(node) => new_targets.push(&node.node),
+                PlanNode::Defer { .. } | PlanNode::Subscription { .. } => {
+                    return Err(BatchingUnsupportedError);
+                }
+                PlanNode::Condition {
+                    if_clause,
+                    else_clause,
+                    condition,
+                } => {
+                    if query
+                        .variable_value(condition.as_str(), variables)
+                        .map(|v| *v == serde_json_bytes::Value::Bool(true))
+                        .unwrap_or(true)
+                    {
+                        if let Some(node) = if_clause {
+                            new_targets.push(node);
+                        }
+                    } else if let Some(node) = else_clause {
+                        new_targets.push(node);
+                    }
+                }
+            }
+        }
+    }
+    Ok(query_hashes)
 }
 
 #[cfg(test)]
@@ -124,7 +215,6 @@ mod tests {
     use crate::graphql;
     use crate::query_planner::QueryPlan;
     use crate::query_planner::QueryPlannerService;
-    use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerRequest;
     use crate::services::execution;
     use crate::spec::Query;
@@ -137,9 +227,7 @@ mod tests {
     ) -> Arc<QueryPlan> {
         let document = Query::parse_document(query, None, &schema, &configuration).unwrap();
 
-        let QueryPlannerContent::Plan {
-            plan: query_plan, ..
-        } = QueryPlannerService::for_test(schema, configuration)
+        QueryPlannerService::for_test(schema, configuration)
             .unwrap()
             .oneshot(
                 QueryPlannerRequest::builder()
@@ -154,11 +242,6 @@ mod tests {
             .unwrap()
             .content
             .unwrap()
-        else {
-            panic!("unexpected query planner output");
-        };
-
-        query_plan
     }
 
     #[tokio::test]

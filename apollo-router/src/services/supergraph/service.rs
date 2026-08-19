@@ -50,7 +50,6 @@ use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::warmup;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
-use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerResponse;
 use crate::services::SubgraphServiceFactory;
 use crate::services::SupergraphRequest;
@@ -245,9 +244,7 @@ async fn service_call(
         Err(err) => {
             let status = match &err {
                 CacheResolverError::Backpressure(_) => StatusCode::SERVICE_UNAVAILABLE,
-                CacheResolverError::RetrievalError(_) | CacheResolverError::BatchingError(_) => {
-                    StatusCode::BAD_REQUEST
-                }
+                CacheResolverError::RetrievalError(_) => StatusCode::BAD_REQUEST,
             };
             match err.into_graphql_errors() {
                 Ok(gql_errors) => {
@@ -271,10 +268,7 @@ async fn service_call(
     }
 
     match content {
-        Some(QueryPlannerContent::Response { response }) => Ok(
-            SupergraphResponse::new_from_graphql_response(*response, context),
-        ),
-        Some(QueryPlannerContent::Plan { plan }) => {
+        Some(plan) => {
             let is_deferred = plan.is_deferred(&variables);
             let is_subscription = plan.is_subscription();
 

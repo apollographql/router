@@ -22,6 +22,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## 🐛 Fixes
 
+### Fix `GROUP_SELECTION_IS_NOT_OBJECT` for union/interface fields in nested `@connect` selections ([PR #9990](https://github.com/apollographql/router/pull/9990))
+
+Connectors validation rejected `->match` results assigned to union- or
+interface-typed fields nested inside another object (e.g. `Stop.location:
+StopLocation` where `StopLocation` is a union). The top-level validation path
+already expanded abstract types to their concrete members, but the recursive
+`walk_selection_with_shape` did not, causing a spurious
+`GROUP_SELECTION_IS_NOT_OBJECT` error. The recursive path now mirrors the
+top-level expansion for both union and interface types.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9990>
+
 ### Upgrading federation 1 subgraphs no longer clones subgraph metadata once per type ([PR #9946](https://github.com/apollographql/router/pull/9946))
 
 Composition constructs a schema upgrader as soon as **one** input subgraph is a
@@ -64,6 +76,8 @@ Federation 2 pattern.
 
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9832>
 
+# [2.16.2](https://crates.io/crates/apollo-federation/2.16.2) - 2026-08-13
+
 ### Propagate directives from `@interfaceObject` fields to `@external` implementations ([PR #9831](https://github.com/apollographql/router/pull/9831))
 
 When an implementation re-declares a field as `@external` (e.g. to reference it in `@requires`), the field's only resolvable definition lives on the abstracting `@interfaceObject`. Directives like `@tag` applied there were not being propagated to the implementation's copy in the supergraph.
@@ -85,6 +99,24 @@ against the supergraph. `@requires` is now partially validated against subgraph 
 and fully validated against supergraph schema during the merge process.
 
 By [@dariuszkuc](https://github.com/dariuszkuc) in <https://github.com/apollographql/router/pull/9722>
+
+# [2.16.1](https://crates.io/crates/apollo-federation/2.16.1) - 2026-07-21
+
+### Fix various issues in GraphQL value coercion and validation
+
+The `coerce_value()` function in `compat.rs` has been rewritten to fix multiple bugs in how default values in schemas and operations are coerced and validated.
+
+Bug fixes include:
+
+- Invalid default values are now correctly reported as errors.
+- Removed default value auto-expansion logic.
+- Non-list value coercion is now only applied to operations.
+- Fixed missing coercion edge cases to always reject null values applied to non-null types.
+- Fixed validation of unknown fields in input object default values.
+- Added missing enum value validations to ensure they are valid and are part of the enum definition.
+- Adds missing validation for `@deprecated` on required arguments and input fields.
+
+By [@sachindshinde](https://github.com/sachindshinde)
 
 # [2.16.0](https://crates.io/crates/apollo-federation/2.16.0) - 2026-06-30
 
@@ -112,10 +144,6 @@ Applying a merged directive to an `@external` field now produces a `MERGED_DIREC
 
 Custom specifications can no longer import from `https://specs.apollo.dev`. This prevents future conflicts with new Apollo specifications.
 
-##### Invalid input object defaults are removed
-
-Default values for input objects are now validated at composition time. If a default object value is missing required fields, composition removes it from the supergraph.
-
 ##### `@tag` validation runs during composition
 
 `@tag` errors now surface during the main composition process so you can catch tag problems at build time.
@@ -134,10 +162,6 @@ The `_FieldSet` scalar no longer accepts non-string values through automatic coe
 ##### Hints are emitted on composition failure
 
 The composition process now emits hints even when composition fails, giving you more context to diagnose what went wrong.
-
-##### Input object defaults are fully expanded
-
-When an input object has a default value of `{}`, composition now expands it to list all field defaults explicitly — for example, `{}` becomes `{ limit: 100, sort: DESC }`.
 
 ##### Default values are normalized to their correct types
 

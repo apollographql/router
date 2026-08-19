@@ -321,8 +321,10 @@ telemetry:
             subgraph.name: true
             client.name: true
 ```
-- `apollo.router.operations.subscriptions.terminated.subgraph` - Number of subgraph WebSocket connections closed by the subgraph. Incremented once per subgraph connection closure. Each deduplicated client sharing that connection will also emit a corresponding `terminated` event with `reason=server_close`. Attributes:
+- `apollo.router.operations.subscriptions.terminated.subgraph` - Number of subgraph WebSocket subscriptions ended by the subgraph closing the connection. Incremented once per subscription that terminates because of a subgraph-side closure. When `max_reconnect_attempts > 0`, intermediate closures that are recovered by a successful reconnect are not counted — only the final closure that ends the subscription (either a normal server-sent `complete` or the closure after all reconnect attempts are exhausted) increments this counter. Each deduplicated client sharing that subscription will also emit a corresponding `terminated.client` event with `reason=server_close`. Attributes:
   - `subgraph.name`: The name of the subgraph that closed the connection.
+- `apollo.router.operations.subscriptions.reconnect` - Number of subgraph WebSocket reconnect attempts. Incremented once per attempt when `max_reconnect_attempts > 0` is configured and the connection drops unexpectedly. Counts only attempts that actually issue a handshake — a closing signal received during the reconnect delay or during the handshake itself short-circuits without incrementing. Attributes:
+  - `subgraph.name`: The name of the subgraph being reconnected to.
 
 ## Batching
 
