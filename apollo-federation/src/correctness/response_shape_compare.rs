@@ -278,10 +278,11 @@ fn compare_possible_definitions_per_type_condition<T: PathConstraint>(
 ///   individual matching variant. Thus, this function tries to collect/merge all implied variants
 ///   and then compare.
 /// - Note that we may need to case-split over Boolean variables. It happens when there are more
-///   Boolean variables used in the `other`'s variants. This function tries to find the smallest
-///   set of missing Boolean variables to case-split. It starts with the empty set, then tries
-///   increasingly larger sets until a matching subset is found. For each set of variables, it
-///   checks if every possible combination of Boolean values (hypothesis) has a match.
+///   Boolean variables used in the `other`'s variants. Each variant's own variable set is tried
+///   first (fewer hypotheses to check), then the union of all variable sets as a fallback, since
+///   full coverage may require combining variables from different variants. For each set of
+///   variables, it checks if every possible combination of Boolean values (hypothesis) has a
+///   match.
 fn solve_boolean_constraints<T: PathConstraint>(
     path_constraint: &T,
     assumption: &Clause,
@@ -352,17 +353,23 @@ type BooleanVariables = Vec<Name>;
 
 /// Generate sets of hypotheses to case-split over that are applicable to the target `defs`.
 /// - Construct hypotheses based on the variables used in the Boolean conditions in `defs`.
-/// - Excludes the literals in the `assumption` since it's already assumed to be true.
+/// - Excludes the literals in the `base_clause` since it's already assumed to be true.
 /// - If there are variants with no extra Boolean variables, it will generate a no-hypothesis
 ///   group, which contains only one empty clause.
+/// - When there are multiple distinct variable groups, the union of all groups is added as the
+///   last (fallback) group. Individual variants' groups may each be insufficient when full
+///   coverage requires combining variables from different variants (e.g. groups `[v0, v1]` and
+///   `[v0, v2]` jointly covering all cases). The union group is the complete case-split: every
+///   hypothesis fully determines each variant's condition, so it can verify any coverage the
+///   smaller groups miss.
 fn extract_boolean_hypotheses(
-    assumption: &Clause,
+    base_clause: &Clause,
     defs: &PossibleDefinitionsPerTypeCondition,
 ) -> Vec<Vec<Clause>> {
     // Collect sets of variables that can be used to case-split over.
     let mut variable_groups = IndexSet::default();
     for variant in defs.conditional_variants() {
-        let Some(remaining_condition) = variant.boolean_clause().subtract(assumption) else {
+        let Some(remaining_condition) = variant.boolean_clause().subtract(base_clause) else {
             // Skip unsatisfiable variants.
             continue;
         };
@@ -375,6 +382,14 @@ fn extract_boolean_hypotheses(
             .cloned()
             .collect();
         variable_groups.insert(vars);
+    }
+    // Add the union of all variable groups as the fallback group (see doc comment above).
+    // With zero or one group, the union adds nothing new.
+    if variable_groups.len() > 1 {
+        let mut union_vars: BooleanVariables = variable_groups.iter().flatten().cloned().collect();
+        union_vars.sort();
+        union_vars.dedup();
+        variable_groups.insert(union_vars); // no-op if some group already equals the union
     }
     // Generate groups of Boolean hypotheses.
     variable_groups
