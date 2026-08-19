@@ -2417,4 +2417,60 @@ mod tests {
             elapsed
         );
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn create_oci_license_stream_valid_reference() {
+        let mock_server = &MockServer::start().await;
+        let license_layer = ImageLayer {
+            data: TEST_LICENSE_JWT.as_bytes().to_vec(),
+            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![license_layer], None).await;
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let result = create_oci_license_stream(oci_config);
+        assert!(result.is_ok(), "valid reference should build a stream");
+
+        let mut stream = result.unwrap();
+        let first_result = stream.next().await;
+        assert!(first_result.is_some(), "stream should yield a first item");
+
+        let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
+        match first_result.unwrap() {
+            Ok(license) => assert_eq!(license.claims, expected.claims),
+            Err(e) => panic!("expected success, got error: {e}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn create_oci_license_stream_invalid_reference() {
+        // Empty reference fails `validate_oci_reference`, so `create_oci_license_stream`
+        // should surface the error rather than build a stream.
+        let oci_config = mock_oci_config_with_reference(String::new());
+        let result = create_oci_license_stream(oci_config);
+        assert!(
+            result.is_err(),
+            "invalid reference should fail before building a stream"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetch_license_oci_success() {
+        let mock_server = &MockServer::start().await;
+        let license_layer = ImageLayer {
+            data: TEST_LICENSE_JWT.as_bytes().to_vec(),
+            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![license_layer], None).await;
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let license = fetch_license_oci(&oci_config)
+            .await
+            .expect("failed to fetch license via outer wrapper");
+
+        let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
+        assert_eq!(license.claims, expected.claims);
+    }
 }
