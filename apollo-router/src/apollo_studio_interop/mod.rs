@@ -426,6 +426,26 @@ fn add_enum_value_to_map(
     }
 }
 
+/// Wraps a `&Object` so a `HashSet` deduplicates by the object's address rather
+/// than its (deep) contents. `Object`'s own `Hash`/`Eq` recurse over the whole
+/// subtree, so keying visited fragments on `&Object` would deep-hash the response
+/// on every fragment spread (the regression this guards against). Keying on the
+/// address is `O(1)`, and the `'a` lifetime ties every key to the borrowed
+/// response tree, so the borrow checker guarantees no key outlives its referent.
+struct ByAddress<'a>(&'a Object);
+
+impl PartialEq for ByAddress<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.0, other.0)
+    }
+}
+impl Eq for ByAddress<'_> {}
+impl std::hash::Hash for ByAddress<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::ptr::hash(self.0, state);
+    }
+}
+
 fn extract_enums_from_selection_set(
     selection_set: &[SpecSelection],
     fragments: &Fragments,
@@ -434,7 +454,12 @@ fn extract_enums_from_selection_set(
     result_set: &mut ReferencedEnums,
 ) {
     let mut stack: Vec<(&[SpecSelection], &Object)> = vec![(selection_set, selection_response)];
-    let mut visited_fragments: HashSet<(&str, &Object)> = HashSet::new();
+    // Deduplicate visited fragments by the response object's address, not its
+    // contents. `Object`'s `Hash`/`Eq` recurse over the whole subtree, so keying on
+    // `&Object` would deep-hash the response on every fragment spread and make
+    // extraction cost grow with response size. `ByAddress` keys on the address
+    // (`O(1)`); its `'a` lifetime keeps every key tied to the borrowed response tree.
+    let mut visited_fragments: HashSet<(&str, ByAddress<'_>)> = HashSet::new();
 
     while let Some((selections, response)) = stack.pop() {
         for selection in selections.iter() {
@@ -465,7 +490,7 @@ fn extract_enums_from_selection_set(
                     stack.push((selection_set, response));
                 }
                 SpecSelection::FragmentSpread { name, .. } => {
-                    let key = (name.as_str(), response);
+                    let key = (name.as_str(), ByAddress(response));
                     if visited_fragments.insert(key)
                         && let Some(fragment) = fragments.get(name)
                     {

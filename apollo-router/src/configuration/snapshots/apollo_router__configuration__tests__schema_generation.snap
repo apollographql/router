@@ -12716,6 +12716,13 @@ expression: "&schema"
           "default": "disabled",
           "description": "Heartbeat interval for graphql-ws protocol (default: disabled)"
         },
+        "max_reconnect_attempts": {
+          "default": 0,
+          "description": "Maximum number of times to attempt to reconnect a dropped WebSocket subscription connection.\nThe default is 0 (no reconnection attempts).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "path": {
           "default": null,
           "description": "Path on which WebSockets are listening",
@@ -12732,6 +12739,14 @@ expression: "&schema"
           ],
           "default": "graphql_ws",
           "description": "Which WebSocket GraphQL protocol to use for this subgraph possible values are: 'graphql_ws' | 'graphql_transport_ws' (default: graphql_ws)"
+        },
+        "reconnect_delay": {
+          "default": null,
+          "description": "Delay before each WebSocket reconnection attempt. Accepts durations like '1s', '500ms'. When unset (null) the default is 1 second; use '0s' for no delay.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
