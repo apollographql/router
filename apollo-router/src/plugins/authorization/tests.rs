@@ -477,20 +477,8 @@ async fn authenticated_directive_reject_unauthorized() {
     assert_logs_contain_entire_request_authorization_error();
 }
 
-/// A subgraph can return more than the operation selected, so the data reaching response
-/// formatting is not bounded by what authorization left in the query. `ExecutionService`
-/// handles that by formatting twice: the filtered query projects the data onto the
-/// authorized shape, then the original query expands it to the shape the client asked
-/// for.
-///
-/// `User.phone` is `@authenticated`, so filtering removes it from an unauthenticated
-/// operation while this subgraph returns it anyway. `Some(Value::Null)` pins both halves
-/// of that arrangement in one assertion: `phone` is present, so the original query
-/// restored the requested shape, and it is null rather than `"1234"`, so the filtered
-/// query stripped the value the client may not see.
-///
-/// Removing either property changes this key: drop the filtered pass and it holds
-/// `"1234"`, run the passes in the other order and it disappears from the response.
+/// When a subgraph response includes authenticated fields, because of @requires or because
+/// the subgraph is misbehaving, the authenticated field should not be propagated to the client.
 #[tokio::test]
 async fn overfetched_unauthorized_field_is_not_returned() {
     let service = TestHarness::builder()
@@ -548,6 +536,19 @@ async fn overfetched_unauthorized_field_is_not_returned() {
          the client as null rather than as its value"
     );
     assert_eq!(current_user.get("name"), Some(&json!("Ada")));
+
+    // `phone` is null because it errored, and the error names it.
+    let phone_error = response
+        .errors
+        .iter()
+        .find(|error| {
+            error.path.as_ref().map(ToString::to_string).as_deref() == Some("/currentUser/phone")
+        })
+        .expect("an execution error nullified `phone`");
+    assert_eq!(
+        phone_error.extensions.get("code"),
+        Some(&json!("UNAUTHORIZED_FIELD_OR_TYPE"))
+    );
 }
 
 mod whole_operation_authorization {
