@@ -462,7 +462,9 @@ impl QueryPlannerService {
 
         match filter_res {
             FilterResult::Unchanged => {}
-            FilterResult::Emptied { paths } => {
+            // Filtering can empty the document; the federation planner cannot plan a
+            // document with no definitions, so answer with a plan that carries no work.
+            FilterResult::Filtered { paths, document } if document.definitions.is_empty() => {
                 selections.unauthorized.paths = paths;
 
                 // References come from the operation that ran, and nothing did.

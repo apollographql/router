@@ -141,16 +141,12 @@ pub(crate) struct UnauthorizedPaths {
 pub(crate) enum FilterResult {
     /// The operation asks for nothing the request lacks authorization for.
     Unchanged,
-    /// `document` is the operation with `paths` removed.
+    /// `document` is the operation with `paths` removed. Filtering can empty the
+    /// document entirely, leaving no definitions.
     Filtered {
         paths: Vec<Path>,
         document: ast::Document,
     },
-    /// Filtering removed every definition from the document, so nothing is left to
-    /// plan and the operation proceeds as a plan with no work. A fully filtered
-    /// operation in a document that other operations keep non-empty is reported as
-    /// `Filtered`.
-    Emptied { paths: Vec<Path> },
 }
 
 impl UnauthorizedPaths {
@@ -381,8 +377,9 @@ impl AuthorizationPlugin {
 
                 // FIXME: consider only `filtered_doc.operations.get(key.operation_name)`?
                 if filtered_doc.definitions.is_empty() {
-                    return Ok(FilterResult::Emptied {
+                    return Ok(FilterResult::Filtered {
                         paths: unauthorized_paths,
+                        document: filtered_doc,
                     });
                 }
 
@@ -401,8 +398,9 @@ impl AuthorizationPlugin {
 
                 // FIXME: consider only `filtered_doc.operations.get(key.operation_name)`?
                 if filtered_doc.definitions.is_empty() {
-                    return Ok(FilterResult::Emptied {
+                    return Ok(FilterResult::Filtered {
                         paths: unauthorized_paths,
+                        document: filtered_doc,
                     });
                 }
 
@@ -421,8 +419,9 @@ impl AuthorizationPlugin {
 
                 // FIXME: consider only `filtered_doc.operations.get(key.operation_name)`?
                 if filtered_doc.definitions.is_empty() {
-                    return Ok(FilterResult::Emptied {
+                    return Ok(FilterResult::Filtered {
                         paths: unauthorized_paths,
+                        document: filtered_doc,
                     });
                 }
 
