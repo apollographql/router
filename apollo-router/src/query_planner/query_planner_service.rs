@@ -1080,27 +1080,18 @@ mod tests {
         keys.join("\n")
     }
 
-    /// Warm-up reaches this service with `CacheKeyMetadata::default()`, the same metadata
-    /// an unauthenticated request produces: `queries_to_warm_up` supplies no metadata for
-    /// persisted queries, and for re-warmed cache entries `update_cache_key` derives
-    /// default metadata from warm-up's claimless context. Filtering empties the operation
-    /// under those inputs, so the plan carries no work rather than the unfiltered fetches.
-    ///
-    /// Scope: `compute_job_type` only selects the compute-pool priority and the metric
-    /// label, and `get` filters before reading it, so `QueryPlanningWarmup` behaves
-    /// exactly like `QueryPlanning` here. The plan cache sits above this service; that
-    /// the empty plan is cached keyed by authorization state is covered by
-    /// `caching_query_planner::tests::emptied_operation_plan_is_cached`.
+    /// An unauthenticated client requesting only fields that require authentication gets
+    /// an empty query plan: nothing to execute, and every requested field in
+    /// `unauthorized.paths`.
     #[test(tokio::test)]
-    async fn planning_unauthenticated_returns_empty_plan_not_unfiltered_plan() {
+    async fn fully_unauthorized_operation_plans_no_work() {
         let configuration: Configuration = serde_json::from_value(serde_json::json!({
             "authorization": { "directives": { "enabled": true } }
         }))
         .unwrap();
         let configuration = Arc::new(configuration);
 
-        // `Query.me` requires the `profile` scope, so filtering an unauthenticated
-        // request empties the document.
+        // `Query.me` requires the `profile` scope.
         let schema = include_str!("../../tests/fixtures/supergraph-auth.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
         let planner = QueryPlannerService::for_test(schema.clone(), configuration.clone()).unwrap();
@@ -1108,26 +1099,22 @@ mod tests {
         let query = "query { me { name } }";
         let doc = Query::parse_document(query, None, &schema, &configuration).unwrap();
 
-        let content = planner
-            .get(
-                QueryKey {
-                    original_query: query.to_string(),
-                    filtered_query: query.to_string(),
-                    operation_name: None,
-                    metadata: CacheKeyMetadata::default(),
-                    plan_options: PlanOptions::default(),
-                },
-                doc,
-                ComputeJobType::QueryPlanningWarmup,
-            )
+        let response = planner
+            .oneshot(QueryPlannerRequest {
+                query: query.to_string(),
+                operation_name: None,
+                document: doc,
+                metadata: CacheKeyMetadata::default(),
+                plan_options: PlanOptions::default(),
+                compute_job_type: ComputeJobType::QueryPlanning,
+            })
             .await
             .unwrap();
 
-        let plan = content;
+        let plan = response.content.expect("planning succeeded");
         assert!(
             plan.root.is_none(),
-            "an unauthenticated request must not plan any work; a plan with fetches \
-             cached under default metadata is reachable by any unauthenticated request"
+            "the plan must carry no fetches when every requested field failed authorization"
         );
         assert_eq!(
             plan.query
