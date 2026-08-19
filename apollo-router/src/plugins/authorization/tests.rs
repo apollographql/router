@@ -46,11 +46,6 @@ fn assert_span_contains_authorization_error_event(span: &str) {
 /// Asserts the `Authorization error` event for a refused operation was logged exactly
 /// once. One place decides a refusal, so a second event means two code paths both
 /// believe they own the log.
-///
-/// The span the event belongs to is asserted by
-/// `integration::telemetry::logging::test_authorization_error_event_in_execution_span`.
-/// This harness runs without the telemetry plugin, so the `execution` span does not
-/// exist here and the event lands directly in the `router` span.
 fn assert_logs_contain_entire_request_authorization_error() {
     let event_regex =
         Regex::new(r"ERROR .*Authorization error unauthorized_query_paths=\[.*]$").unwrap();
@@ -678,28 +673,17 @@ mod whole_operation_authorization {
         assert_no_subgraph_calls(handles).await;
     }
 
-    /// A refusal answers as a field error: HTTP 200 with `data: null` and the
-    /// authorization errors, not as a GraphQL request error, which carries a 4xx status
-    /// and no `data` entry. `rejection_sends_null_data` holds the data side of that
-    /// line; this holds the status.
+    /// A refusal answers as a field error: HTTP 200 with a present-but-`null` `data` and
+    /// the authorization errors, not as a GraphQL request error, which carries a 4xx
+    /// status and no `data` entry.
+    /// This is not a spec-compliant behaviour, but is asserted for backwards compatibility.
     #[tokio::test]
-    async fn returns_http_200() {
+    async fn returns_http_200_with_null_data() {
         let (service, _handles) = rejecting_router().await;
 
-        let (status, _body) = send_rejected_request(service, Context::new()).await;
+        let (status, body) = send_rejected_request(service, Context::new()).await;
 
         assert_eq!(status, http::StatusCode::OK);
-    }
-
-    /// `data` is `null` and present. An absent `data` marks a request error; a null one
-    /// marks a field error that propagated to the root. The key's presence is part of
-    /// the response contract.
-    #[tokio::test]
-    async fn rejection_sends_null_data() {
-        let (service, _handles) = rejecting_router().await;
-
-        let (_status, body) = send_rejected_request(service, Context::new()).await;
-
         assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
     }
 
@@ -726,6 +710,7 @@ mod whole_operation_authorization {
 
     /// `errors.response: disabled` suppresses the authorization errors, so `data: null`
     /// is the only thing telling the client the operation produced nothing.
+    /// This is not a spec-compliant behaviour, but is asserted for backwards compatibility.
     #[tokio::test]
     async fn rejection_with_errors_disabled_sends_null_data_and_no_errors() {
         let (service, _handles) = router_with_unresponsive_subgraphs(serde_json::json!({
@@ -744,6 +729,7 @@ mod whole_operation_authorization {
 
     /// `errors.response: extensions` moves the authorization errors under
     /// `extensions.authorizationErrors` and leaves `errors` out of the response.
+    /// This is not a spec-compliant behaviour, but is asserted for backwards compatibility.
     #[tokio::test]
     async fn rejection_with_errors_in_extensions() {
         let (service, _handles) = router_with_unresponsive_subgraphs(serde_json::json!({
