@@ -7,10 +7,11 @@
 //! so customer dashboards can migrate to the suffixed Prometheus name before the
 //! legacy name is removed in a future major version.
 //!
-//! Scope rationale, including the 42 metrics that are intentionally NOT in this
-//! table because their natural UCUM unit is an annotation (e.g. `{request}`,
-//! `{event}`) and therefore does not change their Prometheus name, is documented
-//! in `.context/router-1777-scope-lists.md` (kept out of tree).
+//! Scope: the `opentelemetry-prometheus` exporter only appends a Prometheus-name
+//! suffix when the OTel `unit` is a physical UCUM unit (e.g. `s`, `By`). Metrics
+//! whose future unit is an annotation (e.g. `{request}`, `{event}`) don't change
+//! their Prometheus name when migrated to `_with_unit!`, so they don't need
+//! dual-emit and are intentionally absent from this table.
 
 /// Looks up the (new OTel name, UCUM unit) for a legacy metric name.
 ///
