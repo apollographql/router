@@ -34,7 +34,6 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authentication;
-use crate::query_planner::FilteredQuery;
 use crate::query_planner::QueryKey;
 use crate::services::execution;
 use crate::services::supergraph;
@@ -138,6 +137,18 @@ pub(crate) struct UnauthorizedPaths {
     pub(crate) errors: ErrorConfig,
 }
 
+/// What [`AuthorizationPlugin::filter_query`] did to an operation.
+pub(crate) enum FilterResult {
+    /// The operation asks for nothing the request lacks authorization for.
+    Unchanged,
+    /// `document` is the operation with `paths` removed. Filtering can empty the
+    /// document entirely, leaving no definitions.
+    Filtered {
+        paths: Vec<Path>,
+        document: ast::Document,
+    },
+}
+
 impl UnauthorizedPaths {
     pub(crate) fn log_unauthorized_paths(&self) {
         // nothing to do if we have no paths or we're not supposed to log
@@ -194,6 +205,7 @@ fn default_enable_directives() -> bool {
 
 pub(crate) struct AuthorizationPlugin {
     require_authentication: bool,
+    reject_unauthorized: bool,
 }
 
 impl AuthorizationPlugin {
@@ -337,8 +349,7 @@ impl AuthorizationPlugin {
         configuration: &Conf,
         key: &QueryKey,
         schema: &Schema,
-    ) -> Result<Option<FilteredQuery>, QueryPlannerError> {
-        let reject_unauthorized = configuration.directives.reject_unauthorized;
+    ) -> Result<FilterResult, QueryPlannerError> {
         let dry_run = configuration.directives.dry_run;
 
         // The filtered query will then be used
@@ -366,7 +377,10 @@ impl AuthorizationPlugin {
 
                 // FIXME: consider only `filtered_doc.operations.get(key.operation_name)`?
                 if filtered_doc.definitions.is_empty() {
-                    return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
+                    return Ok(FilterResult::Filtered {
+                        paths: unauthorized_paths,
+                        document: filtered_doc,
+                    });
                 }
 
                 is_filtered = true;
@@ -384,7 +398,10 @@ impl AuthorizationPlugin {
 
                 // FIXME: consider only `filtered_doc.operations.get(key.operation_name)`?
                 if filtered_doc.definitions.is_empty() {
-                    return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
+                    return Ok(FilterResult::Filtered {
+                        paths: unauthorized_paths,
+                        document: filtered_doc,
+                    });
                 }
 
                 is_filtered = true;
@@ -402,7 +419,10 @@ impl AuthorizationPlugin {
 
                 // FIXME: consider only `filtered_doc.operations.get(key.operation_name)`?
                 if filtered_doc.definitions.is_empty() {
-                    return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
+                    return Ok(FilterResult::Filtered {
+                        paths: unauthorized_paths,
+                        document: filtered_doc,
+                    });
                 }
 
                 is_filtered = true;
@@ -411,14 +431,13 @@ impl AuthorizationPlugin {
             }
         };
 
-        if reject_unauthorized && !unauthorized_paths.is_empty() {
-            return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
-        }
-
         if is_filtered {
-            Ok(Some((unauthorized_paths, doc)))
+            Ok(FilterResult::Filtered {
+                paths: unauthorized_paths,
+                document: doc,
+            })
         } else {
-            Ok(None)
+            Ok(FilterResult::Unchanged)
         }
     }
 
@@ -542,6 +561,7 @@ impl Plugin for AuthorizationPlugin {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(AuthorizationPlugin {
             require_authentication: init.config.require_authentication,
+            reject_unauthorized: init.config.directives.reject_unauthorized,
         })
     }
 
@@ -580,7 +600,30 @@ impl Plugin for AuthorizationPlugin {
     }
 
     fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
+        let reject_unauthorized = self.reject_unauthorized;
+
         ServiceBuilder::new()
+            // Ahead of the counter below, so a refused operation stays uncounted.
+            .checkpoint_async(move |request: execution::Request| async move {
+                if reject_unauthorized && !request.query_plan.query.unauthorized.paths.is_empty() {
+                    let unauthorized = request.query_plan.query.unauthorized.clone();
+                    unauthorized.log_unauthorized_paths();
+
+                    // We knowingly build an invalid response here. Execution was prevented,
+                    // so we should respond with a request error and no data. Instead, we're
+                    // responding with execution errors and a fake/incorrect `data: null`. We
+                    // maintain backwards compatibility for the time being.
+                    // Tracked in ROUTER-2063.
+                    let mut response = graphql::Response::builder().data(Value::Null).build();
+                    unauthorized.update_response_with_unauthorized_path_errors(&mut response);
+
+                    return Ok(ControlFlow::Break(
+                        execution::Response::new_from_graphql_response(response, request.context),
+                    ));
+                }
+
+                Ok(ControlFlow::Continue(request))
+            })
             .map_request(|request: execution::Request| {
                 let filtered = !request.query_plan.query.unauthorized.paths.is_empty();
                 let needs_authenticated = request.context.contains_key(AUTHENTICATION_REQUIRED_KEY);
