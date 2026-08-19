@@ -6,4 +6,3 @@ telemetry:
 authorization:
   directives:
     enabled: true
-    reject_unauthorized: true

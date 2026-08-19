@@ -246,12 +246,15 @@ async fn test_text_sampler_off() -> Result<(), BoxError> {
 /// `execution` span, exactly once per request. The `execution` span comes from the
 /// telemetry plugin, which only joins the pipeline when OpenTelemetry is initialised for
 /// the process, so a spawned router is the smallest thing that has it.
-#[tokio::test(flavor = "multi_thread")]
-async fn test_authorization_error_event_in_execution_span() -> Result<(), BoxError> {
+///
+/// With `reject_unauthorized`, the authorization layer on the execution service emits
+/// the event; without it, response formatting does. Each configuration exercises its
+/// own emitter.
+async fn assert_authorization_error_event_in_execution_span(
+    config: &'static str,
+) -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
-        .config(include_str!(
-            "fixtures/authorization_error_span.router.yaml"
-        ))
+        .config(config)
         .supergraph("tests/fixtures/supergraph-auth.graphql")
         .build()
         .await;
@@ -260,7 +263,7 @@ async fn test_authorization_error_event_in_execution_span() -> Result<(), BoxErr
     router.assert_started().await;
 
     // `Query.me` requires the `profile` scope, so an unauthenticated request loses its
-    // only root field and authorization refuses the operation.
+    // only root field.
     router
         .execute_query(
             Query::builder()
@@ -301,4 +304,20 @@ async fn test_authorization_error_event_in_execution_span() -> Result<(), BoxErr
 
     router.graceful_shutdown().await;
     Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_authorization_error_event_in_execution_span() -> Result<(), BoxError> {
+    assert_authorization_error_event_in_execution_span(include_str!(
+        "fixtures/authorization_error_span.router.yaml"
+    ))
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_authorization_error_event_in_execution_span_without_reject() -> Result<(), BoxError> {
+    assert_authorization_error_event_in_execution_span(include_str!(
+        "fixtures/authorization_error_span_no_reject.router.yaml"
+    ))
+    .await
 }
