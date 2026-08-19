@@ -134,6 +134,7 @@ const APOLLO_REGISTRY_ENDING: &str = "apollographql.com";
 const APOLLO_REGISTRY_USERNAME: &str = "apollo-registry";
 const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
 //  Keep in sync with value in mdg-private/monorepo/libs/entitlements/oci/model/src/main/kotlin/apollo/entitlements/oci/model/EntitlementArtifact.kt:15
+#[allow(dead_code)]
 const ENTITLEMENTS_MEDIA_TYPE: &str = "application/apollo.entitlements";
 const APOLLO_MANIFEST_LAUNCH_ID_ANNOTATION: &str = "com.apollograph.launch.id";
 
@@ -589,8 +590,10 @@ fn parse_rate_limit_error(error: &OciError) -> Option<Duration> {
     None
 }
 
+#[allow(dead_code)]
 type OciLicenseStream = Pin<Box<dyn Stream<Item = Result<License, OciError>> + Send>>;
 
+#[allow(dead_code)]
 pub(crate) fn create_oci_license_stream(
     oci_config: OciConfig,
 ) -> Result<OciLicenseStream, anyhow::Error> {
@@ -599,6 +602,7 @@ pub(crate) fn create_oci_license_stream(
     Ok(Box::pin(stream_license_from_oci(oci_config)))
 }
 
+#[allow(dead_code)]
 fn stream_license_from_oci(oci_config: OciConfig) -> impl Stream<Item = Result<License, OciError>> {
     let (sender, receiver) = channel(2);
 
@@ -661,6 +665,7 @@ fn stream_license_from_oci(oci_config: OciConfig) -> impl Stream<Item = Result<L
     ReceiverStream::new(receiver).boxed()
 }
 
+#[allow(dead_code)]
 async fn fetch_license_oci(oci_config: &OciConfig) -> Result<License, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
@@ -691,6 +696,7 @@ async fn fetch_license_oci(oci_config: &OciConfig) -> Result<License, OciError> 
     }
 }
 
+#[allow(dead_code)]
 async fn fetch_license_from_reference(
     client: &mut Client,
     auth: &RegistryAuth,
