@@ -664,6 +664,34 @@ mod whole_operation_authorization {
         (status, body)
     }
 
+    /// Supergraph-level gates run before the execution service, so variable validation
+    /// answers an unauthorized operation ahead of the authorization refusal. The client
+    /// fixes the variable and then receives the refusal. The same ordering applies to
+    /// the accept-header checks for subscriptions and `@defer`.
+    #[tokio::test]
+    async fn variable_validation_answers_before_the_refusal() {
+        let (service, _handles) = rejecting_router().await;
+
+        let (status, body) = wire_response(
+            service,
+            graphql_post(
+                // `orga.id` is `@authenticated`, and `$id` is required but not provided.
+                "query($id: ID!) { orga(id: $id) { id } }",
+                None,
+                Context::new(),
+            ),
+        )
+        .await;
+
+        assert_eq!(status, http::StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body.pointer("/errors/0/extensions/code"),
+            Some(&serde_json::json!("VALIDATION_INVALID_TYPE_VARIABLE")),
+            "body: {body}"
+        );
+        assert_eq!(body.pointer("/data"), None, "body: {body}");
+    }
+
     #[tokio::test]
     async fn does_not_reach_execution() {
         let (service, handles) = rejecting_router().await;
