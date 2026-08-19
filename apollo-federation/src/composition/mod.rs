@@ -68,13 +68,13 @@ pub fn compose(
     tracing::debug!("Expanding subgraphs...");
     let expanded_subgraphs = expand_subgraphs(subgraphs)?;
     tracing::debug!("Upgrading subgraphs...");
-    let validated_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)
+    let (validated_subgraphs, upgrade_hints) = upgrade_subgraphs_if_necessary(expanded_subgraphs)
         .map_err(CompositionFailure::from_errors)?;
 
     tracing::debug!("Pre-merge validations...");
     pre_merge_validations(&validated_subgraphs)?;
     tracing::debug!("Merging subgraphs...");
-    let supergraph = merge_subgraphs(validated_subgraphs, &options)?;
+    let supergraph = merge_subgraphs(validated_subgraphs, &options, upgrade_hints)?;
     tracing::debug!("Post-merge validations...");
     post_merge_validations(&supergraph)?;
     tracing::debug!("Validating satisfiability...");
@@ -96,14 +96,15 @@ pub fn compose_with_connectors(
     let expanded_subgraphs = expand_subgraphs(subgraphs)?;
 
     tracing::debug!("Upgrading subgraphs...");
-    let validated_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)
-        .map_err(CompositionFailure::from_errors)?;
+    let (validated_subgraphs, upgrade_hints) =
+        upgrade_subgraphs_if_necessary(expanded_subgraphs)
+            .map_err(CompositionFailure::from_errors)?;
 
     tracing::debug!("Pre-merge validations...");
     pre_merge_validations(&validated_subgraphs)?;
 
     tracing::debug!("Merging subgraphs...");
-    let supergraph = merge_subgraphs(validated_subgraphs, &options)?;
+    let supergraph = merge_subgraphs(validated_subgraphs, &options, upgrade_hints)?;
 
     tracing::debug!("Post-merge validations...");
     post_merge_validations(&supergraph)?;
@@ -141,10 +142,11 @@ pub fn pre_merge_validations(subgraphs: &[Subgraph<Validated>]) -> Result<(), Co
     Ok(())
 }
 
-#[instrument(skip(subgraphs, options))]
+#[instrument(skip(subgraphs, options, upgrade_hints))]
 pub fn merge_subgraphs(
     subgraphs: Vec<Subgraph<Validated>>,
     options: &CompositionOptions,
+    upgrade_hints: Vec<CompositionHint>,
 ) -> Result<Supergraph<Merged>, CompositionFailure> {
     let merger = Merger::new(subgraphs, options.clone()).map_err(|e| {
         CompositionFailure::from_errors(vec![CompositionError::InternalError {
@@ -169,7 +171,9 @@ pub fn merge_subgraphs(
                 },
             ]));
         };
-        let supergraph = Supergraph::with_hints(supergraph_schema, result.hints);
+        let mut hints = result.hints;
+        hints.extend(upgrade_hints);
+        let supergraph = Supergraph::with_hints(supergraph_schema, hints);
         Ok(supergraph)
     } else {
         Err(CompositionFailure {
