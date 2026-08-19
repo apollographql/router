@@ -214,13 +214,13 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                 }
             }
             Action::Change { path, from, to } => {
-                // We query the value directly (`$.<path>`) rather than using a root-level
-                // filter expression (`$[?(@.<path> == <from>)]`) — jsonpath_lib's filter
-                // form does not support traversing paths more than two levels deep.
+                // Select the value at `path` and compare it here, rather than letting JSONPath do
+                // the comparison with a `$[?(@.a.b == x)]` filter. That filter form silently
+                // matches nothing once `path` is more than two segments deep, which made the
+                // whole action a no-op — no error, no warning, config left untouched.
                 if jsonpath_lib::select(config, &format!("$.{path}"))
                     .unwrap_or_default()
-                    .into_iter()
-                    .any(|v| v == from)
+                    .contains(&from)
                 {
                     transformer_builder = transformer_builder
                         .add_action(Parser::parse(&format!(r#"const({to})"#), path)?);
@@ -648,5 +648,51 @@ mod test {
             )
             .expect("expected successful migration")
         );
+    }
+
+    /// Rewrites `"Error"` to `"error"` on a four-segment path. These assertions are deliberately
+    /// explicit rather than insta snapshots, so a regression can't be blessed away by accepting a
+    /// new snapshot.
+    fn change_jwt_on_error(source: Value) -> Value {
+        apply_migration(
+            &source,
+            &Migration::builder()
+                .action(Action::Change {
+                    path: "authentication.router.jwt.on_error".to_string(),
+                    from: Value::String("Error".into()),
+                    to: Value::String("error".into()),
+                })
+                .description("rename a deeply nested value")
+                .build(),
+        )
+        .expect("expected successful migration")
+    }
+
+    /// `Change` used to compare the current value with a `$[?(@.a.b == x)]` filter, which matches
+    /// nothing once the path is more than two segments deep. Any migration rewriting a value on a
+    /// deeply nested path was silently a no-op — this asserts it isn't.
+    #[test]
+    fn change_field_deeply_nested() {
+        assert_eq!(
+            change_jwt_on_error(
+                json!({"authentication": {"router": {"jwt": {"on_error": "Error"}}}})
+            ),
+            json!({"authentication": {"router": {"jwt": {"on_error": "error"}}}})
+        );
+    }
+
+    /// Guards the other direction: `from` must still be honoured at depth, so a non-matching value
+    /// is left alone rather than rewritten unconditionally.
+    #[test]
+    fn change_field_deeply_nested_only_matching_value() {
+        let source = json!({"authentication": {"router": {"jwt": {"on_error": "Continue"}}}});
+        assert_eq!(change_jwt_on_error(source.clone()), source);
+    }
+
+    /// A `Change` on a path that isn't present must not create it.
+    #[test]
+    fn change_field_deeply_nested_absent_path() {
+        let source = json!({"authentication": {"router": {"jwt": {}}}});
+        assert_eq!(change_jwt_on_error(source.clone()), source);
     }
 }

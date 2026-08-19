@@ -19,7 +19,6 @@ use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
 use itertools::Itertools;
-use multimap::MultiMap;
 use petgraph::adj::List as AdjList;
 use petgraph::algo::tred::dag_transitive_reduction_closure;
 use petgraph::graph::IndexType;
@@ -87,6 +86,7 @@ use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
+use crate::utils::MultiIndexMap;
 use crate::utils::iter_into_single_item;
 use crate::utils::logging::snapshot;
 
@@ -1713,9 +1713,15 @@ impl FetchDependencyGraph {
         // merge an ancestor node into a descendant node. JS version's insertion order is almost
         // topologically sorted, thanks to the way the graph is constructed from the root. However,
         // it's not exactly topologically sorted. So, it's unclear whether that is 100% safe.
-        // Note: MultiMap preserves insertion order for values of the same key. Thus, the values
-        // of the same key in `by_subgraphs` will be topologically sorted as well.
-        let mut by_subgraphs = MultiMap::new();
+        // Note: `by_subgraphs` must be an insertion-ordered map. A HashMap-backed map here
+        // iterates its keys in a `RandomState`-random order per planning call, which executes
+        // the per-key merges below in a random across-key order; the merge order changes edge
+        // insertion order and merge outcomes downstream, producing nondeterministic plan shapes
+        // (differing `_entities` type-condition batching) across identical calls.
+        // `MultiIndexMap` preserves insertion order for both keys and the values of each key:
+        // keys are inserted in topological-sort order, and values pushed under the same key
+        // inherit that order too, so each key's values remain topologically sorted as well.
+        let mut by_subgraphs = MultiIndexMap::new();
         let sorted_nodes = petgraph::algo::toposort(&self.graph, None)
             .map_err(|_| FederationError::internal("Failed to sort nodes due to cycle(s)"))?;
         for node_index in sorted_nodes {
@@ -2296,9 +2302,32 @@ impl FetchDependencyGraph {
         let parent_relation = self.parent_relation(child_id, node_id);
 
         // we compare the subgraph names last because on average it improves performance
-        Ok(parent_relation.is_some_and(|r| r.path_in_parent.is_some())
+        if !(parent_relation.is_some_and(|r| r.path_in_parent.is_some())
             && node.defer_ref == child.defer_ref
             && node.subgraph_name == child.subgraph_name)
+        {
+            return Ok(false);
+        }
+
+        // `child` may have other parents besides `node_id` -- for instance, a node created to
+        // satisfy `child`'s own `@requires`. Merging `child` into `node_id` collapses `child`'s
+        // selection into `node_id`'s, which silently drops the dependency edge from any other
+        // parent unless `node_id` already (transitively) depends on it. Without this check, an
+        // unsatisfied `@requires` on `child` can be merged away entirely (RH-1396).
+        //
+        // Note this is conservative: some of those other parents may just be fetching `@key`
+        // fields (potentially a compound `@key`) for the very subgraph jump this merge would
+        // remove, in which case merging would still be safe and this rejects an optimization we
+        // could otherwise make. There's no cheap way to distinguish that case from a genuine
+        // unsatisfied dependency today, and it's a niche case -- plan correctness matters more
+        // than plan optimality here, so we accept the missed optimization.
+        for other_parent_id in self.parents_of(child_id) {
+            if other_parent_id != node_id && !self.is_descendant_of(node_id, other_parent_id) {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 
     /// We only allow merging sibling on the same subgraph, same "merge_at" and when the common parent is their only parent:
@@ -3967,14 +3996,28 @@ fn compute_nodes_for_key_resolution<'a>(
         // then we can infer the path of `new_node_id` into that condition node
         // by looking at the paths of each to their common parent.
         // But otherwise, we cannot have a proper "path in parent".
+        //
+        // Note that the conditions are resolved starting from the very position of
+        // `new_node_id` (see `compute_nodes_for_tree` above, which is passed
+        // `stack_item.node_path`), so `condition_node`'s path into the common parent is always
+        // `path_in_parent` possibly followed by a deeper suffix. A non-empty suffix means
+        // `condition_node` sits *below* `new_node_id` in the data, and so there is no downward
+        // path from `condition_node` to `new_node_id`: the suffix describes the reverse
+        // relation and must not be used here. Only equal paths give us a usable (empty) path.
+        //
+        // Note that this is stricter than it strictly needs to be: if `condition_path` were a
+        // *prefix* of `path_in_parent`, then `condition_node` would sit above `new_node_id` and
+        // `path_in_parent.strip_prefix(condition_path)` would be a usable downward path. That case
+        // is not known to be reachable and was not handled before either, so we leave it out.
         let mut path = None;
         let mut iter = dependency_graph.parents_relations_of(condition_node);
         if let (Some(condition_node_parent), None) = (iter.next(), iter.next()) {
             // There is exactly one parent
             if condition_node_parent.parent_node_id == stack_item.node_id
                 && let Some(condition_path) = condition_node_parent.path_in_parent
+                && condition_path == *path_in_parent
             {
-                path = condition_path.strip_prefix(path_in_parent).map(Arc::new)
+                path = Some(Arc::new(OpPath::default()))
             }
         }
         drop(iter);
@@ -4974,6 +5017,13 @@ fn handle_conditions_tree(
                         unmerged_node_ids.push(created_node_id);
                     }
                 }
+            } else {
+                // Without a path into the parent, we cannot even evaluate the "merge into the
+                // grand parent" optimization, so none of the created nodes can be merged. They
+                // must still all be reported as created: they fetch the condition fields that the
+                // post-@requires node depends on, and dropping them here would lose that
+                // dependency and let the @requires be resolved before its conditions are fetched.
+                unmerged_node_ids.extend(newly_created_node_ids);
             }
         }
 
@@ -5043,9 +5093,17 @@ fn create_post_requires_node(
     // aligned with the JS query planner. This could change in the future though, to permit simpler
     // handling and further optimization. (There's also some arguably buggy behavior in this
     // function we ought to resolve in the future.)
+    // Note that we also require a path into the parent: relocating the @requires into the parent
+    // is only possible if we know where in the parent the current node applies. Without it there is
+    // nothing to optimize, and we use the general handling below (which does not need that path).
     let parent_if_tried_optimizing =
         match iter_into_single_item(dependency_graph.parents_relations_of(fetch_node_id)) {
-            Some(parent) if fetch_node_path.path_in_node.has_only_fragments() => Some(parent),
+            Some(parent)
+                if fetch_node_path.path_in_node.has_only_fragments()
+                    && parent.path_in_parent.is_some() =>
+            {
+                Some(parent)
+            }
             _ => None,
         };
 
