@@ -16,7 +16,6 @@
 //! * [`services`] - the various services handling a GraphQL requests,
 //!   and APIs for plugins to intercept them
 
-#![cfg_attr(feature = "failfast", allow(unreachable_code))]
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
 
@@ -29,28 +28,6 @@
 #[ctor::ctor(unsafe)]
 fn install_default_crypto_provider_for_tests() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-}
-
-macro_rules! failfast_debug {
-    ($($tokens:tt)+) => {{
-        tracing::debug!($($tokens)+);
-        #[cfg(feature = "failfast")]
-        panic!(
-            "failfast triggered. \
-            Please remove the feature failfast if you don't want to see these panics"
-        );
-    }};
-}
-
-macro_rules! failfast_error {
-    ($($tokens:tt)+) => {{
-        tracing::error!($($tokens)+);
-        #[cfg(feature = "failfast")]
-        panic!(
-            "failfast triggered. \
-            Please remove the feature failfast if you don't want to see these panics"
-        );
-    }};
 }
 
 #[macro_use]

@@ -40,11 +40,6 @@ global-allocator = ["tikv-jemallocator/profiling", "tikv-jemalloc-ctl/stats", "t
 dhat-heap = ["dhat"]
 dhat-ad-hoc = ["dhat"]
 
-# Prevents the query execution to continue if any error occurs while fetching
-# the data of a subgraph. This is useful in development as you want to be
-# alerted early when something is wrong instead of receiving an invalid result.
-failfast = []
-
 # Enables the use of new telemetry features that are under development
 # and not yet ready for production use.
 telemetry_next = []
