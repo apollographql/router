@@ -3967,14 +3967,28 @@ fn compute_nodes_for_key_resolution<'a>(
         // then we can infer the path of `new_node_id` into that condition node
         // by looking at the paths of each to their common parent.
         // But otherwise, we cannot have a proper "path in parent".
+        //
+        // Note that the conditions are resolved starting from the very position of
+        // `new_node_id` (see `compute_nodes_for_tree` above, which is passed
+        // `stack_item.node_path`), so `condition_node`'s path into the common parent is always
+        // `path_in_parent` possibly followed by a deeper suffix. A non-empty suffix means
+        // `condition_node` sits *below* `new_node_id` in the data, and so there is no downward
+        // path from `condition_node` to `new_node_id`: the suffix describes the reverse
+        // relation and must not be used here. Only equal paths give us a usable (empty) path.
+        //
+        // Note that this is stricter than it strictly needs to be: if `condition_path` were a
+        // *prefix* of `path_in_parent`, then `condition_node` would sit above `new_node_id` and
+        // `path_in_parent.strip_prefix(condition_path)` would be a usable downward path. That case
+        // is not known to be reachable and was not handled before either, so we leave it out.
         let mut path = None;
         let mut iter = dependency_graph.parents_relations_of(condition_node);
         if let (Some(condition_node_parent), None) = (iter.next(), iter.next()) {
             // There is exactly one parent
             if condition_node_parent.parent_node_id == stack_item.node_id
                 && let Some(condition_path) = condition_node_parent.path_in_parent
+                && condition_path == *path_in_parent
             {
-                path = condition_path.strip_prefix(path_in_parent).map(Arc::new)
+                path = Some(Arc::new(OpPath::default()))
             }
         }
         drop(iter);
@@ -4974,6 +4988,13 @@ fn handle_conditions_tree(
                         unmerged_node_ids.push(created_node_id);
                     }
                 }
+            } else {
+                // Without a path into the parent, we cannot even evaluate the "merge into the
+                // grand parent" optimization, so none of the created nodes can be merged. They
+                // must still all be reported as created: they fetch the condition fields that the
+                // post-@requires node depends on, and dropping them here would lose that
+                // dependency and let the @requires be resolved before its conditions are fetched.
+                unmerged_node_ids.extend(newly_created_node_ids);
             }
         }
 
@@ -5043,9 +5064,17 @@ fn create_post_requires_node(
     // aligned with the JS query planner. This could change in the future though, to permit simpler
     // handling and further optimization. (There's also some arguably buggy behavior in this
     // function we ought to resolve in the future.)
+    // Note that we also require a path into the parent: relocating the @requires into the parent
+    // is only possible if we know where in the parent the current node applies. Without it there is
+    // nothing to optimize, and we use the general handling below (which does not need that path).
     let parent_if_tried_optimizing =
         match iter_into_single_item(dependency_graph.parents_relations_of(fetch_node_id)) {
-            Some(parent) if fetch_node_path.path_in_node.has_only_fragments() => Some(parent),
+            Some(parent)
+                if fetch_node_path.path_in_node.has_only_fragments()
+                    && parent.path_in_parent.is_some() =>
+            {
+                Some(parent)
+            }
             _ => None,
         };
 
