@@ -46,6 +46,60 @@ where
 
 pub(crate) type InMemoryCache<K, V> = Arc<Mutex<LruCache<K, V>>>;
 
+/// Connects the Redis client a cache will use, applying the error tolerance `config` asks for.
+///
+/// # Errors
+/// Connection failures return `Err` only when `config.required_to_start` is set. When it is
+/// not, a failed connect logs the error and returns `Ok(None)`, leaving the cache to run on
+/// in-memory storage alone. A client that connects but fails to populate its pool is still
+/// returned after logging; commands issued through it will fail.
+pub(crate) async fn connect_redis(
+    config: RedisCache,
+    caller: &'static str,
+) -> Result<Option<RedisCacheStorage>, BoxError> {
+    let required_to_start = config.required_to_start;
+    let storage = match RedisCacheStorage::new(config, caller).await {
+        Ok(storage) => Some(storage),
+        Err(e) => {
+            tracing::error!(
+                cache = caller,
+                e,
+                "could not open connection to Redis for caching",
+            );
+            if required_to_start {
+                return Err(e);
+            }
+            // WARN: this is a terminal failure; we couldn't, for whatever reason noted in
+            // the error log, connect to redis--maybe it doesn't exist, maybe it's
+            // unreachable, who knows; but, this will prevent future commands from reaching
+            // redis
+            tracing::error!(
+                cache = caller,
+                e,
+                "terminal failure reached and all commands to Redis will fail",
+            );
+            None
+        }
+    };
+
+    // NOTE: this populates the inner client pool, but failure doesn't represent a terminal
+    // state unless the router is configured to require connections to start
+    if let Some(storage) = storage.as_ref()
+        && let Err(e) = storage.create_client_pool().await
+    {
+        tracing::error!(
+            cache = caller,
+            e,
+            "could not open connection to Redis for caching",
+        );
+        if required_to_start {
+            return Err(e);
+        }
+    }
+
+    Ok(storage)
+}
+
 // placeholder storage module
 //
 // this will be replaced by the multi level (in memory + redis/memcached) once we find
@@ -67,69 +121,13 @@ where
     K: KeyType,
     V: ValueType,
 {
-    pub(crate) async fn new(
+    /// Builds a cache from an in-memory LRU capacity and an optional pre-connected Redis
+    /// client. Obtain the client with [`connect_redis`].
+    pub(crate) fn new(
         max_capacity: NonZeroUsize,
-        config: Option<RedisCache>,
+        redis: Option<RedisCacheStorage>,
         caller: &'static str,
-    ) -> Result<Self, BoxError> {
-        let maybe_redis_cache_storage = if let Some(config) = config {
-            let required_to_start = config.required_to_start;
-            let storage = match RedisCacheStorage::new(config, caller).await {
-                Ok(storage) => Some(storage),
-                Err(e) => {
-                    tracing::error!(
-                        cache = caller,
-                        e,
-                        "could not open connection to Redis for caching",
-                    );
-                    if required_to_start {
-                        return Err(e);
-                    }
-                    // WARN: this is a terminal failure; we couldn't, for whatever reason noted in
-                    // the error log, connect to redis--maybe it doesn't exist, maybe it's
-                    // unreachable, who knows; but, this will prevent future commands from reaching
-                    // redis
-                    tracing::error!(
-                        cache = caller,
-                        e,
-                        "terminal failure reached and all commands to Redis will fail",
-                    );
-                    None
-                }
-            };
-
-            // NOTE: this populates the inner client pool, but failure doesn't represent a terminal
-            // state unless the router is configred to require connections to start
-            if let Some(storage) = storage.as_ref()
-                && let Err(e) = storage.create_client_pool().await
-            {
-                tracing::error!(
-                    cache = caller,
-                    e,
-                    "could not open connection to Redis for caching",
-                );
-                if required_to_start {
-                    return Err(e);
-                }
-            }
-
-            storage
-        } else {
-            None
-        };
-
-        Ok(Self {
-            cache_size_gauge: Default::default(),
-            cache_estimated_storage_gauge: Default::default(),
-            cache_size: Default::default(),
-            cache_estimated_storage: Default::default(),
-            caller,
-            inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            redis: maybe_redis_cache_storage,
-        })
-    }
-
-    pub(crate) fn new_in_memory(max_capacity: NonZeroUsize, caller: &'static str) -> Self {
+    ) -> Self {
         Self {
             cache_size_gauge: Default::default(),
             cache_estimated_storage_gauge: Default::default(),
@@ -137,8 +135,12 @@ where
             cache_estimated_storage: Default::default(),
             caller,
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            redis: None,
+            redis,
         }
+    }
+
+    pub(crate) fn new_in_memory(max_capacity: NonZeroUsize, caller: &'static str) -> Self {
+        Self::new(max_capacity, None, caller)
     }
 
     fn create_cache_size_gauge(&self) -> ObservableGauge<i64> {
@@ -403,9 +405,7 @@ mod test {
 
         async {
             let cache: CacheStorage<String, Stuff> =
-                CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test")
-                    .await
-                    .unwrap();
+                CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test");
             cache.activate();
 
             cache.insert("test".to_string(), Stuff {}).await;
@@ -439,9 +439,7 @@ mod test {
 
         async {
             let cache: CacheStorage<String, Stuff> =
-                CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test")
-                    .await
-                    .unwrap();
+                CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test");
             cache.activate();
 
             cache.insert("test".to_string(), Stuff {}).await;
@@ -473,9 +471,7 @@ mod test {
             // note that the cache size is 1
             // so the second insert will always evict
             let cache: CacheStorage<String, Stuff> =
-                CacheStorage::new(NonZeroUsize::new(1).unwrap(), None, "test")
-                    .await
-                    .unwrap();
+                CacheStorage::new(NonZeroUsize::new(1).unwrap(), None, "test");
             cache.activate();
 
             cache
