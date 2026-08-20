@@ -71,12 +71,10 @@ mod tests {
 
     use super::super::*;
     use crate::assert_response_eq_ignoring_error_id;
-    use crate::context::deprecated::DEPRECATED_CLIENT_NAME;
     use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::json_ext::Value;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugin::test::await_mock_driver;
     use crate::plugins::coprocessor::BodyConf;
     use crate::plugins::coprocessor::BodyFieldsConf;
     use crate::plugins::coprocessor::RouterRequestConf;
@@ -89,7 +87,6 @@ mod tests {
     use crate::plugins::coprocessor::supergraph::SupergraphStage;
     use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::plugins::coprocessor::was_incoming_payload_valid;
-    use crate::plugins::telemetry::CLIENT_NAME;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::services::PipelineStep;
     use crate::services::external::EXTERNALIZABLE_VERSION;
@@ -97,7 +94,6 @@ mod tests {
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
-    use crate::test_harness::tracing_test;
 
     #[tokio::test]
     async fn load_plugin() {
@@ -115,62 +111,6 @@ mod tests {
             .build_router()
             .await
             .unwrap();
-    }
-
-    #[tokio::test]
-    async fn deprecated_context_key_mode_string_warns_at_startup() {
-        let _guard = tracing_test::dispatcher_guard();
-
-        let config = serde_json::json!({
-            "coprocessor": {
-                "url": "http://this-url-is-never-connected-to.invalid/",
-                "router": {
-                    "request": {
-                        "context": "deprecated"
-                    }
-                }
-            }
-        });
-        let _test_harness = crate::TestHarness::builder()
-            .configuration_json(config)
-            .unwrap()
-            .build_router()
-            .await
-            .unwrap();
-
-        assert!(
-            tracing_test::logs_contain(
-                "coprocessor.router.request.context: deprecated` is deprecated"
-            ),
-            "expected deprecation warning for context: deprecated config"
-        );
-    }
-
-    #[tokio::test]
-    async fn deprecated_context_key_mode_bool_warns_at_startup() {
-        let _guard = tracing_test::dispatcher_guard();
-
-        let config = serde_json::json!({
-            "coprocessor": {
-                "url": "http://this-url-is-never-connected-to.invalid/",
-                "router": {
-                    "request": {
-                        "context": true
-                    }
-                }
-            }
-        });
-        let _test_harness = crate::TestHarness::builder()
-            .configuration_json(config)
-            .unwrap()
-            .build_router()
-            .await
-            .unwrap();
-
-        assert!(
-            tracing_test::logs_contain("coprocessor.router.request.context: true` is deprecated"),
-            "expected deprecation warning for context: true config"
-        );
     }
 
     #[tokio::test]
@@ -219,7 +159,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: false,
                 path: false,
@@ -281,7 +221,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone(),
             "http://127.0.0.1:8081".to_string(), // global URL - should NOT be used
             Arc::new("".to_string()),
             true,
@@ -319,7 +259,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: false,
@@ -368,7 +308,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -394,7 +334,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: false,
@@ -443,7 +383,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -469,7 +409,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: false,
@@ -517,7 +457,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -584,7 +524,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -732,7 +672,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -759,9 +699,9 @@ mod tests {
                 condition: Default::default(),
                 body: true,
                 subgraph_request_id: true,
-                context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
+                context: ContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
-                ))),
+                )),
                 ..Default::default()
             },
             response: Default::default(),
@@ -891,7 +831,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -902,181 +842,6 @@ mod tests {
         request
             .context
             .insert("not_passed", "OK".to_string())
-            .unwrap();
-        request
-            .context
-            .insert("this-is-a-test-context", 42)
-            .unwrap();
-
-        let response = service.oneshot(request).await.unwrap();
-
-        assert_eq!("5678", &*response.id);
-        assert_eq!(
-            json!({ "test": 1234_u32 }),
-            response.response.into_body().data.unwrap()
-        );
-        crate::plugin::test::await_mock_driver(subgraph_driver).await;
-        crate::plugin::test::await_mock_driver(http_driver).await;
-    }
-
-    #[tokio::test]
-    async fn external_plugin_subgraph_request_with_deprecated_context() {
-        let subgraph_stage = SubgraphStage {
-            request: SubgraphRequestConf {
-                condition: Default::default(),
-                body: true,
-                subgraph_request_id: true,
-                context: ContextConf::NewContextConf(NewContextConf::Deprecated),
-                ..Default::default()
-            },
-            response: Default::default(),
-        };
-
-        let (mock_subgraph_service, mut handle_subgraph) =
-            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
-        let subgraph_driver = tokio::spawn(async move {
-            let (req, responder) = handle_subgraph.next_request().await.unwrap();
-            // Let's assert that the subgraph request has been transformed as it should have.
-            assert_eq!(
-                req.subgraph_request.headers().get("cookie").unwrap(),
-                "tasty_cookie=strawberry"
-            );
-            assert_eq!(
-                req.context
-                    .get::<&str, u8>("this-is-a-test-context")
-                    .unwrap()
-                    .unwrap(),
-                42
-            );
-            assert_eq!(
-                req.context
-                    .get::<&str, String>("apollo::supergraph::operation_name")
-                    .expect("context key should be there")
-                    .expect("context key should have the right format"),
-                "New".to_string()
-            );
-            // The subgraph uri should have changed
-            assert_eq!(
-                "http://thisurihaschanged/",
-                req.subgraph_request.uri().to_string()
-            );
-            // The query should have changed
-            assert_eq!(
-                "query Long {\n  me {\n  name\n}\n}",
-                req.subgraph_request.into_body().query.unwrap()
-            );
-            // this should be the same as the initial request id
-            assert_eq!(&*req.id, "5678");
-            responder.send_response(
-                subgraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .id(req.id)
-                    .subgraph_name(String::default())
-                    .build(),
-            );
-        });
-
-        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
-            crate::services::http::HttpRequest,
-            crate::services::http::HttpResponse,
-        >();
-        let http_driver = tokio::spawn(async move {
-            let (req, responder) = http_handle.next_request().await.unwrap();
-            let context = req.context.clone();
-            let deserialized_request: Externalizable<Value> = serde_json::from_slice(
-                &router::body::into_bytes(req.http_request.into_body())
-                    .await
-                    .unwrap(),
-            )
-            .unwrap();
-            assert_eq!(
-                deserialized_request.subgraph_request_id.as_deref(),
-                Some("5678")
-            );
-            let req_context = deserialized_request.context.unwrap_or_default();
-            assert_eq!(
-                req_context
-                    .get::<&str, u8>("this-is-a-test-context")
-                    .expect("context key should be there")
-                    .expect("context key should have the right format"),
-                42
-            );
-            assert_eq!(
-                req_context
-                    .get::<&str, String>("operation_name")
-                    .expect("context key should be there")
-                    .expect("context key should have the right format"),
-                "Test".to_string()
-            );
-            let response = http::Response::builder()
-                .body(router::body::from_bytes(
-                    r#"{
-                            "version": 1,
-                            "stage": "SubgraphRequest",
-                            "control": "continue",
-                            "headers": {
-                                "cookie": [
-                                  "tasty_cookie=strawberry"
-                                ],
-                                "content-type": [
-                                  "application/json"
-                                ],
-                                "host": [
-                                  "127.0.0.1:4000"
-                                ],
-                                "apollo-federation-include-trace": [
-                                  "ftv1"
-                                ],
-                                "apollographql-client-name": [
-                                  "manual"
-                                ],
-                                "accept": [
-                                  "*/*"
-                                ],
-                                "user-agent": [
-                                  "curl/7.79.1"
-                                ],
-                                "content-length": [
-                                  "46"
-                                ]
-                              },
-                              "body": {
-                                "query": "query Long {\n  me {\n  name\n}\n}"
-                              },
-                              "context": {
-                                "entries": {
-                                  "this-is-a-test-context": 42,
-                                  "operation_name": "New"
-                                }
-                              },
-                              "serviceName": "service name shouldn't change",
-                              "uri": "http://thisurihaschanged",
-                              "subgraphRequestId": "9abc"
-                        }"#,
-                ))
-                .unwrap();
-            responder.send_response(crate::services::http::HttpResponse {
-                http_response: response,
-                context,
-            });
-        });
-
-        let service = subgraph_stage.as_service(
-            mock_http_client,
-            mock_subgraph_service.boxed(),
-            "http://test".to_string(),
-            "my_subgraph_service_name".to_string(),
-            true,
-        );
-
-        let mut request = subgraph::Request::fake_builder().build();
-        request.id = SubgraphRequestId("5678".to_string());
-        request
-            .context
-            .insert("apollo::supergraph::operation_name", "Test".to_string())
             .unwrap();
         request
             .context
@@ -1135,7 +900,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1210,7 +975,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1278,7 +1043,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1405,7 +1170,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1530,7 +1295,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1559,9 +1324,9 @@ mod tests {
                 condition: Default::default(),
                 body: BodyConf::All(true),
                 subgraph_request_id: true,
-                context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
+                context: ContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
-                ))),
+                )),
                 ..Default::default()
             },
         };
@@ -1583,8 +1348,10 @@ mod tests {
             );
         });
 
-        let (mock_http_client, mut http_handle) =
-            tower_test::mock::pair::<HttpRequest, HttpResponse>();
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
         let http_driver = tokio::spawn(async move {
             let (req, responder) = http_handle.next_request().await.unwrap();
             let context = req.context.clone();
@@ -1663,7 +1430,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1696,173 +1463,6 @@ mod tests {
                 .unwrap()
                 .unwrap(),
             42
-        );
-
-        assert_eq!(
-            json!({ "test": 5678_u32 }),
-            response.response.into_body().data.unwrap()
-        );
-        await_mock_driver(subgraph_driver).await;
-        await_mock_driver(http_driver).await;
-    }
-
-    #[tokio::test]
-    async fn external_plugin_subgraph_response_with_deprecated_context() {
-        let subgraph_stage = SubgraphStage {
-            request: Default::default(),
-            response: SubgraphResponseConf {
-                condition: Default::default(),
-                body: BodyConf::All(true),
-                subgraph_request_id: true,
-                context: ContextConf::NewContextConf(NewContextConf::Deprecated),
-                ..Default::default()
-            },
-        };
-
-        let (mock_subgraph_service, mut handle_subgraph) =
-            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
-        let subgraph_driver = tokio::spawn(async move {
-            let (req, responder) = handle_subgraph.next_request().await.unwrap();
-            assert_eq!(&*req.id, "5678");
-            responder.send_response(
-                subgraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .id(req.id)
-                    .subgraph_name(String::default())
-                    .build(),
-            );
-        });
-
-        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
-            crate::services::http::HttpRequest,
-            crate::services::http::HttpResponse,
-        >();
-        let http_driver = tokio::spawn(async move {
-            let (req, responder) = http_handle.next_request().await.unwrap();
-            let context = req.context.clone();
-            let (_, body) = req.http_request.into_parts();
-            let deserialized_response: Externalizable<Value> =
-                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
-
-            assert_eq!(
-                deserialized_response.subgraph_request_id,
-                Some(SubgraphRequestId("5678".to_string()))
-            );
-
-            let req_context = deserialized_response.context.unwrap_or_default();
-            assert_eq!(
-                req_context
-                    .get::<&str, u8>("this-is-a-test-context")
-                    .expect("context key should be there")
-                    .expect("context key should have the right format"),
-                55
-            );
-            assert_eq!(
-                req_context
-                    .get::<&str, String>("operation_name")
-                    .expect("context key should be there")
-                    .expect("context key should have the right format"),
-                "Test".to_string()
-            );
-
-            let response = http::Response::builder()
-                .body(router::body::from_bytes(
-                    r#"{
-                            "version": 1,
-                            "stage": "SubgraphResponse",
-                            "headers": {
-                                "cookie": [
-                                  "tasty_cookie=strawberry"
-                                ],
-                                "content-type": [
-                                  "application/json"
-                                ],
-                                "host": [
-                                  "127.0.0.1:4000"
-                                ],
-                                "apollo-federation-include-trace": [
-                                  "ftv1"
-                                ],
-                                "apollographql-client-name": [
-                                  "manual"
-                                ],
-                                "accept": [
-                                  "*/*"
-                                ],
-                                "user-agent": [
-                                  "curl/7.79.1"
-                                ],
-                                "content-length": [
-                                  "46"
-                                ]
-                              },
-                              "body": {
-                                "data": {
-                                    "test": 5678
-                                }
-                              },
-                              "context": {
-                                "entries": {
-                                  "this-is-a-test-context": 42,
-                                  "operation_name": "New"
-                                }
-                              },
-                              "subgraphRequestId": "9abc"
-                        }"#,
-                ))
-                .unwrap();
-            responder.send_response(crate::services::http::HttpResponse {
-                http_response: response,
-                context,
-            });
-        });
-
-        let service = subgraph_stage.as_service(
-            mock_http_client,
-            mock_subgraph_service.boxed(),
-            "http://test".to_string(),
-            "my_subgraph_service_name".to_string(),
-            true,
-        );
-
-        let mut request = subgraph::Request::fake_builder().build();
-        request.id = SubgraphRequestId("5678".to_string());
-        request
-            .context
-            .insert("apollo::supergraph::operation_name", "Test".to_string())
-            .unwrap();
-        request
-            .context
-            .insert("this-is-a-test-context", 55)
-            .unwrap();
-
-        let response = service.oneshot(request).await.unwrap();
-
-        // Let's assert that the subgraph response has been transformed as it should have.
-        assert_eq!(
-            response.response.headers().get("cookie").unwrap(),
-            "tasty_cookie=strawberry"
-        );
-        assert_eq!(&*response.id, "5678");
-
-        assert_eq!(
-            response
-                .context
-                .get::<&str, u8>("this-is-a-test-context")
-                .unwrap()
-                .unwrap(),
-            42
-        );
-        assert_eq!(
-            response
-                .context
-                .get::<&str, String>("apollo::supergraph::operation_name")
-                .unwrap()
-                .unwrap(),
-            "New".to_string()
         );
 
         assert_eq!(
@@ -1968,7 +1568,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -2008,7 +1608,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: false,
-                context: ContextConf::Deprecated(false),
+                context: ContextConf::None,
                 body: BodyConf::All(true),
                 status_code: false,
                 sdl: false,
@@ -2055,7 +1655,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true,
@@ -2080,9 +1680,9 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: false,
-                context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
+                context: ContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
-                ))),
+                )),
                 body: BodyConf::All(true),
                 status_code: false,
                 sdl: false,
@@ -2152,7 +1752,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true,
@@ -2188,121 +1788,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_plugin_supergraph_response_with_deprecated_context() {
-        let supergraph_stage = SupergraphStage {
-            request: Default::default(),
-            response: SupergraphResponseConf {
-                condition: Default::default(),
-                headers: false,
-                context: ContextConf::NewContextConf(NewContextConf::Deprecated),
-                body: BodyConf::All(true),
-                status_code: false,
-                sdl: false,
-                url: None,
-            },
-        };
-
-        let (mock_supergraph_service, mut handle_supergraph) =
-            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
-        let supergraph_driver = tokio::spawn(async move {
-            let (req, responder) = handle_supergraph.next_request().await.unwrap();
-            responder.send_response(supergraph::Response::new_from_graphql_response(
-                graphql::Response::builder()
-                    .data(Value::Null)
-                    .subscribed(true)
-                    .build(),
-                req.context,
-            ));
-        });
-
-        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
-            crate::services::http::HttpRequest,
-            crate::services::http::HttpResponse,
-        >();
-        let http_driver = tokio::spawn(async move {
-            let (req, responder) = http_handle.next_request().await.unwrap();
-            let context = req.context.clone();
-            let (_, body) = req.http_request.into_parts();
-            let deserialized_response: Externalizable<Value> =
-                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
-            let req_context = deserialized_response.context.unwrap_or_default();
-            assert_eq!(
-                req_context
-                    .get::<&str, String>("operation_name")
-                    .expect("context key should be there")
-                    .expect("context key should have the right format"),
-                "Test".to_string()
-            );
-            let response = http::Response::builder()
-                .body(router::body::from_bytes(
-                    r#"{
-                        "version": 1,
-                        "stage": "SupergraphResponse",
-                        "context": {
-                            "entries": {
-                                "operation_name": "New"
-                            }
-                        },
-                        "body": {
-                            "data": null
-                        }
-                    }"#,
-                ))
-                .unwrap();
-            responder.send_response(crate::services::http::HttpResponse {
-                http_response: response,
-                context,
-            });
-        });
-
-        let service = supergraph_stage.as_service(
-            mock_http_client,
-            mock_supergraph_service.boxed(),
-            "http://test".to_string(),
-            Arc::default(),
-            true,
-        );
-
-        let request = supergraph::Request::fake_builder().build().unwrap();
-        request
-            .context
-            .insert("apollo::supergraph::operation_name", "Test".to_string())
-            .unwrap();
-
-        let mut response = service.oneshot(request).await.unwrap();
-
-        assert_eq!(
-            response
-                .context
-                .get::<&str, String>("apollo::supergraph::operation_name")
-                .unwrap()
-                .unwrap(),
-            "New".to_string()
-        );
-        assert!(
-            response
-                .context
-                .get::<&str, String>("operation_name")
-                .ok()
-                .flatten()
-                .is_none()
-        );
-
-        let gql_response = response.response.body_mut().next().await.unwrap();
-        // Let's assert that the supergraph response has been transformed as it should have.
-        assert_eq!(gql_response.subscribed, Some(true));
-        assert_eq!(gql_response.data, Some(Value::Null));
-        crate::plugin::test::await_mock_driver(supergraph_driver).await;
-        crate::plugin::test::await_mock_driver(http_driver).await;
-    }
-
-    #[tokio::test]
     async fn external_plugin_router_request() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: true,
@@ -2423,7 +1914,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2442,9 +1933,9 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
+                context: ContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
-                ))),
+                )),
                 body: true,
                 sdl: true,
                 path: true,
@@ -2585,7 +2076,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2627,7 +2118,7 @@ mod tests {
                 ])
                 .into(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: true,
@@ -2665,7 +2156,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2684,7 +2175,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: true,
@@ -2810,7 +2301,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2832,7 +2323,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: true,
@@ -2895,7 +2386,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2937,7 +2428,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: true,
@@ -2990,7 +2481,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -3033,7 +2524,7 @@ mod tests {
             response: RouterResponseConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 status_code: false,
@@ -3136,7 +2627,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -3231,7 +2722,7 @@ mod tests {
         let service_stack = router_stage
             .as_service(
                 mock_http_client,
-                mock_router_service.boxed(),
+                mock_router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation - doesn't matter for router stage
@@ -3276,7 +2767,7 @@ mod tests {
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
                 http_client,
-                router_service.boxed(),
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
@@ -3314,7 +2805,7 @@ mod tests {
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
                 http_client,
-                router_service.boxed(),
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
@@ -3353,7 +2844,7 @@ mod tests {
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
                 http_client,
-                router_service.boxed(),
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
@@ -3392,7 +2883,7 @@ mod tests {
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
                 http_client,
-                router_service.boxed(),
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
@@ -3430,7 +2921,7 @@ mod tests {
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
                 http_client,
-                router_service.boxed(),
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
@@ -3469,7 +2960,7 @@ mod tests {
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
                 http_client,
-                router_service.boxed(),
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
@@ -3508,7 +2999,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Some(Condition::False),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: false,
@@ -3526,7 +3017,7 @@ mod tests {
             response: RouterResponseConf {
                 condition: Condition::False,
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 status_code: false,
@@ -3713,7 +3204,7 @@ mod tests {
             response: RouterResponseConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 status_code: false,
@@ -3764,7 +3255,7 @@ mod tests {
         let service_stack = create_router_stage_for_request_validation_test()
             .as_service(
                 http_client,
-                router_service.boxed(),
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled
@@ -3800,7 +3291,7 @@ mod tests {
         let service_stack = create_router_stage_for_request_validation_test()
             .as_service(
                 http_client,
-                router_service.boxed(),
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled
@@ -4022,7 +3513,7 @@ mod tests {
             response: SubgraphResponseConf {
                 condition: Condition::True,
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 service_name: false,
                 status_code: false,
@@ -4061,7 +3552,7 @@ mod tests {
             request: SubgraphRequestConf {
                 condition: Condition::True,
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 uri: true,
                 method: true,
@@ -4079,7 +3570,7 @@ mod tests {
             request: SubgraphRequestConf {
                 condition: Condition::False,
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 uri: true,
                 method: true,
@@ -4098,7 +3589,7 @@ mod tests {
             response: SubgraphResponseConf {
                 condition: Condition::False,
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 service_name: false,
                 status_code: false,
@@ -4354,7 +3845,7 @@ mod tests {
         let (http_client, http_driver) = create_mock_http_client_invalid_subgraph_response();
         let service = create_subgraph_stage_for_validation_test().as_service(
             http_client,
-            subgraph_mock.boxed(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4383,7 +3874,7 @@ mod tests {
         let (http_client, http_driver) = create_mock_http_client_subgraph_request_valid_response();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             http_client,
-            subgraph_mock.boxed(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4408,7 +3899,7 @@ mod tests {
         let (http_client, http_driver) = create_mock_http_client_subgraph_request_empty_response();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             http_client,
-            subgraph_mock.boxed(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4436,7 +3927,7 @@ mod tests {
             create_mock_http_client_subgraph_request_invalid_response();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             http_client,
-            subgraph_mock.boxed(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4463,7 +3954,7 @@ mod tests {
         let (http_client, http_driver) = create_mock_http_client_subgraph_request_valid_response();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             http_client,
-            subgraph_mock.boxed(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4488,7 +3979,7 @@ mod tests {
         let (http_client, http_driver) = create_mock_http_client_subgraph_request_empty_response();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             http_client,
-            subgraph_mock.boxed(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4513,7 +4004,7 @@ mod tests {
             create_mock_http_client_subgraph_request_invalid_response();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             http_client,
-            subgraph_mock.boxed(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4538,7 +4029,7 @@ mod tests {
         let (http_client, http_driver) = create_mock_http_client_subgraph_response_valid_response();
         let service = create_subgraph_stage_for_validation_test().as_service(
             http_client,
-            subgraph_mock.boxed(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4562,7 +4053,7 @@ mod tests {
         let (http_client, http_driver) = create_mock_http_client_subgraph_response_empty_response();
         let service = create_subgraph_stage_for_validation_test().as_service(
             http_client,
-            subgraph_mock.boxed(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4583,7 +4074,7 @@ mod tests {
         let (http_client, http_driver) = create_mock_http_client_invalid_subgraph_response();
         let service = create_subgraph_stage_for_validation_test().as_service(
             http_client,
-            subgraph_mock.boxed(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4604,7 +4095,7 @@ mod tests {
         let (http_client, http_driver) = create_mock_http_client_subgraph_response_valid_response();
         let service = create_subgraph_stage_for_validation_test().as_service(
             http_client,
-            subgraph_mock.boxed(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4628,7 +4119,7 @@ mod tests {
         let (http_client, http_driver) = create_mock_http_client_subgraph_response_empty_response();
         let service = create_subgraph_stage_for_validation_test().as_service(
             http_client,
-            subgraph_mock.boxed(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4724,7 +4215,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -4822,7 +4313,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -4906,7 +4397,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -5003,7 +4494,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -5107,7 +4598,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Disable response validation since coprocessor returns only extensions
@@ -5668,13 +5159,7 @@ mod tests {
         returned_context.insert("k3", "v3".to_string()).unwrap();
 
         // Update context
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &ContextConf::NewContextConf(NewContextConf::All),
-            &keys_sent,
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &keys_sent).unwrap();
 
         // k1 should be updated
         assert_eq!(
@@ -5711,13 +5196,7 @@ mod tests {
         returned_context.insert("k2", "v2_new".to_string()).unwrap();
 
         // Update context
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &ContextConf::NewContextConf(NewContextConf::All),
-            &keys_sent,
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &keys_sent).unwrap();
 
         // k1 should be updated
         assert_eq!(
@@ -5734,7 +5213,6 @@ mod tests {
     #[test]
     fn test_update_context_from_coprocessor_preserves_keys_not_sent() {
         use std::collections::HashSet;
-        use std::sync::Arc;
 
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
@@ -5749,20 +5227,10 @@ mod tests {
         // Coprocessor returns context without k1 (deleted)
         let returned_context = Context::new();
 
-        // Use Selective config to only send "k1", not "key_not_sent"
-        let selective_keys: HashSet<String> = ["k1".to_string()].into();
-        let context_config =
-            ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(selective_keys)));
         let keys_sent: HashSet<String> = ["k1"].into_iter().map(String::from).collect();
 
         // Update context
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &context_config,
-            &keys_sent,
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &keys_sent).unwrap();
 
         // k1 should be deleted (was sent but missing from returned context)
         assert!(!target_context.contains_key("k1"));
@@ -5770,48 +5238,6 @@ mod tests {
         assert_eq!(
             target_context.get_json_value("key_not_sent"),
             Some(serde_json_bytes::json!("preserved_value"))
-        );
-    }
-
-    #[rstest::rstest]
-    fn test_update_context_from_coprocessor_handles_deprecated_key_names(
-        #[values(DEPRECATED_CLIENT_NAME, CLIENT_NAME)] target_context_key_name: &str,
-        #[values(
-            ContextConf::Deprecated(true),
-            ContextConf::NewContextConf(NewContextConf::Deprecated)
-        )]
-        context_conf: ContextConf,
-    ) {
-        use std::collections::HashSet;
-
-        use crate::Context;
-        use crate::plugins::coprocessor::update_context_from_coprocessor;
-
-        let target_context =
-            Context::from_iter([(target_context_key_name.to_string(), "v1".into())]);
-        let returned_context =
-            Context::from_iter([(DEPRECATED_CLIENT_NAME.to_string(), "v2".into())]);
-        let keys_sent: HashSet<String> = [target_context_key_name]
-            .into_iter()
-            .map(String::from)
-            .collect();
-
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &context_conf,
-            &keys_sent,
-        )
-        .unwrap();
-
-        assert_eq!(
-            target_context.get_json_value(CLIENT_NAME),
-            Some(json!("v2")),
-        );
-
-        assert!(
-            !target_context.contains_key(DEPRECATED_CLIENT_NAME),
-            "DEPRECATED_CLIENT_NAME should not be present"
         );
     }
 
@@ -5840,13 +5266,7 @@ mod tests {
         // k2 intentionally removed by coprocessor
         // k3 was never sent, must survive
 
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &ContextConf::NewContextConf(NewContextConf::All),
-            &keys_sent,
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &keys_sent).unwrap();
 
         assert!(target_context.contains_key("k1"));
         assert!(!target_context.contains_key("k2")); // deleted by coprocessor
@@ -5893,13 +5313,7 @@ mod tests {
             .insert("book_request_end", 5700i64)
             .unwrap();
 
-        update_context_from_coprocessor(
-            &shared_context,
-            returned_context,
-            &ContextConf::NewContextConf(NewContextConf::All),
-            &keys_sent,
-        )
-        .unwrap();
+        update_context_from_coprocessor(&shared_context, returned_context, &keys_sent).unwrap();
 
         // accounts_request_start was never sent to book's coprocessor, so it must survive
         assert!(shared_context.contains_key("accounts_request_start"));
@@ -5920,7 +5334,7 @@ mod tests {
                     create_mock_http_client_subgraph_request_valid_response();
                 let _service = _stage.as_service(
                     http_client,
-                    subgraph_mock.boxed(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false,
@@ -5951,7 +5365,7 @@ mod tests {
                     create_mock_http_client_subgraph_response_valid_response();
                 let _service = _stage.as_service(
                     http_client,
-                    subgraph_mock.boxed(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false,
@@ -5984,7 +5398,7 @@ mod tests {
                 >();
                 let _service = _stage.as_service(
                     http_mock,
-                    subgraph_mock.boxed(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false,
@@ -6013,7 +5427,7 @@ mod tests {
                 >();
                 let _service = _stage.as_service(
                     http_mock,
-                    subgraph_mock.boxed(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false,
@@ -6040,7 +5454,7 @@ mod tests {
                     create_mock_http_client_subgraph_request_valid_response();
                 let _service = _stage.as_service(
                     http_client,
-                    subgraph_mock.boxed(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false,
@@ -6058,7 +5472,7 @@ mod tests {
                     create_mock_http_client_subgraph_response_valid_response();
                 let _service = _stage.as_service(
                     http_client,
-                    subgraph_mock.boxed(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false,
@@ -6087,7 +5501,7 @@ mod tests {
                 let (http_client, http_driver) = create_mock_http_client_hard_error();
                 let _service = _stage.as_service(
                     http_client,
-                    subgraph_mock.boxed(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true,
@@ -6117,7 +5531,7 @@ mod tests {
                 let (http_client, http_driver) = create_mock_http_client_hard_error();
                 let _service = _stage.as_service(
                     http_client,
-                    subgraph_mock.boxed(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true,
@@ -6147,7 +5561,7 @@ mod tests {
                 let (http_client, http_driver) = create_mock_http_client_hard_error();
                 let _service = _stage.as_service(
                     http_client,
-                    subgraph_mock.boxed(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true,
@@ -6164,7 +5578,7 @@ mod tests {
                 let (http_client, http_driver) = create_mock_http_client_hard_error();
                 let _service = _stage.as_service(
                     http_client,
-                    subgraph_mock.boxed(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true,
@@ -6195,7 +5609,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         http_client,
-                        router_mock.boxed(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
@@ -6224,7 +5638,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         http_client,
-                        router_mock.boxed(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
@@ -6255,7 +5669,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         http_mock,
-                        router_mock.boxed(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
@@ -6286,7 +5700,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         http_mock,
-                        router_mock.boxed(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
@@ -6315,7 +5729,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         http_client,
-                        router_mock.boxed(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
@@ -6335,7 +5749,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         http_client,
-                        router_mock.boxed(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
@@ -6366,7 +5780,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         http_client,
-                        router_mock.boxed(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
@@ -6394,7 +5808,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         http_client,
-                        router_mock.boxed(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
@@ -6532,7 +5946,7 @@ mod tests {
             let service_stack = router_stage
                 .as_service(
                     mock_http_client,
-                    mock_router_service.boxed(),
+                    mock_router_service.boxed_clone(),
                     "http://test".to_string(),
                     Arc::new("".to_string()),
                     false,
@@ -6566,7 +5980,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         http_client,
-                        router_mock.boxed(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
@@ -6585,7 +5999,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         http_client,
-                        router_mock.boxed(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
@@ -6771,7 +6185,7 @@ mod tests {
                     "url": "http://127.0.0.1:3001/webhook",
                     "router": {
                         "request": {
-                            "context": true,
+                            "context": "all",
                             "headers": true
                         }
                     }
@@ -7071,7 +6485,6 @@ mod tests {
 
         use crate::metrics::FutureMetricsExt;
         use crate::plugins::coprocessor::ContextConf;
-        use crate::plugins::coprocessor::NewContextConf;
         use crate::plugins::coprocessor::connector::ConnectorRequestConf;
         use crate::plugins::coprocessor::connector::ConnectorResponseConf;
         use crate::plugins::coprocessor::connector::ConnectorStage;
@@ -7191,7 +6604,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -7251,7 +6664,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -7311,7 +6724,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -7382,7 +6795,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -7464,7 +6877,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                inner_service.boxed(),
+                inner_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -7489,7 +6902,7 @@ mod tests {
         async fn should_update_context_when_coprocessor_returns_context_entries() {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
-                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    context: ContextConf::All,
                     body: true,
                     ..Default::default()
                 },
@@ -7527,7 +6940,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -7581,7 +6994,7 @@ mod tests {
 
                     let service = connector_stage.as_service(
                         http_client,
-                        mock_connector_service.boxed(),
+                        mock_connector_service.boxed_clone(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
                     );
@@ -7623,7 +7036,7 @@ mod tests {
 
                     let service = connector_stage.as_service(
                         http_mock,
-                        mock_connector_service.boxed(),
+                        mock_connector_service.boxed_clone(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
                     );
@@ -7677,7 +7090,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -7726,7 +7139,7 @@ mod tests {
 
                     let service = connector_stage.as_service(
                         mock_http_client,
-                        mock_connector_service.boxed(),
+                        mock_connector_service.boxed_clone(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
                     );
@@ -7791,7 +7204,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -7846,7 +7259,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -7911,7 +7324,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -7939,7 +7352,7 @@ mod tests {
             let connector_stage = ConnectorStage {
                 request: Default::default(),
                 response: ConnectorResponseConf {
-                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    context: ContextConf::All,
                     body: true,
                     ..Default::default()
                 },
@@ -7981,7 +7394,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -7998,7 +7411,7 @@ mod tests {
             let connector_stage = ConnectorStage {
                 request: Default::default(),
                 response: ConnectorResponseConf {
-                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    context: ContextConf::All,
                     body: true,
                     ..Default::default()
                 },
@@ -8034,7 +7447,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -8086,7 +7499,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -8103,9 +7516,11 @@ mod tests {
             }
         }
 
-        fn create_error_connector_service()
-        -> tower::util::BoxService<request_service::Request, request_service::Response, BoxError>
-        {
+        fn create_error_connector_service() -> tower::util::BoxCloneService<
+            request_service::Request,
+            request_service::Response,
+            BoxError,
+        > {
             tower::service_fn(|req: request_service::Request| async move {
                 let subgraph_name = req.connector.id.subgraph_name.to_string();
                 Ok(request_service::Response {
@@ -8126,7 +7541,7 @@ mod tests {
                     },
                 })
             })
-            .boxed()
+            .boxed_clone()
         }
 
         #[tokio::test]
@@ -8249,7 +7664,7 @@ mod tests {
                 request: RouterRequestConf {
                     condition: Default::default(),
                     headers: true,
-                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    context: ContextConf::All,
                     body: false,
                     sdl: false,
                     path: false,
@@ -8325,7 +7740,7 @@ mod tests {
 
             let service = router_stage.as_service(
                 mock_http_client,
-                mock_router_service.boxed(),
+                mock_router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
                 false,
@@ -8393,7 +7808,7 @@ mod tests {
                 request: SubgraphRequestConf {
                     condition: Default::default(),
                     headers: true,
-                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    context: ContextConf::All,
                     body: false,
                     uri: false,
                     method: false,
@@ -8471,7 +7886,7 @@ mod tests {
 
             let service = subgraph_stage.as_service(
                 mock_http_client,
-                mock_subgraph_service.boxed(),
+                mock_subgraph_service.boxed_clone(),
                 "http://test".to_string(),
                 "test_subgraph".to_string(),
                 false,
@@ -8519,7 +7934,7 @@ mod tests {
                 request: RouterRequestConf {
                     condition: Default::default(),
                     headers: true,
-                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    context: ContextConf::All,
                     body: false,
                     sdl: false,
                     path: false,
@@ -8580,7 +7995,7 @@ mod tests {
 
             let service = router_stage.as_service(
                 mock_http_client,
-                mock_router_service.boxed(),
+                mock_router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
                 false,
@@ -8622,7 +8037,7 @@ mod tests {
                 request: RouterRequestConf {
                     condition: Default::default(),
                     headers: true,
-                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    context: ContextConf::All,
                     body: false,
                     sdl: false,
                     path: false,
@@ -8697,7 +8112,7 @@ mod tests {
 
             let service = router_stage.as_service(
                 mock_http_client,
-                mock_router_service.boxed(),
+                mock_router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
                 false,
@@ -8766,7 +8181,7 @@ mod tests {
                 request: RouterRequestConf {
                     condition: Default::default(),
                     headers: true,
-                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    context: ContextConf::All,
                     body: false,
                     sdl: false,
                     path: false,
@@ -8844,7 +8259,7 @@ mod tests {
 
             let service = router_stage.as_service(
                 mock_http_client,
-                mock_router_service.boxed(),
+                mock_router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
                 false,

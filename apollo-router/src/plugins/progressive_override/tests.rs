@@ -18,7 +18,7 @@ use crate::plugins::progressive_override::UNRESOLVED_LABELS_KEY;
 use crate::services::RouterResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::services::layers::query_analysis::ParsedDocument;
+use crate::services::query_parsing::ParsedDocument;
 use crate::services::router;
 use crate::services::supergraph;
 
@@ -150,7 +150,7 @@ async fn plugin_router_service_adds_all_arbitrary_labels_to_context() {
     ))
     .await
     .unwrap()
-    .router_service(mock.boxed());
+    .router_service(mock.boxed_clone());
 
     let _ = service_stack
         .oneshot(router::Request::fake_builder().build().unwrap())
@@ -207,7 +207,7 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
     ))
     .await
     .unwrap()
-    .supergraph_service(mock.boxed());
+    .supergraph_service(mock.boxed_clone());
 
     let schema = crate::spec::Schema::parse(
         include_str!("./testdata/supergraph.graphql"),
@@ -360,7 +360,7 @@ async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
     ))
     .await
     .unwrap()
-    .supergraph_service(mock.boxed());
+    .supergraph_service(mock.boxed_clone());
 
     let schema = crate::spec::Schema::parse(
         include_str!("./testdata/supergraph.graphql"),

@@ -42,9 +42,9 @@ use crate::plugins::authentication::jwks::Audiences;
 use crate::plugins::authentication::jwks::Issuers;
 use crate::plugins::authentication::jwks::JwksConfig;
 use crate::plugins::authentication::subgraph::make_signing_params;
-use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::connector_service::ConnectorSourceRef;
 use crate::services::router;
+use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
 
 pub(crate) mod jwks;
 
@@ -256,7 +256,7 @@ impl PluginPrivate for AuthenticationPlugin {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         // Return without layering if no router config was defined
         let Some(router_config) = &self.router else {
             return service;
@@ -277,18 +277,20 @@ impl PluginPrivate for AuthenticationPlugin {
 
         ServiceBuilder::new()
             .instrument(authentication_service_span())
-            .checkpoint(move |request: router::Request| {
-                Ok(authenticate(&configuration, &jwks_manager, request))
+            .checkpoint_async(move |request: router::Request| {
+                let configuration = configuration.clone();
+                let jwks_manager = jwks_manager.clone();
+                async move { Ok(authenticate(&configuration, &jwks_manager, request)) }
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn subgraph_service(
         &self,
         name: &str,
-        service: crate::services::subgraph::BoxService,
-    ) -> crate::services::subgraph::BoxService {
+        service: crate::services::subgraph::BoxCloneService,
+    ) -> crate::services::subgraph::BoxCloneService {
         // Return without layering if no subgraph config was defined
         let Some(subgraph) = &self.subgraph else {
             return service;
@@ -299,9 +301,9 @@ impl PluginPrivate for AuthenticationPlugin {
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneService,
         _: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         // Return without layering if no connector config was defined
         let Some(connector_auth) = &self.connector else {
             return service;
@@ -653,19 +655,9 @@ fn authenticate(
         if token_data.claims.get("exp").is_none() {
             tracing::debug!("accepted JWT without `exp` claim");
         }
-        // This is a metric and will not appear in the logs
-        //
-        // Apparently intended to be `apollo.router.operations.authentication.jwt` like above,
-        // but has existed for two years with a buggy name. Keep it for now.
-        u64_counter!(
-            "apollo.router.operations.jwt",
-            "Number of requests with JWT successful authentication (deprecated, \
-                use `apollo.router.operations.authentication.jwt` \
-                with `authentication.jwt.failed = false` instead)",
-            1
-        );
-        // Use the fixed name too:
-        increment_jwt_counter_metric(None);
+
+        let failure_code = None;
+        increment_jwt_counter_metric(failure_code);
 
         let _ = request.context.insert_json_value(
             JWT_CONTEXT_KEY,

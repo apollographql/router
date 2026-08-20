@@ -22,7 +22,6 @@ use tower::BoxError;
 
 use super::DefaultForLevel;
 use super::Selector;
-use super::cache::CACHE_METRIC;
 use super::cache::CacheInstruments;
 use super::cache::CacheInstrumentsConfig;
 use super::cache::attributes::CacheAttributes;
@@ -115,7 +114,7 @@ pub(crate) struct InstrumentsConfig {
     >,
 }
 
-const HTTP_SERVER_REQUEST_DURATION_METRIC: &str = "http.server.request.duration";
+pub(crate) const HTTP_SERVER_REQUEST_DURATION_METRIC: &str = "http.server.request.duration";
 const HTTP_SERVER_REQUEST_BODY_SIZE_METRIC: &str = "http.server.request.body.size";
 const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str = "http.server.response.body.size";
 const HTTP_SERVER_ACTIVE_REQUESTS: &str = "http.server.active_requests";
@@ -990,20 +989,6 @@ impl InstrumentsConfig {
     pub(crate) fn new_builtin_cache_instruments(&self) -> HashMap<String, StaticInstrument> {
         let meter = metrics::meter_provider().meter(METER_NAME);
         let mut static_instruments: HashMap<String, StaticInstrument> = HashMap::new();
-        if self.cache.attributes.cache.is_enabled() {
-            static_instruments.insert(
-                CACHE_METRIC.to_string(),
-                StaticInstrument::CounterF64(
-                    meter
-                        .f64_counter(CACHE_METRIC)
-                        .with_unit("ops")
-                        .with_description(
-                            "Entity cache hit/miss operations at the subgraph level (deprecated)",
-                        )
-                        .build(),
-                ),
-            );
-        }
         if self.cache.attributes.response_cache.is_enabled() {
             static_instruments.insert(
                 RESPONSE_CACHE_METRIC.to_string(),
@@ -1027,43 +1012,6 @@ impl InstrumentsConfig {
         static_instruments: Arc<HashMap<String, StaticInstrument>>,
     ) -> CacheInstruments {
         CacheInstruments {
-            cache_hit: self.cache.attributes.cache.is_enabled().then(|| {
-                let mut nb_attributes = 0;
-                let selectors = match &self.cache.attributes.cache {
-                    DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
-                        None
-                    }
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
-                    }
-                };
-                CustomCounter {
-                    inner: Mutex::new(CustomCounterInner {
-                        increment: Increment::Custom(None),
-                        condition: Condition::True,
-                        counter: Some(static_instruments
-                            .get(CACHE_METRIC)
-                            .expect(
-                                "cannot get static instrument for cache; this should not happen",
-                            )
-                            .as_counter_f64()
-                            .cloned()
-                            .expect(
-                                "cannot convert instrument to counter for cache; this should not happen",
-                            )
-                        ),
-                        attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(SubgraphSelector::Cache {
-                            cache: CacheKind::Hit,
-                            entity_type: None,
-                        })),
-                        selectors,
-                        incremented: false,
-                        _phantom: PhantomData,
-                    }),
-                }
-            }),
             cache_hit_response_cache: self.cache.attributes.response_cache.is_enabled().then(|| {
                 let mut nb_attributes = 0;
                 let selectors = match &self.cache.attributes.response_cache {
@@ -1091,8 +1039,8 @@ impl InstrumentsConfig {
                             )
                         ),
                         attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(SubgraphSelector::Cache {
-                            cache: CacheKind::Hit,
+                        selector: Some(Arc::new(SubgraphSelector::ResponseCache {
+                            response_cache: CacheKind::Hit,
                             entity_type: None,
                         })),
                         selectors,
@@ -1210,11 +1158,6 @@ impl SubscriptionsTerminatedAttributes {
                 .get::<_, String>(CLIENT_NAME)
                 .ok()
                 .flatten()
-                .or_else(|| {
-                    ctx.get::<_, String>(crate::context::deprecated::DEPRECATED_CLIENT_NAME)
-                        .ok()
-                        .flatten()
-                })
                 .unwrap_or_default();
             attrs.push(KeyValue::new("client.name", client_name));
         }
@@ -2727,6 +2670,7 @@ mod tests {
     use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::limits::operation_limits::OperationLimits;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
@@ -2743,7 +2687,6 @@ mod tests {
     use crate::services::RouterResponse;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
-    use crate::spec::operation_limits::OperationLimits;
 
     type JsonMap = serde_json_bytes::Map<ByteString, Value>;
 
@@ -4111,7 +4054,7 @@ mod tests {
     /// Verify that the `RouterInstruments::on_response` dispatch to `subscriptions_terminated`
     /// is wired up end-to-end. If the delegation were removed or mis-wired, `stashed_attributes`
     /// would be empty and the `subgraph.name`/`client.name` labels would silently disappear from
-    /// the metric — exactly the regression this PR guards against.
+    /// the metric.
     #[tokio::test]
     async fn test_router_instruments_on_response_wires_subscriptions_terminated() {
         async {

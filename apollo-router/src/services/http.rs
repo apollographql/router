@@ -2,12 +2,15 @@
 use std::sync::Arc;
 
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower_service::Service;
 
 use super::Plugins;
 use super::router::body::RouterBody;
 use crate::Context;
+use crate::batching::JoinBatchRequestsLayer;
+use crate::layers::InternalServiceBuilderExt as _;
+use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
 
 pub(crate) mod connection_timing;
 pub(crate) mod service;
@@ -16,7 +19,6 @@ mod tests;
 
 pub(crate) use service::HttpClientService;
 
-pub(crate) type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
 
@@ -45,7 +47,7 @@ impl HttpClientServiceFactory {
 
     #[cfg(test)]
     pub(crate) fn from_config(
-        service: impl Into<String>,
+        service: &str,
         configuration: &crate::Configuration,
         client_config: crate::configuration::shared::Client,
     ) -> Self {
@@ -65,32 +67,25 @@ impl HttpClientServiceFactory {
         }
     }
 
-    pub(crate) fn create(&self, name: &str) -> BoxService {
-        let service = self.service.clone();
-        self.plugins
-            .iter()
-            .rev()
-            .fold(service.boxed(), |acc, (_, e)| {
-                e.http_client_service(name, acc)
+    pub(crate) fn create(&self, name: &str) -> BoxCloneService {
+        ServiceBuilder::new()
+            .layer(JoinBatchRequestsLayer::new(name))
+            .layer(SubgraphResponseSizeLimitLayer::new(name))
+            .rust_plugins(self.plugins.clone(), |plugin, service| {
+                plugin.http_client_service(name, service)
             })
+            .service(self.service.clone())
+            .boxed_clone()
     }
-}
 
-pub(crate) trait MakeHttpService: Send + Sync + 'static {
-    fn make(&self) -> BoxService;
-}
-
-impl<S> MakeHttpService for S
-where
-    S: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <S as Service<HttpRequest>>::Future: Send,
-{
-    fn make(&self) -> BoxService {
-        self.clone().boxed()
+    #[cfg(test)]
+    pub(crate) fn for_test(name: &str) -> BoxCloneService {
+        Self::from_config(
+            name,
+            &crate::Configuration::default(),
+            crate::configuration::shared::Client::default(),
+        )
+        .create(name)
     }
 }
 

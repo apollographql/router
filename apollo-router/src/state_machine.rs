@@ -510,7 +510,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 match Self::try_start(
                     state_machine,
                     &mut server_handle,
-                    Some(&router_service_factory),
+                    Some(router_service_factory.clone()),
                     configuration.target().clone(),
                     schema.target().clone(),
                     license.target().clone(),
@@ -650,7 +650,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
     async fn try_start<S>(
         state_machine: &mut StateMachine<S, FA>,
         server_handle: &mut Option<HttpServerHandle>,
-        previous_router_service_factory: Option<&FA::RouterFactory>,
+        previous_router_service_factory: Option<FA::RouterFactory>,
         configuration: Arc<Configuration>,
         schema_state: Arc<SchemaState>,
         license: Arc<LicenseState>,
@@ -1003,7 +1003,6 @@ mod tests {
     use serde_json::json;
     use test_log::test;
     use tower::BoxError;
-    use tower::Service;
 
     use super::*;
     use crate::AllowedFeature;
@@ -1014,10 +1013,8 @@ mod tests {
     use crate::router_factory::Endpoint;
     use crate::router_factory::RouterFactory;
     use crate::router_factory::RouterSuperServiceFactory;
-    use crate::services::RouterRequest;
-    use crate::services::new_service::ServiceFactory;
     use crate::services::router;
-    use crate::services::router::pipeline_handle::PipelineRef;
+    use crate::services::router::pipeline_handle::PipelineHandle;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::schema::SchemaState;
 
@@ -2123,7 +2120,7 @@ mod tests {
             .in_sequence(&mut seq)
             .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2167,7 +2164,7 @@ mod tests {
             .in_sequence(&mut seq)
             .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2183,7 +2180,7 @@ mod tests {
             .withf(|_, configuration, _, _, _, _| configuration.homepage.enabled)
             .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2323,12 +2320,12 @@ mod tests {
         impl RouterSuperServiceFactory for MyRouterConfigurator {
             type RouterFactory = MockMyRouterFactory;
 
-            async fn create<'a>(
-                &'a mut self,
+            async fn create(
+                &mut self,
                 is_telemetry_disabled: bool,
                 configuration: Arc<Configuration>,
                 schema: Arc<Schema>,
-                previous_router_service_factory: Option<&'a MockMyRouterFactory>,
+                previous_router_service_factory: Option<MockMyRouterFactory>,
                 extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
                 license: Arc<LicenseState>
             ) -> Result<MockMyRouterFactory, BoxError>;
@@ -2340,14 +2337,9 @@ mod tests {
         MyRouterFactory {}
 
         impl RouterFactory for MyRouterFactory {
-            type RouterService = router::BoxService;
-            type Future = <Self::RouterService as Service<RouterRequest>>::Future;
+            fn create(&self) -> router::BoxCloneService;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
-            fn pipeline_ref(&self) -> Arc<PipelineRef>;
-        }
-        impl ServiceFactory<RouterRequest> for MyRouterFactory {
-            type Service = router::BoxService;
-            fn create(&self) -> router::BoxService;
+            fn pipeline_handle(&self) -> Arc<PipelineHandle>;
         }
 
         impl Clone for MyRouterFactory {
@@ -2463,7 +2455,7 @@ mod tests {
             })
             .returning(move |_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2477,13 +2469,13 @@ mod tests {
                     move |_,
                           _configuration: &Arc<Configuration>,
                           _,
-                          previous_router_service_factory: &Option<&MockMyRouterFactory>,
+                          previous_router_service_factory: &Option<MockMyRouterFactory>,
                           _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>,
                           _| { previous_router_service_factory.is_some() },
                 )
                 .returning(move |_, _, _, _, _, _| {
                     let mut router = MockMyRouterFactory::new();
-                    router.expect_clone().return_once(MockMyRouterFactory::new);
+                    router.expect_clone().returning(MockMyRouterFactory::new);
                     router.expect_web_endpoints().returning(MultiMap::new);
                     Ok(router)
                 });
@@ -2502,7 +2494,7 @@ mod tests {
             .times(expect_times_called)
             .returning(move |_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2526,7 +2518,7 @@ mod tests {
 
         fn mock_router_ok() -> MockMyRouterFactory {
             let mut router = MockMyRouterFactory::new();
-            router.expect_clone().return_once(MockMyRouterFactory::new);
+            router.expect_clone().returning(MockMyRouterFactory::new);
             router.expect_web_endpoints().returning(MultiMap::new);
             router
         }

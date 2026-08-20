@@ -793,7 +793,7 @@ mod tests {
         annotations: Option<BTreeMap<String, String>>,
     ) -> SchemaLayerManifest {
         let schema_layer = ImageLayer {
-            data: schema_data.to_string().into_bytes(),
+            data: schema_data.to_string().into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -808,6 +808,7 @@ mod tests {
                 size: schema_layer.data.len().try_into().unwrap(),
                 urls: None,
                 annotations: None,
+                artifact_type: None,
             }],
             subject: None,
             artifact_type: None,
@@ -818,7 +819,48 @@ mod tests {
             oci_manifest,
             manifest_digest,
             blob_digest,
-            schema_data: schema_layer.data,
+            schema_data: schema_layer.data.to_vec(),
+        }
+    }
+
+    struct LicenseLayerManifest {
+        oci_manifest: OciManifest,
+        manifest_digest: String,
+        blob_digest: String,
+        license_data: Vec<u8>,
+    }
+
+    fn create_manifest_from_license_layer(
+        license_data: &[u8],
+        annotations: Option<BTreeMap<String, String>>,
+    ) -> LicenseLayerManifest {
+        let license_layer = ImageLayer {
+            data: license_data.to_vec(),
+            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let blob_digest = license_layer.sha256_digest();
+        let oci_manifest = OciManifest::Image(OciImageManifest {
+            schema_version: 2,
+            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+            config: Default::default(),
+            layers: vec![OciDescriptor {
+                media_type: license_layer.media_type.clone(),
+                digest: blob_digest.clone(),
+                size: license_layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+            }],
+            subject: None,
+            artifact_type: None,
+            annotations,
+        });
+        let manifest_digest = calculate_manifest_digest(&oci_manifest);
+        LicenseLayerManifest {
+            oci_manifest,
+            manifest_digest,
+            blob_digest,
+            license_data: license_layer.data,
         }
     }
 
@@ -979,6 +1021,7 @@ mod tests {
                 size: layer.data.len().try_into().unwrap(),
                 urls: None,
                 annotations: None,
+                artifact_type: None,
             }
         }))
         .await;
@@ -1037,7 +1080,7 @@ mod tests {
             ..Default::default()
         });
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes(),
+            data: "test schema".to_string().into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1091,7 +1134,7 @@ mod tests {
             ..Default::default()
         });
         let random_layer = ImageLayer {
-            data: "foo_bar".to_string().into_bytes(),
+            data: "foo_bar".to_string().into(),
             media_type: "foo_bar".to_string(),
             annotations: None,
         };
@@ -1448,7 +1491,7 @@ mod tests {
         let mock_server = &MockServer::start().await;
 
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes(),
+            data: "test schema".to_string().into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1480,7 +1523,7 @@ mod tests {
         let mock_server = &MockServer::start().await;
 
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes(),
+            data: "test schema".to_string().into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1508,7 +1551,7 @@ mod tests {
         let mock_server = &MockServer::start().await;
 
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes(),
+            data: "test schema".to_string().into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1634,7 +1677,7 @@ mod tests {
     async fn test_create_oci_schema_stream_tag_with_hot_reload() {
         let mock_server = &MockServer::start().await;
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes(),
+            data: "test schema".to_string().into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1670,7 +1713,7 @@ mod tests {
     async fn test_create_oci_schema_stream_tag_without_hot_reload() {
         let mock_server = &MockServer::start().await;
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes(),
+            data: "test schema".to_string().into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1729,7 +1772,7 @@ mod tests {
     async fn test_create_oci_schema_stream_digest_without_hot_reload() {
         let mock_server = &MockServer::start().await;
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes(),
+            data: "test schema".to_string().into(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };

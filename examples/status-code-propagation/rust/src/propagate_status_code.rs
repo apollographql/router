@@ -33,7 +33,11 @@ impl Plugin for PropagateStatusCode {
         })
     }
 
-    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        _name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         let all_status_codes = self.status_codes.clone();
         service
             .map_response(move |res| {
@@ -57,11 +61,14 @@ impl Plugin for PropagateStatusCode {
                 }
                 res
             })
-            .boxed()
+            .boxed_clone()
     }
 
     // At this point, all subgraph_services will have pushed their status codes if they match the `watch list`.
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         service
             .map_response(move |mut res| {
                 if let Some(code) = res
@@ -74,7 +81,7 @@ impl Plugin for PropagateStatusCode {
                 }
                 res
             })
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -150,7 +157,7 @@ mod tests {
         let service_stack = PropagateStatusCode::new(init)
             .await
             .expect("couldn't create plugin")
-            .subgraph_service("accounts", mock_service.boxed());
+            .subgraph_service("accounts", mock_service.boxed_clone());
 
         let subgraph_request = subgraph::Request::fake_builder().build();
 
@@ -194,7 +201,7 @@ mod tests {
         let service_stack = PropagateStatusCode::new(init)
             .await
             .expect("couldn't create plugin")
-            .subgraph_service("accounts", mock_service.boxed());
+            .subgraph_service("accounts", mock_service.boxed_clone());
 
         let subgraph_request = subgraph::Request::fake_builder().build();
 
@@ -245,7 +252,7 @@ mod tests {
         let service_stack = PropagateStatusCode::new(init)
             .await
             .expect("couldn't create plugin")
-            .supergraph_service(mock_service.boxed());
+            .supergraph_service(mock_service.boxed_clone());
 
         let router_request = supergraph::Request::fake_builder()
             .build()
@@ -291,7 +298,7 @@ mod tests {
         let service_stack = PropagateStatusCode::new(init)
             .await
             .expect("couldn't create plugin")
-            .supergraph_service(mock_service.boxed());
+            .supergraph_service(mock_service.boxed_clone());
 
         let router_request = supergraph::Request::fake_builder()
             .build()

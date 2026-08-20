@@ -20,18 +20,15 @@ use uuid::Uuid;
 use super::apollo_exporter::proto::reports::QueryMetadata;
 use super::config::ApolloMetricsReferenceMode;
 use super::config::ApolloSignatureNormalizationAlgorithm;
-use super::config::Sampler;
 use super::metrics::apollo::studio::ContextualizedStats;
 use super::metrics::apollo::studio::SingleStats;
 use super::metrics::apollo::studio::SingleStatsReport;
 use super::otlp::Protocol;
-use super::tracing::apollo::TracesReport;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_vec_header_name;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::ReportHeader;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
-use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::max_export_timeout_default;
@@ -58,13 +55,13 @@ pub(crate) fn router_id() -> String {
 #[serde(deny_unknown_fields, default)]
 #[schemars(rename = "ApolloTelemetryConfig")]
 pub(crate) struct Config {
-    /// The Apollo Studio endpoint for exporting traces and metrics.
+    /// The Apollo Studio endpoint for exporting usage report metrics.
     #[schemars(with = "String", default = "endpoint_default")]
     pub(crate) endpoint: Url,
 
     /// The Apollo Studio endpoint for exporting traces and metrics.
     #[schemars(with = "String", default = "otlp_endpoint_default")]
-    pub(crate) experimental_otlp_endpoint: Url,
+    pub(crate) otlp_endpoint: Url,
 
     /// The Apollo Studio API key.
     #[schemars(skip)]
@@ -105,16 +102,13 @@ pub(crate) struct Config {
     /// Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
     pub(crate) field_level_instrumentation_sampler: SamplerOption,
 
-    /// Percentage of traces to send via the OTel protocol when sending to Apollo Studio.
-    pub(crate) otlp_tracing_sampler: SamplerOption,
-
     /// OTLP protocol used for OTel traces.
     /// Note this only applies if OTel traces are enabled and is only intended for use in tests.
-    pub(crate) experimental_otlp_tracing_protocol: Protocol,
+    pub(crate) otlp_tracing_protocol: Protocol,
 
     /// OTLP protocol used for OTel metrics.
     /// Note this is only intended for use in tests.
-    pub(crate) experimental_otlp_metrics_protocol: Protocol,
+    pub(crate) otlp_metrics_protocol: Protocol,
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
     pub(crate) send_headers: ForwardHeaders,
@@ -354,10 +348,6 @@ const fn default_field_level_instrumentation_sampler() -> SamplerOption {
     SamplerOption::TraceIdRatioBased(0.01)
 }
 
-const fn default_otlp_tracing_sampler() -> SamplerOption {
-    SamplerOption::Always(Sampler::AlwaysOn)
-}
-
 fn endpoint_default() -> Url {
     Url::parse(ENDPOINT_DEFAULT).expect("must be valid url")
 }
@@ -406,9 +396,9 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             endpoint: endpoint_default(),
-            experimental_otlp_endpoint: otlp_endpoint_default(),
-            experimental_otlp_tracing_protocol: Protocol::default(),
-            experimental_otlp_metrics_protocol: Protocol::default(),
+            otlp_endpoint: otlp_endpoint_default(),
+            otlp_tracing_protocol: Protocol::default(),
+            otlp_metrics_protocol: Protocol::default(),
             apollo_key: apollo_key(),
             apollo_graph_ref: apollo_graph_reference(),
             client_name_header: client_name_header_default(),
@@ -418,7 +408,6 @@ impl Default for Config {
             schema_id: "<no_schema_id>".to_string(),
             buffer_size: default_buffer_size(),
             field_level_instrumentation_sampler: default_field_level_instrumentation_sampler(),
-            otlp_tracing_sampler: default_otlp_tracing_sampler(),
             send_headers: ForwardHeaders::None,
             send_variable_values: ForwardValues::None,
             tracing: TracingConfiguration::default(),
@@ -495,12 +484,6 @@ pub(crate) enum ForwardValues {
     /// Send all variables except those specified
     #[schemars(schema_with = "forward_variables_except")]
     Except(Vec<String>),
-}
-
-#[derive(Debug, Serialize)]
-pub(crate) enum SingleReport {
-    Stats(SingleStatsReport),
-    Traces(TracesReport),
 }
 
 #[derive(Default, Debug, Serialize)]
@@ -619,28 +602,6 @@ impl Report {
     }
 }
 
-impl AddAssign<SingleReport> for Report {
-    fn add_assign(&mut self, report: SingleReport) {
-        match report {
-            SingleReport::Stats(stats) => self.add_assign(stats),
-            SingleReport::Traces(traces) => self.add_assign(traces),
-        }
-    }
-}
-
-impl AddAssign<TracesReport> for Report {
-    fn add_assign(&mut self, report: TracesReport) {
-        // Note that operation count is dealt with in metrics so we don't increment this.
-        for (operation_signature, trace) in report.traces {
-            self.traces_per_query
-                .entry(operation_signature)
-                .or_default()
-                .traces
-                .push(trace);
-        }
-    }
-}
-
 impl AddAssign<SingleStatsReport> for Report {
     fn add_assign(&mut self, report: SingleStatsReport) {
         for (k, v) in report.stats {
@@ -671,7 +632,6 @@ impl AddAssign<SingleStatsReport> for Report {
 
 #[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct TracesAndStats {
-    pub(crate) traces: Vec<Trace>,
     #[serde(with = "vectorize")]
     pub(crate) stats_with_context: HashMap<StatsContext, ContextualizedStats>,
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
@@ -685,7 +645,7 @@ impl From<TracesAndStats>
         Self {
             stats_with_context: stats.stats_with_context.into_values().map_into().collect(),
             referenced_fields_by_type: stats.referenced_fields_by_type,
-            trace: stats.traces,
+            trace: Vec::new(),
             query_metadata: stats.query_metadata,
         }
     }

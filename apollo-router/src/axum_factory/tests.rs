@@ -84,9 +84,8 @@ use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
 use crate::services::layers::static_page::home_page_content;
 use crate::services::layers::static_page::sandbox_page_content;
-use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::router::pipeline_handle::PipelineRef;
+use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::license_enforcement::LicenseState;
@@ -144,32 +143,160 @@ struct TestRouterFactory {
     inner: MockRouterServiceType,
 }
 
-impl ServiceFactory<router::Request> for TestRouterFactory {
-    type Service = MockRouterServiceType;
-
-    fn create(&self) -> Self::Service {
-        self.inner.clone()
-    }
-}
-
 impl RouterFactory for TestRouterFactory {
-    type RouterService = MockRouterServiceType;
-
-    type Future = <<TestRouterFactory as ServiceFactory<router::Request>>::Service as Service<
-        router::Request,
-    >>::Future;
+    fn create(&self) -> router::BoxCloneService {
+        self.inner.clone().boxed_clone()
+    }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
     }
 
-    fn pipeline_ref(&self) -> Arc<PipelineRef> {
-        Arc::new(PipelineRef {
-            schema_id: "dummy".to_string(),
-            launch_id: None,
-            config_hash: "dummy".to_string(),
-        })
+    fn pipeline_handle(&self) -> Arc<PipelineHandle> {
+        Arc::new(PipelineHandle::new(
+            "dummy".to_string(),
+            None,
+            "dummy".to_string(),
+        ))
     }
+}
+
+/// Like [`TestRouterFactory`], but counts calls to `create()` so tests can observe how many
+/// times the pipeline is actually built, independent of how many requests/connections use it.
+#[derive(Clone)]
+struct CountingRouterFactory {
+    inner: MockRouterServiceType,
+    create_calls: Arc<AtomicU32>,
+}
+
+impl RouterFactory for CountingRouterFactory {
+    fn create(&self) -> router::BoxCloneService {
+        self.create_calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.clone().boxed_clone()
+    }
+
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        MultiMap::new()
+    }
+
+    fn pipeline_handle(&self) -> Arc<PipelineHandle> {
+        Arc::new(PipelineHandle::new(
+            "dummy".to_string(),
+            None,
+            "dummy".to_string(),
+        ))
+    }
+}
+
+/// Confirms `RouterFactory::create()` runs once per server startup rather than per
+/// connection or per request; each connection clones the resulting service.
+#[tokio::test]
+async fn it_creates_the_router_service_once_per_reload() {
+    let create_calls = Arc::new(AtomicU32::new(0));
+    let (service, mut handle) = tower_test::mock::spawn::<router::Request, router::Response>();
+
+    tokio::spawn(async move {
+        loop {
+            while let Some((request, responder)) = handle.next_request().await {
+                let response = router::Response::http_response_builder()
+                    .response(
+                        http::Response::builder()
+                            .body::<crate::services::router::Body>(router::body::from_bytes(
+                                r#"{"data":{"__typename":"Query"}}"#,
+                            ))
+                            .unwrap(),
+                    )
+                    .context(request.context)
+                    .build()
+                    .unwrap();
+                responder.send_response(response);
+            }
+        }
+    });
+
+    let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
+    let server_factory = AxumHttpServerFactory::new();
+    let server = server_factory
+        .create(
+            CountingRouterFactory {
+                inner: service.into_inner(),
+                create_calls: create_calls.clone(),
+            },
+            Arc::new(Configuration::fake_builder().build().unwrap()),
+            None,
+            vec![],
+            MultiMap::new(),
+            Arc::new(LicenseState::Unlicensed),
+            all_connections_stopped_sender,
+        )
+        .await
+        .expect("failed to create server");
+
+    let url = server
+        .graphql_listen_address()
+        .as_ref()
+        .unwrap()
+        .to_string();
+    let mut default_headers = HeaderMap::new();
+    default_headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+    );
+    default_headers.insert(
+        ACCEPT,
+        HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+    );
+
+    // reqwest::Client pools and reuses one keep-alive connection per host by default, so
+    // several sequential requests here should all land on the same connection.
+    let client = reqwest::Client::builder()
+        .default_headers(default_headers.clone())
+        .build()
+        .unwrap();
+    for i in 0..3 {
+        let response = client
+            .post(&url)
+            .body(json!({ "query": "query { __typename }" }).to_string())
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        // Draining the body (not just checking the status) is required for reqwest to
+        // consider this HTTP/1.1 connection idle and eligible for reuse by the next request.
+        response.bytes().await.unwrap();
+        assert_eq!(
+            status,
+            reqwest::StatusCode::OK,
+            "request {i} should succeed"
+        );
+    }
+    assert_eq!(
+        create_calls.load(Ordering::SeqCst),
+        1,
+        "multiple requests on the same connection should not trigger additional create() calls"
+    );
+
+    // A distinct client (own connection pool) forces a fresh TCP connection.
+    let client2 = reqwest::Client::builder()
+        .default_headers(default_headers)
+        .build()
+        .unwrap();
+    let response = client2
+        .post(&url)
+        .body(json!({ "query": "query { __typename }" }).to_string())
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    response.bytes().await.unwrap();
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(
+        create_calls.load(Ordering::SeqCst),
+        1,
+        "a second connection should reuse the same create() call — service is built once per reload"
+    );
+
+    server.shutdown().await.unwrap();
 }
 
 async fn init(
@@ -1552,11 +1679,11 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
     let mut web_endpoints = MultiMap::new();
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.clone().boxed()),
+        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.clone().boxed_clone()),
     );
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/an-other-custom-path".to_string(), endpoint.boxed()),
+        Endpoint::from_router_service("/an-other-custom-path".to_string(), endpoint.boxed_clone()),
     );
 
     let conf = Configuration::fake_builder().build().unwrap();
@@ -1660,11 +1787,11 @@ async fn it_refuses_to_bind_two_extra_endpoints_on_the_same_path() {
     let mut web_endpoints = MultiMap::new();
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.clone().boxed()),
+        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.clone().boxed_clone()),
     );
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.boxed()),
+        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.boxed_clone()),
     );
 
     let conf = Configuration::fake_builder().build().unwrap();
@@ -2202,7 +2329,7 @@ async fn http_compressed_service() -> impl Service<
                         graphql_response
                     })
                 })
-                .boxed()
+                .boxed_clone()
         })
         .build_http_service()
         .await
@@ -2252,7 +2379,7 @@ async fn http_deferred_service() -> impl Service<
                         graphql_response
                     })
                 })
-                .boxed()
+                .boxed_clone()
         })
         .build_http_service()
         .await
@@ -2409,7 +2536,7 @@ async fn test_defer_is_not_buffered_with_compression() {
                         graphql_response
                     })
                 })
-                .boxed()
+                .boxed_clone()
         })
         .subgraph_hook(move |name, service| {
             if name != "accounts" {
@@ -2427,7 +2554,7 @@ async fn test_defer_is_not_buffered_with_compression() {
                         future.await
                     }
                 })
-                .boxed()
+                .boxed_clone()
         })
         .build_http_service()
         .await
@@ -2692,7 +2819,7 @@ async fn test_sneaky_supergraph_and_health_check_configuration() {
     let mut web_endpoints = MultiMap::new();
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/health".to_string(), endpoint.boxed()),
+        Endpoint::from_router_service("/health".to_string(), endpoint.boxed_clone()),
     );
 
     let error = init_with_config(

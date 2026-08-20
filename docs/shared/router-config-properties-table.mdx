@@ -155,14 +155,14 @@ coprocessor:
   execution:
     request:
       body: false
-      context: false
+      context: none
       headers: false
       method: false
       query_plan: false
       sdl: false
     response:
       body: false
-      context: false
+      context: none
       headers: false
       sdl: false
       status_code: false
@@ -173,7 +173,7 @@ coprocessor:
         eq:
         - false
         - false
-      context: false
+      context: none
       headers: false
       method: false
       path: false
@@ -184,7 +184,7 @@ coprocessor:
         eq:
         - false
         - false
-      context: false
+      context: none
       headers: false
       sdl: false
       status_code: false
@@ -196,7 +196,7 @@ coprocessor:
           eq:
           - false
           - false
-        context: false
+        context: none
         headers: false
         method: false
         service_name: false
@@ -208,7 +208,7 @@ coprocessor:
           eq:
           - false
           - false
-        context: false
+        context: none
         headers: false
         service_name: false
         status_code: false
@@ -220,7 +220,7 @@ coprocessor:
         eq:
         - false
         - false
-      context: false
+      context: none
       headers: false
       method: false
       sdl: false
@@ -230,7 +230,7 @@ coprocessor:
         eq:
         - false
         - false
-      context: false
+      context: none
       headers: false
       sdl: false
       status_code: false
@@ -512,55 +512,6 @@ plugins: unknown_type_plugins
 
 ---
 
-### `preview_entity_cache`
-
-Configuration for entity caching
-
-- **Type:** `object`
-
-```yaml title="preview_entity_cache"
-preview_entity_cache:
-  enabled: false
-  expose_keys_in_context: false
-  invalidation:
-    concurrent_requests: 10
-    listen: example_listen
-    path: example_path
-    scan_count: 1000
-  metrics:
-    enabled: false
-    separate_per_type: false
-    ttl: 30s
-  subgraph:
-    all:
-      enabled: true
-      invalidation:
-        enabled: false
-        shared_key: ''
-      private_id: null
-      redis:
-        namespace: example_namespace
-        password: example_password
-        pool_size: 1
-        required_to_start: false
-        reset_ttl: true
-        timeout: null
-        tls:
-          certificate_authorities: null
-          client_authentication:
-            certificate_chain: example_certificate_chain
-            key: example_key
-        ttl: null
-        urls:
-        - http://example.com/urls_item
-        username: example_username
-      ttl: 30s
-    subgraphs: {}
-```
-
-
----
-
 ### `response_cache`
 
 Configuration for response caching
@@ -755,7 +706,6 @@ supergraph:
         username: example_username
     experimental_paths_limit: null
     experimental_plans_limit: null
-    experimental_reuse_query_plans: false
     warmed_up_queries: null
 ```
 
@@ -794,11 +744,10 @@ telemetry:
           send: true
         subgraphs: {}
     experimental_local_field_metrics: false
-    experimental_otlp_endpoint: https://usage-reporting.api.apollographql.com/
-    experimental_otlp_tracing_protocol: grpc
+    otlp_endpoint: https://usage-reporting.api.apollographql.com/
+    otlp_tracing_protocol: grpc
     field_level_instrumentation_sampler: 0.0
     metrics_reference_mode: extended
-    otlp_tracing_sampler: 0.0
     send_headers:
       only:
       - example_only_item
@@ -977,25 +926,10 @@ telemetry:
         aws_xray: false
         baggage: false
         datadog: false
-        jaeger: false
         request:
           format: hexadecimal
           header_name: example_header_name
         trace_context: false
-        zipkin: false
-      zipkin:
-        batch_processor:
-          max_concurrent_exports: 1
-          max_export_batch_size: 512
-          max_export_timeout:
-            nanos: 0
-            secs: 30
-          max_queue_size: 2048
-          scheduled_delay:
-            nanos: 0
-            secs: 5
-        enabled: false
-        endpoint: example_endpoint
   instrumentation:
     events:
       connector:
@@ -1076,7 +1010,7 @@ telemetry:
           level: info
     instruments:
       cache:
-        apollo.router.operations.entity.cache:
+        apollo.router.response.cache:
           attributes:
             graphql.type.name:
               alias: example_alias
@@ -1383,7 +1317,6 @@ telemetry:
           subgraph.name:
             alias: example_alias
       default_attribute_requirement_level: none
-      mode: deprecated
       router:
         attributes:
           baggage: null

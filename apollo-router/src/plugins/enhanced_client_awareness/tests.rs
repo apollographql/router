@@ -56,7 +56,7 @@ async fn given_client_library_metadata_adds_values_to_context() {
     EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
         .await
         .unwrap()
-        .supergraph_service(mock.boxed())
+        .supergraph_service(mock.boxed_clone())
         .oneshot(
             supergraph::Request::fake_builder()
                 .context(Context::default())
@@ -84,7 +84,7 @@ async fn without_client_library_metadata_does_not_add_values_to_context() {
     EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
         .await
         .unwrap()
-        .supergraph_service(mock.boxed())
+        .supergraph_service(mock.boxed_clone())
         .oneshot(
             supergraph::Request::fake_builder()
                 .context(Context::default())
@@ -105,7 +105,7 @@ async fn invalid_library_name_returns_bad_request() {
         EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
             .await
             .unwrap()
-            .supergraph_service(mock.boxed());
+            .supergraph_service(mock.boxed_clone());
 
     let mut clients_map = serde_json_bytes::map::Map::new();
     clients_map.insert(CLIENT_LIBRARY_NAME_KEY, r#"invalid";||"#.into());
@@ -132,7 +132,7 @@ async fn invalid_library_version_returns_bad_request() {
         EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
             .await
             .unwrap()
-            .supergraph_service(mock.boxed());
+            .supergraph_service(mock.boxed_clone());
 
     let mut clients_map = serde_json_bytes::map::Map::new();
     clients_map.insert(CLIENT_LIBRARY_VERSION_KEY, r#"invalid";||"#.into());

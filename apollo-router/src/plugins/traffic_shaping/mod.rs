@@ -278,9 +278,6 @@ pub(crate) struct Config {
     subgraphs: HashMap<String, SubgraphShaping>,
     /// Applied on specific subgraphs
     connector: ConnectorsShapingConfig,
-
-    /// DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
-    deduplicate_variables: Option<bool>,
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
@@ -326,10 +323,14 @@ impl PluginPrivate for TrafficShaping {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         // NB: consider each triplet (map_future_with_request_data, load_shed, layer) as a unit of
-        //  behavior
+        //  behavior.
+        // The outer buffer before the first load_shed() is required for correct cooperative-
+        // scheduling behaviour: without it, Tokio's budget can cause poll_ready to return
+        // Pending spuriously and the load_shed would emit false Overloaded errors.
         ServiceBuilder::new()
+            .buffered()
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
                 move |ctx, future| async {
@@ -401,10 +402,14 @@ impl PluginPrivate for TrafficShaping {
                     .map(|limit| RateLimitLayer::new(limit.capacity.into(), limit.interval))
             }))
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         // Either we have the subgraph config and we merge it with the all config, or we just have the all config or we have nothing.
         let all_config = self.config.all.as_ref();
         let subgraph_config = self.config.subgraphs.get(name);
@@ -428,7 +433,12 @@ impl PluginPrivate for TrafficShaping {
                         .clone()
                 });
 
+            // Outer buffer: required before load_shed() for correct cooperative-scheduling
+            // behaviour (see router_service above for the full explanation).
+            // Inner buffer (below): provides a backpressure surface so that RateLimitLayer
+            // can return poll_ready Pending and LoadShed will actually shed that load.
             ServiceBuilder::new()
+                .buffered()
                 .map_future_with_request_data(
                     |req: &subgraph::Request| (req.context.clone(), req.subgraph_name.clone()),
                     move |(ctx, subgraph_name), future| {
@@ -479,7 +489,7 @@ impl PluginPrivate for TrafficShaping {
                 })
                 .buffered()
                 .service(service)
-                .boxed()
+                .boxed_clone()
         } else {
             service
         }
@@ -487,9 +497,9 @@ impl PluginPrivate for TrafficShaping {
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         let all_config = self.config.connector.all.as_ref();
         let source_config = self.config.connector.sources.get(&source_name).cloned();
         let final_config = Self::merge_config(all_config, source_config.as_ref());
@@ -508,7 +518,11 @@ impl PluginPrivate for TrafficShaping {
                     .clone()
             });
 
+            // Outer buffer: required before load_shed() for correct cooperative-scheduling
+            // behaviour (see router_service above for the full explanation).
+            // Inner buffer (below): provides the backpressure surface for RateLimitLayer.
             ServiceBuilder::new()
+                .buffered()
                 .map_future_with_request_data(
                     |req: &Request| {
                         (
@@ -563,7 +577,7 @@ impl PluginPrivate for TrafficShaping {
                 })
                 .buffered()
                 .service(service)
-                .boxed()
+                .boxed_clone()
         } else {
             service
         }
@@ -665,6 +679,7 @@ mod test {
     use tokio::task::JoinSet;
     use tokio::time::sleep;
     use tower::Service;
+    use tower::ServiceExt as _;
 
     use super::*;
     use crate::Configuration;
@@ -674,15 +689,14 @@ mod test {
     use crate::plugin::test::MockConnector;
     use crate::plugin::test::MockSubgraph;
     use crate::query_planner::QueryPlannerService;
+    use crate::router_factory::RouterFactory;
     use crate::router_factory::create_plugins;
-    use crate::services::HasSchema;
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
     use crate::services::connector::request_service::Request as ConnectorRequest;
-    use crate::services::layers::persisted_queries::PersistedQueryLayer;
-    use crate::services::layers::query_analysis::QueryAnalysisLayer;
+    use crate::services::layers::persisted_queries::PersistedQueryExpander;
     use crate::services::router;
     use crate::services::router::service::RouterCreator;
     use crate::spec::Schema;
@@ -696,7 +710,7 @@ mod test {
     async fn execute_router_test(
         query: &str,
         body: &Bytes,
-        mut router_service: router::BoxService,
+        mut router_service: router::BoxCloneService,
     ) {
         let request = SupergraphRequest::fake_builder()
             .query(query.to_string())
@@ -723,7 +737,7 @@ mod test {
 
     async fn build_mock_router_with_variable_dedup_optimization(
         plugin: Box<dyn DynPlugin>,
-    ) -> router::BoxService {
+    ) -> router::BoxCloneService {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -762,8 +776,6 @@ mod test {
 
         let config: Configuration = serde_yaml::from_str(
             r#"
-        traffic_shaping:
-            deduplicate_variables: true
         supergraph:
             # TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
             generate_query_fragments: false
@@ -773,19 +785,23 @@ mod test {
 
         let config = Arc::new(config);
         let schema = Arc::new(Schema::parse(schema, &config).unwrap());
-        let planner = QueryPlannerService::new(schema.clone(), config.clone())
-            .await
-            .unwrap();
-        let subgraph_schemas = Arc::new(
-            planner
-                .subgraph_schemas()
-                .iter()
-                .map(|(k, v)| (k.clone(), v.schema.clone()))
-                .collect(),
-        );
 
-        let mut builder =
-            PluggableSupergraphServiceBuilder::new(planner).with_configuration(config.clone());
+        let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
+        let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
+        let query_planner_service =
+            QueryPlannerService::new(schema.clone(), config.clone(), qp_arc)
+                .unwrap()
+                .boxed_clone();
+
+        let query_parser_service =
+            crate::services::query_parsing::query_parsing_service(schema.clone(), config.clone());
+
+        let mut builder = PluggableSupergraphServiceBuilder::new(
+            query_planner_service,
+            schema.clone(),
+            subgraph_schemas.clone(),
+        )
+        .with_configuration(config.clone());
 
         let plugins = Arc::new(
             create_plugins(
@@ -803,22 +819,22 @@ mod test {
         builder = builder.with_plugins(plugins);
 
         let builder = builder
-            .with_subgraph_service("accounts", account_service.clone())
-            .with_subgraph_service("reviews", review_service.clone())
-            .with_subgraph_service("products", product_service.clone());
+            .with_subgraph_service("accounts", account_service.boxed_clone())
+            .with_subgraph_service("reviews", review_service.boxed_clone())
+            .with_subgraph_service("products", product_service.boxed_clone());
 
-        let supergraph_creator = builder.build().await.expect("should build");
+        let (supergraph_creator, _planner) = builder.build().await.expect("should build");
 
         RouterCreator::new(
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
-            Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
+            Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
-            Arc::new(Configuration::default()),
+            query_parser_service,
+            config,
         )
         .await
         .unwrap()
-        .make()
-        .boxed()
+        .create()
+        .boxed_clone()
     }
 
     async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
@@ -898,12 +914,9 @@ mod test {
 
     #[tokio::test]
     async fn it_returns_valid_response_for_deduplicated_variables() {
-        let config = serde_yaml::from_str::<serde_json::Value>(
-            r#"
-        deduplicate_variables: true
-        "#,
-        )
-        .unwrap();
+        // Variable deduplication is now unconditionally enabled, so an empty
+        // traffic shaping config is sufficient.
+        let config = serde_yaml::from_str::<serde_json::Value>("{}").unwrap();
         // Build a traffic shaping plugin
         let plugin = get_traffic_shaping_plugin(&config).await;
         let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
@@ -937,7 +950,7 @@ mod test {
         });
 
         let _response = plugin
-            .subgraph_service("test", test_service.boxed())
+            .subgraph_service("test", test_service.boxed_clone())
             .oneshot(request)
             .await
             .unwrap();
@@ -974,7 +987,7 @@ mod test {
 
         let _response = plugin
             .connector_request_service(
-                test_service.boxed(),
+                test_service.boxed_clone(),
                 "test_subgraph.test_sourcename".to_string(),
             )
             .oneshot(request)
@@ -1128,7 +1141,7 @@ mod test {
             graphql::Request::default() => graphql::Response::default()
         });
 
-        let mut svc = plugin.subgraph_service("test", test_service.boxed());
+        let mut svc = plugin.subgraph_service("test", test_service.boxed_clone());
 
         assert!(
             svc.ready()
@@ -1191,7 +1204,7 @@ mod test {
         });
 
         let mut svc = plugin.connector_request_service(
-            test_service.boxed(),
+            test_service.boxed_clone(),
             "test_subgraph.test_sourcename".to_string(),
         );
 
@@ -1266,7 +1279,7 @@ mod test {
             }
         });
 
-        let mut svc = plugin.router_service(mock.boxed());
+        let mut svc = plugin.router_service(mock.boxed_clone());
 
         let response: RouterResponse = svc
             .ready()
@@ -1328,7 +1341,7 @@ mod test {
                     .data(json!({ "test": 1234_u32 }))
                     .build()
             })
-            .boxed();
+            .boxed_clone();
 
         let mut rs = plugin.router_service(svc);
 
@@ -1665,7 +1678,7 @@ mod test {
                 sleep(Duration::from_millis(500)).await;
                 RouterResponse::fake_builder().build()
             })
-            .boxed();
+            .boxed_clone();
 
         let mut router_service = plugin.router_service(svc);
 

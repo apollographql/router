@@ -117,7 +117,7 @@ impl AWSSigV4Config {
                         &SdkConfig::builder()
                             .http_client(
                                 aws_smithy_http_client::Builder::new()
-                                    .tls_provider(Provider::Rustls(CryptoMode::Ring))
+                                    .tls_provider(Provider::Rustls(CryptoMode::AwsLc))
                                     .build_https(),
                             )
                             .sleep_impl(TokioSleep::new())
@@ -190,7 +190,7 @@ fn credentials_chain_builder() -> aws_config::default_provider::credentials::Bui
         ProviderConfig::default()
             .with_http_client(
                 aws_smithy_http_client::Builder::new()
-                    .tls_provider(Provider::Rustls(CryptoMode::Ring))
+                    .tls_provider(Provider::Rustls(CryptoMode::AwsLc))
                     .build_https(),
             )
             .with_sleep_impl(TokioSleep::new())
@@ -493,8 +493,8 @@ impl SubgraphAuth {
     pub(super) fn subgraph_service(
         &self,
         name: &str,
-        service: crate::services::subgraph::BoxService,
-    ) -> crate::services::subgraph::BoxService {
+        service: crate::services::subgraph::BoxCloneService,
+    ) -> crate::services::subgraph::BoxCloneService {
         if let Some(signing_params) = self.params_for_service(name) {
             ServiceBuilder::new()
                 .map_request(move |mut req: SubgraphRequest| {
@@ -504,7 +504,7 @@ impl SubgraphAuth {
                     req
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone()
         } else {
             service
         }
@@ -532,6 +532,7 @@ mod test {
     use http::header::HOST;
     use regex::Regex;
     use tower::Service;
+    use tower::ServiceExt as _;
 
     use super::*;
     use crate::Context;
@@ -672,7 +673,7 @@ mod test {
                 subgraphs: Default::default(),
             }),
         }
-        .subgraph_service("test_subgraph", mock.boxed());
+        .subgraph_service("test_subgraph", mock.boxed_clone());
 
         service.ready().await?.call(subgraph_request).await?;
         crate::plugin::test::await_mock_driver(driver).await;
@@ -740,7 +741,7 @@ mod test {
                 subgraphs: Default::default(),
             }),
         }
-        .subgraph_service("test_subgraph", mock.boxed());
+        .subgraph_service("test_subgraph", mock.boxed_clone());
 
         service.ready().await?.call(subgraph_request).await?;
         crate::plugin::test::await_mock_driver(driver).await;
@@ -792,7 +793,7 @@ mod test {
             });
 
             SubgraphAuth { signing_params }
-                .subgraph_service(name, mock.boxed())
+                .subgraph_service(name, mock.boxed_clone())
                 .ready()
                 .await?
                 .call(request)

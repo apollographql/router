@@ -28,7 +28,7 @@ async fn test_diagnostics() {
         supergraph_schema: Arc::new(apollo_compiler::validation::Valid::assume_valid(
             apollo_compiler::Schema::new(),
         )),
-        subgraph_schemas: Arc::new(std::collections::HashMap::new()),
+        subgraph_schemas: Default::default(),
         launch_id: None,
         notify: crate::Notify::for_tests(),
         license: Arc::new(crate::uplink::license_enforcement::LicenseState::Unlicensed),
@@ -64,7 +64,7 @@ async fn test_diagnostics_disabled() {
         supergraph_schema: Arc::new(apollo_compiler::validation::Valid::assume_valid(
             apollo_compiler::Schema::new(),
         )),
-        subgraph_schemas: Arc::new(std::collections::HashMap::new()),
+        subgraph_schemas: Default::default(),
         launch_id: None,
         notify: crate::Notify::for_tests(),
         license: Arc::new(crate::uplink::license_enforcement::LicenseState::Unlicensed),

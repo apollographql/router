@@ -5,6 +5,7 @@ use std::task::Context;
 use std::task::Poll;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::header::ACCEPT;
@@ -450,7 +451,11 @@ impl PluginPrivate for Headers {
         })
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         // Get operations for this subgraph (fallback to global)
         let operations = self
             .subgraph_operations
@@ -465,14 +470,14 @@ impl PluginPrivate for Headers {
         ServiceBuilder::new()
             .layer(HeadersLayer::new(operations))
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         let operations = self
             .connector_source_operations
             .get(&source_name)
@@ -482,10 +487,10 @@ impl PluginPrivate for Headers {
         ServiceBuilder::new()
             .layer(HeadersLayer::new(operations))
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         let masking_rules_map = self.masking_rules_map.clone();
 
         ServiceBuilder::new()
@@ -496,7 +501,7 @@ impl PluginPrivate for Headers {
                 req
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -521,6 +526,7 @@ impl<S> Layer<S> for HeadersLayer {
     }
 }
 
+#[derive(Clone)]
 struct HeadersService<S> {
     inner: S,
     operations: Arc<Vec<Operation>>,
@@ -550,42 +556,56 @@ static RESERVED_HEADERS: [HeaderName; 14] = [
 
 impl<S> Service<SubgraphRequest> for HeadersService<S>
 where
-    S: Service<SubgraphRequest>,
+    S: Service<SubgraphRequest> + Clone + Send + 'static,
+    S::Future: Send + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = S::Future;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
-        self.modify_subgraph_request(&mut req);
-        self.inner.call(req)
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
+        let operations = self.operations.clone();
+
+        Box::pin(async move {
+            Self::modify_subgraph_request(&operations, &mut req);
+            inner.call(req).await
+        })
     }
 }
 
 impl<S> Service<connector::request_service::Request> for HeadersService<S>
 where
-    S: Service<connector::request_service::Request>,
+    S: Service<connector::request_service::Request> + Clone + Send + 'static,
+    S::Future: Send + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = S::Future;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, mut req: connector::request_service::Request) -> Self::Future {
-        self.modify_connector_request(&mut req);
-        self.inner.call(req)
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
+        let operations = self.operations.clone();
+
+        Box::pin(async move {
+            Self::modify_connector_request(&operations, &mut req);
+            inner.call(req).await
+        })
     }
 }
 
 impl<S> HeadersService<S> {
-    fn modify_subgraph_request(&self, req: &mut SubgraphRequest) {
+    fn modify_subgraph_request(operations: &Arc<Vec<Operation>>, req: &mut SubgraphRequest) {
         let mut already_propagated: HashSet<String> = HashSet::new();
 
         let body_to_value = serde_json_bytes::value::to_value(req.supergraph_request.body()).ok();
@@ -593,7 +613,7 @@ impl<S> HeadersService<S> {
         let context = &req.context;
         let headers_mut = req.subgraph_request.headers_mut();
 
-        for operation in &*self.operations {
+        for operation in &**operations {
             operation.process_header_rules(
                 &mut already_propagated,
                 supergraph_headers,
@@ -605,7 +625,10 @@ impl<S> HeadersService<S> {
         }
     }
 
-    fn modify_connector_request(&self, req: &mut connector::request_service::Request) {
+    fn modify_connector_request(
+        operations: &Arc<Vec<Operation>>,
+        req: &mut connector::request_service::Request,
+    ) {
         let mut already_propagated: HashSet<String> = HashSet::new();
 
         let TransportRequest::Http(ref mut http_request) = req.transport_request else {
@@ -618,7 +641,7 @@ impl<S> HeadersService<S> {
         let existing_headers = http_request.inner.headers().clone();
         let headers_mut = http_request.inner.headers_mut();
 
-        for operation in &*self.operations {
+        for operation in &**operations {
             operation.process_header_rules(
                 &mut already_propagated,
                 supergraph_headers,
@@ -834,6 +857,7 @@ mod test {
     use serde_json_bytes::json;
     use subgraph::SubgraphRequestId;
     use tower::BoxError;
+    use tower::ServiceExt as _;
 
     use super::*;
     use crate::Context;
@@ -1872,7 +1896,7 @@ mod test {
             executable_document: None,
             id: SubgraphRequestId(String::new()),
         };
-        service.modify_subgraph_request(&mut request);
+        HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, &mut request);
         let headers = request
             .subgraph_request
             .headers()
@@ -1944,7 +1968,7 @@ mod test {
             executable_document: None,
             id: SubgraphRequestId(String::new()),
         };
-        service.modify_subgraph_request(&mut request);
+        HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, &mut request);
         let headers = request
             .subgraph_request
             .headers()

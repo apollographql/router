@@ -31,7 +31,6 @@ use crate::configuration::expansion;
 use crate::context::PERSISTED_QUERY_ID;
 use crate::http_ext;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
-use crate::plugins::cache::entity::CONTEXT_CACHE_KEY;
 use crate::plugins::demand_control::COST_ACTUAL_KEY;
 use crate::plugins::demand_control::COST_BY_SUBGRAPH_ACTUAL_KEY;
 use crate::plugins::demand_control::COST_BY_SUBGRAPH_ESTIMATED_KEY;
@@ -1295,6 +1294,12 @@ mod router_plugin {
             .map(|x| x.as_millis() as i64)
     }
 
+    // Test-only helper used to prove which thread a script runs on. Not part of the
+    // documented Rhai API.
+    pub(crate) fn current_thread_id() -> String {
+        format!("{:?}", std::thread::current().id())
+    }
+
     // Add query plan getter to execution request
     #[rhai_fn(get = "query_plan")]
     pub(crate) fn execution_request_query_plan_get(
@@ -1473,7 +1478,6 @@ impl Rhai {
             "APOLLO_SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS".into(),
             SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS.to_string().into(),
         );
-        global_variables.insert("APOLLO_ENTITY_CACHE_KEY".into(), CONTEXT_CACHE_KEY.into());
         global_variables.insert(
             "APOLLO_RESPONSE_CACHE_KEY".into(),
             response_cache::plugin::CONTEXT_CACHE_KEY.into(),

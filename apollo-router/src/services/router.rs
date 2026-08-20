@@ -40,20 +40,19 @@ use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExt
 use crate::services::TryIntoHeaderName;
 use crate::services::TryIntoHeaderValue;
 
-pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
 
 pub type Body = RouterBody;
 pub type Error = hyper::Error;
 
-mod batching;
 pub mod body;
+pub(crate) mod parse_query;
 pub(crate) mod pipeline_handle;
 pub(crate) mod service;
 #[cfg(test)]
 mod tests;
-mod tower_compat;
+pub(crate) mod tower_compat;
 
 assert_impl_all!(Request: Send);
 /// Represents the router processing step of the processing pipeline.

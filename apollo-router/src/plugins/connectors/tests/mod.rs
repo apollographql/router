@@ -32,9 +32,9 @@ use crate::metrics::FutureMetricsExt;
 use crate::plugins::connectors::tests::req_asserts::Plan;
 use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
+use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
-use crate::services::new_service::ServiceFactory;
 use crate::services::router::Request;
 use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
@@ -568,9 +568,7 @@ async fn basic_connection_errors() {
     // Different OSes have different codes at the end of the message so we have to assert on the parts separately
     let msg = err.get("message").unwrap().as_str().unwrap();
     assert!(
-        msg.starts_with(
-            "Connector error: HTTP fetch failed from 'connectors.json': tcp connect error"
-        ),
+        msg.starts_with("Connector error: HTTP fetch failed: tcp connect error"),
         "got message: {msg}"
     );
     assert_eq!(err.get("path").unwrap(), &serde_json::json!(["users"]));
@@ -1868,7 +1866,7 @@ async fn test_sources_in_context() {
             "url": format!("{}/coprocessor", mock_server.uri()),
             "execution": {
               "request": {
-                "context": true
+                "context": "all"
               }
             }
           }
@@ -1949,7 +1947,7 @@ async fn test_variables() {
             "url": format!("{}/coprocessor", mock_server.uri()),
             "supergraph": {
               "request": {
-                "context": true
+                "context": "all"
               }
             }
           }

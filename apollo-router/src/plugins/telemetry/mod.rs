@@ -5,9 +5,7 @@ use std::fmt;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::LazyLock;
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -63,7 +61,6 @@ use uuid::Uuid;
 use self::apollo::ForwardValues;
 use self::apollo::LicensedOperationCountByType;
 use self::apollo::OperationSubType;
-use self::apollo::SingleReport;
 use self::apollo_exporter::Sender;
 use self::apollo_exporter::proto;
 use self::config::Conf;
@@ -75,7 +72,6 @@ use self::config_new::subgraph::events::SubgraphEvents;
 use self::config_new::subgraph::instruments::SubgraphInstruments;
 use self::config_new::supergraph::events::SupergraphEvents;
 use self::metrics::apollo::studio::SingleTypeStat;
-pub(crate) use self::span_factory::SpanMode;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
@@ -86,14 +82,13 @@ use crate::apollo_studio_interop::ReferencedEnums;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
-use crate::context::deprecated::DEPRECATED_CLIENT_NAME;
-use crate::context::deprecated::DEPRECATED_CLIENT_VERSION;
 use crate::graphql::ResponseVisitor;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::instrument::InstrumentLayer;
 use crate::metrics::meter_provider;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::plugins::limits::operation_limits::OperationLimits;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
@@ -114,7 +109,6 @@ use crate::plugins::telemetry::consts::OTEL_NAME;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
-use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::error_counter::count_execution_errors;
@@ -147,7 +141,6 @@ use crate::services::layers::persisted_queries::RequestPersistedQueryId;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::spec::operation_limits::OperationLimits;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
@@ -165,10 +158,11 @@ pub(crate) mod metrics;
 /// Opentelemetry utils
 pub(crate) mod otel;
 mod otlp;
+pub(crate) mod pipeline_bypass;
 pub(crate) mod reload;
 pub(crate) mod resource;
 pub(crate) mod span_ext;
-mod span_factory;
+pub(crate) mod span_factory;
 pub(crate) mod tracing;
 pub(crate) mod utils;
 
@@ -184,36 +178,8 @@ const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 static DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME: HeaderName =
     HeaderName::from_static(DEFAULT_EXPOSE_TRACE_ID_HEADER);
-static CLIENT_NAME_DEPRECATED_WARNED: AtomicBool = AtomicBool::new(false);
-static CLIENT_VERSION_DEPRECATED_WARNED: AtomicBool = AtomicBool::new(false);
 static FTV1_HEADER_NAME: HeaderName = HeaderName::from_static("apollo-federation-include-trace");
 static FTV1_HEADER_VALUE: HeaderValue = HeaderValue::from_static("ftv1");
-
-/// Look up `key` from context, falling back to `deprecated_key` if absent. Emits a
-/// `tracing::warn!` the first time the fallback is used (guarded by `warned`).
-fn get_client_attribute_from_context(
-    ctx: &Context,
-    key: &'static str,
-    deprecated_key: &'static str,
-    warned: &'static AtomicBool,
-) -> Option<String> {
-    if let Some(v) = ctx.get::<&str, String>(key).ok().flatten() {
-        return Some(v);
-    }
-    let v = ctx.get::<&str, String>(deprecated_key).ok().flatten();
-    if v.is_some()
-        && warned
-            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-            .is_ok()
-    {
-        ::tracing::warn!(
-            "`{deprecated_key}` context key is deprecated; \
-             use `{key}` instead. \
-             The fallback will be removed in version 3.0."
-        );
-    }
-    v
-}
 
 pub(crate) const APOLLO_PRIVATE_QUERY_ALIASES: Key =
     Key::from_static_str("apollo_private.query.aliases");
@@ -311,7 +277,6 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
 #[derive(Clone, Debug)]
 struct EnabledFeatures {
     distributed_apq_cache: bool,
-    entity_cache: bool,
     response_cache: bool,
 }
 
@@ -320,7 +285,6 @@ impl EnabledFeatures {
         // Map enabled features to their names for usage reports
         [
             ("distributed_apq_cache", self.distributed_apq_cache),
-            ("entity_cache", self.entity_cache),
             ("response_cache", self.response_cache),
         ]
         .iter()
@@ -365,12 +329,6 @@ impl PluginPrivate for Telemetry {
         let (activation, custom_endpoints, apollo_metrics_sender) =
             reload::prepare(&init.previous_config, &config)?;
 
-        if config.instrumentation.spans.mode == SpanMode::Deprecated {
-            ::tracing::warn!(
-                "telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether"
-            );
-        }
-
         // Set up feature usage list
         let full_config = init
             .full_config
@@ -393,15 +351,11 @@ impl PluginPrivate for Telemetry {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        let config = self.config.clone();
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         let supergraph_schema_id = self.supergraph_schema_id.clone();
         let config_later = self.config.clone();
         let config_request = self.config.clone();
         let config_checkpoint = self.config.clone();
-        let span_mode = config.instrumentation.spans.mode;
-        let use_legacy_request_span =
-            matches!(config.instrumentation.spans.mode, SpanMode::Deprecated);
         let enabled_features = self.enabled_features.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
         let metrics_sender = self.apollo_metrics_sender.clone();
@@ -430,8 +384,7 @@ impl PluginPrivate for Telemetry {
                 // The current span *should* be the request span as we are outside the instrument block.
                 let span = Span::current();
                 if let Some(span_name) = span.metadata().map(|metadata| metadata.name())
-                    && ((use_legacy_request_span && span_name == REQUEST_SPAN_NAME)
-                        || (!use_legacy_request_span && span_name == ROUTER_SPAN_NAME))
+                    && span_name == ROUTER_SPAN_NAME
                 {
                     //https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/
                     let operation_kind = response.context.get::<_, String>(OPERATION_KIND);
@@ -459,57 +412,56 @@ impl PluginPrivate for Telemetry {
                 response
             })
             .layer(InstrumentLayer::new(move |request: &router::Request| {
-                if use_legacy_request_span {
-                    span_mode.create_router(&request.router_request)
+                // When running through axum, the TraceLayer holds a "router" span guard
+                // across the entire synchronous call chain, so Span::current() already
+                // returns it here — reuse it rather than creating a duplicate SERVER span.
+                // In tests that bypass axum, there is no active span, so we create one to
+                // match the behavior users actually see.
+                let current = Span::current();
+                if current
+                    .metadata()
+                    .is_some_and(|m| m.name() == ROUTER_SPAN_NAME)
+                {
+                    current
                 } else {
-                    // When running through axum, the TraceLayer holds a "router" span guard
-                    // across the entire synchronous call chain, so Span::current() already
-                    // returns it here — reuse it rather than creating a duplicate SERVER span.
-                    // In tests that bypass axum, there is no active span, so we create one to
-                    // match the behavior users actually see.
-                    let current = Span::current();
-                    if current
-                        .metadata()
-                        .is_some_and(|m| m.name() == ROUTER_SPAN_NAME)
-                    {
-                        current
-                    } else {
-                        span_mode.create_router(&request.router_request)
-                    }
+                    span_factory::create_router(&request.router_request)
                 }
             }))
-            .checkpoint(move |req: router::Request| {
-                let library_name_valid = req
-                    .router_request
-                    .headers()
-                    .get(&config_checkpoint.apollo.library_name_header)
-                    .and_then(|v| v.to_str().ok())
-                    .is_none_or(is_valid_client_library_value);
-                let library_version_valid = req
-                    .router_request
-                    .headers()
-                    .get(&config_checkpoint.apollo.library_version_header)
-                    .and_then(|v| v.to_str().ok())
-                    .is_none_or(is_valid_client_library_value);
-                if !library_name_valid || !library_version_valid {
-                    if !library_name_valid {
-                        ::tracing::warn!(
-                            "Rejecting request: invalid client library name header value"
-                        );
+            .checkpoint_async(move |req: router::Request| {
+                let config_checkpoint = config_checkpoint.clone();
+                async move {
+                    let library_name_valid = req
+                        .router_request
+                        .headers()
+                        .get(&config_checkpoint.apollo.library_name_header)
+                        .and_then(|v| v.to_str().ok())
+                        .is_none_or(is_valid_client_library_value);
+                    let library_version_valid = req
+                        .router_request
+                        .headers()
+                        .get(&config_checkpoint.apollo.library_version_header)
+                        .and_then(|v| v.to_str().ok())
+                        .is_none_or(is_valid_client_library_value);
+                    if !library_name_valid || !library_version_valid {
+                        if !library_name_valid {
+                            ::tracing::warn!(
+                                "Rejecting request: invalid client library name header value"
+                            );
+                        }
+                        if !library_version_valid {
+                            ::tracing::warn!(
+                                "Rejecting request: invalid client library version header value"
+                            );
+                        }
+                        Ok(ControlFlow::Break(
+                            router::Response::error_builder()
+                                .status_code(StatusCode::BAD_REQUEST)
+                                .context(req.context)
+                                .build()?,
+                        ))
+                    } else {
+                        Ok(ControlFlow::Continue(req))
                     }
-                    if !library_version_valid {
-                        ::tracing::warn!(
-                            "Rejecting request: invalid client library version header value"
-                        );
-                    }
-                    Ok(ControlFlow::Break(
-                        router::Response::error_builder()
-                            .status_code(StatusCode::BAD_REQUEST)
-                            .context(req.context)
-                            .build()?,
-                    ))
-                } else {
-                    Ok(ControlFlow::Continue(req))
                 }
             })
             .map_future_with_request_data(
@@ -597,7 +549,7 @@ impl PluginPrivate for Telemetry {
                         request.context.clone(),
                     )
                 },
-                move |(mut custom_attributes, custom_instruments, mut custom_events, ctx): (
+                move |(custom_attributes, custom_instruments, mut custom_events, ctx): (
                     Vec<KeyValue>,
                     RouterInstruments,
                     RouterEvents,
@@ -614,32 +566,6 @@ impl PluginPrivate for Telemetry {
                     Self::plugin_metrics(&config);
 
                     async move {
-                        // NB: client name and version must be picked up here, rather than in the
-                        //  `req_fn` of this `map_future_with_request_data` call, to allow plugins
-                        //  at the router service to modify the name and version.
-                        let client_name = get_client_attribute_from_context(
-                            &ctx,
-                            CLIENT_NAME,
-                            DEPRECATED_CLIENT_NAME,
-                            &CLIENT_NAME_DEPRECATED_WARNED,
-                        );
-                        let client_version = get_client_attribute_from_context(
-                            &ctx,
-                            CLIENT_VERSION,
-                            DEPRECATED_CLIENT_VERSION,
-                            &CLIENT_VERSION_DEPRECATED_WARNED,
-                        );
-
-                        if let Some(key) = client_name_key {
-                            custom_attributes
-                                .push(KeyValue::new(key, client_name.unwrap_or_default()));
-                        }
-
-                        if let Some(key) = client_version_key {
-                            custom_attributes
-                                .push(KeyValue::new(key, client_version.unwrap_or_default()));
-                        }
-
                         if let Some(http_server_response_body_size) =
                             &custom_instruments.http_server_response_body_size
                         {
@@ -663,6 +589,34 @@ impl PluginPrivate for Telemetry {
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);
                         let response: Result<router::Response, BoxError> = fut.await;
+
+                        // Client name and version must be picked up after awaiting
+                        // the inner service future, because router service plugins
+                        // (e.g. rhai) may modify these values in the shared context
+                        // during request processing. With buffered service layers,
+                        // that processing is deferred until the future is polled.
+                        let get_from_context =
+                            |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
+                        let client_name = get_from_context(&ctx, CLIENT_NAME);
+                        let client_version = get_from_context(&ctx, CLIENT_VERSION);
+
+                        if let Some(key) = client_name_key {
+                            span.set_span_dyn_attribute(
+                                key,
+                                opentelemetry::Value::String(
+                                    client_name.unwrap_or_default().into(),
+                                ),
+                            );
+                        }
+
+                        if let Some(key) = client_version_key {
+                            span.set_span_dyn_attribute(
+                                key,
+                                opentelemetry::Value::String(
+                                    client_version.unwrap_or_default().into(),
+                                ),
+                            );
+                        }
 
                         span.record(
                             APOLLO_PRIVATE_DURATION_NS,
@@ -759,12 +713,14 @@ impl PluginPrivate for Telemetry {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         let metrics_sender = self.apollo_metrics_sender.clone();
-        let span_mode = self.config.instrumentation.spans.mode;
         let config = self.config.clone();
         let config_instrument = self.config.clone();
         let config_map_res_first = config.clone();
@@ -783,7 +739,7 @@ impl PluginPrivate for Telemetry {
             .clone();
         ServiceBuilder::new()
             .instrument(move |supergraph_req: &SupergraphRequest| {
-                span_mode.create_supergraph(
+                span_factory::create_supergraph(
                     &config_instrument.apollo,
                     supergraph_req,
                     field_level_instrumentation_ratio,
@@ -950,10 +906,10 @@ impl PluginPrivate for Telemetry {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         let config = self.config.clone();
         let config_map_res_first = config.clone();
 
@@ -984,12 +940,15 @@ impl PluginPrivate for Telemetry {
                 }
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         let config = self.config.clone();
-        let span_mode = self.config.instrumentation.spans.mode;
         let conf = self.config.clone();
         let subgraph_name = ByteString::from(name);
         let name = name.to_owned();
@@ -1009,7 +968,9 @@ impl PluginPrivate for Telemetry {
             .cache_custom_instruments
             .clone();
         ServiceBuilder::new()
-            .instrument(move |req: &SubgraphRequest| span_mode.create_subgraph(name.as_str(), req))
+            .instrument(move |req: &SubgraphRequest| {
+                span_factory::create_subgraph(name.as_str(), req)
+            })
             .map_request(move |req: SubgraphRequest| request_ftv1(req))
             .map_response(move |resp| store_ftv1(&subgraph_name, resp))
             .map_future_with_request_data(
@@ -1119,17 +1080,16 @@ impl PluginPrivate for Telemetry {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn connector_request_service(
         &self,
-        service: connector::request_service::BoxService,
+        service: connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> connector::request_service::BoxService {
+    ) -> connector::request_service::BoxCloneService {
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();
-        let span_mode = self.config.instrumentation.spans.mode;
         let static_connector_instruments = self
             .builtin_instruments
             .read()
@@ -1142,7 +1102,7 @@ impl PluginPrivate for Telemetry {
             .clone();
         ServiceBuilder::new()
             .instrument(move |_req: &connector::request_service::Request| {
-                span_mode.create_connector(source_name.as_str())
+                span_factory::create_connector(source_name.as_str())
             })
             .map_future_with_request_data(
                 move |request: &connector::request_service::Request| {
@@ -1232,14 +1192,14 @@ impl PluginPrivate for Telemetry {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn http_client_service(
         &self,
         _subgraph_name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService {
+        service: crate::services::http::BoxCloneService,
+    ) -> crate::services::http::BoxCloneService {
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();
 
@@ -1316,7 +1276,7 @@ impl PluginPrivate for Telemetry {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
@@ -1739,7 +1699,7 @@ impl Telemetry {
                 ..Default::default()
             }
         };
-        sender.send(SingleReport::Stats(metrics));
+        sender.send(metrics);
     }
 
     /// Returns `[(subgraph_name, trace), …]`
@@ -1881,9 +1841,6 @@ impl Telemetry {
         if config.exporters.tracing.datadog.is_enabled() {
             attributes.push(KeyValue::new("telemetry.tracing.datadog", true));
         }
-        if config.exporters.tracing.zipkin.is_enabled() {
-            attributes.push(KeyValue::new("telemetry.tracing.zipkin", true));
-        }
 
         if !attributes.is_empty() {
             u64_counter!(
@@ -1905,12 +1862,6 @@ impl Telemetry {
                     full_config["apq"]["router"]["cache"]["redis"].is_object();
                 enabled && redis_cache_config_set
             },
-            // Entity cache's top-level enabled flag defaults to false. If the top-level flag is
-            // enabled, the feature is considered enabled regardless of the subgraph-level enabled
-            // settings.
-            entity_cache: full_config["preview_entity_cache"]["enabled"]
-                .as_bool()
-                .unwrap_or(false),
             // Response cache's top-level enabled flag defaults to false. If the top-level flag is
             // enabled, the feature is considered enabled regardless of the subgraph-level enabled
             // settings.
@@ -2288,7 +2239,7 @@ mod tests {
                     .unwrap(),
             );
         });
-        let mut supergraph_service = plugin.supergraph_service(mock_service.boxed());
+        let mut supergraph_service = plugin.supergraph_service(mock_service.boxed_clone());
         let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
         let _router_response = supergraph_service
             .ready()
@@ -2350,10 +2301,6 @@ mod tests {
             features.distributed_apq_cache,
             "Telemetry plugin should consider apq feature enabled when explicitly enabled"
         );
-        assert!(
-            features.entity_cache,
-            "Telemetry plugin should consider entity cache feature enabled when explicitly enabled"
-        );
 
         // Explicitly enabled
         let plugin = create_plugin_with_config(include_str!(
@@ -2383,10 +2330,6 @@ mod tests {
             "Telemetry plugin should consider apq feature disabled when explicitly disabled"
         );
         assert!(
-            !features.entity_cache,
-            "Telemetry plugin should consider entity cache feature disabled when explicitly disabled"
-        );
-        assert!(
             !features.response_cache,
             "Telemetry plugin should consider response cache feature disabled when explicitly disabled"
         );
@@ -2401,10 +2344,6 @@ mod tests {
         assert!(
             !features.distributed_apq_cache,
             "Telemetry plugin should consider apq feature disabled when all values are defaulted"
-        );
-        assert!(
-            !features.entity_cache,
-            "Telemetry plugin should consider entity cache feature disabled when all values are defaulted"
         );
         assert!(
             !features.response_cache,
@@ -2492,7 +2431,7 @@ mod tests {
                 );
             });
             let mut bad_request_supergraph_service =
-                plugin.supergraph_service(mock_bad_request_service.boxed());
+                plugin.supergraph_service(mock_bad_request_service.boxed_clone());
             let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
             let _router_response = bad_request_supergraph_service
                 .ready()
@@ -2543,7 +2482,7 @@ mod tests {
                 }
             });
             let mut bad_request_router_service =
-                plugin.router_service(mock_bad_request_service.boxed());
+                plugin.router_service(mock_bad_request_service.boxed_clone());
             let router_req = RouterRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2625,7 +2564,7 @@ mod tests {
                 }
             });
             let mut bad_request_router_service =
-                plugin.router_service(mock_bad_request_service.boxed());
+                plugin.router_service(mock_bad_request_service.boxed_clone());
             let router_req = RouterRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2718,7 +2657,7 @@ mod tests {
                 }
             });
             let mut bad_request_supergraph_service =
-                plugin.supergraph_service(mock_bad_request_service.boxed());
+                plugin.supergraph_service(mock_bad_request_service.boxed_clone());
             let supergraph_req = SupergraphRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2839,7 +2778,7 @@ mod tests {
                 }
             });
             let mut bad_request_subgraph_service =
-                plugin.subgraph_service("test", mock_bad_request_service.boxed());
+                plugin.subgraph_service("test", mock_bad_request_service.boxed_clone());
             let sub_req = http::Request::builder()
                 .method("POST")
                 .uri("http://test")
@@ -2947,7 +2886,7 @@ mod tests {
                 }
             });
             let mut bad_request_subgraph_service =
-                plugin.subgraph_service("test", mock_bad_request_service.boxed());
+                plugin.subgraph_service("test", mock_bad_request_service.boxed_clone());
             let sub_req = http::Request::builder()
                 .method("POST")
                 .uri("http://test")
@@ -3053,7 +2992,7 @@ mod tests {
             }
         });
         let mut request_supergraph_service =
-            plugin.supergraph_service(mock_request_service.boxed());
+            plugin.supergraph_service(mock_request_service.boxed_clone());
 
         for _ in 0..10 {
             let supergraph_req = SupergraphRequest::fake_builder()
@@ -3118,7 +3057,7 @@ mod tests {
             });
 
             let mut subgraph_service =
-                plugin.subgraph_service("my_subgraph_name", mock_subgraph_service.boxed());
+                plugin.subgraph_service("my_subgraph_name", mock_subgraph_service.boxed_clone());
             let subgraph_req = SubgraphRequest::fake_builder()
                 .subgraph_request(
                     http_ext::Request::fake_builder()
@@ -3177,7 +3116,7 @@ mod tests {
 
             let mut subgraph_service = plugin.subgraph_service(
                 "my_subgraph_name_error",
-                mock_subgraph_service_in_error.boxed(),
+                mock_subgraph_service_in_error.boxed_clone(),
             );
 
             let subgraph_req = SubgraphRequest::fake_builder()
@@ -3205,8 +3144,7 @@ mod tests {
             assert_histogram_count!(
                 "http.client.request.duration",
                 1,
-                "message" =
-                    "HTTP fetch failed from 'my_subgraph_name_error': cannot contact the subgraph",
+                "message" = "HTTP fetch failed: cannot contact the subgraph",
                 "subgraph" = "my_subgraph_name_error",
                 "query_from_request" = "query { test }"
             );
@@ -3581,7 +3519,7 @@ mod tests {
             );
         });
 
-        let mut service = plugin.supergraph_service(mock_service.boxed());
+        let mut service = plugin.supergraph_service(mock_service.boxed_clone());
         let router_req = SupergraphRequest::fake_builder().build().unwrap();
         let _router_response = service
             .ready()
@@ -3667,6 +3605,97 @@ mod tests {
                 10.0,
                 "cost.result" = "COST_ESTIMATED_TOO_EXPENSIVE"
             );
+        }
+        .with_metrics()
+        .await;
+    }
+}
+
+#[cfg(test)]
+mod licensed_operation_count_tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use crate::Context;
+    use crate::apollo_studio_interop::UsageReporting;
+    use crate::apollo_studio_interop::UsageReportingOperationDetails;
+    use crate::metrics::FutureMetricsExt as _;
+    use crate::plugins::telemetry::EnabledFeatures;
+    use crate::plugins::telemetry::Telemetry;
+    use crate::plugins::telemetry::apollo_exporter::Sender;
+    use crate::query_planner::OperationKind;
+
+    /// Drives `update_apollo_metrics` over a context and returns the licensed operation
+    /// count Studio would be billed for.
+    async fn licensed_operation_count_for(context: Context) -> u64 {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        Telemetry::update_apollo_metrics(
+            &context,
+            0.0,
+            Sender::Apollo(tx),
+            false,
+            Duration::from_millis(1),
+            OperationKind::Query,
+            None,
+            HashMap::new(),
+            EnabledFeatures {
+                distributed_apq_cache: false,
+                response_cache: false,
+            },
+        );
+
+        rx.recv()
+            .await
+            .expect("update_apollo_metrics must send a stats report")
+            .licensed_operation_count_by_type
+            .map(|by_type| by_type.licensed_operation_count)
+            .unwrap_or(0)
+    }
+
+    /// A context holding no `UsageReporting` bills one licensed operation. Billing does
+    /// not depend on the operation reaching execution or reporting anything about
+    /// itself.
+    #[tokio::test]
+    async fn missing_usage_reporting_is_billed_as_one_operation() {
+        async {
+            assert_eq!(licensed_operation_count_for(Context::new()).await, 1);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// `UsageReporting::Error` bills nothing: it is the one variant that zeroes the
+    /// licensed operation count, so an operation reported with it drops off the bill.
+    #[tokio::test]
+    async fn usage_reporting_error_is_not_billed() {
+        async {
+            let context = Context::new();
+            context.extensions().with_lock(|lock| {
+                lock.insert::<Arc<UsageReporting>>(Arc::new(UsageReporting::Error(
+                    "some error key".to_string(),
+                )))
+            });
+
+            assert_eq!(licensed_operation_count_for(context).await, 0);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// `UsageReporting::Operation` bills one licensed operation, the same as a context
+    /// holding no reporting at all: attribution does not change what an operation costs.
+    #[tokio::test]
+    async fn operation_details_are_billed_as_one_operation() {
+        async {
+            let context = Context::new();
+            context.extensions().with_lock(|lock| {
+                lock.insert::<Arc<UsageReporting>>(Arc::new(UsageReporting::Operation(
+                    UsageReportingOperationDetails::default(),
+                )))
+            });
+
+            assert_eq!(licensed_operation_count_for(context).await, 1);
         }
         .with_metrics()
         .await;

@@ -311,21 +311,6 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.entity_cache,
-            "$.preview_entity_cache",
-            opt.enabled,
-            "$[?(@.enabled)]",
-            opt.subgraph.enabled,
-            "$[?(@.subgraph.all.enabled)]",
-            opt.subgraph.enabled,
-            "$[?(@.subgraph.subgraphs..enabled)]",
-            opt.subgraph.ttl,
-            "$[?(@.subgraph.all.ttl || @.subgraph.subgraphs..ttl)]",
-            opt.subgraph.invalidation.enabled,
-            "$[?(@.subgraph.all.invalidation.enabled || @.subgraph.subgraphs..invalidation.enabled)]"
-        );
-
-        populate_config_instrument!(
             apollo.router.config.response_cache,
             "$.response_cache",
             opt.enabled,
@@ -354,8 +339,6 @@ impl InstrumentData {
             "$..tracing.otlp[?(@.enabled==true)]",
             opt.tracing.datadog,
             "$..tracing.datadog[?(@.enabled==true)]",
-            opt.tracing.zipkin,
-            "$..tracing.zipkin[?(@.enabled==true)]",
             opt.events,
             "$..events",
             opt.events.router,
@@ -382,8 +365,6 @@ impl InstrumentData {
             "$..instruments.default_attribute_requirement_level",
             opt.spans,
             "$..spans",
-            opt.spans.mode,
-            "$..spans.mode",
             opt.spans.default_attribute_requirement_level,
             "$..spans.default_attribute_requirement_level",
             opt.spans.router,
@@ -505,11 +486,6 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_reuse_query_plans,
-            "$.supergraph.query_planning.experimental_reuse_query_plans[?(@==true)]"
-        );
-
-        populate_config_instrument!(
             apollo.router.config.experimental_cooperative_cancellation,
             "$.supergraph.query_planning.experimental_cooperative_cancellation"
         );
@@ -530,8 +506,8 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_otlp_endpoint,
-            "$.telemetry.apollo.experimental_otlp_endpoint"
+            apollo.router.config.otlp_endpoint,
+            "$.telemetry.apollo.otlp_endpoint"
         );
 
         populate_config_instrument!(
@@ -550,13 +526,13 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_otlp_tracing_protocol,
-            "$.telemetry.apollo.experimental_otlp_tracing_protocol"
+            apollo.router.config.otlp_tracing_protocol,
+            "$.telemetry.apollo.otlp_tracing_protocol"
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_otlp_metrics_protocol,
-            "$.telemetry.apollo.experimental_otlp_metrics_protocol"
+            apollo.router.config.otlp_metrics_protocol,
+            "$.telemetry.apollo.otlp_metrics_protocol"
         );
 
         populate_config_instrument!(
@@ -629,7 +605,7 @@ impl InstrumentData {
         );
         attributes.insert(
             "opt.security.recursive_selections".to_string(),
-            crate::services::layers::query_analysis::recursive_selections_check_enabled().into(),
+            crate::services::query_parsing::recursive_selections_limit::recursive_selections_check_enabled().into(),
         );
         attributes.insert(
             "opt.security.non_local_selections".to_string(),

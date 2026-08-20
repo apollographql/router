@@ -632,7 +632,11 @@ impl StaticCostCalculator {
         query_plan: &QueryPlan,
         variables: &Object,
     ) -> Result<CostBySubgraph, DemandControlError> {
-        self.score_plan_node(&query_plan.root, variables)
+        if let Some(plan) = query_plan.root.as_ref() {
+            self.score_plan_node(plan, variables)
+        } else {
+            Ok(CostBySubgraph::default())
+        }
     }
 
     pub(crate) fn actual(
@@ -784,9 +788,8 @@ mod tests {
     use crate::compute_job::ComputeJobType;
     use crate::plugins::authorization::CacheKeyMetadata;
     use crate::query_planner::QueryPlannerService;
-    use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerRequest;
-    use crate::services::layers::query_analysis::ParsedDocument;
+    use crate::services::query_parsing::ParsedDocument;
     use crate::services::query_planner::PlanOptions;
     use crate::spec;
     use crate::spec::Query;
@@ -885,9 +888,10 @@ mod tests {
             .unwrap_or_default();
         let supergraph_schema = schema.supergraph_schema().clone();
 
-        let mut planner = QueryPlannerService::new(schema.into(), config.clone())
-            .await
-            .unwrap();
+        let schema_arc: Arc<crate::spec::Schema> = schema.into();
+        let qp_arc = QueryPlannerService::create_planner(&schema_arc, &config).unwrap();
+        let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
+        let mut planner = QueryPlannerService::new(schema_arc, config.clone(), qp_arc).unwrap();
 
         let ctx = Context::new();
         ctx.extensions()
@@ -901,22 +905,18 @@ mod tests {
                 CacheKeyMetadata::default(),
                 PlanOptions::default(),
                 ComputeJobType::QueryPlanning,
-                variables.clone(),
             ))
             .await
             .unwrap();
-        let query_plan = match planner_res.content.unwrap() {
-            QueryPlannerContent::Plan { plan } => plan,
-            _ => panic!("Query planner returned unexpected non-plan content"),
-        };
+        let query_plan = planner_res.content.unwrap();
 
         let schema = DemandControlledSchema::new(Arc::new(supergraph_schema)).unwrap();
         let mut demand_controlled_subgraph_schemas = HashMap::new();
-        for (subgraph_name, subgraph_schema) in planner.subgraph_schemas().iter() {
+        for (subgraph_name, subgraph_schema) in subgraph_schemas.iter() {
             let demand_controlled_subgraph_schema =
-                DemandControlledSchema::new(subgraph_schema.schema.clone()).unwrap();
+                DemandControlledSchema::new(subgraph_schema.clone()).unwrap();
             demand_controlled_subgraph_schemas
-                .insert(subgraph_name.to_string(), demand_controlled_subgraph_schema);
+                .insert(subgraph_name.clone(), demand_controlled_subgraph_schema);
         }
 
         let calculator = StaticCostCalculator::new(

@@ -31,7 +31,6 @@ telemetry:
 
   instrumentation:
     spans:
-      mode: spec_compliant
       supergraph:
         attributes:
           graphql.operation.name: true

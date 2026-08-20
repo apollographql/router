@@ -16,9 +16,9 @@ telemetry:
           scheduled_delay: 100ms
   instrumentation:
     spans:
-      mode: spec_compliant
       router:
         attributes:
-          otel.name: overridden
+          otel.name:
+            static: overridden
 
 

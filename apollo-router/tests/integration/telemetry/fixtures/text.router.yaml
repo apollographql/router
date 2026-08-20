@@ -1,8 +1,6 @@
 telemetry:
 
   instrumentation:
-    spans:
-      mode: spec_compliant
     events:
       router:
         # Standard events
@@ -57,7 +55,8 @@ telemetry:
           level: warn
           on: event_response
           attributes:
-            on_supergraph_response_event: on_supergraph_event
+            on_supergraph_response_event:
+              static: on_supergraph_event
         my.request.event:
           message: "my event message"
           level: info

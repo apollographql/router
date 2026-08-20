@@ -15,7 +15,6 @@ use tower_http::trace::MakeSpan;
 use tracing_futures::Instrument;
 
 use crate::AllowedFeature;
-use crate::axum_factory::span_mode;
 use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
@@ -28,12 +27,12 @@ use crate::plugin::PluginUnstable;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::canned;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
+use crate::router_factory::RouterFactory;
 use crate::router_factory::YamlRouterFactory;
-use crate::services::HasSchema;
 use crate::services::SupergraphCreator;
 use crate::services::execution;
-use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::layers::persisted_queries::PersistedQueryExpander;
+use crate::services::query_parsing;
 use crate::services::router;
 use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
@@ -254,7 +253,7 @@ impl<'a> TestHarness<'a> {
     /// Adds a callback-based hook similar to [`Plugin::router_service`]
     pub fn router_hook(
         self,
-        callback: impl Fn(router::BoxService) -> router::BoxService + Send + Sync + 'static,
+        callback: impl Fn(router::BoxCloneService) -> router::BoxCloneService + Send + Sync + 'static,
     ) -> Self {
         self.extra_plugin(RouterServicePlugin(callback))
     }
@@ -262,7 +261,10 @@ impl<'a> TestHarness<'a> {
     /// Adds a callback-based hook similar to [`Plugin::supergraph_service`]
     pub fn supergraph_hook(
         self,
-        callback: impl Fn(supergraph::BoxService) -> supergraph::BoxService + Send + Sync + 'static,
+        callback: impl Fn(supergraph::BoxCloneService) -> supergraph::BoxCloneService
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.extra_plugin(SupergraphServicePlugin(callback))
     }
@@ -270,7 +272,10 @@ impl<'a> TestHarness<'a> {
     /// Adds a callback-based hook similar to [`Plugin::execution_service`]
     pub fn execution_hook(
         self,
-        callback: impl Fn(execution::BoxService) -> execution::BoxService + Send + Sync + 'static,
+        callback: impl Fn(execution::BoxCloneService) -> execution::BoxCloneService
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.extra_plugin(ExecutionServicePlugin(callback))
     }
@@ -278,7 +283,10 @@ impl<'a> TestHarness<'a> {
     /// Adds a callback-based hook similar to [`Plugin::subgraph_service`]
     pub fn subgraph_hook(
         self,
-        callback: impl Fn(&str, subgraph::BoxService) -> subgraph::BoxService + Send + Sync + 'static,
+        callback: impl Fn(&str, subgraph::BoxCloneService) -> subgraph::BoxCloneService
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.extra_plugin(SubgraphServicePlugin(callback))
     }
@@ -322,7 +330,8 @@ impl<'a> TestHarness<'a> {
         let license = self.license.unwrap_or(Arc::new(LicenseState::Licensed {
             limits: Default::default(),
         }));
-        let supergraph_creator = YamlRouterFactory
+
+        let (supergraph_creator, _warmup) = YamlRouterFactory
             .inner_create_supergraph(
                 config.clone(),
                 schema.clone(),
@@ -353,7 +362,7 @@ impl<'a> TestHarness<'a> {
             if let Some(query_str) = body.query.as_deref() {
                 let operation_name = body.operation_name.as_deref();
                 if !request.context.extensions().with_lock(|lock| {
-                    lock.contains_key::<crate::services::layers::query_analysis::ParsedDocument>()
+                    lock.contains_key::<crate::services::query_parsing::ParsedDocument>()
                 }) {
                     let doc = crate::spec::Query::parse_document(
                         query_str,
@@ -363,7 +372,7 @@ impl<'a> TestHarness<'a> {
                     )
                     .expect("parse error in test");
                     request.context.extensions().with_lock(|lock| {
-                        lock.insert::<crate::services::layers::query_analysis::ParsedDocument>(doc)
+                        lock.insert::<crate::services::query_parsing::ParsedDocument>(doc)
                     });
                 }
             }
@@ -375,21 +384,25 @@ impl<'a> TestHarness<'a> {
 
     /// Builds the router service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
-        let (config, _schema, supergraph_creator) = self.build_common().await?;
+        let (config, schema, supergraph_creator) = self.build_common().await?;
+
+        let query_parsing_service = query_parsing::query_parsing_service(schema, config.clone());
+
         let router_creator = RouterCreator::new(
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
-            Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
+            Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
+            query_parsing_service,
             config.clone(),
         )
         .await
         .unwrap();
 
         Ok(tower::service_fn(move |request: router::Request| {
-            let router = ServiceBuilder::new().service(router_creator.make()).boxed();
+            let router = ServiceBuilder::new()
+                .service(router_creator.create())
+                .boxed();
             let span = PropagatingMakeSpan {
                 license: Default::default(),
-                span_mode: span_mode(&config),
             }
             .make_span(&request.router_request);
             async move { router.oneshot(request).await }.instrument(span)
@@ -401,13 +414,16 @@ impl<'a> TestHarness<'a> {
     pub async fn build_http_service(self) -> Result<HttpService, BoxError> {
         use crate::axum_factory::ListenAddrAndRouter;
         use crate::axum_factory::axum_http_server_factory::make_axum_router;
-        use crate::router_factory::RouterFactory;
+        use crate::axum_factory::utils::connection_router_service;
 
-        let (config, _schema, supergraph_creator) = self.build_common().await?;
+        let (config, schema, supergraph_creator) = self.build_common().await?;
+
+        let query_parsing_service = query_parsing::query_parsing_service(schema, config.clone());
+
         let router_creator = RouterCreator::new(
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
-            Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
+            Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
+            query_parsing_service,
             config.clone(),
         )
         .await?;
@@ -415,7 +431,6 @@ impl<'a> TestHarness<'a> {
         let web_endpoints = router_creator.web_endpoints();
 
         let routers = make_axum_router(
-            router_creator,
             &config,
             web_endpoints,
             Arc::new(LicenseState::Licensed {
@@ -423,6 +438,15 @@ impl<'a> TestHarness<'a> {
             }),
         )?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
+
+        // The router reads its pipeline from a request extension, which the server factory
+        // populates. Add the same extension here so the returned service is callable.
+        let router_service = connection_router_service(router_creator.create());
+        let router = ServiceBuilder::new()
+            .layer(tower_http::add_extension::AddExtensionLayer::new(
+                router_service,
+            ))
+            .service(router);
         Ok(router.boxed())
     }
 }
@@ -442,7 +466,7 @@ struct SubgraphServicePlugin<F>(F);
 #[async_trait::async_trait]
 impl<F> Plugin for RouterServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(router::BoxService) -> router::BoxService,
+    F: 'static + Send + Sync + Fn(router::BoxCloneService) -> router::BoxCloneService,
 {
     type Config = ();
 
@@ -450,7 +474,7 @@ where
         unreachable!()
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         (self.0)(service)
     }
 }
@@ -458,7 +482,7 @@ where
 #[async_trait::async_trait]
 impl<F> Plugin for SupergraphServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(supergraph::BoxService) -> supergraph::BoxService,
+    F: 'static + Send + Sync + Fn(supergraph::BoxCloneService) -> supergraph::BoxCloneService,
 {
     type Config = ();
 
@@ -466,7 +490,10 @@ where
         unreachable!()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         (self.0)(service)
     }
 }
@@ -474,7 +501,7 @@ where
 #[async_trait::async_trait]
 impl<F> Plugin for ExecutionServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(execution::BoxService) -> execution::BoxService,
+    F: 'static + Send + Sync + Fn(execution::BoxCloneService) -> execution::BoxCloneService,
 {
     type Config = ();
 
@@ -482,7 +509,7 @@ where
         unreachable!()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         (self.0)(service)
     }
 }
@@ -490,7 +517,7 @@ where
 #[async_trait::async_trait]
 impl<F> Plugin for SubgraphServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(&str, subgraph::BoxService) -> subgraph::BoxService,
+    F: 'static + Send + Sync + Fn(&str, subgraph::BoxCloneService) -> subgraph::BoxCloneService,
 {
     type Config = ();
 
@@ -501,8 +528,8 @@ where
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         (self.0)(subgraph_name, service)
     }
 }
@@ -529,11 +556,11 @@ impl Plugin for MockedSubgraphs {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        default: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        default: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         self.0
             .get(subgraph_name)
-            .map(|service| service.clone().boxed())
+            .map(|service| service.clone().boxed_clone())
             .unwrap_or(default)
     }
 }

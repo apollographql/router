@@ -2830,7 +2830,7 @@ async fn no_data() {
                     }
                 });
                 drain_drivers_clone.lock().unwrap().push(driver);
-                mock.boxed()
+                mock.boxed_clone()
             } else {
                 service
             }
@@ -2878,7 +2878,7 @@ async fn no_data() {
       },
       "errors": [
         {
-          "message": "HTTP fetch failed from 'orga': orga not found",
+          "message": "HTTP fetch failed: orga not found",
           "path": [
             "currentUser",
             "allOrganizations",
@@ -5129,7 +5129,7 @@ async fn no_store_on_subgraph_timeout() {
                     // Unreachable in practice — the traffic shaping timeout fires first.
                     Err::<subgraph::Response, tower::BoxError>("orga sleep exceeded".into())
                 })
-                .boxed()
+                .boxed_clone()
             } else {
                 service
             }

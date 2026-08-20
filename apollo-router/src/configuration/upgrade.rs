@@ -75,8 +75,8 @@ const REMOVAL_EXPRESSION: &str = r#"const("__PLEASE_DELETE_ME")"#;
 pub(crate) enum UpgradeMode {
     /// Upgrade using migrations for major version (eg: from router 1.x to router 2.x)
     Major,
-    /// Upgrade using migrations for minor version (eg: from router 2.x to router 2.y)
-    Minor,
+    /// Upgrade using migrations for a given minor version (eg: from router 2.x to router 2.y)
+    Minor(i64),
 }
 
 pub(crate) fn upgrade_configuration(
@@ -84,14 +84,13 @@ pub(crate) fn upgrade_configuration(
     log_warnings: bool,
     upgrade_mode: UpgradeMode,
 ) -> Result<serde_json::Value, super::ConfigurationError> {
-    const CURRENT_MAJOR_VERSION: &str = env!("CARGO_PKG_VERSION_MAJOR");
     // Transformers are loaded from a file and applied in order
     let mut migrations: Vec<Migration> = Vec::new();
-    let files = Asset::iter().sorted().filter(|f| {
-        if matches!(upgrade_mode, UpgradeMode::Major) {
-            f.ends_with(".yaml")
-        } else {
-            f.ends_with(".yaml") && f.starts_with(CURRENT_MAJOR_VERSION)
+    let files = Asset::iter().sorted().filter(|f| match upgrade_mode {
+        UpgradeMode::Major => f.ends_with(".yaml"),
+        UpgradeMode::Minor(major_version) => {
+            let major_version = major_version.to_string();
+            f.ends_with(".yaml") && f.starts_with(&major_version)
         }
     });
     for filename in files {

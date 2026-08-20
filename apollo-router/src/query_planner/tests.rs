@@ -35,8 +35,8 @@ use crate::query_planner::fetch::FetchNode;
 use crate::services::SubgraphResponse;
 use crate::services::SubgraphServiceFactory;
 use crate::services::connector_service::ConnectorServiceFactory;
-use crate::services::fetch_service::FetchServiceFactory;
-use crate::services::subgraph_service::MakeSubgraphService;
+use crate::services::fetch_service::FetchService;
+use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Query;
 use crate::spec::Schema;
@@ -163,7 +163,7 @@ fn assert_response_diagnostics(
 }
 
 fn subgraph_service_factory(
-    graphs: Vec<(String, Arc<dyn MakeSubgraphService>)>,
+    graphs: Vec<(String, subgraph::BoxCloneService)>,
 ) -> SubgraphServiceFactory {
     SubgraphServiceFactory::new(
         graphs,
@@ -171,6 +171,7 @@ fn subgraph_service_factory(
         // Required for subscriptions: we are not testing that here
         Default::default(),
         None,
+        Default::default(),
     )
 }
 
@@ -198,7 +199,6 @@ async fn fetch_includes_operation_name() {
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
@@ -222,16 +222,16 @@ async fn fetch_includes_operation_name() {
     let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
     let ssf = subgraph_service_factory(vec![(
         "product".into(),
-        Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
+        mock_products_service.boxed_clone(),
     )]);
-    let sf = Arc::new(FetchServiceFactory::new(
+    let sf = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let _response = query_plan
         .execute(
@@ -258,7 +258,6 @@ async fn fetch_makes_post_requests() {
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
@@ -281,16 +280,16 @@ async fn fetch_makes_post_requests() {
     let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
     let ssf = subgraph_service_factory(vec![(
         "product".into(),
-        Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
+        mock_products_service.boxed_clone(),
     )]);
-    let sf = Arc::new(FetchServiceFactory::new(
+    let sf = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let _response = query_plan
         .execute(
@@ -317,78 +316,77 @@ async fn fetch_makes_post_requests() {
 async fn defer() {
     // plan for { t { x ... @defer { y } }}
     let query_plan: QueryPlan = QueryPlan {
-            formatted_query_plan: Default::default(),
-            root: PlanNode::Defer {
-                primary: Primary {
-                    subselection: Some("{ t { x } }".to_string()),
-                    node: Some(Box::new(PlanNode::Fetch(FetchNode {
-                        service_name: "X".into(),
-                        requires: vec![],
+        formatted_query_plan: Default::default(),
+        root: Some(Arc::new(PlanNode::Defer {
+            primary: Primary {
+                subselection: Some("{ t { x } }".to_string()),
+                node: Some(Box::new(PlanNode::Fetch(FetchNode {
+                    service_name: "X".into(),
+                    requires: vec![],
+                    variable_usages: vec![],
+                    operation: SerializableDocument::from_string("{ t { id __typename x } }"),
+                    operation_name: Some("t".into()),
+                    operation_kind: OperationKind::Query,
+                    id: Some("fetch1".into()),
+                    input_rewrites: None,
+                    output_rewrites: None,
+                    context_rewrites: None,
+                    schema_aware_hash: Default::default(),
+                    authorization: Default::default(),
+                }))),
+            },
+            deferred: vec![DeferredNode {
+                depends: vec![Depends {
+                    id: "fetch1".into(),
+                }],
+                label: None,
+                query_path: Path(vec![PathElement::Key("t".to_string(), None)]),
+                subselection: Some("{ y }".to_string()),
+                node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
+                    path: Path(vec![PathElement::Key("t".to_string(), None)]),
+                    node: Box::new(PlanNode::Fetch(FetchNode {
+                        service_name: "Y".into(),
+                        requires: vec![requires_selection::Selection::InlineFragment(
+                            requires_selection::InlineFragment {
+                                type_condition: Some(name!("T")),
+                                selections: vec![
+                                    requires_selection::Selection::Field(
+                                        requires_selection::Field {
+                                            alias: None,
+                                            name: name!("id"),
+                                            selections: Vec::new(),
+                                        },
+                                    ),
+                                    requires_selection::Selection::Field(
+                                        requires_selection::Field {
+                                            alias: None,
+                                            name: name!("__typename"),
+                                            selections: Vec::new(),
+                                        },
+                                    ),
+                                ],
+                            },
+                        )],
                         variable_usages: vec![],
-                        operation: SerializableDocument::from_string("{ t { id __typename x } }"),
-                        operation_name: Some("t".into()),
+                        operation: SerializableDocument::from_string(
+                            "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}",
+                        ),
+                        operation_name: None,
                         operation_kind: OperationKind::Query,
-                        id: Some("fetch1".into()),
+                        id: Some("fetch2".into()),
                         input_rewrites: None,
                         output_rewrites: None,
                         context_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
-                    }))),
-                },
-                deferred: vec![DeferredNode {
-                    depends: vec![Depends {
-                        id: "fetch1".into(),
-                    }],
-                    label: None,
-                    query_path: Path(vec![PathElement::Key("t".to_string(), None)]),
-                    subselection: Some("{ y }".to_string()),
-                    node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
-                        path: Path(vec![PathElement::Key("t".to_string(), None)]),
-                        node: Box::new(PlanNode::Fetch(FetchNode {
-                            service_name: "Y".into(),
-                            requires: vec![requires_selection::Selection::InlineFragment(
-                                requires_selection::InlineFragment {
-                                    type_condition: Some(name!("T")),
-                                    selections: vec![
-                                        requires_selection::Selection::Field(
-                                            requires_selection::Field {
-                                                alias: None,
-                                                name: name!("id"),
-                                                selections: Vec::new(),
-                                            },
-                                        ),
-                                        requires_selection::Selection::Field(
-                                            requires_selection::Field {
-                                                alias: None,
-                                                name: name!("__typename"),
-                                                selections: Vec::new(),
-                                            },
-                                        ),
-                                    ],
-                                },
-                            )],
-                            variable_usages: vec![],
-                            operation: SerializableDocument::from_string(
-                                "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}"
-                            ),
-                            operation_name: None,
-                            operation_kind: OperationKind::Query,
-                            id: Some("fetch2".into()),
-                            input_rewrites: None,
-                            output_rewrites: None,
-                            context_rewrites: None,
-                            schema_aware_hash: Default::default(),
-                            authorization: Default::default(),
-                        })),
-                    }))),
-                }],
-            }.into(),
-            usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
-            query: Arc::new(Query::empty_for_tests()),
-            query_metrics: Default::default(),
-            estimated_size: Default::default(),
-        };
+                    })),
+                }))),
+            }],
+        })),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
+        query: Arc::new(Query::empty_for_tests()),
+        estimated_size: Default::default(),
+    };
 
     let (mock_x_service, mut handle_x) = tower_test::mock::pair::<
         crate::services::SubgraphRequest,
@@ -425,23 +423,17 @@ async fn defer() {
     let schema = include_str!("testdata/defer_schema.graphql");
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
     let ssf = subgraph_service_factory(vec![
-        (
-            "X".into(),
-            Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
-        ),
-        (
-            "Y".into(),
-            Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
-        ),
+        ("X".into(), mock_x_service.boxed_clone()),
+        ("Y".into(), mock_y_service.boxed_clone()),
     ]);
-    let sf = Arc::new(FetchServiceFactory::new(
+    let sf = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let response = query_plan
         .execute(
@@ -497,7 +489,7 @@ async fn defer_if_condition() {
         .unwrap(),
     );
 
-    let root: Arc<PlanNode> =
+    let root: Option<Arc<PlanNode>> =
         serde_json::from_str(include_str!("testdata/defer_clause_plan.json")).unwrap();
 
     let query_plan = QueryPlan {
@@ -513,7 +505,6 @@ async fn defer_if_condition() {
             .unwrap(),
         ),
         formatted_query_plan: None,
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
@@ -536,18 +527,15 @@ async fn defer_if_condition() {
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
     let mut receiver_stream = ReceiverStream::new(receiver);
 
-    let ssf = subgraph_service_factory(vec![(
-        "accounts".into(),
-        Arc::new(mocked_accounts) as Arc<dyn MakeSubgraphService>,
-    )]);
-    let service_factory = Arc::new(FetchServiceFactory::new(
+    let ssf = subgraph_service_factory(vec![("accounts".into(), mocked_accounts.boxed_clone())]);
+    let service_factory = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let defer_primary_response = query_plan
         .execute(
@@ -671,7 +659,6 @@ async fn dependent_mutations() {
         .unwrap(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
@@ -697,23 +684,17 @@ async fn dependent_mutations() {
 
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
     let ssf = subgraph_service_factory(vec![
-        (
-            "A".into(),
-            Arc::new(mock_a_service) as Arc<dyn MakeSubgraphService>,
-        ),
-        (
-            "B".into(),
-            Arc::new(mock_b_service) as Arc<dyn MakeSubgraphService>,
-        ),
+        ("A".into(), mock_a_service.boxed_clone()),
+        ("B".into(), mock_b_service.boxed_clone()),
     ]);
-    let sf = Arc::new(FetchServiceFactory::new(
+    let sf = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
     let _response = query_plan
@@ -1878,7 +1859,7 @@ fn broken_plan_does_not_panic() {
     let operation = "{ invalid }";
     let subgraph_schema = "type Query { field: Int }";
     let mut plan = QueryPlan {
-        root: PlanNode::Fetch(FetchNode {
+        root: Some(Arc::new(PlanNode::Fetch(FetchNode {
             service_name: "X".into(),
             requires: vec![],
             variable_usages: vec![],
@@ -1891,23 +1872,22 @@ fn broken_plan_does_not_panic() {
             context_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
-        })
-        .into(),
+        }))),
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
     let subgraph_schema = apollo_compiler::Schema::parse_and_validate(subgraph_schema, "").unwrap();
     let mut subgraph_schemas = HashMap::default();
     subgraph_schemas.insert(
         "X".to_owned(),
-        query_planner::fetch::SubgraphSchema::new(subgraph_schema),
+        query_planner::HashedSubgraphSchema::new(subgraph_schema),
     );
     // Run the plan initialization code to make sure it doesn't panic.
+    let root_node = plan.root.as_mut().expect("non-empty query plan");
     let result =
-        Arc::make_mut(&mut plan.root).init_parsed_operations_and_hash_subqueries(&subgraph_schemas);
+        Arc::make_mut(root_node).init_parsed_operations_and_hash_subqueries(&subgraph_schemas);
     assert_eq!(
         result.unwrap_err().to_string(),
         r#"[1:3] Cannot query field "invalid" on type "Query"."#
@@ -1940,7 +1920,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
     // and the deferred fetch (Z) requires inner.__typename + id + sub { subId data }
     let query_plan: QueryPlan = QueryPlan {
         formatted_query_plan: Default::default(),
-        root: PlanNode::Defer {
+        root: Some(Arc::new(PlanNode::Defer {
             primary: Primary {
                 subselection: Some("{ start { id inner { __typename id } } }".to_string()),
                 node: Some(Box::new(PlanNode::Sequence {
@@ -1973,29 +1953,27 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                             ]),
                             node: Box::new(PlanNode::Fetch(FetchNode {
                                 service_name: "Y".into(),
-                                requires: vec![
-                                    requires_selection::Selection::InlineFragment(
-                                        requires_selection::InlineFragment {
-                                            type_condition: Some(name!("Sub")),
-                                            selections: vec![
-                                                requires_selection::Selection::Field(
-                                                    requires_selection::Field {
-                                                        alias: None,
-                                                        name: name!("__typename"),
-                                                        selections: Vec::new(),
-                                                    },
-                                                ),
-                                                requires_selection::Selection::Field(
-                                                    requires_selection::Field {
-                                                        alias: None,
-                                                        name: name!("subId"),
-                                                        selections: Vec::new(),
-                                                    },
-                                                ),
-                                            ],
-                                        },
-                                    ),
-                                ],
+                                requires: vec![requires_selection::Selection::InlineFragment(
+                                    requires_selection::InlineFragment {
+                                        type_condition: Some(name!("Sub")),
+                                        selections: vec![
+                                            requires_selection::Selection::Field(
+                                                requires_selection::Field {
+                                                    alias: None,
+                                                    name: name!("__typename"),
+                                                    selections: Vec::new(),
+                                                },
+                                            ),
+                                            requires_selection::Selection::Field(
+                                                requires_selection::Field {
+                                                    alias: None,
+                                                    name: name!("subId"),
+                                                    selections: Vec::new(),
+                                                },
+                                            ),
+                                        ],
+                                    },
+                                )],
                                 variable_usages: vec![],
                                 operation: SerializableDocument::from_string(
                                     "query($representations:[_Any!]!){_entities(representations:$representations){...on Sub{data}}}",
@@ -2035,51 +2013,49 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                     ]),
                     node: Box::new(PlanNode::Fetch(FetchNode {
                         service_name: "Z".into(),
-                        requires: vec![
-                            requires_selection::Selection::InlineFragment(
-                                requires_selection::InlineFragment {
-                                    type_condition: Some(name!("Inner")),
-                                    selections: vec![
-                                        requires_selection::Selection::Field(
-                                            requires_selection::Field {
-                                                alias: None,
-                                                name: name!("__typename"),
-                                                selections: Vec::new(),
-                                            },
-                                        ),
-                                        requires_selection::Selection::Field(
-                                            requires_selection::Field {
-                                                alias: None,
-                                                name: name!("id"),
-                                                selections: Vec::new(),
-                                            },
-                                        ),
-                                        requires_selection::Selection::Field(
-                                            requires_selection::Field {
-                                                alias: None,
-                                                name: name!("sub"),
-                                                selections: vec![
-                                                    requires_selection::Selection::Field(
-                                                        requires_selection::Field {
-                                                            alias: None,
-                                                            name: name!("subId"),
-                                                            selections: Vec::new(),
-                                                        },
-                                                    ),
-                                                    requires_selection::Selection::Field(
-                                                        requires_selection::Field {
-                                                            alias: None,
-                                                            name: name!("data"),
-                                                            selections: Vec::new(),
-                                                        },
-                                                    ),
-                                                ],
-                                            },
-                                        ),
-                                    ],
-                                },
-                            ),
-                        ],
+                        requires: vec![requires_selection::Selection::InlineFragment(
+                            requires_selection::InlineFragment {
+                                type_condition: Some(name!("Inner")),
+                                selections: vec![
+                                    requires_selection::Selection::Field(
+                                        requires_selection::Field {
+                                            alias: None,
+                                            name: name!("__typename"),
+                                            selections: Vec::new(),
+                                        },
+                                    ),
+                                    requires_selection::Selection::Field(
+                                        requires_selection::Field {
+                                            alias: None,
+                                            name: name!("id"),
+                                            selections: Vec::new(),
+                                        },
+                                    ),
+                                    requires_selection::Selection::Field(
+                                        requires_selection::Field {
+                                            alias: None,
+                                            name: name!("sub"),
+                                            selections: vec![
+                                                requires_selection::Selection::Field(
+                                                    requires_selection::Field {
+                                                        alias: None,
+                                                        name: name!("subId"),
+                                                        selections: Vec::new(),
+                                                    },
+                                                ),
+                                                requires_selection::Selection::Field(
+                                                    requires_selection::Field {
+                                                        alias: None,
+                                                        name: name!("data"),
+                                                        selections: Vec::new(),
+                                                    },
+                                                ),
+                                            ],
+                                        },
+                                    ),
+                                ],
+                            },
+                        )],
                         variable_usages: vec![],
                         operation: SerializableDocument::from_string(
                             "query($representations:[_Any!]!){_entities(representations:$representations){...on Inner{target{x}}}}",
@@ -2095,11 +2071,9 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                     })),
                 }))),
             }],
-        }
-        .into(),
+        })),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
@@ -2168,27 +2142,18 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
     let schema = include_str!("testdata/defer_depends_schema.graphql");
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
     let ssf = subgraph_service_factory(vec![
-        (
-            "X".into(),
-            Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
-        ),
-        (
-            "Y".into(),
-            Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
-        ),
-        (
-            "Z".into(),
-            Arc::new(mock_z_service) as Arc<dyn MakeSubgraphService>,
-        ),
+        ("X".into(), mock_x_service.boxed_clone()),
+        ("Y".into(), mock_y_service.boxed_clone()),
+        ("Z".into(), mock_z_service.boxed_clone()),
     ]);
-    let sf = Arc::new(FetchServiceFactory::new(
+    let sf = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let response = query_plan
         .execute(

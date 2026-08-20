@@ -457,15 +457,6 @@ impl Configuration {
             },
         }
     }
-
-    fn apollo_plugin_enabled(&self, plugin_name: &str) -> bool {
-        self.apollo_plugins
-            .plugins
-            .get(plugin_name)
-            .and_then(|config| config.as_object().and_then(|c| c.get("enabled")))
-            .and_then(|enabled| enabled.as_bool())
-            .unwrap_or(false)
-    }
 }
 
 impl Default for Configuration {
@@ -608,16 +599,6 @@ impl Configuration {
             }
         }
 
-        // response & entity caching
-        if self.apollo_plugin_enabled("response_cache")
-            && self.apollo_plugin_enabled("preview_entity_cache")
-        {
-            return Err(ConfigurationError::InvalidConfiguration {
-                message: "entity cache and response cache features are mutually exclusive",
-                error: "either set response_cache.enabled: false or preview_entity_cache.enabled: false in your router yaml configuration".into(),
-            });
-        }
-
         Ok(self)
     }
 }
@@ -754,10 +735,10 @@ pub(crate) struct Supergraph {
     /// Query planning options
     pub(crate) query_planning: QueryPlanning,
 
-    /// abort request handling when the client drops the connection.
-    /// Default: false.
-    /// When set to true, some parts of the request pipeline like telemetry will not work properly,
-    /// but request handling will stop immediately when the client connection is closed.
+    /// Abort request handling when the client drops the connection.
+    /// Default: true.
+    /// When set to false, telemetry will be recorded for canceled requests, but request
+    /// handling will continue running until completion even after the client disconnects.
     pub(crate) early_cancel: bool,
 
     /// Enable errors generated during response reformatting and result coercion to be returned in
@@ -779,6 +760,10 @@ pub(crate) struct Supergraph {
 }
 
 const fn default_generate_query_fragments() -> bool {
+    true
+}
+
+const fn default_early_cancel() -> bool {
     true
 }
 
@@ -813,7 +798,7 @@ impl Supergraph {
             query_planning: query_planning.unwrap_or_default(),
             generate_query_fragments: generate_query_fragments
                 .unwrap_or_else(default_generate_query_fragments),
-            early_cancel: early_cancel.unwrap_or_default(),
+            early_cancel: early_cancel.unwrap_or_else(default_early_cancel),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
             strict_variable_validation: strict_variable_validation
@@ -851,7 +836,7 @@ impl Supergraph {
             query_planning: query_planning.unwrap_or_default(),
             generate_query_fragments: generate_query_fragments
                 .unwrap_or_else(default_generate_query_fragments),
-            early_cancel: early_cancel.unwrap_or_default(),
+            early_cancel: early_cancel.unwrap_or_else(default_early_cancel),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
             strict_variable_validation: strict_variable_validation
@@ -980,10 +965,6 @@ pub(crate) struct QueryPlanning {
     /// The default value is None, which specifies no limit.
     pub(crate) experimental_paths_limit: Option<u32>,
 
-    /// If cache warm up is configured, this will allow the router to keep a query plan created with
-    /// the old schema, if it determines that the schema update does not affect the corresponding query
-    pub(crate) experimental_reuse_query_plans: bool,
-
     /// Configures cooperative cancellation of query planning
     ///
     /// See [`CooperativeCancellation`] for more details.
@@ -999,7 +980,6 @@ impl QueryPlanning {
         warmed_up_queries: Option<usize>,
         experimental_plans_limit: Option<u32>,
         experimental_paths_limit: Option<u32>,
-        experimental_reuse_query_plans: Option<bool>,
         experimental_cooperative_cancellation: Option<CooperativeCancellation>,
     ) -> Self {
         Self {
@@ -1007,7 +987,6 @@ impl QueryPlanning {
             warmed_up_queries,
             experimental_plans_limit,
             experimental_paths_limit,
-            experimental_reuse_query_plans: experimental_reuse_query_plans.unwrap_or_default(),
             experimental_cooperative_cancellation: experimental_cooperative_cancellation
                 .unwrap_or_default(),
         }

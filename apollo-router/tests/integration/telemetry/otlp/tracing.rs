@@ -15,6 +15,7 @@ use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
 use crate::integration::common::graph_os_enabled;
 use crate::integration::telemetry::TraceSpec;
+use crate::integration::telemetry::unique_trace_id;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_trace_error() -> Result<(), BoxError> {
@@ -252,14 +253,13 @@ async fn test_otlp_request_with_datadog_propagator_no_agent() -> Result<(), BoxE
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
--> Result<(), BoxError> {
+async fn test_otlp_request_with_trace_context_propagator_with_datadog() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
     let config =
-        include_str!("../fixtures/otlp_datadog_request_with_zipkin_propagator.router.yaml")
+        include_str!("../fixtures/otlp_datadog_request_with_trace_context_propagator.router.yaml")
             .replace("<otel-collector-endpoint>", &mock_server.uri());
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
@@ -284,26 +284,6 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
             Query::builder().traced(true).build(),
         )
         .await?;
-    // ---------------------- zipkin propagator with unsampled trace
-    // Testing for an unsampled trace, so it should be sent to the otlp exporter with sampling priority set 0
-    // But it shouldn't send the trace to subgraph as the trace is originally not sampled, the main goal is to measure it at the DD agent level
-    TraceSpec::builder()
-        .services(["router"].into())
-        .priority_sampled("0")
-        .subgraph_sampled(false)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder()
-                .traced(false)
-                .header("X-B3-TraceId", "80f198ee56343ba864fe8b2a57d3eff7")
-                .header("X-B3-ParentSpanId", "05e3ac9a4f6e3b90")
-                .header("X-B3-SpanId", "e457b5a2e4d86bd1")
-                .header("X-B3-Sampled", "0")
-                .build(),
-        )
-        .await?;
     // ---------------------- trace context propagation
     // Testing for a trace containing the right tracestate with m and psr for DD and a sampled trace, so it should be sent to the otlp exporter with sampling priority set to 1
     // And it should also send the trace to subgraph as the trace is sampled
@@ -319,7 +299,7 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
                 .traced(true)
                 .header(
                     "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+                    format!("00-{}-b7ad6b7169203331-01", unique_trace_id()),
                 )
                 .header("tracestate", "m=1,psr=1")
                 .build(),
@@ -340,7 +320,7 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
                 .traced(false)
                 .header(
                     "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-02",
+                    format!("00-{}-b7ad6b7169203331-02", unique_trace_id()),
                 )
                 .header("tracestate", "m=1,psr=0")
                 .build(),
@@ -361,14 +341,13 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
                 .traced(false)
                 .header(
                     "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-03",
+                    format!("00-{}-b7ad6b7169203331-03", unique_trace_id()),
                 )
                 .header("tracestate", "m=1,psr=1")
                 .build(),
         )
         .await?;
 
-    // Be careful if you add the same kind of test crafting your own trace id, make sure to increment the previous trace id by 1 if not you'll receive all the previous spans tested with the same trace id before
     router.graceful_shutdown().await;
     Ok(())
 }

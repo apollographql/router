@@ -35,7 +35,6 @@ use tower::ServiceBuilder;
 use tower::util::Either;
 use tower_http::decompression::Decompression;
 use tower_http::decompression::DecompressionLayer;
-use tracing::Instrument;
 use tracing::Span;
 
 use super::HttpRequest;
@@ -527,49 +526,46 @@ impl tower::Service<HttpRequest> for HttpClientService {
         };
 
         let service_name = self.service.clone();
-        let http_req_span = Span::current();
-
-        get_text_map_propagator(|propagator| {
-            propagator.inject_context(
-                &prepare_context(http_req_span.context()),
-                &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
-            );
-        });
-
-        let (parts, body) = http_request.into_parts();
-        let content_encoding = parts.headers.get(&CONTENT_ENCODING);
-
-        let opt_compressor = content_encoding
-            .as_ref()
-            .and_then(|value| value.to_str().ok())
-            .and_then(|v| Compressor::new(v.split(',').map(|s| s.trim())));
-
-        let body = match opt_compressor {
-            None => body,
-            Some(compressor) => router::body::from_result_stream(compressor.process(body)),
-        };
-
-        let mut http_request = http::Request::from_parts(parts, body);
-
-        http_request
-            .headers_mut()
-            .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS.clone());
-
-        let signing_params = http_request
-            .extensions()
-            .get::<Arc<SigningParamsConfig>>()
-            .cloned();
 
         Box::pin(async move {
+            get_text_map_propagator(|propagator| {
+                propagator.inject_context(
+                    &prepare_context(Span::current().context()),
+                    &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
+                );
+            });
+
+            let (parts, body) = http_request.into_parts();
+            let content_encoding = parts.headers.get(&CONTENT_ENCODING);
+
+            let opt_compressor = content_encoding
+                .as_ref()
+                .and_then(|value| value.to_str().ok())
+                .and_then(|v| Compressor::new(v.split(',').map(|s| s.trim())));
+
+            let body = match opt_compressor {
+                None => body,
+                Some(compressor) => router::body::from_result_stream(compressor.process(body)),
+            };
+
+            let mut http_request = http::Request::from_parts(parts, body);
+
+            http_request
+                .headers_mut()
+                .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS.clone());
+
+            let signing_params = http_request
+                .extensions()
+                .get::<Arc<SigningParamsConfig>>()
+                .cloned();
+
             let http_request = if let Some(signing_params) = signing_params {
                 signing_params.sign(http_request, &service_name).await?
             } else {
                 http_request
             };
 
-            let http_response = do_fetch(client, &service_name, http_request)
-                .instrument(http_req_span)
-                .await?;
+            let http_response = do_fetch(client, &service_name, http_request).await?;
 
             Ok(HttpResponse {
                 http_response,
@@ -656,6 +652,9 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use hyper_rustls::ConfigBuilderExt;
     use mime::APPLICATION_JSON;
+    use opentelemetry::InstrumentationScope;
+    use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
     use tokio::net::TcpListener;
     use tower::ServiceExt;
     use tracing::Subscriber;
@@ -669,11 +668,16 @@ mod tests {
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::otel;
     use crate::plugins::telemetry::otel::OtelData;
-    use crate::services::http::BoxService;
+    use crate::services::http::BoxCloneService;
     use crate::services::http::HttpClientService;
     use crate::services::http::HttpRequest;
     use crate::services::http::service::WireByteCount;
     use crate::services::router;
+
+    fn make_tracer() -> opentelemetry_sdk::trace::Tracer {
+        SdkTracerProvider::default()
+            .tracer_with_scope(InstrumentationScope::builder("test").build())
+    }
 
     async fn emulate_subgraph_with_status_code(listener: TcpListener, status_code: StatusCode) {
         crate::services::http::tests::serve(listener, move |_| async move {
@@ -725,9 +729,8 @@ mod tests {
             let mut map = self.values.lock().unwrap();
             if let Some(span) = ctx.span(id)
                 && let Some(otel_data) = span.extensions().get::<OtelData>()
-                && let Some(attributes) = otel_data.builder.attributes.as_ref()
             {
-                for attribute in attributes {
+                for attribute in &otel_data.attributes {
                     map.insert(attribute.key.to_string(), attribute.value.clone());
                 }
             }
@@ -739,13 +742,13 @@ mod tests {
         let layer = DynAttributeLayer;
         let subscriber = tracing_subscriber::Registry::default()
             .with(layer)
-            .with(otel::layer().force_sampling())
+            .with(otel::layer().with_tracer(make_tracer()))
             .with(recording_layer.clone());
         let guard = tracing::subscriber::set_default(subscriber);
         (guard, recording_layer)
     }
 
-    async fn make_telemetry_http_client(service_name: &str) -> BoxService {
+    async fn make_telemetry_http_client(service_name: &str) -> BoxCloneService {
         let full_config = serde_json::json!({
             "telemetry": {}
         });
@@ -780,7 +783,7 @@ mod tests {
         )
         .expect("can create a HttpClientService");
 
-        plugin.http_client_service(service_name, BoxService::new(http_client_service))
+        plugin.http_client_service(service_name, BoxCloneService::new(http_client_service))
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -865,7 +868,7 @@ mod tests {
             let layer = DynAttributeLayer;
             let subscriber = tracing_subscriber::Registry::default()
                 .with(layer)
-                .with(otel::layer().force_sampling())
+                .with(otel::layer().with_tracer(make_tracer()))
                 .with(recording_layer.clone());
             let guard = tracing::subscriber::set_default(subscriber);
             (guard, recording_layer)
@@ -934,7 +937,7 @@ mod tests {
 
         // Wrap with telemetry plugin
         let mut telemetry_wrapped_service =
-            plugin.http_client_service("test", BoxService::new(http_client_service));
+            plugin.http_client_service("test", BoxCloneService::new(http_client_service));
 
         let (_guard, recording_layer) = setup_tracing();
 

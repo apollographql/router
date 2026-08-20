@@ -125,6 +125,30 @@ const TEST_LICENSE_JWKS_SECRET_BASE64URL: &str =
 /// stays valid through any reasonable test session and well within
 /// tokio's `DelayQueue` scheduler cap.
 fn mint_test_license_jwt() -> String {
+    mint_license_jwt(None, LICENSE_SIX_MONTHS_SECS, LICENSE_SIX_MONTHS_SECS)
+}
+
+/// ~6 months in seconds: far enough out that a minted JWT stays valid through
+/// any reasonable test session, and well within tokio's `DelayQueue`
+/// scheduler cap (about a year — see `mint_license_jwt`).
+#[allow(dead_code)]
+pub const LICENSE_SIX_MONTHS_SECS: i64 = 60 * 60 * 24 * 180;
+
+/// Mint a test license JWT signed with the bundled HS256 test secret.
+///
+/// `allowed_features` is the `allowedFeatures` claim: `None` omits the claim
+/// entirely (which `LicenseLimits` interprets as "all features allowed"),
+/// `Some(&[])` is an empty allow-list. `warn_at_offset_secs` and
+/// `halt_at_offset_secs` are relative to now — negative values put the claim
+/// in the past. Keep future offsets under about a year: the license stream
+/// schedules `haltAt`/`warnAt` on a tokio `DelayQueue`, which cannot schedule
+/// `Instant`s derived from far-future `SystemTime`s.
+#[allow(dead_code)]
+pub fn mint_license_jwt(
+    allowed_features: Option<&[&str]>,
+    warn_at_offset_secs: i64,
+    halt_at_offset_secs: i64,
+) -> String {
     use std::time::SystemTime;
     use std::time::UNIX_EPOCH;
 
@@ -134,23 +158,24 @@ fn mint_test_license_jwt() -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock before unix epoch")
-        .as_secs();
-    let six_months_secs: u64 = 60 * 60 * 24 * 180;
-    let halt_at = now + six_months_secs;
+        .as_secs() as i64;
 
     let secret_bytes = URL_SAFE_NO_PAD
         .decode(TEST_LICENSE_JWKS_SECRET_BASE64URL)
         .expect("test JWKS secret is valid base64url");
     let key = jsonwebtoken::EncodingKey::from_secret(&secret_bytes);
     let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
-    let claims = serde_json::json!({
+    let mut claims = serde_json::json!({
         "exp": 10000000000_u64,
         "iss": "https://www.apollographql.com/",
         "sub": "apollo",
         "aud": "SELF_HOSTED",
-        "warnAt": halt_at,
-        "haltAt": halt_at,
+        "warnAt": now + warn_at_offset_secs,
+        "haltAt": now + halt_at_offset_secs,
     });
+    if let Some(features) = allowed_features {
+        claims["allowedFeatures"] = serde_json::json!(features);
+    }
     jsonwebtoken::encode(&header, &claims, &key).expect("sign test license JWT")
 }
 
@@ -410,7 +435,7 @@ pub struct IntegrationTest {
     /// **Note:** Studio reporting (`usage-reporting.api.apollographql.com`)
     /// is NOT reached even in the opt-in branch. `merge_overrides()`
     /// unconditionally pins `telemetry.apollo.endpoint` and
-    /// `telemetry.apollo.experimental_otlp_endpoint` in the YAML config
+    /// `telemetry.apollo.otlp_endpoint` in the YAML config
     /// to the per-test `apollo_otlp_server` mock, regardless of this
     /// flag. That pinning is load-bearing for keeping CI off the
     /// public Internet. If a future test genuinely needs real Studio
@@ -586,7 +611,6 @@ pub enum Telemetry {
         endpoint: Option<String>,
     },
     Datadog,
-    Zipkin,
     #[default]
     None,
 }
@@ -637,24 +661,6 @@ impl Telemetry {
                     .build(),
                 )
                 .build(),
-            Telemetry::Zipkin => SdkTracerProvider::builder()
-                .with_resource(resource)
-                .with_span_processor(
-                    BatchSpanProcessor::builder(
-                        opentelemetry_zipkin::ZipkinExporter::builder()
-                            .with_collector_endpoint("http://127.0.0.1:9411/api/v2/spans")
-                            .build()
-                            .expect("zipkin pipeline failed"),
-                        runtime::Tokio,
-                    )
-                    .with_batch_config(
-                        BatchConfigBuilder::default()
-                            .with_scheduled_delay(Duration::from_millis(10))
-                            .build(),
-                    )
-                    .build(),
-                )
-                .build(),
             Telemetry::None | Telemetry::Otlp { endpoint: None } => SdkTracerProvider::builder()
                 .with_resource(resource)
                 .with_simple_exporter(NoopSpanExporter::default())
@@ -687,13 +693,6 @@ impl Telemetry {
             }
             Telemetry::Otlp { .. } => {
                 let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
-                propagator.inject_context(
-                    &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                )
-            }
-            Telemetry::Zipkin => {
-                let propagator = opentelemetry_zipkin::Propagator::new();
                 propagator.inject_context(
                     &ctx,
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
@@ -754,10 +753,6 @@ impl Telemetry {
             }
             Telemetry::Otlp { .. } => {
                 let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
-                propagator.extract_with_context(context, &headers)
-            }
-            Telemetry::Zipkin => {
-                let propagator = opentelemetry_zipkin::Propagator::new();
                 propagator.extract_with_context(context, &headers)
             }
             _ => context.clone(),
@@ -2461,7 +2456,7 @@ fn merge_overrides(
     // tests only did so if the request landed within the assertion deadline).
     //
     // We override two distinct keys:
-    //   * `experimental_otlp_endpoint` is consumed by the OTLP exporter
+    //   * `otlp_endpoint` is consumed by the OTLP exporter
     //     (`apollo_otlp_exporter.rs`).
     //   * `endpoint` is consumed by the legacy Apollo-protocol exporter
     //     (`apollo_exporter.rs`).
@@ -2482,7 +2477,7 @@ fn merge_overrides(
             .or_insert_with(|| serde_json::Value::Object(Default::default()));
         if let Some(apollo_config) = apollo_entry.as_object_mut() {
             apollo_config.insert(
-                "experimental_otlp_endpoint".to_string(),
+                "otlp_endpoint".to_string(),
                 serde_json::Value::String(apollo_otlp_endpoint.to_string()),
             );
             apollo_config.insert(
@@ -2509,19 +2504,13 @@ fn merge_overrides(
 
     insert_redis_namespace(config.pointer_mut("/supergraph/query_planning/cache/redis"));
     insert_redis_namespace(config.pointer_mut("/apq/router/cache/redis"));
-    insert_redis_namespace(config.pointer_mut("/preview_entity_cache/subgraph/all/redis"));
     insert_redis_namespace(config.pointer_mut("/response_cache/subgraph/all/redis"));
-    for per_subgraph_path in [
-        "/response_cache/subgraph/subgraphs",
-        "/preview_entity_cache/subgraph/subgraphs",
-    ] {
-        if let Some(subgraphs) = config
-            .pointer_mut(per_subgraph_path)
-            .and_then(|o| o.as_object_mut())
-        {
-            for subgraph_config in subgraphs.values_mut() {
-                insert_redis_namespace(subgraph_config.pointer_mut("/redis"));
-            }
+    if let Some(subgraphs) = config
+        .pointer_mut("/response_cache/subgraph/subgraphs")
+        .and_then(|o| o.as_object_mut())
+    {
+        for subgraph_config in subgraphs.values_mut() {
+            insert_redis_namespace(subgraph_config.pointer_mut("/redis"));
         }
     }
 
@@ -2540,7 +2529,6 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
     let top_level_paths = [
         "/supergraph/query_planning/cache/redis/urls",
         "/apq/router/cache/redis/urls",
-        "/preview_entity_cache/subgraph/all/redis/urls",
         "/response_cache/subgraph/all/redis/urls",
     ];
     for path in top_level_paths {
@@ -2549,19 +2537,16 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
         }
     }
 
-    let per_subgraph_sections = [
-        "/response_cache/subgraph/subgraphs",
-        "/preview_entity_cache/subgraph/subgraphs",
-    ];
-    for section in per_subgraph_sections {
-        if let Some(subgraphs) = config.pointer(section).and_then(|o| o.as_object()) {
-            for subgraph_config in subgraphs.values() {
-                if let Some(urls) = subgraph_config
-                    .pointer("/redis/urls")
-                    .and_then(|o| o.as_array())
-                {
-                    return Some(convert_urls(urls));
-                }
+    if let Some(subgraphs) = config
+        .pointer("/response_cache/subgraph/subgraphs")
+        .and_then(|o| o.as_object())
+    {
+        for subgraph_config in subgraphs.values() {
+            if let Some(urls) = subgraph_config
+                .pointer("/redis/urls")
+                .and_then(|o| o.as_array())
+            {
+                return Some(convert_urls(urls));
             }
         }
     }

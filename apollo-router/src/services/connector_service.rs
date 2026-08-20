@@ -1,5 +1,6 @@
 //! Tower service for connectors.
 
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -16,20 +17,24 @@ use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
+use tower::Service;
 use tower::ServiceExt;
 use tracing_futures::Instrument;
 
-use super::connect::BoxService;
-use super::new_service::ServiceFactory;
+use super::connect::BoxCloneService;
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::connectors::handle_responses::aggregate_responses;
 use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
-use crate::query_planner::fetch::SubgraphSchemas;
+use crate::query_planner::SubgraphSchemas;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
+use crate::services::connect::ServiceResult;
+use crate::services::connector::request_service::BoxCloneService as ConnectorRequestBoxService;
 use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::spec::Schema;
 
@@ -49,13 +54,16 @@ pub(crate) const APOLLO_CONNECTOR_SOURCE_DETAIL: Key =
     Key::from_static_str("apollo.connector.source.detail");
 
 /// A service for executing connector requests.
+///
+/// Bound to a single connector, and therefore a single connector source.
+/// it will actually dispatch to.
 #[derive(Clone)]
 pub(crate) struct ConnectorService {
     pub(crate) _schema: Arc<Schema>,
     pub(crate) _subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>,
-    pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
-    pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
+    pub(crate) connector: Connector,
+    pub(crate) connector_request_service: ConnectorRequestBoxService,
 }
 
 /// A reference to a unique Connector source.
@@ -123,23 +131,19 @@ impl tower::Service<ConnectRequest> for ConnectorService {
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.connector_request_service.poll_ready(cx)
     }
 
     fn call(&mut self, request: ConnectRequest) -> Self::Future {
-        let connector = self
-            .connectors_by_service_name
-            .get(&request.service_name)
-            .cloned();
-
-        let connector_request_service_factory = self.connector_request_service_factory.clone();
+        let connector = self.connector.clone();
+        let fresh_connector_request_service = self.connector_request_service.clone();
+        let connector_request_service = std::mem::replace(
+            &mut self.connector_request_service,
+            fresh_connector_request_service,
+        );
 
         Box::pin(async move {
-            let Some(connector) = connector else {
-                return Err("no connector found".into());
-            };
-
             let fetch_time_offset = request.context.created_at.elapsed().as_nanos() as i64;
             let span = tracing::info_span!(
                 CONNECT_SPAN_NAME,
@@ -178,7 +182,7 @@ impl tower::Service<ConnectRequest> for ConnectorService {
                 span.record("apollo.connector.source.name", source_name.as_str());
             }
 
-            execute(&connector_request_service_factory, request, connector)
+            execute(connector_request_service, request, connector)
                 .instrument(span)
                 .await
         })
@@ -186,13 +190,12 @@ impl tower::Service<ConnectRequest> for ConnectorService {
 }
 
 async fn execute(
-    connector_request_service_factory: &ConnectorRequestServiceFactory,
+    connector_request_service: ConnectorRequestBoxService,
     request: ConnectRequest,
     connector: Connector,
 ) -> Result<ConnectResponse, BoxError> {
     let context = request.context.clone();
     let connector = Arc::new(connector);
-    let source_name = connector.source_config_key();
     let debug = &context
         .extensions()
         .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
@@ -209,12 +212,10 @@ async fn execute(
     .map_err(BoxError::from)?
     .into_iter()
     .map(move |request| {
-        let source_name = source_name.clone();
+        let mut connector_request_service = connector_request_service.clone();
         async move {
-            connector_request_service_factory
-                .create(source_name)
-                .oneshot(request)
-                .await
+            connector_request_service.ready().await?;
+            connector_request_service.call(request).await
         }
     });
 
@@ -234,12 +235,12 @@ async fn execute(
 
 #[derive(Clone)]
 pub(crate) struct ConnectorServiceFactory {
-    pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
-    pub(crate) subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
-    pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
+    /// Pre-built services for each connector.
+    services: Arc<
+        HashMap<String, UnconstrainedBuffer<ConnectRequest, BoxFuture<'static, ServiceResult>>>,
+    >,
 }
 
 impl ConnectorServiceFactory {
@@ -250,15 +251,30 @@ impl ConnectorServiceFactory {
         connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
         connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
     ) -> Self {
+        let mut services = HashMap::with_capacity(connectors_by_service_name.len());
+        for (service_name, connector) in connectors_by_service_name.iter() {
+            let connector_request_service =
+                connector_request_service_factory.create(connector.source_config_key());
+
+            let service = ConnectorService {
+                _schema: schema.clone(),
+                _subgraph_schemas: subgraph_schemas.clone(),
+                _subscription_config: subscription_config.clone(),
+                connector: connector.clone(),
+                connector_request_service,
+            };
+            services.insert(
+                service_name.to_string(),
+                UnconstrainedBuffer::new(service.boxed_clone(), DEFAULT_BUFFER_SIZE),
+            );
+        }
+
         Self {
-            subgraph_schemas,
-            schema: schema.clone(),
-            subscription_config,
             connectors_by_service_name,
             _connect_spec_version_instrument: connect_spec_version_instrument(
                 schema.connectors.as_ref(),
             ),
-            connector_request_service_factory,
+            services: Arc::new(services),
         }
     }
 
@@ -272,23 +288,18 @@ impl ConnectorServiceFactory {
             Arc::new(ConnectorRequestServiceFactory::new(
                 Default::default(),
                 Default::default(),
-                Default::default(),
             )),
         )
     }
-}
 
-impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
-    type Service = BoxService;
-
-    fn create(&self) -> Self::Service {
-        ConnectorService {
-            _schema: self.schema.clone(),
-            _subgraph_schemas: self.subgraph_schemas.clone(),
-            _subscription_config: self.subscription_config.clone(),
-            connectors_by_service_name: self.connectors_by_service_name.clone(),
-            connector_request_service_factory: self.connector_request_service_factory.clone(),
-        }
-        .boxed()
+    /// Retrieves the pre-built [`ConnectorService`] stack for `service_name`, or `None` if
+    /// no connector is registered under that name.
+    ///
+    /// The returned service is a clone of the stack built once in [`Self::new`] at reload
+    /// time, so this is a cheap retrieval rather than a construction.
+    pub(crate) fn get(&self, service_name: &str) -> Option<BoxCloneService> {
+        self.services
+            .get(service_name)
+            .map(|svc| svc.clone().boxed_clone())
     }
 }
