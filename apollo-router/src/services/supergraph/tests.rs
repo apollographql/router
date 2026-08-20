@@ -3838,11 +3838,11 @@ async fn test_cache_warmup() {
     use tower::ServiceBuilder;
 
     use crate::query_planner::QueryPlan;
-    use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::QueryPlannerResponse;
     use crate::services::layers::persisted_queries::PersistedQueryExpander;
     use crate::services::query_planner;
     use crate::services::supergraph::service::SupergraphCreator;
+    use crate::services::supergraph::service::build_supergraph_creator;
 
     let configuration = Configuration::default();
     let schema = Arc::new(
@@ -3905,13 +3905,16 @@ async fn test_cache_warmup() {
         responder.send_response(empty_query_plan());
     });
 
-    let (supergraph_creator, _warmup) = PluggableSupergraphServiceBuilder::new(
+    let (supergraph_creator, _warmup) = build_supergraph_creator(
         mock.map_err(|err| panic!("mock driver failed: {err}"))
             .boxed_clone(),
         schema.clone(),
         Arc::new(Default::default()),
+        Arc::new(configuration.clone()),
+        Default::default(),
+        Vec::new(),
+        Default::default(),
     )
-    .build()
     .await
     .unwrap();
 
@@ -3947,13 +3950,16 @@ async fn test_cache_warmup() {
         did_plan_2.store(true, std::sync::atomic::Ordering::Relaxed);
     });
 
-    let (supergraph_creator, query_planner_service) = PluggableSupergraphServiceBuilder::new(
+    let (supergraph_creator, query_planner_service) = build_supergraph_creator(
         mock.map_err(|err| panic!("mock driver failed: {err}"))
             .boxed_clone(),
         schema.clone(),
         Arc::new(Default::default()),
+        Arc::new(configuration.clone()),
+        Default::default(),
+        Vec::new(),
+        Default::default(),
     )
-    .build()
     .await
     .unwrap();
 

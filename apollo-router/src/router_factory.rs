@@ -35,12 +35,12 @@ use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::query_planner::InMemoryQueryPlanCache;
 use crate::query_planner::QueryPlannerService;
 use crate::query_planner::warmup;
-use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::Plugins;
 use crate::services::SubgraphService;
 use crate::services::SupergraphCreator;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
+use crate::services::build_supergraph_creator;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::query_parsing;
@@ -385,23 +385,21 @@ impl YamlRouterFactory {
         );
 
         async {
-            let mut builder = PluggableSupergraphServiceBuilder::new(
-                query_planner_service,
-                schema.clone(),
-                subgraph_schemas,
-            );
-            builder = builder.with_configuration(configuration.clone());
             let (http_service_factory, connector_http_service_factory) =
                 create_http_services(&plugins, &schema, &configuration).await?;
             let subgraph_services = create_subgraph_services(&http_service_factory).await?;
-            builder = builder.with_http_service_factory(http_service_factory);
-            builder = builder.with_connector_http_service_factory(connector_http_service_factory);
-            for (name, subgraph_service) in subgraph_services {
-                builder = builder.with_subgraph_service(&name, subgraph_service);
-            }
 
             // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
-            let pair = builder.with_plugins(plugins).build().await?;
+            let pair = build_supergraph_creator(
+                query_planner_service,
+                schema.clone(),
+                subgraph_schemas,
+                configuration.clone(),
+                plugins,
+                subgraph_services.into_iter().collect(),
+                connector_http_service_factory,
+            )
+            .await?;
 
             Ok(pair)
         }

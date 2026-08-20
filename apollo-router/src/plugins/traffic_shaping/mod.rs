@@ -691,10 +691,10 @@ mod test {
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::RouterFactory;
     use crate::router_factory::create_plugins;
-    use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
+    use crate::services::build_supergraph_creator;
     use crate::services::connector::request_service::Request as ConnectorRequest;
     use crate::services::layers::persisted_queries::PersistedQueryExpander;
     use crate::services::router;
@@ -796,18 +796,11 @@ mod test {
         let query_parser_service =
             crate::services::query_parsing::query_parsing_service(schema.clone(), config.clone());
 
-        let mut builder = PluggableSupergraphServiceBuilder::new(
-            query_planner_service,
-            schema.clone(),
-            subgraph_schemas.clone(),
-        )
-        .with_configuration(config.clone());
-
         let plugins = Arc::new(
             create_plugins(
                 &config,
                 &schema,
-                subgraph_schemas,
+                subgraph_schemas.clone(),
                 None,
                 Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
                 Default::default(),
@@ -816,14 +809,22 @@ mod test {
             .await
             .expect("create plugins should work"),
         );
-        builder = builder.with_plugins(plugins);
 
-        let builder = builder
-            .with_subgraph_service("accounts", account_service.boxed_clone())
-            .with_subgraph_service("reviews", review_service.boxed_clone())
-            .with_subgraph_service("products", product_service.boxed_clone());
-
-        let (supergraph_creator, _planner) = builder.build().await.expect("should build");
+        let (supergraph_creator, _planner) = build_supergraph_creator(
+            query_planner_service,
+            schema.clone(),
+            subgraph_schemas,
+            config.clone(),
+            plugins,
+            vec![
+                ("accounts".to_string(), account_service.boxed_clone()),
+                ("reviews".to_string(), review_service.boxed_clone()),
+                ("products".to_string(), product_service.boxed_clone()),
+            ],
+            Default::default(),
+        )
+        .await
+        .expect("should build");
 
         RouterCreator::new(
             Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
