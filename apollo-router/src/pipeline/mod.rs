@@ -36,12 +36,13 @@ pub(crate) use self::plugins::create_plugins;
 // implementation detail of the acquire phase.
 #[cfg(test)]
 pub(crate) use self::plugins::inject_schema_id;
+pub(crate) use self::stages::SupergraphPipeline;
 pub(crate) use self::stages::build_apq_expander;
 pub(crate) use self::stages::build_http_services;
+pub(crate) use self::stages::build_query_parsing_service;
 pub(crate) use self::stages::build_query_plan_cache;
+pub(crate) use self::stages::build_subgraph_services;
 pub(crate) use self::stages::build_supergraph_pipeline;
-pub(crate) use self::stages::create_subgraph_services;
-pub(crate) use self::stages::query_parsing_service;
 use crate::Endpoint;
 use crate::ListenAddr;
 use crate::configuration::Configuration;
@@ -115,16 +116,21 @@ pub(crate) async fn build_pipeline(
     let pipeline = async {
         let query_plan_cache = build_query_plan_cache(&configuration, query_plan_redis);
         let apq_expander = build_apq_expander(&configuration, apq_redis);
-        let query_parsing_service = query_parsing_service(schema.clone(), configuration.clone());
+        let query_parsing_service =
+            build_query_parsing_service(schema.clone(), configuration.clone());
 
-        let (supergraph_service, in_memory_query_plan_cache, caching_query_planner) = {
+        let SupergraphPipeline {
+            supergraph_service,
+            in_memory_query_plan_cache,
+            caching_query_planner,
+        } = {
             let _span = tracing::info_span!("supergraph_creation").entered();
             let (http_service_factory, connector_http_service_factory) = build_http_services(
                 subgraph_client_material,
                 connector_client_material,
                 &plugins,
             );
-            let subgraph_services = create_subgraph_services(&http_service_factory);
+            let subgraph_services = build_subgraph_services(&http_service_factory);
             build_supergraph_pipeline(
                 query_planner_service,
                 query_plan_cache,
@@ -281,7 +287,7 @@ pub(crate) async fn from_supergraph_mock_with_configuration(
             .await
             .unwrap();
 
-    let query_parsing_service = query_parsing_service(schema.clone(), configuration.clone());
+    let query_parsing_service = build_query_parsing_service(schema.clone(), configuration.clone());
 
     let apq_expander = build_apq_expander(
         &configuration,
@@ -334,7 +340,7 @@ pub(crate) async fn empty() -> impl Service<
             .await
             .unwrap();
 
-    let query_parsing_service = query_parsing_service(schema.clone(), configuration.clone());
+    let query_parsing_service = build_query_parsing_service(schema.clone(), configuration.clone());
 
     let apq_expander = build_apq_expander(
         &configuration,

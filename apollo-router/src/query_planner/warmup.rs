@@ -610,7 +610,7 @@ mod tests {
             );
 
             let query_parsing_service =
-                crate::pipeline::query_parsing_service(schema, configuration);
+                crate::pipeline::build_query_parsing_service(schema, configuration);
 
             let mut service = ServiceBuilder::new()
                 .layer(WarmupParseQueryLayer::new(query_parsing_service))
@@ -659,7 +659,7 @@ mod tests {
             );
 
             let query_parsing_service =
-                crate::pipeline::query_parsing_service(schema, configuration);
+                crate::pipeline::build_query_parsing_service(schema, configuration);
 
             let mut service = ServiceBuilder::new()
                 .layer(WarmupParseQueryLayer::new(query_parsing_service))
@@ -764,7 +764,7 @@ mod tests {
             );
 
             let query_parsing_service =
-                crate::pipeline::query_parsing_service(schema, configuration);
+                crate::pipeline::build_query_parsing_service(schema, configuration);
 
             let mut service = ServiceBuilder::new()
                 .layer(WarmupParseQueryLayer::new(query_parsing_service))

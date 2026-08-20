@@ -33,9 +33,9 @@ sequenceDiagram
     rect rgba(20, 160, 150, 0.15)
         Note over BP: Assemble — infallible plain functions
         BP->>BP: build_query_plan_cache / build_apq_expander (from the connected Redis clients)
-        BP->>BP: query_parsing_service
+        BP->>BP: build_query_parsing_service
         BP->>BP: build_http_services (from parsed TLS material)
-        BP->>BP: create_subgraph_services
+        BP->>BP: build_subgraph_services
         BP->>BP: build_supergraph_pipeline (execution + supergraph stacks)
         BP->>BP: Pipeline::new (router stack)
         BP->>BP: warm up query plan cache
@@ -92,8 +92,8 @@ Construction is slow enough to need its own observability — a reload blocks on
 | TLS/DNS client material | `parse_http_client_material`, `HttpClientMaterial` | `pipeline/acquire.rs`, `services/http/service.rs` |
 | Redis client connects | `connect_query_plan_redis`, `connect_apq_redis`, `connect_redis` | `pipeline/acquire.rs`, `cache/storage.rs` |
 | Cache assembly | `build_query_plan_cache`, `build_apq_expander`, `DeduplicatingCache::with_capacity` | `pipeline/stages.rs`, `cache/mod.rs` |
-| Query parsing stack assembly | `query_parsing_service` | `pipeline/stages.rs` |
-| HTTP client + subgraph service assembly | `build_http_services`, `create_subgraph_services` | `pipeline/stages.rs` |
+| Query parsing stack assembly | `build_query_parsing_service` | `pipeline/stages.rs` |
+| HTTP client + subgraph service assembly | `build_http_services`, `build_subgraph_services` | `pipeline/stages.rs` |
 | Execution + supergraph stack assembly | `build_supergraph_pipeline`, `build_execution_service`, `build_supergraph_service` | `pipeline/stages.rs` |
 | Router stack assembly | `Pipeline::new` | `pipeline/mod.rs` |
 | The persistent pipeline | `Pipeline` (impl `RouterFactory`) | `pipeline/mod.rs` |

@@ -118,7 +118,7 @@ pub(crate) fn build_http_services(
 
 /// Builds a subgraph service around each entry's HTTP client factory, keyed by subgraph
 /// name.
-pub(crate) fn create_subgraph_services(
+pub(crate) fn build_subgraph_services(
     http_service_factory: &IndexMap<String, HttpClientServiceFactory>,
 ) -> IndexMap<String, subgraph::BoxCloneService> {
     let mut subgraph_services = IndexMap::default();
@@ -132,7 +132,7 @@ pub(crate) fn create_subgraph_services(
 /// Build a query parsing service with in-memory caching.
 ///
 /// The cache size is the same as the query plan cache size.
-pub(crate) fn query_parsing_service(
+pub(crate) fn build_query_parsing_service(
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,
 ) -> query_parsing::BoxCloneService {
@@ -155,17 +155,21 @@ pub(crate) fn query_parsing_service(
         .boxed_clone()
 }
 
+/// What [`build_supergraph_pipeline`] assembles.
+pub(crate) struct SupergraphPipeline {
+    /// The buffered supergraph service; clone it for each consumer.
+    pub(crate) supergraph_service: supergraph::BoxCloneService,
+    /// Handle to the in-memory query-plan cache, kept for the next hot reload's warm-up.
+    pub(crate) in_memory_query_plan_cache: InMemoryQueryPlanCache,
+    /// The caching-wrapped planner, consumed by warm-up.
+    pub(crate) caching_query_planner: query_planner::CacheBoxCloneService,
+}
+
 /// Assembles the supergraph pipeline: wraps the query planner in `query_plan_cache`, then
 /// builds the execution and supergraph service stacks.
 ///
 /// Part of the assemble phase; call it after plugin activation, with a cache built by
 /// [`build_query_plan_cache`].
-///
-/// Returns three values:
-///
-/// - the buffered supergraph service; clone it for each consumer
-/// - a handle on the in-memory query-plan cache, for warm-up on the next reload
-/// - the caching query planner service, for query-plan cache warm-up
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_supergraph_pipeline(
     query_planner_service: query_planner::BoxCloneService,
@@ -176,11 +180,7 @@ pub(crate) fn build_supergraph_pipeline(
     plugins: Arc<Plugins>,
     subgraph_services: Vec<(String, subgraph::BoxCloneService)>,
     connector_http_service_factory: IndexMap<String, HttpClientServiceFactory>,
-) -> (
-    supergraph::BoxCloneService,
-    InMemoryQueryPlanCache,
-    query_planner::CacheBoxCloneService,
-) {
+) -> SupergraphPipeline {
     let query_planner_service = CachingQueryPlanner::new(
         query_planner_service,
         schema.clone(),
@@ -210,11 +210,11 @@ pub(crate) fn build_supergraph_pipeline(
         plugins,
     );
 
-    (
-        supergraph_service.boxed_clone(),
-        query_plan_cache.in_memory_cache(),
-        query_planner_service,
-    )
+    SupergraphPipeline {
+        supergraph_service: supergraph_service.boxed_clone(),
+        in_memory_query_plan_cache: query_plan_cache.in_memory_cache(),
+        caching_query_planner: query_planner_service,
+    }
 }
 
 /// Assembles the execution service stack: the batching and subscription layers, each plugin's

@@ -798,7 +798,7 @@ mod test {
                 .boxed_clone();
 
         let query_parser_service =
-            crate::pipeline::query_parsing_service(schema.clone(), config.clone());
+            crate::pipeline::build_query_parsing_service(schema.clone(), config.clone());
 
         let plugins = Arc::new(
             create_plugins(
@@ -821,7 +821,11 @@ mod test {
         let query_plan_cache =
             build_query_plan_cache(&config, connect_query_plan_redis(&config).await.unwrap());
 
-        let (supergraph_service, in_memory_query_plan_cache, _planner) = build_supergraph_pipeline(
+        let crate::pipeline::SupergraphPipeline {
+            supergraph_service,
+            in_memory_query_plan_cache,
+            ..
+        } = build_supergraph_pipeline(
             query_planner_service,
             query_plan_cache,
             schema.clone(),

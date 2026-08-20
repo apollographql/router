@@ -20,17 +20,18 @@ use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::graphql;
 use crate::pipeline::Pipeline;
+use crate::pipeline::SupergraphPipeline;
 use crate::pipeline::build_apq_expander;
 use crate::pipeline::build_http_services;
+use crate::pipeline::build_query_parsing_service;
 use crate::pipeline::build_query_plan_cache;
+use crate::pipeline::build_subgraph_services;
 use crate::pipeline::build_supergraph_pipeline;
 use crate::pipeline::connect_apq_redis;
 use crate::pipeline::connect_query_plan_redis;
 use crate::pipeline::create_plugins;
 use crate::pipeline::create_query_planner_service;
-use crate::pipeline::create_subgraph_services;
 use crate::pipeline::parse_http_client_material;
-use crate::pipeline::query_parsing_service;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -384,18 +385,21 @@ impl<'a> TestHarness<'a> {
             connector_client_material,
             &plugins,
         );
-        let subgraph_services = create_subgraph_services(&http_service_factory);
-        let (supergraph_service, in_memory_query_plan_cache, _caching_query_planner) =
-            build_supergraph_pipeline(
-                query_planner_service,
-                query_plan_cache,
-                schema.clone(),
-                subgraph_schemas,
-                config.clone(),
-                plugins.clone(),
-                subgraph_services.into_iter().collect(),
-                connector_http_service_factory,
-            );
+        let subgraph_services = build_subgraph_services(&http_service_factory);
+        let SupergraphPipeline {
+            supergraph_service,
+            in_memory_query_plan_cache,
+            ..
+        } = build_supergraph_pipeline(
+            query_planner_service,
+            query_plan_cache,
+            schema.clone(),
+            subgraph_schemas,
+            config.clone(),
+            plugins.clone(),
+            subgraph_services.into_iter().collect(),
+            connector_http_service_factory,
+        );
 
         Ok((
             config,
@@ -449,7 +453,7 @@ impl<'a> TestHarness<'a> {
         let (config, schema, plugins, supergraph_service, in_memory_query_plan_cache) =
             self.build_common().await?;
 
-        let query_parsing_service = query_parsing_service(schema.clone(), config.clone());
+        let query_parsing_service = build_query_parsing_service(schema.clone(), config.clone());
 
         let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await?);
         let pipeline = Pipeline::new(
@@ -483,7 +487,7 @@ impl<'a> TestHarness<'a> {
         let (config, schema, plugins, supergraph_service, in_memory_query_plan_cache) =
             self.build_common().await?;
 
-        let query_parsing_service = query_parsing_service(schema.clone(), config.clone());
+        let query_parsing_service = build_query_parsing_service(schema.clone(), config.clone());
 
         let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await?);
         let pipeline = Pipeline::new(

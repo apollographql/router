@@ -3854,8 +3854,10 @@ async fn test_cache_warmup() {
 
     // We have to do a bunch of setup here...
     // XXX(@goto-bus-stop): we should probably just use the RouterService at this point?
-    let query_parsing_service =
-        crate::pipeline::query_parsing_service(schema.clone(), Arc::new(configuration.clone()));
+    let query_parsing_service = crate::pipeline::build_query_parsing_service(
+        schema.clone(),
+        Arc::new(configuration.clone()),
+    );
     let pq_layer = PersistedQueryExpander::new(&configuration).await.unwrap();
 
     /// Return an empty plan that doesn't require any subgraph requests to fulfill.
@@ -3908,7 +3910,11 @@ async fn test_cache_warmup() {
             .await
             .unwrap(),
     );
-    let (supergraph_service, previous_cache, _warmup) = build_supergraph_pipeline(
+    let crate::pipeline::SupergraphPipeline {
+        supergraph_service,
+        in_memory_query_plan_cache: previous_cache,
+        ..
+    } = build_supergraph_pipeline(
         mock.map_err(|err| panic!("mock driver failed: {err}"))
             .boxed_clone(),
         query_plan_cache,
@@ -3956,18 +3962,21 @@ async fn test_cache_warmup() {
             .await
             .unwrap(),
     );
-    let (supergraph_service, _in_memory_query_plan_cache, query_planner_service) =
-        build_supergraph_pipeline(
-            mock.map_err(|err| panic!("mock driver failed: {err}"))
-                .boxed_clone(),
-            query_plan_cache,
-            schema.clone(),
-            Arc::new(Default::default()),
-            Arc::new(configuration.clone()),
-            Default::default(),
-            Vec::new(),
-            Default::default(),
-        );
+    let crate::pipeline::SupergraphPipeline {
+        supergraph_service,
+        caching_query_planner: query_planner_service,
+        ..
+    } = build_supergraph_pipeline(
+        mock.map_err(|err| panic!("mock driver failed: {err}"))
+            .boxed_clone(),
+        query_plan_cache,
+        schema.clone(),
+        Arc::new(Default::default()),
+        Arc::new(configuration.clone()),
+        Default::default(),
+        Vec::new(),
+        Default::default(),
+    );
 
     let warmup_service = ServiceBuilder::new()
         .layer(crate::query_planner::warmup::WarmupParseQueryLayer::new(

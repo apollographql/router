@@ -1055,7 +1055,7 @@ mod create_subgraph_services_tests {
     use crate::Context;
     use crate::configuration::SubgraphApq;
     use crate::graphql::Response;
-    use crate::pipeline::create_subgraph_services;
+    use crate::pipeline::build_subgraph_services;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
     use crate::services::http::HttpClientServiceFactory;
@@ -1158,7 +1158,7 @@ mod create_subgraph_services_tests {
         let mut http_service_factory = IndexMap::new();
         http_service_factory.insert("test".to_string(), make_http_service_factory("test"));
 
-        let subgraph_services = create_subgraph_services(&http_service_factory);
+        let subgraph_services = build_subgraph_services(&http_service_factory);
         let factory = SubgraphServiceFactory::new(
             subgraph_services.into_iter().collect(),
             Default::default(),
@@ -1212,7 +1212,7 @@ mod create_subgraph_services_tests {
         let mut http_service_factory = IndexMap::new();
         http_service_factory.insert("test".to_string(), make_http_service_factory("test"));
 
-        let subgraph_services = create_subgraph_services(&http_service_factory);
+        let subgraph_services = build_subgraph_services(&http_service_factory);
         let factory = SubgraphServiceFactory::new(
             subgraph_services.into_iter().collect(),
             Default::default(),
@@ -1289,7 +1289,7 @@ mod create_subgraph_services_tests {
             make_http_service_factory("disabled_subgraph"),
         );
 
-        let subgraph_services = create_subgraph_services(&http_service_factory);
+        let subgraph_services = build_subgraph_services(&http_service_factory);
         let factory = SubgraphServiceFactory::new(
             subgraph_services.into_iter().collect(),
             Default::default(),
