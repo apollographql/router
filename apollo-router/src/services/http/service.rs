@@ -53,7 +53,6 @@ use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::otel::prepare_context;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::services::hickory_dns_connector::AsyncHyperResolver;
-use crate::services::hickory_dns_connector::new_async_http_connector;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 
@@ -203,6 +202,140 @@ impl Display for Compression {
     }
 }
 
+/// Validated inputs for building an [`HttpClientService`].
+///
+/// Parsing configuration into this type is the fallible half of client construction:
+/// certificate stores, client certificates, and the DNS resolver can all fail to load.
+/// [`HttpClientService::new`] consumes the material and cannot fail.
+pub(crate) struct HttpClientMaterial {
+    /// The target service, used for metrics and error reporting. The subgraph or connector name
+    /// also feeds request signing.
+    service_target: ServiceTarget,
+    tls_config: ClientConfig,
+    /// Router config options for the client, such as HTTP/2 support and pool timeouts.
+    client_config: crate::configuration::shared::Client,
+    /// DNS resolver that applies the client's configured resolution strategy.
+    dns_resolver: AsyncHyperResolver,
+}
+
+impl HttpClientMaterial {
+    /// Parses the client material for a subgraph. Per-subgraph TLS config in `configuration`
+    /// overrides `tls_root_store` and the default client authentication.
+    pub(crate) fn for_subgraph(
+        service: impl Into<String>,
+        configuration: &Configuration,
+        tls_root_store: &RootCertStore,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        let name: String = service.into();
+        let default_client_cert_config = configuration
+            .tls
+            .subgraph
+            .all
+            .client_authentication
+            .as_ref();
+
+        let tls_cert_store = configuration
+            .tls
+            .subgraph
+            .subgraphs
+            .get(&name)
+            .as_ref()
+            .and_then(|subgraph| subgraph.create_certificate_store())
+            .transpose()?
+            .unwrap_or_else(|| tls_root_store.clone());
+        let client_cert_config = configuration
+            .tls
+            .subgraph
+            .subgraphs
+            .get(&name)
+            .as_ref()
+            .and_then(|tls| tls.client_authentication.as_ref())
+            .or(default_client_cert_config);
+
+        let tls_config =
+            generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
+        let service_target = ServiceTarget::Subgraph {
+            name: Arc::from(name.as_str()),
+        };
+
+        Self::new(service_target, tls_config, client_config)
+    }
+
+    /// Parses the client material for a connector source. Per-source TLS config in
+    /// `configuration` overrides `tls_root_store` and the default client authentication.
+    pub(crate) fn for_connector(
+        source_name: impl Into<String>,
+        configuration: &Configuration,
+        tls_root_store: &RootCertStore,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        let name: String = source_name.into();
+        let default_client_cert_config = configuration
+            .tls
+            .connector
+            .all
+            .client_authentication
+            .as_ref();
+
+        let tls_cert_store = configuration
+            .tls
+            .connector
+            .sources
+            .get(&name)
+            .as_ref()
+            .and_then(|subgraph| subgraph.create_certificate_store())
+            .transpose()?
+            .unwrap_or_else(|| tls_root_store.clone());
+        let client_cert_config = configuration
+            .tls
+            .connector
+            .sources
+            .get(&name)
+            .as_ref()
+            .and_then(|tls| tls.client_authentication.as_ref())
+            .or(default_client_cert_config);
+
+        let tls_config =
+            generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
+        let service_target = ServiceTarget::Connector {
+            name: Arc::from(name.as_str()),
+        };
+
+        Self::new(service_target, tls_config, client_config)
+    }
+
+    /// Parses the client material for the coprocessor client.
+    pub(crate) fn for_coprocessor(
+        tls_root_store: &RootCertStore,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        // Coprocessors don't use client certificates, so use no client auth
+        let tls_config = generate_tls_client_config(tls_root_store.clone(), None)?;
+
+        Self::new(ServiceTarget::Coprocessor, tls_config, client_config)
+    }
+
+    /// Assembles material from an already-resolved TLS config. Fails if the DNS resolver
+    /// cannot be created from the system configuration.
+    fn new(
+        service_target: ServiceTarget,
+        tls_config: ClientConfig,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        let dns_resolver = AsyncHyperResolver::new_from_system_conf(
+            client_config.dns_resolution_strategy.unwrap_or_default(),
+        )?;
+
+        Ok(Self {
+            service_target,
+            tls_config,
+            client_config,
+            dns_resolver,
+        })
+    }
+}
+
 /// A set of clients (http, unix) for talking with external services like coprocessors, subgraphs,
 /// connectors-connected subgraphs, and so on, implemented as a tower service
 #[derive(Clone)]
@@ -217,10 +350,7 @@ pub(crate) struct HttpClientService {
 }
 
 impl HttpClientService {
-    /// Test-wrapper for HttpClientService::new()
-    ///
-    /// NOTE: this separation is primarily to keep us from exposing `new()`
-    /// when we don't need to
+    /// Test-wrapper that builds a subgraph client from a service name.
     #[cfg_attr(test, allow(unreachable_pub))]
     pub(crate) fn test_new(
         service: impl Into<String>,
@@ -230,28 +360,26 @@ impl HttpClientService {
         let service_target = ServiceTarget::Subgraph {
             name: Arc::from(service.into().as_str()),
         };
-        Self::new(service_target, tls_config, client_config)
+        Ok(Self::new(HttpClientMaterial::new(
+            service_target,
+            tls_config,
+            client_config,
+        )?))
     }
 
-    /// Create a new HttpClientService using:
-    ///
-    /// - the target service kind (subgraph/connector with its name, or coprocessor), used for
-    ///   metrics and error reporting; the name is also used for request signing
-    /// - the tls config to be used in setting tls; though, this is actually rustls's and hyper
-    ///   figuring out which parts of a broader config to use for tls
-    /// - the client's config, which is _our_ set of options from the router config for use in
-    ///   enabling/disabling features like http/2
-    fn new(
-        service_target: ServiceTarget,
-        tls_config: ClientConfig,
-        client_config: crate::configuration::shared::Client,
-    ) -> Result<Self, BoxError> {
+    /// Creates a client from parsed [`HttpClientMaterial`].
+    pub(crate) fn new(material: HttpClientMaterial) -> Self {
+        let HttpClientMaterial {
+            service_target,
+            tls_config,
+            client_config,
+            dns_resolver,
+        } = material;
         let service_name: Arc<str> = match &service_target {
             ServiceTarget::Coprocessor => Arc::from("coprocessor"),
             ServiceTarget::Subgraph { name } | ServiceTarget::Connector { name } => name.clone(),
         };
-        let mut http_connector =
-            new_async_http_connector(client_config.dns_resolution_strategy.unwrap_or_default())?;
+        let mut http_connector = HttpConnector::new_with_resolver(dns_resolver);
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
@@ -321,7 +449,7 @@ impl HttpClientService {
                 .service(unix_client_inner)
         };
 
-        Ok(Self {
+        Self {
             http_client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
                 .layer(WireBodySizeLayer)
@@ -329,7 +457,7 @@ impl HttpClientService {
             #[cfg(unix)]
             unix_client,
             service: service_name,
-        })
+        }
     }
 
     /// Creates a client for talking to subgraphs
@@ -339,39 +467,12 @@ impl HttpClientService {
         tls_root_store: &RootCertStore,
         client_config: crate::configuration::shared::Client,
     ) -> Result<Self, BoxError> {
-        let name: String = service.into();
-        let default_client_cert_config = configuration
-            .tls
-            .subgraph
-            .all
-            .client_authentication
-            .as_ref();
-
-        let tls_cert_store = configuration
-            .tls
-            .subgraph
-            .subgraphs
-            .get(&name)
-            .as_ref()
-            .and_then(|subgraph| subgraph.create_certificate_store())
-            .transpose()?
-            .unwrap_or_else(|| tls_root_store.clone());
-        let client_cert_config = configuration
-            .tls
-            .subgraph
-            .subgraphs
-            .get(&name)
-            .as_ref()
-            .and_then(|tls| tls.client_authentication.as_ref())
-            .or(default_client_cert_config);
-
-        let tls_client_config =
-            generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
-        let service_target = ServiceTarget::Subgraph {
-            name: Arc::from(name.as_str()),
-        };
-
-        Self::new(service_target, tls_client_config, client_config)
+        Ok(Self::new(HttpClientMaterial::for_subgraph(
+            service,
+            configuration,
+            tls_root_store,
+            client_config,
+        )?))
     }
 
     /// Creates a client for talking to connectors-connected subgraphs
@@ -381,39 +482,12 @@ impl HttpClientService {
         tls_root_store: &RootCertStore,
         client_config: crate::configuration::shared::Client,
     ) -> Result<Self, BoxError> {
-        let name: String = source_name.into();
-        let default_client_cert_config = configuration
-            .tls
-            .connector
-            .all
-            .client_authentication
-            .as_ref();
-
-        let tls_cert_store = configuration
-            .tls
-            .connector
-            .sources
-            .get(&name)
-            .as_ref()
-            .and_then(|subgraph| subgraph.create_certificate_store())
-            .transpose()?
-            .unwrap_or_else(|| tls_root_store.clone());
-        let client_cert_config = configuration
-            .tls
-            .connector
-            .sources
-            .get(&name)
-            .as_ref()
-            .and_then(|tls| tls.client_authentication.as_ref())
-            .or(default_client_cert_config);
-
-        let tls_client_config =
-            generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
-        let service_target = ServiceTarget::Connector {
-            name: Arc::from(name.as_str()),
-        };
-
-        Self::new(service_target, tls_client_config, client_config)
+        Ok(Self::new(HttpClientMaterial::for_connector(
+            source_name,
+            configuration,
+            tls_root_store,
+            client_config,
+        )?))
     }
 
     /// Creates a client for talking to coprocessors
@@ -423,10 +497,10 @@ impl HttpClientService {
         tls_root_store: &RootCertStore,
         client_config: crate::configuration::shared::Client,
     ) -> Result<Self, BoxError> {
-        // Coprocessors don't use client certificates, so use no client auth
-        let tls_client_config = generate_tls_client_config(tls_root_store.clone(), None)?;
-
-        Self::new(ServiceTarget::Coprocessor, tls_client_config, client_config)
+        Ok(Self::new(HttpClientMaterial::for_coprocessor(
+            tls_root_store,
+            client_config,
+        )?))
     }
 
     /// Creates a root certificate store with native certificates. These are used for root-of-trust
@@ -471,12 +545,16 @@ impl HttpClientService {
     ) -> Result<Self, BoxError> {
         // No TLS config - provide empty root store
         let tls_root_store = RootCertStore::empty();
-        let tls_client_config = generate_tls_client_config(tls_root_store, None)?;
+        let tls_config = generate_tls_client_config(tls_root_store, None)?;
 
         let service_target = ServiceTarget::Subgraph {
             name: Arc::from("test"),
         };
-        HttpClientService::new(service_target, tls_client_config, client_config)
+        Ok(HttpClientService::new(HttpClientMaterial::new(
+            service_target,
+            tls_config,
+            client_config,
+        )?))
     }
 }
 
@@ -664,6 +742,7 @@ mod tests {
     use tracing_subscriber::registry::LookupSpan;
 
     use super::super::ServiceTarget;
+    use super::HttpClientMaterial;
     use crate::Context;
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::otel;
@@ -774,14 +853,16 @@ mod tests {
             name: Arc::from(service_name),
         };
         let http_client_service = HttpClientService::new(
-            service_target,
-            rustls::ClientConfig::builder()
-                .with_native_roots()
-                .expect("Able to load native roots")
-                .with_no_client_auth(),
-            crate::configuration::shared::Client::builder().build(),
-        )
-        .expect("can create a HttpClientService");
+            HttpClientMaterial::new(
+                service_target,
+                rustls::ClientConfig::builder()
+                    .with_native_roots()
+                    .expect("Able to load native roots")
+                    .with_no_client_auth(),
+                crate::configuration::shared::Client::builder().build(),
+            )
+            .expect("can create http client material"),
+        );
 
         plugin.http_client_service(service_name, BoxCloneService::new(http_client_service))
     }
@@ -926,14 +1007,16 @@ mod tests {
             name: Arc::from("test"),
         };
         let http_client_service = HttpClientService::new(
-            service_target,
-            rustls::ClientConfig::builder()
-                .with_native_roots()
-                .expect("Able to load native roots")
-                .with_no_client_auth(),
-            crate::configuration::shared::Client::builder().build(),
-        )
-        .expect("can create a HttpClientService");
+            HttpClientMaterial::new(
+                service_target,
+                rustls::ClientConfig::builder()
+                    .with_native_roots()
+                    .expect("Able to load native roots")
+                    .with_no_client_auth(),
+                crate::configuration::shared::Client::builder().build(),
+            )
+            .expect("can create http client material"),
+        );
 
         // Wrap with telemetry plugin
         let mut telemetry_wrapped_service =
@@ -1019,14 +1102,16 @@ mod tests {
             name: Arc::from("test"),
         };
         let http_client_service = HttpClientService::new(
-            service_target,
-            rustls::ClientConfig::builder()
-                .with_native_roots()
-                .expect("read native TLS root certificates")
-                .with_no_client_auth(),
-            crate::configuration::shared::Client::builder().build(),
-        )
-        .expect("can create a HttpClientService");
+            HttpClientMaterial::new(
+                service_target,
+                rustls::ClientConfig::builder()
+                    .with_native_roots()
+                    .expect("read native TLS root certificates")
+                    .with_no_client_auth(),
+                crate::configuration::shared::Client::builder().build(),
+            )
+            .expect("can create http client material"),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = http_client_service
