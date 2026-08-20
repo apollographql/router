@@ -47,6 +47,10 @@ reload:
 
 The retry budget is reset whenever the router receives a new reload trigger — a new schema or license from Uplink, a configuration or rhai script file change, or an explicit reload signal — so any new change will always get a fresh set of attempts even if previous retries were exhausted.
 
+The router only retries failures that a later attempt might resolve. Some reloads fail for a reason that can't change on its own: a schema that doesn't parse, a configuration that isn't valid for your license, or a schema that uses preview features your configuration doesn't enable. The router doesn't spend retries on these. It keeps serving the previous schema, configuration, and license, and waits for your next update, which gets a fresh set of attempts.
+
+The `apollo.router.state.reload.attempt` metric counts reload attempts. Its `is_success` attribute tells you whether the reload built, and `error_kind` tells you why it didn't, so you can distinguish a router that's still retrying (`transient`) from one that's waiting for you to publish a fix (`permanent`).
+
 ## Production recommendations
 
 For production deployments with high traffic:
