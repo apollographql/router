@@ -50,12 +50,12 @@ pub(crate) trait RouterServiceFactory {
     ) -> Result<Self::RouterFactory, BoxError>;
 }
 
-/// Main implementation of the SupergraphService factory, supporting the extensions system
+/// Builds a [`Pipeline`] from configuration via [`crate::pipeline::build_pipeline`].
 #[derive(Default)]
-pub(crate) struct YamlRouterFactory;
+pub(crate) struct PipelineFactory;
 
 #[async_trait::async_trait]
-impl RouterServiceFactory for YamlRouterFactory {
+impl RouterServiceFactory for PipelineFactory {
     type RouterFactory = Pipeline;
 
     async fn create_pipeline(
@@ -92,7 +92,7 @@ pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: 
     let schema = Arc::new(Schema::parse(schema, &config).unwrap());
 
     let is_telemetry_disabled = false;
-    let service = YamlRouterFactory
+    let service = PipelineFactory
         .create_pipeline(
             is_telemetry_disabled,
             Arc::new(config),
@@ -126,8 +126,8 @@ mod test {
     use crate::pipeline::inject_schema_id;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
+    use crate::router_factory::PipelineFactory;
     use crate::router_factory::RouterServiceFactory;
-    use crate::router_factory::YamlRouterFactory;
     use crate::spec::Schema;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
@@ -201,7 +201,7 @@ mod test {
         let schema = Schema::parse(schema, &config)?;
 
         let is_telemetry_disabled = false;
-        let service = YamlRouterFactory
+        let service = PipelineFactory
             .create_pipeline(
                 is_telemetry_disabled,
                 Arc::new(config),
@@ -380,7 +380,7 @@ mod test {
          *  - the router factory runs (including the plugin inits gated by the license)
          * */
         let is_telemetry_disabled = false;
-        let service = YamlRouterFactory
+        let service = PipelineFactory
             .create_pipeline(
                 is_telemetry_disabled,
                 Arc::new(router_config),
@@ -449,7 +449,7 @@ mod test {
          *  - the router factory runs (including the plugin inits gated by the license)
          * */
         let is_telemetry_disabled = false;
-        let service = YamlRouterFactory
+        let service = PipelineFactory
             .create_pipeline(
                 is_telemetry_disabled,
                 Arc::new(router_config),
@@ -531,7 +531,7 @@ mod test {
          *  - the router factory runs (including the plugin inits gated by the license)
          * */
         let is_telemetry_disabled = false;
-        let service = YamlRouterFactory
+        let service = PipelineFactory
             .create_pipeline(
                 is_telemetry_disabled,
                 Arc::new(router_config),
@@ -618,7 +618,7 @@ mod test {
          *  - the router factory runs (including the plugin inits gated by the license)
          * */
         let is_telemetry_disabled = false;
-        let service = YamlRouterFactory
+        let service = PipelineFactory
             .create_pipeline(
                 is_telemetry_disabled,
                 Arc::new(router_config),
@@ -690,7 +690,7 @@ mod test {
          *  - the router factory runs (including the plugin inits gated by the license)
          * */
         let is_telemetry_disabled = false;
-        let service = YamlRouterFactory
+        let service = PipelineFactory
             .create_pipeline(
                 is_telemetry_disabled,
                 Arc::new(router_config),
@@ -768,7 +768,7 @@ mod test {
          *  - the router factory runs (including the plugin inits gated by the license)
          * */
         let is_telemetry_disabled = false;
-        let service = YamlRouterFactory
+        let service = PipelineFactory
             .create_pipeline(
                 is_telemetry_disabled,
                 Arc::new(router_config),
@@ -854,7 +854,7 @@ mod test {
          *  - the router factory runs (including the plugin inits gated by the license)
          * */
         let is_telemetry_disabled = false;
-        let service = YamlRouterFactory
+        let service = PipelineFactory
             .create_pipeline(
                 is_telemetry_disabled,
                 Arc::new(router_config),

@@ -22,8 +22,8 @@ use crate::configuration::generate_config_schema;
 use crate::executable::Opt;
 use crate::pipeline::Pipeline;
 use crate::plugin::DynPlugin;
+use crate::router_factory::PipelineFactory;
 use crate::router_factory::RouterServiceFactory;
-use crate::router_factory::YamlRouterFactory;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
@@ -53,9 +53,9 @@ struct UsageReport {
     usage: Map<String, Value>,
 }
 
-impl OrbiterRouterSuperServiceFactory {
-    pub(crate) fn new(delegate: YamlRouterFactory) -> OrbiterRouterSuperServiceFactory {
-        OrbiterRouterSuperServiceFactory { delegate }
+impl OrbiterPipelineFactory {
+    pub(crate) fn new(delegate: PipelineFactory) -> OrbiterPipelineFactory {
+        OrbiterPipelineFactory { delegate }
     }
 }
 
@@ -85,12 +85,12 @@ impl OrbiterRouterSuperServiceFactory {
 /// }
 /// ```
 #[derive(Default)]
-pub(crate) struct OrbiterRouterSuperServiceFactory {
-    delegate: YamlRouterFactory,
+pub(crate) struct OrbiterPipelineFactory {
+    delegate: PipelineFactory,
 }
 
 #[async_trait]
-impl RouterServiceFactory for OrbiterRouterSuperServiceFactory {
+impl RouterServiceFactory for OrbiterPipelineFactory {
     type RouterFactory = Pipeline;
 
     async fn create_pipeline(

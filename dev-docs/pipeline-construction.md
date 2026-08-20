@@ -83,7 +83,7 @@ Construction is slow enough to need its own observability — a reload blocks on
 
 | Concern | Function / type | File |
 |---|---|---|
-| Entry point called from the state machine | `RouterServiceFactory::create_pipeline` (impl `YamlRouterFactory`) | `router_factory.rs` |
+| Entry point called from the state machine | `RouterServiceFactory::create_pipeline` (impl `PipelineFactory`) | `router_factory.rs` |
 | The three phases | `build_pipeline` | `pipeline/mod.rs` |
 | The acquire phase | `acquire`/`Acquired` | `pipeline/acquire.rs` |
 | Early telemetry init | `init_telemetry` | `pipeline/acquire.rs` |
