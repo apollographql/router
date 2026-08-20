@@ -2034,8 +2034,6 @@ fn avoids_selecting_inapplicable_key_from_parent_node() {
       "###
     );
 }
-<<<<<<< HEAD
-=======
 
 // Reproduction for RH-1390: router panics at planning time when @external
 // appears on nested @key fields combined with cross-subgraph @requires.
@@ -2249,4 +2247,3 @@ fn handles_requires_when_key_conditions_are_fetched_below_the_entity() {
     "#
     );
 }
->>>>>>> 13c9e699f (fix(query-planner): handle @requires when key conditions are fetched below the entity (#9926))
