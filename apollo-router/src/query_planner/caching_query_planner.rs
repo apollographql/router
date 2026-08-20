@@ -10,6 +10,7 @@ use futures::future::BoxFuture;
 use sha2::Digest;
 use sha2::Sha256;
 use tokio_util::time::FutureExt;
+#[cfg(test)]
 use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
@@ -157,6 +158,7 @@ fn init_query_plan_from_redis(
 impl CachingQueryPlanner<()> {
     /// Create a cache for query plans. This cache can deduplicate requests and uses both Redis and
     /// an in-memory backend.
+    #[cfg(test)]
     pub(crate) async fn create_cache(
         config: &crate::configuration::QueryPlanCache,
     ) -> Result<QueryPlanCache, BoxError> {

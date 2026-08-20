@@ -685,12 +685,16 @@ mod test {
     use crate::Configuration;
     use crate::Context;
     use crate::json_ext::Object;
+    use crate::pipeline::build_apq_expander;
+    use crate::pipeline::build_query_plan_cache;
+    use crate::pipeline::connect_apq_redis;
+    use crate::pipeline::connect_query_plan_redis;
+    use crate::pipeline::create_plugins;
     use crate::plugin::DynPlugin;
     use crate::plugin::test::MockConnector;
     use crate::plugin::test::MockSubgraph;
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::RouterFactory;
-    use crate::router_factory::create_plugins;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
@@ -810,8 +814,16 @@ mod test {
             .expect("create plugins should work"),
         );
 
+        for (_, plugin) in plugins.iter() {
+            plugin.activate();
+        }
+
+        let query_plan_cache =
+            build_query_plan_cache(&config, connect_query_plan_redis(&config).await.unwrap());
+
         let (supergraph_creator, _planner) = build_supergraph_creator(
             query_planner_service,
+            query_plan_cache,
             schema.clone(),
             subgraph_schemas,
             config.clone(),
@@ -822,18 +834,16 @@ mod test {
                 ("products".to_string(), product_service.boxed_clone()),
             ],
             Default::default(),
-        )
-        .await
-        .expect("should build");
+        );
 
+        let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await.unwrap());
         RouterCreator::new(
             Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
+            apq_expander,
             Arc::new(supergraph_creator),
             query_parser_service,
             config,
         )
-        .await
-        .unwrap()
         .create()
         .boxed_clone()
     }

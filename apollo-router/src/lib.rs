@@ -79,6 +79,7 @@ mod introspection;
 pub mod layers;
 pub(crate) mod logging;
 mod orbiter;
+mod pipeline;
 mod plugins;
 pub(crate) mod protocols;
 mod query_planner;

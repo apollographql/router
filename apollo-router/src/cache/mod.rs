@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
+#[cfg(test)]
 use tower::BoxError;
 
 use self::redis::RedisCacheStorage;
@@ -12,6 +13,7 @@ use self::storage::CacheStorage;
 use self::storage::InMemoryCache;
 use self::storage::KeyType;
 use self::storage::ValueType;
+#[cfg(test)]
 use self::storage::connect_redis;
 
 mod metrics;
@@ -66,6 +68,7 @@ where
     /// # Errors
     /// Fails only when the Redis connect fails and the configuration marks it as required
     /// to start; see [`connect_redis`].
+    #[cfg(test)]
     pub(crate) async fn from_configuration(
         config: &crate::configuration::Cache,
         caller: &'static str,

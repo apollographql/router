@@ -46,6 +46,7 @@ use crate::plugins::telemetry::config_new::supergraph::events::SupergraphEventRe
 use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryQueryPlanCache;
+use crate::query_planner::QueryPlanCache;
 use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::warmup;
 use crate::services::ExecutionRequest;
@@ -450,27 +451,25 @@ async fn plan_query(
     Ok(qpr)
 }
 
-/// Builds the supergraph pipeline and activates it.
+/// Assembles the supergraph pipeline: wraps the query planner in `query_plan_cache`, then
+/// builds the execution and supergraph service stacks.
 ///
-/// Creates the query-plan cache, activates every plugin plus the query-plan and introspection
-/// caches, then assembles the execution and supergraph service stacks. Activation interacts
-/// with globals (the telemetry plugin swaps the tracer provider), so a caller that gets `Ok`
-/// back must go live with the returned pipeline.
+/// Part of the assemble phase in [`crate::pipeline`]; call it after plugin activation, with
+/// a cache built by [`crate::pipeline::build_query_plan_cache`].
 ///
 /// The second element of the returned pair is the caching query planner service, for use in
 /// query-plan cache warm-up.
-pub(crate) async fn build_supergraph_creator(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_supergraph_creator(
     query_planner_service: query_planner::BoxCloneService,
+    query_plan_cache: QueryPlanCache,
     schema: Arc<Schema>,
     subgraph_schemas: Arc<SubgraphSchemas>,
     configuration: Arc<Configuration>,
     plugins: Arc<Plugins>,
     subgraph_services: Vec<(String, subgraph::BoxCloneService)>,
     connector_http_service_factory: IndexMap<String, HttpClientServiceFactory>,
-) -> Result<(SupergraphCreator, query_planner::CacheBoxCloneService), crate::error::ServiceBuildError>
-{
-    let query_plan_cache =
-        CachingQueryPlanner::create_cache(&configuration.supergraph.query_planning.cache).await?;
+) -> (SupergraphCreator, query_planner::CacheBoxCloneService) {
     let query_planner_service = CachingQueryPlanner::new(
         query_planner_service,
         schema.clone(),
@@ -482,16 +481,6 @@ pub(crate) async fn build_supergraph_creator(
 
     let (introspection_service, introspection_cache) =
         introspection::introspection_service(&configuration);
-
-    // Activate the telemetry plugin.
-    // We must NOT fail to go live with the new router from this point as the telemetry plugin activate interacts with globals.
-    for (_, plugin) in plugins.iter() {
-        plugin.activate();
-    }
-
-    // We need a non-fallible hook so that once we know we are going live with a pipeline we do final initialization.
-    // For now just shoe-horn something in, but if we ever reintroduce the query planner hook in plugins and activate then this can be made clean.
-    query_plan_cache.activate();
     if let Some(introspection_cache) = introspection_cache {
         introspection_cache.activate();
     }
@@ -514,7 +503,7 @@ pub(crate) async fn build_supergraph_creator(
         plugins.clone(),
     );
 
-    Ok((
+    (
         SupergraphCreator {
             in_memory_query_plan_cache: query_plan_cache.in_memory_cache(),
             schema,
@@ -522,7 +511,7 @@ pub(crate) async fn build_supergraph_creator(
             sb,
         },
         query_planner_service,
-    ))
+    )
 }
 
 /// Assembles the execution service stack: the batching and subscription layers, each plugin's

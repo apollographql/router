@@ -19,6 +19,15 @@ use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::graphql;
+use crate::pipeline::build_apq_expander;
+use crate::pipeline::build_http_services;
+use crate::pipeline::build_query_plan_cache;
+use crate::pipeline::connect_apq_redis;
+use crate::pipeline::connect_query_plan_redis;
+use crate::pipeline::create_plugins;
+use crate::pipeline::create_query_planner_service;
+use crate::pipeline::create_subgraph_services;
+use crate::pipeline::parse_http_client_material;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -28,8 +37,9 @@ use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::canned;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
 use crate::router_factory::RouterFactory;
-use crate::router_factory::YamlRouterFactory;
+use crate::services::Plugins;
 use crate::services::SupergraphCreator;
+use crate::services::build_supergraph_creator;
 use crate::services::execution;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::query_parsing;
@@ -331,16 +341,51 @@ impl<'a> TestHarness<'a> {
             limits: Default::default(),
         }));
 
-        let (supergraph_creator, _warmup) = YamlRouterFactory
-            .inner_create_supergraph(
-                config.clone(),
-                schema.clone(),
+        // Compose the acquire, activate, and assemble steps from `crate::pipeline` directly:
+        // tests need an activated SupergraphCreator without the router service, APQ expander,
+        // and warm-up that `build_pipeline` adds on top.
+        let (query_planner_service, subgraph_schemas) =
+            create_query_planner_service(&schema, &config)?;
+        let plugins: Arc<Plugins> = Arc::new(
+            create_plugins(
+                &config,
+                &schema,
+                subgraph_schemas.clone(),
                 None,
                 Some(self.extra_plugins),
                 license,
                 None,
             )
-            .await?;
+            .instrument(tracing::info_span!("plugins"))
+            .await?
+            .into_iter()
+            .collect(),
+        );
+        let (subgraph_client_material, connector_client_material) =
+            parse_http_client_material(&plugins, &schema, &config)?;
+        let query_plan_redis = connect_query_plan_redis(&config).await?;
+
+        for (_, plugin) in plugins.iter() {
+            plugin.activate();
+        }
+
+        let query_plan_cache = build_query_plan_cache(&config, query_plan_redis);
+        let (http_service_factory, connector_http_service_factory) = build_http_services(
+            subgraph_client_material,
+            connector_client_material,
+            &plugins,
+        );
+        let subgraph_services = create_subgraph_services(&http_service_factory);
+        let (supergraph_creator, _caching_query_planner) = build_supergraph_creator(
+            query_planner_service,
+            query_plan_cache,
+            schema.clone(),
+            subgraph_schemas,
+            config.clone(),
+            plugins,
+            subgraph_services.into_iter().collect(),
+            connector_http_service_factory,
+        );
 
         Ok((config, schema, supergraph_creator))
     }
@@ -388,14 +433,14 @@ impl<'a> TestHarness<'a> {
 
         let query_parsing_service = query_parsing::query_parsing_service(schema, config.clone());
 
+        let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await?);
         let router_creator = RouterCreator::new(
             Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
+            apq_expander,
             Arc::new(supergraph_creator),
             query_parsing_service,
             config.clone(),
-        )
-        .await
-        .unwrap();
+        );
 
         Ok(tower::service_fn(move |request: router::Request| {
             let router = ServiceBuilder::new()
@@ -420,13 +465,14 @@ impl<'a> TestHarness<'a> {
 
         let query_parsing_service = query_parsing::query_parsing_service(schema, config.clone());
 
+        let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await?);
         let router_creator = RouterCreator::new(
             Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
+            apq_expander,
             Arc::new(supergraph_creator),
             query_parsing_service,
             config.clone(),
-        )
-        .await?;
+        );
 
         let web_endpoints = router_creator.web_endpoints();
 

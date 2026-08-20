@@ -3905,18 +3905,23 @@ async fn test_cache_warmup() {
         responder.send_response(empty_query_plan());
     });
 
+    let query_plan_cache = crate::pipeline::build_query_plan_cache(
+        &configuration,
+        crate::pipeline::connect_query_plan_redis(&configuration)
+            .await
+            .unwrap(),
+    );
     let (supergraph_creator, _warmup) = build_supergraph_creator(
         mock.map_err(|err| panic!("mock driver failed: {err}"))
             .boxed_clone(),
+        query_plan_cache,
         schema.clone(),
         Arc::new(Default::default()),
         Arc::new(configuration.clone()),
         Default::default(),
         Vec::new(),
         Default::default(),
-    )
-    .await
-    .unwrap();
+    );
 
     let supergraph_service = ServiceBuilder::new()
         .load_shed()
@@ -3950,18 +3955,23 @@ async fn test_cache_warmup() {
         did_plan_2.store(true, std::sync::atomic::Ordering::Relaxed);
     });
 
+    let query_plan_cache = crate::pipeline::build_query_plan_cache(
+        &configuration,
+        crate::pipeline::connect_query_plan_redis(&configuration)
+            .await
+            .unwrap(),
+    );
     let (supergraph_creator, query_planner_service) = build_supergraph_creator(
         mock.map_err(|err| panic!("mock driver failed: {err}"))
             .boxed_clone(),
+        query_plan_cache,
         schema.clone(),
         Arc::new(Default::default()),
         Arc::new(configuration.clone()),
         Default::default(),
         Vec::new(),
         Default::default(),
-    )
-    .await
-    .unwrap();
+    );
 
     let warmup_service = ServiceBuilder::new()
         .layer(crate::query_planner::warmup::WarmupParseQueryLayer::new(

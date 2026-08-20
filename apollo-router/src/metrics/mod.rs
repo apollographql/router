@@ -885,9 +885,9 @@ pub fn meter_provider() -> impl opentelemetry::metrics::MeterProvider {
 /// router's own macros registered — it cannot reach instruments a library is holding. A
 /// dependency that caches its instruments across a reload (in a `static`, say) would keep
 /// writing into the previous, now shut down, provider. The dependencies bridged today are safe
-/// because their instruments are created per pipeline: plugins are activated in
-/// `build_supergraph_creator` before `RouterCreator::new` builds the service
-/// stack, so every reload recreates them against the freshly installed providers.
+/// because their instruments are created per pipeline: `build_pipeline` activates plugins
+/// before it assembles the service stacks, so every reload recreates them against the
+/// freshly installed providers.
 struct DelegatingMeterProvider;
 
 impl opentelemetry::metrics::MeterProvider for DelegatingMeterProvider {

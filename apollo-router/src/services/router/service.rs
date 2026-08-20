@@ -39,7 +39,6 @@ use crate::ListenAddr;
 use crate::apollo_studio_interop::extended_references_layer::ExtendedReferencesLayer;
 use crate::axum_factory::CanceledRequest;
 use crate::batching::SplitBatchRequestLayer;
-use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::graphql;
 use crate::layers::InternalServiceBuilderExt as _;
@@ -178,14 +177,20 @@ pub(crate) async fn from_supergraph_mock_with_configuration(
         configuration.clone(),
     );
 
+    let apq_expander = crate::pipeline::build_apq_expander(
+        &configuration,
+        crate::pipeline::connect_apq_redis(&configuration)
+            .await
+            .unwrap(),
+    );
+
     RouterCreator::new(
         Arc::new(PersistedQueryExpander::new(&configuration).await.unwrap()),
+        apq_expander,
         Arc::new(supergraph_creator),
         query_parsing_service,
         configuration,
     )
-    .await
-    .unwrap()
     .create()
 }
 
@@ -226,14 +231,20 @@ pub(crate) async fn empty() -> impl Service<
         configuration.clone(),
     );
 
+    let apq_expander = crate::pipeline::build_apq_expander(
+        &configuration,
+        crate::pipeline::connect_apq_redis(&configuration)
+            .await
+            .unwrap(),
+    );
+
     RouterCreator::new(
         Arc::new(PersistedQueryExpander::new(&configuration).await.unwrap()),
+        apq_expander,
         Arc::new(supergraph_creator),
         query_parsing_service,
         configuration,
     )
-    .await
-    .unwrap()
     .create()
 }
 
@@ -700,29 +711,14 @@ impl RouterFactory for RouterCreator {
 }
 
 impl RouterCreator {
-    pub(crate) async fn new(
+    pub(crate) fn new(
         persisted_queries: Arc<PersistedQueryExpander>,
+        apq_expander: APQExpander,
         supergraph_creator: Arc<SupergraphCreator>,
         query_parsing_service: query_parsing::BoxCloneService,
         configuration: Arc<Configuration>,
-    ) -> Result<Self, BoxError> {
+    ) -> Self {
         let static_page = StaticPageLayer::new(&configuration);
-        let apq_expander = if configuration.apq.enabled {
-            APQExpander::with_cache(
-                DeduplicatingCache::from_configuration(&configuration.apq.router.cache, "APQ")
-                    .await?,
-            )
-        } else {
-            APQExpander::disabled()
-        };
-        // There is a problem here.
-        // APQ isn't a plugin and so cannot participate in plugin lifecycle events.
-        // After telemetry `activate` NO part of the pipeline can fail as globals have been interacted with.
-        // However, the APQExpander uses DeduplicatingCache which is fallible. So if this fails on hot reload the router will be
-        // left in an inconsistent state and all metrics will likely stop working.
-        // Fixing this will require a larger refactor to bring APQ into the router lifecycle.
-        // For now just call activate to make the gauges work on the happy path.
-        apq_expander.activate();
 
         // Create a handle that will help us keep track of this pipeline.
         // A metric is exposed that allows the use to see if pipelines are being hung onto.
@@ -754,12 +750,12 @@ impl RouterCreator {
             .service(router_service)
             .boxed_clone();
 
-        Ok(Self {
+        Self {
             supergraph_creator,
             service,
             pipeline_handle: Arc::new(pipeline_handle),
             configuration,
-        })
+        }
     }
 }
 
