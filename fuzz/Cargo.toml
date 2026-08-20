@@ -11,7 +11,8 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "=0.4.10"
-apollo-federation = { path = "../apollo-federation" }
+apollo-compiler.workspace = true
+apollo-federation = { path = "../apollo-federation", features = ["correctness"] }
 apollo-parser.workspace = true
 apollo-smith.workspace = true
 bnf = "0.6"
@@ -54,6 +55,13 @@ doc = false
 [[bin]]
 name = "connector_selection_parse"
 path = "fuzz_targets/connector_selection_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "query_planner"
+path = "fuzz_targets/query_planner.rs"
 test = false
 doc = false
 bench = false
