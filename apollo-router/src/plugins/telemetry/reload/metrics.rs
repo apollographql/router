@@ -202,6 +202,7 @@ impl<'a> MetricsBuilder<'a> {
         let cardinality_limit = self.metrics_common().cardinality_limit;
         // Preserve declaration order so earlier, more-specific views win over later
         // wildcards, and compile each view's name into a matcher exactly once.
+        // name_matcher() is fallible (malformed glob), so a bad config surfaces here.
         let user_views: Vec<(InstrumentNameMatcher, MetricView)> = self
             .metrics_common()
             .views
