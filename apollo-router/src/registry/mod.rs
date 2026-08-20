@@ -835,7 +835,7 @@ mod tests {
         annotations: Option<BTreeMap<String, String>>,
     ) -> LicenseLayerManifest {
         let license_layer = ImageLayer {
-            data: license_data.to_vec(),
+            data: license_data.to_owned().into(),
             media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -848,8 +848,7 @@ mod tests {
                 media_type: license_layer.media_type.clone(),
                 digest: blob_digest.clone(),
                 size: license_layer.data.len().try_into().unwrap(),
-                urls: None,
-                annotations: None,
+                ..Default::default()
             }],
             subject: None,
             artifact_type: None,
@@ -860,51 +859,10 @@ mod tests {
             oci_manifest,
             manifest_digest,
             blob_digest,
-            license_data: license_layer.data,
+            license_data: license_layer.data.into(),
         }
     }
-
-    struct LicenseLayerManifest {
-        oci_manifest: OciManifest,
-        manifest_digest: String,
-        blob_digest: String,
-        license_data: Vec<u8>,
-    }
-
-    fn create_manifest_from_license_layer(
-        license_data: &[u8],
-        annotations: Option<BTreeMap<String, String>>,
-    ) -> LicenseLayerManifest {
-        let license_layer = ImageLayer {
-            data: license_data.to_vec(),
-            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
-            annotations: None,
-        };
-        let blob_digest = license_layer.sha256_digest();
-        let oci_manifest = OciManifest::Image(OciImageManifest {
-            schema_version: 2,
-            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
-            config: Default::default(),
-            layers: vec![OciDescriptor {
-                media_type: license_layer.media_type.clone(),
-                digest: blob_digest.clone(),
-                size: license_layer.data.len().try_into().unwrap(),
-                urls: None,
-                annotations: None,
-            }],
-            subject: None,
-            artifact_type: None,
-            annotations,
-        });
-        let manifest_digest = calculate_manifest_digest(&oci_manifest);
-        LicenseLayerManifest {
-            oci_manifest,
-            manifest_digest,
-            blob_digest,
-            license_data: license_layer.data,
-        }
-    }
-
+    
     struct SequentialManifestDigests {
         digests: Mutex<VecDeque<String>>,
     }
@@ -1162,7 +1120,7 @@ mod tests {
             ..Default::default()
         });
         let license_layer = ImageLayer {
-            data: TEST_LICENSE_JWT.as_bytes().to_vec(),
+            data: TEST_LICENSE_JWT.into(),
             media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1189,7 +1147,7 @@ mod tests {
             ..Default::default()
         });
         let license_layer = ImageLayer {
-            data: TEST_LICENSE_JWT.as_bytes().to_vec(),
+            data: TEST_LICENSE_JWT.into(),
             media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1222,7 +1180,7 @@ mod tests {
             ..Default::default()
         });
         let unrelated_layer = ImageLayer {
-            data: "foo_bar".to_string().into_bytes(),
+            data: "foo_bar".to_string().into(),
             media_type: "foo_bar".to_string(),
             annotations: None,
         };
@@ -1252,7 +1210,7 @@ mod tests {
         });
         // 0xFF/0xFE are not valid UTF-8 start bytes.
         let license_layer = ImageLayer {
-            data: vec![0xFF, 0xFE, 0xFD],
+            data: vec![0xFF, 0xFE, 0xFD].into(),
             media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1281,7 +1239,7 @@ mod tests {
             ..Default::default()
         });
         let license_layer = ImageLayer {
-            data: b"not a jwt".to_vec(),
+            data: "not a jwt".into(),
             media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -2117,7 +2075,7 @@ mod tests {
     async fn stream_license_from_oci_success() {
         let mock_server = &MockServer::start().await;
         let license_layer = ImageLayer {
-            data: TEST_LICENSE_JWT.as_bytes().to_vec(),
+            data: TEST_LICENSE_JWT.into(),
             media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -2469,7 +2427,7 @@ mod tests {
     async fn create_oci_license_stream_valid_reference() {
         let mock_server = &MockServer::start().await;
         let license_layer = ImageLayer {
-            data: TEST_LICENSE_JWT.as_bytes().to_vec(),
+            data: TEST_LICENSE_JWT.into(),
             media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -2506,7 +2464,7 @@ mod tests {
     async fn fetch_license_oci_success() {
         let mock_server = &MockServer::start().await;
         let license_layer = ImageLayer {
-            data: TEST_LICENSE_JWT.as_bytes().to_vec(),
+            data: TEST_LICENSE_JWT.into(),
             media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
             annotations: None,
         };
