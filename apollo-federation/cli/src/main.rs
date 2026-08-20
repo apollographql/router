@@ -277,7 +277,7 @@ fn compose_files_inner(
         let doc_str = std::fs::read_to_string(path).unwrap();
         let url = format!("file://{}", path.to_str().unwrap());
         let basename = path.file_stem().unwrap().to_str().unwrap();
-        let result = typestate::Subgraph::from_sdl(basename, &url, &doc_str);
+        let result = typestate::Subgraph::parse(basename, &url, &doc_str);
         match result {
             Ok(subgraph) => {
                 subgraphs.push(subgraph);
@@ -343,7 +343,7 @@ fn compose_from_config_inner(
             ]));
         };
 
-        let result = typestate::Subgraph::from_sdl(&name, &subgraph_config.routing_url, &doc_str);
+        let result = typestate::Subgraph::parse(&name, &subgraph_config.routing_url, &doc_str);
         match result {
             Ok(subgraph) => {
                 subgraphs.push(subgraph);

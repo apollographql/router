@@ -404,7 +404,7 @@ mod value_type_fields {
 
     #[test]
     fn use_of_federation_key_does_not_raise_hint() {
-        let subgraph1 = Subgraph::from_sdl(
+        let subgraph1 = Subgraph::parse(
             "subgraph1",
             "http://localhost:4001",
             r#"
@@ -425,7 +425,7 @@ mod value_type_fields {
         )
         .unwrap();
 
-        let subgraph2 = Subgraph::from_sdl(
+        let subgraph2 = Subgraph::parse(
             "subgraph2",
             "http://localhost:4002",
             r#"
@@ -1967,14 +1967,14 @@ type Resource {
 }
         "#;
 
-        let already_newest = Subgraph::from_sdl(
+        let already_newest = Subgraph::parse(
             "already-newest",
             "http://localhost:4001",
             newer_federation_schema,
         )
         .unwrap();
 
-        let old_but_not_upgraded = Subgraph::from_sdl(
+        let old_but_not_upgraded = Subgraph::parse(
             "old-but-not-upgraded",
             "http://localhost:4002",
             older_federation_schema,
@@ -1982,7 +1982,7 @@ type Resource {
         .unwrap();
 
         let upgraded =
-            Subgraph::from_sdl("upgraded", "http://localhost:4003", auto_upgraded_schema).unwrap();
+            Subgraph::parse("upgraded", "http://localhost:4003", auto_upgraded_schema).unwrap();
 
         let result = compose(vec![already_newest, old_but_not_upgraded, upgraded]).unwrap();
 
@@ -2030,12 +2030,10 @@ type Resource @shareable @key(fields: "id") {
         "#;
 
         let upgraded_1 =
-            Subgraph::from_sdl("upgraded-1", "http://localhost:4001", auto_upgraded_schema)
-                .unwrap();
+            Subgraph::parse("upgraded-1", "http://localhost:4001", auto_upgraded_schema).unwrap();
 
         let upgraded_2 =
-            Subgraph::from_sdl("upgraded-2", "http://localhost:4002", auto_upgraded_schema)
-                .unwrap();
+            Subgraph::parse("upgraded-2", "http://localhost:4002", auto_upgraded_schema).unwrap();
 
         let result = compose(vec![upgraded_1, upgraded_2]).unwrap();
 
@@ -2071,14 +2069,14 @@ type Query {
 }
         "#;
 
-        let already_newest = Subgraph::from_sdl(
+        let already_newest = Subgraph::parse(
             "already-newest",
             "http://localhost:4001",
             newer_federation_schema,
         )
         .unwrap();
 
-        let old_but_not_upgraded = Subgraph::from_sdl(
+        let old_but_not_upgraded = Subgraph::parse(
             "old-but-not-upgraded",
             "http://localhost:4002",
             older_federation_schema,

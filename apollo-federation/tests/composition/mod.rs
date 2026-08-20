@@ -33,7 +33,7 @@ pub(crate) mod test_helpers {
     use apollo_federation::error::CompositionError;
     use apollo_federation::error::FederationError;
     use apollo_federation::subgraph::test_utils::remove_indentation;
-    use apollo_federation::subgraph::typestate::Source;
+    use apollo_federation::subgraph::typestate::Initial;
     use apollo_federation::subgraph::typestate::Subgraph;
     use apollo_federation::supergraph::CompositionHint;
     use apollo_federation::supergraph::Satisfiable;
@@ -47,7 +47,7 @@ pub(crate) mod test_helpers {
     /// Thin wrapper around [`apollo_federation::composition::compose`] that passes
     /// [`CompositionOptions::default()`], so tests don't have to spell it out.
     pub(crate) fn compose(
-        subgraphs: Vec<Subgraph<Source>>,
+        subgraphs: Vec<Subgraph<Initial>>,
     ) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
         apollo_federation::composition::compose(subgraphs, CompositionOptions::default())
     }
@@ -90,18 +90,18 @@ pub(crate) mod test_helpers {
     /// Use this when a test needs to call [`compose`] directly with custom [`CompositionOptions`].
     pub(crate) fn as_fed2_subgraphs(
         service_list: &[ServiceDefinition<'_>],
-    ) -> Result<Vec<Subgraph<Source>>, Vec<CompositionError>> {
+    ) -> Result<Vec<Subgraph<Initial>>, Vec<CompositionError>> {
         as_fed2_subgraphs_with_imports(service_list, true)
     }
 
     fn as_fed2_subgraphs_with_imports(
         service_list: &[ServiceDefinition<'_>],
         include_all_imports: bool,
-    ) -> Result<Vec<Subgraph<Source>>, Vec<CompositionError>> {
+    ) -> Result<Vec<Subgraph<Initial>>, Vec<CompositionError>> {
         let mut fed2_subgraphs = Vec::new();
         let mut errors = Vec::new();
         for service in service_list {
-            let result = Subgraph::from_sdl(
+            let result = Subgraph::parse(
                 service.name,
                 &format!("http://{}", service.name),
                 service.type_defs,

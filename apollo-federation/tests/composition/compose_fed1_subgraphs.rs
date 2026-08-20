@@ -15,7 +15,7 @@ fn compose_services(
     let mut subgraphs = Vec::new();
     let mut errors = Vec::new();
     for service in service_list {
-        let result = Subgraph::from_sdl(
+        let result = Subgraph::parse(
             service.name,
             &format!("http://{}", service.name),
             service.type_defs,

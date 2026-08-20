@@ -70,7 +70,7 @@ fn cache_tag_can_be_renamed() {
         }
     "#;
     let products =
-        Subgraph::from_sdl("products", "http://products/graphql", sdl).expect("parsed subgraph");
+        Subgraph::parse("products", "http://products/graphql", sdl).expect("parsed subgraph");
     let result = compose(vec![products]).expect("composed successfully");
     assert_snapshot!(result.schema().schema());
 }

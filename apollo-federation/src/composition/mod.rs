@@ -10,9 +10,9 @@ use crate::merger::merge::Merger;
 pub use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
 use crate::schema::validators::connectors::validate_override_on_connector;
 use crate::schema::validators::root_fields::validate_consistent_root_fields;
+use crate::subgraph::SubgraphError;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Initial;
-use crate::subgraph::typestate::Source;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 pub use crate::supergraph::CompositionHint;
@@ -35,6 +35,12 @@ impl CompositionFailure {
     }
 }
 
+impl From<SubgraphError> for CompositionFailure {
+    fn from(error: SubgraphError) -> Self {
+        Self::from_errors(error.to_composition_errors().collect())
+    }
+}
+
 impl From<Vec<CompositionError>> for CompositionFailure {
     fn from(errors: Vec<CompositionError>) -> Self {
         Self::from_errors(errors)
@@ -53,7 +59,7 @@ pub struct CompositionOptions {
 /// Mirrors the JS `compose` function.
 #[instrument(skip(subgraphs, options))]
 pub fn compose(
-    subgraphs: Vec<Subgraph<Source>>,
+    subgraphs: Vec<Subgraph<Initial>>,
     options: CompositionOptions,
 ) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
     // explicitly sort subgraphs by their names
@@ -61,23 +67,24 @@ pub fn compose(
     let mut subgraphs = subgraphs;
     subgraphs.sort_by(|s1, s2| s1.name.cmp(&s2.name));
 
-    // Connectors issues are found before anything else, so they are reported first.
-    let mut hints: Vec<CompositionHint> = vec![];
+    // Hints raised before merging have nowhere to live yet — a `Supergraph` only exists from the
+    // merge onwards, and a `CompositionFailure` is only built at the point of failure. So they are
+    // gathered here and attached once there is something to attach them to.
+    //
+    // This is why `compose_subgraphs` is a separate function: it uses `?`, and every one of those
+    // early returns would otherwise drop whatever had been gathered so far.
+    let mut early_hints: Vec<CompositionHint> = vec![];
 
-    tracing::debug!("Validating connectors...");
-    let subgraphs = match validate_connectors(subgraphs, &mut hints) {
-        Ok(subgraphs) => subgraphs,
-        Err(errors) => return Err(CompositionFailure { errors, hints }),
-    };
-
-    let mut result = compose_subgraphs(subgraphs, options);
+    let mut result = compose_subgraphs(subgraphs, options, &mut early_hints);
     match &mut result {
-        Ok(supergraph) => prepend_hints(supergraph.hints_mut(), hints),
-        Err(failure) => prepend_hints(&mut failure.hints, hints),
+        Ok(supergraph) => prepend_hints(supergraph.hints_mut(), early_hints),
+        Err(failure) => prepend_hints(&mut failure.hints, early_hints),
     }
     result
 }
 
+/// Puts `hints` in front of `target`, so hints stay in the order they were raised: everything from
+/// the subgraph stages before anything from merging and satisfiability.
 fn prepend_hints(target: &mut Vec<CompositionHint>, mut hints: Vec<CompositionHint>) {
     if hints.is_empty() {
         return;
@@ -86,15 +93,22 @@ fn prepend_hints(target: &mut Vec<CompositionHint>, mut hints: Vec<CompositionHi
     *target = hints;
 }
 
+/// Runs the composition pipeline, collecting any pre-merge hints into `hints`.
+///
+/// Split out from [`compose`] so that the `?`s below cannot drop those hints — see the note there.
 fn compose_subgraphs(
     subgraphs: Vec<Subgraph<Initial>>,
     options: CompositionOptions,
+    hints: &mut Vec<CompositionHint>,
 ) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
     tracing::debug!("Expanding subgraphs...");
     let expanded_subgraphs = expand_subgraphs(subgraphs)?;
-    tracing::debug!("Upgrading subgraphs...");
-    let validated_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)
-        .map_err(CompositionFailure::from_errors)?;
+
+    tracing::debug!("Upgrading and validating subgraphs...");
+    let validated_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)?;
+    for subgraph in &validated_subgraphs {
+        hints.extend(subgraph.hints().iter().cloned());
+    }
 
     tracing::debug!("Pre-merge validations...");
     pre_merge_validations(&validated_subgraphs)?;
@@ -112,32 +126,6 @@ fn compose_subgraphs(
 
     tracing::debug!("Validating satisfiability...");
     validate_satisfiability(supergraph, &options)
-}
-
-/// Runs the connectors (`@source`/`@connect`) validations over every subgraph document, producing
-/// the parsed subgraphs.
-///
-/// Connectors errors are fatal: the later composition phases assume connectors are well-formed.
-#[instrument(skip(subgraphs, hints))]
-fn validate_connectors(
-    subgraphs: Vec<Subgraph<Source>>,
-    hints: &mut Vec<CompositionHint>,
-) -> Result<Vec<Subgraph<Initial>>, Vec<CompositionError>> {
-    let mut errors: Vec<CompositionError> = vec![];
-    let parsed = subgraphs
-        .into_iter()
-        .filter_map(|s| {
-            s.validate_connectors(hints)
-                .map_err(|e| errors.extend(e))
-                .ok()
-        })
-        .collect();
-
-    if errors.is_empty() {
-        Ok(parsed)
-    } else {
-        Err(errors)
-    }
 }
 
 /// Apollo Federation allow subgraphs to specify partial schemas (i.e. "import" directives through

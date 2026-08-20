@@ -11,9 +11,9 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::name;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::Parser;
+use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::ObjectType;
 use apollo_compiler::validation::Valid;
 use hashbrown::HashSet;
 use indexmap::IndexMap;
@@ -34,10 +34,8 @@ use crate::connectors::validation::Message;
 use crate::connectors::validation::graphql::SchemaInfo;
 use crate::link::Import;
 use crate::link::Link;
-use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
-use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
 use crate::link::spec::Identity;
+use crate::schema::HasFields;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
@@ -61,8 +59,6 @@ pub(super) fn validate(
 }
 
 fn check_for_disallowed_type_definitions(schema: &SchemaInfo) -> impl Iterator<Item = Message> {
-    use apollo_compiler::parser::SourceSpan;
-
     use crate::connectors::ConnectSpec;
 
     let subscription_name = schema
@@ -72,10 +68,8 @@ fn check_for_disallowed_type_definitions(schema: &SchemaInfo) -> impl Iterator<I
         .map(|sub| &sub.name);
     let spec = schema.connect_link.spec;
 
-    schema
-        .types
-        .values()
-        .filter_map(move |extended_type| match extended_type {
+    user_defined_types(schema)
+        .filter_map(move |(_, extended_type)| match extended_type {
             ExtendedType::Union(union_type) if spec < ConnectSpec::V0_4 => {
                 Some(Message {
                     code: Code::ConnectorsUnsupportedAbstractType,
@@ -113,6 +107,8 @@ fn check_for_disallowed_type_definitions(schema: &SchemaInfo) -> impl Iterator<I
 /// Certain federation directives are not allowed when using connectors.
 /// We produce errors for any which were imported, even if not used.
 fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
+    // Not `LinksMetadata::for_identity`: that returns only the `Link`, and the messages below need
+    // the `@link` AST node to locate the offending `import` entry. See the TODO just below.
     let Some((fed_link, fed_link_directive)) =
         Link::for_identity(schema, &Identity::federation_identity())
     else {
@@ -158,24 +154,46 @@ fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
         .collect()
 }
 
+/// The types the subgraph author actually wrote.
+///
+/// Connectors validation runs on an expanded schema, so by this point the schema also contains the
+/// federation and connect spec definitions plus the generated `_Entity`/`_Service` types. Injected
+/// elements are built programmatically and so carry no source location, while anything parsed from
+/// the author's document does — that is what distinguishes them.
+fn user_defined_types<'a>(
+    schema: &'a SchemaInfo,
+) -> impl Iterator<Item = (&'a Name, &'a ExtendedType)> {
+    schema.types.iter().filter(|(_, extended_type)| {
+        !extended_type.is_built_in() && is_user_defined(extended_type.location())
+    })
+}
+
+/// Whether an element came from the author's document rather than from link expansion.
+///
+/// See [`user_defined_types`].
+fn is_user_defined(location: Option<SourceSpan>) -> bool {
+    location.is_some()
+}
+
 /// Check that all fields defined in the schema are resolved by a connector.
 fn check_seen_fields(
     schema: &SchemaInfo,
     fields_seen_by_connectors: Vec<(Name, Name)>,
 ) -> impl Iterator<Item = Message> {
-    let federation = Link::for_identity(schema, &Identity::federation_identity());
-    let external_directive_name = federation.map_or(EXTERNAL_DIRECTIVE_NAME, |(link, _)| {
-        link.directive_name_in_schema(&EXTERNAL_DIRECTIVE_NAME)
-    });
+    // Resolved through the link metadata computed during expansion, so `@external` is found under
+    // whatever name the author imported it as, without re-scanning and re-parsing every `@link`.
+    let external_directive_name = schema
+        .federation_schema()
+        .metadata()
+        .and_then(|metadata| metadata.for_identity(&Identity::federation_identity()))
+        .map_or(EXTERNAL_DIRECTIVE_NAME, |link| {
+            link.directive_name_in_schema(&EXTERNAL_DIRECTIVE_NAME)
+        });
 
     let mut all_fields = IndexSet::default();
 
-    // Collect fields from all non-built-in types
-    for extended_type in schema.types.values() {
-        if extended_type.is_built_in() {
-            continue;
-        }
-
+    // Collect fields from all types the author wrote
+    for (_, extended_type) in user_defined_types(schema) {
         // ignore all fields on types marked @external
         if extended_type
             .directives()
@@ -189,6 +207,9 @@ fn check_seen_fields(
             ExtendedType::Object(object) => {
                 // Add object fields (ignore fields marked @external)
                 for (field_name, field_def) in &object.fields {
+                    if !is_user_defined(field_def.location()) {
+                        continue;
+                    }
                     if !field_def
                         .directives
                         .iter()
@@ -201,11 +222,14 @@ fn check_seen_fields(
             ExtendedType::Interface(interface) => {
                 // For interfaces, only add fields from implementing types
                 // Interface fields are implicitly resolved when implementing types resolve them
-                for (type_name, implementing_type) in schema.types.iter() {
+                for (type_name, implementing_type) in user_defined_types(schema) {
                     if let ExtendedType::Object(obj) = implementing_type
                         && obj.implements_interfaces.contains(&interface.name)
                     {
                         for (field_name, field_def) in &obj.fields {
+                            if !is_user_defined(field_def.location()) {
+                                continue;
+                            }
                             if !field_def
                                 .directives
                                 .iter()
@@ -248,19 +272,17 @@ fn check_seen_fields(
 
 fn fields_seen_by_resolvable_keys(schema: &SchemaInfo) -> IndexSet<(Name, Name)> {
     let mut seen_fields = IndexSet::default();
-    let objects = schema.types.values().filter_map(|node| node.as_object());
     // Mark resolvable key fields as seen
-    let mut selections: Vec<(Name, Selection)> = objects
-        .clone()
-        .flat_map(|object| {
-            resolvable_key_fields(object, schema).flat_map(|(field_set, _)| {
-                field_set
-                    .selection_set
-                    .selections
-                    .iter()
-                    .map(|selection| (object.name.clone(), selection.clone()))
-                    .collect::<Vec<_>>()
-            })
+    let mut selections: Vec<(Name, Selection)> = find_all_resolvable_keys(schema)
+        .into_iter()
+        .flat_map(|(field_set, _)| {
+            let type_name = field_set.selection_set.ty.clone();
+            field_set
+                .selection_set
+                .selections
+                .iter()
+                .map(|selection| (type_name.clone(), selection.clone()))
+                .collect::<Vec<_>>()
         })
         .collect();
     while !selections.is_empty() {
@@ -278,46 +300,6 @@ fn fields_seen_by_resolvable_keys(schema: &SchemaInfo) -> IndexSet<(Name, Name)>
     }
 
     seen_fields
-}
-
-/// For an object type, get all the keys (and directive nodes) that are resolvable.
-///
-/// The [`FieldSet`] returned here is what goes in the `fields` argument, so `id` in `@key(fields: "id")`
-fn resolvable_key_fields<'a>(
-    object: &'a ObjectType,
-    schema: &'a Schema,
-) -> impl Iterator<Item = (FieldSet, &'a Component<Directive>)> {
-    object
-        .directives
-        .iter()
-        .filter(|directive| directive.name == FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
-        .filter(|directive| {
-            directive
-                .arguments
-                .iter()
-                .find(|arg| arg.name == FEDERATION_RESOLVABLE_ARGUMENT_NAME)
-                .and_then(|arg| arg.value.to_bool())
-                .unwrap_or(true)
-        })
-        .filter_map(|directive| {
-            directive
-                .arguments
-                .iter()
-                .find(|arg| arg.name == FEDERATION_FIELDS_ARGUMENT_NAME)
-                .map(|arg| &arg.value)
-                .and_then(|value| value.as_str())
-                .and_then(|fields_str| {
-                    Parser::new()
-                        .parse_field_set(
-                            Valid::assume_valid_ref(schema),
-                            object.name.clone(),
-                            fields_str.to_string(),
-                            "",
-                        )
-                        .ok()
-                        .map(|field_set| (field_set, directive))
-                })
-        })
 }
 
 fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message> {
@@ -523,11 +505,37 @@ impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
     }
 }
 
-fn find_all_resolvable_keys(schema: &Schema) -> Vec<(FieldSet, &Component<Directive>)> {
-    schema
-        .types
-        .values()
-        .filter_map(|extended_type| extended_type.as_object())
-        .flat_map(|object| resolvable_key_fields(object, schema))
+/// Every resolvable `@key` the author wrote, paired with the AST node to report locations against.
+///
+/// The [`FieldSet`] is the parsed `fields` argument, so `id` in `@key(fields: "id")`.
+///
+/// This goes through [`FederationSchema::key_directive_applications`] rather than scanning for a
+/// directive literally named `key`, so a subgraph that imports `@key` under an alias — or doesn't
+/// import it at all, leaving it as `federation__key` — still has its keys found.
+fn find_all_resolvable_keys<'a>(
+    schema: &'a SchemaInfo,
+) -> Vec<(FieldSet, &'a Component<Directive>)> {
+    let Ok(applications) = schema.federation_schema().key_directive_applications() else {
+        // No federation link, or `@key` has no definition. Nothing to check against.
+        return Vec::new();
+    };
+
+    applications
+        .into_iter()
+        // Malformed applications are reported by the federation validators, not here.
+        .filter_map(Result::ok)
+        .filter(|key| key.resolvable())
+        .filter(|key| is_user_defined(key.schema_directive().location()))
+        .filter_map(|key| {
+            let field_set = Parser::new()
+                .parse_field_set(
+                    Valid::assume_valid_ref(schema),
+                    key.target().type_name().clone(),
+                    key.fields().to_string(),
+                    "",
+                )
+                .ok()?;
+            Some((field_set, key.schema_directive()))
+        })
         .collect()
 }

@@ -517,9 +517,9 @@ fn interface_object_with_inaccessible_field() {
         }
     "#;
 
-    let parsed_a = Subgraph::from_sdl("subgraph-a", "http://example.com", subgraph_a).unwrap();
-    let parsed_b = Subgraph::from_sdl("subgraph-b", "http://example.com", subgraph_b).unwrap();
-    let parsed_c = Subgraph::from_sdl("subgraph-c", "http://example.com", subgraph_c).unwrap();
+    let parsed_a = Subgraph::parse("subgraph-a", "http://example.com", subgraph_a).unwrap();
+    let parsed_b = Subgraph::parse("subgraph-b", "http://example.com", subgraph_b).unwrap();
+    let parsed_c = Subgraph::parse("subgraph-c", "http://example.com", subgraph_c).unwrap();
 
     let supergraph = compose(vec![parsed_a, parsed_b, parsed_c]).unwrap();
 
@@ -591,9 +591,9 @@ fn interface_object_field_tag_propagates_to_locally_external_field() {
     "#;
 
     let parsed_a =
-        Subgraph::from_sdl("subgraph-a", "http://example.com", subgraph_a).expect("valid subgraph");
+        Subgraph::parse("subgraph-a", "http://example.com", subgraph_a).expect("valid subgraph");
     let parsed_b =
-        Subgraph::from_sdl("subgraph-b", "http://example.com", subgraph_b).expect("valid subgraph");
+        Subgraph::parse("subgraph-b", "http://example.com", subgraph_b).expect("valid subgraph");
 
     let supergraph = compose(vec![parsed_a, parsed_b]).expect("Expected composition to succeed");
 
