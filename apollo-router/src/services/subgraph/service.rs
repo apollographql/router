@@ -59,12 +59,12 @@ impl SubgraphService {
     pub(crate) fn new(
         service: impl Into<String>,
         inner: crate::services::http::BoxCloneService,
-    ) -> Result<Self, BoxError> {
+    ) -> Self {
         let name = service.into();
-        Ok(Self {
+        Self {
             inner,
             service: Arc::new(name),
-        })
+        }
     }
 }
 
@@ -917,10 +917,10 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         let spawned_task = tokio::task::spawn(emulate_subgraph_with_callback_data(listener));
-        let subgraph_service = with_subscription_layer(
-            SubgraphService::new("testbis", HttpClientServiceFactory::for_test("testbis"))
-                .expect("can create a SubgraphService"),
-        );
+        let subgraph_service = with_subscription_layer(SubgraphService::new(
+            "testbis",
+            HttpClientServiceFactory::for_test("testbis"),
+        ));
         let (tx, _rx) = mpsc::channel(2);
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -953,10 +953,10 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_graphql_response(listener));
-        let subgraph_service = with_content_negotiation_layer(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
-        );
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
+            "test",
+            HttpClientServiceFactory::for_test("test"),
+        ));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -979,10 +979,10 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_json_response(listener));
-        let subgraph_service = with_content_negotiation_layer(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
-        );
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
+            "test",
+            HttpClientServiceFactory::for_test("test"),
+        ));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1006,10 +1006,10 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_panic(listener));
-        let subgraph_service = with_content_negotiation_layer(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
-        );
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
+            "test",
+            HttpClientServiceFactory::for_test("test"),
+        ));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1036,10 +1036,10 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_ok_status_invalid_response(listener));
-        let subgraph_service = with_content_negotiation_layer(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
-        );
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
+            "test",
+            HttpClientServiceFactory::for_test("test"),
+        ));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1065,10 +1065,10 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_large_response(listener));
-        let subgraph_service = with_content_negotiation_layer(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
-        );
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
+            "test",
+            HttpClientServiceFactory::for_test("test"),
+        ));
 
         let context = Context::new();
         context
@@ -1107,10 +1107,10 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_json_response(listener));
-        let subgraph_service = with_content_negotiation_layer(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
-        );
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
+            "test",
+            HttpClientServiceFactory::for_test("test"),
+        ));
 
         let context = Context::new();
         // Limit of 1000 bytes — well above {"data": null} (14 bytes)
@@ -1145,10 +1145,10 @@ mod tests {
         tokio::task::spawn(
             emulate_subgraph_invalid_response_invalid_status_application_json(listener),
         );
-        let subgraph_service = with_content_negotiation_layer(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
-        );
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
+            "test",
+            HttpClientServiceFactory::for_test("test"),
+        ));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1180,10 +1180,10 @@ mod tests {
         tokio::task::spawn(
             emulate_subgraph_invalid_response_invalid_status_application_graphql(listener),
         );
-        let subgraph_service = with_content_negotiation_layer(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
-        );
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
+            "test",
+            HttpClientServiceFactory::for_test("test"),
+        ));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1213,10 +1213,10 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         let spawned_task = tokio::task::spawn(emulate_correct_websocket_server(listener));
-        let subgraph_service = with_subscription_layer(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
-        );
+        let subgraph_service = with_subscription_layer(SubgraphService::new(
+            "test",
+            HttpClientServiceFactory::for_test("test"),
+        ));
         let (tx, rx) = mpsc::channel(2);
         let mut rx_stream = ReceiverStream::new(rx);
 
@@ -1260,8 +1260,7 @@ mod tests {
             let socket_addr = listener.local_addr().unwrap();
             tokio::task::spawn(emulate_incorrect_websocket_server(listener));
             let subgraph_service = with_subscription_layer(
-                SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                    .expect("can create a SubgraphService"),
+                SubgraphService::new("test", HttpClientServiceFactory::for_test("test")),
             );
             let (tx, _rx) = mpsc::channel(2);
 
@@ -1306,10 +1305,10 @@ mod tests {
             let socket_addr = listener.local_addr().unwrap();
             let spawned_task =
                 tokio::task::spawn(emulate_websocket_server_that_completes(listener));
-            let subgraph_service = with_subscription_layer(
-                SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                    .expect("can create a SubgraphService"),
-            );
+            let subgraph_service = with_subscription_layer(SubgraphService::new(
+                "test",
+                HttpClientServiceFactory::for_test("test"),
+            ));
             let (tx, rx) = mpsc::channel(2);
             let mut rx_stream = ReceiverStream::new(rx);
 
@@ -1448,10 +1447,10 @@ mod tests {
                 Some(Arc::new(subscription_config())),
                 Arc::from("test"),
             )
-            .layer(
-                SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                    .expect("can create a SubgraphService"),
-            );
+            .layer(SubgraphService::new(
+                "test",
+                HttpClientServiceFactory::for_test("test"),
+            ));
 
             let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
             let query = "subscription {\n  userWasCreated {\n    username\n  }\n}";
@@ -1547,8 +1546,7 @@ mod tests {
 
             // Configure reconnect — the Complete should suppress it entirely.
             let subgraph_service = with_subscription_layer_reconnect(
-                SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                    .expect("can create a SubgraphService"),
+                SubgraphService::new("test", HttpClientServiceFactory::for_test("test")),
                 5,
             );
 
@@ -2270,8 +2268,7 @@ mod tests {
         ));
 
         let subgraph_service = with_subscription_layer_reconnect(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test")),
             1,
         );
 
@@ -2349,8 +2346,7 @@ mod tests {
             ));
 
         let subgraph_service = with_subscription_layer_reconnect_protocol(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test")),
             1,
             WebSocketProtocol::SubscriptionsTransportWs,
         );
@@ -2420,8 +2416,7 @@ mod tests {
             let spawned_task = tokio::task::spawn(emulate_websocket_server_that_drops(listener));
 
             let subgraph_service = with_subscription_layer_reconnect(
-                SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                    .expect("can create a SubgraphService"),
+                SubgraphService::new("test", HttpClientServiceFactory::for_test("test")),
                 1,
             );
 
@@ -2520,8 +2515,7 @@ mod tests {
             let spawned_task = tokio::task::spawn(emulate_websocket_server_that_drops(listener));
 
             let subgraph_service = with_subscription_layer_reconnect(
-                SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                    .expect("can create a SubgraphService"),
+                SubgraphService::new("test", HttpClientServiceFactory::for_test("test")),
                 0,
             );
 
@@ -2619,8 +2613,7 @@ mod tests {
             ));
 
             let subgraph_service = with_subscription_layer_reconnect(
-                SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                    .expect("can create a SubgraphService"),
+                SubgraphService::new("test", HttpClientServiceFactory::for_test("test")),
                 1,
             );
 
@@ -2700,8 +2693,7 @@ mod tests {
             ));
 
             let subgraph_service = with_subscription_layer_reconnect(
-                SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                    .expect("can create a SubgraphService"),
+                SubgraphService::new("test", HttpClientServiceFactory::for_test("test")),
                 1,
             );
 
@@ -2790,8 +2782,7 @@ mod tests {
         let spawned_task = tokio::task::spawn(emulate_websocket_server_that_drops(listener));
 
         let subgraph_service = with_subscription_layer_reconnect(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test")),
             1,
         );
 
@@ -2869,8 +2860,7 @@ mod tests {
 
             // Reconnect is configured — the terminal Error must suppress it entirely.
             let subgraph_service = with_subscription_layer_reconnect(
-                SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                    .expect("can create a SubgraphService"),
+                SubgraphService::new("test", HttpClientServiceFactory::for_test("test")),
                 5,
             );
 
@@ -2970,8 +2960,7 @@ mod tests {
                 Arc::from("test"),
             )
             .layer(
-                SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
+                SubgraphService::new("test", HttpClientServiceFactory::for_test("test")),
             );
 
             let (tx, rx) = mpsc::channel(2);
@@ -3081,8 +3070,7 @@ mod tests {
                 Arc::from("test"),
             )
             .layer(
-                SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
+                SubgraphService::new("test", HttpClientServiceFactory::for_test("test")),
             );
 
             let (tx, rx) = mpsc::channel(2);
@@ -3172,10 +3160,10 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_bad_request(listener));
-        let subgraph_service = with_content_negotiation_layer(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
-        );
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
+            "test",
+            HttpClientServiceFactory::for_test("test"),
+        ));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -3206,10 +3194,10 @@ mod tests {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_missing_content_type(listener));
 
-        let subgraph_service = with_content_negotiation_layer(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
-        );
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
+            "test",
+            HttpClientServiceFactory::for_test("test"),
+        ));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -3236,10 +3224,10 @@ mod tests {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_invalid_content_type(listener));
 
-        let subgraph_service = with_content_negotiation_layer(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
-        );
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
+            "test",
+            HttpClientServiceFactory::for_test("test"),
+        ));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -3266,10 +3254,10 @@ mod tests {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_unsupported_content_type(listener));
 
-        let subgraph_service = with_content_negotiation_layer(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
-        );
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
+            "test",
+            HttpClientServiceFactory::for_test("test"),
+        ));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -3295,10 +3283,10 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_unauthorized(listener));
-        let subgraph_service = with_content_negotiation_layer(
-            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
-                .expect("can create a SubgraphService"),
-        );
+        let subgraph_service = with_content_negotiation_layer(SubgraphService::new(
+            "test",
+            HttpClientServiceFactory::for_test("test"),
+        ));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service

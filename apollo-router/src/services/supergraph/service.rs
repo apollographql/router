@@ -546,7 +546,7 @@ impl PluggableSupergraphServiceBuilder {
             subgraph_schemas.clone(),
             &configuration,
             query_plan_cache.clone(),
-        )?
+        )
         .boxed_clone();
 
         let (introspection_service, introspection_cache) =

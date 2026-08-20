@@ -668,10 +668,10 @@ mod tests {
             name: &str,
             enable_apq: bool,
         ) -> SubgraphApqService<SubgraphService> {
-            SubgraphApqLayer::new(enable_apq).layer(
-                SubgraphService::new(name, HttpClientServiceFactory::for_test(name))
-                    .expect("can create a SubgraphService"),
-            )
+            SubgraphApqLayer::new(enable_apq).layer(SubgraphService::new(
+                name,
+                HttpClientServiceFactory::for_test(name),
+            ))
         }
 
         #[tokio::test(flavor = "multi_thread")]

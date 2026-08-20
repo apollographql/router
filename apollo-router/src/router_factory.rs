@@ -389,7 +389,7 @@ pub(crate) async fn create_subgraph_services(
 ) -> Result<IndexMap<String, subgraph::BoxCloneService>, BoxError> {
     let mut subgraph_services = IndexMap::default();
     for (name, http_service_factory) in http_service_factory.iter() {
-        let svc = SubgraphService::new(name, http_service_factory.create(name))?;
+        let svc = SubgraphService::new(name, http_service_factory.create(name));
         subgraph_services.insert(name.clone(), svc.boxed_clone());
     }
 

@@ -177,7 +177,13 @@ impl<T> CachingQueryPlanner<T> {
         let cache =
             CachingQueryPlanner::create_cache(&configuration.supergraph.query_planning.cache)
                 .await?;
-        Self::new(delegate, schema, subgraph_schemas, configuration, cache)
+        Ok(Self::new(
+            delegate,
+            schema,
+            subgraph_schemas,
+            configuration,
+            cache,
+        ))
     }
 
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
@@ -187,7 +193,7 @@ impl<T> CachingQueryPlanner<T> {
         subgraph_schemas: Arc<SubgraphSchemas>,
         configuration: &Configuration,
         cache: QueryPlanCache,
-    ) -> Result<Self, BoxError> {
+    ) -> Self {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
 
@@ -198,7 +204,7 @@ impl<T> CachingQueryPlanner<T> {
             .experimental_cooperative_cancellation
             .clone();
 
-        Ok(Self {
+        Self {
             cache,
             delegate,
             schema,
@@ -206,7 +212,7 @@ impl<T> CachingQueryPlanner<T> {
             enable_authorization_directives,
             cooperative_cancellation,
             config_mode_hash,
-        })
+        }
     }
 }
 
