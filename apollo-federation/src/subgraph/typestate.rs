@@ -20,11 +20,10 @@ use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
 use crate::bail;
 use crate::compat::coerce_and_validate_schema_values;
-use crate::connectors::validation::Severity as ConnectorsSeverity;
-use crate::connectors::validation::ValidationResult;
-use crate::connectors::validation::validate as validate_connectors;
+use crate::composition::CompositionFailure;
+use crate::connectors::blueprint::ConnectorsBlueprint;
+use crate::connectors::spec::upgrade_connect_link_if_needed;
 use crate::ensure;
-use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::Locations;
 use crate::error::MultipleFederationErrors;
@@ -48,7 +47,6 @@ use crate::link::link_spec_definition::LINK_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec_definition::SpecDefinition;
-use crate::merger::hints::HintCode;
 use crate::query_graph::build_query_graph::FEDERATED_GRAPH_ROOT_SOURCE;
 use crate::schema::FederationSchema;
 use crate::schema::blueprint::FederationBlueprint;
@@ -78,17 +76,6 @@ use crate::supergraph::GRAPHQL_QUERY_TYPE_NAME;
 use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
 use crate::supergraph::SERVICE_TYPE_SPEC;
 
-/// A subgraph as the user wrote it: the schema document, not yet parsed.
-///
-/// Validations that work on the document rather than on the parsed schema belong here, so that the
-/// locations they report point back at what the user actually wrote, and so that they can rewrite
-/// the document before it is parsed. Today that means the connectors (`@source`/`@connect`)
-/// validations, which is why [`Subgraph::validate_connectors`] is the only way out of this state.
-#[derive(Clone, Debug)]
-pub struct Source {
-    sdl: String,
-}
-
 #[derive(Clone, Debug)]
 pub struct Initial {
     schema: Schema,
@@ -97,7 +84,7 @@ pub struct Initial {
 
 #[derive(Clone, Debug)]
 pub struct Expanded {
-    schema: ValidFederationSchema,
+    schema: FederationSchema,
     orphan_extension_types: HashSet<Name>,
     metadata: SubgraphMetadata,
 }
@@ -114,6 +101,11 @@ pub struct Validated {
     schema: ValidFederationSchema,
     orphan_extension_types: HashSet<Name>,
     metadata: SubgraphMetadata,
+    /// Warnings raised while validating this subgraph.
+    ///
+    /// Only warnings live here: errors abort the transition into this state, and are carried by the
+    /// [`CompositionFailure`] instead. Connectors validation is the only producer today.
+    hints: Vec<CompositionHint>,
 }
 
 impl Expanded {
@@ -186,128 +178,24 @@ impl HasMetadata for Validated {
 /// - `Initial`: The initial state, containing original schema. This provides no guarantees about the schema,
 ///   other than that it can be parsed.
 /// - `Expanded`: The schema's links have been expanded to include missing directive definitions and subgraph
-///   metadata has been computed.
-///   - The schema may be fed1 or fed2 schema.
-///   - If fed1, it's partially validated with only some federation rules applied.
-///   - If fed2, it's fully validated with all federation rules.
+///   metadata has been computed. The schema may be fed1 or fed2, and is *not* yet validated —
+///   expansion is a transformation, and every validation happens on the way to `Validated`.
 /// - `Upgraded`: The schema has been upgraded to Federation v2 format or root type normalized.
+///   Like `Expanded`, it is not yet validated.
 ///   - Fed v1 input schemas are always upgraded to fed v2 and may be root type normalized.
 ///   - Fed v2 input schemas may only be root type normalized.
 ///   - Fed v2 schemas that do not need root type normalization skip this state.
 /// - `Validated`: The schema has been validated according to Federation rules. Iterators over directives are
 ///   infallible at this stage.
+///
+/// Both states before `Validated` hold a plain [`FederationSchema`]; only `Validated` carries the
+/// [`ValidFederationSchema`] the rest of composition needs, and GraphQL validation runs exactly once,
+/// on the transition into it.
 #[derive(Clone, Debug)]
 pub struct Subgraph<S> {
     pub name: String,
     pub url: String,
     pub state: S,
-}
-
-impl Subgraph<Source> {
-    /// Creates a subgraph from the schema document the user wrote.
-    pub fn from_sdl(
-        name: &str,
-        url: &str,
-        sdl: impl Into<String>,
-    ) -> Result<Subgraph<Source>, SubgraphError> {
-        check_subgraph_name(name)?;
-        Ok(Subgraph {
-            name: name.to_string(),
-            url: url.to_string(),
-            state: Source { sdl: sdl.into() },
-        })
-    }
-
-    pub fn sdl(&self) -> &str {
-        &self.state.sdl
-    }
-
-    /// Validates the connectors (`@source`/`@connect`) directives, then parses the document.
-    ///
-    /// Warnings are appended to `hints`; errors are returned and are fatal for this subgraph.
-    /// Parsing is part of this transition because the validations may rewrite the document — today
-    /// they auto-upgrade `connect/v0.1` to `v0.2` — and it is the rewritten document that the rest
-    /// of composition must work from.
-    // PORT_NOTE: Mirrors `validate_connector_subgraphs` from the apollo-composition crate.
-    pub fn validate_connectors(
-        self,
-        hints: &mut Vec<CompositionHint>,
-    ) -> Result<Subgraph<Initial>, Vec<CompositionError>> {
-        let ValidationResult {
-            errors: messages,
-            transformed,
-            ..
-        } = validate_connectors(self.state.sdl, &self.name);
-
-        let mut errors = vec![];
-        for message in messages {
-            let locations = message
-                .locations
-                .into_iter()
-                .map(|range| SubgraphLocation {
-                    subgraph: self.name.clone(),
-                    range,
-                })
-                .collect();
-            match message.code.severity() {
-                ConnectorsSeverity::Error => {
-                    errors.push(CompositionError::ConnectorsValidationError {
-                        code: message.code,
-                        message: message.message,
-                        locations,
-                    })
-                }
-                ConnectorsSeverity::Warning => hints.push(CompositionHint {
-                    definition: HintCode::ConnectorsHint(message.code).definition(),
-                    message: message.message,
-                    locations,
-                }),
-            }
-        }
-        if !errors.is_empty() {
-            return Err(errors);
-        }
-
-        Subgraph::parse(&self.name, &self.url, &transformed)
-            .map_err(|e| e.to_composition_errors().collect())
-    }
-
-    /// Given a document that is assumed to _not_ be a fed2 schema (it does not have a `@link` to
-    /// the federation spec), converts it to a fed2 schema by adding a `@link` to the last known
-    /// federation spec.
-    ///
-    /// - It is assumed to have no `@link` to the federation spec.
-    /// - Returns an equivalent subgraph with a `@link` added with latest federation spec.
-    /// - Based on the `include_all_imports` param, we either import ALL directive definitions OR just up to fed v2.4
-    /// - This is mainly for testing and not optimized.
-    // PORT_NOTE: Corresponds to `asFed2SubgraphDocument` function in JS, but simplified.
-    pub fn into_fed2_test_subgraph(self, include_all_imports: bool) -> Result<Self, SubgraphError> {
-        let federation_spec = FederationSpecDefinition::latest();
-        let spec_to_import = if include_all_imports {
-            federation_spec
-        } else {
-            FederationSpecDefinition::auto_expanded_federation_spec()
-        };
-        let imports = spec_to_import
-            .directive_specs()
-            .iter()
-            .map(|d| format!(r#""@{}""#, d.name()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let link = format!(
-            r#"extend schema @link(url: "{url}", import: [{imports}])"#,
-            url = federation_spec.url(),
-        );
-
-        // Test documents are written as raw strings that open with a newline, so the `@link` goes
-        // on that otherwise-empty first line rather than pushing every line of the document down by
-        // one. Locations reported against the document then still match what the test author wrote.
-        let sdl = match self.state.sdl.strip_prefix('\n') {
-            Some(rest) => format!("{link}\n{rest}"),
-            None => format!("{link}\n{}", self.state.sdl),
-        };
-        Self::from_sdl(&self.name, &self.url, sdl)
-    }
 }
 
 fn check_subgraph_name(name: &str) -> Result<(), SubgraphError> {
@@ -433,12 +321,11 @@ impl Subgraph<Initial> {
     }
 
     pub fn assume_expanded(self) -> Result<Subgraph<Expanded>, SubgraphError> {
-        let schema = FederationSchema::new(self.state.schema)
+        let mut schema = FederationSchema::new(self.state.schema)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
-        let schema =
-            ValidFederationSchema::new_assume_valid(schema).map_err(|(_schema, error)| {
-                SubgraphError::new_without_locations(self.name.clone(), error)
-            })?;
+        // `Expanded` carries subgraph metadata, which `FederationSchema::new` does not populate.
+        FederationBlueprint::on_constructed(&mut schema)
+            .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
         let orphan_extension_types = self.state.orphan_extension_types;
         let metadata = schema
             .subgraph_metadata()
@@ -460,31 +347,24 @@ impl Subgraph<Initial> {
         })
     }
 
-    /// Expands schema with federation definitions and validates the resulting schema.
-    // PORT_NOTE: This mimics the JS `buildSubgraph()` method's behavior validating after expanding.
+    /// Expands the schema with all imported federation and spec definitions.
+    ///
+    /// This is a pure transformation: it injects missing definitions, collects link metadata and
+    /// computes subgraph metadata, but runs no validations. Everything is validated on the way to
+    /// [`Validated`] — see [`Subgraph::<Expanded>::validate`].
+    // PORT_NOTE: The JS `buildSubgraph()` validates as part of expanding. We keep the two separate
+    // so that validations which need the expanded schema, but should report before GraphQL errors,
+    // have somewhere to run.
     pub fn expand_links(self) -> Result<Subgraph<Expanded>, SubgraphError> {
         trace!("expand_links: expand subgraph `{}`", self.name);
         let subgraph_name = self.name.clone();
-        self.expand_links_internal(true)
+        self.expand_links_internal()
             .map_err(|e| SubgraphError::new_without_locations(subgraph_name, e))
     }
 
-    /// Only for `@fromContext` testing.
-    pub fn expand_links_without_validation(self) -> Result<Subgraph<Expanded>, SubgraphError> {
-        trace!("expand_links: expand subgraph `{}`", self.name);
-        let subgraph_name = self.name.clone();
-        self.expand_links_internal(false)
-            .map_err(|e| SubgraphError::new_without_locations(subgraph_name, e))
-    }
-
-    fn expand_links_internal(self, validate: bool) -> Result<Subgraph<Expanded>, FederationError> {
+    fn expand_links_internal(self) -> Result<Subgraph<Expanded>, FederationError> {
         let schema = expand_schema(self.state.schema)?;
         let orphan_extension_types = self.state.orphan_extension_types;
-        let schema = if validate {
-            validate_subgraph_schema(schema)?
-        } else {
-            schema.assume_valid()?
-        };
         let Some(metadata) = schema.subgraph_metadata().cloned() else {
             bail!(
                 "Unable to detect federation version used in subgraph '{}'",
@@ -560,7 +440,11 @@ impl Subgraph<Expanded> {
     ///
     /// PORT NOTE: This logic was part of the SchemaUpgrader constructor.
     pub(crate) fn into_fed_2_subgraph(self) -> Result<Subgraph<Upgraded>, FederationError> {
-        let mut schema: FederationSchema = self.state.schema.into();
+        // Validate before upgrading. The upgrade injects the fed2 definitions, so afterwards we can
+        // no longer tell that a fed2-only directive — `@override`, say — was undefined in the
+        // author's fed1 schema. This is the fed1-rules pass; the fed2-rules pass happens on the way
+        // to `Validated`.
+        let mut schema: FederationSchema = validate_subgraph_schema(self.state.schema)?.into();
         let field_set_scalar_name =
             schema.federation_type_name_in_schema(FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC)?;
         if let Some(field_set_scalar) = schema.try_get_type(&field_set_scalar_name) {
@@ -636,14 +520,16 @@ impl Subgraph<Expanded> {
                     metadata: _,
                 },
         } = self;
-        let mut schema: FederationSchema = schema.into();
+        let mut schema = schema;
         for (current_name, new_name) in &operation_types_to_rename {
             schema
                 .get_type(current_name)?
                 .rename(&mut schema, new_name.clone())?;
         }
-        let schema = validate_subgraph_schema(schema)?;
-        let Some(metadata) = schema.subgraph_metadata().cloned() else {
+        // No re-validation here: `Expanded` is unvalidated by contract, and the single validation
+        // on the way to `Validated` covers the renamed schema. The metadata does have to be
+        // recomputed though — the copy from expansion still refers to the pre-rename type names.
+        let Some(metadata) = compute_subgraph_metadata(&schema)? else {
             bail!(
                 "Unable to detect federation version used in subgraph '{}'",
                 name
@@ -666,25 +552,43 @@ impl Subgraph<Expanded> {
             name: self.name,
             url: self.url,
             state: Upgraded {
-                schema: self.state.schema.into(),
+                schema: self.state.schema,
                 metadata: self.state.metadata,
                 orphan_extension_types: self.state.orphan_extension_types,
             },
         }
     }
 
-    /// Jumps from Expanded to Validated for Fed2 input schemas, assuming no upgrade/normalization
-    /// is necessary.
-    pub fn assume_validated(self) -> Subgraph<Validated> {
-        Subgraph {
+    /// Validates the connectors (`@source`/`@connect`) directives.
+    ///
+    /// Runs on the expanded-but-not-yet-validated schema: expansion has put the connect and
+    /// federation definitions in place, and GraphQL validation has not happened yet, so a subgraph
+    /// that is both connector-invalid and GraphQL-invalid still reports its connector diagnostics.
+    /// See `ConnectorsBlueprint::on_validation`.
+    ///
+    /// Validates the expanded schema against GraphQL and Federation rules.
+    ///
+    /// This is the only place GraphQL validation happens for a subgraph that needs no fed1 upgrade
+    /// and no root type normalization; [`Subgraph::<Upgraded>::validate`] is its counterpart for
+    /// those that do.
+    pub fn validate(self) -> Result<Subgraph<Validated>, CompositionFailure> {
+        tracing::debug!("Subgraph<Expanded>: validate `{}`", self.name);
+        // Connectors first: it is defined against the expanded-but-unvalidated schema, and its
+        // diagnostics are more actionable than the GraphQL ones for a subgraph author.
+        let hints = ConnectorsBlueprint::on_validation(&self)?;
+        let schema = validate_subgraph_schema(self.state.schema)
+            .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?;
+
+        Ok(Subgraph {
             name: self.name,
             url: self.url,
             state: Validated {
-                schema: self.state.schema,
+                schema,
                 orphan_extension_types: self.state.orphan_extension_types,
                 metadata: self.state.metadata,
+                hints,
             },
-        }
+        })
     }
 }
 
@@ -739,11 +643,12 @@ fn normalize_root_types_in_subgraph_schema(
 }
 
 impl Subgraph<Upgraded> {
-    pub fn validate(self) -> Result<Subgraph<Validated>, SubgraphError> {
-        tracing::debug!(
-            "Subgraph<Upgraded>: validate_subgraph_schema for `{}`",
-            self.name
-        );
+    pub fn validate(self) -> Result<Subgraph<Validated>, CompositionFailure> {
+        tracing::debug!("Subgraph<Upgraded>: validate `{}`", self.name);
+        // See the note in `Subgraph::<Expanded>::validate`. A connectors subgraph is necessarily
+        // fed2 and so does not normally reach this state, but running here keeps the two paths into
+        // `Validated` equivalent.
+        let hints = ConnectorsBlueprint::on_validation(&self)?;
         let schema = validate_subgraph_schema(self.state.schema)
             .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?;
         let Some(metadata) = schema.subgraph_metadata().cloned() else {
@@ -753,7 +658,8 @@ impl Subgraph<Upgraded> {
                     "Unable to detect federation version used in subgraph '{}'",
                     self.name
                 ),
-            ));
+            )
+            .into());
         };
 
         Ok(Subgraph {
@@ -763,6 +669,7 @@ impl Subgraph<Upgraded> {
                 schema,
                 orphan_extension_types: self.state.orphan_extension_types,
                 metadata,
+                hints,
             },
         })
     }
@@ -783,6 +690,11 @@ fn default_operation_name(op_type: &OperationType) -> Name {
 }
 
 impl Subgraph<Validated> {
+    /// Warnings raised while validating this subgraph, to be reported as composition hints.
+    pub fn hints(&self) -> &[CompositionHint] {
+        &self.state.hints
+    }
+
     pub fn validated_schema(&self) -> &ValidFederationSchema {
         &self.state.schema
     }
@@ -1077,6 +989,11 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
             FederationBlueprint::on_missing_directive_definition(&mut schema, &directive)?;
         }
     }
+
+    // Normalize spec versions that are accepted on input but not used past this point, so that the
+    // metadata collected below and the definitions injected after it are the upgraded ones.
+    trace!("expand_schema: upgrade_connect_link_if_needed");
+    upgrade_connect_link_if_needed(schema.schema_mut());
 
     // Now that we have the definition for `@link`, the bootstrap directive detection should work.
     trace!("new_federation_subgraph_schema: collect_links_metadata");
@@ -1622,11 +1539,15 @@ mod tests {
             .collect::<Vec<_>>();
         defined_type_names.sort();
 
-        // Note: Unused types (Float and ID) are removed by `expand_links` (GraphQL validation).
+        // Note: `Float` and `ID` are unused here. They are pruned by GraphQL validation, which now
+        // runs in `validate()` rather than in `expand_links()`, so they are still present at this
+        // point.
         assert_eq!(
             defined_type_names,
             vec![
                 name!("Boolean"),
+                name!("Float"),
+                name!("ID"),
                 name!("Int"),
                 name!("Query"),
                 name!("String"),
@@ -2007,8 +1928,18 @@ mod tests {
         let errors = Subgraph::parse("S", "S.graphql", schema_doc)
             .expect("parses schema")
             .expand_links()
+            .expect("expands")
+            .validate()
             .expect_err("fail to validate")
-            .format_errors();
+            .errors
+            .iter()
+            .map(|error| {
+                (
+                    error.code().definition().code().to_string(),
+                    error.to_string(),
+                )
+            })
+            .collect::<Vec<_>>();
         assert_eq!(errors.len(), 1);
         assert_eq!(
             errors[0].1,

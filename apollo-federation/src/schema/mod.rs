@@ -14,6 +14,7 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::parser::LineColumn;
+use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ExtensionId;
@@ -1177,7 +1178,7 @@ pub(crate) struct KeyDirective<'schema> {
     /// The parsed arguments of this `@key` application
     arguments: KeyDirectiveArguments<'schema>,
     /// The original `Directive` instance from the AST with unparsed arguments
-    schema_directive: &'schema apollo_compiler::schema::Component<Directive>,
+    schema_directive: &'schema Component<Directive>,
     /// The `DirectiveList` containing all directives applied to the target position, including this one
     sibling_directives: &'schema apollo_compiler::schema::DirectiveList,
     /// The schema position to which this directive is applied
@@ -1194,9 +1195,19 @@ impl HasFields for KeyDirective<'_> {
     }
 }
 
-impl KeyDirective<'_> {
+impl<'schema> KeyDirective<'schema> {
     pub(crate) fn target(&self) -> &ObjectOrInterfaceTypeDefinitionPosition {
         &self.target
+    }
+
+    /// Whether this key can be used to resolve the entity, i.e. `@key(resolvable:)`.
+    pub(crate) fn resolvable(&self) -> bool {
+        self.arguments.resolvable
+    }
+
+    /// The `@key` application as it appears in the AST, for reporting source locations against.
+    pub(crate) fn schema_directive(&self) -> &'schema Component<Directive> {
+        self.schema_directive
     }
 }
 

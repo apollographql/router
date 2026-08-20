@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn type_level_external_preserves_join_field_with_external_arg() {
         // s1: owns T, provides field a
-        let s1 = Subgraph::from_sdl(
+        let s1 = Subgraph::parse(
             "s1",
             "http://s1",
             r#"
@@ -230,7 +230,7 @@ mod tests {
         .unwrap();
 
         // s2: also owns T, provides field b
-        let s2 = Subgraph::from_sdl(
+        let s2 = Subgraph::parse(
             "s2",
             "http://s2",
             r#"
@@ -256,7 +256,7 @@ mod tests {
 
         // s3: references T as an external stub (type-level @external).
         // Extends S from s1 and uses @requires on x.
-        let s3 = Subgraph::from_sdl(
+        let s3 = Subgraph::parse(
             "s3",
             "http://s3",
             r#"

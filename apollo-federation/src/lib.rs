@@ -401,7 +401,7 @@ mod test_supergraph {
     use pretty_assertions::assert_str_eq;
 
     use super::*;
-    use crate::subgraph::SubgraphError;
+    use crate::composition::CompositionFailure;
     use crate::subgraph::typestate;
 
     #[test]
@@ -439,8 +439,12 @@ mod test_supergraph {
         name: &str,
         url: &str,
         sdl: &str,
-    ) -> Result<typestate::Subgraph<typestate::Expanded>, SubgraphError> {
-        typestate::Subgraph::parse(name, url, sdl)?.expand_links()
+    ) -> Result<typestate::Subgraph<typestate::Validated>, CompositionFailure> {
+        // Expansion is a pure transformation, so the validations this helper's name promises come
+        // from the `validate()` step.
+        typestate::Subgraph::parse(name, url, sdl)?
+            .expand_links()?
+            .validate()
     }
 
     #[test]
@@ -503,7 +507,7 @@ mod test_supergraph {
         );
 
         let err = res.unwrap_err();
-        let errors: Vec<String> = err.to_composition_errors().map(|e| e.to_string()).collect();
+        let errors: Vec<String> = err.errors.iter().map(|e| e.to_string()).collect();
         assert!(
             errors
                 .iter()

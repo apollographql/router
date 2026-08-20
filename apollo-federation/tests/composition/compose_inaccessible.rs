@@ -145,7 +145,7 @@ fn inaccessible_rejects_inaccessible_and_external_together() {
 
 #[test]
 fn inaccessible_errors_if_imported_under_mismatched_names() {
-    let subgraph_a = Subgraph::from_sdl("subgraphA", "",
+    let subgraph_a = Subgraph::parse("subgraphA", "",
         r#"
         extend schema
           @link(url: "https://specs.apollo.dev/federation/v2.0", import: [{name: "@inaccessible", as: "@private"}])
@@ -157,7 +157,7 @@ fn inaccessible_errors_if_imported_under_mismatched_names() {
         "#,
     ).unwrap();
 
-    let subgraph_b = Subgraph::from_sdl(
+    let subgraph_b = Subgraph::parse(
         "subgraphB",
         "",
         r#"
@@ -183,7 +183,7 @@ fn inaccessible_errors_if_imported_under_mismatched_names() {
 
 #[test]
 fn inaccessible_succeeds_if_imported_under_same_non_default_name() {
-    let subgraph_a = Subgraph::from_sdl("subgraphA", "",
+    let subgraph_a = Subgraph::parse("subgraphA", "",
         r#"
         extend schema
           @link(url: "https://specs.apollo.dev/federation/v2.0", import: [{name: "@inaccessible", as: "@private"}])
@@ -195,7 +195,7 @@ fn inaccessible_succeeds_if_imported_under_same_non_default_name() {
         "#,
     ).unwrap();
 
-    let subgraph_b = Subgraph::from_sdl("subgraphB", "",
+    let subgraph_b = Subgraph::parse("subgraphB", "",
         r#"
         extend schema
           @link(url: "https://specs.apollo.dev/federation/v2.0", import: [{name: "@inaccessible", as: "@private"}])
@@ -419,7 +419,7 @@ fn inaccessible_uses_security_core_purpose_in_supergraph() {
 fn namespaced_inaccessible_composes_correctly() {
     // This subgraph uses the namespaced form @federation__inaccessible because it does not
     // explicitly import @inaccessible in the @link directive
-    let subgraph_a = Subgraph::from_sdl(
+    let subgraph_a = Subgraph::parse(
         "subgraphA",
         "http://subgraphA",
         r#"
@@ -440,7 +440,7 @@ fn namespaced_inaccessible_composes_correctly() {
     )
     .unwrap();
 
-    let subgraph_b = Subgraph::from_sdl(
+    let subgraph_b = Subgraph::parse(
         "subgraphB",
         "http://subgraphB",
         r#"

@@ -24,6 +24,7 @@ use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
 use super::position::ObjectFieldDefinitionPosition;
 use super::position::ObjectTypeDefinitionPosition;
+use crate::composition::CompositionFailure;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
@@ -37,6 +38,7 @@ use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Upgraded;
 use crate::subgraph::typestate::Validated;
+use crate::supergraph::CompositionHint;
 use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
 use crate::supergraph::remove_inactive_requires_and_provides_from_subgraph;
 use crate::utils::FallibleIterator;
@@ -990,8 +992,9 @@ fn inner_upgrade_subgraphs_if_necessary(
 #[instrument(skip(subgraphs))]
 pub fn upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
-) -> Result<Vec<Subgraph<Validated>>, Vec<CompositionError>> {
+) -> Result<Vec<Subgraph<Validated>>, CompositionFailure> {
     let mut errors: Vec<CompositionError> = vec![];
+    let mut hints: Vec<CompositionHint> = vec![];
     let subgraphs = subgraphs
         .into_iter()
         .filter_map(|sg| match sg.normalize_root_types() {
@@ -1006,31 +1009,32 @@ pub fn upgrade_subgraphs_if_necessary(
     // Upgrade subgraphs (if necessary)
     let upgraded = inner_upgrade_subgraphs_if_necessary(subgraphs)?;
 
-    // Validate subgraphs (if either upgraded or normalized)
+    // Validate subgraphs. Expansion is a pure transformation, so every subgraph is validated here
+    // regardless of whether it was upgraded or normalized — the two arms differ only in which state
+    // they arrive in.
     let validated: Vec<Subgraph<Validated>> = upgraded
         .into_iter()
-        .filter_map(|subgraph| match subgraph {
-            Either::Left(s) => {
-                // This subgraph was not upgraded nor normalized in this function, which implies
-                // this subgraph is originally Fed v2. Since Fed v2 schemas are already fully
-                // validated in the `expand_links` method, it's safe to transition to the
-                // `Validated` state.
-                Some(s.assume_validated())
-            }
-            Either::Right(s) => match s.validate() {
+        .filter_map(|subgraph| {
+            let result = match subgraph {
+                Either::Left(s) => s.validate(),
+                Either::Right(s) => s.validate(),
+            };
+            match result {
                 Ok(s) => Some(s),
-                Err(e) => {
-                    errors.extend(e.to_composition_errors());
+                Err(failure) => {
+                    errors.extend(failure.errors);
+                    // Warnings raised beside the errors are still worth reporting.
+                    hints.extend(failure.hints);
                     None
                 }
-            },
+            }
         })
         .collect();
 
     if errors.is_empty() {
         Ok(validated)
     } else {
-        Err(errors)
+        Err(CompositionFailure { errors, hints })
     }
 }
 
@@ -1404,10 +1408,10 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let errors = upgrade_subgraphs_if_necessary(vec![s1, s2]).expect_err("should fail");
-        assert_eq!(errors.len(), 1);
+        let failure = upgrade_subgraphs_if_necessary(vec![s1, s2]).expect_err("should fail");
+        assert_eq!(failure.errors.len(), 1);
         assert_eq!(
-            errors[0].to_string(),
+            failure.errors[0].to_string(),
             r#"The @interfaceObject directive is used on type "A" in subgraph "s1", which requires other subgraphs to resolve its type name via an interface @key. However, @key on an interface in a federation 1 subgraph does not mean it can fulfill the __typename-resolution requirement that @interfaceObject depends on. For subgraph "s2", either upgrade them to federation 2 subgraphs or remove @key from the type."#
         );
     }

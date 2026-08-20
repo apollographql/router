@@ -12,68 +12,45 @@ mod source;
 use std::ops::Range;
 
 use apollo_compiler::Name;
-use apollo_compiler::Schema;
 use apollo_compiler::parser::LineColumn;
-use apollo_compiler::schema::SchemaBuilder;
 use itertools::Itertools;
 pub(crate) use schema::field_set_is_subset;
 use strum_macros::Display;
 use strum_macros::EnumIter;
 use strum_macros::IntoStaticStr;
 
-use crate::connectors::ConnectSpec;
 use crate::connectors::spec::ConnectLink;
 use crate::connectors::spec::source::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::connectors::validation::connect::fields_seen_by_all_connects;
 use crate::connectors::validation::graphql::SchemaInfo;
 use crate::connectors::validation::source::SourceDirective;
-
-/// The result of a validation pass on a subgraph
-#[derive(Debug)]
-pub struct ValidationResult {
-    /// All validation errors encountered.
-    pub errors: Vec<Message>,
-
-    /// Whether the validated subgraph contained connector directives
-    pub has_connectors: bool,
-
-    /// The parsed (and potentially invalid) schema of the subgraph
-    pub schema: Schema,
-
-    /// The optionally transformed schema to be used in later steps.
-    pub transformed: String,
-}
+use crate::subgraph::typestate::HasMetadata;
+use crate::subgraph::typestate::Subgraph;
 
 /// Validate the connectors-related directives `@source` and `@connect`.
 ///
-/// This function attempts to collect as many validation errors as possible, so it does not bail
-/// out as soon as it encounters one.
-pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
-    let schema = SchemaBuilder::new()
-        .adopt_orphan_extensions()
-        .parse(&source_text, file_name)
-        .build()
-        .unwrap_or_else(|schema_with_errors| schema_with_errors.partial);
-    let link = match ConnectLink::new(&schema) {
-        None => {
-            return ValidationResult {
-                errors: Vec::new(),
-                has_connectors: false,
-                schema,
-                transformed: source_text,
-            };
-        }
-        Some(Err(err)) => {
-            return ValidationResult {
-                errors: vec![err],
-                has_connectors: true,
-                schema,
-                transformed: source_text,
-            };
-        }
+/// Returns every [`Message`] produced, errors and warnings alike — see [`Code::severity`]. This
+/// function attempts to collect as many of them as possible, so it does not bail out as soon as it
+/// encounters one. An empty result means the subgraph either has no connectors or has no problems.
+///
+/// Takes an expanded subgraph because that is the state these validations are defined against: the
+/// connect and federation definitions are present and link metadata has been collected, but the
+/// schema has not been GraphQL-validated yet. The subgraph is only read, never rewritten —
+/// normalizing the spec version (`connect/v0.1` is auto-upgraded to `v0.2`) is link expansion's
+/// job, see `connectors::spec::upgrade_connect_link_if_needed`.
+#[allow(private_bounds)]
+pub fn validate<S: HasMetadata>(subgraph: &Subgraph<S>) -> Vec<Message> {
+    let schema = subgraph.schema();
+    let subgraph_name = subgraph.name.as_str();
+
+    let link = match ConnectLink::new(schema.schema()) {
+        // Not a connectors subgraph.
+        None => return Vec::new(),
+        Some(Err(err)) => return vec![err],
         Some(Ok(link)) => link,
     };
-    let schema_info = SchemaInfo::new(&schema, &source_text, link);
+
+    let schema_info = SchemaInfo::new(schema, link);
 
     let (source_directives, mut messages) = SourceDirective::find(&schema_info);
     let all_source_names = source_directives
@@ -90,7 +67,7 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
             // Don't run schema-wide checks if any connectors failed to validate
             messages.extend(schema::validate(
                 &schema_info,
-                file_name,
+                subgraph_name,
                 fields_seen_by_connectors,
             ))
         }
@@ -107,53 +84,13 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
         messages.push(Message {
             code: Code::NoSourceImport,
             message: format!("The `@{SOURCE_DIRECTIVE_NAME_IN_SPEC}` directive is not imported. Try adding `@{SOURCE_DIRECTIVE_NAME_IN_SPEC}` to `import` for `{link}`", link=schema_info.connect_link),
-            locations: schema_info.connect_link.directive.line_column_range(&schema.sources)
+            locations: schema_info.connect_link.directive.line_column_range(&schema.schema().sources)
                 .into_iter()
                 .collect(),
         });
     }
 
-    // Auto-upgrade the schema as the _last_ step, so that error messages from earlier don't have
-    // incorrect line/col info if we mess this up
-    if schema_info.connect_link.spec == ConnectSpec::V0_1 {
-        if let Some(version_range) =
-            schema_info
-                .connect_link
-                .directive
-                .location()
-                .and_then(|link_range| {
-                    let version_offset = source_text
-                        .get(link_range.offset()..link_range.end_offset())?
-                        .find(ConnectSpec::V0_1.as_str())?;
-                    let start = link_range.offset() + version_offset;
-                    let end = start + ConnectSpec::V0_1.as_str().len();
-                    Some(start..end)
-                })
-        {
-            source_text.replace_range(version_range, ConnectSpec::V0_2.as_str());
-        } else {
-            messages.push(Message {
-                code: Code::UnknownConnectorsVersion,
-                message: "Failed to auto-upgrade 0.1 to 0.2, you must manually update the version in `@link`".to_string(),
-                locations: schema_info.connect_link.directive.line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-            return ValidationResult {
-                errors: messages,
-                has_connectors: true,
-                schema,
-                transformed: source_text,
-            };
-        };
-    }
-
-    ValidationResult {
-        errors: messages,
-        has_connectors: true,
-        schema,
-        transformed: source_text,
-    }
+    messages
 }
 
 const DEFAULT_SOURCE_DIRECTIVE_NAME: &str = "connect__source";
@@ -326,8 +263,8 @@ pub enum Severity {
 mod test_validate_source {
     use std::fs::read_to_string;
 
+    use apollo_compiler::schema::SchemaBuilder;
     use insta::assert_debug_snapshot;
-    use insta::assert_snapshot;
     use insta::glob;
     use pretty_assertions::assert_str_eq;
 
@@ -337,18 +274,43 @@ mod test_validate_source {
     fn validation_tests() {
         insta::with_settings!({prepend_module_to_snapshot => false}, {
             glob!("test_data", "**/*.graphql", |path| {
-                let schema = read_to_string(path).unwrap();
-                let result = validate(schema.clone(), path.to_str().unwrap());
-                assert_debug_snapshot!(result.errors);
-                if path.parent().is_some_and(|parent| parent.ends_with("transformed")) {
-                    assert_snapshot!(&diff::lines(&schema, &result.transformed).into_iter().filter_map(|res| match res {
-                        diff::Result::Left(line) => Some(format!("- {line}")),
-                        diff::Result::Right(line) => Some(format!("+ {line}")),
-                        diff::Result::Both(_, _) => None,
-                    }).join("\n"));
-                } else {
-                    assert_str_eq!(schema, result.transformed, "Schema should not have been transformed by validations")
-                }
+                let sdl = read_to_string(path).unwrap();
+                let name = path.to_str().unwrap();
+                // Mirror the production path: parse, expand links, then validate. Expansion is what
+                // puts the `@connect`/`@source`/federation definitions, link metadata and
+                // referencers in place, and `ConnectorsBlueprint::on_validation` runs on the result.
+                //
+                // The schema is built here rather than via `Subgraph::parse` so that a failed build
+                // still yields the partial schema: connector errors are reported for documents that
+                // aren't valid GraphQL, matching the fact that validation runs before
+                // `validate_or_return_self`.
+                let builder = SchemaBuilder::new()
+                    .adopt_orphan_extensions()
+                    .parse(&sdl, name);
+                let orphan_extension_types = builder.iter_orphan_extension_types().cloned().collect();
+                let parsed = builder
+                    .build()
+                    .unwrap_or_else(|schema_with_errors| schema_with_errors.partial);
+
+                let subgraph = Subgraph::new(name, "http://test", parsed, orphan_extension_types)
+                    .expect("valid subgraph name");
+                let subgraph = match subgraph.expand_links() {
+                    Ok(subgraph) => subgraph,
+                    Err(err) => {
+                        assert_debug_snapshot!(format!("failed to expand: {err}"));
+                        return;
+                    }
+                };
+
+                let before = subgraph.schema_string();
+                let errors = validate(&subgraph);
+                let after = subgraph.schema_string();
+
+                assert_debug_snapshot!(errors);
+                assert_str_eq!(
+                    before, after,
+                    "Validations must not modify the schema; rewrites belong in link expansion"
+                );
             });
         });
     }
