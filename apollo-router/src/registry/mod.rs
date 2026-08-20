@@ -949,6 +949,18 @@ mod tests {
         manifest_annotations
     }
 
+    fn schema_layer(data: &str) -> ImageLayer {
+        ImageLayer::new(data.to_string(), APOLLO_SCHEMA_MEDIA_TYPE.to_string(), None)
+    }
+
+    fn license_layer(data: impl Into<bytes::Bytes>) -> ImageLayer {
+        ImageLayer::new(data, ENTITLEMENTS_MEDIA_TYPE.to_string(), None)
+    }
+
+    fn unrelated_layer() -> ImageLayer {
+        ImageLayer::new("foo_bar".to_string(), "foo_bar".to_string(), None)
+    }
+
     async fn setup_mocks(
         mock_server: &MockServer,
         layers: Vec<ImageLayer>,
@@ -1030,234 +1042,106 @@ mod tests {
             .expect("url must be valid")
     }
 
+    #[rstest::rstest]
+    #[case::single_layer(vec![schema_layer("test schema")], Some("test schema"))]
+    #[case::extra_layers(vec![schema_layer("test schema"), unrelated_layer()], Some("test schema"))]
+    #[case::missing_layer(vec![unrelated_layer()], None)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn fetch_blob() {
+    async fn fetch_oci_from_reference_cases(
+        #[case] layers: Vec<ImageLayer>,
+        #[case] expected_schema: Option<&str>,
+    ) {
         let mock_server = &MockServer::start().await;
         let mut client = Client::new(ClientConfig {
             protocol: ClientProtocol::Http,
             ..Default::default()
         });
-        let schema_layer = ImageLayer {
-            data: "test schema".to_string().into(),
-            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
-            annotations: None,
-        };
-        let image_reference = setup_mocks(mock_server, vec![schema_layer], None).await;
+        let image_reference = setup_mocks(mock_server, layers, None).await;
         let result = fetch_oci_from_reference(
             &mut client,
             &RegistryAuth::Anonymous,
             &image_reference,
             None,
         )
-        .await
-        .expect("failed to fetch oci bundle");
-        assert_eq!(result.schema, "test schema");
-    }
+        .await;
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn handle_extra_layers() {
-        let mock_server = &MockServer::start().await;
-        let mut client = Client::new(ClientConfig {
-            protocol: ClientProtocol::Http,
-            ..Default::default()
-        });
-        let schema_layer = ImageLayer {
-            data: "test schema".into(),
-            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
-            annotations: None,
-        };
-        let random_layer = ImageLayer {
-            data: "foo_bar".into(),
-            media_type: "foo_bar".to_string(),
-            annotations: None,
-        };
-        let image_reference =
-            setup_mocks(mock_server, vec![schema_layer, random_layer], None).await;
-        let result = fetch_oci_from_reference(
-            &mut client,
-            &RegistryAuth::Anonymous,
-            &image_reference,
-            None,
-        )
-        .await
-        .expect("failed to fetch oci bundle");
-        assert_eq!(result.schema, "test schema");
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn error_layer_not_found() {
-        let mock_server = &MockServer::start().await;
-        let mut client = Client::new(ClientConfig {
-            protocol: ClientProtocol::Http,
-            ..Default::default()
-        });
-        let random_layer = ImageLayer {
-            data: "foo_bar".to_string().into(),
-            media_type: "foo_bar".to_string(),
-            annotations: None,
-        };
-        let image_reference = setup_mocks(mock_server, vec![random_layer], None).await;
-        let result = fetch_oci_from_reference(
-            &mut client,
-            &RegistryAuth::Anonymous,
-            &image_reference,
-            None,
-        )
-        .await
-        .expect_err("expect can't fetch oci bundle");
-        if let LayerMissingTitle = result {
-            // Expected error
-        } else {
-            panic!("expected missing title error, got {result:?}");
+        match expected_schema {
+            Some(schema) => {
+                assert_eq!(result.expect("failed to fetch oci bundle").schema, schema);
+            }
+            None => {
+                let err = result.expect_err("expect can't fetch oci bundle");
+                assert!(
+                    matches!(err, LayerMissingTitle),
+                    "expected LayerMissingTitle, got {err:?}"
+                );
+            }
         }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn fetch_license_success() {
-        let mock_server = &MockServer::start().await;
-        let mut client = Client::new(ClientConfig {
-            protocol: ClientProtocol::Http,
-            ..Default::default()
-        });
-        let license_layer = ImageLayer {
-            data: TEST_LICENSE_JWT.into(),
-            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
-            annotations: None,
-        };
-        let image_reference = setup_mocks(mock_server, vec![license_layer], None).await;
-
-        let result = fetch_license_from_reference(
-            &mut client,
-            &RegistryAuth::Anonymous,
-            &image_reference,
-            None,
-        )
-        .await
-        .expect("failed to fetch license");
-
+    fn assert_license_fetch_success(result: Result<License, OciError>) {
         let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
-        assert_eq!(result.claims, expected.claims);
+        assert_eq!(
+            result.expect("failed to fetch license").claims,
+            expected.claims
+        );
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn fetch_license_ignores_extra_layers() {
-        let mock_server = &MockServer::start().await;
-        let mut client = Client::new(ClientConfig {
-            protocol: ClientProtocol::Http,
-            ..Default::default()
-        });
-        let license_layer = ImageLayer {
-            data: TEST_LICENSE_JWT.into(),
-            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
-            annotations: None,
-        };
-        let unrelated_layer = ImageLayer {
-            data: "foo_bar".into(),
-            media_type: "foo_bar".to_string(),
-            annotations: None,
-        };
-        let image_reference =
-            setup_mocks(mock_server, vec![license_layer, unrelated_layer], None).await;
-
-        let result = fetch_license_from_reference(
-            &mut client,
-            &RegistryAuth::Anonymous,
-            &image_reference,
-            None,
-        )
-        .await
-        .expect("failed to fetch license");
-
-        let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
-        assert_eq!(result.claims, expected.claims);
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn fetch_license_missing_layer() {
-        let mock_server = &MockServer::start().await;
-        let mut client = Client::new(ClientConfig {
-            protocol: ClientProtocol::Http,
-            ..Default::default()
-        });
-        let unrelated_layer = ImageLayer {
-            data: "foo_bar".to_string().into(),
-            media_type: "foo_bar".to_string(),
-            annotations: None,
-        };
-        let image_reference = setup_mocks(mock_server, vec![unrelated_layer], None).await;
-
-        let err = fetch_license_from_reference(
-            &mut client,
-            &RegistryAuth::Anonymous,
-            &image_reference,
-            None,
-        )
-        .await
-        .expect_err("expected missing entitlements layer");
-
+    fn assert_license_fetch_missing_layer(result: Result<License, OciError>) {
+        let err = result.expect_err("expected missing entitlements layer");
         assert!(
             matches!(err, OciError::LayerMissingTitle),
             "expected LayerMissingTitle, got {err:?}"
         );
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn fetch_license_bad_utf8() {
-        let mock_server = &MockServer::start().await;
-        let mut client = Client::new(ClientConfig {
-            protocol: ClientProtocol::Http,
-            ..Default::default()
-        });
-        // 0xFF/0xFE are not valid UTF-8 start bytes.
-        let license_layer = ImageLayer {
-            data: vec![0xFF, 0xFE, 0xFD].into(),
-            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
-            annotations: None,
-        };
-        let image_reference = setup_mocks(mock_server, vec![license_layer], None).await;
-
-        let err = fetch_license_from_reference(
-            &mut client,
-            &RegistryAuth::Anonymous,
-            &image_reference,
-            None,
-        )
-        .await
-        .expect_err("expected utf8 conversion error");
-
+    fn assert_license_fetch_bad_utf8(result: Result<License, OciError>) {
+        let err = result.expect_err("expected utf8 conversion error");
         assert!(
             matches!(err, OciError::LayerParse(_)),
             "expected LayerParse, got {err:?}"
         );
     }
 
+    fn assert_license_fetch_bad_jwt(result: Result<License, OciError>) {
+        let err = result.expect_err("expected JWT parse error");
+        assert!(
+            matches!(err, OciError::LicenseParse(_)),
+            "expected LicenseParse, got {err:?}"
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::success(vec![license_layer(TEST_LICENSE_JWT)], assert_license_fetch_success)]
+    #[case::ignores_extra_layers(
+        vec![license_layer(TEST_LICENSE_JWT), unrelated_layer()],
+        assert_license_fetch_success
+    )]
+    #[case::missing_layer(vec![unrelated_layer()], assert_license_fetch_missing_layer)]
+    // 0xFF/0xFE are not valid UTF-8 start bytes.
+    #[case::bad_utf8(vec![license_layer(vec![0xFF, 0xFE, 0xFD])], assert_license_fetch_bad_utf8)]
+    #[case::bad_jwt(vec![license_layer("not a jwt")], assert_license_fetch_bad_jwt)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn fetch_license_bad_jwt() {
+    async fn fetch_license_from_reference_cases(
+        #[case] layers: Vec<ImageLayer>,
+        #[case] assert_result: fn(Result<License, OciError>),
+    ) {
         let mock_server = &MockServer::start().await;
         let mut client = Client::new(ClientConfig {
             protocol: ClientProtocol::Http,
             ..Default::default()
         });
-        let license_layer = ImageLayer {
-            data: "not a jwt".into(),
-            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
-            annotations: None,
-        };
-        let image_reference = setup_mocks(mock_server, vec![license_layer], None).await;
+        let image_reference = setup_mocks(mock_server, layers, None).await;
 
-        let err = fetch_license_from_reference(
+        let result = fetch_license_from_reference(
             &mut client,
             &RegistryAuth::Anonymous,
             &image_reference,
             None,
         )
-        .await
-        .expect_err("expected JWT parse error");
+        .await;
 
-        assert!(
-            matches!(err, OciError::LicenseParse(_)),
-            "expected LicenseParse, got {err:?}"
-        );
+        assert_result(result);
     }
 
     #[rstest::rstest]
@@ -1444,21 +1328,25 @@ mod tests {
         }
     }
 
+    #[rstest::rstest]
+    #[case::with_launch_id(
+        Some(generate_manifest_annotations(Some("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))),
+        Some("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string())
+    )]
+    #[case::no_manifest_annotations(None, None)]
+    #[case::manifest_without_launch_id(Some(generate_manifest_annotations(None)), None)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn stream_from_oci_success() {
+    async fn stream_from_oci_launch_id_cases(
+        #[case] manifest_annotations: Option<BTreeMap<String, String>>,
+        #[case] expected_launch_id: Option<String>,
+    ) {
         let mock_server = &MockServer::start().await;
-
-        let schema_layer = ImageLayer {
-            data: "test schema".to_string().into(),
-            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
-            annotations: None,
-        };
-
-        let launch_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string();
-        let manifest_annotations = generate_manifest_annotations(Some(&launch_id.clone()));
-
-        let image_reference =
-            setup_mocks(mock_server, vec![schema_layer], Some(manifest_annotations)).await;
+        let image_reference = setup_mocks(
+            mock_server,
+            vec![schema_layer("test schema")],
+            manifest_annotations,
+        )
+        .await;
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
         let results = stream_from_oci(oci_config)
@@ -1470,65 +1358,7 @@ mod tests {
         match &results[0] {
             Ok(schema_state) => {
                 assert_eq!(schema_state.sdl, "test schema");
-                assert_eq!(schema_state.launch_id, Some(launch_id));
-            }
-            Err(e) => panic!("expected success, got error: {e}"),
-        }
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn stream_from_oci_missing_manifests() {
-        let mock_server = &MockServer::start().await;
-
-        let schema_layer = ImageLayer {
-            data: "test schema".to_string().into(),
-            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
-            annotations: None,
-        };
-
-        let image_reference = setup_mocks(mock_server, vec![schema_layer], None).await;
-        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
-
-        let results = stream_from_oci(oci_config)
-            .take(1)
-            .collect::<Vec<_>>()
-            .await;
-
-        assert_eq!(results.len(), 1);
-        match &results[0] {
-            Ok(schema_state) => {
-                assert_eq!(schema_state.sdl, "test schema");
-                assert_eq!(schema_state.launch_id, None);
-            }
-            Err(e) => panic!("expected success, got error: {e}"),
-        }
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn stream_from_oci_missing_launch_id_manifest() {
-        let mock_server = &MockServer::start().await;
-
-        let schema_layer = ImageLayer {
-            data: "test schema".to_string().into(),
-            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
-            annotations: None,
-        };
-
-        let manifest_annotations = generate_manifest_annotations(None);
-        let image_reference =
-            setup_mocks(mock_server, vec![schema_layer], Some(manifest_annotations)).await;
-        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
-
-        let results = stream_from_oci(oci_config)
-            .take(1)
-            .collect::<Vec<_>>()
-            .await;
-
-        assert_eq!(results.len(), 1);
-        match &results[0] {
-            Ok(schema_state) => {
-                assert_eq!(schema_state.sdl, "test schema");
-                assert_eq!(schema_state.launch_id, None);
+                assert_eq!(schema_state.launch_id, expected_launch_id);
             }
             Err(e) => panic!("expected success, got error: {e}"),
         }
