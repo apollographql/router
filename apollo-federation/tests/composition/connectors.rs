@@ -672,7 +672,7 @@ type Resource {
 }
         "#;
         let subgraph =
-            Subgraph::from_sdl("with-connectors", "http://with-connectors", type_defs).unwrap();
+            Subgraph::parse("with-connectors", "http://with-connectors", type_defs).unwrap();
 
         let failure = compose(vec![subgraph]).expect_err("Expected composition to fail");
         let locations = failure.errors[0].locations();
@@ -784,7 +784,7 @@ type Resource {
     /// bring their own federation `@link`.
     #[test]
     fn override_on_connector_subgraph_is_rejected_when_aliased() {
-        let with_connectors = Subgraph::from_sdl(
+        let with_connectors = Subgraph::parse(
             "with-connectors",
             "http://with-connectors",
             r#"
@@ -808,7 +808,7 @@ type Resource @key(fields: "id") {
         .unwrap();
 
         // `@override` is imported under an alias here.
-        let plain = Subgraph::from_sdl(
+        let plain = Subgraph::parse(
             "plain",
             "http://plain",
             r#"

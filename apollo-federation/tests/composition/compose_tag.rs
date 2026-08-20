@@ -140,7 +140,7 @@ fn tag_propagates_to_supergraph_fed2_subgraphs() {
 
 #[test]
 fn tag_propagates_to_supergraph_fed1_subgraphs() {
-    let subgraph_a = Subgraph::from_sdl(
+    let subgraph_a = Subgraph::parse(
         "subgraphA",
         "",
         r#"
@@ -156,7 +156,7 @@ fn tag_propagates_to_supergraph_fed1_subgraphs() {
     )
     .unwrap();
 
-    let subgraph_b = Subgraph::from_sdl(
+    let subgraph_b = Subgraph::parse(
         "subgraphB",
         "",
         r#"
@@ -176,7 +176,7 @@ fn tag_propagates_to_supergraph_fed1_subgraphs() {
 
 #[test]
 fn tag_propagates_to_supergraph_mixed_fed1_fed2_subgraphs() {
-    let subgraph_a = Subgraph::from_sdl(
+    let subgraph_a = Subgraph::parse(
         "subgraphA",
         "",
         r#"
@@ -192,7 +192,7 @@ fn tag_propagates_to_supergraph_mixed_fed1_fed2_subgraphs() {
     )
     .unwrap();
 
-    let subgraph_b = Subgraph::from_sdl(
+    let subgraph_b = Subgraph::parse(
         "subgraphB",
         "",
         r#"
@@ -261,7 +261,7 @@ fn tag_merges_multiple_tags_fed2_subgraphs() {
 
 #[test]
 fn tag_merges_multiple_tags_fed1_subgraphs() {
-    let subgraph_a = Subgraph::from_sdl("subgraphA", "", 
+    let subgraph_a = Subgraph::parse("subgraphA", "", 
         r#"
         type Query {
           user: [User]
@@ -279,7 +279,7 @@ fn tag_merges_multiple_tags_fed1_subgraphs() {
         "#,
     ).unwrap();
 
-    let subgraph_b = Subgraph::from_sdl( "subgraphB", "",
+    let subgraph_b = Subgraph::parse( "subgraphB", "",
         r#"
         type User @key(fields: "id") @tag(name: "aTagOnTypeFromSubgraphB") @tag(name: "aMergedTagOnType") {
           id: ID!
@@ -300,7 +300,7 @@ fn tag_merges_multiple_tags_fed1_subgraphs() {
 
 #[test]
 fn tag_merges_multiple_tags_mixed_fed1_fed2_subgraphs() {
-    let subgraph_a = Subgraph::from_sdl("subgraphA", "", 
+    let subgraph_a = Subgraph::parse("subgraphA", "", 
         r#"
         type Query {
           user: [User]
@@ -318,7 +318,7 @@ fn tag_merges_multiple_tags_mixed_fed1_fed2_subgraphs() {
         "#,
     ).unwrap();
 
-    let subgraph_b = Subgraph::from_sdl( "subgraphB", "",
+    let subgraph_b = Subgraph::parse( "subgraphB", "",
         r#"
         type User @key(fields: "id") @tag(name: "aTagOnTypeFromSubgraphB") @tag(name: "aMergedTagOnType") {
           id: ID!
@@ -381,7 +381,7 @@ fn tag_rejects_tag_and_external_together_fed2_subgraphs() {
 
 #[test]
 fn tag_rejects_tag_and_external_together_fed1_subgraphs() {
-    let subgraph_a = Subgraph::from_sdl(
+    let subgraph_a = Subgraph::parse(
         "subgraphA",
         "",
         r#"
@@ -399,7 +399,7 @@ fn tag_rejects_tag_and_external_together_fed1_subgraphs() {
     )
     .unwrap();
 
-    let subgraph_b = Subgraph::from_sdl(
+    let subgraph_b = Subgraph::parse(
         "subgraphB",
         "",
         r#"
@@ -423,7 +423,7 @@ fn tag_rejects_tag_and_external_together_fed1_subgraphs() {
 
 #[test]
 fn tag_rejects_tag_and_external_together_mixed_fed1_fed2_subgraphs() {
-    let subgraph_a = Subgraph::from_sdl(
+    let subgraph_a = Subgraph::parse(
         "subgraphA",
         "",
         r#"
@@ -441,7 +441,7 @@ fn tag_rejects_tag_and_external_together_mixed_fed1_fed2_subgraphs() {
     )
     .unwrap();
 
-    let subgraph_b = Subgraph::from_sdl(
+    let subgraph_b = Subgraph::parse(
         "subgraphB",
         "",
         r#"
@@ -471,7 +471,7 @@ fn tag_rejects_tag_and_external_together_mixed_fed1_fed2_subgraphs() {
 
 #[test]
 fn tag_errors_if_imported_under_mismatched_names() {
-    let subgraph_a = Subgraph::from_sdl(
+    let subgraph_a = Subgraph::parse(
         "subgraphA",
         "",
         r#"
@@ -485,7 +485,7 @@ fn tag_errors_if_imported_under_mismatched_names() {
     )
     .unwrap();
 
-    let subgraph_b = Subgraph::from_sdl(
+    let subgraph_b = Subgraph::parse(
         "subgraphB",
         "",
         r#"
@@ -511,7 +511,7 @@ fn tag_errors_if_imported_under_mismatched_names() {
 
 #[test]
 fn tag_succeeds_if_imported_under_same_non_default_name() {
-    let subgraph_a = Subgraph::from_sdl(
+    let subgraph_a = Subgraph::parse(
         "subgraphA",
         "",
         r#"
@@ -525,7 +525,7 @@ fn tag_succeeds_if_imported_under_same_non_default_name() {
     )
     .unwrap();
 
-    let subgraph_b = Subgraph::from_sdl(
+    let subgraph_b = Subgraph::parse(
         "subgraphB",
         "",
         r#"

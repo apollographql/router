@@ -1,6 +1,6 @@
 use apollo_compiler::Name;
 use apollo_compiler::coord;
-use apollo_federation::subgraph::typestate::Source;
+use apollo_federation::subgraph::typestate::Initial;
 use apollo_federation::subgraph::typestate::Subgraph;
 use apollo_federation::supergraph::Satisfiable;
 use apollo_federation::supergraph::Supergraph;
@@ -80,7 +80,7 @@ mod simple_cases {
 
     #[test]
     fn simple_success_case_renamed_compose_directive() {
-        let subgraph_a = Subgraph::from_sdl("subgraphA", "", r#"
+        let subgraph_a = Subgraph::parse("subgraphA", "", r#"
       extend schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
         @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", { name: "@composeDirective", as: "@apolloCompose" }])
@@ -159,7 +159,7 @@ mod federation_directives {
     #[case("@authenticated")]
     #[case("@requiresScopes")]
     fn hints_for_renamed_default_composed_federation_directives(#[case] directive: &str) {
-        let subgraph_a = Subgraph::from_sdl("subgraphA", "", r#"
+        let subgraph_a = Subgraph::parse("subgraphA", "", r#"
       extend schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
         @link(url: "https://specs.apollo.dev/federation/v2.5", import: [{ name: "@key" }, { name: "@composeDirective" } , { name: "<DIRECTIVE>", as: "@apolloDirective" }])
@@ -236,7 +236,7 @@ mod federation_directives {
     fn errors_for_renamed_federation_directives_with_nontrivial_compositions(
         #[case] directive: &str,
     ) {
-        let subgraph_a = Subgraph::from_sdl("subgraphA", "", r#"
+        let subgraph_a = Subgraph::parse("subgraphA", "", r#"
       extend schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
         @link(url: "https://specs.apollo.dev/federation/v2.1", import: [{ name: "@key" }, { name: "@composeDirective" } , { name: "<DIRECTIVE>", as: "@apolloDirective" }])
@@ -981,7 +981,7 @@ mod inconsistent_imports {
 
     #[test]
     fn errors_when_exported_directives_conflict_with_federation_directives() {
-        let subgraph_a = Subgraph::from_sdl("subgraphA", "", r#"
+        let subgraph_a = Subgraph::parse("subgraphA", "", r#"
             extend schema
                 @link(url: "https://specs.apollo.dev/link/v1.0")
                 @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective"])
@@ -997,7 +997,7 @@ mod inconsistent_imports {
                 a: String @inaccessible(name: "a")
             }
         "#).unwrap();
-        let subgraph_b = Subgraph::from_sdl("subgraphB", "", r#"
+        let subgraph_b = Subgraph::parse("subgraphB", "", r#"
             extend schema
                 @link(url: "https://specs.apollo.dev/link/v1.0")
                 @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@inaccessible"])
@@ -1152,7 +1152,7 @@ mod composition {
 
     #[test]
     fn composes_custom_tag_directive_when_renamed() {
-        let subgraph_a = Subgraph::from_sdl("subgraphA", "", r#"
+        let subgraph_a = Subgraph::parse("subgraphA", "", r#"
             extend schema
                 @link(url: "https://specs.apollo.dev/link/v1.0")
                 @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@tag"])
@@ -1214,7 +1214,7 @@ mod composition {
 
     #[test]
     fn composes_custom_tag_when_federation_tag_is_renamed() {
-        let subgraph_a = Subgraph::from_sdl("subgraphA", "", r#"
+        let subgraph_a = Subgraph::parse("subgraphA", "", r#"
             extend schema
                 @link(url: "https://specs.apollo.dev/link/v1.0")
                 @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", {name: "@tag", as: "@mytag"}])
@@ -1231,7 +1231,7 @@ mod composition {
                 b: String @mytag(name: "c")
             }
         "#).unwrap();
-        let subgraph_b = Subgraph::from_sdl(
+        let subgraph_b = Subgraph::parse(
             "subgraphB",
             "",
             r#"
@@ -1290,7 +1290,7 @@ mod composition {
 
     #[test]
     fn composes_repeatable_custom_directives() {
-        let subgraph_a = Subgraph::from_sdl("subgraphA", "", r#"
+        let subgraph_a = Subgraph::parse("subgraphA", "", r#"
             extend schema @composeDirective(name: "@auth")
               @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@shareable"])
               @link(url: "https://custom.dev/auth/v1.0", import: ["@auth"])
@@ -1300,7 +1300,7 @@ mod composition {
               shared: String @shareable @auth(scope: "VIEWER")
             }
         "#).unwrap();
-        let subgraph_b = Subgraph::from_sdl("subgraphB", "", r#"
+        let subgraph_b = Subgraph::parse("subgraphB", "", r#"
             extend schema @composeDirective(name: "@auth")
               @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@shareable"])
               @link(url: "https://custom.dev/auth/v1.0", import: ["@auth"])
@@ -1333,7 +1333,7 @@ mod composition {
 
     #[test]
     fn composes_custom_directive_with_nullable_array_arguments() {
-        let subgraph_a = Subgraph::from_sdl("subgraphA", "", r#"
+        let subgraph_a = Subgraph::parse("subgraphA", "", r#"
             extend schema @composeDirective(name: "@auth")
               @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@shareable"])
               @link(url: "https://custom.dev/auth/v1.0", import: ["@auth"])
@@ -1343,7 +1343,7 @@ mod composition {
               shared: String @shareable @auth(scope: ["VIEWER"])
             }
         "#).unwrap();
-        let subgraph_b = Subgraph::from_sdl("subgraphB", "", r#"
+        let subgraph_b = Subgraph::parse("subgraphB", "", r#"
             extend schema @composeDirective(name: "@auth")
               @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@shareable"])
               @link(url: "https://custom.dev/auth/v1.0", import: ["@auth"])
@@ -1383,7 +1383,7 @@ mod composition {
         // it without specifying the argument (relying on the default).
         // Subgraph B defines @foo without a default value for `debug` and
         // applies it explicitly with the value matching subgraph A's default.
-        let subgraph_a = Subgraph::from_sdl("subgraphA", "", r#"
+        let subgraph_a = Subgraph::parse("subgraphA", "", r#"
             extend schema @composeDirective(name: "@foo")
               @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@shareable"])
               @link(url: "https://custom.dev/foo/v1.0", import: ["@foo"])
@@ -1393,7 +1393,7 @@ mod composition {
               shared: String @shareable @foo(name: "test")
             }
         "#).expect("valid subgraph");
-        let subgraph_b = Subgraph::from_sdl("subgraphB", "", r#"
+        let subgraph_b = Subgraph::parse("subgraphB", "", r#"
             extend schema @composeDirective(name: "@foo")
               @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@shareable"])
               @link(url: "https://custom.dev/foo/v1.1", import: ["@foo"])
@@ -1515,7 +1515,7 @@ mod string_to_enum_coercion {
     /// unquoted enum value `INTERNAL` is a valid representation of string `"INTERNAL"`.
     #[test]
     fn composes_directive_with_enum_arg_when_other_subgraph_uses_string() {
-        let subgraph_a = Subgraph::from_sdl("subgraphA", "", r#"
+        let subgraph_a = Subgraph::parse("subgraphA", "", r#"
             extend schema @composeDirective(name: "@custom")
               @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@shareable"])
               @link(url: "https://custom.dev/custom/v1.0", import: ["@custom"])
@@ -1537,7 +1537,7 @@ mod string_to_enum_coercion {
             }
         "#).expect("valid first subgraph");
 
-        let subgraph_b = Subgraph::from_sdl("subgraphB", "", r#"
+        let subgraph_b = Subgraph::parse("subgraphB", "", r#"
             extend schema @composeDirective(name: "@custom")
               @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@shareable"])
               @link(url: "https://custom.dev/custom/v1.0", import: ["@custom"])
@@ -1568,7 +1568,7 @@ fn generate_subgraph(
     compose_text: &str,
     directive_text: &str,
     usage: &str,
-) -> Subgraph<Source> {
+) -> Subgraph<Initial> {
     let schema = r#"
         extend schema
             @link(url: "https://specs.apollo.dev/link/v1.0")
@@ -1591,7 +1591,7 @@ fn generate_subgraph(
     .replace("<NAME>", name)
     .replace("<USAGE>", usage);
 
-    Subgraph::from_sdl(name, "", schema.as_str())
+    Subgraph::parse(name, "", schema.as_str())
         .unwrap()
         .into_fed2_test_subgraph(true)
         .unwrap()
