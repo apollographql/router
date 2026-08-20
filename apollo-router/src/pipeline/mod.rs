@@ -180,6 +180,83 @@ pub(crate) async fn build_pipeline(
     Ok(pipeline)
 }
 
+/// Builds an activated supergraph service for [`TestHarness`](crate::TestHarness),
+/// without the telemetry early-activation, APQ, persisted queries, warm-up, and router
+/// service that [`build_pipeline`] adds around it.
+///
+/// Composes the same acquire → activate → assemble sequence as [`build_pipeline`],
+/// restricted to what the supergraph service needs:
+///
+/// - acquire the query planner, the plugins, HTTP client material, and the query-plan
+///   Redis client
+/// - activate every plugin
+/// - assemble the HTTP and subgraph services, the query-plan cache, and the supergraph
+///   pipeline
+///
+/// A change to that sequence in [`build_pipeline`] applies here too.
+pub(crate) async fn build_supergraph_only(
+    configuration: Arc<Configuration>,
+    schema: Arc<Schema>,
+    extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
+    license: Arc<LicenseState>,
+) -> Result<
+    (
+        Arc<Plugins>,
+        supergraph::BoxCloneService,
+        InMemoryQueryPlanCache,
+    ),
+    BoxError,
+> {
+    let (query_planner_service, subgraph_schemas) =
+        create_query_planner_service(&schema, &configuration)?;
+    let plugins: Arc<Plugins> = Arc::new(
+        create_plugins(
+            &configuration,
+            &schema,
+            subgraph_schemas.clone(),
+            None,
+            Some(extra_plugins),
+            license,
+            None,
+        )
+        .instrument(tracing::info_span!("plugins"))
+        .await?
+        .into_iter()
+        .collect(),
+    );
+    let (subgraph_client_material, connector_client_material) =
+        parse_http_client_material(&plugins, &schema, &configuration)?;
+    let query_plan_redis = connect_query_plan_redis(&configuration).await?;
+
+    for (_, plugin) in plugins.iter() {
+        plugin.activate();
+    }
+
+    let query_plan_cache = build_query_plan_cache(&configuration, query_plan_redis);
+    let (http_service_factory, connector_http_service_factory) = build_http_services(
+        subgraph_client_material,
+        connector_client_material,
+        &plugins,
+    );
+    let subgraph_services = build_subgraph_services(&http_service_factory);
+    let SupergraphPipeline {
+        supergraph_service,
+        in_memory_query_plan_cache,
+        ..
+    } = build_supergraph_pipeline(
+        query_planner_service,
+        query_plan_cache,
+        schema,
+        subgraph_schemas,
+        configuration,
+        plugins.clone(),
+        subgraph_services.into_iter().collect(),
+        connector_http_service_factory,
+    );
+
+    Ok((plugins, supergraph_service, in_memory_query_plan_cache))
+}
+
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct Pipeline {

@@ -20,18 +20,10 @@ use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::graphql;
 use crate::pipeline::Pipeline;
-use crate::pipeline::SupergraphPipeline;
 use crate::pipeline::build_apq_expander;
-use crate::pipeline::build_http_services;
 use crate::pipeline::build_query_parsing_service;
-use crate::pipeline::build_query_plan_cache;
-use crate::pipeline::build_subgraph_services;
-use crate::pipeline::build_supergraph_pipeline;
+use crate::pipeline::build_supergraph_only;
 use crate::pipeline::connect_apq_redis;
-use crate::pipeline::connect_query_plan_redis;
-use crate::pipeline::create_plugins;
-use crate::pipeline::create_query_planner_service;
-use crate::pipeline::parse_http_client_material;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -351,55 +343,9 @@ impl<'a> TestHarness<'a> {
             limits: Default::default(),
         }));
 
-        // Compose the acquire, activate, and assemble steps from `crate::pipeline` directly:
-        // tests need an activated supergraph service without the router service, APQ expander,
-        // and warm-up that `build_pipeline` adds on top.
-        let (query_planner_service, subgraph_schemas) =
-            create_query_planner_service(&schema, &config)?;
-        let plugins: Arc<Plugins> = Arc::new(
-            create_plugins(
-                &config,
-                &schema,
-                subgraph_schemas.clone(),
-                None,
-                Some(self.extra_plugins),
-                license,
-                None,
-            )
-            .instrument(tracing::info_span!("plugins"))
-            .await?
-            .into_iter()
-            .collect(),
-        );
-        let (subgraph_client_material, connector_client_material) =
-            parse_http_client_material(&plugins, &schema, &config)?;
-        let query_plan_redis = connect_query_plan_redis(&config).await?;
-
-        for (_, plugin) in plugins.iter() {
-            plugin.activate();
-        }
-
-        let query_plan_cache = build_query_plan_cache(&config, query_plan_redis);
-        let (http_service_factory, connector_http_service_factory) = build_http_services(
-            subgraph_client_material,
-            connector_client_material,
-            &plugins,
-        );
-        let subgraph_services = build_subgraph_services(&http_service_factory);
-        let SupergraphPipeline {
-            supergraph_service,
-            in_memory_query_plan_cache,
-            ..
-        } = build_supergraph_pipeline(
-            query_planner_service,
-            query_plan_cache,
-            schema.clone(),
-            subgraph_schemas,
-            config.clone(),
-            plugins.clone(),
-            subgraph_services.into_iter().collect(),
-            connector_http_service_factory,
-        );
+        let (plugins, supergraph_service, in_memory_query_plan_cache) =
+            build_supergraph_only(config.clone(), schema.clone(), self.extra_plugins, license)
+                .await?;
 
         Ok((
             config,
