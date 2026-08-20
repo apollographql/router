@@ -58,15 +58,13 @@ use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::InMemoryQueryPlanCache;
 use crate::router_factory::RouterFactory;
-use crate::services::HasPlugins;
-use crate::services::HasSchema;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
 use crate::services::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
+use crate::services::Plugins;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
-use crate::services::SupergraphCreator;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::layers::apq::APQExpander;
@@ -165,15 +163,16 @@ pub(crate) async fn from_supergraph_mock_with_configuration(
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
 + Clone {
-    let (_, _, supergraph_creator) = crate::TestHarness::builder()
-        .configuration(configuration.clone())
-        .supergraph_hook(move |_| mock.clone().boxed_clone())
-        .build_common()
-        .await
-        .unwrap();
+    let (_, schema, plugins, supergraph_service, in_memory_query_plan_cache) =
+        crate::TestHarness::builder()
+            .configuration(configuration.clone())
+            .supergraph_hook(move |_| mock.clone().boxed_clone())
+            .build_common()
+            .await
+            .unwrap();
 
     let query_parsing_service = crate::services::query_parsing::query_parsing_service(
-        supergraph_creator.schema(),
+        schema.clone(),
         configuration.clone(),
     );
 
@@ -187,7 +186,10 @@ pub(crate) async fn from_supergraph_mock_with_configuration(
     RouterCreator::new(
         Arc::new(PersistedQueryExpander::new(&configuration).await.unwrap()),
         apq_expander,
-        Arc::new(supergraph_creator),
+        supergraph_service,
+        schema,
+        plugins,
+        in_memory_query_plan_cache,
         query_parsing_service,
         configuration,
     )
@@ -219,15 +221,16 @@ pub(crate) async fn empty() -> impl Service<
     let (mock, _handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
     let configuration = Arc::new(Configuration::default());
-    let (_, _, supergraph_creator) = crate::TestHarness::builder()
-        .configuration(configuration.clone())
-        .supergraph_hook(move |_| mock.clone().boxed_clone())
-        .build_common()
-        .await
-        .unwrap();
+    let (_, schema, plugins, supergraph_service, in_memory_query_plan_cache) =
+        crate::TestHarness::builder()
+            .configuration(configuration.clone())
+            .supergraph_hook(move |_| mock.clone().boxed_clone())
+            .build_common()
+            .await
+            .unwrap();
 
     let query_parsing_service = crate::services::query_parsing::query_parsing_service(
-        supergraph_creator.schema(),
+        schema.clone(),
         configuration.clone(),
     );
 
@@ -241,7 +244,10 @@ pub(crate) async fn empty() -> impl Service<
     RouterCreator::new(
         Arc::new(PersistedQueryExpander::new(&configuration).await.unwrap()),
         apq_expander,
-        Arc::new(supergraph_creator),
+        supergraph_service,
+        schema,
+        plugins,
+        in_memory_query_plan_cache,
         query_parsing_service,
         configuration,
     )
@@ -684,7 +690,9 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
-    pub(crate) supergraph_creator: Arc<SupergraphCreator>,
+    pub(crate) schema: Arc<crate::spec::Schema>,
+    pub(crate) plugins: Arc<Plugins>,
+    in_memory_query_plan_cache: InMemoryQueryPlanCache,
     service: router::BoxCloneService,
     pipeline_handle: Arc<PipelineHandle>,
     /// The configuration used to create this router, stored for hot reload previous config extraction
@@ -698,8 +706,7 @@ impl RouterFactory for RouterCreator {
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let mut mm = MultiMap::new();
-        self.supergraph_creator
-            .plugins()
+        self.plugins
             .values()
             .for_each(|p| mm.extend(p.web_endpoints()));
         mm
@@ -711,10 +718,14 @@ impl RouterFactory for RouterCreator {
 }
 
 impl RouterCreator {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         persisted_queries: Arc<PersistedQueryExpander>,
         apq_expander: APQExpander,
-        supergraph_creator: Arc<SupergraphCreator>,
+        supergraph_service: supergraph::BoxCloneService,
+        schema: Arc<crate::spec::Schema>,
+        plugins: Arc<Plugins>,
+        in_memory_query_plan_cache: InMemoryQueryPlanCache,
         query_parsing_service: query_parsing::BoxCloneService,
         configuration: Arc<Configuration>,
     ) -> Self {
@@ -722,9 +733,8 @@ impl RouterCreator {
 
         // Create a handle that will help us keep track of this pipeline.
         // A metric is exposed that allows the use to see if pipelines are being hung onto.
-        let schema_id = supergraph_creator.schema().schema_id.to_string();
-        let launch_id = supergraph_creator
-            .schema()
+        let schema_id = schema.schema_id.to_string();
+        let launch_id = schema
             .launch_id
             .as_ref()
             .map(|launch_id| launch_id.to_string());
@@ -732,18 +742,18 @@ impl RouterCreator {
         let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
 
         let router_service = RouterService::new(
-            supergraph_creator.make(),
+            supergraph_service,
             apq_expander,
             persisted_queries,
             query_parsing_service,
-            supergraph_creator.schema(),
+            schema.clone(),
             &configuration,
             configuration.batching.clone(),
         );
 
         let service = ServiceBuilder::new()
             .layer(static_page.clone())
-            .rust_plugins(supergraph_creator.plugins(), |plugin, service| {
+            .rust_plugins(plugins.clone(), |plugin, service| {
                 plugin.router_service(service)
             })
             .layer(content_negotiation::RouterContentNegotiationLayer::default())
@@ -751,7 +761,9 @@ impl RouterCreator {
             .boxed_clone();
 
         Self {
-            supergraph_creator,
+            schema,
+            plugins,
+            in_memory_query_plan_cache,
             service,
             pipeline_handle: Arc::new(pipeline_handle),
             configuration,
@@ -761,6 +773,6 @@ impl RouterCreator {
 
 impl RouterCreator {
     pub(crate) fn previous_cache(&self) -> InMemoryQueryPlanCache {
-        self.supergraph_creator.previous_cache()
+        self.in_memory_query_plan_cache.clone()
     }
 }

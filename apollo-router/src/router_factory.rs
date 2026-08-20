@@ -271,7 +271,6 @@ mod test {
     use crate::plugin::PluginInit;
     use crate::router_factory::RouterServiceFactory;
     use crate::router_factory::YamlRouterFactory;
-    use crate::services::supergraph::service::HasPlugins;
     use crate::spec::Schema;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
@@ -543,7 +542,7 @@ mod test {
         assert!(
             MANDATORY_PLUGINS
                 .iter()
-                .all(|plugin| { service.supergraph_creator.plugins().contains_key(*plugin) })
+                .all(|plugin| { service.plugins.contains_key(*plugin) })
         );
     }
 
@@ -612,7 +611,7 @@ mod test {
         assert!(
             OSS_PLUGINS
                 .iter()
-                .all(|plugin| { service.supergraph_creator.plugins().contains_key(*plugin) })
+                .all(|plugin| { service.plugins.contains_key(*plugin) })
         );
     }
 
@@ -694,16 +693,13 @@ mod test {
          * - mandatory plugins should have been added.
          * */
         assert!(
-            service
-                .supergraph_creator
-                .plugins()
-                .contains_key(&format!("apollo.{plugin}")),
+            service.plugins.contains_key(&format!("apollo.{plugin}")),
             "Plugin {plugin} should have been added"
         );
         assert!(
             MANDATORY_PLUGINS
                 .iter()
-                .all(|plugin| { service.supergraph_creator.plugins().contains_key(*plugin) })
+                .all(|plugin| { service.plugins.contains_key(*plugin) })
         );
     }
 
@@ -784,16 +780,13 @@ mod test {
          * - mandatory plugins should have been added.
          * */
         assert!(
-            !service
-                .supergraph_creator
-                .plugins()
-                .contains_key(&format!("apollo.{plugin}")),
+            !service.plugins.contains_key(&format!("apollo.{plugin}")),
             "Plugin {plugin} should not have been added"
         );
         assert!(
             MANDATORY_PLUGINS
                 .iter()
-                .all(|plugin| { service.supergraph_creator.plugins().contains_key(*plugin) })
+                .all(|plugin| { service.plugins.contains_key(*plugin) })
         );
     }
 
@@ -859,30 +852,21 @@ mod test {
          * - coprocessors and subscritions (both gated features) should not have been added.
          * */
         assert!(
-            service
-                .supergraph_creator
-                .plugins()
-                .contains_key(&format!("apollo.{plugin}")),
+            service.plugins.contains_key(&format!("apollo.{plugin}")),
             "Plugin {plugin} should have been added"
         );
         assert!(
             MANDATORY_PLUGINS
                 .iter()
-                .all(|plugin| { service.supergraph_creator.plugins().contains_key(*plugin) })
+                .all(|plugin| { service.plugins.contains_key(*plugin) })
         );
         // These gated features should not have been added
         assert!(
-            !service
-                .supergraph_creator
-                .plugins()
-                .contains_key("apollo.subscription"),
+            !service.plugins.contains_key("apollo.subscription"),
             "Plugin {plugin} should not have been added"
         );
         assert!(
-            !service
-                .supergraph_creator
-                .plugins()
-                .contains_key("apollo.coprocessor"),
+            !service.plugins.contains_key("apollo.coprocessor"),
             "Plugin {plugin} should not have been added"
         );
     }
@@ -944,16 +928,13 @@ mod test {
          *  - since `allowed_features` is unrestricted plugin should have been added.
          * */
         assert!(
-            service
-                .supergraph_creator
-                .plugins()
-                .contains_key(&format!("apollo.{plugin}")),
+            service.plugins.contains_key(&format!("apollo.{plugin}")),
             "Plugin {plugin} should have been added"
         );
         assert!(
             MANDATORY_PLUGINS
                 .iter()
-                .all(|plugin| { service.supergraph_creator.plugins().contains_key(*plugin) })
+                .all(|plugin| { service.plugins.contains_key(*plugin) })
         );
     }
 
@@ -1037,21 +1018,18 @@ mod test {
          *  - all oss plugins in the config should have been added
          * */
         assert!(
-            service
-                .supergraph_creator
-                .plugins()
-                .contains_key(&format!("apollo.{plugin}")),
+            service.plugins.contains_key(&format!("apollo.{plugin}")),
             "Plugin {plugin} should have been added"
         );
         assert!(
             MANDATORY_PLUGINS
                 .iter()
-                .all(|plugin| { service.supergraph_creator.plugins().contains_key(*plugin) })
+                .all(|plugin| { service.plugins.contains_key(*plugin) })
         );
         assert!(
             OSS_PLUGINS
                 .iter()
-                .all(|plugin| { service.supergraph_creator.plugins().contains_key(*plugin) })
+                .all(|plugin| { service.plugins.contains_key(*plugin) })
         );
     }
 }

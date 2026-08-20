@@ -126,7 +126,7 @@ The supergraph service consists of some layers in "front" of the service "proper
 
 The implementation of those interactions is more complicated than in the router service, but I think many things could probably be implemented as a normal tower service stack, and we could benefit from doing that.
 
-Front (`SupergraphCreator`):
+Front (`build_supergraph_service`):
 - Content negotiation: Response-side
   - This layer sets the Content-Type header on the response.
 - AllowOnlyHttpPostMutationsLayer is the final step before going into the supergraph service proper.

@@ -3841,8 +3841,7 @@ async fn test_cache_warmup() {
     use crate::services::QueryPlannerResponse;
     use crate::services::layers::persisted_queries::PersistedQueryExpander;
     use crate::services::query_planner;
-    use crate::services::supergraph::service::SupergraphCreator;
-    use crate::services::supergraph::service::build_supergraph_creator;
+    use crate::services::supergraph::service::build_supergraph_pipeline;
 
     let configuration = Configuration::default();
     let schema = Arc::new(
@@ -3911,7 +3910,7 @@ async fn test_cache_warmup() {
             .await
             .unwrap(),
     );
-    let (supergraph_creator, _warmup) = build_supergraph_creator(
+    let (supergraph_service, previous_cache, _warmup) = build_supergraph_pipeline(
         mock.map_err(|err| panic!("mock driver failed: {err}"))
             .boxed_clone(),
         query_plan_cache,
@@ -3929,14 +3928,12 @@ async fn test_cache_warmup() {
             query_parsing_service.clone(),
             configuration.supergraph.redact_query_validation_errors,
         ))
-        .service(supergraph_creator.make());
+        .service(supergraph_service);
 
     let response = execute_query(supergraph_service).await;
     assert!(response.errors.is_empty());
 
     crate::plugin::test::await_mock_driver(driver).await;
-
-    let previous_cache = supergraph_creator.previous_cache();
 
     // Second, we warm up a new service using the cache from the previous service.
 
@@ -3961,17 +3958,18 @@ async fn test_cache_warmup() {
             .await
             .unwrap(),
     );
-    let (supergraph_creator, query_planner_service) = build_supergraph_creator(
-        mock.map_err(|err| panic!("mock driver failed: {err}"))
-            .boxed_clone(),
-        query_plan_cache,
-        schema.clone(),
-        Arc::new(Default::default()),
-        Arc::new(configuration.clone()),
-        Default::default(),
-        Vec::new(),
-        Default::default(),
-    );
+    let (supergraph_service, _in_memory_query_plan_cache, query_planner_service) =
+        build_supergraph_pipeline(
+            mock.map_err(|err| panic!("mock driver failed: {err}"))
+                .boxed_clone(),
+            query_plan_cache,
+            schema.clone(),
+            Arc::new(Default::default()),
+            Arc::new(configuration.clone()),
+            Default::default(),
+            Vec::new(),
+            Default::default(),
+        );
 
     let warmup_service = ServiceBuilder::new()
         .layer(crate::query_planner::warmup::WarmupParseQueryLayer::new(
@@ -3981,7 +3979,7 @@ async fn test_cache_warmup() {
         .service(query_planner_service)
         .boxed_clone();
 
-    SupergraphCreator::warm_up_query_planner(
+    crate::query_planner::warmup::warm_up_query_planner(
         warmup_service,
         &pq_layer,
         Some(previous_cache),
@@ -4003,7 +4001,7 @@ async fn test_cache_warmup() {
             query_parsing_service.clone(),
             configuration.supergraph.redact_query_validation_errors,
         ))
-        .service(supergraph_creator.make());
+        .service(supergraph_service);
 
     let response = execute_query(supergraph_service).await;
     assert!(response.errors.is_empty());

@@ -36,7 +36,7 @@ sequenceDiagram
         BP->>BP: query_parsing_service
         BP->>BP: build_http_services (from parsed TLS material)
         BP->>BP: create_subgraph_services
-        BP->>BP: build_supergraph_creator (execution + supergraph stacks)
+        BP->>BP: build_supergraph_pipeline (execution + supergraph stacks)
         BP->>BP: RouterCreator::new (router stack)
         BP->>BP: warm up query plan cache
     end
@@ -92,6 +92,6 @@ Construction is slow enough to need its own observability — a reload blocks on
 | Redis client connects | `connect_query_plan_redis`, `connect_apq_redis`, `connect_redis` | `pipeline.rs`, `cache/storage.rs` |
 | Cache assembly | `build_query_plan_cache`, `build_apq_expander`, `DeduplicatingCache::with_capacity` | `pipeline.rs`, `cache/mod.rs` |
 | HTTP client + subgraph service assembly | `build_http_services`, `create_subgraph_services` | `pipeline.rs` |
-| Execution + supergraph stack assembly | `build_supergraph_creator`, `build_execution_service`, `build_supergraph_service` | `services/supergraph/service.rs` |
+| Execution + supergraph stack assembly | `build_supergraph_pipeline`, `build_execution_service`, `build_supergraph_service` | `services/supergraph/service.rs` |
 | Router stack assembly | `RouterCreator::new` | `services/router/service.rs` |
 | The persistent pipeline | `RouterCreator` (impl `RouterFactory`) | `services/router/service.rs` |

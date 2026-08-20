@@ -698,7 +698,7 @@ mod test {
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
-    use crate::services::build_supergraph_creator;
+    use crate::services::build_supergraph_pipeline;
     use crate::services::connector::request_service::Request as ConnectorRequest;
     use crate::services::layers::persisted_queries::PersistedQueryExpander;
     use crate::services::router;
@@ -821,13 +821,13 @@ mod test {
         let query_plan_cache =
             build_query_plan_cache(&config, connect_query_plan_redis(&config).await.unwrap());
 
-        let (supergraph_creator, _planner) = build_supergraph_creator(
+        let (supergraph_service, in_memory_query_plan_cache, _planner) = build_supergraph_pipeline(
             query_planner_service,
             query_plan_cache,
             schema.clone(),
             subgraph_schemas,
             config.clone(),
-            plugins,
+            plugins.clone(),
             vec![
                 ("accounts".to_string(), account_service.boxed_clone()),
                 ("reviews".to_string(), review_service.boxed_clone()),
@@ -840,7 +840,10 @@ mod test {
         RouterCreator::new(
             Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             apq_expander,
-            Arc::new(supergraph_creator),
+            supergraph_service,
+            schema,
+            plugins,
+            in_memory_query_plan_cache,
             query_parser_service,
             config,
         )

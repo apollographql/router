@@ -48,10 +48,9 @@ use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::warmup;
 use crate::services::Plugins;
 use crate::services::SubgraphService;
-use crate::services::SupergraphCreator;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
-use crate::services::build_supergraph_creator;
+use crate::services::build_supergraph_pipeline;
 use crate::services::http::HttpClientService;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::http::service::HttpClientMaterial;
@@ -113,7 +112,7 @@ pub(crate) async fn build_pipeline(
         let query_parsing_service =
             query_parsing::query_parsing_service(schema.clone(), configuration.clone());
 
-        let (supergraph_creator, caching_query_planner) = {
+        let (supergraph_service, in_memory_query_plan_cache, caching_query_planner) = {
             let _span = tracing::info_span!("supergraph_creation").entered();
             let (http_service_factory, connector_http_service_factory) = build_http_services(
                 subgraph_client_material,
@@ -121,13 +120,13 @@ pub(crate) async fn build_pipeline(
                 &plugins,
             );
             let subgraph_services = create_subgraph_services(&http_service_factory);
-            build_supergraph_creator(
+            build_supergraph_pipeline(
                 query_planner_service,
                 query_plan_cache,
                 schema.clone(),
                 subgraph_schemas,
                 configuration.clone(),
-                plugins,
+                plugins.clone(),
                 subgraph_services.into_iter().collect(),
                 connector_http_service_factory,
             )
@@ -136,7 +135,10 @@ pub(crate) async fn build_pipeline(
         let router_creator = RouterCreator::new(
             persisted_queries.clone(),
             apq_expander,
-            Arc::new(supergraph_creator),
+            supergraph_service,
+            schema,
+            plugins,
+            in_memory_query_plan_cache,
             query_parsing_service.clone(),
             configuration.clone(),
         );
@@ -147,7 +149,7 @@ pub(crate) async fn build_pipeline(
             .service(caching_query_planner)
             .boxed_clone();
 
-        SupergraphCreator::warm_up_query_planner(
+        warmup::warm_up_query_planner(
             warmup_query_planner_service,
             &persisted_queries,
             previous_cache,

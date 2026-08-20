@@ -23,7 +23,6 @@ use crate::executable::Opt;
 use crate::plugin::DynPlugin;
 use crate::router_factory::RouterServiceFactory;
 use crate::router_factory::YamlRouterFactory;
-use crate::services::HasSchema;
 use crate::services::router::service::RouterCreator;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
@@ -115,7 +114,7 @@ impl RouterServiceFactory for OrbiterRouterSuperServiceFactory {
             .await
             .inspect(|factory| {
                 if !is_telemetry_disabled {
-                    let schema = factory.supergraph_creator.schema();
+                    let schema = factory.schema.clone();
 
                     tokio::task::spawn(async move {
                         tracing::debug!("sending anonymous usage data to Apollo");

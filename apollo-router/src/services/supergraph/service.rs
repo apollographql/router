@@ -23,7 +23,6 @@ use crate::Configuration;
 use crate::Context;
 use crate::batching::BatchQueryPlanAnalysisLayer;
 use crate::compute_job::ComputeBackPressureError;
-use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::configuration::mode::Mode;
 use crate::error::CacheResolverError;
 use crate::graphql;
@@ -48,7 +47,6 @@ use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryQueryPlanCache;
 use crate::query_planner::QueryPlanCache;
 use crate::query_planner::SubgraphSchemas;
-use crate::query_planner::warmup;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::QueryPlannerResponse;
@@ -63,7 +61,6 @@ use crate::services::fetch_service::FetchService;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::content_negotiation;
-use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::query_parsing::ParsedDocument;
 use crate::services::query_planner;
 use crate::services::router::ClientRequestAccepts;
@@ -457,10 +454,13 @@ async fn plan_query(
 /// Part of the assemble phase in [`crate::pipeline`]; call it after plugin activation, with
 /// a cache built by [`crate::pipeline::build_query_plan_cache`].
 ///
-/// The second element of the returned pair is the caching query planner service, for use in
-/// query-plan cache warm-up.
+/// Returns three values:
+///
+/// - the buffered supergraph service; clone it for each consumer
+/// - a handle on the in-memory query-plan cache, for warm-up on the next reload
+/// - the caching query planner service, for query-plan cache warm-up
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn build_supergraph_creator(
+pub(crate) fn build_supergraph_pipeline(
     query_planner_service: query_planner::BoxCloneService,
     query_plan_cache: QueryPlanCache,
     schema: Arc<Schema>,
@@ -469,7 +469,11 @@ pub(crate) fn build_supergraph_creator(
     plugins: Arc<Plugins>,
     subgraph_services: Vec<(String, subgraph::BoxCloneService)>,
     connector_http_service_factory: IndexMap<String, HttpClientServiceFactory>,
-) -> (SupergraphCreator, query_planner::CacheBoxCloneService) {
+) -> (
+    supergraph::BoxCloneService,
+    InMemoryQueryPlanCache,
+    query_planner::CacheBoxCloneService,
+) {
     let query_planner_service = CachingQueryPlanner::new(
         query_planner_service,
         schema.clone(),
@@ -490,22 +494,18 @@ pub(crate) fn build_supergraph_creator(
         configuration.clone(),
     );
 
-    let sb = build_supergraph_service(
+    let supergraph_service = build_supergraph_service(
         query_planner_service.clone(),
         execution_service,
         introspection_service,
-        schema.clone(),
+        schema,
         &configuration,
-        plugins.clone(),
+        plugins,
     );
 
     (
-        SupergraphCreator {
-            in_memory_query_plan_cache: query_plan_cache.in_memory_cache(),
-            schema,
-            plugins,
-            sb,
-        },
+        supergraph_service.boxed_clone(),
+        query_plan_cache.in_memory_cache(),
         query_planner_service,
     )
 }
@@ -583,10 +583,9 @@ pub(crate) fn build_execution_service(
         .boxed_clone()
 }
 
-/// Assembles the [`SupergraphService`] stack, outermost first: the buffer that
-/// [`SupergraphCreator::make`] hands out, the content-negotiation and compute-job metrics
-/// layers, each plugin's `supergraph_service` hook, and the mutation-restriction and
-/// operation-limit layers.
+/// Assembles the [`SupergraphService`] stack, outermost first: the buffer, the
+/// content-negotiation and compute-job metrics layers, each plugin's `supergraph_service`
+/// hook, and the mutation-restriction and operation-limit layers.
 pub(crate) fn build_supergraph_service(
     query_planner_service: query_planner::CacheBoxCloneService,
     execution_service: execution::BoxCloneService,
@@ -619,72 +618,4 @@ pub(crate) fn build_supergraph_service(
             &configuration.limits.router,
         ))
         .service(supergraph_service)
-}
-
-/// A collection of services and data which may be used to create a "router".
-#[derive(Clone)]
-pub(crate) struct SupergraphCreator {
-    /// A reference to the in-memory query plan cache, kept around so we can peek into it for warm-up
-    in_memory_query_plan_cache: InMemoryQueryPlanCache,
-    schema: Arc<Schema>,
-    plugins: Arc<Plugins>,
-    sb: UnconstrainedBuffer<
-        SupergraphRequest,
-        BoxFuture<'static, Result<SupergraphResponse, BoxError>>,
-    >,
-}
-
-pub(crate) trait HasPlugins {
-    fn plugins(&self) -> Arc<Plugins>;
-}
-
-impl HasPlugins for SupergraphCreator {
-    fn plugins(&self) -> Arc<Plugins> {
-        self.plugins.clone()
-    }
-}
-
-pub(crate) trait HasSchema {
-    fn schema(&self) -> Arc<Schema>;
-}
-
-impl HasSchema for SupergraphCreator {
-    fn schema(&self) -> Arc<Schema> {
-        Arc::clone(&self.schema)
-    }
-}
-
-impl SupergraphCreator {
-    pub(crate) fn make(&self) -> supergraph::BoxCloneService {
-        self.sb.clone().boxed_clone()
-    }
-
-    pub(crate) fn previous_cache(&self) -> InMemoryQueryPlanCache {
-        self.in_memory_query_plan_cache.clone()
-    }
-
-    pub(crate) async fn warm_up_query_planner(
-        warmup_query_planner_service: warmup::BoxCloneService,
-        persisted_queries: &PersistedQueryExpander,
-        previous_cache: Option<InMemoryQueryPlanCache>,
-        max_cached_queries: Option<usize>,
-        experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
-    ) {
-        let requests = warmup::queries_to_warm_up(
-            previous_cache,
-            max_cached_queries,
-            persisted_queries.all_operations(),
-            experimental_pql_prewarm,
-        )
-        .await;
-
-        if !requests.is_empty() {
-            tracing::info!(
-                "warming up the query plan cache with {} queries, this might take a while",
-                requests.len(),
-            );
-        }
-
-        warmup::warm_up(warmup_query_planner_service, requests).await;
-    }
 }
