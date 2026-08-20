@@ -372,7 +372,7 @@ impl Prepare {
                 semver_heading,
                 version,
                 chrono::Utc::now().date_naive(),
-                &new_changelog,
+                new_changelog,
             ),
         );
         std::fs::write("./CHANGELOG.md", updated.to_string())?;

@@ -27,14 +27,14 @@ impl Dist {
 
                 let bin_path = TARGET_DIR.join(target).join("release").join(RELEASE_BIN);
 
-                eprintln!("successfully compiled to: {}", &bin_path);
+                eprintln!("successfully compiled to: {}", bin_path);
             }
             None => {
                 cargo!(args);
 
                 let bin_path = TARGET_DIR.join("release").join(RELEASE_BIN);
 
-                eprintln!("successfully compiled to: {}", &bin_path);
+                eprintln!("successfully compiled to: {}", bin_path);
             }
         }
 
