@@ -481,15 +481,17 @@ dependencies = [
 
 [[package]]
 name = "apollo-smith"
-version = "0.15.2"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d357249cf88f604ab4086df0c14104b8d47849893e5b8a12fb2843f08bb1bc2a"
+checksum = "231b846cb1c3fd7c15d1a96eeab979883105ca1be4e238ee9cdad32658984c18"
 dependencies = [
  "apollo-compiler",
  "apollo-parser",
  "arbitrary",
  "indexmap 2.14.0",
  "once_cell",
+ "petgraph",
+ "rand 0.10.2",
  "serde_json_bytes",
  "thiserror 2.0.20",
 ]
