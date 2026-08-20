@@ -10,7 +10,6 @@ use std::time::Duration;
 use lru::LruCache;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry::metrics::ObservableGauge;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::sync::Mutex;
@@ -111,9 +110,6 @@ pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
     redis: Option<RedisCacheStorage>,
     cache_size: Arc<AtomicI64>,
     cache_estimated_storage: Arc<AtomicI64>,
-    // It's OK for these to be mutexes as they are only initialized once
-    cache_size_gauge: Arc<parking_lot::Mutex<Option<ObservableGauge<i64>>>>,
-    cache_estimated_storage_gauge: Arc<parking_lot::Mutex<Option<ObservableGauge<i64>>>>,
 }
 
 impl<K, V> CacheStorage<K, V>
@@ -123,27 +119,34 @@ where
 {
     /// Builds a cache from an in-memory LRU capacity and an optional pre-connected Redis
     /// client. Obtain the client with [`connect_redis`].
+    ///
+    /// Registers the cache's size and estimated-storage gauges against the current meter
+    /// provider. Construct the cache after telemetry activation: a meter-provider swap
+    /// discards previously registered gauge callbacks.
     pub(crate) fn new(
         max_capacity: NonZeroUsize,
         redis: Option<RedisCacheStorage>,
         caller: &'static str,
     ) -> Self {
-        Self {
-            cache_size_gauge: Default::default(),
-            cache_estimated_storage_gauge: Default::default(),
+        let storage = Self {
             cache_size: Default::default(),
             cache_estimated_storage: Default::default(),
             caller,
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
             redis,
-        }
+        };
+        // The meter provider's callback registry owns the gauge callbacks (see
+        // `metrics::aggregation`); building the gauges leaves no handle worth storing.
+        storage.register_cache_size_gauge();
+        storage.register_cache_estimated_storage_size_gauge();
+        storage
     }
 
     pub(crate) fn new_in_memory(max_capacity: NonZeroUsize, caller: &'static str) -> Self {
         Self::new(max_capacity, None, caller)
     }
 
-    fn create_cache_size_gauge(&self) -> ObservableGauge<i64> {
+    fn register_cache_size_gauge(&self) {
         let meter: opentelemetry::metrics::Meter = metrics::meter_provider().meter(METER_NAME);
         let current_cache_size_for_gauge = self.cache_size.clone();
         let caller = self.caller;
@@ -159,10 +162,10 @@ where
                     ],
                 )
             })
-            .build()
+            .build();
     }
 
-    fn create_cache_estimated_storage_size_gauge(&self) -> ObservableGauge<i64> {
+    fn register_cache_estimated_storage_size_gauge(&self) {
         let meter: opentelemetry::metrics::Meter = metrics::meter_provider().meter(METER_NAME);
         let cache_estimated_storage_for_gauge = self.cache_estimated_storage.clone();
         let caller = self.caller;
@@ -184,7 +187,7 @@ where
                     )
                 }
             })
-            .build()
+            .build();
     }
 
     /// Check the in-memory cache, then Redis on a miss. A Redis hit is promoted to the
@@ -318,19 +321,6 @@ where
         self.inner.lock().await.len()
     }
 
-    pub(crate) fn activate(&self) {
-        // Gauges MUST be created after the meter provider is initialized.
-        // This means that on reload we need a non-fallible way to recreate the gauges.
-        *self.cache_size_gauge.lock() = Some(self.create_cache_size_gauge());
-        *self.cache_estimated_storage_gauge.lock() =
-            Some(self.create_cache_estimated_storage_size_gauge());
-
-        // Also activate Redis metrics if present
-        if let Some(redis) = &self.redis {
-            redis.activate();
-        }
-    }
-
     fn record_cache_hit_duration(&self, duration: Duration, storage: CacheStorageName) {
         f64_histogram!(
             "apollo.router.cache.hit.time",
@@ -406,7 +396,6 @@ mod test {
         async {
             let cache: CacheStorage<String, Stuff> =
                 CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test");
-            cache.activate();
 
             cache.insert("test".to_string(), Stuff {}).await;
             assert_gauge!(
@@ -440,7 +429,6 @@ mod test {
         async {
             let cache: CacheStorage<String, Stuff> =
                 CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test");
-            cache.activate();
 
             cache.insert("test".to_string(), Stuff {}).await;
             // This metric won't exist
@@ -472,7 +460,6 @@ mod test {
             // so the second insert will always evict
             let cache: CacheStorage<String, Stuff> =
                 CacheStorage::new(NonZeroUsize::new(1).unwrap(), None, "test");
-            cache.activate();
 
             cache
                 .insert(

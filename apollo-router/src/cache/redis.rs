@@ -139,15 +139,9 @@ struct DropSafeRedisPool {
     // establishes replica connections. `None` otherwise.
     replica_heartbeat_abort_handle: Option<AbortHandle>,
     watcher_abort_handle: AbortHandle,
-    // Metrics collector handles its own abort and spawns a background task for gauge updates
-    metrics_collector: RedisMetricsCollector,
-}
-
-impl DropSafeRedisPool {
-    /// Signal that the meter provider is ready and metrics gauges can be created.
-    fn activate(&self) {
-        self.metrics_collector.activate();
-    }
+    // Held so the metrics polling task is aborted (via the collector's Drop) when the
+    // pool is dropped.
+    _metrics_collector: RedisMetricsCollector,
 }
 
 impl Deref for DropSafeRedisPool {
@@ -600,26 +594,13 @@ impl RedisCacheStorage {
                 .as_ref()
                 .map(|h| h.abort_handle()),
             watcher_abort_handle: watcher_handle.abort_handle(),
-            metrics_collector,
+            _metrics_collector: metrics_collector,
         };
 
         // replace the current pool (if there is one) with the new one
         *self.inner.write() = Some(inner);
 
-        // set up metrics
-        self.activate();
-
         Ok(())
-    }
-
-    /// Signal that the meter provider is ready and metrics gauges can be created.
-    ///
-    /// This MUST be called after `Telemetry.activate()` to ensure gauges are
-    /// registered with the correct meter provider.
-    pub(crate) fn activate(&self) {
-        if let Some(inner) = self.inner.read().as_ref() {
-            inner.activate();
-        }
     }
 
     /// Helper method to record Redis errors for metrics. Calls `record_redis_error` for both
@@ -1474,10 +1455,7 @@ mod test {
                 let inner = guard.as_ref().unwrap();
                 (
                     inner.heartbeat_abort_handle.clone(),
-                    inner
-                        .metrics_collector
-                        .abort_handle()
-                        .expect("metrics not activated"),
+                    inner._metrics_collector.abort_handle(),
                 )
             };
             assert!(!old_heartbeat.is_finished());
@@ -1502,10 +1480,7 @@ mod test {
             let guard = storage.inner.read();
             let new_inner = guard.as_ref().unwrap();
             assert!(!new_inner.heartbeat_abort_handle.is_finished());
-            let new_metrics = new_inner
-                .metrics_collector
-                .abort_handle()
-                .expect("metrics not activated after recreation");
+            let new_metrics = new_inner._metrics_collector.abort_handle();
             assert!(!new_metrics.is_finished());
             Ok(())
         }
@@ -1577,20 +1552,7 @@ mod test {
             Ok(())
         }
 
-        /// activate() on an empty inner (None) should be a no-op and not panic
-        #[tokio::test]
-        #[rstest::rstest]
-        async fn activate_on_none_inner_is_noop(
-            #[values(true, false)] clustered: bool,
-        ) -> Result<(), BoxError> {
-            let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
-            assert!(storage.inner.read().is_none());
-            storage.activate();
-            Ok(())
-        }
-
-        /// activate() after initial create_client_pool() populates the metrics abort handle
+        /// create_client_pool() starts the metrics collection task
         #[tokio::test]
         #[rstest::rstest]
         async fn create_client_pool_starts_metrics(
@@ -1599,8 +1561,7 @@ mod test {
             let _guard = lock_for_static().lock().await;
             let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
 
-            // before initialize, which calls activate(), metrics abort handle should be None
-            // (because the inner is None!)
+            // before create_client_pool() there is no pool and no metrics collector
             assert!(storage.inner.read().as_ref().is_none());
 
             storage.create_client_pool().await?;
@@ -1610,51 +1571,9 @@ mod test {
                 .read()
                 .as_ref()
                 .unwrap()
-                .metrics_collector
-                .abort_handle()
-                .expect("metrics should be activated");
+                ._metrics_collector
+                .abort_handle();
             assert!(!handle.is_finished());
-            Ok(())
-        }
-
-        /// Calling activate() twice should abort the first metrics task before starting a new one,
-        /// not orphan it
-        #[tokio::test]
-        #[rstest::rstest]
-        async fn activate_twice_does_not_orphan_old_task(
-            #[values(true, false)] clustered: bool,
-        ) -> Result<(), BoxError> {
-            let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
-            storage.create_client_pool().await?;
-
-            let first_handle = storage
-                .inner
-                .read()
-                .as_ref()
-                .unwrap()
-                .metrics_collector
-                .abort_handle()
-                .expect("first activate should populate handle");
-            assert!(!first_handle.is_finished());
-
-            storage.activate();
-            tokio::task::yield_now().await;
-
-            assert!(
-                first_handle.is_finished(),
-                "first metrics task should be aborted"
-            );
-
-            let second_handle = storage
-                .inner
-                .read()
-                .as_ref()
-                .unwrap()
-                .metrics_collector
-                .abort_handle()
-                .expect("second activate should populate handle");
-            assert!(!second_handle.is_finished());
             Ok(())
         }
 

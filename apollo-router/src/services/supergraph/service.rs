@@ -479,11 +479,7 @@ pub(crate) fn build_supergraph_creator(
     )
     .boxed_clone();
 
-    let (introspection_service, introspection_cache) =
-        introspection::introspection_service(&configuration);
-    if let Some(introspection_cache) = introspection_cache {
-        introspection_cache.activate();
-    }
+    let introspection_service = introspection::introspection_service(&configuration);
 
     let execution_service = build_execution_service(
         schema.clone(),

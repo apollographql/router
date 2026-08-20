@@ -9,9 +9,9 @@
 //!   tracer and meter providers that cannot be rolled back. Nothing after this phase starts
 //!   may fail.
 //! - **Assemble** builds the caches and service stacks from the acquired resources, using
-//!   infallible functions. Each cache registers its gauges via `activate()` as soon as it is
-//!   constructed; constructing caches after the meter-provider swap binds those gauges to
-//!   the provider that serves this pipeline.
+//!   infallible functions. Each cache registers its gauges in its constructor; constructing
+//!   caches after the meter-provider swap binds those gauges to the provider that serves
+//!   this pipeline.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -438,7 +438,7 @@ pub(crate) fn build_query_plan_cache(
     configuration: &Configuration,
     redis: Option<RedisCacheStorage>,
 ) -> QueryPlanCache {
-    let cache = Arc::new(DeduplicatingCache::with_capacity(
+    Arc::new(DeduplicatingCache::with_capacity(
         configuration
             .supergraph
             .query_planning
@@ -447,9 +447,7 @@ pub(crate) fn build_query_plan_cache(
             .limit,
         redis,
         "query planner",
-    ));
-    cache.activate();
-    cache
+    ))
 }
 
 /// Builds the APQ expander around a pre-connected Redis client and registers its cache
@@ -460,7 +458,7 @@ pub(crate) fn build_apq_expander(
     configuration: &Configuration,
     redis: Option<RedisCacheStorage>,
 ) -> APQExpander {
-    let apq_expander = if configuration.apq.enabled {
+    if configuration.apq.enabled {
         APQExpander::with_cache(DeduplicatingCache::with_capacity(
             configuration.apq.router.cache.in_memory.limit,
             redis,
@@ -468,9 +466,7 @@ pub(crate) fn build_apq_expander(
         ))
     } else {
         APQExpander::disabled()
-    };
-    apq_expander.activate();
-    apq_expander
+    }
 }
 
 /// Builds HTTP client service factories from parsed client material, keyed as

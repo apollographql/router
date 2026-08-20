@@ -194,10 +194,6 @@ where
     pub(crate) fn in_memory_cache(&self) -> InMemoryCache<K, V> {
         self.storage.in_memory_cache()
     }
-
-    pub(crate) fn activate(&self) {
-        self.storage.activate()
-    }
 }
 
 pub(crate) struct Entry<K: KeyType, V: ValueType, UncachedError> {
