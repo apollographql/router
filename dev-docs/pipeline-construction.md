@@ -59,7 +59,7 @@ Every fallible step in construction is resource acquisition — parsing config-s
 | `connect_query_plan_redis` / `connect_apq_redis` | the Redis client connect (`connect_redis`), honoring `required_to_start` |
 | `PersistedQueryExpander::new` | persisted-query manifest fetch |
 
-The assemble functions are infallible at the signature level: caches build from pre-connected clients (`DeduplicatingCache::with_capacity`), HTTP client services build from pre-parsed `HttpClientMaterial`, and the service stacks (`build_execution_service`, `build_supergraph_service`, `RouterCreator::new`) are pure tower assembly. Query-plan warmup returns `()`.
+The assemble functions are infallible at the signature level: caches build from pre-connected clients (`DeduplicatingCache::with_capacity`), HTTP client services build from pre-parsed `HttpClientMaterial`, and the service stacks (`build_execution_service`, `build_supergraph_service`, `RouterCreator::new`) are infallible plain functions — tower assembly plus creating the pipeline handle. Query-plan warmup returns `()`.
 
 ### Telemetry instruments and the phases
 
@@ -72,8 +72,8 @@ Nothing in the acquire phase creates and *holds* a telemetry instrument, because
 
 Construction is slow enough to need its own observability — a reload blocks on it, and query-plan warmup alone has historically dominated reload time (see the cost model in `dev-docs/reload-lifecycle.md`).
 
-- **Spans.** Everything runs inside `starting`; beneath it, `acquire`, `activate`, and `assemble`, with the per-step spans inside them (`query_planner_creation`, `plugins` with one child span per plugin, `supergraph_creation`). A slow reload decomposes directly: a stalled Redis connect, a slow persisted-query manifest fetch, and a long warmup each show up as their own span. `init_telemetry` runs first inside `acquire` so tracing is live for the rest of construction on first boot.
-- **Duration metrics.** `apollo.router.query_planning.warmup.duration` (histogram) for warmup, `apollo.router.lifecycle.query_planner.init` for planner initialization, and `apollo.router.schema.load.duration` for the schema parse that precedes construction in `try_start`.
+- **Spans.** Everything runs inside `starting`; beneath it, `acquire`, `activate`, and `assemble`, with per-step spans inside them (`query_planner_creation`, `plugins` with one child span per plugin, `query_plan_redis_connect`, `apq_redis_connect`, `persisted_queries_manifest`, `supergraph_creation`, `warmup`). A slow reload decomposes directly: a stalled Redis connect, a slow persisted-query manifest fetch, and a long warmup each show up as their own span. `init_telemetry` runs first inside `acquire` so tracing is live for the rest of construction on first boot.
+- **Duration metrics.** `apollo.router.query_planning.warmup.duration` (histogram) for warmup, and `apollo.router.schema.load.duration` (histogram) for the schema parse that precedes construction in `try_start`. `apollo.router.lifecycle.query_planner.init` counts planner-initialization attempts with success/error attributes.
 
 ### Plugin ordering
 

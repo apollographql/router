@@ -156,6 +156,7 @@ pub(crate) async fn build_pipeline(
                 .persisted_queries
                 .experimental_prewarm_query_plan_cache,
         )
+        .instrument(tracing::info_span!("warmup"))
         .await;
 
         router_creator
@@ -166,8 +167,9 @@ pub(crate) async fn build_pipeline(
     Ok(router_creator)
 }
 
-/// Everything the acquire phase produces. Each field is a resource whose creation can
-/// fail; the assemble phase consumes them infallibly.
+/// Everything the acquire phase produces. Each field except `subgraph_schemas` (an
+/// infallible byproduct of planner creation) is a resource whose creation can fail; the
+/// assemble phase consumes them infallibly.
 struct Acquired {
     query_planner_service: query_planner::BoxCloneService,
     subgraph_schemas: Arc<SubgraphSchemas>,
@@ -211,10 +213,18 @@ async fn acquire(
     let (subgraph_client_material, connector_client_material) =
         parse_http_client_material(&plugins, schema, configuration)?;
 
-    let query_plan_redis = connect_query_plan_redis(configuration).await?;
-    let apq_redis = connect_apq_redis(configuration).await?;
+    let query_plan_redis = connect_query_plan_redis(configuration)
+        .instrument(tracing::info_span!("query_plan_redis_connect"))
+        .await?;
+    let apq_redis = connect_apq_redis(configuration)
+        .instrument(tracing::info_span!("apq_redis_connect"))
+        .await?;
 
-    let persisted_queries = Arc::new(PersistedQueryExpander::new(configuration).await?);
+    let persisted_queries = Arc::new(
+        PersistedQueryExpander::new(configuration)
+            .instrument(tracing::info_span!("persisted_queries_manifest"))
+            .await?,
+    );
 
     Ok(Acquired {
         query_planner_service,
@@ -333,8 +343,8 @@ pub(crate) fn parse_http_client_material(
     schema: &Schema,
     configuration: &Configuration,
 ) -> Result<HttpClientMaterialMaps, BoxError> {
-    // Build each root store once and share it across subgraphs and sources: parsing the
-    // OS-provided certificate list is expensive, notably on macOS.
+    // Build each root store once and share it across subgraphs and sources:
+    // native_roots_store re-reads the OS trust store on every call.
     let subgraph_tls_root_store: RootCertStore = configuration
         .tls
         .subgraph
@@ -848,7 +858,8 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("progressive_override"); // router, supergraph
     add_optional_apollo_plugin!("demand_control"); // execution, subgraph
 
-    // This relative ordering is documented in `docs/source/customizations/native.mdx`:
+    // This relative ordering is documented publicly for native plugins
+    // (/graphos/routing/customization/native-plugins):
     add_oss_apollo_plugin!("connectors"); // supergraph, execution
     add_oss_apollo_plugin!("rhai"); // router, supergraph, execution, subgraph
     add_optional_apollo_plugin!("coprocessor"); // router, supergraph, execution, subgraph, connector_request
