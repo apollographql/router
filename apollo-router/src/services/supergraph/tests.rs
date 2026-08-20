@@ -3837,11 +3837,11 @@ async fn test_cache_warmup() {
 
     use tower::ServiceBuilder;
 
+    use crate::pipeline::build_supergraph_pipeline;
     use crate::query_planner::QueryPlan;
     use crate::services::QueryPlannerResponse;
     use crate::services::layers::persisted_queries::PersistedQueryExpander;
     use crate::services::query_planner;
-    use crate::services::supergraph::service::build_supergraph_pipeline;
 
     let configuration = Configuration::default();
     let schema = Arc::new(
@@ -3854,10 +3854,8 @@ async fn test_cache_warmup() {
 
     // We have to do a bunch of setup here...
     // XXX(@goto-bus-stop): we should probably just use the RouterService at this point?
-    let query_parsing_service = crate::services::query_parsing::query_parsing_service(
-        schema.clone(),
-        Arc::new(configuration.clone()),
-    );
+    let query_parsing_service =
+        crate::pipeline::query_parsing_service(schema.clone(), Arc::new(configuration.clone()));
     let pq_layer = PersistedQueryExpander::new(&configuration).await.unwrap();
 
     /// Return an empty plan that doesn't require any subgraph requests to fulfill.

@@ -687,6 +687,7 @@ mod test {
     use crate::json_ext::Object;
     use crate::pipeline::build_apq_expander;
     use crate::pipeline::build_query_plan_cache;
+    use crate::pipeline::build_supergraph_pipeline;
     use crate::pipeline::connect_apq_redis;
     use crate::pipeline::connect_query_plan_redis;
     use crate::pipeline::create_plugins;
@@ -698,7 +699,6 @@ mod test {
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
-    use crate::services::build_supergraph_pipeline;
     use crate::services::connector::request_service::Request as ConnectorRequest;
     use crate::services::layers::persisted_queries::PersistedQueryExpander;
     use crate::services::router;
@@ -798,7 +798,7 @@ mod test {
                 .boxed_clone();
 
         let query_parser_service =
-            crate::services::query_parsing::query_parsing_service(schema.clone(), config.clone());
+            crate::pipeline::query_parsing_service(schema.clone(), config.clone());
 
         let plugins = Arc::new(
             create_plugins(

@@ -22,12 +22,14 @@ use crate::graphql;
 use crate::pipeline::build_apq_expander;
 use crate::pipeline::build_http_services;
 use crate::pipeline::build_query_plan_cache;
+use crate::pipeline::build_supergraph_pipeline;
 use crate::pipeline::connect_apq_redis;
 use crate::pipeline::connect_query_plan_redis;
 use crate::pipeline::create_plugins;
 use crate::pipeline::create_query_planner_service;
 use crate::pipeline::create_subgraph_services;
 use crate::pipeline::parse_http_client_material;
+use crate::pipeline::query_parsing_service;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -39,10 +41,8 @@ use crate::plugins::telemetry::reload::otel::init_telemetry;
 use crate::query_planner::InMemoryQueryPlanCache;
 use crate::router_factory::RouterFactory;
 use crate::services::Plugins;
-use crate::services::build_supergraph_pipeline;
 use crate::services::execution;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
-use crate::services::query_parsing;
 use crate::services::router;
 use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
@@ -449,8 +449,7 @@ impl<'a> TestHarness<'a> {
         let (config, schema, plugins, supergraph_service, in_memory_query_plan_cache) =
             self.build_common().await?;
 
-        let query_parsing_service =
-            query_parsing::query_parsing_service(schema.clone(), config.clone());
+        let query_parsing_service = query_parsing_service(schema.clone(), config.clone());
 
         let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await?);
         let router_creator = RouterCreator::new(
@@ -486,8 +485,7 @@ impl<'a> TestHarness<'a> {
         let (config, schema, plugins, supergraph_service, in_memory_query_plan_cache) =
             self.build_common().await?;
 
-        let query_parsing_service =
-            query_parsing::query_parsing_service(schema.clone(), config.clone());
+        let query_parsing_service = query_parsing_service(schema.clone(), config.clone());
 
         let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await?);
         let router_creator = RouterCreator::new(

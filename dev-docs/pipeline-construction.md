@@ -1,6 +1,6 @@
 # Pipeline construction
 
-This document describes how the router builds a serving pipeline from configuration, schema, and license — the work behind `RouterServiceFactory::create_pipeline`, implemented in `apollo-router/src/pipeline.rs`.
+This document describes how the router builds a serving pipeline from configuration, schema, and license — the work behind `RouterServiceFactory::create_pipeline`, implemented in the `apollo-router/src/pipeline/` module.
 
 `apollo-router/src/state_machine.rs` decides *when* to build a pipeline (see `dev-docs/reload-lifecycle.md`); this document covers what happens once it decides to.
 
@@ -84,14 +84,16 @@ Construction is slow enough to need its own observability — a reload blocks on
 | Concern | Function / type | File |
 |---|---|---|
 | Entry point called from the state machine | `RouterServiceFactory::create_pipeline` (impl `YamlRouterFactory`) | `router_factory.rs` |
-| The three phases | `build_pipeline`, `acquire`/`Acquired` | `pipeline.rs` |
-| Early telemetry init | `init_telemetry` | `pipeline.rs` |
-| Federation planner + subgraph schemas | `create_query_planner_service` | `pipeline.rs` |
-| Plugin instantiation and ordering | `create_plugins` | `pipeline.rs` |
-| TLS/DNS client material | `parse_http_client_material`, `HttpClientMaterial` | `pipeline.rs`, `services/http/service.rs` |
-| Redis client connects | `connect_query_plan_redis`, `connect_apq_redis`, `connect_redis` | `pipeline.rs`, `cache/storage.rs` |
-| Cache assembly | `build_query_plan_cache`, `build_apq_expander`, `DeduplicatingCache::with_capacity` | `pipeline.rs`, `cache/mod.rs` |
-| HTTP client + subgraph service assembly | `build_http_services`, `create_subgraph_services` | `pipeline.rs` |
-| Execution + supergraph stack assembly | `build_supergraph_pipeline`, `build_execution_service`, `build_supergraph_service` | `services/supergraph/service.rs` |
+| The three phases | `build_pipeline` | `pipeline/mod.rs` |
+| The acquire phase | `acquire`/`Acquired` | `pipeline/acquire.rs` |
+| Early telemetry init | `init_telemetry` | `pipeline/acquire.rs` |
+| Federation planner + subgraph schemas | `create_query_planner_service` | `pipeline/acquire.rs` |
+| Plugin instantiation and ordering | `create_plugins` | `pipeline/acquire.rs` |
+| TLS/DNS client material | `parse_http_client_material`, `HttpClientMaterial` | `pipeline/acquire.rs`, `services/http/service.rs` |
+| Redis client connects | `connect_query_plan_redis`, `connect_apq_redis`, `connect_redis` | `pipeline/acquire.rs`, `cache/storage.rs` |
+| Cache assembly | `build_query_plan_cache`, `build_apq_expander`, `DeduplicatingCache::with_capacity` | `pipeline/stages.rs`, `cache/mod.rs` |
+| Query parsing stack assembly | `query_parsing_service` | `pipeline/stages.rs` |
+| HTTP client + subgraph service assembly | `build_http_services`, `create_subgraph_services` | `pipeline/stages.rs` |
+| Execution + supergraph stack assembly | `build_supergraph_pipeline`, `build_execution_service`, `build_supergraph_service` | `pipeline/stages.rs` |
 | Router stack assembly | `RouterCreator::new` | `services/router/service.rs` |
 | The persistent pipeline | `RouterCreator` (impl `RouterFactory`) | `services/router/service.rs` |

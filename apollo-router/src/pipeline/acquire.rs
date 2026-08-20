@@ -1,17 +1,5 @@
-//! Construction of the router's serving pipeline from configuration, schema, and license.
-//!
-//! [`build_pipeline`] runs three phases, each under its own tracing span:
-//!
-//! - **Acquire** gathers every resource whose creation can fail: the telemetry plugin, the
-//!   federation query planner, the other plugins, TLS/DNS client material, Redis clients,
-//!   and the persisted-query manifest.
-//! - **Activate** runs every plugin's `activate()` hook. The telemetry hook swaps in global
-//!   tracer and meter providers that cannot be rolled back. Nothing after this phase starts
-//!   may fail.
-//! - **Assemble** builds the caches and service stacks from the acquired resources, using
-//!   infallible functions. Each cache registers its gauges in its constructor; constructing
-//!   caches after the meter-provider swap binds those gauges to the provider that serves
-//!   this pipeline.
+//! The acquire phase of [`build_pipeline`](super::build_pipeline): every resource whose
+//! creation can fail.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -23,12 +11,10 @@ use rustls::RootCertStore;
 use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing::Instrument;
 
 use crate::AllowedFeature;
-use crate::cache::DeduplicatingCache;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::storage::connect_redis;
 use crate::configuration::APOLLO_PLUGIN_PREFIX;
@@ -41,149 +27,33 @@ use crate::plugins::subscription::notification::Notify;
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::plugins::traffic_shaping::TrafficShaping;
-use crate::query_planner::InMemoryQueryPlanCache;
-use crate::query_planner::QueryPlanCache;
 use crate::query_planner::QueryPlannerService;
 use crate::query_planner::SubgraphSchemas;
-use crate::query_planner::warmup;
 use crate::services::Plugins;
-use crate::services::SubgraphService;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
-use crate::services::build_supergraph_pipeline;
 use crate::services::http::HttpClientService;
-use crate::services::http::HttpClientServiceFactory;
 use crate::services::http::service::HttpClientMaterial;
-use crate::services::layers::apq::APQExpander;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
-use crate::services::query_parsing;
 use crate::services::query_planner;
-use crate::services::router::service::RouterCreator;
-use crate::services::subgraph;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
-
-/// Builds a serving pipeline from configuration, schema, and license.
-///
-/// Runs the acquire, activate, and assemble phases the module docs describe. On a hot
-/// reload, pass the previous pipeline's configuration and in-memory query-plan cache:
-/// the early telemetry activation is then skipped and warm-up replays the previously
-/// cached queries against the new planner.
-pub(crate) async fn build_pipeline(
-    configuration: Arc<Configuration>,
-    schema: Arc<Schema>,
-    previous_config: Option<Arc<Configuration>>,
-    previous_cache: Option<InMemoryQueryPlanCache>,
-    extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-    license: Arc<LicenseState>,
-) -> Result<RouterCreator, BoxError> {
-    let Acquired {
-        query_planner_service,
-        subgraph_schemas,
-        plugins,
-        subgraph_client_material,
-        connector_client_material,
-        query_plan_redis,
-        apq_redis,
-        persisted_queries,
-    } = acquire(
-        &configuration,
-        &schema,
-        previous_config,
-        extra_plugins,
-        license,
-    )
-    .instrument(tracing::info_span!("acquire"))
-    .await?;
-
-    {
-        // The point of no return: activating the telemetry plugin swaps in global tracer
-        // and meter providers that cannot be rolled back. From here on the pipeline must
-        // go live, which is why the assemble phase below is infallible.
-        let _span = tracing::info_span!("activate").entered();
-        for (_, plugin) in plugins.iter() {
-            plugin.activate();
-        }
-    }
-
-    let router_creator = async {
-        let query_plan_cache = build_query_plan_cache(&configuration, query_plan_redis);
-        let apq_expander = build_apq_expander(&configuration, apq_redis);
-        let query_parsing_service =
-            query_parsing::query_parsing_service(schema.clone(), configuration.clone());
-
-        let (supergraph_service, in_memory_query_plan_cache, caching_query_planner) = {
-            let _span = tracing::info_span!("supergraph_creation").entered();
-            let (http_service_factory, connector_http_service_factory) = build_http_services(
-                subgraph_client_material,
-                connector_client_material,
-                &plugins,
-            );
-            let subgraph_services = create_subgraph_services(&http_service_factory);
-            build_supergraph_pipeline(
-                query_planner_service,
-                query_plan_cache,
-                schema.clone(),
-                subgraph_schemas,
-                configuration.clone(),
-                plugins.clone(),
-                subgraph_services.into_iter().collect(),
-                connector_http_service_factory,
-            )
-        };
-
-        let router_creator = RouterCreator::new(
-            persisted_queries.clone(),
-            apq_expander,
-            supergraph_service,
-            schema,
-            plugins,
-            in_memory_query_plan_cache,
-            query_parsing_service.clone(),
-            configuration.clone(),
-        );
-
-        let warmup_query_planner_service = ServiceBuilder::new()
-            .layer(warmup::WarmupParseQueryLayer::new(query_parsing_service))
-            .map_response(drop) // Ignore response
-            .service(caching_query_planner)
-            .boxed_clone();
-
-        warmup::warm_up_query_planner(
-            warmup_query_planner_service,
-            &persisted_queries,
-            previous_cache,
-            configuration.supergraph.query_planning.warmed_up_queries,
-            &configuration
-                .persisted_queries
-                .experimental_prewarm_query_plan_cache,
-        )
-        .instrument(tracing::info_span!("warmup"))
-        .await;
-
-        router_creator
-    }
-    .instrument(tracing::info_span!("assemble"))
-    .await;
-
-    Ok(router_creator)
-}
 
 /// Everything the acquire phase produces. Each field except `subgraph_schemas` (an
 /// infallible byproduct of planner creation) is a resource whose creation can fail; the
 /// assemble phase consumes them infallibly.
-struct Acquired {
-    query_planner_service: query_planner::BoxCloneService,
-    subgraph_schemas: Arc<SubgraphSchemas>,
-    plugins: Arc<Plugins>,
-    subgraph_client_material: IndexMap<String, HttpClientMaterial>,
-    connector_client_material: IndexMap<String, HttpClientMaterial>,
-    query_plan_redis: Option<RedisCacheStorage>,
-    apq_redis: Option<RedisCacheStorage>,
-    persisted_queries: Arc<PersistedQueryExpander>,
+pub(super) struct Acquired {
+    pub(super) query_planner_service: query_planner::BoxCloneService,
+    pub(super) subgraph_schemas: Arc<SubgraphSchemas>,
+    pub(super) plugins: Arc<Plugins>,
+    pub(super) subgraph_client_material: IndexMap<String, HttpClientMaterial>,
+    pub(super) connector_client_material: IndexMap<String, HttpClientMaterial>,
+    pub(super) query_plan_redis: Option<RedisCacheStorage>,
+    pub(super) apq_redis: Option<RedisCacheStorage>,
+    pub(super) persisted_queries: Arc<PersistedQueryExpander>,
 }
 
-async fn acquire(
+pub(super) async fn acquire(
     configuration: &Arc<Configuration>,
     schema: &Arc<Schema>,
     previous_config: Option<Arc<Configuration>>,
@@ -252,7 +122,7 @@ async fn acquire(
 ///   first boot is still live
 /// - when the process never installed the global OpenTelemetry layer
 /// - when the configuration has no `telemetry` section
-async fn init_telemetry(
+pub(super) async fn init_telemetry(
     configuration: &Configuration,
     schema: &Schema,
     license: &Arc<LicenseState>,
@@ -338,8 +208,8 @@ pub(crate) type HttpClientMaterialMaps = (
 
 /// Parses TLS and DNS client material for every subgraph and connector source.
 ///
-/// This is the fallible half of HTTP client construction; [`build_http_services`] turns
-/// the material into services.
+/// This is the fallible half of HTTP client construction;
+/// [`build_http_services`](super::build_http_services) turns the material into services.
 pub(crate) fn parse_http_client_material(
     plugins: &Plugins,
     schema: &Schema,
@@ -441,82 +311,6 @@ pub(crate) async fn connect_apq_redis(
         Some(redis_config) => connect_redis(redis_config, "APQ").await,
         None => Ok(None),
     }
-}
-
-/// Builds the query-plan cache around a pre-connected Redis client and registers its
-/// gauges. Belongs to the assemble phase; the module docs explain why cache construction
-/// follows plugin activation.
-pub(crate) fn build_query_plan_cache(
-    configuration: &Configuration,
-    redis: Option<RedisCacheStorage>,
-) -> QueryPlanCache {
-    Arc::new(DeduplicatingCache::with_capacity(
-        configuration
-            .supergraph
-            .query_planning
-            .cache
-            .in_memory
-            .limit,
-        redis,
-        "query planner",
-    ))
-}
-
-/// Builds the APQ expander around a pre-connected Redis client and registers its cache
-/// gauges. When APQ is disabled the expander rejects persisted-query hashes instead.
-/// Belongs to the assemble phase; the module docs explain why cache construction follows
-/// plugin activation.
-pub(crate) fn build_apq_expander(
-    configuration: &Configuration,
-    redis: Option<RedisCacheStorage>,
-) -> APQExpander {
-    if configuration.apq.enabled {
-        APQExpander::with_cache(DeduplicatingCache::with_capacity(
-            configuration.apq.router.cache.in_memory.limit,
-            redis,
-            "APQ",
-        ))
-    } else {
-        APQExpander::disabled()
-    }
-}
-
-/// Builds HTTP client service factories from parsed client material, keyed as
-/// [`HttpClientMaterialMaps`] documents.
-pub(crate) fn build_http_services(
-    subgraph_material: IndexMap<String, HttpClientMaterial>,
-    connector_material: IndexMap<String, HttpClientMaterial>,
-    plugins: &Arc<Plugins>,
-) -> (
-    IndexMap<String, HttpClientServiceFactory>,
-    IndexMap<String, HttpClientServiceFactory>,
-) {
-    let build = |material: IndexMap<String, HttpClientMaterial>| {
-        material
-            .into_iter()
-            .map(|(name, material)| {
-                let factory = HttpClientServiceFactory::new(
-                    HttpClientService::new(material),
-                    plugins.clone(),
-                );
-                (name, factory)
-            })
-            .collect()
-    };
-    (build(subgraph_material), build(connector_material))
-}
-
-/// Builds a subgraph service around each entry's HTTP client factory, keyed by subgraph
-/// name.
-pub(crate) fn create_subgraph_services(
-    http_service_factory: &IndexMap<String, HttpClientServiceFactory>,
-) -> IndexMap<String, subgraph::BoxCloneService> {
-    let mut subgraph_services = IndexMap::default();
-    for (name, http_service_factory) in http_service_factory.iter() {
-        let svc = SubgraphService::new(name, http_service_factory.create(name));
-        subgraph_services.insert(name.clone(), svc.boxed_clone());
-    }
-    subgraph_services
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -938,203 +732,5 @@ pub(crate) fn inject_schema_id(
             "schema_id".to_string(),
             Value::String(schema_id.to_string()),
         );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json_bytes::json;
-
-    use super::*;
-    use crate::services::SupergraphRequest;
-
-    /// Subgraph names in `testdata/supergraph.graphql`, sorted.
-    const FIXTURE_SUBGRAPHS: [&str; 4] = ["accounts", "inventory", "products", "reviews"];
-
-    fn test_configuration() -> Arc<Configuration> {
-        Arc::new(Configuration::builder().build().unwrap())
-    }
-
-    fn test_schema(configuration: &Configuration) -> Arc<Schema> {
-        Arc::new(Schema::parse(include_str!("testdata/supergraph.graphql"), configuration).unwrap())
-    }
-
-    fn sorted_keys<V>(map: &IndexMap<String, V>) -> Vec<&str> {
-        let mut keys: Vec<&str> = map.keys().map(String::as_str).collect();
-        keys.sort_unstable();
-        keys
-    }
-
-    /// A plugin map holding a real traffic-shaping plugin, which
-    /// [`parse_http_client_material`] looks up by name for per-subgraph client config.
-    async fn plugins_with_traffic_shaping() -> Plugins {
-        let traffic_shaping = crate::plugin::plugins()
-            .find(|factory| factory.name == APOLLO_TRAFFIC_SHAPING)
-            .expect("traffic shaping plugin is registered")
-            .create_instance_without_schema(&serde_json::json!({}))
-            .await
-            .expect("traffic shaping plugin builds from an empty config");
-        let mut plugins = Plugins::default();
-        plugins.insert(APOLLO_TRAFFIC_SHAPING.to_string(), traffic_shaping);
-        plugins
-    }
-
-    /// A request carrying a persisted-query hash and no query string. An enabled APQ
-    /// expander answers it from its cache; a disabled one rejects it. The two error
-    /// messages tell the paths apart.
-    fn hash_only_apq_request() -> SupergraphRequest {
-        SupergraphRequest::fake_builder()
-            .extension(
-                "persistedQuery",
-                json!({
-                    "version": 1,
-                    "sha256Hash": "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
-                }),
-            )
-            .build()
-            .expect("valid request")
-    }
-
-    #[test]
-    fn create_query_planner_service_extracts_a_schema_per_subgraph() {
-        let configuration = test_configuration();
-        let schema = test_schema(&configuration);
-
-        let (_planner, subgraph_schemas) =
-            create_query_planner_service(&schema, &configuration).unwrap();
-
-        let mut names: Vec<&str> = subgraph_schemas.keys().map(String::as_str).collect();
-        names.sort_unstable();
-        assert_eq!(names, FIXTURE_SUBGRAPHS);
-    }
-
-    #[tokio::test]
-    async fn parse_http_client_material_covers_every_subgraph() {
-        let configuration = test_configuration();
-        let schema = test_schema(&configuration);
-        let plugins = plugins_with_traffic_shaping().await;
-
-        let (subgraph_material, connector_material) =
-            parse_http_client_material(&plugins, &schema, &configuration).unwrap();
-
-        assert_eq!(sorted_keys(&subgraph_material), FIXTURE_SUBGRAPHS);
-        assert!(connector_material.is_empty());
-    }
-
-    #[tokio::test]
-    async fn build_http_services_builds_a_client_factory_per_subgraph() {
-        let configuration = test_configuration();
-        let schema = test_schema(&configuration);
-        let plugins = plugins_with_traffic_shaping().await;
-        let (subgraph_material, connector_material) =
-            parse_http_client_material(&plugins, &schema, &configuration).unwrap();
-
-        let (subgraph_factories, connector_factories) =
-            build_http_services(subgraph_material, connector_material, &Arc::new(plugins));
-
-        assert_eq!(sorted_keys(&subgraph_factories), FIXTURE_SUBGRAPHS);
-        assert!(connector_factories.is_empty());
-    }
-
-    #[tokio::test]
-    async fn init_telemetry_returns_no_plugin_on_hot_reload() {
-        let configuration = test_configuration();
-        let schema = test_schema(&configuration);
-        let license = Arc::new(LicenseState::default());
-
-        let plugin = init_telemetry(&configuration, &schema, &license, Some(&configuration))
-            .await
-            .unwrap();
-
-        assert!(plugin.is_none());
-    }
-
-    #[tokio::test]
-    async fn create_plugins_instantiates_mandatory_plugins() {
-        let configuration = test_configuration();
-        let schema = test_schema(&configuration);
-        let (_planner, subgraph_schemas) =
-            create_query_planner_service(&schema, &configuration).unwrap();
-
-        let plugins = create_plugins(
-            &configuration,
-            &schema,
-            subgraph_schemas,
-            None,
-            None,
-            Arc::new(LicenseState::default()),
-            None,
-        )
-        .await
-        .unwrap();
-
-        assert!(plugins.contains_key("apollo.include_subgraph_errors"));
-        assert!(plugins.contains_key("apollo.traffic_shaping"));
-    }
-
-    #[tokio::test]
-    async fn build_query_plan_cache_without_redis_uses_the_configured_capacity() {
-        let configuration: Configuration = serde_yaml::from_str(
-            r#"
-            supergraph:
-              query_planning:
-                cache:
-                  in_memory:
-                    limit: 42
-            "#,
-        )
-        .unwrap();
-
-        let cache = build_query_plan_cache(&configuration, None);
-
-        assert_eq!(cache.in_memory_cache().lock().await.cap().get(), 42);
-    }
-
-    #[tokio::test]
-    async fn apq_expander_enabled_reports_an_unknown_hash_as_not_found() {
-        let configuration = test_configuration();
-        assert!(configuration.apq.enabled);
-
-        let expander = build_apq_expander(&configuration, None);
-        let mut response = expander
-            .supergraph_request(hash_only_apq_request())
-            .await
-            .expect_err("a cache miss short-circuits the request");
-
-        let graphql = response.next_response().await.expect("one response");
-        assert_eq!(graphql.errors[0].message, "PersistedQueryNotFound");
-    }
-
-    #[tokio::test]
-    async fn apq_expander_disabled_rejects_persisted_query_requests() {
-        let mut configuration = Configuration::default();
-        configuration.apq.enabled = false;
-
-        let expander = build_apq_expander(&configuration, None);
-        let mut response = expander
-            .supergraph_request(hash_only_apq_request())
-            .await
-            .expect_err("persisted queries are rejected when APQ is disabled");
-
-        let graphql = response.next_response().await.expect("one response");
-        assert_eq!(graphql.errors[0].message, "PersistedQueryNotSupported");
-    }
-
-    #[tokio::test]
-    async fn connect_query_plan_redis_is_none_without_redis_config() {
-        let configuration = test_configuration();
-
-        let redis = connect_query_plan_redis(&configuration).await.unwrap();
-
-        assert!(redis.is_none());
-    }
-
-    #[tokio::test]
-    async fn connect_apq_redis_is_none_without_redis_config() {
-        let configuration = test_configuration();
-
-        let redis = connect_apq_redis(&configuration).await.unwrap();
-
-        assert!(redis.is_none());
     }
 }

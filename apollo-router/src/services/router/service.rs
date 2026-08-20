@@ -171,10 +171,8 @@ pub(crate) async fn from_supergraph_mock_with_configuration(
             .await
             .unwrap();
 
-    let query_parsing_service = crate::services::query_parsing::query_parsing_service(
-        schema.clone(),
-        configuration.clone(),
-    );
+    let query_parsing_service =
+        crate::pipeline::query_parsing_service(schema.clone(), configuration.clone());
 
     let apq_expander = crate::pipeline::build_apq_expander(
         &configuration,
@@ -229,10 +227,8 @@ pub(crate) async fn empty() -> impl Service<
             .await
             .unwrap();
 
-    let query_parsing_service = crate::services::query_parsing::query_parsing_service(
-        schema.clone(),
-        configuration.clone(),
-    );
+    let query_parsing_service =
+        crate::pipeline::query_parsing_service(schema.clone(), configuration.clone());
 
     let apq_expander = crate::pipeline::build_apq_expander(
         &configuration,

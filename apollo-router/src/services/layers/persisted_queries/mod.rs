@@ -1018,7 +1018,7 @@ mod tests {
 
             let schema = Arc::new(Schema::parse(include_str!("../../../testdata/supergraph.graphql"), &Default::default()).unwrap());
 
-            let query_parsing_service = query_parsing::query_parsing_service(schema, Arc::new(config));
+            let query_parsing_service = crate::pipeline::query_parsing_service(schema, Arc::new(config));
 
             // A random query is blocked.
             denied_by_safelist(
@@ -1235,7 +1235,8 @@ mod tests {
             )
             .unwrap(),
         );
-        let query_parsing_service = query_parsing::query_parsing_service(schema, Arc::new(config));
+        let query_parsing_service =
+            crate::pipeline::query_parsing_service(schema, Arc::new(config));
 
         // The client-scoped body is only accepted for its registered client.
         assert_allowed_for_client(
