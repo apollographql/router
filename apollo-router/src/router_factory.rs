@@ -197,55 +197,13 @@ impl RouterServiceFactory for YamlRouterFactory {
             previous_router.as_ref().map(|r| r.configuration.clone());
         let previous_cache = previous_router.as_ref().map(|r| r.previous_cache());
 
-        // we have to create a telemetry plugin before creating everything else, to generate a trace
-        // of router and plugin creation
-        let plugin_registry = &*crate::plugin::PLUGINS;
-        let mut initial_telemetry_plugin = None;
-
-        if previous_config.is_none()
-            && apollo_opentelemetry_initialized()
-            && let Some(factory) = plugin_registry
-                .iter()
-                .find(|factory| factory.name == "apollo.telemetry")
-        {
-            let mut telemetry_config = configuration
-                .apollo_plugins
-                .plugins
-                .get("telemetry")
-                .cloned();
-            if let Some(plugin_config) = &mut telemetry_config {
-                inject_schema_id(schema.schema_id.as_str(), plugin_config);
-                // Extract previous telemetry config for hot reload comparison
-                let previous_telemetry_config = previous_config
-                    .as_ref()
-                    .and_then(|config| config.apollo_plugins.plugins.get("telemetry").cloned());
-
-                let telemetry_init = PluginInit::builder()
-                    .config(plugin_config.clone())
-                    .and_previous_config(previous_telemetry_config)
-                    .supergraph_sdl(schema.raw_sdl.clone())
-                    .supergraph_schema_id(schema.schema_id.clone().into_inner())
-                    .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
-                    .notify(configuration.notify.clone())
-                    .license(license.clone())
-                    .full_config(configuration.validated_yaml.clone())
-                    .and_original_config_yaml(configuration.raw_yaml.clone())
-                    .build();
-
-                match factory.create_instance(telemetry_init).await {
-                    Ok(plugin) => {
-                        if let Some(telemetry) = plugin
-                            .as_any()
-                            .downcast_ref::<crate::plugins::telemetry::Telemetry>()
-                        {
-                            telemetry.activate();
-                        }
-                        initial_telemetry_plugin = Some(plugin);
-                    }
-                    Err(e) => return Err(e),
-                }
-            }
-        }
+        let initial_telemetry_plugin = init_telemetry(
+            &configuration,
+            &schema,
+            &license,
+            previous_config.as_deref(),
+        )
+        .await?;
 
         let router_span = tracing::info_span!(STARTING_SPAN_NAME);
         Self.inner_create(
@@ -260,6 +218,74 @@ impl RouterServiceFactory for YamlRouterFactory {
         .instrument(router_span)
         .await
     }
+}
+
+/// Creates and activates the telemetry plugin before the rest of pipeline construction.
+///
+/// Tracing has to be live before the other plugins and services are built, or none of
+/// that construction gets traced. Hand the returned plugin to `create_plugins`, which
+/// splices it into the plugin map instead of building telemetry a second time.
+///
+/// Returns `None` when early activation is unnecessary or impossible:
+///
+/// - on a hot reload (`previous_config` is `Some`), because the telemetry activated at
+///   first boot is still live
+/// - when the process never installed the global OpenTelemetry layer
+/// - when the configuration has no `telemetry` section
+async fn init_telemetry(
+    configuration: &Configuration,
+    schema: &Schema,
+    license: &Arc<LicenseState>,
+    previous_config: Option<&Configuration>,
+) -> Result<Option<Box<dyn DynPlugin>>, BoxError> {
+    let plugin_registry = &*crate::plugin::PLUGINS;
+    let mut initial_telemetry_plugin = None;
+
+    if previous_config.is_none()
+        && apollo_opentelemetry_initialized()
+        && let Some(factory) = plugin_registry
+            .iter()
+            .find(|factory| factory.name == "apollo.telemetry")
+    {
+        let mut telemetry_config = configuration
+            .apollo_plugins
+            .plugins
+            .get("telemetry")
+            .cloned();
+        if let Some(plugin_config) = &mut telemetry_config {
+            inject_schema_id(schema.schema_id.as_str(), plugin_config);
+            // Extract previous telemetry config for hot reload comparison
+            let previous_telemetry_config = previous_config
+                .and_then(|config| config.apollo_plugins.plugins.get("telemetry").cloned());
+
+            let telemetry_init = PluginInit::builder()
+                .config(plugin_config.clone())
+                .and_previous_config(previous_telemetry_config)
+                .supergraph_sdl(schema.raw_sdl.clone())
+                .supergraph_schema_id(schema.schema_id.clone().into_inner())
+                .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
+                .notify(configuration.notify.clone())
+                .license(license.clone())
+                .full_config(configuration.validated_yaml.clone())
+                .and_original_config_yaml(configuration.raw_yaml.clone())
+                .build();
+
+            match factory.create_instance(telemetry_init).await {
+                Ok(plugin) => {
+                    if let Some(telemetry) = plugin
+                        .as_any()
+                        .downcast_ref::<crate::plugins::telemetry::Telemetry>()
+                    {
+                        telemetry.activate();
+                    }
+                    initial_telemetry_plugin = Some(plugin);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    Ok(initial_telemetry_plugin)
 }
 
 impl YamlRouterFactory {
