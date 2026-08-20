@@ -11,17 +11,15 @@ use crate::subgraph::typestate::Subgraph;
 
 /// Rejects `@override(from:)` pointing at a connector-enabled subgraph.
 ///
-/// Overrides mess with the supergraph in ways that can be difficult to detect when expanding
-/// connectors; the supergraph may omit overridden fields and other shenanigans. To allow for a
-/// better developer experience, we check here if any connector-enabled subgraphs have fields
-/// overridden.
+/// Single connector enabled subgraph schema may contain multiple connectors. Since we auto-generate
+/// synthetic ("virtual") subgraphs for each connector, any overrides pointing to original user
+/// provided subgraph will be invalid so we need to reject those as invalid.
 ///
 /// # Ordering
 ///
-/// This runs after merging so that connectors-related override errors are only reported once
-/// merging succeeded, and before connector expansion, which these overrides would otherwise
-/// corrupt. It looks at the subgraphs rather than the supergraph precisely because merging may
-/// have dropped the overridden fields.
+/// This should be reported after merging so that connectors-related override errors would only
+/// be reported if merging succeeds. It looks at the subgraphs rather than the supergraph precisely
+/// because merging may have dropped the overridden fields.
 // PORT_NOTE: Corresponds to `validate_overrides` in the apollo-composition crate. That version
 // worked on the unexpanded subgraph schemas and so had to match the `@override` directive by name
 // against a hardcoded list, missing any subgraph that imported it under an alias. Here the name is
