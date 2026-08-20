@@ -89,6 +89,63 @@ pub static TEST_JWKS_ENDPOINT: LazyLock<PathBuf> = LazyLock::new(|| {
         .join("license.jwks.json")
 });
 
+/// HS256 test secret bundled in `apollo-router/src/uplink/testdata/license.jwks.json`.
+/// JWK format (`oct`/`HS256`/`use=sig`) with `k` base64url-encoded.
+/// Decoded value is the byte string `make_a_long_secret_for_rfc_7518_256_bits_requirement_blah`.
+const TEST_LICENSE_JWKS_SECRET_BASE64URL: &str =
+    "bWFrZV9hX2xvbmdfc2VjcmV0X2Zvcl9yZmNfNzUxOF8yNTZfYml0c19yZXF1aXJlbWVudF9ibGFo";
+
+/// ~6 months in seconds: far enough out that a minted JWT stays valid through
+/// any reasonable test session, and well within tokio's `DelayQueue`
+/// scheduler cap (about a year — see `mint_license_jwt`).
+#[allow(dead_code)]
+pub const LICENSE_SIX_MONTHS_SECS: i64 = 60 * 60 * 24 * 180;
+
+/// Mint a test license JWT signed with the bundled HS256 test secret.
+///
+/// `allowed_features` is the `allowedFeatures` claim: `None` omits the claim
+/// entirely (which `LicenseLimits` interprets as "all features allowed"),
+/// `Some(&[])` is an empty allow-list. `warn_at_offset_secs` and
+/// `halt_at_offset_secs` are relative to now — negative values put the claim
+/// in the past. Keep future offsets under about a year: the license stream
+/// schedules `haltAt`/`warnAt` on a tokio `DelayQueue`, which cannot schedule
+/// `Instant`s derived from far-future `SystemTime`s.
+#[allow(dead_code)]
+pub fn mint_license_jwt(
+    allowed_features: Option<&[&str]>,
+    warn_at_offset_secs: i64,
+    halt_at_offset_secs: i64,
+) -> String {
+    use std::time::SystemTime;
+    use std::time::UNIX_EPOCH;
+
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before unix epoch")
+        .as_secs() as i64;
+
+    let secret_bytes = URL_SAFE_NO_PAD
+        .decode(TEST_LICENSE_JWKS_SECRET_BASE64URL)
+        .expect("test JWKS secret is valid base64url");
+    let key = jsonwebtoken::EncodingKey::from_secret(&secret_bytes);
+    let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
+    let mut claims = serde_json::json!({
+        "exp": 10000000000_u64,
+        "iss": "https://www.apollographql.com/",
+        "sub": "apollo",
+        "aud": "SELF_HOSTED",
+        "warnAt": now + warn_at_offset_secs,
+        "haltAt": now + halt_at_offset_secs,
+    });
+    if let Some(features) = allowed_features {
+        claims["allowedFeatures"] = serde_json::json!(features);
+    }
+    jsonwebtoken::encode(&header, &claims, &key).expect("sign test license JWT")
+}
+
 fn get_allocated_ports() -> &'static Arc<Mutex<HashMap<u16, String>>> {
     ALLOCATED_PORTS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
 }
