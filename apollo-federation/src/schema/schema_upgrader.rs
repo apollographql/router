@@ -1016,7 +1016,7 @@ pub fn upgrade_subgraphs_if_necessary(
                 Either::Left(s) => s.assume_upgraded(),
                 Either::Right(s) => s,
             };
-            all_hints.extend(upgraded.apply_fed3_compat());
+            all_hints.extend(upgraded.apply_fed3_upgrade());
             match upgraded.validate() {
                 Ok(s) => Some(s),
                 Err(e) => {
