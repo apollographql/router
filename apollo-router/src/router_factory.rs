@@ -162,10 +162,10 @@ pub(crate) trait RouterFactory: Clone + Send + 'static {
 /// Instances of this traits are used by the StateMachine to generate a new
 /// RouterFactory from configuration when it changes
 #[async_trait::async_trait]
-pub(crate) trait RouterSuperServiceFactory {
+pub(crate) trait RouterServiceFactory {
     type RouterFactory: RouterFactory;
 
-    async fn create(
+    async fn create_pipeline(
         &mut self,
         is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
@@ -181,10 +181,10 @@ pub(crate) trait RouterSuperServiceFactory {
 pub(crate) struct YamlRouterFactory;
 
 #[async_trait::async_trait]
-impl RouterSuperServiceFactory for YamlRouterFactory {
+impl RouterServiceFactory for YamlRouterFactory {
     type RouterFactory = RouterCreator;
 
-    async fn create(
+    async fn create_pipeline(
         &mut self,
         _is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
@@ -539,7 +539,7 @@ pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: 
 
     let is_telemetry_disabled = false;
     let service = YamlRouterFactory
-        .create(
+        .create_pipeline(
             is_telemetry_disabled,
             Arc::new(config),
             schema,
@@ -973,7 +973,7 @@ mod test {
     use crate::configuration::Configuration;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
-    use crate::router_factory::RouterSuperServiceFactory;
+    use crate::router_factory::RouterServiceFactory;
     use crate::router_factory::YamlRouterFactory;
     use crate::router_factory::inject_schema_id;
     use crate::services::supergraph::service::HasPlugins;
@@ -1051,7 +1051,7 @@ mod test {
 
         let is_telemetry_disabled = false;
         let service = YamlRouterFactory
-            .create(
+            .create_pipeline(
                 is_telemetry_disabled,
                 Arc::new(config),
                 Arc::new(schema),
@@ -1230,7 +1230,7 @@ mod test {
          * */
         let is_telemetry_disabled = false;
         let service = YamlRouterFactory
-            .create(
+            .create_pipeline(
                 is_telemetry_disabled,
                 Arc::new(router_config),
                 Arc::new(schema),
@@ -1299,7 +1299,7 @@ mod test {
          * */
         let is_telemetry_disabled = false;
         let service = YamlRouterFactory
-            .create(
+            .create_pipeline(
                 is_telemetry_disabled,
                 Arc::new(router_config),
                 Arc::new(schema),
@@ -1381,7 +1381,7 @@ mod test {
          * */
         let is_telemetry_disabled = false;
         let service = YamlRouterFactory
-            .create(
+            .create_pipeline(
                 is_telemetry_disabled,
                 Arc::new(router_config),
                 Arc::new(schema),
@@ -1471,7 +1471,7 @@ mod test {
          * */
         let is_telemetry_disabled = false;
         let service = YamlRouterFactory
-            .create(
+            .create_pipeline(
                 is_telemetry_disabled,
                 Arc::new(router_config),
                 Arc::new(schema),
@@ -1546,7 +1546,7 @@ mod test {
          * */
         let is_telemetry_disabled = false;
         let service = YamlRouterFactory
-            .create(
+            .create_pipeline(
                 is_telemetry_disabled,
                 Arc::new(router_config),
                 Arc::new(schema),
@@ -1633,7 +1633,7 @@ mod test {
          * */
         let is_telemetry_disabled = false;
         let service = YamlRouterFactory
-            .create(
+            .create_pipeline(
                 is_telemetry_disabled,
                 Arc::new(router_config),
                 Arc::new(schema),
@@ -1722,7 +1722,7 @@ mod test {
          * */
         let is_telemetry_disabled = false;
         let service = YamlRouterFactory
-            .create(
+            .create_pipeline(
                 is_telemetry_disabled,
                 Arc::new(router_config),
                 Arc::new(schema),

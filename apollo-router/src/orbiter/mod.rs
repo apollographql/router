@@ -21,7 +21,7 @@ use crate::Configuration;
 use crate::configuration::generate_config_schema;
 use crate::executable::Opt;
 use crate::plugin::DynPlugin;
-use crate::router_factory::RouterSuperServiceFactory;
+use crate::router_factory::RouterServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::HasSchema;
 use crate::services::router::service::RouterCreator;
@@ -91,10 +91,10 @@ pub(crate) struct OrbiterRouterSuperServiceFactory {
 }
 
 #[async_trait]
-impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
+impl RouterServiceFactory for OrbiterRouterSuperServiceFactory {
     type RouterFactory = RouterCreator;
 
-    async fn create(
+    async fn create_pipeline(
         &mut self,
         is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
@@ -104,7 +104,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
         license: Arc<LicenseState>,
     ) -> Result<Self::RouterFactory, BoxError> {
         self.delegate
-            .create(
+            .create_pipeline(
                 is_telemetry_disabled,
                 configuration.clone(),
                 schema.clone(),

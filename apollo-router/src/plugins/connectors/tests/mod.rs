@@ -33,7 +33,7 @@ use crate::plugins::connectors::tests::req_asserts::Plan;
 use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::router_factory::RouterFactory;
-use crate::router_factory::RouterSuperServiceFactory;
+use crate::router_factory::RouterServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::router::Request;
 use crate::services::supergraph;
@@ -2327,7 +2327,7 @@ async fn execute(
     let config: Configuration = serde_json_bytes::from_value(config).unwrap();
 
     let router_creator = factory
-        .create(
+        .create_pipeline(
             false,
             Arc::new(config.clone()),
             Arc::new(crate::spec::Schema::parse(schema, &config).unwrap()),

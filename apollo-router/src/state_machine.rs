@@ -17,7 +17,7 @@
 //!   input can make the combination succeed. This is deliberate and long-standing.
 //! - **The cheap checks and the permanent failures are the same set.** Schema parsing
 //!   and the two enforcement checks are pure; everything expensive and everything
-//!   retryable lives in `router_configurator.create()`, which builds the query planner,
+//!   retryable lives in `router_configurator.create_pipeline()`, which builds the query planner,
 //!   initializes plugins, and warms the query plan cache inline.
 //!
 //! `dev-docs/reload-lifecycle.md` covers all of this properly, including the cost model,
@@ -64,7 +64,7 @@ use crate::configuration::metrics::Metrics;
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::router::Event::UpdateLicense;
 use crate::router_factory::RouterFactory;
-use crate::router_factory::RouterSuperServiceFactory;
+use crate::router_factory::RouterServiceFactory;
 use crate::spec::Schema;
 use crate::uplink::feature_gate_enforcement::FeatureGateEnforcementReport;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
@@ -158,7 +158,7 @@ impl<T> PendingChange<T> {
 
 /// This state maintains private information that is not exposed to the user via state listener.
 #[allow(clippy::large_enum_variant)]
-enum State<FA: RouterSuperServiceFactory> {
+enum State<FA: RouterServiceFactory> {
     Startup {
         configuration: Option<Arc<Configuration>>,
         schema: Option<Arc<SchemaState>>,
@@ -203,7 +203,7 @@ enum State<FA: RouterSuperServiceFactory> {
     Errored(ApolloRouterError),
 }
 
-impl<FA: RouterSuperServiceFactory> Debug for State<FA> {
+impl<FA: RouterServiceFactory> Debug for State<FA> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Startup { .. } => write!(f, "Startup"),
@@ -263,7 +263,7 @@ impl ReloadError {
     }
 }
 
-impl<FA: RouterSuperServiceFactory> State<FA> {
+impl<FA: RouterServiceFactory> State<FA> {
     async fn no_more_configuration(self) -> Self {
         match self {
             Startup {
@@ -659,7 +659,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
     ) -> Result<(State<FA>, Arc<Schema>), ReloadError>
     where
         S: HttpServerFactory,
-        FA: RouterSuperServiceFactory,
+        FA: RouterServiceFactory,
     {
         let schema = Arc::new(
             Schema::parse_arc(schema_state.clone(), &configuration).map_err(|e| {
@@ -693,7 +693,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
 
         let router_service_factory = state_machine
             .router_configurator
-            .create(
+            .create_pipeline(
                 state_machine.is_telemetry_disabled,
                 configuration.clone(),
                 schema.clone(),
@@ -776,7 +776,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
 pub(crate) struct StateMachine<S, FA>
 where
     S: HttpServerFactory,
-    FA: RouterSuperServiceFactory,
+    FA: RouterServiceFactory,
 {
     is_telemetry_disabled: bool,
     http_server_factory: S,
@@ -790,7 +790,7 @@ where
 impl<S, FA> StateMachine<S, FA>
 where
     S: HttpServerFactory,
-    FA: RouterSuperServiceFactory + Send,
+    FA: RouterServiceFactory + Send,
     FA::RouterFactory: RouterFactory,
 {
     pub(crate) fn new(
@@ -1012,7 +1012,7 @@ mod tests {
     use crate::plugin::DynPlugin;
     use crate::router_factory::Endpoint;
     use crate::router_factory::RouterFactory;
-    use crate::router_factory::RouterSuperServiceFactory;
+    use crate::router_factory::RouterServiceFactory;
     use crate::services::router;
     use crate::services::router::pipeline_handle::PipelineHandle;
     use crate::uplink::license_enforcement::LicenseLimits;
@@ -2088,7 +2088,7 @@ mod tests {
     async fn router_factory_error_startup() {
         let mut router_factory = MockMyRouterConfigurator::new();
         router_factory
-            .expect_create()
+            .expect_create_pipeline()
             .times(1)
             .returning(|_, _, _, _, _, _| Err(BoxError::from("Error")));
 
@@ -2115,7 +2115,7 @@ mod tests {
         let mut seq = Sequence::new();
         let mut router_factory = MockMyRouterConfigurator::new();
         router_factory
-            .expect_create()
+            .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _, _, _, _, _| {
@@ -2125,7 +2125,7 @@ mod tests {
                 Ok(router)
             });
         router_factory
-            .expect_create()
+            .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _, _, _, _, _| Err(BoxError::from("error")));
@@ -2159,7 +2159,7 @@ mod tests {
         let mut seq = Sequence::new();
         let mut router_factory = MockMyRouterConfigurator::new();
         router_factory
-            .expect_create()
+            .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _, _, _, _, _| {
@@ -2169,12 +2169,12 @@ mod tests {
                 Ok(router)
             });
         router_factory
-            .expect_create()
+            .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _, _, _, _, _| Err(BoxError::from("error")));
         router_factory
-            .expect_create()
+            .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
             .withf(|_, configuration, _, _, _, _| configuration.homepage.enabled)
@@ -2317,10 +2317,10 @@ mod tests {
         MyRouterConfigurator {}
 
         #[async_trait::async_trait]
-        impl RouterSuperServiceFactory for MyRouterConfigurator {
+        impl RouterServiceFactory for MyRouterConfigurator {
             type RouterFactory = MockMyRouterFactory;
 
-            async fn create(
+            async fn create_pipeline(
                 &mut self,
                 is_telemetry_disabled: bool,
                 configuration: Arc<Configuration>,
@@ -2447,7 +2447,7 @@ mod tests {
         let mut router_factory = MockMyRouterConfigurator::new();
 
         router_factory
-            .expect_create()
+            .expect_create_pipeline()
             .times(if expect_times_called > 1 {
                 1
             } else {
@@ -2463,7 +2463,7 @@ mod tests {
         // verify reloads have the last previous_router_service_factory parameter
         if expect_times_called > 0 {
             router_factory
-                .expect_create()
+                .expect_create_pipeline()
                 .times(expect_times_called - 1)
                 .withf(
                     move |_,
@@ -2490,7 +2490,7 @@ mod tests {
         let mut router_factory = MockMyRouterConfigurator::new();
 
         router_factory
-            .expect_create()
+            .expect_create_pipeline()
             .times(expect_times_called)
             .returning(move |_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
@@ -2524,14 +2524,14 @@ mod tests {
         }
 
         /// Build a factory from a sequence of outcomes: `Ok(())` → one successful
-        /// `create()` call, `Err(())` → one failing call.  Ordering is enforced by a
+        /// `create_pipeline()` call, `Err(())` → one failing call.  Ordering is enforced by a
         /// mockall `Sequence` (the Arc counter inside it outlives the helper frame).
         fn factory(outcomes: &[Result<(), ()>]) -> MockMyRouterConfigurator {
             let mut seq = Sequence::new();
             let mut factory = MockMyRouterConfigurator::new();
             for &outcome in outcomes {
                 factory
-                    .expect_create()
+                    .expect_create_pipeline()
                     .times(1)
                     .in_sequence(&mut seq)
                     .returning(move |_, _, _, _, _, _| {
@@ -2614,7 +2614,7 @@ mod tests {
 
             /// Shut down and assert the state machine exited cleanly.
             /// Dropping `self` also drops the mock router factory, which causes
-            /// mockall to assert that all expected `create()` calls were made.
+            /// mockall to assert that all expected `create_pipeline()` calls were made.
             async fn finish(self) {
                 self.tx.send(Shutdown).await.unwrap();
                 drop(self.tx);
@@ -2779,7 +2779,7 @@ mod tests {
         }
 
         /// A schema that does not parse — the cheapest permanent failure to trigger,
-        /// and one that fails before `create()` is ever reached.
+        /// and one that fails before `create_pipeline()` is ever reached.
         fn unparseable_schema() -> SchemaState {
             SchemaState {
                 sdl: "this is not valid graphql".to_owned(),
@@ -2790,14 +2790,14 @@ mod tests {
         // A permanent failure must disarm the retry timer rather than churn on it: the
         // same inputs will fail in the same place every time.
         //
-        // These failures happen early in try_start, before `create()` is reached, so the
+        // These failures happen early in try_start, before `create_pipeline()` is reached, so the
         // mock router factory's call count cannot observe the retries at all — it would
         // pass whether or not the timer fired. Assert on the state machine's own
         // transition signal instead: every loop iteration notifies exactly once, so a
         // retry that fires leaves a permit behind.
         #[test(tokio::test(start_paused = true))]
         async fn permanent_failure_stops_retrying() {
-            // Only the startup build: the unparseable schema never reaches create().
+            // Only the startup build: the unparseable schema never reaches create_pipeline().
             let harness = Harness::new(factory(&[Ok(())]), 1);
             harness.startup().await;
             harness
@@ -2826,7 +2826,7 @@ mod tests {
             let harness = Harness::new(factory(&[Ok(())]), 1);
             harness.startup().await;
             // Publishing a configuration that uses restricted features is a violation,
-            // and fails before create().
+            // and fails before create_pipeline().
             harness
                 .send_and_wait(UpdateConfiguration(test_config_restricted()))
                 .await;
@@ -2847,7 +2847,7 @@ mod tests {
         #[test(tokio::test(start_paused = true))]
         async fn permanent_failure_recovers_on_new_input() {
             // Startup, then one more build for the good schema published after the
-            // unparseable one; the unparseable schema itself never reaches create().
+            // unparseable one; the unparseable schema itself never reaches create_pipeline().
             let harness = Harness::new(factory(&[Ok(()), Ok(())]), 2);
             harness.startup().await;
             harness
@@ -2870,7 +2870,7 @@ mod tests {
                 let harness = Harness::new(factory(&[Ok(()), Err(()), Ok(())]), 2);
                 harness.startup_with_config(zero_retries).await;
 
-                // A failing create() is transient: the same inputs may well build next time.
+                // A failing create_pipeline() is transient: the same inputs may well build next time.
                 harness.send_and_wait(UpdateSchema(minimal_schema())).await;
                 assert_counter!(
                     "apollo.router.state.reload.attempt",
