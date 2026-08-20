@@ -550,6 +550,18 @@ async fn add_plugin(
     }
 }
 
+/// Instantiates every plugin in the order below, then returns them keyed by name.
+///
+/// Each Apollo plugin is added through one of three macros:
+///
+/// - `add_mandatory_apollo_plugin!` instantiates the plugin even with no user config for it.
+/// - `add_optional_apollo_plugin!` instantiates the plugin only if configured. The license's
+///   allowed features gate it.
+/// - `add_oss_apollo_plugin!` instantiates the plugin only if configured, with no license
+///   check.
+///
+/// The macros exist to avoid repeating the several arguments every plugin construction
+/// needs; each forwards to [`add_plugin`].
 pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
@@ -797,11 +809,18 @@ pub(crate) async fn create_plugins(
     // router-service hook is an infallible `map_request` (eg `headers`, which only injects
     // `MaskingRulesMap` into context) may appear before telemetry without breaking this
     // invariant — they can't short-circuit a request away from telemetry.
-    add_mandatory_apollo_plugin!("include_subgraph_errors");
-    add_mandatory_apollo_plugin!("headers");
+    //
+    // Each entry below names the services the plugin hooks. Two plugins whose hooked
+    // services don't overlap can be reordered relative to each other; the annotations make
+    // that check possible without reading every plugin's source.
+    add_mandatory_apollo_plugin!("include_subgraph_errors"); // supergraph, subgraph
+    add_mandatory_apollo_plugin!("headers"); // router, subgraph, connector_request
     if apollo_telemetry_plugin_mandatory {
         match initial_telemetry_plugin {
             None => {
+                // router, supergraph, execution, subgraph, connector_request, http_client —
+                // must come before any plugin below that can reject a request at the router
+                // service, so telemetry records the rejection.
                 add_mandatory_apollo_plugin!("telemetry");
             }
             Some(plugin) => {
@@ -811,35 +830,35 @@ pub(crate) async fn create_plugins(
             }
         }
     }
-    add_mandatory_apollo_plugin!("license_enforcement");
-    add_mandatory_apollo_plugin!("health_check");
-    add_mandatory_apollo_plugin!("traffic_shaping");
-    add_mandatory_apollo_plugin!("limits");
-    add_mandatory_apollo_plugin!("csrf");
-    add_mandatory_apollo_plugin!("fleet_detector");
-    add_mandatory_apollo_plugin!("enhanced_client_awareness");
-    add_mandatory_apollo_plugin!("experimental_diagnostics");
+    add_mandatory_apollo_plugin!("license_enforcement"); // router
+    add_mandatory_apollo_plugin!("health_check"); // router
+    add_mandatory_apollo_plugin!("traffic_shaping"); // router, subgraph, connector_request
+    add_mandatory_apollo_plugin!("limits"); // router, subgraph, connector_request
+    add_mandatory_apollo_plugin!("csrf"); // router
+    add_mandatory_apollo_plugin!("fleet_detector"); // router, http_client
+    add_mandatory_apollo_plugin!("enhanced_client_awareness"); // supergraph
+    add_mandatory_apollo_plugin!("experimental_diagnostics"); // no service hooks
 
-    add_oss_apollo_plugin!("forbid_mutations");
-    add_optional_apollo_plugin!("subscription");
-    add_oss_apollo_plugin!("override_subgraph_url");
-    add_optional_apollo_plugin!("authorization");
-    add_optional_apollo_plugin!("authentication");
-    add_oss_apollo_plugin!("preview_file_uploads");
-    add_mandatory_apollo_plugin!("progressive_override");
-    add_optional_apollo_plugin!("demand_control");
+    add_oss_apollo_plugin!("forbid_mutations"); // execution
+    add_optional_apollo_plugin!("subscription"); // subgraph
+    add_oss_apollo_plugin!("override_subgraph_url"); // subgraph
+    add_optional_apollo_plugin!("authorization"); // supergraph, execution
+    add_optional_apollo_plugin!("authentication"); // router, subgraph, connector_request
+    add_oss_apollo_plugin!("preview_file_uploads"); // router, supergraph, execution, subgraph, http_client
+    add_mandatory_apollo_plugin!("progressive_override"); // router, supergraph
+    add_optional_apollo_plugin!("demand_control"); // execution, subgraph
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
-    add_oss_apollo_plugin!("connectors");
-    add_oss_apollo_plugin!("rhai");
-    add_optional_apollo_plugin!("coprocessor");
-    add_optional_apollo_plugin!("response_cache");
+    add_oss_apollo_plugin!("connectors"); // supergraph, execution
+    add_oss_apollo_plugin!("rhai"); // router, supergraph, execution, subgraph
+    add_optional_apollo_plugin!("coprocessor"); // router, supergraph, execution, subgraph, connector_request
+    add_optional_apollo_plugin!("response_cache"); // supergraph, subgraph
     add_user_plugins!();
 
     // Because this plugin intercepts subgraph requests
     // and does not forward them to the next service in the chain,
     // it needs to intervene after user plugins for users plugins to run at all.
-    add_optional_apollo_plugin!("experimental_mock_subgraphs");
+    add_optional_apollo_plugin!("experimental_mock_subgraphs"); // subgraph
 
     // Macros above remove from `apollo_plugin_factories`, so anything left at the end
     // indicates a missing macro call.
