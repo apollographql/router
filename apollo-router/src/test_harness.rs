@@ -19,6 +19,7 @@ use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::graphql;
+use crate::pipeline::Pipeline;
 use crate::pipeline::build_apq_expander;
 use crate::pipeline::build_http_services;
 use crate::pipeline::build_query_plan_cache;
@@ -44,7 +45,6 @@ use crate::services::Plugins;
 use crate::services::execution;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::router;
-use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
@@ -452,7 +452,7 @@ impl<'a> TestHarness<'a> {
         let query_parsing_service = query_parsing_service(schema.clone(), config.clone());
 
         let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await?);
-        let router_creator = RouterCreator::new(
+        let pipeline = Pipeline::new(
             Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             apq_expander,
             supergraph_service,
@@ -464,9 +464,7 @@ impl<'a> TestHarness<'a> {
         );
 
         Ok(tower::service_fn(move |request: router::Request| {
-            let router = ServiceBuilder::new()
-                .service(router_creator.create())
-                .boxed();
+            let router = ServiceBuilder::new().service(pipeline.create()).boxed();
             let span = PropagatingMakeSpan {
                 license: Default::default(),
             }
@@ -488,7 +486,7 @@ impl<'a> TestHarness<'a> {
         let query_parsing_service = query_parsing_service(schema.clone(), config.clone());
 
         let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await?);
-        let router_creator = RouterCreator::new(
+        let pipeline = Pipeline::new(
             Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             apq_expander,
             supergraph_service,
@@ -499,7 +497,7 @@ impl<'a> TestHarness<'a> {
             config.clone(),
         );
 
-        let web_endpoints = router_creator.web_endpoints();
+        let web_endpoints = pipeline.web_endpoints();
 
         let routers = make_axum_router(
             &config,
@@ -512,7 +510,7 @@ impl<'a> TestHarness<'a> {
 
         // The router reads its pipeline from a request extension, which the server factory
         // populates. Add the same extension here so the returned service is callable.
-        let router_service = connection_router_service(router_creator.create());
+        let router_service = connection_router_service(pipeline.create());
         let router = ServiceBuilder::new()
             .layer(tower_http::add_extension::AddExtensionLayer::new(
                 router_service,

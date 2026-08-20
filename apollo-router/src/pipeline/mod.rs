@@ -15,7 +15,12 @@
 
 use std::sync::Arc;
 
+#[cfg(test)]
+use futures::future::BoxFuture;
+use multimap::MultiMap;
 use tower::BoxError;
+#[cfg(test)]
+use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing::Instrument;
@@ -37,11 +42,24 @@ pub(crate) use self::stages::build_query_plan_cache;
 pub(crate) use self::stages::build_supergraph_pipeline;
 pub(crate) use self::stages::create_subgraph_services;
 pub(crate) use self::stages::query_parsing_service;
+use crate::Endpoint;
+use crate::ListenAddr;
 use crate::configuration::Configuration;
+use crate::layers::InternalServiceBuilderExt as _;
 use crate::plugin::DynPlugin;
 use crate::query_planner::InMemoryQueryPlanCache;
 use crate::query_planner::warmup;
-use crate::services::router::service::RouterCreator;
+use crate::router_factory::RouterFactory;
+use crate::services::Plugins;
+use crate::services::layers::apq::APQExpander;
+use crate::services::layers::content_negotiation;
+use crate::services::layers::persisted_queries::PersistedQueryExpander;
+use crate::services::layers::static_page::StaticPageLayer;
+use crate::services::query_parsing;
+use crate::services::router;
+use crate::services::router::pipeline_handle::PipelineHandle;
+use crate::services::router::service::RouterService;
+use crate::services::supergraph;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
@@ -63,7 +81,7 @@ pub(crate) async fn build_pipeline(
     previous_cache: Option<InMemoryQueryPlanCache>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     license: Arc<LicenseState>,
-) -> Result<RouterCreator, BoxError> {
+) -> Result<Pipeline, BoxError> {
     let Acquired {
         query_planner_service,
         subgraph_schemas,
@@ -93,7 +111,7 @@ pub(crate) async fn build_pipeline(
         }
     }
 
-    let router_creator = async {
+    let pipeline = async {
         let query_plan_cache = build_query_plan_cache(&configuration, query_plan_redis);
         let apq_expander = build_apq_expander(&configuration, apq_redis);
         let query_parsing_service = query_parsing_service(schema.clone(), configuration.clone());
@@ -118,7 +136,7 @@ pub(crate) async fn build_pipeline(
             )
         };
 
-        let router_creator = RouterCreator::new(
+        let pipeline = Pipeline::new(
             persisted_queries.clone(),
             apq_expander,
             supergraph_service,
@@ -147,10 +165,190 @@ pub(crate) async fn build_pipeline(
         .instrument(tracing::info_span!("warmup"))
         .await;
 
-        router_creator
+        pipeline
     }
     .instrument(tracing::info_span!("assemble"))
     .await;
 
-    Ok(router_creator)
+    Ok(pipeline)
+}
+
+/// A collection of services and data which may be used to create a "router".
+#[derive(Clone)]
+pub(crate) struct Pipeline {
+    pub(crate) schema: Arc<Schema>,
+    pub(crate) plugins: Arc<Plugins>,
+    in_memory_query_plan_cache: InMemoryQueryPlanCache,
+    service: router::BoxCloneService,
+    pipeline_handle: Arc<PipelineHandle>,
+    /// The configuration used to create this router, stored for hot reload previous config extraction
+    pub(crate) configuration: Arc<Configuration>,
+}
+
+impl RouterFactory for Pipeline {
+    fn create(&self) -> router::BoxCloneService {
+        self.service.clone()
+    }
+
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        let mut mm = MultiMap::new();
+        self.plugins
+            .values()
+            .for_each(|p| mm.extend(p.web_endpoints()));
+        mm
+    }
+
+    fn pipeline_handle(&self) -> Arc<PipelineHandle> {
+        self.pipeline_handle.clone()
+    }
+}
+
+impl Pipeline {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        persisted_queries: Arc<PersistedQueryExpander>,
+        apq_expander: APQExpander,
+        supergraph_service: supergraph::BoxCloneService,
+        schema: Arc<Schema>,
+        plugins: Arc<Plugins>,
+        in_memory_query_plan_cache: InMemoryQueryPlanCache,
+        query_parsing_service: query_parsing::BoxCloneService,
+        configuration: Arc<Configuration>,
+    ) -> Self {
+        let static_page = StaticPageLayer::new(&configuration);
+
+        // Create a handle that will help us keep track of this pipeline.
+        // A metric is exposed that allows the user to see if pipelines are being hung onto.
+        let schema_id = schema.schema_id.to_string();
+        let launch_id = schema
+            .launch_id
+            .as_ref()
+            .map(|launch_id| launch_id.to_string());
+        let config_hash = configuration.hash();
+        let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
+
+        let router_service = RouterService::new(
+            supergraph_service,
+            apq_expander,
+            persisted_queries,
+            query_parsing_service,
+            schema.clone(),
+            &configuration,
+            configuration.batching.clone(),
+        );
+
+        let service = ServiceBuilder::new()
+            .layer(static_page.clone())
+            .rust_plugins(plugins.clone(), |plugin, service| {
+                plugin.router_service(service)
+            })
+            .layer(content_negotiation::RouterContentNegotiationLayer::default())
+            .service(router_service)
+            .boxed_clone();
+
+        Self {
+            schema,
+            plugins,
+            in_memory_query_plan_cache,
+            service,
+            pipeline_handle: Arc::new(pipeline_handle),
+            configuration,
+        }
+    }
+
+    pub(crate) fn previous_cache(&self) -> InMemoryQueryPlanCache {
+        self.in_memory_query_plan_cache.clone()
+    }
+}
+
+#[cfg(test)]
+pub(crate) async fn from_supergraph_mock_with_configuration(
+    mock: tower_test::mock::Mock<supergraph::Request, supergraph::Response>,
+    configuration: Arc<Configuration>,
+) -> impl Service<
+    router::Request,
+    Response = router::Response,
+    Error = BoxError,
+    Future = BoxFuture<'static, router::ServiceResult>,
+> + Send
++ Clone {
+    let (_, schema, plugins, supergraph_service, in_memory_query_plan_cache) =
+        crate::TestHarness::builder()
+            .configuration(configuration.clone())
+            .supergraph_hook(move |_| mock.clone().boxed_clone())
+            .build_common()
+            .await
+            .unwrap();
+
+    let query_parsing_service = query_parsing_service(schema.clone(), configuration.clone());
+
+    let apq_expander = build_apq_expander(
+        &configuration,
+        connect_apq_redis(&configuration).await.unwrap(),
+    );
+
+    Pipeline::new(
+        Arc::new(PersistedQueryExpander::new(&configuration).await.unwrap()),
+        apq_expander,
+        supergraph_service,
+        schema,
+        plugins,
+        in_memory_query_plan_cache,
+        query_parsing_service,
+        configuration,
+    )
+    .create()
+}
+
+#[cfg(test)]
+pub(crate) async fn from_supergraph_mock(
+    mock: tower_test::mock::Mock<supergraph::Request, supergraph::Response>,
+) -> impl Service<
+    router::Request,
+    Response = router::Response,
+    Error = BoxError,
+    Future = BoxFuture<'static, router::ServiceResult>,
+> + Send
++ Clone {
+    from_supergraph_mock_with_configuration(mock, Arc::new(Configuration::default())).await
+}
+
+#[cfg(test)]
+pub(crate) async fn empty() -> impl Service<
+    router::Request,
+    Response = router::Response,
+    Error = BoxError,
+    Future = BoxFuture<'static, router::ServiceResult>,
+> + Send {
+    // The handle is intentionally discarded — empty() creates a service that is never expected
+    // to be called. Any call would block indefinitely.
+    let (mock, _handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+
+    let configuration = Arc::new(Configuration::default());
+    let (_, schema, plugins, supergraph_service, in_memory_query_plan_cache) =
+        crate::TestHarness::builder()
+            .configuration(configuration.clone())
+            .supergraph_hook(move |_| mock.clone().boxed_clone())
+            .build_common()
+            .await
+            .unwrap();
+
+    let query_parsing_service = query_parsing_service(schema.clone(), configuration.clone());
+
+    let apq_expander = build_apq_expander(
+        &configuration,
+        connect_apq_redis(&configuration).await.unwrap(),
+    );
+
+    Pipeline::new(
+        Arc::new(PersistedQueryExpander::new(&configuration).await.unwrap()),
+        apq_expander,
+        supergraph_service,
+        schema,
+        plugins,
+        in_memory_query_plan_cache,
+        query_parsing_service,
+        configuration,
+    )
+    .create()
 }

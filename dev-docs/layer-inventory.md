@@ -39,7 +39,7 @@ The router service consists of some layers in "front" of the service "proper", a
 
 I suspect that this is bad and that we should try to make all these layers part of a straightforward tower service stack.
 
-Front (`RouterCreator`):
+Front (`Pipeline::new`):
 - StaticPageLayer
   - If configured, responds to any request that accepts a "text/html" response (*at all*, regardless of preference), with a fixed HTML response.
   - This must occur before content negotiation, which rejects "Accept: text/html" requests.

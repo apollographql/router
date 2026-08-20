@@ -20,10 +20,10 @@ use uuid::Uuid;
 use crate::Configuration;
 use crate::configuration::generate_config_schema;
 use crate::executable::Opt;
+use crate::pipeline::Pipeline;
 use crate::plugin::DynPlugin;
 use crate::router_factory::RouterServiceFactory;
 use crate::router_factory::YamlRouterFactory;
-use crate::services::router::service::RouterCreator;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
@@ -91,7 +91,7 @@ pub(crate) struct OrbiterRouterSuperServiceFactory {
 
 #[async_trait]
 impl RouterServiceFactory for OrbiterRouterSuperServiceFactory {
-    type RouterFactory = RouterCreator;
+    type RouterFactory = Pipeline;
 
     async fn create_pipeline(
         &mut self,

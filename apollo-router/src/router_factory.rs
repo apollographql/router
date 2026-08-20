@@ -15,11 +15,11 @@ use crate::ListenAddr;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::configuration::TlsClient;
+use crate::pipeline::Pipeline;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
-use crate::services::router::service::RouterCreator;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
@@ -153,7 +153,7 @@ pub(crate) struct YamlRouterFactory;
 
 #[async_trait::async_trait]
 impl RouterServiceFactory for YamlRouterFactory {
-    type RouterFactory = RouterCreator;
+    type RouterFactory = Pipeline;
 
     async fn create_pipeline(
         &mut self,

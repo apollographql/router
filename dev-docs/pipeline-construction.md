@@ -37,14 +37,14 @@ sequenceDiagram
         BP->>BP: build_http_services (from parsed TLS material)
         BP->>BP: create_subgraph_services
         BP->>BP: build_supergraph_pipeline (execution + supergraph stacks)
-        BP->>BP: RouterCreator::new (router stack)
+        BP->>BP: Pipeline::new (router stack)
         BP->>BP: warm up query plan cache
     end
 
-    BP-->>SM: RouterCreator (router service, plugins, cache handle, pipeline handle)
+    BP-->>SM: Pipeline (router service, plugins, cache handle, pipeline handle)
 ```
 
-The state machine holds the returned `RouterCreator` across reloads: it implements `RouterFactory` (per-request `create()`, `web_endpoints()`, `pipeline_handle()`) and supplies the previous configuration and in-memory query-plan cache when the next reload builds its successor.
+The state machine holds the returned `Pipeline` across reloads: it implements `RouterFactory` (per-request `create()`, `web_endpoints()`, `pipeline_handle()`) and supplies the previous configuration and in-memory query-plan cache when the next reload builds its successor.
 
 ### Why the split is sound
 
@@ -59,7 +59,7 @@ Every fallible step in construction is resource acquisition — parsing config-s
 | `connect_query_plan_redis` / `connect_apq_redis` | the Redis client connect (`connect_redis`), honoring `required_to_start` |
 | `PersistedQueryExpander::new` | persisted-query manifest fetch |
 
-The assemble functions are infallible at the signature level: caches build from pre-connected clients (`DeduplicatingCache::with_capacity`), HTTP client services build from pre-parsed `HttpClientMaterial`, and the service stacks (`build_execution_service`, `build_supergraph_service`, `RouterCreator::new`) are infallible plain functions — tower assembly plus creating the pipeline handle. Query-plan warmup returns `()`.
+The assemble functions are infallible at the signature level: caches build from pre-connected clients (`DeduplicatingCache::with_capacity`), HTTP client services build from pre-parsed `HttpClientMaterial`, and the service stacks (`build_execution_service`, `build_supergraph_service`, `Pipeline::new`) are infallible plain functions — tower assembly plus creating the pipeline handle. Query-plan warmup returns `()`.
 
 ### Telemetry instruments and the phases
 
@@ -95,5 +95,5 @@ Construction is slow enough to need its own observability — a reload blocks on
 | Query parsing stack assembly | `query_parsing_service` | `pipeline/stages.rs` |
 | HTTP client + subgraph service assembly | `build_http_services`, `create_subgraph_services` | `pipeline/stages.rs` |
 | Execution + supergraph stack assembly | `build_supergraph_pipeline`, `build_execution_service`, `build_supergraph_service` | `pipeline/stages.rs` |
-| Router stack assembly | `RouterCreator::new` | `services/router/service.rs` |
-| The persistent pipeline | `RouterCreator` (impl `RouterFactory`) | `services/router/service.rs` |
+| Router stack assembly | `Pipeline::new` | `pipeline/mod.rs` |
+| The persistent pipeline | `Pipeline` (impl `RouterFactory`) | `pipeline/mod.rs` |

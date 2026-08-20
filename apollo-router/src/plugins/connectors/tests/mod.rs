@@ -2326,7 +2326,7 @@ async fn execute(
     };
     let config: Configuration = serde_json_bytes::from_value(config).unwrap();
 
-    let router_creator = factory
+    let pipeline = factory
         .create_pipeline(
             false,
             Arc::new(config.clone()),
@@ -2337,7 +2337,7 @@ async fn execute(
         )
         .await
         .unwrap();
-    let service = router_creator.create();
+    let service = pipeline.create();
 
     let mut request = supergraph::Request::fake_builder()
         .query(query)

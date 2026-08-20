@@ -2,9 +2,8 @@ use std::sync::Arc;
 
 use crate::metrics::UpDownCounterGuard;
 
-/// A pipeline is used to keep track of how many pipelines we have active. It's associated with an instance of RouterCreator
-/// The telemetry plugin has a gauge to expose this data
-/// Pipeline ref represents a unique pipeline
+/// Identifies one built pipeline, so the telemetry plugin's gauge can report how many
+/// pipelines are still alive. Each [`crate::pipeline::Pipeline`] carries one.
 #[derive(Clone, Hash, Eq, PartialEq, Debug)]
 pub(crate) struct PipelineRef {
     pub(crate) schema_id: String,

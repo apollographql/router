@@ -674,7 +674,7 @@ mod tests {
         let configuration = Configuration::fake_builder().build().unwrap();
 
         init_with_config(
-            router::service::empty().await,
+            crate::pipeline::empty().await,
             Arc::new(configuration),
             MultiMap::new(),
         )
@@ -716,7 +716,7 @@ mod tests {
         );
 
         let error = init_with_config(
-            router::service::empty().await,
+            crate::pipeline::empty().await,
             Arc::new(configuration),
             web_endpoints,
         )
@@ -756,7 +756,7 @@ mod tests {
             Endpoint::from_router_service("/".to_string(), endpoint),
         );
 
-        let error = init_with_config(router::service::empty().await, Arc::new(configuration), mm)
+        let error = init_with_config(crate::pipeline::empty().await, Arc::new(configuration), mm)
             .await
             .unwrap_err();
 
@@ -807,7 +807,7 @@ mod tests {
                 req.context,
             ));
         });
-        let router_service = router::service::from_supergraph_mock_with_configuration(
+        let router_service = crate::pipeline::from_supergraph_mock_with_configuration(
             router_mock,
             configuration.clone(),
         )
@@ -861,7 +861,7 @@ mod tests {
                     .unwrap(),
             );
 
-            let router_service = router::service::empty().await;
+            let router_service = crate::pipeline::empty().await;
             let (server, _) = init_with_config(router_service, conf, MultiMap::new())
                 .await
                 .unwrap();
@@ -908,7 +908,7 @@ mod tests {
             //
             // reqwest rejects URLs this long before even connecting, so we use a raw TCP
             // stream and write the HTTP request manually.
-            let router_service = router::service::empty().await;
+            let router_service = crate::pipeline::empty().await;
             let (server, _) = init_with_config(
                 router_service,
                 Arc::new(Configuration::fake_builder().build().unwrap()),

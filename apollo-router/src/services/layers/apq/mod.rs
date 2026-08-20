@@ -246,9 +246,9 @@ mod apq_tests {
     use crate::Context;
     use crate::assert_error_eq_ignoring_id;
     use crate::error::Error;
+    use crate::pipeline::from_supergraph_mock;
+    use crate::pipeline::from_supergraph_mock_with_configuration;
     use crate::services::router::ClientRequestAccepts;
-    use crate::services::router::service::from_supergraph_mock;
-    use crate::services::router::service::from_supergraph_mock_with_configuration;
 
     #[tokio::test]
     async fn it_works() {

@@ -685,6 +685,7 @@ mod test {
     use crate::Configuration;
     use crate::Context;
     use crate::json_ext::Object;
+    use crate::pipeline::Pipeline;
     use crate::pipeline::build_apq_expander;
     use crate::pipeline::build_query_plan_cache;
     use crate::pipeline::build_supergraph_pipeline;
@@ -702,7 +703,6 @@ mod test {
     use crate::services::connector::request_service::Request as ConnectorRequest;
     use crate::services::layers::persisted_queries::PersistedQueryExpander;
     use crate::services::router;
-    use crate::services::router::service::RouterCreator;
     use crate::spec::Schema;
 
     static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
@@ -837,7 +837,7 @@ mod test {
         );
 
         let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await.unwrap());
-        RouterCreator::new(
+        Pipeline::new(
             Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             apq_expander,
             supergraph_service,

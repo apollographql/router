@@ -181,7 +181,7 @@ mod tests {
                     .unwrap(),
             );
         });
-        let mock_router_service = router::service::from_supergraph_mock(router_mock).await;
+        let mock_router_service = crate::pipeline::from_supergraph_mock(router_mock).await;
 
         let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
             crate::services::http::HttpRequest,
@@ -2147,7 +2147,7 @@ mod tests {
                     .unwrap(),
             );
         });
-        let mock_router_service = router::service::from_supergraph_mock(router_mock).await;
+        let mock_router_service = crate::pipeline::from_supergraph_mock(router_mock).await;
 
         let (mock_http_client, http_handle) = tower_test::mock::pair::<
             crate::services::http::HttpRequest,
@@ -2545,7 +2545,7 @@ mod tests {
                     .unwrap(),
             );
         });
-        let mock_router_service = router::service::from_supergraph_mock(router_mock).await;
+        let mock_router_service = crate::pipeline::from_supergraph_mock(router_mock).await;
 
         let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
             crate::services::http::HttpRequest,
