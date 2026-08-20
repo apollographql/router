@@ -95,6 +95,7 @@ mod uplink;
 pub(crate) mod allocator;
 mod registry;
 
+pub use crate::axum_factory::Endpoint;
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
 pub use crate::context::Context;
@@ -109,7 +110,6 @@ pub use crate::router::LicenseSource;
 pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
-pub use crate::router_factory::Endpoint;
 pub use crate::test_harness::MockedSubgraphs;
 pub use crate::test_harness::TestHarness;
 #[cfg(any(test, feature = "snapshot"))]

@@ -1,23 +1,14 @@
-use std::io;
 use std::sync::Arc;
 
-use axum::response::IntoResponse;
-use http::StatusCode;
 use multimap::MultiMap;
-use rustls::RootCertStore;
-use rustls::pki_types::CertificateDer;
 use tower::BoxError;
-use tower::ServiceExt;
-use tower::service_fn;
 use tracing::Instrument;
 
 use crate::ListenAddr;
+use crate::axum_factory::Endpoint;
 use crate::configuration::Configuration;
-use crate::configuration::ConfigurationError;
-use crate::configuration::TlsClient;
 use crate::pipeline::Pipeline;
 use crate::plugin::DynPlugin;
-use crate::plugin::Handler;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::spec::Schema;
@@ -25,94 +16,6 @@ use crate::uplink::license_enforcement::LicenseState;
 
 pub(crate) const STARTING_SPAN_NAME: &str = "starting";
 
-#[derive(Clone)]
-/// A path and a handler to be exposed as a web_endpoint for plugins
-pub struct Endpoint {
-    pub(crate) path: String,
-    // Plugins need to be Send + Sync
-    // BoxCloneService isn't enough
-    handler: EndpointHandler,
-}
-
-#[derive(Clone)]
-enum EndpointHandler {
-    /// Legacy handler wrapping a router service
-    Service(Handler),
-    /// Direct axum router (bypasses service conversion)
-    Router(axum::Router),
-}
-
-impl std::fmt::Debug for Endpoint {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Endpoint")
-            .field("path", &self.path)
-            .finish()
-    }
-}
-
-impl Endpoint {
-    /// Creates an Endpoint given a path and a Boxed Service
-    pub fn from_router_service(path: String, handler: router::BoxCloneService) -> Self {
-        Self {
-            path,
-            handler: EndpointHandler::Service(Handler::new(handler)),
-        }
-    }
-
-    /// Creates an Endpoint given a path and an axum Router
-    ///
-    /// This is the preferred method for plugins that use axum internally,
-    /// as it avoids unnecessary service wrapping and path manipulation.
-    ///
-    /// The router will be automatically nested at the specified path, allowing
-    /// it to handle all sub-routes. For example, a router registered at `/diagnostics`
-    /// will handle `/diagnostics/`, `/diagnostics/memory/status`, etc.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use axum::{Router, routing::get};
-    ///
-    /// let router = Router::new()
-    ///     .route("/", get(handle_dashboard))
-    ///     .route("/status", get(handle_status));
-    ///
-    /// let endpoint = Endpoint::from_router("/diagnostics".to_string(), router);
-    /// // This will handle:
-    /// // - /diagnostics/
-    /// // - /diagnostics/status
-    /// ```
-    pub(crate) fn from_router(path: String, router: axum::Router) -> Self {
-        Self {
-            path,
-            handler: EndpointHandler::Router(router),
-        }
-    }
-
-    pub(crate) fn into_router(self) -> axum::Router {
-        match self.handler {
-            // If we already have a router, just nest it at the path
-            EndpointHandler::Router(router) => axum::Router::new().nest(&self.path, router),
-            // Legacy service handling with path-based routing
-            EndpointHandler::Service(handler) => {
-                let handler_clone = handler.clone();
-                let handler = move |req: http::Request<axum::body::Body>| {
-                    let endpoint = handler_clone.clone();
-                    async move {
-                        Ok(endpoint
-                            .oneshot(req.into())
-                            .await
-                            .map(|res| res.response)
-                            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
-                            .into_response())
-                    }
-                };
-
-                axum::Router::new().route_service(self.path.as_str(), service_fn(handler))
-            }
-        }
-    }
-}
 /// Factory for creating a router service instance.
 ///
 /// The HTTP server calls `create` once per reload and shares the resulting
@@ -179,52 +82,6 @@ impl RouterServiceFactory for YamlRouterFactory {
         .instrument(tracing::info_span!(STARTING_SPAN_NAME))
         .await
     }
-}
-
-impl TlsClient {
-    pub(crate) fn create_certificate_store(
-        &self,
-    ) -> Option<Result<RootCertStore, ConfigurationError>> {
-        self.certificate_authorities
-            .as_deref()
-            .map(create_certificate_store)
-    }
-}
-
-pub(crate) fn create_certificate_store(
-    certificate_authorities: &str,
-) -> Result<RootCertStore, ConfigurationError> {
-    let mut store = RootCertStore::empty();
-    let certificates = load_certs(certificate_authorities).map_err(|e| {
-        ConfigurationError::CertificateAuthorities {
-            error: format!("could not parse the certificate list: {e}"),
-        }
-    })?;
-    for certificate in certificates {
-        store
-            .add(certificate)
-            .map_err(|e| ConfigurationError::CertificateAuthorities {
-                error: format!("could not add certificate to root store: {e}"),
-            })?;
-    }
-    if store.is_empty() {
-        Err(ConfigurationError::CertificateAuthorities {
-            error: "the certificate list is empty".to_string(),
-        })
-    } else {
-        Ok(store)
-    }
-}
-
-fn load_certs(certificates: &str) -> io::Result<Vec<CertificateDer<'static>>> {
-    tracing::debug!("loading root certificates");
-
-    // Load and return certificate.
-    rustls_pemfile::certs(&mut certificates.as_bytes())
-        .collect::<Result<Vec<_>, _>>()
-        // XXX(@goto-bus-stop): the error type here is already io::Error. Should we wrap it,
-        // instead of replacing it with this generic error message?
-        .map_err(|_| io::Error::other("failed to load certificate"))
 }
 
 /// test only helper method to create a router factory in integration tests

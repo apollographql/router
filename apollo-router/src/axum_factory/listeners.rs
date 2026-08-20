@@ -35,6 +35,7 @@ use tower_service::Service;
 
 use crate::ListenAddr;
 use crate::axum_factory::ENDPOINT_CALLBACK;
+use crate::axum_factory::Endpoint;
 use crate::axum_factory::connection_handle::ConnectionHandle;
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::axum_factory::utils::ConnectionRouterService;
@@ -44,7 +45,6 @@ use crate::http_server_factory::NetworkStream;
 use crate::metrics::FutureMetricsExt;
 use crate::plugins::telemetry::pipeline_bypass::record_rejected_request;
 use crate::router::ApolloRouterError;
-use crate::router_factory::Endpoint;
 use crate::services::router::pipeline_handle::PipelineHandle;
 
 static MAX_FILE_HANDLES_WARN: AtomicBool = AtomicBool::new(false);

@@ -1006,11 +1006,11 @@ mod tests {
 
     use super::*;
     use crate::AllowedFeature;
+    use crate::axum_factory::Endpoint;
     use crate::configuration::Homepage;
     use crate::http_server_factory::Listener;
     use crate::metrics::FutureMetricsExt;
     use crate::plugin::DynPlugin;
-    use crate::router_factory::Endpoint;
     use crate::router_factory::RouterFactory;
     use crate::router_factory::RouterServiceFactory;
     use crate::services::router;
