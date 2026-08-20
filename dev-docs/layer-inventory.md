@@ -5,7 +5,7 @@ This is ordered from the point of view of a request to the router, starting at t
 
 Keep in mind that plugins can add hooks at various points of the pipeline. So a single plugin can have several entries in the list below. Also, requests flow from top to bottom, but responses flow bottom to top.
 
-Still missing are the execution and subgraph client parts of the onion, and layers added by plugins.
+For how these stacks get *built* — and for the execution, subgraph, and HTTP client stacks this inventory doesn't cover — see `dev-docs/pipeline-construction.md` and the stage builders in `apollo-router/src/pipeline/stages.rs`, which assemble every construction-time stack in one module.
 
 ## Axum
 Before entering the router service, we have some layers on our axum Router. These are already functioning properly in the tower service stack.
