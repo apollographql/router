@@ -158,8 +158,8 @@ pub(crate) fn apollo_opentelemetry_initialized() -> bool {
 }
 
 /// Records the tracer provider that has just been installed globally, returning the one it
-/// replaced. The caller owns the returned provider and must drop it from a blocking context, as
-/// dropping the last clone shuts its span processors down.
+/// replaced. The caller owns the returned provider and must hand it to
+/// [`shutdown_tracer_provider`] from a blocking context.
 ///
 /// See [`INSTALLED_TRACER_PROVIDER`] for why this bookkeeping is needed.
 pub(in crate::plugins::telemetry) fn set_installed_tracer_provider(
@@ -185,10 +185,15 @@ pub(crate) fn shutdown_installed_tracer_provider() {
 ///
 /// Calling `shutdown()` rather than dropping the provider guarantees its span processors
 /// are flushed and stopped. `SdkTracerProvider` is refcounted, so its `Drop` reaches the
-/// processors only when the *last* clone goes away, and the `SdkTracer` in
-/// [`OPENTELEMETRY_TRACER_HANDLE`] holds one for the whole process lifetime. `shutdown()` ignores
-/// the refcount and reaches the processors regardless.
-fn shutdown_tracer_provider(provider: Option<SdkTracerProvider>) {
+/// processors only when the *last* clone goes away, and clones outlive every point at which the
+/// router is done with a provider: the `SdkTracer` in [`OPENTELEMETRY_TRACER_HANDLE`] holds one
+/// for the whole process lifetime, and every span still in flight at a reload holds one of the
+/// provider it started under. `shutdown()` ignores the refcount and reaches the processors
+/// regardless.
+///
+/// Must be called from a blocking thread while the Tokio runtime is still alive: shutting a batch
+/// processor down blocks until it has flushed, and it needs the runtime to make progress.
+pub(in crate::plugins::telemetry) fn shutdown_tracer_provider(provider: Option<SdkTracerProvider>) {
     let Some(provider) = provider else {
         return;
     };
@@ -250,44 +255,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
-    use std::sync::atomic::Ordering;
-
     use opentelemetry::trace::Span as _;
     use opentelemetry::trace::Tracer as _;
-    use opentelemetry_sdk::error::OTelSdkResult;
-    use opentelemetry_sdk::trace::SpanData;
-    use opentelemetry_sdk::trace::SpanProcessor;
 
     use super::*;
-
-    /// Records whether the provider propagated a shutdown down to its span processors.
-    #[derive(Debug, Default, Clone)]
-    struct ShutdownProbe {
-        shut_down: Arc<AtomicBool>,
-    }
-
-    impl ShutdownProbe {
-        fn was_shut_down(&self) -> bool {
-            self.shut_down.load(Ordering::SeqCst)
-        }
-    }
-
-    impl SpanProcessor for ShutdownProbe {
-        fn on_start(&self, _span: &mut opentelemetry_sdk::trace::Span, _cx: &Context) {}
-
-        fn on_end(&self, _span: SpanData) {}
-
-        fn force_flush(&self) -> OTelSdkResult {
-            Ok(())
-        }
-
-        fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
-            self.shut_down.store(true, Ordering::SeqCst);
-            Ok(())
-        }
-    }
+    use crate::plugins::telemetry::reload::testing::ShutdownProbe;
 
     /// The provider a batch processor belongs to used to be shut down only by dropping its last
     /// clone — which never happened, because `ReloadTracer` holds a `SdkTracer` (and therefore a
