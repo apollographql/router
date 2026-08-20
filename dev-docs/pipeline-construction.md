@@ -88,7 +88,7 @@ Construction is slow enough to need its own observability — a reload blocks on
 | The acquire phase | `acquire`/`Acquired` | `pipeline/acquire.rs` |
 | Early telemetry init | `init_telemetry` | `pipeline/acquire.rs` |
 | Federation planner + subgraph schemas | `create_query_planner_service` | `pipeline/acquire.rs` |
-| Plugin instantiation and ordering | `create_plugins` | `pipeline/acquire.rs` |
+| Plugin instantiation and ordering | `create_plugins`, `PluginRegistrar` | `pipeline/plugins.rs` |
 | TLS/DNS client material | `parse_http_client_material`, `HttpClientMaterial` | `pipeline/acquire.rs`, `services/http/service.rs` |
 | Redis client connects | `connect_query_plan_redis`, `connect_apq_redis`, `connect_redis` | `pipeline/acquire.rs`, `cache/storage.rs` |
 | Cache assembly | `build_query_plan_cache`, `build_apq_expander`, `DeduplicatingCache::with_capacity` | `pipeline/stages.rs`, `cache/mod.rs` |

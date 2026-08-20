@@ -29,13 +29,13 @@ use self::acquire::Acquired;
 use self::acquire::acquire;
 pub(crate) use self::acquire::connect_apq_redis;
 pub(crate) use self::acquire::connect_query_plan_redis;
-pub(crate) use self::acquire::create_plugins;
 pub(crate) use self::acquire::create_query_planner_service;
+pub(crate) use self::acquire::parse_http_client_material;
+pub(crate) use self::plugins::create_plugins;
 // Only tests outside this module call `inject_schema_id`; within the pipeline it is an
 // implementation detail of the acquire phase.
 #[cfg(test)]
-pub(crate) use self::acquire::inject_schema_id;
-pub(crate) use self::acquire::parse_http_client_material;
+pub(crate) use self::plugins::inject_schema_id;
 pub(crate) use self::stages::build_apq_expander;
 pub(crate) use self::stages::build_http_services;
 pub(crate) use self::stages::build_query_plan_cache;
@@ -64,6 +64,7 @@ use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
 mod acquire;
+mod plugins;
 mod stages;
 #[cfg(test)]
 mod tests;
