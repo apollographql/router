@@ -164,15 +164,8 @@ fn user_defined_types<'a>(
     schema: &'a SchemaInfo,
 ) -> impl Iterator<Item = (&'a Name, &'a ExtendedType)> {
     schema.types.iter().filter(|(_, extended_type)| {
-        !extended_type.is_built_in() && is_user_defined(extended_type.location())
+        !extended_type.is_built_in() && extended_type.location().is_some()
     })
-}
-
-/// Whether an element came from the author's document rather than from link expansion.
-///
-/// See [`user_defined_types`].
-fn is_user_defined(location: Option<SourceSpan>) -> bool {
-    location.is_some()
 }
 
 /// Check that all fields defined in the schema are resolved by a connector.
@@ -207,7 +200,7 @@ fn check_seen_fields(
             ExtendedType::Object(object) => {
                 // Add object fields (ignore fields marked @external)
                 for (field_name, field_def) in &object.fields {
-                    if !is_user_defined(field_def.location()) {
+                    if field_def.location().is_none() {
                         continue;
                     }
                     if !field_def
@@ -227,7 +220,7 @@ fn check_seen_fields(
                         && obj.implements_interfaces.contains(&interface.name)
                     {
                         for (field_name, field_def) in &obj.fields {
-                            if !is_user_defined(field_def.location()) {
+                            if field_def.location().is_none() {
                                 continue;
                             }
                             if !field_def
@@ -525,7 +518,7 @@ fn find_all_resolvable_keys<'a>(
         // Malformed applications are reported by the federation validators, not here.
         .filter_map(Result::ok)
         .filter(|key| key.resolvable())
-        .filter(|key| is_user_defined(key.schema_directive().location()))
+        .filter(|key| key.schema_directive().location().is_some())
         .filter_map(|key| {
             let field_set = Parser::new()
                 .parse_field_set(
