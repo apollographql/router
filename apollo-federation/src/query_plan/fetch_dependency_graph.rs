@@ -2659,6 +2659,39 @@ impl FetchDependencyGraph {
             .selection_set
             .selection_set
             .can_rebase_on(&type_at_path, &parent.selection_set.selection_set.schema)?;
+
+        // `can_rebase_on` answers "can the parent fetch this" from the parent's
+        // *subgraph schema*. A connector boundary copy deliberately breaks the
+        // "same type ⇒ same fields reachable" assumption that makes the schema a
+        // valid stand-in for the graph: the copy's reachable fields are a strict
+        // subset of its type's, and under source-aware every connector shares the
+        // one `connectors` subgraph, so the schema still declares the fields the
+        // copy pruned. The sibling use of `can_rebase_on` in
+        // `query_planning_traversal::selection_set_is_fully_local_from_all_nodes`
+        // guards against this by bailing on `reaches_connector_boundary_copy`.
+        //
+        // Here the answer is only consulted about fields when the residual
+        // selection is non-empty (the caller has already removed this node's
+        // inputs, and an empty residual rebases trivially). No operation is known
+        // to reach that combination, so rather than change plan shape on a hazard
+        // without a repro, log it: an unproven invariant that reports itself is
+        // worth more than one nobody would notice breaking. Silent on every
+        // expansion-path graph, where the copy set is empty by construction.
+        if node_is_unneeded
+            && !node.selection_set.selection_set.is_empty()
+            && self.federated_query_graph.has_connector_boundary_copies()
+        {
+            tracing::warn!(
+                node_subgraph = %node.subgraph_name,
+                parent_subgraph = %parent.subgraph_name,
+                type_at_path = %type_at_path,
+                residual = %node.selection_set.selection_set,
+                "source-aware: merging a fetch into its parent on a graph with connector \
+                 boundary copies, with a non-empty residual selection — the parent's connector \
+                 may not serve these fields even though its subgraph schema declares them"
+            );
+        }
+
         Ok(node_is_unneeded)
     }
 

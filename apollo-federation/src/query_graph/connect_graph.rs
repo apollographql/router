@@ -503,6 +503,7 @@ mod tests {
 
     use super::build_connector_source_edges;
     use super::build_source_entering_edge;
+    use super::restrict_connector_reachability;
     use crate::connectors::Connector;
     use crate::query_graph::QueryGraphEdgeTransition;
     use crate::schema::FederationSchema;
@@ -731,6 +732,91 @@ mod tests {
         assert!(
             total > 0,
             "no connector source edges collected across fixtures"
+        );
+    }
+
+    /// `QueryGraph::has_connector_boundary_copies` really separates the two
+    /// paths, so checks that gate on it are neither dead nor firing everywhere.
+    ///
+    /// It is the graph-wide form of the "same type ⇒ same fields reachable"
+    /// question, used where no node is available to ask
+    /// `reaches_connector_boundary_copy` about — currently the non-empty-residual
+    /// warning in `fetch_dependency_graph::is_node_unneeded`. That check can only
+    /// ever be reached on the source-aware side, and this is what says so:
+    /// `true` on a raw graph the restrictive-provides pass mutated, `false` on
+    /// the same schema's expanded graph, where no copy exists by construction.
+    #[test]
+    fn boundary_copy_presence_separates_source_aware_from_expansion() {
+        use crate::ApiSchemaOptions;
+        use crate::Supergraph;
+        use crate::connectors::expand::ExpansionResult;
+        use crate::connectors::expand::expand_connectors;
+        use crate::query_graph::build_query_graph::build_federated_query_graph;
+
+        // steelthread restricts (`Query.users` selects `id name`, so `username`
+        // is pruned from its landing copy), which is what makes it the fixture
+        // that can distinguish the two graphs at all.
+        let sdl = include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
+
+        let build = |sdl: &str| {
+            let supergraph = Supergraph::new_with_router_specs(sdl).unwrap();
+            let api = supergraph
+                .to_api_schema(ApiSchemaOptions::default())
+                .unwrap();
+            build_federated_query_graph(supergraph.schema.clone(), api, Some(false), Some(true))
+                .unwrap()
+        };
+
+        // Raw graph, before the pass: no copies yet.
+        let mut raw = build(sdl);
+        assert!(
+            !raw.has_connector_boundary_copies(),
+            "a freshly built graph has no boundary copies until the pass runs"
+        );
+
+        // Raw graph, after the pass: copies exist.
+        let fed = FederationSchema::new(Schema::parse(sdl, "supergraph.graphql").unwrap()).unwrap();
+        let connectors: Vec<Connector> = extract_subgraphs_from_supergraph(&fed, Some(false))
+            .unwrap()
+            .subgraphs
+            .values()
+            .flat_map(|sg| Connector::from_schema(sg.schema.schema(), &sg.name).unwrap_or_default())
+            .collect();
+        assert!(!connectors.is_empty(), "steelthread has connectors");
+        assert!(
+            restrict_connector_reachability(&mut raw, &connectors).unwrap(),
+            "steelthread has prunable fields, so the pass must mutate the graph"
+        );
+        assert!(
+            raw.has_connector_boundary_copies(),
+            "after the restrictive-provides pass the raw graph has boundary copies"
+        );
+
+        // Expanded graph, same schema: the pass has nothing to act on, and the
+        // predicate must stay false so expansion-path checks never fire.
+        let expanded_sdl = match expand_connectors(
+            sdl,
+            &ApiSchemaOptions {
+                include_defer: true,
+                ..Default::default()
+            },
+        ) {
+            Ok(ExpansionResult::Expanded { raw_sdl, .. }) => raw_sdl,
+            Ok(ExpansionResult::Unchanged) => panic!("steelthread must expand"),
+            Err(e) => panic!("steelthread expansion failed: {e}"),
+        };
+        let mut expanded = build(&expanded_sdl);
+        assert!(
+            !expanded.has_connector_boundary_copies(),
+            "an expanded graph has no boundary copies"
+        );
+        assert!(
+            !restrict_connector_reachability(&mut expanded, &connectors).unwrap(),
+            "the pass finds nothing to restrict on an expanded graph"
+        );
+        assert!(
+            !expanded.has_connector_boundary_copies(),
+            "and so leaves the expanded graph without copies"
         );
     }
 }

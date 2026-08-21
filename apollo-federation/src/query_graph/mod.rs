@@ -549,6 +549,18 @@ impl QueryGraph {
         self.nodes_reaching_connector_boundary_copy.contains(&node)
     }
 
+    /// Whether this graph contains any connector boundary copy at all — i.e.
+    /// whether "same type ⇒ same fields reachable" holds graph-wide.
+    ///
+    /// False for every expansion-path graph, so it is the cheap way for a
+    /// downstream check to ask "could the schema and the graph disagree about
+    /// field availability here?" without a node to hand. Where a node *is*
+    /// available, prefer [`Self::reaches_connector_boundary_copy`], which is
+    /// precise.
+    pub(crate) fn has_connector_boundary_copies(&self) -> bool {
+        !self.nodes_reaching_connector_boundary_copy.is_empty()
+    }
+
     /// Recompute [`Self::nodes_reaching_connector_boundary_copy`] by walking edges backwards from
     /// every boundary copy. Called by the restrictive-provides pass after it mutates the graph;
     /// a graph with no copies leaves the set empty and every caller unaffected.
