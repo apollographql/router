@@ -54,8 +54,7 @@ use crate::services::supergraph::service::SupergraphService;
 use crate::spec::Schema;
 
 /// Builds the query-plan cache around a pre-connected Redis client and registers its
-/// gauges. Belongs to the assemble phase; the [`crate::pipeline`] docs explain why cache
-/// construction follows plugin activation.
+/// gauges.
 pub(crate) fn build_query_plan_cache(
     configuration: &Configuration,
     redis: Option<RedisCacheStorage>,
@@ -74,8 +73,6 @@ pub(crate) fn build_query_plan_cache(
 
 /// Builds the APQ expander around a pre-connected Redis client and registers its cache
 /// gauges. When APQ is disabled the expander rejects persisted-query hashes instead.
-/// Belongs to the assemble phase; the [`crate::pipeline`] docs explain why cache
-/// construction follows plugin activation.
 pub(crate) fn build_apq_expander(
     configuration: &Configuration,
     redis: Option<RedisCacheStorage>,
@@ -165,9 +162,6 @@ pub(crate) struct SupergraphPipeline {
 
 /// Assembles the supergraph pipeline: wraps the query planner in `query_plan_cache`, then
 /// builds the execution and supergraph service stacks.
-///
-/// Part of the assemble phase; call it after plugin activation, with a cache built by
-/// [`build_query_plan_cache`].
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_supergraph_pipeline(
     query_planner_service: query_planner::BoxCloneService,
