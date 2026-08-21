@@ -3,9 +3,7 @@
 
 use std::sync::Arc;
 
-use futures::future::BoxFuture;
 use indexmap::IndexMap;
-use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
@@ -16,8 +14,6 @@ use crate::cache::redis::RedisCacheStorage;
 use crate::introspection;
 use crate::introspection::IntrospectionService;
 use crate::layers::InternalServiceBuilderExt as _;
-use crate::layers::ServiceBuilderExt as _;
-use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
@@ -30,8 +26,6 @@ use crate::query_planner::SubgraphSchemas;
 use crate::services::Plugins;
 use crate::services::SubgraphService;
 use crate::services::SubgraphServiceFactory;
-use crate::services::SupergraphRequest;
-use crate::services::SupergraphResponse;
 use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::services::connector_service::ConnectorServiceFactory;
 use crate::services::execution;
@@ -150,9 +144,8 @@ pub(crate) fn build_query_parsing_service(
         .boxed_clone()
 }
 
-/// What [`build_supergraph_pipeline`] assembles.
 pub(crate) struct SupergraphPipeline {
-    /// The buffered supergraph service; clone it for each consumer.
+    /// The supergraph service; clone it for each consumer.
     pub(crate) supergraph_service: supergraph::BoxCloneService,
     /// Handle to the in-memory query-plan cache, kept for the next hot reload's warm-up.
     pub(crate) in_memory_query_plan_cache: InMemoryQueryPlanCache,
@@ -203,7 +196,7 @@ pub(crate) fn build_supergraph_pipeline(
     );
 
     SupergraphPipeline {
-        supergraph_service: supergraph_service.boxed_clone(),
+        supergraph_service,
         in_memory_query_plan_cache: query_plan_cache.in_memory_cache(),
         caching_query_planner: query_planner_service,
     }
@@ -282,9 +275,9 @@ fn build_execution_service(
         .boxed_clone()
 }
 
-/// Assembles the [`SupergraphService`] stack, outermost first: the buffer, the
-/// content-negotiation and compute-job metrics layers, each plugin's `supergraph_service`
-/// hook, and the mutation-restriction and operation-limit layers.
+/// Assembles the [`SupergraphService`] stack, outermost first: the content-negotiation
+/// and compute-job metrics layers, each plugin's `supergraph_service` hook, and the
+/// mutation-restriction and operation-limit layers.
 fn build_supergraph_service(
     query_planner_service: query_planner::CacheBoxCloneService,
     execution_service: execution::BoxCloneService,
@@ -292,8 +285,7 @@ fn build_supergraph_service(
     schema: Arc<Schema>,
     configuration: &Configuration,
     plugins: Arc<Plugins>,
-) -> UnconstrainedBuffer<SupergraphRequest, BoxFuture<'static, Result<SupergraphResponse, BoxError>>>
-{
+) -> supergraph::BoxCloneService {
     let supergraph_service = SupergraphService::builder()
         .query_planner_service(query_planner_service)
         .execution_service(execution_service)
@@ -302,11 +294,7 @@ fn build_supergraph_service(
         .strict_variable_validation(configuration.supergraph.strict_variable_validation)
         .build();
 
-    // The outer buffer provides backpressure for the full supergraph pipeline and is
-    // required for correct LoadShed / ConcurrencyLimit / RateLimit behaviour introduced
-    // by traffic-shaping and other plugins (see ServiceBuilderExt::buffered).
     ServiceBuilder::new()
-        .buffered()
         .layer(content_negotiation::SupergraphContentNegotiationLayer::default())
         .layer(crate::compute_job::ComputeJobMetricsLayer::new())
         .rust_plugins(plugins, |plugin, service| {

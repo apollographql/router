@@ -372,9 +372,19 @@ pub(crate) async fn from_supergraph_mock_with_configuration(
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
 + Clone {
+    use crate::layers::ServiceBuilderExt as _;
+
     let (_, schema, plugins, supergraph_pipeline) = crate::TestHarness::builder()
         .configuration(configuration.clone())
-        .supergraph_hook(move |_| mock.clone().boxed_clone())
+        // Buffer the mock so it stays permanently ready: a tower_test mock fails
+        // `poll_ready` once its handle is dropped (as in [`empty`]), which would fail
+        // requests before they reach the router layers under test.
+        .supergraph_hook(move |_| {
+            ServiceBuilder::new()
+                .buffered()
+                .service(mock.clone().boxed_clone())
+                .boxed_clone()
+        })
         .build_common()
         .await
         .unwrap();
