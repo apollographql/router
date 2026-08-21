@@ -592,11 +592,8 @@ mod tests {
     use apollo_compiler::Schema;
 
     use super::*;
-    use crate::ApiSchemaOptions;
-    use crate::Supergraph;
-    use crate::query_graph::build_federated_query_graph;
-    use crate::query_plan::query_planner::QueryPlanner;
     use crate::query_plan::query_planner::QueryPlannerConfig;
+    use crate::query_plan::source_aware::SourceAwareQueryPlanner;
     use crate::schema::FederationSchema;
     use crate::supergraph::extract_subgraphs_from_supergraph;
 
@@ -629,34 +626,15 @@ mod tests {
     fn stamps_connector_coordinates_over_raw_graph_plans() {
         let sdl = include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
 
-        // Raw-graph planner (connectors treated as one ordinary subgraph).
-        let supergraph = Supergraph::new_with_router_specs(sdl).unwrap();
-        let api = supergraph
-            .to_api_schema(ApiSchemaOptions::default())
-            .unwrap();
-        let graph = build_federated_query_graph(
-            supergraph.schema.clone(),
-            api.clone(),
-            Some(false),
-            Some(true),
-        )
-        .unwrap();
-        let planner = QueryPlanner::from_query_graph(
-            QueryPlannerConfig::default(),
-            graph,
-            supergraph.schema.clone(),
-            api.clone(),
-        )
-        .unwrap();
-
-        // Ground-truth connectors, built directly from the raw subgraphs.
-        let fed = FederationSchema::new(Schema::parse(sdl, "s.graphql").unwrap()).unwrap();
-        let subgraphs = extract_subgraphs_from_supergraph(&fed, Some(false)).unwrap();
-        let connectors: Vec<Connector> = subgraphs
-            .subgraphs
-            .values()
-            .flat_map(|sg| Connector::from_schema(sg.schema.schema(), &sg.name).unwrap_or_default())
-            .collect();
+        // Raw-graph planner and its ground-truth connectors, both from the
+        // shipped source-aware constructor. Building the graph here by hand with
+        // `build_federated_query_graph` + `from_query_graph` would skip
+        // `restrict_connector_reachability`, and a stamping claim measured on a
+        // planner the router never builds is not a claim about the router.
+        let (planner, connectors) =
+            SourceAwareQueryPlanner::new(sdl, QueryPlannerConfig::default())
+                .unwrap()
+                .into_parts();
         assert!(!connectors.is_empty(), "steelthread has connectors");
 
         // Root-field query: the single connectors fetch should be stamped with

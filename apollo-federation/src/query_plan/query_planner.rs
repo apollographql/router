@@ -295,6 +295,16 @@ impl QueryPlanner {
     /// standard graph build. Everything downstream (traversal, fetch-dep graph)
     /// consumes `federated_query_graph` and is agnostic to how it was produced,
     /// which is what lets a source-aware graph be dropped in here.
+    ///
+    /// **Do not build a source-aware planner by calling this directly.** Use
+    /// [`SourceAwareQueryPlanner::new`](crate::query_plan::source_aware::SourceAwareQueryPlanner::new),
+    /// the only caller that should pass a connector graph. A raw graph straight
+    /// out of `build_federated_query_graph` has not been through
+    /// `restrict_connector_reachability`, and a planner over *that* graph
+    /// over-merges fields into fetches whose connector cannot serve them — it
+    /// plans plausibly and differently from the router. Several tests and
+    /// diagnostics on this branch did exactly that, and their results described a
+    /// planner that does not exist.
     pub(crate) fn from_query_graph(
         config: QueryPlannerConfig,
         query_graph: QueryGraph,
@@ -1496,44 +1506,17 @@ type User
     /// Run: `cargo test -p apollo-federation steel_thread_probe -- --nocapture`
     #[test]
     fn steel_thread_probe_plan_over_raw_connector_graph() {
-        use crate::ApiSchemaOptions;
-        use crate::Supergraph;
-        use crate::query_graph::build_federated_query_graph;
+        use crate::query_plan::source_aware::SourceAwareQueryPlanner;
 
         let sdl = include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
 
-        let supergraph = match Supergraph::new_with_router_specs(sdl) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("STEELTHREAD: supergraph parse failed: {e}");
-                return;
-            }
-        };
-        let api_schema = supergraph
-            .to_api_schema(ApiSchemaOptions::default())
-            .expect("api schema");
-
-        // Build the query graph from the RAW connector supergraph (no expansion).
-        let graph = match build_federated_query_graph(
-            supergraph.schema.clone(),
-            api_schema.clone(),
-            Some(false),
-            Some(true),
-        ) {
-            Ok(g) => g,
-            Err(e) => {
-                eprintln!("STEELTHREAD: raw graph build failed: {e}");
-                return;
-            }
-        };
-
-        let planner = match QueryPlanner::from_query_graph(
-            QueryPlannerConfig::default(),
-            graph,
-            supergraph.schema.clone(),
-            api_schema.clone(),
-        ) {
-            Ok(p) => p,
+        // The shipped constructor, not a hand-built graph: `from_query_graph`
+        // alone skips `restrict_connector_reachability`, so it prints a planner
+        // the router does not build.
+        let planner = match SourceAwareQueryPlanner::new(sdl, QueryPlannerConfig::default())
+            .map(SourceAwareQueryPlanner::into_parts)
+        {
+            Ok((p, _connectors)) => p,
             Err(e) => {
                 eprintln!("STEELTHREAD: planner construction failed: {e}");
                 return;
@@ -1569,29 +1552,19 @@ type User
     fn mirage_check_entity_queries_over_raw_graph() {
         use apollo_compiler::ExecutableDocument;
 
-        use crate::ApiSchemaOptions;
         use crate::Supergraph;
-        use crate::query_graph::build_federated_query_graph;
+        use crate::query_plan::source_aware::SourceAwareQueryPlanner;
 
         let sdl = include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
         let supergraph = Supergraph::new_with_router_specs(sdl).unwrap();
-        let api = supergraph
-            .to_api_schema(ApiSchemaOptions::default())
-            .unwrap();
-        let graph = build_federated_query_graph(
-            supergraph.schema.clone(),
-            api.clone(),
-            Some(false),
-            Some(true),
-        )
-        .unwrap();
-        let planner = QueryPlanner::from_query_graph(
-            QueryPlannerConfig::default(),
-            graph,
-            supergraph.schema.clone(),
-            api.clone(),
-        )
-        .unwrap();
+        // Through the shipped constructor, so the printed verdicts describe the
+        // planner the router builds. `from_query_graph` on a hand-built graph
+        // omits `restrict_connector_reachability`, and a diagnostic that reports
+        // a different planner's behaviour is how a wrong belief spreads.
+        let (planner, _connectors) =
+            SourceAwareQueryPlanner::new(sdl, QueryPlannerConfig::default())
+                .unwrap()
+                .into_parts();
 
         // Correctness oracle: is each raw-graph plan actually semantically
         // correct, or just plausible-looking (the real mirage)?
@@ -1646,29 +1619,14 @@ type User
     fn dump_raw_graph_entity_plan() {
         use apollo_compiler::ExecutableDocument;
 
-        use crate::ApiSchemaOptions;
-        use crate::Supergraph;
-        use crate::query_graph::build_federated_query_graph;
+        use crate::query_plan::source_aware::SourceAwareQueryPlanner;
 
         let sdl = include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
-        let supergraph = Supergraph::new_with_router_specs(sdl).unwrap();
-        let api = supergraph
-            .to_api_schema(ApiSchemaOptions::default())
-            .unwrap();
-        let graph = build_federated_query_graph(
-            supergraph.schema.clone(),
-            api.clone(),
-            Some(false),
-            Some(true),
-        )
-        .unwrap();
-        let planner = QueryPlanner::from_query_graph(
-            QueryPlannerConfig::default(),
-            graph,
-            supergraph.schema.clone(),
-            api.clone(),
-        )
-        .unwrap();
+        // Shipped constructor — see `steel_thread_probe_plan_over_raw_connector_graph`.
+        let (planner, _connectors) =
+            SourceAwareQueryPlanner::new(sdl, QueryPlannerConfig::default())
+                .unwrap()
+                .into_parts();
 
         // The plan's own Display renders entity fetches as `{inputs} => {outputs}`,
         // not the literal `_entities(...)` string — so inspect each fetch's actual
@@ -1739,40 +1697,23 @@ type User
     #[test]
     fn steel_thread_root_field_end_to_end() {
         use apollo_compiler::ExecutableDocument;
-        use apollo_compiler::Schema;
         use apollo_compiler::collections::IndexMap;
         use serde_json_bytes::json;
 
-        use crate::ApiSchemaOptions;
-        use crate::Supergraph;
-        use crate::connectors::Connector;
         use crate::connectors::runtime::http_json_transport::TransportRequest;
         use crate::connectors::runtime::http_json_transport::make_request;
-        use crate::query_graph::build_federated_query_graph;
-        use crate::schema::FederationSchema;
-        use crate::supergraph::extract_subgraphs_from_supergraph;
+        use crate::query_plan::source_aware::SourceAwareQueryPlanner;
 
         let sdl = include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql");
 
-        // (1) PLAN — over the raw, non-expanded connector graph.
-        let supergraph = Supergraph::new_with_router_specs(sdl).unwrap();
-        let api = supergraph
-            .to_api_schema(ApiSchemaOptions::default())
-            .unwrap();
-        let graph = build_federated_query_graph(
-            supergraph.schema.clone(),
-            api.clone(),
-            Some(false),
-            Some(true),
-        )
-        .unwrap();
-        let planner = QueryPlanner::from_query_graph(
-            QueryPlannerConfig::default(),
-            graph,
-            supergraph.schema.clone(),
-            api.clone(),
-        )
-        .unwrap();
+        // (1) PLAN — over the raw, non-expanded connector graph, via the shipped
+        // constructor so this end-to-end claim is about the router's planner and
+        // not a hand-built graph missing `restrict_connector_reachability`. It
+        // also hands back the same connector set step (2) needs.
+        let (planner, connectors) =
+            SourceAwareQueryPlanner::new(sdl, QueryPlannerConfig::default())
+                .unwrap()
+                .into_parts();
         let query = ExecutableDocument::parse_and_validate(
             planner.api_schema().schema(),
             "{ users { id name } }",
@@ -1789,13 +1730,6 @@ type User
 
         // (2) DISPATCH — find the connector for `Query.users` and build its
         // real HTTP request.
-        let fed = FederationSchema::new(Schema::parse(sdl, "s.graphql").unwrap()).unwrap();
-        let subgraphs = extract_subgraphs_from_supergraph(&fed, Some(false)).unwrap();
-        let connectors: Vec<Connector> = subgraphs
-            .subgraphs
-            .values()
-            .flat_map(|sg| Connector::from_schema(sg.schema.schema(), &sg.name).unwrap_or_default())
-            .collect();
         let connector = connectors
             .iter()
             .find(|c| c.id.coordinate().contains("Query.users["))
@@ -1866,7 +1800,6 @@ type User
         use crate::Supergraph;
         use crate::connectors::expand::ExpansionResult;
         use crate::connectors::expand::expand_connectors;
-        use crate::query_graph::build_federated_query_graph;
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         enum Verdict {
@@ -1890,6 +1823,17 @@ type User
                     "{ user(id: \"1\") { c } }",      // cross-source resolution
                     "{ user(id: \"1\") { d } }",      // d @requires(c)
                     "{ user(id: \"1\") { name d } }", // mix
+                    // Boundary-copy + condition-handling probes. `Query.users`
+                    // has `selection: "id name"`, so the `User` it lands on is a
+                    // restrictive-provides copy pruned to `{id, name}`. Each of
+                    // these then needs a field that copy does *not* provide,
+                    // which is the input shape `is_node_unneeded` gets wrong if
+                    // it consults the shared `connectors` schema rather than the
+                    // pruned graph (see `fetch_dependency_graph.rs:2638`).
+                    "{ users { username } }", // entity-resolver field off a pruned copy
+                    "{ users { d } }",        // @requires(c) off a pruned copy
+                    "{ users { c d } }",      // condition field also selected
+                    "{ users { username d } }", // both, same copy
                 ],
             ),
             (
@@ -1899,6 +1843,14 @@ type User
                     "{ users { id a b c d } }",
                     "{ user(id: \"1\") { id a b c d } }",
                     "{ user(id: \"1\") { a } }",
+                    // Same probe shape as steelthread's, but here the required
+                    // fields are reached through `$this.b`/`$this.c`, which
+                    // expansion encodes as `key: "b c"` on `d`'s synthetic
+                    // subgraph rather than as a `@requires`. `Query.users` has
+                    // `selection: "id a"`, so `b` is the non-empty residual.
+                    "{ users { d } }",
+                    "{ users { b d } }",
+                    "{ users { b } }",
                 ],
             ),
             (
@@ -2074,24 +2026,24 @@ type User
             eprintln!("\n=== fixture: {name} ===");
 
             // --- source-aware mode: planner over the RAW connector graph ---
+            //
+            // Built through `SourceAwareQueryPlanner`, which is the *shipped*
+            // source-aware entry point, rather than by calling
+            // `build_federated_query_graph` + `from_query_graph` here. Those two
+            // calls alone omit `restrict_connector_reachability` (the
+            // restrictive-provides pass), and a planner without it over-merges
+            // fields into a fetch whose connector cannot serve them — so
+            // hand-rolling the construction measures a graph the router never
+            // plans on. Going through the real constructor is what keeps this
+            // harness's verdicts about the shipped path.
             let raw_supergraph = Supergraph::new_with_router_specs(sdl).unwrap();
-            let raw_api = raw_supergraph
-                .to_api_schema(ApiSchemaOptions::default())
-                .unwrap();
-            let raw_graph = build_federated_query_graph(
-                raw_supergraph.schema.clone(),
-                raw_api.clone(),
-                Some(false),
-                Some(true),
-            )
-            .unwrap();
-            let raw_planner = QueryPlanner::from_query_graph(
-                QueryPlannerConfig::default(),
-                raw_graph,
-                raw_supergraph.schema.clone(),
-                raw_api.clone(),
-            )
-            .unwrap();
+            let (raw_planner, _connectors) =
+                crate::query_plan::source_aware::SourceAwareQueryPlanner::new(
+                    sdl,
+                    QueryPlannerConfig::default(),
+                )
+                .unwrap()
+                .into_parts();
             let raw_subgraphs: IndexMap<_, _> = raw_supergraph
                 .extract_subgraphs()
                 .unwrap()
@@ -2156,5 +2108,96 @@ type User
             0,
             "source-aware planning diverged from expansion on {different} op(s) and errored on {error} op(s) — see the per-op lines above",
         );
+    }
+
+    /// DIAGNOSTIC for the boundary-copy condition-handling question: print both
+    /// plans, side by side, for operations that enter a type through a
+    /// restrictive-provides copy and then need a field that copy does not
+    /// provide.
+    ///
+    /// The point is what carries the dependency in each mode. Expansion encodes
+    /// a connector's `$this.x` reads as a **key** on the connector's synthetic
+    /// subgraph (`simple.graphql`'s `User.d` reads `$this.b`/`$this.c` with only
+    /// `requires: "c"` declared, and expands to `key: "b c"`), so the expansion
+    /// plan satisfies it by key resolution. Source-aware has no synthetic
+    /// subgraph, so the same dependency has to come out of the raw graph. Seeing
+    /// both plans is the only way to tell whether it does.
+    ///
+    /// Run: `cargo test -p apollo-federation dump_boundary_copy_condition_plans -- --nocapture`
+    #[test]
+    fn dump_boundary_copy_condition_plans() {
+        use apollo_compiler::ExecutableDocument;
+
+        use crate::ApiSchemaOptions;
+        use crate::Supergraph;
+        use crate::connectors::expand::ExpansionResult;
+        use crate::connectors::expand::expand_connectors;
+
+        let fixtures: &[(&str, &str, &[&str])] = &[
+            (
+                "simple",
+                include_str!("../connectors/expand/tests/schemas/expand/simple.graphql"),
+                &["{ users { d } }", "{ users { b } }", "{ users { b d } }"],
+            ),
+            (
+                "steelthread",
+                include_str!("../connectors/expand/tests/schemas/expand/steelthread.graphql"),
+                &[
+                    "{ users { d } }",
+                    "{ users { username } }",
+                    "{ users { username d } }",
+                ],
+            ),
+        ];
+
+        for (name, sdl, operations) in fixtures {
+            // Same reasoning as `raw_vs_expanded_plan_diff`: go through the
+            // shipped constructor so the restrictive-provides pass is applied.
+            let (raw_planner, _connectors) =
+                crate::query_plan::source_aware::SourceAwareQueryPlanner::new(
+                    sdl,
+                    QueryPlannerConfig::default(),
+                )
+                .unwrap()
+                .into_parts();
+
+            let expanded_supergraph = match expand_connectors(
+                sdl,
+                &ApiSchemaOptions {
+                    include_defer: true,
+                    ..Default::default()
+                },
+            ) {
+                Ok(ExpansionResult::Expanded { raw_sdl, .. }) => {
+                    Supergraph::new_with_router_specs(&raw_sdl).unwrap()
+                }
+                Ok(ExpansionResult::Unchanged) => {
+                    panic!("fixture {name} did not expand (got Unchanged)")
+                }
+                Err(e) => panic!("fixture {name} expansion failed: {e}"),
+            };
+            let exp_planner =
+                QueryPlanner::new(&expanded_supergraph, QueryPlannerConfig::default()).unwrap();
+
+            for q in *operations {
+                let doc = ExecutableDocument::parse_and_validate(
+                    raw_planner.api_schema().schema(),
+                    *q,
+                    "q.graphql",
+                )
+                .unwrap();
+                let raw = raw_planner.build_query_plan(&doc, None, Default::default());
+                let exp = exp_planner.build_query_plan(&doc, None, Default::default());
+                eprintln!("\n########## {name}: {q}");
+                match raw {
+                    Ok(p) => eprintln!("--- SOURCE-AWARE ---\n{p}"),
+                    Err(e) => eprintln!("--- SOURCE-AWARE --- ERROR: {e}"),
+                }
+                match exp {
+                    Ok(p) => eprintln!("--- EXPANSION ---\n{p}"),
+                    Err(e) => eprintln!("--- EXPANSION --- ERROR: {e}"),
+                }
+            }
+        }
     }
 }
