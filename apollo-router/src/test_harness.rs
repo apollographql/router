@@ -19,10 +19,10 @@ use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::graphql;
-use crate::pipeline::Pipeline;
 use crate::pipeline::SupergraphPipeline;
 use crate::pipeline::build_apq_expander;
 use crate::pipeline::build_query_parsing_service;
+use crate::pipeline::build_router_service;
 use crate::pipeline::build_supergraph_only;
 use crate::pipeline::connect_apq_redis;
 use crate::plugin::DynPlugin;
@@ -33,7 +33,6 @@ use crate::plugin::PluginUnstable;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::canned;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
-use crate::router_factory::RouterFactory;
 use crate::services::Plugins;
 use crate::services::execution;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
@@ -391,28 +390,26 @@ impl<'a> TestHarness<'a> {
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
         let (config, schema, plugins, supergraph_pipeline) = self.build_common().await?;
         let SupergraphPipeline {
-            supergraph_service,
-            in_memory_query_plan_cache,
-            caching_query_planner,
+            supergraph_service, ..
         } = supergraph_pipeline;
 
         let query_parsing_service = build_query_parsing_service(schema.clone(), config.clone());
 
         let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await?);
-        let pipeline = Pipeline::new(
-            Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
-            apq_expander,
+        let router_service = build_router_service(
             supergraph_service,
-            caching_query_planner,
-            schema,
-            plugins,
-            in_memory_query_plan_cache,
+            apq_expander,
+            Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             query_parsing_service,
-            config.clone(),
+            schema,
+            &config,
+            plugins,
         );
 
         Ok(tower::service_fn(move |request: router::Request| {
-            let router = ServiceBuilder::new().service(pipeline.create()).boxed();
+            let router = ServiceBuilder::new()
+                .service(router_service.clone())
+                .boxed();
             let span = PropagatingMakeSpan {
                 license: Default::default(),
             }
@@ -430,27 +427,27 @@ impl<'a> TestHarness<'a> {
 
         let (config, schema, plugins, supergraph_pipeline) = self.build_common().await?;
         let SupergraphPipeline {
-            supergraph_service,
-            in_memory_query_plan_cache,
-            caching_query_planner,
+            supergraph_service, ..
         } = supergraph_pipeline;
 
         let query_parsing_service = build_query_parsing_service(schema.clone(), config.clone());
 
         let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await?);
-        let pipeline = Pipeline::new(
-            Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
-            apq_expander,
-            supergraph_service,
-            caching_query_planner,
-            schema,
-            plugins,
-            in_memory_query_plan_cache,
-            query_parsing_service,
-            config.clone(),
-        );
 
-        let web_endpoints = pipeline.web_endpoints();
+        let mut web_endpoints = multimap::MultiMap::new();
+        plugins
+            .values()
+            .for_each(|p| web_endpoints.extend(p.web_endpoints()));
+
+        let pipeline_router_service = build_router_service(
+            supergraph_service,
+            apq_expander,
+            Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
+            query_parsing_service,
+            schema,
+            &config,
+            plugins,
+        );
 
         let routers = make_axum_router(
             &config,
@@ -463,7 +460,7 @@ impl<'a> TestHarness<'a> {
 
         // The router reads its pipeline from a request extension, which the server factory
         // populates. Add the same extension here so the returned service is callable.
-        let router_service = connection_router_service(pipeline.create());
+        let router_service = connection_router_service(pipeline_router_service);
         let router = ServiceBuilder::new()
             .layer(tower_http::add_extension::AddExtensionLayer::new(
                 router_service,

@@ -6,7 +6,7 @@ This document describes how the router builds a serving pipeline from configurat
 
 ## The three phases
 
-`pipeline::build_pipeline` runs three phases, each a named function under its own tracing span nested in `starting`: async fallible `acquire`, then `activate`, then synchronous infallible `assemble`, which takes the `Acquired` struct whole. The point of no return sits between acquire and activate; everything after it is infallible. Query-plan warm-up runs after assemble as its own step (`PendingWarmup::run`), so the pipeline is complete before the slow part of a reload starts.
+`pipeline::build_pipeline` runs three phases, each a named function under its own tracing span nested in `starting`: async fallible `acquire`, then `activate`, then synchronous infallible `assemble`, which takes the `Acquired` struct whole. The point of no return sits between acquire and activate; everything after it is infallible. Query-plan warm-up runs after assemble as its own step (`Pipeline::warm_up`), so the pipeline is complete before the slow part of a reload starts.
 
 ```mermaid
 sequenceDiagram
@@ -17,7 +17,7 @@ sequenceDiagram
 
     rect rgba(192, 106, 16, 0.15)
         Note over BP: Acquire — everything fallible lives here
-        BP->>BP: init_telemetry
+        BP->>BP: maybe_bootstrap_telemetry
         BP->>BP: create_query_planner_service (federation planner, schema + authorization validation)
         BP->>BP: create_plugins
         BP->>BP: parse_http_client_inputs (cert stores, client certs, DNS resolver)
@@ -37,10 +37,10 @@ sequenceDiagram
         BP->>BP: build_http_services (from parsed client inputs)
         BP->>BP: build_subgraph_services
         BP->>BP: build_supergraph_pipeline (execution + supergraph stacks)
-        BP->>BP: Pipeline::new (router stack)
+        BP->>BP: build_router_service (router stack)
     end
 
-    BP->>BP: warm up query plan cache (PendingWarmup, after the pipeline is complete)
+    BP->>BP: warm up query plan cache (Pipeline::warm_up, after the pipeline is complete)
 
     BP-->>SM: Pipeline (router service, plugins, cache handle, pipeline handle)
 ```
@@ -60,7 +60,7 @@ Every fallible step in construction is resource acquisition — parsing config-s
 | `connect_query_plan_redis` / `connect_apq_redis` | the Redis client connect (`connect_redis`), honoring `required_to_start` |
 | `PersistedQueryExpander::new` | persisted-query manifest fetch |
 
-The assemble functions are infallible at the signature level: caches build from pre-connected clients (`DeduplicatingCache::with_capacity`), HTTP client services build from pre-parsed `HttpClientInputs`, and the service stacks (`build_execution_service`, `build_supergraph_service`, `Pipeline::new`) are infallible plain functions — tower assembly plus creating the pipeline handle. Query-plan warmup returns `()`.
+The assemble functions are infallible at the signature level: caches build from pre-connected clients (`DeduplicatingCache::with_capacity`), HTTP client services build from pre-parsed `HttpClientInputs`, and the service stacks (`build_execution_service`, `build_supergraph_service`, `build_router_service`) are infallible plain functions — tower assembly plus creating the pipeline handle. Query-plan warmup returns `()`.
 
 ### Telemetry instruments and the phases
 
@@ -96,5 +96,5 @@ Construction is slow enough to need its own observability — a reload blocks on
 | Query parsing stack assembly | `build_query_parsing_service` | `pipeline/stages.rs` |
 | HTTP client + subgraph service assembly | `build_http_services`, `build_subgraph_services` | `pipeline/stages.rs` |
 | Execution + supergraph stack assembly | `build_supergraph_pipeline`, `build_execution_service`, `build_supergraph_service` | `pipeline/stages.rs` |
-| Router stack assembly | `Pipeline::new` | `pipeline/mod.rs` |
+| Router + warm-up stack assembly | `build_router_service`, `build_warmup_service` | `pipeline/stages.rs` |
 | The persistent pipeline | `Pipeline` (impl `RouterFactory`) | `pipeline/mod.rs` |

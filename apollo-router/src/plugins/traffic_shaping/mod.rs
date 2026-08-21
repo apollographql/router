@@ -685,7 +685,6 @@ mod test {
     use crate::Configuration;
     use crate::Context;
     use crate::json_ext::Object;
-    use crate::pipeline::Pipeline;
     use crate::pipeline::build_apq_expander;
     use crate::pipeline::build_query_plan_cache;
     use crate::pipeline::build_supergraph_pipeline;
@@ -696,7 +695,6 @@ mod test {
     use crate::plugin::test::MockConnector;
     use crate::plugin::test::MockSubgraph;
     use crate::query_planner::QueryPlannerService;
-    use crate::router_factory::RouterFactory;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
@@ -822,9 +820,7 @@ mod test {
             build_query_plan_cache(&config, connect_query_plan_redis(&config).await.unwrap());
 
         let crate::pipeline::SupergraphPipeline {
-            supergraph_service,
-            in_memory_query_plan_cache,
-            caching_query_planner,
+            supergraph_service, ..
         } = build_supergraph_pipeline(
             query_planner_service,
             query_plan_cache,
@@ -841,19 +837,15 @@ mod test {
         );
 
         let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await.unwrap());
-        Pipeline::new(
-            Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
-            apq_expander,
+        crate::pipeline::build_router_service(
             supergraph_service,
-            caching_query_planner,
-            schema,
-            plugins,
-            in_memory_query_plan_cache,
+            apq_expander,
+            Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             query_parser_service,
-            config,
+            schema,
+            &config,
+            plugins,
         )
-        .create()
-        .boxed_clone()
     }
 
     async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {

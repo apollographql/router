@@ -23,6 +23,7 @@ use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryQueryPlanCache;
 use crate::query_planner::QueryPlanCache;
 use crate::query_planner::SubgraphSchemas;
+use crate::query_planner::warmup;
 use crate::services::Plugins;
 use crate::services::SubgraphService;
 use crate::services::SubgraphServices;
@@ -37,11 +38,15 @@ use crate::services::http::service::HttpClientInputs;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::apq::APQExpander;
 use crate::services::layers::content_negotiation;
+use crate::services::layers::persisted_queries::PersistedQueryExpander;
+use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::query_parsing;
 use crate::services::query_parsing::cache::QueryParsingCacheLayer;
 use crate::services::query_parsing::recursive_selections_limit::LimitRecursiveSelectionLayer;
 use crate::services::query_parsing::service::QueryParsingService;
 use crate::services::query_planner;
+use crate::services::router;
+use crate::services::router::service::RouterService;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::services::supergraph::service::SupergraphService;
@@ -312,4 +317,49 @@ fn build_supergraph_service(
             &configuration.limits.router,
         ))
         .service(supergraph_service)
+}
+
+/// Assembles the router service stack, outermost first: the static-page layer, each
+/// plugin's `router_service` hook, the content-negotiation layer, and the
+/// [`RouterService`] that expands APQ and persisted queries, parses the query, and
+/// dispatches to the supergraph service.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_router_service(
+    supergraph_service: supergraph::BoxCloneService,
+    apq_expander: APQExpander,
+    persisted_queries: Arc<PersistedQueryExpander>,
+    query_parsing_service: query_parsing::BoxCloneService,
+    schema: Arc<Schema>,
+    configuration: &Configuration,
+    plugins: Arc<Plugins>,
+) -> router::BoxCloneService {
+    let router_service = RouterService::new(
+        supergraph_service,
+        apq_expander,
+        persisted_queries,
+        query_parsing_service,
+        schema,
+        configuration,
+        configuration.batching.clone(),
+    );
+
+    ServiceBuilder::new()
+        .layer(StaticPageLayer::new(configuration))
+        .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
+        .layer(content_negotiation::RouterContentNegotiationLayer::default())
+        .service(router_service)
+        .boxed_clone()
+}
+
+/// Assembles the query-plan warm-up service: parses each warm-up query, feeds it to the
+/// caching query planner to populate the plan cache, and discards the responses.
+pub(crate) fn build_warmup_service(
+    query_parsing_service: query_parsing::BoxCloneService,
+    caching_query_planner: query_planner::CacheBoxCloneService,
+) -> warmup::BoxCloneService {
+    ServiceBuilder::new()
+        .layer(warmup::WarmupParseQueryLayer::new(query_parsing_service))
+        .map_response(drop) // Ignore response
+        .service(caching_query_planner)
+        .boxed_clone()
 }
