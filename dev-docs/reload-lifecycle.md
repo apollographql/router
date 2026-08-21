@@ -66,7 +66,7 @@ What #9391 changed was honesty about what is serving: before it, `Running.config
 
 The order is forced, not incidental: the two enforcement steps are individually much cheaper than parsing, but both take the **parsed** `&Schema` — feature gates read `@link` directives off the supergraph, and license enforcement's `validate_schema` walks schema directives — so neither can run first. The one part that is schema-independent is license enforcement's `validate_configuration`, which needs only the configuration and the license-derived restrictions. Splitting that out to reject a bad configuration before parsing would only ever speed up the failure path, since anything that passes still has to be parsed.
 
-**Expensive, and where all the I/O lives** — `router_configurator.create()`:
+**Expensive, and where all the I/O lives** — `router_configurator.create_pipeline()`:
 
 - Constructs the federation query planner.
 - Instantiates every plugin, several of which do real network I/O in their constructors (telemetry exporters, coprocessor clients, Redis-backed caches, and the persisted-query manifest fetch, which is awaited before returning).
@@ -79,7 +79,7 @@ That split lines up exactly with the failure classification below, which is not 
 `ReloadError` is either `Transient` or `Permanent`, and `attempt_reload` uses it to decide whether to keep the retry timer running:
 
 - **Permanent** — the failure is a property of the inputs themselves: a schema that doesn't parse, a configuration the license forbids, a schema using preview features the configuration doesn't enable. These are exactly the three pure checks. Retrying re-derives the same verdict, so the retry budget is pinned to `Some(0)` to disarm the timer, and the router waits for a new input instead of churning.
-- **Transient** — anything from `create()`. It may succeed next time, so it is retried.
+- **Transient** — anything from `create_pipeline()`. It may succeed next time, so it is retried.
 
 "Permanent" is scoped to *one triple*, not to the router. A change to any one input makes a new triple which gets its own verdict, and `accumulate_inputs` resets the retry budget on any event, so the next publish always gets an immediate fresh attempt.
 
@@ -122,7 +122,7 @@ All of these are true as of writing. They are recorded because they are surprisi
 
 **An unservable input blocks the others.** Because a reload builds from the merged target and pending values are never discarded, an input that can never be applied fails every subsequent attempt. Publish a configuration that violates enforcement, then publish a good schema, and that schema cannot be served until someone publishes another configuration. The retention half of this is deliberate (see above); the blocking half is a consequence nobody chose. Fixing it means being able to commit some combination other than the full merged target, which means committed and desired diverge persistently. See ROUTER-1970 for the analysis.
 
-**A transiently-broken configuration blocks in the same way, and can't be detected cheaply.** A bad plugin option fails inside `create()` forever, is classified transient, exhausts its budget, and then blocks later publishes exactly like a permanent failure — except no pure check can see it coming. Worse, `accumulate_inputs` resets the budget on *any* event, so a stream of schema publishes can keep a doomed configuration's budget alive indefinitely and exhaustion may never be reached.
+**A transiently-broken configuration blocks in the same way, and can't be detected cheaply.** A bad plugin option fails inside `create_pipeline()` forever, is classified transient, exhausts its budget, and then blocks later publishes exactly like a permanent failure — except no pure check can see it coming. Worse, `accumulate_inputs` resets the budget on *any* event, so a stream of schema publishes can keep a doomed configuration's budget alive indefinitely and exhaustion may never be reached.
 
 **The health check has no view of reload state.** A router parked in `Reloading` with the timer disarmed reports `UP` and ready. That is arguably correct — it *is* serving traffic healthily on its committed inputs, and a probe that failed here would have Kubernetes depool or restart a router that is working — so this is a visibility gap rather than a wrong answer. The point is only that `/health` is not where a stuck reload shows up: the health plugin is rebuilt on every reload and so cannot hold state across one, and it is not wired to the state machine at all. Look instead at the failure log and `apollo.router.state.reload.attempt` — though note both are events rather than levels, so neither tells you the condition is *still* true.
 

@@ -135,13 +135,11 @@ pub(super) async fn init_telemetry(
             .cloned();
         if let Some(plugin_config) = &mut telemetry_config {
             inject_schema_id(schema.schema_id.as_str(), plugin_config);
-            // Extract previous telemetry config for hot reload comparison
-            let previous_telemetry_config = previous_config
-                .and_then(|config| config.apollo_plugins.plugins.get("telemetry").cloned());
 
+            // No previous config: this branch only runs on first boot (`previous_config`
+            // is `None` per the guard above).
             let telemetry_init = PluginInit::builder()
                 .config(plugin_config.clone())
-                .and_previous_config(previous_telemetry_config)
                 .supergraph_sdl(schema.raw_sdl.clone())
                 .supergraph_schema_id(schema.schema_id.clone().into_inner())
                 .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))

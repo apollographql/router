@@ -403,32 +403,5 @@ pub(crate) async fn empty() -> impl Service<
     // The handle is intentionally discarded — empty() creates a service that is never expected
     // to be called. Any call would block indefinitely.
     let (mock, _handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
-
-    let configuration = Arc::new(Configuration::default());
-    let (_, schema, plugins, supergraph_service, in_memory_query_plan_cache) =
-        crate::TestHarness::builder()
-            .configuration(configuration.clone())
-            .supergraph_hook(move |_| mock.clone().boxed_clone())
-            .build_common()
-            .await
-            .unwrap();
-
-    let query_parsing_service = build_query_parsing_service(schema.clone(), configuration.clone());
-
-    let apq_expander = build_apq_expander(
-        &configuration,
-        connect_apq_redis(&configuration).await.unwrap(),
-    );
-
-    Pipeline::new(
-        Arc::new(PersistedQueryExpander::new(&configuration).await.unwrap()),
-        apq_expander,
-        supergraph_service,
-        schema,
-        plugins,
-        in_memory_query_plan_cache,
-        query_parsing_service,
-        configuration,
-    )
-    .create()
+    from_supergraph_mock_with_configuration(mock, Arc::new(Configuration::default())).await
 }
