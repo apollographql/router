@@ -1,6 +1,7 @@
 //! The assemble phase of [`build_pipeline`](super::build_pipeline): the construction-time
 //! tower stack for each pipeline stage, built infallibly from acquired resources.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use indexmap::IndexMap;
@@ -21,7 +22,9 @@ use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAu
 use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
+use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::SubscriptionExecutionLayer;
+use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
@@ -43,6 +46,7 @@ use crate::services::http::build_http_client_service;
 use crate::services::http::service::HttpClientInputs;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::apq::APQExpander;
+use crate::services::layers::apq::subgraph::SubgraphApqLayer;
 use crate::services::layers::content_negotiation;
 use crate::services::layers::persisted_queries::EnforceSafelistLayer;
 use crate::services::layers::persisted_queries::ExpandIdsLayer;
@@ -128,17 +132,74 @@ pub(crate) fn build_http_services(
     (subgraph_services, connector_services)
 }
 
-/// Builds a subgraph service around each entry's HTTP client, keyed by subgraph name.
+/// Assembles the full service stack for each subgraph, keyed by subgraph name: a
+/// [`SubgraphService`] around the subgraph's HTTP client, wrapped by
+/// [`wrap_subgraph_services`].
 pub(crate) fn build_subgraph_services(
     http_services: IndexMap<String, http::BoxCloneService>,
-) -> IndexMap<String, subgraph::BoxCloneService> {
-    http_services
+    plugins: &Arc<Plugins>,
+    configuration: &Configuration,
+) -> SubgraphServices {
+    let subgraph_services = http_services
         .into_iter()
         .map(|(name, http_service)| {
             let svc = SubgraphService::new(&name, http_service);
             (name, svc.boxed_clone())
         })
-        .collect()
+        .collect();
+    wrap_subgraph_services(subgraph_services, plugins, configuration)
+}
+
+/// Wraps each subgraph service in its per-subgraph stack, outermost first: a buffer,
+/// each plugin's `subgraph_service` hook, and the subscription, APQ, and
+/// content-negotiation layers.
+pub(crate) fn wrap_subgraph_services(
+    subgraph_services: Vec<(String, subgraph::BoxCloneService)>,
+    plugins: &Arc<Plugins>,
+    configuration: &Configuration,
+) -> SubgraphServices {
+    use crate::layers::ServiceBuilderExt as _;
+
+    let subscription_config = subscription_plugin_config(plugins).map(Arc::new);
+
+    let mut map = HashMap::with_capacity(subgraph_services.len());
+    for (name, service) in subgraph_services.into_iter() {
+        // The subscription and APQ layers sit *after* all user plugins but *before* the
+        // subgraph service proper.
+        let apq_enabled = configuration.apq.subgraph.get(&name).enabled;
+
+        // One buffer per named subgraph provides per-subgraph backpressure and is
+        // required for correct LoadShed / RateLimit behaviour from traffic-shaping
+        // plugins (see ServiceBuilderExt::buffered).
+        let service = ServiceBuilder::new()
+            .buffered()
+            .rust_plugins(plugins.clone(), |plugin, service| {
+                plugin.subgraph_service(&name, service)
+            })
+            .layer(SubscriptionSubgraphLayer::new(
+                configuration.notify.clone(),
+                subscription_config.clone(),
+                Arc::from(name.clone()),
+            ))
+            .layer(SubgraphApqLayer::new(apq_enabled))
+            .layer(content_negotiation::SubgraphContentNegotiationLayer::default())
+            .service(service);
+
+        map.insert(name, service);
+    }
+
+    SubgraphServices {
+        services: Arc::new(map),
+    }
+}
+
+/// The subscription plugin's configuration, when the plugin is installed.
+fn subscription_plugin_config(plugins: &Plugins) -> Option<SubscriptionConfig> {
+    plugins
+        .iter()
+        .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
+        .map(|p| p.config.clone())
 }
 
 /// Build a query parsing service with in-memory caching.
@@ -186,7 +247,7 @@ pub(crate) fn build_supergraph_pipeline(
     subgraph_schemas: Arc<SubgraphSchemas>,
     configuration: Arc<Configuration>,
     plugins: Arc<Plugins>,
-    subgraph_services: Vec<(String, subgraph::BoxCloneService)>,
+    subgraph_services: SubgraphServices,
     connector_http_services: IndexMap<String, http::BoxCloneService>,
 ) -> SupergraphPipeline {
     let query_planner_service = CachingQueryPlanner::new(
@@ -232,26 +293,16 @@ fn build_execution_service(
     schema: Arc<Schema>,
     subgraph_schemas: Arc<SubgraphSchemas>,
     plugins: Arc<Plugins>,
-    subgraph_services: Vec<(String, subgraph::BoxCloneService)>,
+    subgraph_services: SubgraphServices,
     connector_http_services: IndexMap<String, http::BoxCloneService>,
     configuration: Arc<Configuration>,
 ) -> execution::BoxCloneService {
-    let subscription_plugin_conf = plugins
-        .iter()
-        .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
-        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
-        .map(|p| p.config.clone());
+    let subscription_plugin_conf = subscription_plugin_config(&plugins);
 
     let fetch_service = FetchService::new(
         schema.clone(),
         subgraph_schemas.clone(),
-        Arc::new(SubgraphServices::new(
-            subgraph_services,
-            plugins.clone(),
-            configuration.notify.clone(),
-            subscription_plugin_conf.clone().map(Arc::new),
-            configuration.apq.subgraph.clone(),
-        )),
+        Arc::new(subgraph_services),
         subscription_plugin_conf.clone(),
         Arc::new(ConnectorServices::new(
             schema.clone(),

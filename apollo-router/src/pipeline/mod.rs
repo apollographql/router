@@ -30,10 +30,10 @@
 //!   batching, response size limits, each plugin's `http_client_service` hook, then the
 //!   hyper-based `HttpClientService`.
 //!
-//! The router, supergraph, execution, and HTTP client stacks are assembled by the
-//! `build_*` functions in [`stages`]; the per-subgraph and per-connector stacks are
-//! assembled by the `SubgraphServices`, `ConnectorServices`, and
-//! `ConnectorRequestServices` constructors that those functions call.
+//! The router, supergraph, execution, subgraph, and HTTP client stacks are assembled by
+//! the `build_*` functions in [`stages`]; the per-connector stacks are assembled by the
+//! `ConnectorServices` and `ConnectorRequestServices` constructors that those functions
+//! call.
 //!
 //! # Construction: acquire → activate → assemble
 //!
@@ -100,6 +100,8 @@ pub(crate) use self::stages::build_router_service;
 pub(crate) use self::stages::build_subgraph_services;
 pub(crate) use self::stages::build_supergraph_pipeline;
 use self::stages::build_warmup_service;
+#[cfg(test)]
+pub(crate) use self::stages::wrap_subgraph_services;
 use crate::Endpoint;
 use crate::ListenAddr;
 use crate::configuration::Configuration;
@@ -201,7 +203,8 @@ fn assemble(
     } = tracing::info_span!("supergraph_creation").in_scope(|| {
         let (subgraph_http_services, connector_http_services) =
             build_http_services(subgraph_client_inputs, connector_client_inputs, &plugins);
-        let subgraph_services = build_subgraph_services(subgraph_http_services);
+        let subgraph_services =
+            build_subgraph_services(subgraph_http_services, &plugins, &configuration);
         build_supergraph_pipeline(
             query_planner_service,
             query_plan_cache,
@@ -209,7 +212,7 @@ fn assemble(
             subgraph_schemas,
             configuration.clone(),
             plugins.clone(),
-            subgraph_services.into_iter().collect(),
+            subgraph_services,
             connector_http_services,
         )
     });
@@ -283,7 +286,8 @@ pub(crate) async fn build_supergraph_for_test_harness(
     let query_plan_cache = build_query_plan_cache(&configuration, query_plan_redis);
     let (subgraph_http_services, connector_http_services) =
         build_http_services(subgraph_client_inputs, connector_client_inputs, &plugins);
-    let subgraph_services = build_subgraph_services(subgraph_http_services);
+    let subgraph_services =
+        build_subgraph_services(subgraph_http_services, &plugins, &configuration);
     let supergraph_pipeline = build_supergraph_pipeline(
         query_planner_service,
         query_plan_cache,
@@ -291,7 +295,7 @@ pub(crate) async fn build_supergraph_for_test_harness(
         subgraph_schemas,
         configuration,
         plugins.clone(),
-        subgraph_services.into_iter().collect(),
+        subgraph_services,
         connector_http_services,
     );
 

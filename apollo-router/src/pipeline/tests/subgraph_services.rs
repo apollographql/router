@@ -26,7 +26,6 @@ use crate::services::SubgraphRequest;
 use crate::services::http::test_http_client_service;
 use crate::services::layers::apq::subgraph::PERSISTED_QUERY_KEY;
 use crate::services::router;
-use crate::services::subgraph::service::SubgraphServices;
 
 async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler) -> std::io::Result<()>
 where
@@ -114,14 +113,7 @@ async fn respects_all_enabled_config() {
     let mut http_services = IndexMap::new();
     http_services.insert("test".to_string(), test_http_client_service("test"));
 
-    let subgraph_services = build_subgraph_services(http_services);
-    let services = SubgraphServices::new(
-        subgraph_services.into_iter().collect(),
-        Default::default(),
-        Default::default(),
-        None,
-        config.apq.subgraph.clone(),
-    );
+    let services = build_subgraph_services(http_services, &Default::default(), &config);
     let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
     let resp = services
         .get("test")
@@ -168,14 +160,7 @@ async fn respects_all_disabled_config() {
     let mut http_services = IndexMap::new();
     http_services.insert("test".to_string(), test_http_client_service("test"));
 
-    let subgraph_services = build_subgraph_services(http_services);
-    let services = SubgraphServices::new(
-        subgraph_services.into_iter().collect(),
-        Default::default(),
-        Default::default(),
-        None,
-        config.apq.subgraph.clone(),
-    );
+    let services = build_subgraph_services(http_services, &Default::default(), &config);
     let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
     services
         .get("test")
@@ -245,14 +230,7 @@ async fn per_subgraph_override_takes_precedence_over_all() {
         test_http_client_service("disabled_subgraph"),
     );
 
-    let subgraph_services = build_subgraph_services(http_services);
-    let services = SubgraphServices::new(
-        subgraph_services.into_iter().collect(),
-        Default::default(),
-        Default::default(),
-        None,
-        config.apq.subgraph.clone(),
-    );
+    let services = build_subgraph_services(http_services, &Default::default(), &config);
     let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
 
     let enabled_request = SubgraphRequest::builder()

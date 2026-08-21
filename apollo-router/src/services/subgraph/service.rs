@@ -13,24 +13,16 @@ use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use tower::BoxError;
 use tower::Service as _;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing::Instrument;
 
 use super::http::get_uri_details;
 use super::http::http_response_to_graphql_response;
-use crate::Notify;
-use crate::configuration::SubgraphApq;
-use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
-use crate::layers::InternalServiceBuilderExt as _;
-use crate::layers::ServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::limits::response_size_limit::ResponseSizeLimitError;
-use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::events::log_subgraph_request_event;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventRequest;
@@ -38,13 +30,10 @@ use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventRespon
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphRequestBodySize;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphResponseBodySize;
 use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
-use crate::services::Plugins;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::http::HttpRequest;
 use crate::services::http::service::WireByteCount;
-use crate::services::layers::apq::subgraph::SubgraphApqLayer;
-use crate::services::layers::content_negotiation::SubgraphContentNegotiationLayer;
 use crate::services::router;
 use crate::services::subgraph;
 
@@ -329,7 +318,7 @@ async fn call_http(
 }
 
 /// The pre-built subgraph service stack for each subgraph, keyed by subgraph name.
-/// [`Self::new`] assembles every stack once; [`Self::get`] hands out cheap clones.
+/// Stacks are built once; [`Self::get`] hands out cheap clones.
 #[derive(Clone)]
 pub(crate) struct SubgraphServices {
     pub(crate) services: Arc<
@@ -341,44 +330,6 @@ pub(crate) struct SubgraphServices {
 }
 
 impl SubgraphServices {
-    pub(crate) fn new(
-        services: Vec<(String, subgraph::BoxCloneService)>,
-        plugins: Arc<Plugins>,
-        notify: Notify<String, graphql::Response>,
-        subscription_config: Option<Arc<SubscriptionConfig>>,
-        apq_config: SubgraphConfiguration<SubgraphApq>,
-    ) -> Self {
-        let mut map = HashMap::with_capacity(services.len());
-        for (name, service) in services.into_iter() {
-            // We have to do a little dance here to insert the subscription and APQ layers at the
-            // right place: *after* all user plugins, but *before* the subgraph service proper.
-            let apq_enabled = apq_config.get(&name).enabled;
-
-            // One buffer per named subgraph provides per-subgraph backpressure and is
-            // required for correct LoadShed / RateLimit behaviour from traffic-shaping
-            // plugins (see ServiceBuilderExt::buffered).
-            let service = ServiceBuilder::new()
-                .buffered()
-                .rust_plugins(plugins.clone(), |plugin, service| {
-                    plugin.subgraph_service(&name, service)
-                })
-                .layer(SubscriptionSubgraphLayer::new(
-                    notify.clone(),
-                    subscription_config.clone(),
-                    Arc::from(name.clone()),
-                ))
-                .layer(SubgraphApqLayer::new(apq_enabled))
-                .layer(SubgraphContentNegotiationLayer::default())
-                .service(service);
-
-            map.insert(name, service);
-        }
-
-        SubgraphServices {
-            services: Arc::new(map),
-        }
-    }
-
     /// Retrieves the pre-built subgraph service stack for `name`, or `None` if no subgraph
     /// is registered under that name.
     pub(crate) fn get(&self, name: &str) -> Option<subgraph::BoxCloneService> {
@@ -418,11 +369,13 @@ mod tests {
     use tokio::sync::mpsc;
     use tokio_stream::wrappers::ReceiverStream;
     use tower::Layer as _;
+    use tower::ServiceBuilder;
     use tower::ServiceExt;
     use url::Url;
 
     use super::*;
     use crate::Context;
+    use crate::Notify;
     use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::graphql::Error;
     use crate::graphql::Request;
@@ -433,6 +386,7 @@ mod tests {
     use crate::plugins::subscription::HeartbeatInterval;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
     use crate::plugins::subscription::SubgraphPassthroughMode;
+    use crate::plugins::subscription::SubscriptionConfig;
     use crate::plugins::subscription::SubscriptionModeConfig;
     use crate::plugins::subscription::WebSocketConfiguration;
     use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
@@ -443,8 +397,10 @@ mod tests {
     use crate::protocols::websocket::WebSocketProtocol;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::http::test_http_client_service;
+    use crate::services::layers::apq::subgraph::SubgraphApqLayer;
     use crate::services::layers::apq::subgraph::SubgraphApqService;
     use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
+    use crate::services::layers::content_negotiation::SubgraphContentNegotiationLayer;
     use crate::services::layers::content_negotiation::SubgraphContentNegotiationService;
     use crate::services::router;
 

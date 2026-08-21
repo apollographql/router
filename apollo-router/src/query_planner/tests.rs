@@ -163,13 +163,10 @@ fn assert_response_diagnostics(
 }
 
 fn subgraph_services(graphs: Vec<(String, subgraph::BoxCloneService)>) -> SubgraphServices {
-    SubgraphServices::new(
+    crate::pipeline::wrap_subgraph_services(
         graphs,
-        Default::default(),
-        // Required for subscriptions: we are not testing that here
-        Default::default(),
-        None,
-        Default::default(),
+        &Default::default(),
+        &crate::Configuration::default(),
     )
 }
 

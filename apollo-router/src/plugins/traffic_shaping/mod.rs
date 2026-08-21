@@ -828,11 +828,15 @@ mod test {
             subgraph_schemas,
             config.clone(),
             plugins.clone(),
-            vec![
-                ("accounts".to_string(), account_service.boxed_clone()),
-                ("reviews".to_string(), review_service.boxed_clone()),
-                ("products".to_string(), product_service.boxed_clone()),
-            ],
+            crate::pipeline::wrap_subgraph_services(
+                vec![
+                    ("accounts".to_string(), account_service.boxed_clone()),
+                    ("reviews".to_string(), review_service.boxed_clone()),
+                    ("products".to_string(), product_service.boxed_clone()),
+                ],
+                &plugins,
+                &config,
+            ),
             Default::default(),
         );
 
