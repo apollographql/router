@@ -1,5 +1,4 @@
 //! Service which makes individual requests to Apollo Connectors over some transport
-#![allow(missing_docs)] // FIXME
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -48,7 +47,12 @@ use crate::services::Plugins;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::router;
 
+/// A boxed service making a single connector request. This is what
+/// [`PluginUnstable::connector_request_service`](crate::plugin::PluginUnstable::connector_request_service)
+/// receives and returns, so a plugin wraps this type to customize connector traffic.
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+
+/// The result of a single connector request.
 pub type ServiceResult = Result<Response, BoxError>;
 
 assert_impl_all!(Request: Send);

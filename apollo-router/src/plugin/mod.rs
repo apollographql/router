@@ -407,17 +407,6 @@ pub trait Plugin: Send + Sync + 'static {
         service
     }
 
-    /// This service handles individual requests to Apollo Connectors
-    /// Define `connector_request_service` to configure this communication (for example, to dynamically add headers to pass to a REST API).
-    /// The `_source_name` parameter is useful if you need to apply a customization only specific connectors.
-    fn connector_request_service(
-        &self,
-        service: crate::services::connector::request_service::BoxService,
-        _source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
-        service
-    }
-
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
@@ -492,7 +481,19 @@ pub trait PluginUnstable: Send + Sync + 'static {
         service
     }
 
-    /// This service handles individual requests to Apollo Connectors
+    /// This service handles individual requests to Apollo Connectors.
+    ///
+    /// Define `connector_request_service` to configure this communication, for example to
+    /// dynamically add headers to pass to a REST API. The `source_name` parameter is useful if
+    /// you need to apply a customization only to specific connectors.
+    ///
+    /// A plugin can read and mutate the outbound HTTP request through
+    /// [`Request::transport_request`], and read the router request that produced it through
+    /// [`Request::supergraph_request`]. One GraphQL operation may produce many connector
+    /// requests, so this service is called once per outbound request, not once per operation.
+    ///
+    /// [`Request::transport_request`]: crate::services::connector::request_service::Request::transport_request
+    /// [`Request::supergraph_request`]: crate::services::connector::request_service::Request::supergraph_request
     fn connector_request_service(
         &self,
         service: crate::services::connector::request_service::BoxService,
@@ -554,13 +555,9 @@ where
         Plugin::subgraph_service(self, subgraph_name, service)
     }
 
-    fn connector_request_service(
-        &self,
-        service: crate::services::connector::request_service::BoxService,
-        source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
-        Plugin::connector_request_service(self, service, source_name)
-    }
+    // No `connector_request_service` forwarding here on purpose: the hook is only on
+    // `PluginUnstable`, so a plugin that implements the stable `Plugin` trait gets the
+    // passthrough default rather than a customization point that is still settling.
 
     /// Return the name of the plugin.
     fn name(&self) -> &'static str

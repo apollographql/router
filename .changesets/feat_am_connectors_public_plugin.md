@@ -1,6 +1,6 @@
 ### Promote `connector_request_service` to the public plugin interface ([PR #10049](https://github.com/apollographql/router/pull/10049))
 
-`connector_request_service` is now available on the public `Plugin` and `PluginUnstable` traits, so a custom Rust plugin can wrap the service that makes individual connector HTTP requests. It receives the boxed service and the `@source` name, matching the shape of `subgraph_service`:
+`connector_request_service` is now available on the public `PluginUnstable` trait, so a custom Rust plugin can wrap the service that makes individual connector HTTP requests. It receives the boxed service and the `@source` name, matching the shape of `subgraph_service`:
 
 ```rust
 fn connector_request_service(
