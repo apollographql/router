@@ -589,7 +589,7 @@ mod tests {
         use crate::graphql::Response;
         use crate::query_planner::fetch::OperationKind;
         use crate::services::SubgraphService;
-        use crate::services::http::HttpClientServiceFactory;
+        use crate::services::http::test_http_client_service;
         use crate::services::router;
 
         async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler) -> std::io::Result<()>
@@ -668,10 +668,8 @@ mod tests {
             name: &str,
             enable_apq: bool,
         ) -> SubgraphApqService<SubgraphService> {
-            SubgraphApqLayer::new(enable_apq).layer(SubgraphService::new(
-                name,
-                HttpClientServiceFactory::for_test(name),
-            ))
+            SubgraphApqLayer::new(enable_apq)
+                .layer(SubgraphService::new(name, test_http_client_service(name)))
         }
 
         #[tokio::test(flavor = "multi_thread")]

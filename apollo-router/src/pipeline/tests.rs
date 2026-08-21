@@ -95,18 +95,18 @@ async fn parse_http_client_inputs_covers_every_subgraph() {
 }
 
 #[tokio::test]
-async fn build_http_services_builds_a_client_factory_per_subgraph() {
+async fn build_http_services_builds_a_client_per_subgraph() {
     let configuration = test_configuration();
     let schema = test_schema(&configuration);
     let plugins = plugins_with_traffic_shaping().await;
     let (subgraph_inputs, connector_inputs) =
         parse_http_client_inputs(&plugins, &schema, &configuration).unwrap();
 
-    let (subgraph_factories, connector_factories) =
+    let (subgraph_services, connector_services) =
         build_http_services(subgraph_inputs, connector_inputs, &Arc::new(plugins));
 
-    assert_eq!(sorted_keys(&subgraph_factories), FIXTURE_SUBGRAPHS);
-    assert!(connector_factories.is_empty());
+    assert_eq!(sorted_keys(&subgraph_services), FIXTURE_SUBGRAPHS);
+    assert!(connector_services.is_empty());
 }
 
 #[tokio::test]

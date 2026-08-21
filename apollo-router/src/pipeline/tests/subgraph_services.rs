@@ -23,7 +23,7 @@ use crate::graphql::Response;
 use crate::pipeline::build_subgraph_services;
 use crate::query_planner::fetch::OperationKind;
 use crate::services::SubgraphRequest;
-use crate::services::http::HttpClientServiceFactory;
+use crate::services::http::test_http_client_service;
 use crate::services::layers::apq::subgraph::PERSISTED_QUERY_KEY;
 use crate::services::router;
 use crate::services::subgraph::service::SubgraphServiceFactory;
@@ -82,14 +82,6 @@ fn subgraph_request(uri: Uri, subgraph_name: &str, query: &str) -> SubgraphReque
         .build()
 }
 
-fn make_http_service_factory(name: &str) -> HttpClientServiceFactory {
-    HttpClientServiceFactory::from_config(
-        name,
-        &Configuration::default(),
-        crate::configuration::shared::Client::default(),
-    )
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn respects_all_enabled_config() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -119,10 +111,10 @@ async fn respects_all_enabled_config() {
     let mut config = Configuration::default();
     config.apq.subgraph.all.enabled = true;
 
-    let mut http_service_factory = IndexMap::new();
-    http_service_factory.insert("test".to_string(), make_http_service_factory("test"));
+    let mut http_services = IndexMap::new();
+    http_services.insert("test".to_string(), test_http_client_service("test"));
 
-    let subgraph_services = build_subgraph_services(&http_service_factory);
+    let subgraph_services = build_subgraph_services(http_services);
     let factory = SubgraphServiceFactory::new(
         subgraph_services.into_iter().collect(),
         Default::default(),
@@ -173,10 +165,10 @@ async fn respects_all_disabled_config() {
     let mut config = Configuration::default();
     config.apq.subgraph.all.enabled = false;
 
-    let mut http_service_factory = IndexMap::new();
-    http_service_factory.insert("test".to_string(), make_http_service_factory("test"));
+    let mut http_services = IndexMap::new();
+    http_services.insert("test".to_string(), test_http_client_service("test"));
 
-    let subgraph_services = build_subgraph_services(&http_service_factory);
+    let subgraph_services = build_subgraph_services(http_services);
     let factory = SubgraphServiceFactory::new(
         subgraph_services.into_iter().collect(),
         Default::default(),
@@ -243,17 +235,17 @@ async fn per_subgraph_override_takes_precedence_over_all() {
         SubgraphApq { enabled: true },
     );
 
-    let mut http_service_factory = IndexMap::new();
-    http_service_factory.insert(
+    let mut http_services = IndexMap::new();
+    http_services.insert(
         "enabled_subgraph".to_string(),
-        make_http_service_factory("enabled_subgraph"),
+        test_http_client_service("enabled_subgraph"),
     );
-    http_service_factory.insert(
+    http_services.insert(
         "disabled_subgraph".to_string(),
-        make_http_service_factory("disabled_subgraph"),
+        test_http_client_service("disabled_subgraph"),
     );
 
-    let subgraph_services = build_subgraph_services(&http_service_factory);
+    let subgraph_services = build_subgraph_services(http_services);
     let factory = SubgraphServiceFactory::new(
         subgraph_services.into_iter().collect(),
         Default::default(),

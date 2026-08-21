@@ -43,7 +43,6 @@ use crate::plugins::telemetry::config_new::connector::events::ConnectorEventRequ
 use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::services::Plugins;
-use crate::services::http::HttpClientServiceFactory;
 use crate::services::router;
 
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
@@ -163,18 +162,14 @@ pub(crate) struct ConnectorRequestServiceFactory {
 }
 
 impl ConnectorRequestServiceFactory {
-    /// `http_client_service_factory` contains the connector HTTP client factories
-    /// that we'll set up connector request services for.
+    /// `http_clients` contains the pre-built connector HTTP client service for each
+    /// source, keyed by `source_config_key()`.
     pub(crate) fn new(
-        http_client_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
+        http_clients: IndexMap<String, crate::services::http::BoxCloneService>,
         plugins: Arc<Plugins>,
     ) -> Self {
-        let mut map = HashMap::with_capacity(http_client_service_factory.len());
-        for (source, factory) in http_client_service_factory.iter() {
-            // source_config_key() format is "{subgraph_name}.{source_or_synthetic}";
-            // the subgraph name is the first dot-separated component.
-            let subgraph_name = source.split('.').next().unwrap_or(source);
-            let http_client = factory.create(subgraph_name);
+        let mut map = HashMap::with_capacity(http_clients.len());
+        for (source, http_client) in http_clients.into_iter() {
             // One buffer per connector source provides per-source backpressure and is
             // required for correct LoadShed / RateLimit behaviour from traffic-shaping
             // plugins (mirrors the per-subgraph buffer in SubgraphServiceFactory).
@@ -185,7 +180,7 @@ impl ConnectorRequestServiceFactory {
                 ),
                 DEFAULT_BUFFER_SIZE,
             );
-            map.insert(source.clone(), service);
+            map.insert(source, service);
         }
 
         Self {

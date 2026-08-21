@@ -31,8 +31,8 @@ use crate::services::connector_service::ConnectorServiceFactory;
 use crate::services::execution;
 use crate::services::execution::service::ExecutionService;
 use crate::services::fetch_service::FetchService;
-use crate::services::http::HttpClientService;
-use crate::services::http::HttpClientServiceFactory;
+use crate::services::http;
+use crate::services::http::build_http_client_service;
 use crate::services::http::service::HttpClientInputs;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::apq::APQExpander;
@@ -82,40 +82,47 @@ pub(crate) fn build_apq_expander(
     }
 }
 
-/// Builds HTTP client service factories from parsed client inputs, keyed as
+/// Builds HTTP client services from parsed client inputs, keyed as
 /// [`HttpClientInputsMaps`](super::acquire::HttpClientInputsMaps) documents.
 pub(crate) fn build_http_services(
     subgraph_inputs: IndexMap<String, HttpClientInputs>,
     connector_inputs: IndexMap<String, HttpClientInputs>,
     plugins: &Arc<Plugins>,
 ) -> (
-    IndexMap<String, HttpClientServiceFactory>,
-    IndexMap<String, HttpClientServiceFactory>,
+    IndexMap<String, http::BoxCloneService>,
+    IndexMap<String, http::BoxCloneService>,
 ) {
-    let build = |inputs: IndexMap<String, HttpClientInputs>| {
-        inputs
-            .into_iter()
-            .map(|(name, inputs)| {
-                let factory =
-                    HttpClientServiceFactory::new(HttpClientService::new(inputs), plugins.clone());
-                (name, factory)
-            })
-            .collect()
-    };
-    (build(subgraph_inputs), build(connector_inputs))
+    let subgraph_services = subgraph_inputs
+        .into_iter()
+        .map(|(name, inputs)| {
+            let service = build_http_client_service(&name, inputs, plugins.clone());
+            (name, service)
+        })
+        .collect();
+    let connector_services = connector_inputs
+        .into_iter()
+        .map(|(source, inputs)| {
+            // source_config_key() format is "{subgraph_name}.{source_or_synthetic}"; the
+            // http_client_service plugin hook receives the subgraph name, not the source key.
+            let subgraph_name = source.split('.').next().unwrap_or(&source);
+            let service = build_http_client_service(subgraph_name, inputs, plugins.clone());
+            (source, service)
+        })
+        .collect();
+    (subgraph_services, connector_services)
 }
 
-/// Builds a subgraph service around each entry's HTTP client factory, keyed by subgraph
-/// name.
+/// Builds a subgraph service around each entry's HTTP client, keyed by subgraph name.
 pub(crate) fn build_subgraph_services(
-    http_service_factory: &IndexMap<String, HttpClientServiceFactory>,
+    http_services: IndexMap<String, http::BoxCloneService>,
 ) -> IndexMap<String, subgraph::BoxCloneService> {
-    let mut subgraph_services = IndexMap::default();
-    for (name, http_service_factory) in http_service_factory.iter() {
-        let svc = SubgraphService::new(name, http_service_factory.create(name));
-        subgraph_services.insert(name.clone(), svc.boxed_clone());
-    }
-    subgraph_services
+    http_services
+        .into_iter()
+        .map(|(name, http_service)| {
+            let svc = SubgraphService::new(&name, http_service);
+            (name, svc.boxed_clone())
+        })
+        .collect()
 }
 
 /// Build a query parsing service with in-memory caching.
@@ -164,7 +171,7 @@ pub(crate) fn build_supergraph_pipeline(
     configuration: Arc<Configuration>,
     plugins: Arc<Plugins>,
     subgraph_services: Vec<(String, subgraph::BoxCloneService)>,
-    connector_http_service_factory: IndexMap<String, HttpClientServiceFactory>,
+    connector_http_services: IndexMap<String, http::BoxCloneService>,
 ) -> SupergraphPipeline {
     let query_planner_service = CachingQueryPlanner::new(
         query_planner_service,
@@ -182,7 +189,7 @@ pub(crate) fn build_supergraph_pipeline(
         subgraph_schemas,
         plugins.clone(),
         subgraph_services,
-        connector_http_service_factory,
+        connector_http_services,
         configuration.clone(),
     );
 
@@ -210,7 +217,7 @@ fn build_execution_service(
     subgraph_schemas: Arc<SubgraphSchemas>,
     plugins: Arc<Plugins>,
     subgraph_services: Vec<(String, subgraph::BoxCloneService)>,
-    connector_http_service_factory: IndexMap<String, HttpClientServiceFactory>,
+    connector_http_services: IndexMap<String, http::BoxCloneService>,
     configuration: Arc<Configuration>,
 ) -> execution::BoxCloneService {
     let subscription_plugin_conf = plugins
@@ -240,7 +247,7 @@ fn build_execution_service(
                 .map(|c| c.by_service_name.clone())
                 .unwrap_or_default(),
             Arc::new(ConnectorRequestServiceFactory::new(
-                Arc::new(connector_http_service_factory),
+                connector_http_services,
                 plugins.clone(),
             )),
         )),

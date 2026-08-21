@@ -144,9 +144,9 @@ fn assemble(
         in_memory_query_plan_cache,
         caching_query_planner,
     } = tracing::info_span!("supergraph_creation").in_scope(|| {
-        let (http_service_factory, connector_http_service_factory) =
+        let (subgraph_http_services, connector_http_services) =
             build_http_services(subgraph_client_inputs, connector_client_inputs, &plugins);
-        let subgraph_services = build_subgraph_services(&http_service_factory);
+        let subgraph_services = build_subgraph_services(subgraph_http_services);
         build_supergraph_pipeline(
             query_planner_service,
             query_plan_cache,
@@ -155,7 +155,7 @@ fn assemble(
             configuration.clone(),
             plugins.clone(),
             subgraph_services.into_iter().collect(),
-            connector_http_service_factory,
+            connector_http_services,
         )
     });
 
@@ -218,9 +218,9 @@ pub(crate) async fn build_supergraph_only(
     }
 
     let query_plan_cache = build_query_plan_cache(&configuration, query_plan_redis);
-    let (http_service_factory, connector_http_service_factory) =
+    let (subgraph_http_services, connector_http_services) =
         build_http_services(subgraph_client_inputs, connector_client_inputs, &plugins);
-    let subgraph_services = build_subgraph_services(&http_service_factory);
+    let subgraph_services = build_subgraph_services(subgraph_http_services);
     let supergraph_pipeline = build_supergraph_pipeline(
         query_planner_service,
         query_plan_cache,
@@ -229,7 +229,7 @@ pub(crate) async fn build_supergraph_only(
         configuration,
         plugins.clone(),
         subgraph_services.into_iter().collect(),
-        connector_http_service_factory,
+        connector_http_services,
     );
 
     Ok((plugins, supergraph_pipeline))
