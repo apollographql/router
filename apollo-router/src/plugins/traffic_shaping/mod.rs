@@ -824,7 +824,7 @@ mod test {
         let crate::pipeline::SupergraphPipeline {
             supergraph_service,
             in_memory_query_plan_cache,
-            ..
+            caching_query_planner,
         } = build_supergraph_pipeline(
             query_planner_service,
             query_plan_cache,
@@ -845,6 +845,7 @@ mod test {
             Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
             apq_expander,
             supergraph_service,
+            caching_query_planner,
             schema,
             plugins,
             in_memory_query_plan_cache,

@@ -53,6 +53,7 @@ use crate::services::layers::content_negotiation;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::query_parsing;
+use crate::services::query_planner;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::router::service::RouterService;
@@ -80,16 +81,7 @@ pub(crate) async fn build_pipeline(
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     license: Arc<LicenseState>,
 ) -> Result<Pipeline, BoxError> {
-    let Acquired {
-        query_planner_service,
-        subgraph_schemas,
-        plugins,
-        subgraph_client_inputs,
-        connector_client_inputs,
-        query_plan_redis,
-        apq_redis,
-        persisted_queries,
-    } = acquire(
+    let acquired = acquire(
         &configuration,
         &schema,
         previous_config,
@@ -99,78 +91,85 @@ pub(crate) async fn build_pipeline(
     .instrument(tracing::info_span!("acquire"))
     .await?;
 
-    {
-        // The point of no return: activating the telemetry plugin swaps in global tracer
-        // and meter providers that cannot be rolled back. From here on the pipeline must
-        // go live. The assemble phase below is therefore infallible.
-        let _span = tracing::info_span!("activate").entered();
-        for (_, plugin) in plugins.iter() {
-            plugin.activate();
-        }
-    }
+    activate(&acquired);
 
-    let pipeline = async {
-        let query_plan_cache = build_query_plan_cache(&configuration, query_plan_redis);
-        let apq_expander = build_apq_expander(&configuration, apq_redis);
-        let query_parsing_service =
-            build_query_parsing_service(schema.clone(), configuration.clone());
+    let pipeline =
+        tracing::info_span!("assemble").in_scope(|| assemble(acquired, configuration, schema));
 
-        let SupergraphPipeline {
-            supergraph_service,
-            in_memory_query_plan_cache,
-            caching_query_planner,
-        } = {
-            let _span = tracing::info_span!("supergraph_creation").entered();
-            let (http_service_factory, connector_http_service_factory) =
-                build_http_services(subgraph_client_inputs, connector_client_inputs, &plugins);
-            let subgraph_services = build_subgraph_services(&http_service_factory);
-            build_supergraph_pipeline(
-                query_planner_service,
-                query_plan_cache,
-                schema.clone(),
-                subgraph_schemas,
-                configuration.clone(),
-                plugins.clone(),
-                subgraph_services.into_iter().collect(),
-                connector_http_service_factory,
-            )
-        };
-
-        let pipeline = Pipeline::new(
-            persisted_queries.clone(),
-            apq_expander,
-            supergraph_service,
-            schema,
-            plugins,
-            in_memory_query_plan_cache,
-            query_parsing_service.clone(),
-            configuration.clone(),
-        );
-
-        let warmup_query_planner_service = ServiceBuilder::new()
-            .layer(warmup::WarmupParseQueryLayer::new(query_parsing_service))
-            .map_response(drop) // Ignore response
-            .service(caching_query_planner)
-            .boxed_clone();
-
-        warmup::warm_up_query_planner(
-            warmup_query_planner_service,
-            &persisted_queries,
-            previous_cache,
-            configuration.supergraph.query_planning.warmed_up_queries,
-            &configuration
-                .persisted_queries
-                .experimental_prewarm_query_plan_cache,
-        )
+    pipeline
+        .warm_up(previous_cache)
         .instrument(tracing::info_span!("warmup"))
         .await;
 
-        pipeline
-    }
-    .instrument(tracing::info_span!("assemble"))
-    .await;
-
     Ok(pipeline)
+}
+
+/// The point of no return: activating the telemetry plugin swaps in global tracer and
+/// meter providers that cannot be rolled back. From here on the pipeline must go live,
+/// so everything after this call is infallible.
+fn activate(acquired: &Acquired) {
+    tracing::info_span!("activate").in_scope(|| {
+        for (_, plugin) in acquired.plugins.iter() {
+            plugin.activate();
+        }
+    })
+}
+
+/// Assembles the pipeline from the acquired resources.
+///
+/// Call after [`activate`]: the caches built here register their gauges against the
+/// meter provider that activation installed.
+fn assemble(
+    acquired: Acquired,
+    configuration: Arc<Configuration>,
+    schema: Arc<Schema>,
+) -> Pipeline {
+    let Acquired {
+        query_planner_service,
+        subgraph_schemas,
+        plugins,
+        subgraph_client_inputs,
+        connector_client_inputs,
+        query_plan_redis,
+        apq_redis,
+        persisted_queries,
+    } = acquired;
+
+    let query_plan_cache = build_query_plan_cache(&configuration, query_plan_redis);
+    let apq_expander = build_apq_expander(&configuration, apq_redis);
+    let query_parsing_service = build_query_parsing_service(schema.clone(), configuration.clone());
+
+    let SupergraphPipeline {
+        supergraph_service,
+        in_memory_query_plan_cache,
+        caching_query_planner,
+    } = tracing::info_span!("supergraph_creation").in_scope(|| {
+        let (http_service_factory, connector_http_service_factory) =
+            build_http_services(subgraph_client_inputs, connector_client_inputs, &plugins);
+        let subgraph_services = build_subgraph_services(&http_service_factory);
+        build_supergraph_pipeline(
+            query_planner_service,
+            query_plan_cache,
+            schema.clone(),
+            subgraph_schemas,
+            configuration.clone(),
+            plugins.clone(),
+            subgraph_services.into_iter().collect(),
+            connector_http_service_factory,
+        )
+    });
+
+    Pipeline::new(
+        persisted_queries,
+        apq_expander,
+        supergraph_service,
+        caching_query_planner,
+        schema,
+        plugins,
+        in_memory_query_plan_cache,
+        query_parsing_service,
+        configuration,
+    )
 }
 
 /// Builds an activated supergraph service for [`TestHarness`](crate::TestHarness),
@@ -192,14 +191,7 @@ pub(crate) async fn build_supergraph_only(
     schema: Arc<Schema>,
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
     license: Arc<LicenseState>,
-) -> Result<
-    (
-        Arc<Plugins>,
-        supergraph::BoxCloneService,
-        InMemoryQueryPlanCache,
-    ),
-    BoxError,
-> {
+) -> Result<(Arc<Plugins>, SupergraphPipeline), BoxError> {
     let (query_planner_service, subgraph_schemas) =
         create_query_planner_service(&schema, &configuration)?;
     let plugins: Arc<Plugins> = Arc::new(
@@ -229,11 +221,7 @@ pub(crate) async fn build_supergraph_only(
     let (http_service_factory, connector_http_service_factory) =
         build_http_services(subgraph_client_inputs, connector_client_inputs, &plugins);
     let subgraph_services = build_subgraph_services(&http_service_factory);
-    let SupergraphPipeline {
-        supergraph_service,
-        in_memory_query_plan_cache,
-        ..
-    } = build_supergraph_pipeline(
+    let supergraph_pipeline = build_supergraph_pipeline(
         query_planner_service,
         query_plan_cache,
         schema,
@@ -244,7 +232,7 @@ pub(crate) async fn build_supergraph_only(
         connector_http_service_factory,
     );
 
-    Ok((plugins, supergraph_service, in_memory_query_plan_cache))
+    Ok((plugins, supergraph_pipeline))
 }
 
 /// One built serving pipeline: the router service stack plus the schema, plugins, and
@@ -255,6 +243,8 @@ pub(crate) struct Pipeline {
     pub(crate) plugins: Arc<Plugins>,
     in_memory_query_plan_cache: InMemoryQueryPlanCache,
     service: router::BoxCloneService,
+    warmup_service: warmup::BoxCloneService,
+    persisted_queries: Arc<PersistedQueryExpander>,
     pipeline_handle: Arc<PipelineHandle>,
     /// The configuration used to create this router, stored for hot reload previous config extraction
     pub(crate) configuration: Arc<Configuration>,
@@ -284,12 +274,20 @@ impl Pipeline {
         persisted_queries: Arc<PersistedQueryExpander>,
         apq_expander: APQExpander,
         supergraph_service: supergraph::BoxCloneService,
+        caching_query_planner: query_planner::CacheBoxCloneService,
         schema: Arc<Schema>,
         plugins: Arc<Plugins>,
         in_memory_query_plan_cache: InMemoryQueryPlanCache,
         query_parsing_service: query_parsing::BoxCloneService,
         configuration: Arc<Configuration>,
     ) -> Self {
+        let warmup_service = ServiceBuilder::new()
+            .layer(warmup::WarmupParseQueryLayer::new(
+                query_parsing_service.clone(),
+            ))
+            .map_response(drop) // Ignore response
+            .service(caching_query_planner)
+            .boxed_clone();
         let static_page = StaticPageLayer::new(&configuration);
 
         // PipelineHandle registers the apollo.router.pipelines up-down counter, so
@@ -305,7 +303,7 @@ impl Pipeline {
         let router_service = RouterService::new(
             supergraph_service,
             apq_expander,
-            persisted_queries,
+            persisted_queries.clone(),
             query_parsing_service,
             schema.clone(),
             &configuration,
@@ -326,8 +324,35 @@ impl Pipeline {
             plugins,
             in_memory_query_plan_cache,
             service,
+            warmup_service,
+            persisted_queries,
             pipeline_handle: Arc::new(pipeline_handle),
             configuration,
+        }
+    }
+
+    /// Warms the query-plan cache by replaying a configurable sample of previously
+    /// cached queries, plus configured persisted queries, through the planner.
+    fn warm_up(
+        &self,
+        previous_cache: Option<InMemoryQueryPlanCache>,
+    ) -> impl Future<Output = ()> + Send + use<> {
+        // Clone what the future needs up front: the warmup service is not Sync, so a
+        // future borrowing self would not be Send.
+        let warmup_service = self.warmup_service.clone();
+        let persisted_queries = self.persisted_queries.clone();
+        let configuration = self.configuration.clone();
+        async move {
+            warmup::warm_up_query_planner(
+                warmup_service,
+                &persisted_queries,
+                previous_cache,
+                configuration.supergraph.query_planning.warmed_up_queries,
+                &configuration
+                    .persisted_queries
+                    .experimental_prewarm_query_plan_cache,
+            )
+            .await;
         }
     }
 
@@ -347,13 +372,17 @@ pub(crate) async fn from_supergraph_mock_with_configuration(
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
 + Clone {
-    let (_, schema, plugins, supergraph_service, in_memory_query_plan_cache) =
-        crate::TestHarness::builder()
-            .configuration(configuration.clone())
-            .supergraph_hook(move |_| mock.clone().boxed_clone())
-            .build_common()
-            .await
-            .unwrap();
+    let (_, schema, plugins, supergraph_pipeline) = crate::TestHarness::builder()
+        .configuration(configuration.clone())
+        .supergraph_hook(move |_| mock.clone().boxed_clone())
+        .build_common()
+        .await
+        .unwrap();
+    let SupergraphPipeline {
+        supergraph_service,
+        in_memory_query_plan_cache,
+        caching_query_planner,
+    } = supergraph_pipeline;
 
     let query_parsing_service = build_query_parsing_service(schema.clone(), configuration.clone());
 
@@ -366,6 +395,7 @@ pub(crate) async fn from_supergraph_mock_with_configuration(
         Arc::new(PersistedQueryExpander::new(&configuration).await.unwrap()),
         apq_expander,
         supergraph_service,
+        caching_query_planner,
         schema,
         plugins,
         in_memory_query_plan_cache,
