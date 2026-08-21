@@ -23,7 +23,7 @@ use crate::pipeline::SupergraphPipeline;
 use crate::pipeline::build_apq_expander;
 use crate::pipeline::build_query_parsing_service;
 use crate::pipeline::build_router_service;
-use crate::pipeline::build_supergraph_only;
+use crate::pipeline::build_supergraph_for_test_harness;
 use crate::pipeline::connect_apq_redis;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
@@ -341,9 +341,13 @@ impl<'a> TestHarness<'a> {
             limits: Default::default(),
         }));
 
-        let (plugins, supergraph_pipeline) =
-            build_supergraph_only(config.clone(), schema.clone(), self.extra_plugins, license)
-                .await?;
+        let (plugins, supergraph_pipeline) = build_supergraph_for_test_harness(
+            config.clone(),
+            schema.clone(),
+            self.extra_plugins,
+            license,
+        )
+        .await?;
 
         Ok((config, schema, plugins, supergraph_pipeline))
     }

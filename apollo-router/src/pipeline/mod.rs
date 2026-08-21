@@ -203,7 +203,7 @@ fn assemble(
 ///   pipeline
 ///
 /// A change to that sequence in [`build_pipeline`] applies here too.
-pub(crate) async fn build_supergraph_only(
+pub(crate) async fn build_supergraph_for_test_harness(
     configuration: Arc<Configuration>,
     schema: Arc<Schema>,
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
