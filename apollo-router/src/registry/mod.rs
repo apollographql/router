@@ -862,7 +862,7 @@ mod tests {
             license_data: license_layer.data.into(),
         }
     }
-    
+
     struct SequentialManifestDigests {
         digests: Mutex<VecDeque<String>>,
     }
@@ -2026,11 +2026,12 @@ mod tests {
         let graph_id = "test-graph-id";
         let reference = "latest";
 
-        // Same license blob, two manifests with different annotations. That
-        // yields different manifest digests but the same blob digest, so the
-        // stream sees a "changed" manifest and re-fetches the (identical) blob.
-        // Using two distinct valid JWTs is impossible here — the JWKS bundled
-        // via `include_str!` only signs one test token.
+        // Use different annotations with the same data (the license blob) to simulate
+        // a change in data. The different annotations result in different manifest
+        // digests, so the stream sees a "changed" manifest and re-fetches 
+        // the data (the license) even though it hasn't changed.
+        // [Using two distinct valid JWTs isn't possible here because the JWKS bundled
+        // via `include_str!` only signs one test token.]
         let mut ann1 = BTreeMap::new();
         ann1.insert("v".to_string(), "1".to_string());
         let mut ann2 = BTreeMap::new();
