@@ -146,7 +146,8 @@ pub(crate) async fn create_plugins(
                 let _ = registrar
                     .plugin_instances
                     .insert("apollo.telemetry".to_string(), plugin);
-                registrar.apollo_plugins_config.remove("apollo.telemetry");
+                // `apollo_plugins_config` is keyed by short plugin name, unlike `factories`.
+                registrar.apollo_plugins_config.remove("telemetry");
                 registrar.factories.remove("apollo.telemetry");
             }
         }
