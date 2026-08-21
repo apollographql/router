@@ -30,10 +30,8 @@
 //!   batching, response size limits, each plugin's `http_client_service` hook, then the
 //!   hyper-based `HttpClientService`.
 //!
-//! The router, supergraph, execution, subgraph, and HTTP client stacks are assembled by
-//! the `build_*` functions in [`stages`]; the per-connector stacks are assembled by the
-//! `ConnectorServices` and `ConnectorRequestServices` constructors that those functions
-//! call.
+//! Every one of these stacks is assembled by a `build_*` function in [`stages`], so the
+//! full layer composition of the pipeline is legible in that one file.
 //!
 //! # Construction: acquire → activate → assemble
 //!

@@ -19,7 +19,6 @@ use apollo_federation::connectors::runtime::mapping::Problem;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
 use apollo_federation::connectors::runtime::responses::handle_mapping_only_response;
 use futures::future::BoxFuture;
-use indexmap::IndexMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
@@ -30,7 +29,6 @@ use tower::ServiceExt;
 use crate::Context;
 use crate::error::FetchError;
 use crate::graphql;
-use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::request_limit::RequestLimits;
@@ -42,7 +40,6 @@ use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEventRequest;
 use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::log_event;
-use crate::services::Plugins;
 use crate::services::router;
 
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
@@ -156,8 +153,7 @@ impl Response {
 }
 
 /// The pre-built request service stack for each connector source, keyed by
-/// `source_config_key()`. [`Self::new`] assembles every stack once; [`Self::get`] hands
-/// out cheap clones.
+/// `source_config_key()`. Stacks are built once; [`Self::get`] hands out cheap clones.
 #[derive(Clone)]
 pub(crate) struct ConnectorRequestServices {
     pub(crate) services:
@@ -165,34 +161,8 @@ pub(crate) struct ConnectorRequestServices {
 }
 
 impl ConnectorRequestServices {
-    /// `http_clients` contains the pre-built connector HTTP client service for each
-    /// source, keyed by `source_config_key()`.
-    pub(crate) fn new(
-        http_clients: IndexMap<String, crate::services::http::BoxCloneService>,
-        plugins: Arc<Plugins>,
-    ) -> Self {
-        let mut map = HashMap::with_capacity(http_clients.len());
-        for (source, http_client) in http_clients.into_iter() {
-            // One buffer per connector source provides per-source backpressure and is
-            // required for correct LoadShed / RateLimit behaviour from traffic-shaping
-            // plugins (mirrors the per-subgraph buffer in SubgraphServices).
-            let service = UnconstrainedBuffer::new(
-                plugins.iter().rev().fold(
-                    ConnectorRequestService { http_client }.boxed_clone(),
-                    |acc, (_, e)| e.connector_request_service(acc, source.clone()),
-                ),
-                DEFAULT_BUFFER_SIZE,
-            );
-            map.insert(source, service);
-        }
-
-        Self {
-            services: Arc::new(map),
-        }
-    }
-
     /// Retrieves the pre-built request service for `source_name`: a cheap clone of an
-    /// entry built once in [`Self::new`].
+    /// entry built once.
     ///
     /// # Panics
     /// Panics if no service exists for `source_name`.

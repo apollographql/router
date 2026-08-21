@@ -16,9 +16,12 @@ use crate::cache::DeduplicatingCache;
 use crate::cache::redis::RedisCacheStorage;
 use crate::introspection;
 use crate::introspection::IntrospectionService;
+use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::InternalServiceBuilderExt as _;
+use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
+use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
@@ -36,7 +39,9 @@ use crate::query_planner::warmup;
 use crate::services::Plugins;
 use crate::services::SubgraphService;
 use crate::services::SubgraphServices;
+use crate::services::connector::request_service::ConnectorRequestService;
 use crate::services::connector::request_service::ConnectorRequestServices;
+use crate::services::connector_service::ConnectorService;
 use crate::services::connector_service::ConnectorServices;
 use crate::services::execution;
 use crate::services::execution::service::ExecutionService;
@@ -193,6 +198,76 @@ pub(crate) fn wrap_subgraph_services(
     }
 }
 
+/// Assembles the request service stack for each connector source, keyed by
+/// `source_config_key()`, outermost first: a per-source buffer, each plugin's
+/// `connector_request_service` hook, and the [`ConnectorRequestService`] around the
+/// source's HTTP client.
+fn build_connector_request_services(
+    connector_http_services: IndexMap<String, http::BoxCloneService>,
+    plugins: &Arc<Plugins>,
+) -> ConnectorRequestServices {
+    let mut map = HashMap::with_capacity(connector_http_services.len());
+    for (source, http_client) in connector_http_services.into_iter() {
+        // One buffer per connector source provides per-source backpressure and is
+        // required for correct LoadShed / RateLimit behaviour from traffic-shaping
+        // plugins (mirrors the per-subgraph buffer in [`wrap_subgraph_services`]).
+        let service = UnconstrainedBuffer::new(
+            plugins.iter().rev().fold(
+                ConnectorRequestService { http_client }.boxed_clone(),
+                |acc, (_, e)| e.connector_request_service(acc, source.clone()),
+            ),
+            DEFAULT_BUFFER_SIZE,
+        );
+        map.insert(source, service);
+    }
+
+    ConnectorRequestServices {
+        services: Arc::new(map),
+    }
+}
+
+/// Assembles the [`ConnectorService`] stack for each of the schema's connectors, keyed
+/// by the connector's service name: a per-connector buffer around the
+/// [`ConnectorService`] holding its source's request service.
+fn build_connector_services(
+    schema: Arc<Schema>,
+    subgraph_schemas: Arc<SubgraphSchemas>,
+    subscription_config: Option<SubscriptionConfig>,
+    connector_request_services: ConnectorRequestServices,
+) -> ConnectorServices {
+    let connectors_by_service_name = schema
+        .connectors
+        .as_ref()
+        .map(|c| c.by_service_name.clone())
+        .unwrap_or_default();
+
+    let mut services = HashMap::with_capacity(connectors_by_service_name.len());
+    for (service_name, connector) in connectors_by_service_name.iter() {
+        let connector_request_service =
+            connector_request_services.get(connector.source_config_key());
+
+        let service = ConnectorService {
+            _schema: schema.clone(),
+            _subgraph_schemas: subgraph_schemas.clone(),
+            _subscription_config: subscription_config.clone(),
+            connector: connector.clone(),
+            connector_request_service,
+        };
+        services.insert(
+            service_name.to_string(),
+            UnconstrainedBuffer::new(service.boxed_clone(), DEFAULT_BUFFER_SIZE),
+        );
+    }
+
+    ConnectorServices {
+        connectors_by_service_name,
+        _connect_spec_version_instrument: connect_spec_version_instrument(
+            schema.connectors.as_ref(),
+        ),
+        services: Arc::new(services),
+    }
+}
+
 /// The subscription plugin's configuration, when the plugin is installed.
 fn subscription_plugin_config(plugins: &Plugins) -> Option<SubscriptionConfig> {
     plugins
@@ -299,25 +374,19 @@ fn build_execution_service(
 ) -> execution::BoxCloneService {
     let subscription_plugin_conf = subscription_plugin_config(&plugins);
 
+    let connector_services = build_connector_services(
+        schema.clone(),
+        subgraph_schemas.clone(),
+        subscription_plugin_conf.clone(),
+        build_connector_request_services(connector_http_services, &plugins),
+    );
+
     let fetch_service = FetchService::new(
         schema.clone(),
         subgraph_schemas.clone(),
         Arc::new(subgraph_services),
         subscription_plugin_conf.clone(),
-        Arc::new(ConnectorServices::new(
-            schema.clone(),
-            subgraph_schemas.clone(),
-            subscription_plugin_conf.clone(),
-            schema
-                .connectors
-                .as_ref()
-                .map(|c| c.by_service_name.clone())
-                .unwrap_or_default(),
-            Arc::new(ConnectorRequestServices::new(
-                connector_http_services,
-                plugins.clone(),
-            )),
-        )),
+        Arc::new(connector_services),
         Arc::new(configuration.experimental_hoist_orphan_errors.clone()),
     );
 
