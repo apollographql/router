@@ -8,17 +8,23 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::Configuration;
+use crate::apollo_studio_interop::extended_references_layer::ExtendedReferencesLayer;
 use crate::batching::BatchQueryPlanAnalysisLayer;
+use crate::batching::SplitBatchRequestLayer;
 use crate::cache::DeduplicatingCache;
 use crate::cache::redis::RedisCacheStorage;
 use crate::introspection;
 use crate::introspection::IntrospectionService;
 use crate::layers::InternalServiceBuilderExt as _;
+use crate::plugins::authorization::AuthorizationPlugin;
+use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
 use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionExecutionLayer;
 use crate::plugins::telemetry::Telemetry;
+use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
+use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryQueryPlanCache;
 use crate::query_planner::QueryPlanCache;
@@ -38,6 +44,8 @@ use crate::services::http::service::HttpClientInputs;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::apq::APQExpander;
 use crate::services::layers::content_negotiation;
+use crate::services::layers::persisted_queries::EnforceSafelistLayer;
+use crate::services::layers::persisted_queries::ExpandIdsLayer;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::query_parsing;
@@ -46,7 +54,10 @@ use crate::services::query_parsing::recursive_selections_limit::LimitRecursiveSe
 use crate::services::query_parsing::service::QueryParsingService;
 use crate::services::query_planner;
 use crate::services::router;
-use crate::services::router::service::RouterService;
+use crate::services::router::parse_query::ParseQueryLayer;
+use crate::services::router::service::DisplayRouterRequestLayer;
+use crate::services::router::service::RouterToSupergraphRequestLayer;
+use crate::services::router::tower_compat::APQCachingLayer;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::services::supergraph::service::SupergraphService;
@@ -320,9 +331,10 @@ fn build_supergraph_service(
 }
 
 /// Assembles the router service stack, outermost first: the static-page layer, each
-/// plugin's `router_service` hook, the content-negotiation layer, and the
-/// [`RouterService`] that expands APQ and persisted queries, parses the query, and
-/// dispatches to the supergraph service.
+/// plugin's `router_service` hook, content negotiation, request logging, batch
+/// splitting, the HTTP→GraphQL translation, persisted-query and APQ expansion, query
+/// parsing, authorization and extended-reference extraction, and safelist enforcement,
+/// ending in the supergraph service.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_router_service(
     supergraph_service: supergraph::BoxCloneService,
@@ -333,21 +345,33 @@ pub(crate) fn build_router_service(
     configuration: &Configuration,
     plugins: Arc<Plugins>,
 ) -> router::BoxCloneService {
-    let router_service = RouterService::new(
-        supergraph_service,
-        apq_expander,
-        persisted_queries,
-        query_parsing_service,
-        schema,
-        configuration,
-        configuration.batching.clone(),
+    let enable_authorization_directives =
+        AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
+    let extended_references = matches!(
+        TelemetryConfig::metrics_reference_mode(configuration),
+        ApolloMetricsReferenceMode::Extended
     );
 
     ServiceBuilder::new()
         .layer(StaticPageLayer::new(configuration))
         .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
         .layer(content_negotiation::RouterContentNegotiationLayer::default())
-        .service(router_service)
+        .layer(DisplayRouterRequestLayer)
+        .layer(SplitBatchRequestLayer::new(configuration.batching.clone()))
+        .layer(RouterToSupergraphRequestLayer)
+        .layer(ExpandIdsLayer::new(persisted_queries.clone()))
+        .layer(APQCachingLayer::new(Arc::new(apq_expander)))
+        .layer(ParseQueryLayer::new(
+            query_parsing_service,
+            configuration.supergraph.redact_query_validation_errors,
+        ))
+        .option_layer(
+            enable_authorization_directives
+                .then(|| ExtractAuthorizationChecksLayer::new(schema.clone())),
+        )
+        .option_layer(extended_references.then(|| ExtendedReferencesLayer::new(schema)))
+        .layer(EnforceSafelistLayer::new(persisted_queries))
+        .service(supergraph_service)
         .boxed_clone()
 }
 

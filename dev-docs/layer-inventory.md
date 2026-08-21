@@ -95,7 +95,7 @@ Plugins:
 - Rhai/coprocessors
   - I have not looked deeply into it but I think this will be okay
 
-Proper (`RouterService`):
+Proper (the inner stack of `build_router_service`):
 - Batching
   - This is not a layer but the code can sort of be understood conceptually like one. Maybe it could, should be a layer?
   - Splits apart the incoming request into multiple requests that go through the rest of the pipeline, and puts the responses back together.

@@ -1,6 +1,5 @@
 //! Implements the router phase of the request lifecycle.
 
-use std::sync::Arc;
 use std::task::Poll;
 
 use axum::response::*;
@@ -22,26 +21,14 @@ use mime::APPLICATION_JSON;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use tower::BoxError;
-use tower::ServiceBuilder;
-use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
 use super::Body;
 use super::ClientRequestAccepts;
-use super::parse_query::ParseQueryLayer;
-use super::tower_compat::APQCachingLayer;
-use crate::Configuration;
 use crate::Context;
-use crate::apollo_studio_interop::extended_references_layer::ExtendedReferencesLayer;
 use crate::axum_factory::CanceledRequest;
-use crate::batching::SplitBatchRequestLayer;
-use crate::configuration::Batching;
 use crate::graphql;
-use crate::plugins::authorization::AuthorizationPlugin;
-use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
-use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
-use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
@@ -60,15 +47,9 @@ use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::services::layers::apq::APQExpander;
 use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
-use crate::services::layers::persisted_queries::EnforceSafelistLayer;
-use crate::services::layers::persisted_queries::ExpandIdsLayer;
-use crate::services::layers::persisted_queries::PersistedQueryExpander;
-use crate::services::query_parsing;
 use crate::services::router;
 use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
-use crate::services::supergraph;
 
 pub(crate) static MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE);
@@ -78,73 +59,9 @@ static ACCEL_BUFFERING_HEADER_NAME: HeaderName = HeaderName::from_static("x-acce
 static ACCEL_BUFFERING_HEADER_VALUE: HeaderValue = HeaderValue::from_static("no");
 static ORIGIN_HEADER_VALUE: HeaderValue = HeaderValue::from_static("origin");
 
-/// Containing [`Service`] in the request lifecyle.
-#[derive(Clone)]
-pub(crate) struct RouterService {
-    // A service stack for the actual implementation of the router service.
-    service: router::BoxCloneService,
-}
-
-impl RouterService {
-    pub(crate) fn new(
-        supergraph_service: supergraph::BoxCloneService,
-        apq_expander: APQExpander,
-        persisted_queries: Arc<PersistedQueryExpander>,
-        query_parsing_service: query_parsing::BoxCloneService,
-        schema: Arc<crate::spec::Schema>,
-        configuration: &Configuration,
-        batching: Batching,
-    ) -> Self {
-        // Some of the layers in the stack are wrapping previous implementations that are called
-        // layers, but are not tower layers at all.
-        let apq_expander = Arc::new(apq_expander);
-        let enable_authorization_directives =
-            AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
-        let extended_references = matches!(
-            TelemetryConfig::metrics_reference_mode(configuration),
-            ApolloMetricsReferenceMode::Extended
-        );
-
-        let service = ServiceBuilder::new()
-            .layer(DisplayRouterRequestLayer)
-            .layer(SplitBatchRequestLayer::new(batching))
-            .layer(RouterToSupergraphRequestLayer)
-            .layer(ExpandIdsLayer::new(persisted_queries.clone()))
-            .layer(APQCachingLayer::new(apq_expander))
-            .layer(ParseQueryLayer::new(
-                query_parsing_service,
-                configuration.supergraph.redact_query_validation_errors,
-            ))
-            .option_layer(
-                enable_authorization_directives
-                    .then(|| ExtractAuthorizationChecksLayer::new(schema.clone())),
-            )
-            .option_layer(extended_references.then(|| ExtendedReferencesLayer::new(schema)))
-            .layer(EnforceSafelistLayer::new(persisted_queries))
-            .service(supergraph_service)
-            .boxed_clone();
-
-        RouterService { service }
-    }
-}
-
-impl Service<RouterRequest> for RouterService {
-    type Response = RouterResponse;
-    type Error = BoxError;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: RouterRequest) -> Self::Future {
-        self.service.call(req)
-    }
-}
-
 /// If the `DisplayRouterRequest(true)` marker value is in context,
 /// reads the request body and logs it out.
-struct DisplayRouterRequestLayer;
+pub(crate) struct DisplayRouterRequestLayer;
 impl<S> tower::Layer<S> for DisplayRouterRequestLayer {
     type Service = DisplayRouterRequestService<S>;
 
@@ -154,7 +71,7 @@ impl<S> tower::Layer<S> for DisplayRouterRequestLayer {
 }
 
 #[derive(Clone)]
-struct DisplayRouterRequestService<S> {
+pub(crate) struct DisplayRouterRequestService<S> {
     inner: S,
 }
 
@@ -272,7 +189,7 @@ where
 
 /// A layer that translates router requests (streaming http bodies) into supergraph requests
 /// (JSON bodies in the GraphQL spec format).
-struct RouterToSupergraphRequestLayer;
+pub(crate) struct RouterToSupergraphRequestLayer;
 
 impl<S> tower::Layer<S> for RouterToSupergraphRequestLayer {
     type Service = RouterToSupergraphRequestService<S>;
@@ -287,7 +204,7 @@ impl<S> tower::Layer<S> for RouterToSupergraphRequestLayer {
 /// A service that translates router requests (streaming http bodies) into supergraph requests
 /// (JSON bodies in the GraphQL spec format).
 #[derive(Clone)]
-struct RouterToSupergraphRequestService<S> {
+pub(crate) struct RouterToSupergraphRequestService<S> {
     supergraph_service: S, // <supergraph::BoxCloneService>,
 }
 

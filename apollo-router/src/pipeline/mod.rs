@@ -11,8 +11,9 @@
 //! outside in:
 //!
 //! - **Router** — HTTP in, HTTP out. Static pages, each plugin's `router_service` hook,
-//!   content negotiation, then `RouterService`: APQ and persisted-query expansion, query
-//!   parsing, batching, and dispatch to the supergraph service.
+//!   content negotiation, batch splitting, the HTTP→GraphQL translation, APQ and
+//!   persisted-query expansion, and query parsing, dispatching to the supergraph
+//!   service.
 //! - **Supergraph** — GraphQL request in, GraphQL response out. Content negotiation, each
 //!   plugin's `supergraph_service` hook, mutation and operation-limit enforcement, then
 //!   `SupergraphService`: introspection and query planning (through the query-plan
