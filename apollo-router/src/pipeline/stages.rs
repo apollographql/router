@@ -25,9 +25,9 @@ use crate::query_planner::QueryPlanCache;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::Plugins;
 use crate::services::SubgraphService;
-use crate::services::SubgraphServiceFactory;
-use crate::services::connector::request_service::ConnectorRequestServiceFactory;
-use crate::services::connector_service::ConnectorServiceFactory;
+use crate::services::SubgraphServices;
+use crate::services::connector::request_service::ConnectorRequestServices;
+use crate::services::connector_service::ConnectorServices;
 use crate::services::execution;
 use crate::services::execution::service::ExecutionService;
 use crate::services::fetch_service::FetchService;
@@ -229,7 +229,7 @@ fn build_execution_service(
     let fetch_service = FetchService::new(
         schema.clone(),
         subgraph_schemas.clone(),
-        Arc::new(SubgraphServiceFactory::new(
+        Arc::new(SubgraphServices::new(
             subgraph_services,
             plugins.clone(),
             configuration.notify.clone(),
@@ -237,7 +237,7 @@ fn build_execution_service(
             configuration.apq.subgraph.clone(),
         )),
         subscription_plugin_conf.clone(),
-        Arc::new(ConnectorServiceFactory::new(
+        Arc::new(ConnectorServices::new(
             schema.clone(),
             subgraph_schemas.clone(),
             subscription_plugin_conf.clone(),
@@ -246,7 +246,7 @@ fn build_execution_service(
                 .as_ref()
                 .map(|c| c.by_service_name.clone())
                 .unwrap_or_default(),
-            Arc::new(ConnectorRequestServiceFactory::new(
+            Arc::new(ConnectorRequestServices::new(
                 connector_http_services,
                 plugins.clone(),
             )),

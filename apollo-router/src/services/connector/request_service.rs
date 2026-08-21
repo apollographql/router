@@ -155,13 +155,16 @@ impl Response {
     }
 }
 
+/// The pre-built request service stack for each connector source, keyed by
+/// `source_config_key()`. [`Self::new`] assembles every stack once at reload time;
+/// [`Self::get`] hands out cheap clones.
 #[derive(Clone)]
-pub(crate) struct ConnectorRequestServiceFactory {
+pub(crate) struct ConnectorRequestServices {
     pub(crate) services:
         Arc<HashMap<String, UnconstrainedBuffer<Request, BoxFuture<'static, ServiceResult>>>>,
 }
 
-impl ConnectorRequestServiceFactory {
+impl ConnectorRequestServices {
     /// `http_clients` contains the pre-built connector HTTP client service for each
     /// source, keyed by `source_config_key()`.
     pub(crate) fn new(
@@ -172,7 +175,7 @@ impl ConnectorRequestServiceFactory {
         for (source, http_client) in http_clients.into_iter() {
             // One buffer per connector source provides per-source backpressure and is
             // required for correct LoadShed / RateLimit behaviour from traffic-shaping
-            // plugins (mirrors the per-subgraph buffer in SubgraphServiceFactory).
+            // plugins (mirrors the per-subgraph buffer in SubgraphServices).
             let service = UnconstrainedBuffer::new(
                 plugins.iter().rev().fold(
                     ConnectorRequestService { http_client }.boxed_clone(),
@@ -188,7 +191,9 @@ impl ConnectorRequestServiceFactory {
         }
     }
 
-    pub(crate) fn create(&self, source_name: String) -> BoxCloneService {
+    /// Retrieves the pre-built request service for `source_name`. Cheap: clones an entry
+    /// built once in [`Self::new`] at reload time.
+    pub(crate) fn get(&self, source_name: String) -> BoxCloneService {
         // Note: We have to box our cloned service to erase the type of the Buffer.
         self.services
             .get(&source_name)

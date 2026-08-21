@@ -35,7 +35,7 @@ use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
 use crate::services::connect::ServiceResult;
 use crate::services::connector::request_service::BoxCloneService as ConnectorRequestBoxService;
-use crate::services::connector::request_service::ConnectorRequestServiceFactory;
+use crate::services::connector::request_service::ConnectorRequestServices;
 use crate::spec::Schema;
 
 pub(crate) const APOLLO_CONNECTOR_TYPE: Key = Key::from_static_str("apollo.connector.type");
@@ -233,8 +233,11 @@ async fn execute(
     .map_err(BoxError::from)
 }
 
+/// The pre-built [`ConnectorService`] stack for each connector, keyed by the connector's
+/// service name. [`Self::new`] assembles every stack once at reload time; [`Self::get`]
+/// hands out cheap clones.
 #[derive(Clone)]
-pub(crate) struct ConnectorServiceFactory {
+pub(crate) struct ConnectorServices {
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
     /// Pre-built services for each connector.
@@ -243,18 +246,18 @@ pub(crate) struct ConnectorServiceFactory {
     >,
 }
 
-impl ConnectorServiceFactory {
+impl ConnectorServices {
     pub(crate) fn new(
         schema: Arc<Schema>,
         subgraph_schemas: Arc<SubgraphSchemas>,
         subscription_config: Option<SubscriptionConfig>,
         connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
-        connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
+        connector_request_services: Arc<ConnectorRequestServices>,
     ) -> Self {
         let mut services = HashMap::with_capacity(connectors_by_service_name.len());
         for (service_name, connector) in connectors_by_service_name.iter() {
             let connector_request_service =
-                connector_request_service_factory.create(connector.source_config_key());
+                connector_request_services.get(connector.source_config_key());
 
             let service = ConnectorService {
                 _schema: schema.clone(),
@@ -285,7 +288,7 @@ impl ConnectorServiceFactory {
             Default::default(),
             Default::default(),
             Default::default(),
-            Arc::new(ConnectorRequestServiceFactory::new(
+            Arc::new(ConnectorRequestServices::new(
                 Default::default(),
                 Default::default(),
             )),

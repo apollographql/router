@@ -1,5 +1,5 @@
 //! [`build_subgraph_services`] against a real local HTTP listener: subgraph APQ
-//! enablement per the `apq.subgraph` config, applied through `SubgraphServiceFactory`.
+//! enablement per the `apq.subgraph` config, applied through `SubgraphServices`.
 
 use std::convert::Infallible;
 use std::str::FromStr;
@@ -26,7 +26,7 @@ use crate::services::SubgraphRequest;
 use crate::services::http::test_http_client_service;
 use crate::services::layers::apq::subgraph::PERSISTED_QUERY_KEY;
 use crate::services::router;
-use crate::services::subgraph::service::SubgraphServiceFactory;
+use crate::services::subgraph::service::SubgraphServices;
 
 async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler) -> std::io::Result<()>
 where
@@ -115,7 +115,7 @@ async fn respects_all_enabled_config() {
     http_services.insert("test".to_string(), test_http_client_service("test"));
 
     let subgraph_services = build_subgraph_services(http_services);
-    let factory = SubgraphServiceFactory::new(
+    let services = SubgraphServices::new(
         subgraph_services.into_iter().collect(),
         Default::default(),
         Default::default(),
@@ -123,7 +123,7 @@ async fn respects_all_enabled_config() {
         config.apq.subgraph.clone(),
     );
     let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
-    let resp = factory
+    let resp = services
         .get("test")
         .unwrap()
         .oneshot(subgraph_request(url, "test", "query"))
@@ -169,7 +169,7 @@ async fn respects_all_disabled_config() {
     http_services.insert("test".to_string(), test_http_client_service("test"));
 
     let subgraph_services = build_subgraph_services(http_services);
-    let factory = SubgraphServiceFactory::new(
+    let services = SubgraphServices::new(
         subgraph_services.into_iter().collect(),
         Default::default(),
         Default::default(),
@@ -177,7 +177,7 @@ async fn respects_all_disabled_config() {
         config.apq.subgraph.clone(),
     );
     let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
-    factory
+    services
         .get("test")
         .unwrap()
         .oneshot(subgraph_request(url, "test", "query"))
@@ -246,7 +246,7 @@ async fn per_subgraph_override_takes_precedence_over_all() {
     );
 
     let subgraph_services = build_subgraph_services(http_services);
-    let factory = SubgraphServiceFactory::new(
+    let services = SubgraphServices::new(
         subgraph_services.into_iter().collect(),
         Default::default(),
         Default::default(),
@@ -293,13 +293,13 @@ async fn per_subgraph_override_takes_precedence_over_all() {
         .context(Context::new())
         .build();
 
-    factory
+    services
         .get("enabled_subgraph")
         .unwrap()
         .oneshot(enabled_request)
         .await
         .unwrap();
-    factory
+    services
         .get("disabled_subgraph")
         .unwrap()
         .oneshot(disabled_request)

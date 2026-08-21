@@ -328,8 +328,11 @@ async fn call_http(
     ))
 }
 
+/// The pre-built subgraph service stack for each subgraph, keyed by subgraph name.
+/// [`Self::new`] assembles every stack once at reload time; [`Self::get`] hands out
+/// cheap clones.
 #[derive(Clone)]
-pub(crate) struct SubgraphServiceFactory {
+pub(crate) struct SubgraphServices {
     pub(crate) services: Arc<
         HashMap<
             String,
@@ -338,7 +341,7 @@ pub(crate) struct SubgraphServiceFactory {
     >,
 }
 
-impl SubgraphServiceFactory {
+impl SubgraphServices {
     pub(crate) fn new(
         services: Vec<(String, subgraph::BoxCloneService)>,
         plugins: Arc<Plugins>,
@@ -372,7 +375,7 @@ impl SubgraphServiceFactory {
             map.insert(name, service);
         }
 
-        SubgraphServiceFactory {
+        SubgraphServices {
             services: Arc::new(map),
         }
     }
@@ -864,9 +867,9 @@ mod tests {
     }
 
     /// Wraps a bare `SubgraphService` with `SubgraphLayer`, mirroring the position it occupies in
-    /// `SubgraphServiceFactory::new`. Most unit tests construct a `SubgraphService` directly and
-    /// call it without going through the factory, which would otherwise skip Accept/Content-Type
-    /// header injection entirely.
+    /// `SubgraphServices::new`. Most unit tests construct a `SubgraphService` directly and
+    /// call it without going through `SubgraphServices`, which would otherwise skip
+    /// Accept/Content-Type header injection entirely.
     fn with_content_negotiation_layer(
         s: SubgraphService,
     ) -> SubgraphContentNegotiationService<SubgraphService> {
@@ -875,7 +878,7 @@ mod tests {
 
     /// Manually rebuilds the production layer stack (Subscription -> APQ -> SubgraphLayer ->
     /// SubgraphService) for subscriptions tests, which construct a `SubgraphService` directly
-    /// instead of going through the `SubgraphServiceFactory`.
+    /// instead of going through the `SubgraphServices`.
     fn with_subscription_layer(
         s: SubgraphService,
     ) -> SubscriptionSubgraphService<
