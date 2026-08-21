@@ -206,8 +206,8 @@ impl Display for Compression {
 ///
 /// Parsing configuration into this type is the fallible half of client construction:
 /// certificate stores, client certificates, and the DNS resolver can all fail to load.
-/// [`HttpClientService::new`] consumes the material and cannot fail.
-pub(crate) struct HttpClientMaterial {
+/// [`HttpClientService::new`] consumes the inputs and cannot fail.
+pub(crate) struct HttpClientInputs {
     /// The target service, used for metrics and error reporting. The subgraph or connector name
     /// also feeds request signing.
     service_target: ServiceTarget,
@@ -218,8 +218,8 @@ pub(crate) struct HttpClientMaterial {
     dns_resolver: AsyncHyperResolver,
 }
 
-impl HttpClientMaterial {
-    /// Parses the client material for a subgraph. Per-subgraph TLS config in `configuration`
+impl HttpClientInputs {
+    /// Parses the client inputs for a subgraph. Per-subgraph TLS config in `configuration`
     /// overrides `tls_root_store` and the default client authentication.
     pub(crate) fn for_subgraph(
         service: impl Into<String>,
@@ -262,7 +262,7 @@ impl HttpClientMaterial {
         Self::new(service_target, tls_config, client_config)
     }
 
-    /// Parses the client material for a connector source. Per-source TLS config in
+    /// Parses the client inputs for a connector source. Per-source TLS config in
     /// `configuration` overrides `tls_root_store` and the default client authentication.
     pub(crate) fn for_connector(
         source_name: impl Into<String>,
@@ -305,7 +305,7 @@ impl HttpClientMaterial {
         Self::new(service_target, tls_config, client_config)
     }
 
-    /// Parses the client material for the coprocessor client.
+    /// Parses the client inputs for the coprocessor client.
     pub(crate) fn for_coprocessor(
         tls_root_store: &RootCertStore,
         client_config: crate::configuration::shared::Client,
@@ -316,7 +316,7 @@ impl HttpClientMaterial {
         Self::new(ServiceTarget::Coprocessor, tls_config, client_config)
     }
 
-    /// Assembles material from an already-resolved TLS config. Fails if the DNS resolver
+    /// Assembles the inputs from an already-resolved TLS config. Fails if the DNS resolver
     /// cannot be created from the system configuration.
     fn new(
         service_target: ServiceTarget,
@@ -360,21 +360,21 @@ impl HttpClientService {
         let service_target = ServiceTarget::Subgraph {
             name: Arc::from(service.into().as_str()),
         };
-        Ok(Self::new(HttpClientMaterial::new(
+        Ok(Self::new(HttpClientInputs::new(
             service_target,
             tls_config,
             client_config,
         )?))
     }
 
-    /// Creates a client from parsed [`HttpClientMaterial`].
-    pub(crate) fn new(material: HttpClientMaterial) -> Self {
-        let HttpClientMaterial {
+    /// Creates a client from parsed [`HttpClientInputs`].
+    pub(crate) fn new(inputs: HttpClientInputs) -> Self {
+        let HttpClientInputs {
             service_target,
             tls_config,
             client_config,
             dns_resolver,
-        } = material;
+        } = inputs;
         let service_name: Arc<str> = match &service_target {
             ServiceTarget::Coprocessor => Arc::from("coprocessor"),
             ServiceTarget::Subgraph { name } | ServiceTarget::Connector { name } => name.clone(),
@@ -467,7 +467,7 @@ impl HttpClientService {
         tls_root_store: &RootCertStore,
         client_config: crate::configuration::shared::Client,
     ) -> Result<Self, BoxError> {
-        Ok(Self::new(HttpClientMaterial::for_subgraph(
+        Ok(Self::new(HttpClientInputs::for_subgraph(
             service,
             configuration,
             tls_root_store,
@@ -482,7 +482,7 @@ impl HttpClientService {
         tls_root_store: &RootCertStore,
         client_config: crate::configuration::shared::Client,
     ) -> Result<Self, BoxError> {
-        Ok(Self::new(HttpClientMaterial::for_connector(
+        Ok(Self::new(HttpClientInputs::for_connector(
             source_name,
             configuration,
             tls_root_store,
@@ -497,7 +497,7 @@ impl HttpClientService {
         tls_root_store: &RootCertStore,
         client_config: crate::configuration::shared::Client,
     ) -> Result<Self, BoxError> {
-        Ok(Self::new(HttpClientMaterial::for_coprocessor(
+        Ok(Self::new(HttpClientInputs::for_coprocessor(
             tls_root_store,
             client_config,
         )?))
@@ -550,7 +550,7 @@ impl HttpClientService {
         let service_target = ServiceTarget::Subgraph {
             name: Arc::from("test"),
         };
-        Ok(HttpClientService::new(HttpClientMaterial::new(
+        Ok(HttpClientService::new(HttpClientInputs::new(
             service_target,
             tls_config,
             client_config,
@@ -742,7 +742,7 @@ mod tests {
     use tracing_subscriber::registry::LookupSpan;
 
     use super::super::ServiceTarget;
-    use super::HttpClientMaterial;
+    use super::HttpClientInputs;
     use crate::Context;
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::otel;
@@ -853,7 +853,7 @@ mod tests {
             name: Arc::from(service_name),
         };
         let http_client_service = HttpClientService::new(
-            HttpClientMaterial::new(
+            HttpClientInputs::new(
                 service_target,
                 rustls::ClientConfig::builder()
                     .with_native_roots()
@@ -861,7 +861,7 @@ mod tests {
                     .with_no_client_auth(),
                 crate::configuration::shared::Client::builder().build(),
             )
-            .expect("can create http client material"),
+            .expect("can create http client inputs"),
         );
 
         plugin.http_client_service(service_name, BoxCloneService::new(http_client_service))
@@ -1007,7 +1007,7 @@ mod tests {
             name: Arc::from("test"),
         };
         let http_client_service = HttpClientService::new(
-            HttpClientMaterial::new(
+            HttpClientInputs::new(
                 service_target,
                 rustls::ClientConfig::builder()
                     .with_native_roots()
@@ -1015,7 +1015,7 @@ mod tests {
                     .with_no_client_auth(),
                 crate::configuration::shared::Client::builder().build(),
             )
-            .expect("can create http client material"),
+            .expect("can create http client inputs"),
         );
 
         // Wrap with telemetry plugin
@@ -1102,7 +1102,7 @@ mod tests {
             name: Arc::from("test"),
         };
         let http_client_service = HttpClientService::new(
-            HttpClientMaterial::new(
+            HttpClientInputs::new(
                 service_target,
                 rustls::ClientConfig::builder()
                     .with_native_roots()
@@ -1110,7 +1110,7 @@ mod tests {
                     .with_no_client_auth(),
                 crate::configuration::shared::Client::builder().build(),
             )
-            .expect("can create http client material"),
+            .expect("can create http client inputs"),
         );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();

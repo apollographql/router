@@ -24,7 +24,7 @@ use crate::query_planner::QueryPlannerService;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::Plugins;
 use crate::services::http::HttpClientService;
-use crate::services::http::service::HttpClientMaterial;
+use crate::services::http::service::HttpClientInputs;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::query_planner;
 use crate::spec::Schema;
@@ -37,8 +37,8 @@ pub(super) struct Acquired {
     pub(super) query_planner_service: query_planner::BoxCloneService,
     pub(super) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(super) plugins: Arc<Plugins>,
-    pub(super) subgraph_client_material: IndexMap<String, HttpClientMaterial>,
-    pub(super) connector_client_material: IndexMap<String, HttpClientMaterial>,
+    pub(super) subgraph_client_inputs: IndexMap<String, HttpClientInputs>,
+    pub(super) connector_client_inputs: IndexMap<String, HttpClientInputs>,
     pub(super) query_plan_redis: Option<RedisCacheStorage>,
     pub(super) apq_redis: Option<RedisCacheStorage>,
     pub(super) persisted_queries: Arc<PersistedQueryExpander>,
@@ -74,8 +74,8 @@ pub(super) async fn acquire(
         .collect(),
     );
 
-    let (subgraph_client_material, connector_client_material) =
-        parse_http_client_material(&plugins, schema, configuration)?;
+    let (subgraph_client_inputs, connector_client_inputs) =
+        parse_http_client_inputs(&plugins, schema, configuration)?;
 
     let query_plan_redis = connect_query_plan_redis(configuration)
         .instrument(tracing::info_span!("query_plan_redis_connect"))
@@ -94,8 +94,8 @@ pub(super) async fn acquire(
         query_planner_service,
         subgraph_schemas,
         plugins,
-        subgraph_client_material,
-        connector_client_material,
+        subgraph_client_inputs,
+        connector_client_inputs,
         query_plan_redis,
         apq_redis,
         persisted_queries,
@@ -189,24 +189,24 @@ pub(crate) fn create_query_planner_service(
     Ok((query_planner_service, subgraph_schemas))
 }
 
-/// `(subgraph_material, connector_material)`: client material for regular subgraphs keyed
+/// `(subgraph_inputs, connector_inputs)`: client inputs for regular subgraphs keyed
 /// by subgraph name, and for connector sources keyed by `source_config_key()`
 /// (`{subgraph_name}.{source_or_synthetic}`).
-pub(crate) type HttpClientMaterialMaps = (
-    IndexMap<String, HttpClientMaterial>,
-    IndexMap<String, HttpClientMaterial>,
+pub(crate) type HttpClientInputsMaps = (
+    IndexMap<String, HttpClientInputs>,
+    IndexMap<String, HttpClientInputs>,
 );
 
-/// Parses TLS and DNS client material for every non-connector subgraph and every
+/// Parses TLS and DNS client inputs for every non-connector subgraph and every
 /// connector source.
 ///
 /// This is the fallible half of HTTP client construction;
-/// [`build_http_services`](super::build_http_services) turns the material into services.
-pub(crate) fn parse_http_client_material(
+/// [`build_http_services`](super::build_http_services) turns the inputs into services.
+pub(crate) fn parse_http_client_inputs(
     plugins: &Plugins,
     schema: &Schema,
     configuration: &Configuration,
-) -> Result<HttpClientMaterialMaps, BoxError> {
+) -> Result<HttpClientInputsMaps, BoxError> {
     // Build the subgraph and connector root stores once each and share them across
     // their clients:
     // native_roots_store re-reads the OS trust store on every call.
@@ -242,18 +242,18 @@ pub(crate) fn parse_http_client_material(
         })
         .unwrap_or_default();
 
-    let mut subgraph_material = IndexMap::new();
+    let mut subgraph_inputs = IndexMap::new();
     for (name, _) in schema.subgraphs() {
         if connector_subgraphs.contains(name) {
             continue; // Connector-backed subgraphs get per-source clients below instead
         }
-        let material = HttpClientMaterial::for_subgraph(
+        let inputs = HttpClientInputs::for_subgraph(
             name,
             configuration,
             &subgraph_tls_root_store,
             shaping.subgraph_client_config(name),
         )?;
-        subgraph_material.insert(name.clone(), material);
+        subgraph_inputs.insert(name.clone(), inputs);
     }
 
     let connector_sources = schema
@@ -262,18 +262,18 @@ pub(crate) fn parse_http_client_material(
         .map(|c| c.source_config_keys.clone())
         .unwrap_or_default();
 
-    let mut connector_material = IndexMap::new();
+    let mut connector_inputs = IndexMap::new();
     for name in connector_sources.iter() {
-        let material = HttpClientMaterial::for_connector(
+        let inputs = HttpClientInputs::for_connector(
             name,
             configuration,
             &connector_tls_root_store,
             shaping.connector_client_config(name),
         )?;
-        connector_material.insert(name.clone(), material);
+        connector_inputs.insert(name.clone(), inputs);
     }
 
-    Ok((subgraph_material, connector_material))
+    Ok((subgraph_inputs, connector_inputs))
 }
 
 /// Connects the Redis client for the query-plan cache, when one is configured.

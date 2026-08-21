@@ -20,7 +20,7 @@ sequenceDiagram
         BP->>BP: init_telemetry
         BP->>BP: create_query_planner_service (federation planner, schema + authorization validation)
         BP->>BP: create_plugins
-        BP->>BP: parse_http_client_material (cert stores, client certs, DNS resolver)
+        BP->>BP: parse_http_client_inputs (cert stores, client certs, DNS resolver)
         BP->>BP: connect_query_plan_redis / connect_apq_redis
         BP->>BP: PersistedQueryExpander::new (manifest fetch)
     end
@@ -34,7 +34,7 @@ sequenceDiagram
         Note over BP: Assemble — infallible plain functions
         BP->>BP: build_query_plan_cache / build_apq_expander (from the connected Redis clients)
         BP->>BP: build_query_parsing_service
-        BP->>BP: build_http_services (from parsed TLS material)
+        BP->>BP: build_http_services (from parsed client inputs)
         BP->>BP: build_subgraph_services
         BP->>BP: build_supergraph_pipeline (execution + supergraph stacks)
         BP->>BP: Pipeline::new (router stack)
@@ -48,18 +48,18 @@ The state machine holds the returned `Pipeline` across reloads: it implements `R
 
 ### Why the split is sound
 
-Every fallible step in construction is resource acquisition — parsing config-supplied material, connecting to external systems, or validating the schema:
+Every fallible step in construction is resource acquisition — parsing config-supplied inputs, connecting to external systems, or validating the schema:
 
 | Acquire step | Failure source |
 |---|---|
 | `maybe_bootstrap_telemetry` | telemetry plugin constructor (exporter setup) |
 | `create_query_planner_service` | unsupported federation version/features; authorization spec validation |
 | `create_plugins` | every plugin constructor — coprocessor clients, response-cache Redis, exporters |
-| `parse_http_client_material` | TLS root-store, client-certificate, and DNS-resolver parsing |
+| `parse_http_client_inputs` | TLS root-store, client-certificate, and DNS-resolver parsing |
 | `connect_query_plan_redis` / `connect_apq_redis` | the Redis client connect (`connect_redis`), honoring `required_to_start` |
 | `PersistedQueryExpander::new` | persisted-query manifest fetch |
 
-The assemble functions are infallible at the signature level: caches build from pre-connected clients (`DeduplicatingCache::with_capacity`), HTTP client services build from pre-parsed `HttpClientMaterial`, and the service stacks (`build_execution_service`, `build_supergraph_service`, `Pipeline::new`) are infallible plain functions — tower assembly plus creating the pipeline handle. Query-plan warmup returns `()`.
+The assemble functions are infallible at the signature level: caches build from pre-connected clients (`DeduplicatingCache::with_capacity`), HTTP client services build from pre-parsed `HttpClientInputs`, and the service stacks (`build_execution_service`, `build_supergraph_service`, `Pipeline::new`) are infallible plain functions — tower assembly plus creating the pipeline handle. Query-plan warmup returns `()`.
 
 ### Telemetry instruments and the phases
 
@@ -89,7 +89,7 @@ Construction is slow enough to need its own observability — a reload blocks on
 | Early telemetry init | `maybe_bootstrap_telemetry` | `pipeline/acquire.rs` |
 | Federation planner + subgraph schemas | `create_query_planner_service` | `pipeline/acquire.rs` |
 | Plugin instantiation and ordering | `create_plugins`, `PluginRegistrar` | `pipeline/plugins.rs` |
-| TLS/DNS client material | `parse_http_client_material`, `HttpClientMaterial` | `pipeline/acquire.rs`, `services/http/service.rs` |
+| TLS/DNS client inputs | `parse_http_client_inputs`, `HttpClientInputs` | `pipeline/acquire.rs`, `services/http/service.rs` |
 | Redis client connects | `connect_query_plan_redis`, `connect_apq_redis`, `connect_redis` | `pipeline/acquire.rs`, `cache/storage.rs` |
 | Cache assembly | `build_query_plan_cache`, `build_apq_expander`, `DeduplicatingCache::with_capacity` | `pipeline/stages.rs`, `cache/mod.rs` |
 | Query parsing stack assembly | `build_query_parsing_service` | `pipeline/stages.rs` |

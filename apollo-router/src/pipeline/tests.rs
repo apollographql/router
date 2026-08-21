@@ -39,7 +39,7 @@ fn sorted_keys<V>(map: &IndexMap<String, V>) -> Vec<&str> {
 }
 
 /// A plugin map holding a real traffic-shaping plugin, which
-/// [`parse_http_client_material`] looks up by name for per-subgraph client config.
+/// [`parse_http_client_inputs`] looks up by name for per-subgraph client config.
 async fn plugins_with_traffic_shaping() -> Plugins {
     let traffic_shaping = crate::plugin::plugins()
         .find(|factory| factory.name == APOLLO_TRAFFIC_SHAPING)
@@ -82,16 +82,16 @@ fn create_query_planner_service_extracts_a_schema_per_subgraph() {
 }
 
 #[tokio::test]
-async fn parse_http_client_material_covers_every_subgraph() {
+async fn parse_http_client_inputs_covers_every_subgraph() {
     let configuration = test_configuration();
     let schema = test_schema(&configuration);
     let plugins = plugins_with_traffic_shaping().await;
 
-    let (subgraph_material, connector_material) =
-        parse_http_client_material(&plugins, &schema, &configuration).unwrap();
+    let (subgraph_inputs, connector_inputs) =
+        parse_http_client_inputs(&plugins, &schema, &configuration).unwrap();
 
-    assert_eq!(sorted_keys(&subgraph_material), FIXTURE_SUBGRAPHS);
-    assert!(connector_material.is_empty());
+    assert_eq!(sorted_keys(&subgraph_inputs), FIXTURE_SUBGRAPHS);
+    assert!(connector_inputs.is_empty());
 }
 
 #[tokio::test]
@@ -99,11 +99,11 @@ async fn build_http_services_builds_a_client_factory_per_subgraph() {
     let configuration = test_configuration();
     let schema = test_schema(&configuration);
     let plugins = plugins_with_traffic_shaping().await;
-    let (subgraph_material, connector_material) =
-        parse_http_client_material(&plugins, &schema, &configuration).unwrap();
+    let (subgraph_inputs, connector_inputs) =
+        parse_http_client_inputs(&plugins, &schema, &configuration).unwrap();
 
     let (subgraph_factories, connector_factories) =
-        build_http_services(subgraph_material, connector_material, &Arc::new(plugins));
+        build_http_services(subgraph_inputs, connector_inputs, &Arc::new(plugins));
 
     assert_eq!(sorted_keys(&subgraph_factories), FIXTURE_SUBGRAPHS);
     assert!(connector_factories.is_empty());

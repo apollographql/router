@@ -39,7 +39,7 @@ use crate::services::execution::service::ExecutionService;
 use crate::services::fetch_service::FetchService;
 use crate::services::http::HttpClientService;
 use crate::services::http::HttpClientServiceFactory;
-use crate::services::http::service::HttpClientMaterial;
+use crate::services::http::service::HttpClientInputs;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::apq::APQExpander;
 use crate::services::layers::content_negotiation;
@@ -91,29 +91,27 @@ pub(crate) fn build_apq_expander(
     }
 }
 
-/// Builds HTTP client service factories from parsed client material, keyed as
-/// [`HttpClientMaterialMaps`](super::acquire::HttpClientMaterialMaps) documents.
+/// Builds HTTP client service factories from parsed client inputs, keyed as
+/// [`HttpClientInputsMaps`](super::acquire::HttpClientInputsMaps) documents.
 pub(crate) fn build_http_services(
-    subgraph_material: IndexMap<String, HttpClientMaterial>,
-    connector_material: IndexMap<String, HttpClientMaterial>,
+    subgraph_inputs: IndexMap<String, HttpClientInputs>,
+    connector_inputs: IndexMap<String, HttpClientInputs>,
     plugins: &Arc<Plugins>,
 ) -> (
     IndexMap<String, HttpClientServiceFactory>,
     IndexMap<String, HttpClientServiceFactory>,
 ) {
-    let build = |material: IndexMap<String, HttpClientMaterial>| {
-        material
+    let build = |inputs: IndexMap<String, HttpClientInputs>| {
+        inputs
             .into_iter()
-            .map(|(name, material)| {
-                let factory = HttpClientServiceFactory::new(
-                    HttpClientService::new(material),
-                    plugins.clone(),
-                );
+            .map(|(name, inputs)| {
+                let factory =
+                    HttpClientServiceFactory::new(HttpClientService::new(inputs), plugins.clone());
                 (name, factory)
             })
             .collect()
     };
-    (build(subgraph_material), build(connector_material))
+    (build(subgraph_inputs), build(connector_inputs))
 }
 
 /// Builds a subgraph service around each entry's HTTP client factory, keyed by subgraph

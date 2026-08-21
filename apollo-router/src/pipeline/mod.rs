@@ -4,7 +4,7 @@
 //!
 //! - **Acquire** (the [`acquire`](mod@self::acquire) submodule) gathers every resource whose
 //!   creation can fail: the telemetry plugin, the federation query planner, the other
-//!   plugins, TLS/DNS client material, Redis clients, and the persisted-query manifest.
+//!   plugins, TLS/DNS client inputs, Redis clients, and the persisted-query manifest.
 //! - **Activate** runs every plugin's `activate()` hook. The telemetry hook swaps in global
 //!   tracer and meter providers that cannot be rolled back. Nothing after this phase starts
 //!   may fail.
@@ -30,7 +30,7 @@ use self::acquire::acquire;
 pub(crate) use self::acquire::connect_apq_redis;
 pub(crate) use self::acquire::connect_query_plan_redis;
 pub(crate) use self::acquire::create_query_planner_service;
-pub(crate) use self::acquire::parse_http_client_material;
+pub(crate) use self::acquire::parse_http_client_inputs;
 pub(crate) use self::plugins::create_plugins;
 pub(crate) use self::stages::SupergraphPipeline;
 pub(crate) use self::stages::build_apq_expander;
@@ -84,8 +84,8 @@ pub(crate) async fn build_pipeline(
         query_planner_service,
         subgraph_schemas,
         plugins,
-        subgraph_client_material,
-        connector_client_material,
+        subgraph_client_inputs,
+        connector_client_inputs,
         query_plan_redis,
         apq_redis,
         persisted_queries,
@@ -121,11 +121,8 @@ pub(crate) async fn build_pipeline(
             caching_query_planner,
         } = {
             let _span = tracing::info_span!("supergraph_creation").entered();
-            let (http_service_factory, connector_http_service_factory) = build_http_services(
-                subgraph_client_material,
-                connector_client_material,
-                &plugins,
-            );
+            let (http_service_factory, connector_http_service_factory) =
+                build_http_services(subgraph_client_inputs, connector_client_inputs, &plugins);
             let subgraph_services = build_subgraph_services(&http_service_factory);
             build_supergraph_pipeline(
                 query_planner_service,
@@ -183,7 +180,7 @@ pub(crate) async fn build_pipeline(
 /// Composes the same acquire → activate → assemble sequence as [`build_pipeline`],
 /// restricted to what the supergraph service needs:
 ///
-/// - acquire the query planner, the plugins, HTTP client material, and the query-plan
+/// - acquire the query planner, the plugins, HTTP client inputs, and the query-plan
 ///   Redis client
 /// - activate every plugin
 /// - assemble the HTTP and subgraph services, the query-plan cache, and the supergraph
@@ -220,8 +217,8 @@ pub(crate) async fn build_supergraph_only(
         .into_iter()
         .collect(),
     );
-    let (subgraph_client_material, connector_client_material) =
-        parse_http_client_material(&plugins, &schema, &configuration)?;
+    let (subgraph_client_inputs, connector_client_inputs) =
+        parse_http_client_inputs(&plugins, &schema, &configuration)?;
     let query_plan_redis = connect_query_plan_redis(&configuration).await?;
 
     for (_, plugin) in plugins.iter() {
@@ -229,11 +226,8 @@ pub(crate) async fn build_supergraph_only(
     }
 
     let query_plan_cache = build_query_plan_cache(&configuration, query_plan_redis);
-    let (http_service_factory, connector_http_service_factory) = build_http_services(
-        subgraph_client_material,
-        connector_client_material,
-        &plugins,
-    );
+    let (http_service_factory, connector_http_service_factory) =
+        build_http_services(subgraph_client_inputs, connector_client_inputs, &plugins);
     let subgraph_services = build_subgraph_services(&http_service_factory);
     let SupergraphPipeline {
         supergraph_service,
