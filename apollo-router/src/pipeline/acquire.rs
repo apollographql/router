@@ -52,7 +52,8 @@ pub(super) async fn acquire(
     license: Arc<LicenseState>,
 ) -> Result<Acquired, BoxError> {
     let bootstrap_telemetry_plugin =
-        maybe_bootstrap_telemetry(configuration, schema, &license, previous_config.as_deref()).await?;
+        maybe_bootstrap_telemetry(configuration, schema, &license, previous_config.as_deref())
+            .await?;
 
     let (query_planner_service, subgraph_schemas) =
         create_query_planner_service(schema, configuration)?;
