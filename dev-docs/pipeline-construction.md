@@ -52,7 +52,7 @@ Every fallible step in construction is resource acquisition — parsing config-s
 
 | Acquire step | Failure source |
 |---|---|
-| `init_telemetry` | telemetry plugin constructor (exporter setup) |
+| `maybe_bootstrap_telemetry` | telemetry plugin constructor (exporter setup) |
 | `create_query_planner_service` | unsupported federation version/features; authorization spec validation |
 | `create_plugins` | every plugin constructor — coprocessor clients, response-cache Redis, exporters |
 | `parse_http_client_material` | TLS root-store, client-certificate, and DNS-resolver parsing |
@@ -72,7 +72,7 @@ Nothing in the acquire phase creates and *holds* a telemetry instrument, because
 
 Construction is slow enough to need its own observability — a reload blocks on it, and query-plan warmup alone has historically dominated reload time (see the cost model in `dev-docs/reload-lifecycle.md`).
 
-- **Spans.** Everything runs inside `starting`; beneath it, `acquire`, `activate`, and `assemble`, with per-step spans inside them (`query_planner_creation`, `plugins` with one child span per plugin, `query_plan_redis_connect`, `apq_redis_connect`, `persisted_queries_manifest`, `supergraph_creation`, `warmup`). A slow reload decomposes directly: a stalled Redis connect, a slow persisted-query manifest fetch, and a long warmup each show up as their own span. `init_telemetry` runs first inside `acquire` so tracing is live for the rest of construction on first boot.
+- **Spans.** Everything runs inside `starting`; beneath it, `acquire`, `activate`, and `assemble`, with per-step spans inside them (`query_planner_creation`, `plugins` with one child span per plugin, `query_plan_redis_connect`, `apq_redis_connect`, `persisted_queries_manifest`, `supergraph_creation`, `warmup`). A slow reload decomposes directly: a stalled Redis connect, a slow persisted-query manifest fetch, and a long warmup each show up as their own span. `maybe_bootstrap_telemetry` runs first inside `acquire` so tracing is live for the rest of construction on first boot.
 - **Duration metrics.** `apollo.router.query_planning.warmup.duration` (histogram) for warmup, and `apollo.router.schema.load.duration` (histogram) for the schema parse that precedes construction in `try_start`. `apollo.router.lifecycle.query_planner.init` counts planner-initialization attempts with success/error attributes.
 
 ### Plugin ordering
@@ -86,7 +86,7 @@ Construction is slow enough to need its own observability — a reload blocks on
 | Entry point called from the state machine | `RouterServiceFactory::create_pipeline` (impl `PipelineFactory`) | `router_factory.rs` |
 | The three phases | `build_pipeline` | `pipeline/mod.rs` |
 | The acquire phase | `acquire`/`Acquired` | `pipeline/acquire.rs` |
-| Early telemetry init | `init_telemetry` | `pipeline/acquire.rs` |
+| Early telemetry init | `maybe_bootstrap_telemetry` | `pipeline/acquire.rs` |
 | Federation planner + subgraph schemas | `create_query_planner_service` | `pipeline/acquire.rs` |
 | Plugin instantiation and ordering | `create_plugins`, `PluginRegistrar` | `pipeline/plugins.rs` |
 | TLS/DNS client material | `parse_http_client_material`, `HttpClientMaterial` | `pipeline/acquire.rs`, `services/http/service.rs` |

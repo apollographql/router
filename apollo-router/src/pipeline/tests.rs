@@ -3,7 +3,7 @@ use std::sync::Arc;
 use indexmap::IndexMap;
 use serde_json_bytes::json;
 
-use super::acquire::init_telemetry;
+use super::acquire::maybe_bootstrap_telemetry;
 use super::*;
 use crate::configuration::Configuration;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
@@ -115,7 +115,7 @@ async fn init_telemetry_returns_no_plugin_on_hot_reload() {
     let schema = test_schema(&configuration);
     let license = Arc::new(LicenseState::default());
 
-    let plugin = init_telemetry(&configuration, &schema, &license, Some(&configuration))
+    let plugin = maybe_bootstrap_telemetry(&configuration, &schema, &license, Some(&configuration))
         .await
         .unwrap();
 

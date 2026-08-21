@@ -51,8 +51,8 @@ pub(super) async fn acquire(
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     license: Arc<LicenseState>,
 ) -> Result<Acquired, BoxError> {
-    let initial_telemetry_plugin =
-        init_telemetry(configuration, schema, &license, previous_config.as_deref()).await?;
+    let bootstrap_telemetry_plugin =
+        maybe_bootstrap_telemetry(configuration, schema, &license, previous_config.as_deref()).await?;
 
     let (query_planner_service, subgraph_schemas) =
         create_query_planner_service(schema, configuration)?;
@@ -62,7 +62,7 @@ pub(super) async fn acquire(
             configuration,
             schema,
             subgraph_schemas.clone(),
-            initial_telemetry_plugin,
+            bootstrap_telemetry_plugin,
             extra_plugins,
             license,
             previous_config,
@@ -113,7 +113,7 @@ pub(super) async fn acquire(
 ///   first boot is still live
 /// - when the process never installed the global OpenTelemetry layer
 /// - when the configuration has no `telemetry` section
-pub(super) async fn init_telemetry(
+pub(super) async fn maybe_bootstrap_telemetry(
     configuration: &Configuration,
     schema: &Schema,
     license: &Arc<LicenseState>,
