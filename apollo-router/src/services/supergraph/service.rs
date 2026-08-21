@@ -134,9 +134,15 @@ impl Service<SupergraphRequest> for SupergraphService {
             self.strict_variable_validation,
         )
         .or_else(|error: BoxError| async move {
+            // Any error reaching this catch-all is an unhandled internal failure: every
+            // client-actionable error is already returned as an `Ok` response upstream in
+            // `service_call`. Log the detail for operators, but do not put it in the response
+            // as it could leak internal information (e.g. query planner internals) to the
+            // caller. This mirrors `internal_server_error` in the axum factory.
+            tracing::error!(code = "INTERNAL_SERVER_ERROR", err = %error);
             let errors = vec![
                 crate::error::Error::builder()
-                    .message(error.to_string())
+                    .message("internal server error")
                     .extension_code("INTERNAL_SERVER_ERROR")
                     .build(),
             ];
