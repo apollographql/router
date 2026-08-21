@@ -105,8 +105,7 @@ pub(super) async fn acquire(
 /// Creates and activates the telemetry plugin before the rest of pipeline construction.
 ///
 /// Tracing has to be live before the other plugins and services are built, or none of
-/// that construction gets traced. Hand the returned plugin to `create_plugins`, which
-/// splices it into the plugin map instead of building telemetry a second time.
+/// that construction gets traced.
 ///
 /// Returns `None` when early activation is unnecessary or impossible:
 ///

@@ -234,8 +234,8 @@ async fn execute(
 }
 
 /// The pre-built [`ConnectorService`] stack for each connector, keyed by the connector's
-/// service name. [`Self::new`] assembles every stack once at reload time; [`Self::get`]
-/// hands out cheap clones.
+/// service name. [`Self::new`] assembles every stack once; [`Self::get`] hands out cheap
+/// clones.
 #[derive(Clone)]
 pub(crate) struct ConnectorServices {
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,

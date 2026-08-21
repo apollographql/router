@@ -1,5 +1,41 @@
 //! Construction of the router's serving pipeline from configuration, schema, and license.
 //!
+//! A [`Pipeline`] is one immutable, fully wired instance of the router's request-handling
+//! stack, plus the pieces a hot reload needs from it (configuration, schema, plugins, and
+//! the in-memory query-plan cache). The state machine builds one at startup and a
+//! replacement on every configuration or schema change, via [`build_pipeline`].
+//!
+//! # The request-time stack
+//!
+//! A built pipeline is a chain of tower service stacks, one per protocol level. From the
+//! outside in:
+//!
+//! - **Router** — HTTP in, HTTP out. Static pages, each plugin's `router_service` hook,
+//!   content negotiation, then `RouterService`: APQ and persisted-query expansion, query
+//!   parsing, batching, and dispatch to the supergraph service.
+//! - **Supergraph** — GraphQL request in, GraphQL response out. Content negotiation, each
+//!   plugin's `supergraph_service` hook, mutation and operation-limit enforcement, then
+//!   `SupergraphService`: introspection and query planning (through the query-plan
+//!   cache), and dispatch to the execution service.
+//! - **Execution** — executes one query plan. Batch analysis, subscriptions, each
+//!   plugin's `execution_service` hook, then `ExecutionService`, whose `FetchService`
+//!   routes fetch nodes to subgraphs and connectors.
+//! - **Subgraph / connector** — one pre-built stack per subgraph
+//!   ([`SubgraphServices`](crate::services::SubgraphServices)) and per connector
+//!   (`ConnectorServices` over `ConnectorRequestServices`), with their plugin hooks
+//!   (`subgraph_service`, `connector_request_service`) and per-entry buffers, ending in
+//!   an HTTP client.
+//! - **HTTP client** — one client per subgraph and per connector source: request
+//!   batching, response size limits, each plugin's `http_client_service` hook, then the
+//!   hyper-based `HttpClientService`.
+//!
+//! The router, supergraph, execution, and HTTP client stacks are assembled by the
+//! `build_*` functions in [`stages`]; the per-subgraph and per-connector stacks are
+//! assembled by the `SubgraphServices`, `ConnectorServices`, and
+//! `ConnectorRequestServices` constructors that those functions call.
+//!
+//! # Construction: acquire → activate → assemble
+//!
 //! [`build_pipeline`] runs three phases, each under its own tracing span:
 //!
 //! - **Acquire** (the [`acquire`](mod@self::acquire) submodule) gathers every resource whose
@@ -9,9 +45,29 @@
 //!   tracer and meter providers that cannot be rolled back. Nothing after this phase starts
 //!   may fail.
 //! - **Assemble** (the [`stages`] submodule) builds the caches and service stacks from the
-//!   acquired resources, using infallible functions. Each cache registers its gauges in its
-//!   constructor; constructing caches after the meter-provider swap binds those gauges to
-//!   the provider that serves this pipeline.
+//!   acquired resources, using infallible functions. The query-plan and APQ caches register
+//!   their gauges in their constructors; constructing them after the meter-provider swap
+//!   binds those gauges to the provider that serves this pipeline.
+//!
+//! After assemble, [`Pipeline::warm_up`] populates the query-plan cache — from a sample
+//! of the previous pipeline's cache on a reload, and from persisted queries when
+//! configured — before [`build_pipeline`] returns the pipeline to serve traffic.
+//!
+//! # Hot reload
+//!
+//! On a reload, [`build_pipeline`] receives the previous pipeline's configuration and
+//! in-memory query-plan cache. The telemetry bootstrap is skipped — the global tracer and
+//! meter providers from first boot stay installed until the telemetry plugin's
+//! `activate()` swaps in new ones — and warm-up draws its queries from the previous
+//! cache. Plugin instantiation, planner creation, Redis connects, and stack assembly all
+//! run from scratch, so the old pipeline keeps serving unchanged until the state machine
+//! swaps the new one in.
+//!
+//! Plugin construction order (and with it, hook order at every stack above) is defined
+//! once, in [`plugins`] ([`create_plugins`]).
+//!
+//! `dev-docs/pipeline-construction.md` covers the design rationale, the failure-model
+//! table, and the instrumentation.
 
 use std::sync::Arc;
 
@@ -115,8 +171,8 @@ fn activate(acquired: &Acquired) {
 
 /// Assembles the pipeline from the acquired resources.
 ///
-/// Call after [`activate`]: the caches built here register their gauges against the
-/// meter provider that activation installed.
+/// Call after [`activate`]: the query-plan and APQ caches built here register their
+/// gauges against the meter provider that activation installed.
 fn assemble(
     acquired: Acquired,
     configuration: Arc<Configuration>,
@@ -192,17 +248,6 @@ fn assemble(
 /// Builds an activated supergraph service for [`TestHarness`](crate::TestHarness),
 /// without the telemetry early-activation, APQ, persisted queries, warm-up, and router
 /// service that [`build_pipeline`] adds around it.
-///
-/// Composes the same acquire → activate → assemble sequence as [`build_pipeline`],
-/// restricted to what the supergraph service needs:
-///
-/// - acquire the query planner, the plugins, HTTP client inputs, and the query-plan
-///   Redis client
-/// - activate every plugin
-/// - assemble the HTTP and subgraph services, the query-plan cache, and the supergraph
-///   pipeline
-///
-/// A change to that sequence in [`build_pipeline`] applies here too.
 pub(crate) async fn build_supergraph_for_test_harness(
     configuration: Arc<Configuration>,
     schema: Arc<Schema>,
@@ -263,7 +308,7 @@ pub(crate) struct Pipeline {
     warmup_service: warmup::BoxCloneService,
     persisted_queries: Arc<PersistedQueryExpander>,
     pipeline_handle: Arc<PipelineHandle>,
-    /// The configuration used to create this router, stored for hot reload previous config extraction
+    /// The configuration this pipeline was built from.
     pub(crate) configuration: Arc<Configuration>,
 }
 

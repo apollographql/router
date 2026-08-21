@@ -38,8 +38,8 @@ pub(crate) struct HttpResponse {
 /// batching and response-size-limit layers, each plugin's `http_client_service` hook,
 /// and the [`HttpClientService`] built from `inputs`.
 ///
-/// `name` is the subgraph name; connector sources pass their subgraph's name too, since
-/// that is what the plugin hook receives.
+/// `name` is the subgraph name — for a connector source's client, the name of the
+/// subgraph that owns the source — and is what the plugin hook receives.
 pub(crate) fn build_http_client_service(
     name: &str,
     inputs: service::HttpClientInputs,

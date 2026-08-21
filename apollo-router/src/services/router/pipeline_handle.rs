@@ -3,8 +3,7 @@ use std::sync::Arc;
 use crate::metrics::UpDownCounterGuard;
 
 /// Identifies one built pipeline. The `apollo.router.pipelines` up-down counter and the
-/// connection counters carry its fields as attributes. Each
-/// [`crate::pipeline::Pipeline`] carries one.
+/// connection counters carry its fields as attributes.
 #[derive(Clone, Hash, Eq, PartialEq, Debug)]
 pub(crate) struct PipelineRef {
     pub(crate) schema_id: String,

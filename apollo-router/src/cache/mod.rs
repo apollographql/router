@@ -50,8 +50,7 @@ where
     UncachedError: Clone + Send + 'static,
 {
     /// Builds a cache from an in-memory LRU capacity and an optional pre-connected Redis
-    /// client. Obtain the client with [`connect_redis`], or use
-    /// [`DeduplicatingCache::from_configuration`] to do both steps at once.
+    /// client. Obtain the client with [`connect_redis`].
     pub(crate) fn with_capacity(
         capacity: NonZeroUsize,
         redis: Option<RedisCacheStorage>,

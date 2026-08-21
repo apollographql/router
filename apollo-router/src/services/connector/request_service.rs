@@ -156,8 +156,8 @@ impl Response {
 }
 
 /// The pre-built request service stack for each connector source, keyed by
-/// `source_config_key()`. [`Self::new`] assembles every stack once at reload time;
-/// [`Self::get`] hands out cheap clones.
+/// `source_config_key()`. [`Self::new`] assembles every stack once; [`Self::get`] hands
+/// out cheap clones.
 #[derive(Clone)]
 pub(crate) struct ConnectorRequestServices {
     pub(crate) services:
@@ -191,8 +191,11 @@ impl ConnectorRequestServices {
         }
     }
 
-    /// Retrieves the pre-built request service for `source_name`. Cheap: clones an entry
-    /// built once in [`Self::new`] at reload time.
+    /// Retrieves the pre-built request service for `source_name`: a cheap clone of an
+    /// entry built once in [`Self::new`].
+    ///
+    /// # Panics
+    /// Panics if no service exists for `source_name`.
     pub(crate) fn get(&self, source_name: String) -> BoxCloneService {
         // Note: We have to box our cloned service to erase the type of the Buffer.
         self.services

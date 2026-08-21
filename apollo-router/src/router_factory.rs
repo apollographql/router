@@ -16,10 +16,8 @@ use crate::uplink::license_enforcement::LicenseState;
 
 pub(crate) const STARTING_SPAN_NAME: &str = "starting";
 
-/// Factory for creating a router service instance.
-///
-/// The HTTP server calls `create` once per reload and shares the resulting
-/// service across every connection it serves.
+/// A built pipeline's serving surface: the router service, the plugin web endpoints,
+/// and the pipeline handle.
 pub(crate) trait RouterFactory: Clone + Send + 'static {
     fn create(&self) -> router::BoxCloneService;
 

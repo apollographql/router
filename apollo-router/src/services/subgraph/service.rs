@@ -329,8 +329,7 @@ async fn call_http(
 }
 
 /// The pre-built subgraph service stack for each subgraph, keyed by subgraph name.
-/// [`Self::new`] assembles every stack once at reload time; [`Self::get`] hands out
-/// cheap clones.
+/// [`Self::new`] assembles every stack once; [`Self::get`] hands out cheap clones.
 #[derive(Clone)]
 pub(crate) struct SubgraphServices {
     pub(crate) services: Arc<
