@@ -155,19 +155,6 @@ fn init_query_plan_from_redis(
     Ok(())
 }
 
-impl CachingQueryPlanner<()> {
-    /// Create a cache for query plans. This cache can deduplicate requests and uses both Redis and
-    /// an in-memory backend.
-    #[cfg(test)]
-    pub(crate) async fn create_cache(
-        config: &crate::configuration::QueryPlanCache,
-    ) -> Result<QueryPlanCache, BoxError> {
-        let cache =
-            DeduplicatingCache::from_configuration(&config.clone().into(), "query planner").await?;
-        Ok(Arc::new(cache))
-    }
-}
-
 impl<T> CachingQueryPlanner<T> {
     #[cfg(test)]
     pub(crate) async fn for_test(
@@ -176,9 +163,10 @@ impl<T> CachingQueryPlanner<T> {
         subgraph_schemas: Arc<SubgraphSchemas>,
         configuration: &Configuration,
     ) -> Result<Self, BoxError> {
-        let cache =
-            CachingQueryPlanner::create_cache(&configuration.supergraph.query_planning.cache)
-                .await?;
+        let cache = crate::pipeline::build_query_plan_cache(
+            configuration,
+            crate::pipeline::connect_query_plan_redis(configuration).await?,
+        );
         Ok(Self::new(
             delegate,
             schema,

@@ -5,16 +5,12 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
-#[cfg(test)]
-use tower::BoxError;
 
 use self::redis::RedisCacheStorage;
 use self::storage::CacheStorage;
 use self::storage::InMemoryCache;
 use self::storage::KeyType;
 use self::storage::ValueType;
-#[cfg(test)]
-use self::storage::connect_redis;
 
 mod metrics;
 pub(crate) mod redis;
@@ -50,7 +46,7 @@ where
     UncachedError: Clone + Send + 'static,
 {
     /// Builds a cache from an in-memory LRU capacity and an optional pre-connected Redis
-    /// client. Obtain the client with [`connect_redis`].
+    /// client. Obtain the client with [`storage::connect_redis`].
     pub(crate) fn with_capacity(
         capacity: NonZeroUsize,
         redis: Option<RedisCacheStorage>,
@@ -60,23 +56,6 @@ where
             wait_map: Arc::new(Mutex::new(HashMap::new())),
             storage: CacheStorage::new(capacity, redis, caller),
         }
-    }
-
-    /// Connects the Redis client `config` describes, if any, and builds a cache around it.
-    ///
-    /// # Errors
-    /// Fails only when the Redis connect fails and the configuration marks it as required
-    /// to start; see [`connect_redis`].
-    #[cfg(test)]
-    pub(crate) async fn from_configuration(
-        config: &crate::configuration::Cache,
-        caller: &'static str,
-    ) -> Result<Self, BoxError> {
-        let redis = match config.redis.clone() {
-            Some(redis_config) => connect_redis(redis_config, caller).await?,
-            None => None,
-        };
-        Ok(Self::with_capacity(config.in_memory.limit, redis, caller))
     }
 
     /// Look up `key` in the cache, returning an [`Entry`] that describes how to proceed:
