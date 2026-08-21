@@ -37,7 +37,6 @@ use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Upgraded;
 use crate::subgraph::typestate::Validated;
-use crate::supergraph::CompositionHint;
 use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
 use crate::supergraph::remove_inactive_requires_and_provides_from_subgraph;
 use crate::utils::FallibleIterator;
@@ -991,7 +990,7 @@ fn inner_upgrade_subgraphs_if_necessary(
 #[instrument(skip(subgraphs))]
 pub fn upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
-) -> Result<(Vec<Subgraph<Validated>>, Vec<CompositionHint>), Vec<CompositionError>> {
+) -> Result<Vec<Subgraph<Validated>>, Vec<CompositionError>> {
     let mut errors: Vec<CompositionError> = vec![];
     let subgraphs = subgraphs
         .into_iter()
@@ -1008,7 +1007,6 @@ pub fn upgrade_subgraphs_if_necessary(
     let upgraded = inner_upgrade_subgraphs_if_necessary(subgraphs)?;
 
     // Apply fed3 compatibility transformations and validate
-    let mut all_hints: Vec<CompositionHint> = Vec::new();
     let validated: Vec<Subgraph<Validated>> = upgraded
         .into_iter()
         .filter_map(|subgraph| {
@@ -1016,7 +1014,7 @@ pub fn upgrade_subgraphs_if_necessary(
                 Either::Left(s) => s.assume_upgraded(),
                 Either::Right(s) => s,
             };
-            all_hints.extend(upgraded.apply_fed3_upgrade());
+            upgraded.apply_fed3_upgrade();
             match upgraded.validate() {
                 Ok(s) => Some(s),
                 Err(e) => {
@@ -1028,7 +1026,7 @@ pub fn upgrade_subgraphs_if_necessary(
         .collect();
 
     if errors.is_empty() {
-        Ok((validated, all_hints))
+        Ok(validated)
     } else {
         Err(errors)
     }
@@ -1098,7 +1096,6 @@ mod tests {
 
         let [s1, _s2]: [Subgraph<_>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2])
             .expect("upgrades schema")
-            .0
             .try_into()
             .expect("Expected 2 elements");
 
@@ -1227,7 +1224,6 @@ mod tests {
 
         let [s1, _s2]: [Subgraph<_>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2])
             .expect("upgrades schema")
-            .0
             .try_into()
             .expect("Expected 2 elements");
 
@@ -1264,7 +1260,6 @@ mod tests {
 
         let [s]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![s])
             .expect("upgrades schema")
-            .0
             .try_into()
             .expect("Expected 1 element");
 
@@ -1775,7 +1770,6 @@ mod tests {
 
         let [s1, s2]: [Subgraph<_>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2])
             .expect("upgrades schema")
-            .0
             .try_into()
             .expect("Expected 2 elements");
 
@@ -1814,7 +1808,6 @@ mod tests {
 
         let [subgraph]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![subgraph])
             .expect("upgrades schema")
-            .0
             .try_into()
             .expect("Expected 1 element");
 
@@ -1918,7 +1911,6 @@ mod tests {
         let [subgraph1, subgraph2]: [Subgraph<_>; 2] =
             upgrade_subgraphs_if_necessary(vec![subgraph1, subgraph2])
                 .expect("upgrades schema")
-                .0
                 .try_into()
                 .expect("Expected 2 elements");
         assert!(
@@ -1999,7 +1991,6 @@ mod tests {
 
         let [s1]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![subgraph1])
             .expect("successfully upgraded")
-            .0
             .try_into()
             .expect("single graph");
         insta::assert_snapshot!(
@@ -2074,7 +2065,6 @@ mod tests {
         // @core is not applied on the schema so it is treated as regular custom directive
         let [upgraded] = upgrade_subgraphs_if_necessary(vec![subgraph1])
             .expect("upgrades schema")
-            .0
             .try_into()
             .expect("single subgraph was upgraded");
         insta::assert_snapshot!(
@@ -2162,7 +2152,6 @@ mod tests {
 
         let [upgraded] = upgrade_subgraphs_if_necessary(vec![subgraph1])
             .expect("upgrades schema")
-            .0
             .try_into()
             .expect("single subgraph was upgraded");
         // keeps user provided @link and adds federation directive aliased to link1
@@ -2263,7 +2252,7 @@ mod tests {
                     .expect("expands schema")
             })
             .collect::<Vec<_>>();
-        let (upgraded, _hints) = upgrade_subgraphs_if_necessary(expanded).expect("failed to upgrade schema");
+        let upgraded = upgrade_subgraphs_if_necessary(expanded).expect("failed to upgrade schema");
         let changed_schema = upgraded[0].schema().schema();
         let id_field = coord!(User.id)
             .lookup_field(changed_schema)
@@ -2325,7 +2314,6 @@ mod tests {
 
         let [s1] = upgrade_subgraphs_if_necessary(vec![subgraph1])
             .expect("upgrades schema")
-            .0
             .try_into()
             .expect("Expected 1 element");
 
@@ -2430,7 +2418,6 @@ mod tests {
         let [_s1, s2]: [Subgraph<_>; 2] =
             upgrade_subgraphs_if_necessary(vec![subgraph1, subgraph2])
                 .expect("upgrades schema")
-                .0
                 .try_into()
                 .expect("Expected 2 elements");
 
@@ -2623,7 +2610,6 @@ scalar _FieldSet
 
         let [upgraded]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![s1])
             .expect("success")
-            .0
             .try_into()
             .expect("single subgraph upgraded");
         insta::assert_snapshot!(
@@ -2868,7 +2854,6 @@ scalar _FieldSet
         let [fed1, fed2]: [Subgraph<_>; 2] =
             upgrade_subgraphs_if_necessary(mixed_federation_version_subgraphs())
                 .expect("upgrades schema")
-                .0
                 .try_into()
                 .expect("Expected 2 elements");
 

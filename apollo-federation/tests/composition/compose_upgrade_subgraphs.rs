@@ -38,7 +38,6 @@ fn fed1_preserves_custom_directive_descriptions() {
 
     let [upgraded]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![subgraph])
         .expect("upgrades schema")
-        .0
         .try_into()
         .expect("Expected 1 element");
 
@@ -78,7 +77,6 @@ fn fed1_preserves_federation_directive_descriptions() {
 
     let [upgraded]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![subgraph])
         .expect("upgrades schema")
-        .0
         .try_into()
         .expect("Expected 1 element");
 
@@ -119,7 +117,6 @@ fn fed1_fieldset_with_tag_upgrades_successfully() {
 
     let [upgraded]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![subgraph])
         .expect("upgrades schema")
-        .0
         .try_into()
         .expect("Upgrade subgraphs");
 
@@ -163,7 +160,6 @@ fn fed2_preserves_custom_directive_descriptions() {
 
     let [validated]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![subgraph])
         .expect("validates schema")
-        .0
         .try_into()
         .expect("Expected 1 element");
 
@@ -206,7 +202,6 @@ fn fed2_uses_standard_federation_directive_definitions() {
 
     let [validated]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![subgraph])
         .expect("validates schema")
-        .0
         .try_into()
         .expect("Expected 1 element");
 
@@ -270,7 +265,7 @@ fn upgrade_does_not_add_shareable_to_key_fields_in_partial_schemas() {
     .expand_links()
     .expect("expands");
 
-    let (mut upgraded, _hints) = upgrade_subgraphs_if_necessary(vec![s1, s2]).expect("upgrade succeeds");
+    let mut upgraded = upgrade_subgraphs_if_necessary(vec![s1, s2]).expect("upgrade succeeds");
     upgraded.sort_by(|a, b| a.name.cmp(&b.name));
 
     assert_snapshot!("s1", upgraded[0].schema_string());
