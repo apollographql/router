@@ -71,33 +71,34 @@ where
     fn allows_any(&self, _defs: &PossibleDefinitions) -> bool;
 }
 
-struct DummyPathConstraint;
-
-impl PathConstraint for DummyPathConstraint {
-    fn under_type_condition(&self, _type_cond: &NormalizedTypeCondition) -> Self {
-        DummyPathConstraint
+/// Conjunction of two path constraints: a runtime type is possible only if both constraints
+/// allow it. This is how an extra oracle (e.g. `SubgraphConstraint`) is layered on top of the
+/// base `SchemaConstraint`.
+impl<A: PathConstraint, B: PathConstraint> PathConstraint for (A, B) {
+    fn under_type_condition(&self, type_cond: &NormalizedTypeCondition) -> Self {
+        (
+            self.0.under_type_condition(type_cond),
+            self.1.under_type_condition(type_cond),
+        )
     }
 
-    fn for_field(&self, _representative_field: &Field) -> Result<Self, ComparisonError> {
-        Ok(DummyPathConstraint)
+    fn for_field(&self, representative_field: &Field) -> Result<Self, ComparisonError> {
+        Ok((
+            self.0.for_field(representative_field)?,
+            self.1.for_field(representative_field)?,
+        ))
     }
 
-    fn allows(&self, _ty: &ObjectTypeDefinitionPosition) -> bool {
-        true
+    fn allows(&self, ty: &ObjectTypeDefinitionPosition) -> bool {
+        self.0.allows(ty) && self.1.allows(ty)
     }
 
-    fn allows_any(&self, _defs: &PossibleDefinitions) -> bool {
-        true
+    fn allows_any(&self, defs: &PossibleDefinitions) -> bool {
+        // Note: More precise than `self.0.allows_any(defs) && self.1.allows_any(defs)`, since
+        //       some ground type must satisfy both constraints simultaneously.
+        defs.iter()
+            .any(|(type_cond, _)| type_cond.ground_set().iter().any(|ty| self.allows(ty)))
     }
-}
-
-// Check if `this` is a subset of `other`.
-pub fn compare_response_shapes(
-    this: &ResponseShape,
-    other: &ResponseShape,
-) -> Result<(), ComparisonError> {
-    let assumption = Clause::default(); // empty assumption at the top level
-    compare_response_shapes_with_constraint(&DummyPathConstraint, &assumption, this, other)
 }
 
 /// Check if `this` is a subset of `other`, but also use the `PathConstraint` to ignore infeasible
