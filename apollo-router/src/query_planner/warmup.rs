@@ -321,7 +321,8 @@ pub(crate) async fn warm_up(
 }
 
 /// Warms up the query plan cache behind `warmup_query_planner_service`. Collects the
-/// operations to plan with [`queries_to_warm_up`], then plans each of them with [`warm_up`].
+/// operations to plan with [`queries_to_warm_up`], then attempts to plan each of them
+/// with [`warm_up`].
 pub(crate) async fn warm_up_query_planner(
     warmup_query_planner_service: BoxCloneService,
     persisted_queries: &PersistedQueryExpander,

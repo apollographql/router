@@ -170,8 +170,9 @@ pub(super) async fn init_telemetry(
 /// Creates the federation query planner service and the subgraph schemas it extracts.
 ///
 /// # Errors
-/// Fails when the schema uses unsupported federation versions or features, or when its
-/// authorization directives do not validate.
+/// Fails when the schema uses unsupported federation versions or features, when its
+/// authorization directives do not validate, or when planner initialization fails for
+/// another reason.
 pub(crate) fn create_query_planner_service(
     schema: &Arc<Schema>,
     configuration: &Arc<Configuration>,
@@ -195,7 +196,8 @@ pub(crate) type HttpClientMaterialMaps = (
     IndexMap<String, HttpClientMaterial>,
 );
 
-/// Parses TLS and DNS client material for every subgraph and connector source.
+/// Parses TLS and DNS client material for every non-connector subgraph and every
+/// connector source.
 ///
 /// This is the fallible half of HTTP client construction;
 /// [`build_http_services`](super::build_http_services) turns the material into services.
@@ -204,7 +206,8 @@ pub(crate) fn parse_http_client_material(
     schema: &Schema,
     configuration: &Configuration,
 ) -> Result<HttpClientMaterialMaps, BoxError> {
-    // Build each root store once and share it across subgraphs and sources:
+    // Build the subgraph and connector root stores once each and share them across
+    // their clients:
     // native_roots_store re-reads the OS trust store on every call.
     let subgraph_tls_root_store: RootCertStore = configuration
         .tls

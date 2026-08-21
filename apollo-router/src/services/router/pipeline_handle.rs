@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use crate::metrics::UpDownCounterGuard;
 
-/// Identifies one built pipeline, so the telemetry plugin's gauge can report how many
-/// pipelines are still alive. Each [`crate::pipeline::Pipeline`] carries one.
+/// Identifies one built pipeline. The `apollo.router.pipelines` up-down counter and the
+/// connection counters carry its fields as attributes. Each
+/// [`crate::pipeline::Pipeline`] carries one.
 #[derive(Clone, Hash, Eq, PartialEq, Debug)]
 pub(crate) struct PipelineRef {
     pub(crate) schema_id: String,

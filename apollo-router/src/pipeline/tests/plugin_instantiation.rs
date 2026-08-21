@@ -1,5 +1,6 @@
-//! Which plugins a built pipeline instantiates: mandatory and OSS plugins always,
-//! optional plugins gated by the license's allowed features.
+//! Which plugins a built pipeline instantiates: mandatory plugins always, OSS plugins
+//! whenever configured regardless of license, optional plugins gated by the license's
+//! allowed features.
 
 use std::collections::HashSet;
 use std::sync::Arc;

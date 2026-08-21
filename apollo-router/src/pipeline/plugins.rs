@@ -27,14 +27,16 @@ use crate::services::apollo_key;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
-/// Instantiates every plugin in the order below, then returns them keyed by name.
+/// Processes the plugins in the order below and returns the built instances keyed by name.
 ///
-/// Each Apollo plugin is added through one of three [`PluginRegistrar`] methods:
+/// Apart from a pre-activated telemetry instance, which is spliced in directly, each
+/// Apollo plugin is added through one of three [`PluginRegistrar`] methods:
 ///
 /// - [`add_mandatory`](PluginRegistrar::add_mandatory) instantiates the plugin even with
 ///   no user config for it.
 /// - [`add_optional`](PluginRegistrar::add_optional) instantiates the plugin only if
-///   configured. The license's allowed features gate it.
+///   configured. When the plugin maps to a license-restricted feature, the license's
+///   allowed features gate it.
 /// - [`add_oss`](PluginRegistrar::add_oss) instantiates the plugin only if configured,
 ///   with no license check.
 pub(crate) async fn create_plugins(
@@ -117,7 +119,7 @@ pub(crate) async fn create_plugins(
     // 2. telemetry (has hooks at router, supergraph, and subgraph services)
     // 3. rate limiting (has a hook at the router service)
     // The order here means that header propagation happens before telemetry *at the subgraph
-    // service*. Depending on the requirements of plugins, it may have to be in this order.
+    // service*.
     // Similarly, header propagation being first does not mean that it's exempt from rate
     // limiting, for the same reason. Rate limiting must be after telemetry, though, because
     // telemetry and rate limiting both work at the router service, and requests rejected from
@@ -187,10 +189,11 @@ pub(crate) async fn create_plugins(
 
 /// Construction-time state shared by every plugin instantiation in [`create_plugins`].
 ///
-/// The `add_*` methods each claim their factory out of `factories`, take the plugin's
-/// section out of `apollo_plugins_config`, and record the built instance or the
-/// construction error. Bundling the state into one struct lets the methods borrow it
-/// mutably as a unit.
+/// [`add_mandatory`](Self::add_mandatory), [`add_optional`](Self::add_optional), and
+/// [`add_oss`](Self::add_oss) each claim their factory out of `factories`, take the
+/// plugin's section out of `apollo_plugins_config`, and record the built instance or
+/// the construction error. Bundling the state into one struct lets the methods borrow
+/// it mutably as a unit.
 struct PluginRegistrar<'a> {
     /// Apollo plugin factories not yet claimed by an `add_*` call, keyed by full plugin
     /// name (`apollo.<name>`). [`finish`](Self::finish) panics on any leftovers.
@@ -269,7 +272,8 @@ impl PluginRegistrar<'_> {
 
     /// Instantiates the Apollo plugin named `apollo.<name>` when the configuration has a
     /// section for it. When the plugin maps to a license-restricted feature and the
-    /// license does not allow that feature, the plugin is skipped with a warning.
+    /// license does not allow that feature, the method skips the plugin and logs a
+    /// warning.
     async fn add_optional(&mut self, name: &str) {
         let full_name = format!("apollo.{name}");
         let span = Self::plugin_span(&full_name);
@@ -343,8 +347,8 @@ impl PluginRegistrar<'_> {
     }
 
     /// Builds the [`PluginInit`] for one plugin and instantiates it through `factory`.
-    /// A construction failure is pushed onto `errors` rather than returned, so one
-    /// broken plugin does not hide the errors of the others.
+    /// Pushes a construction failure onto `errors` instead of returning it. One broken
+    /// plugin therefore does not hide the others' errors.
     async fn add_plugin(
         &mut self,
         name: String,

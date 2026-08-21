@@ -161,7 +161,7 @@ pub(crate) struct SupergraphPipeline {
     pub(crate) supergraph_service: supergraph::BoxCloneService,
     /// Handle to the in-memory query-plan cache, kept for the next hot reload's warm-up.
     pub(crate) in_memory_query_plan_cache: InMemoryQueryPlanCache,
-    /// The caching-wrapped planner, consumed by warm-up.
+    /// The caching-wrapped planner, for replaying queries into the plan cache.
     pub(crate) caching_query_planner: query_planner::CacheBoxCloneService,
 }
 

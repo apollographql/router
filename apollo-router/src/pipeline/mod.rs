@@ -69,9 +69,9 @@ mod tests;
 /// Builds a serving pipeline from configuration, schema, and license.
 ///
 /// Runs the acquire, activate, and assemble phases the module docs describe. On a hot
-/// reload, pass the previous pipeline's configuration and in-memory query-plan cache:
-/// the early telemetry activation is then skipped and warm-up replays the previously
-/// cached queries against the new planner.
+/// reload, pass the previous pipeline's configuration and in-memory query-plan cache.
+/// `build_pipeline` then skips the early telemetry activation, and warm-up replays a
+/// configurable sample of the previously cached queries against the new planner.
 pub(crate) async fn build_pipeline(
     configuration: Arc<Configuration>,
     schema: Arc<Schema>,
@@ -102,7 +102,7 @@ pub(crate) async fn build_pipeline(
     {
         // The point of no return: activating the telemetry plugin swaps in global tracer
         // and meter providers that cannot be rolled back. From here on the pipeline must
-        // go live, which is why the assemble phase below is infallible.
+        // go live. The assemble phase below is therefore infallible.
         let _span = tracing::info_span!("activate").entered();
         for (_, plugin) in plugins.iter() {
             plugin.activate();
@@ -253,7 +253,8 @@ pub(crate) async fn build_supergraph_only(
     Ok((plugins, supergraph_service, in_memory_query_plan_cache))
 }
 
-/// A collection of services and data which may be used to create a "router".
+/// One built serving pipeline: the router service stack plus the schema, plugins, and
+/// caches a hot reload needs from it.
 #[derive(Clone)]
 pub(crate) struct Pipeline {
     pub(crate) schema: Arc<Schema>,
@@ -297,8 +298,8 @@ impl Pipeline {
     ) -> Self {
         let static_page = StaticPageLayer::new(&configuration);
 
-        // Create a handle that will help us keep track of this pipeline.
-        // A metric is exposed that allows the user to see if pipelines are being hung onto.
+        // PipelineHandle registers the apollo.router.pipelines up-down counter, so
+        // operators can see when old pipelines are still held alive.
         let schema_id = schema.schema_id.to_string();
         let launch_id = schema
             .launch_id
@@ -400,8 +401,8 @@ pub(crate) async fn empty() -> impl Service<
     Error = BoxError,
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send {
-    // The handle is intentionally discarded — empty() creates a service that is never expected
-    // to be called. Any call would block indefinitely.
+    // empty() discards the handle: the service is never expected to be called, and any
+    // call fails with a `Closed` error.
     let (mock, _handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
     from_supergraph_mock_with_configuration(mock, Arc::new(Configuration::default())).await
 }
