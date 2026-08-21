@@ -521,4 +521,64 @@ mod tests {
             "reason argument should have been stripped from argument"
         );
     }
+
+    #[test]
+    fn upgrade_hints_precede_merge_hints() {
+        let s1 = Subgraph::parse(
+            "s1",
+            "http://s1",
+            r#"
+                extend schema
+                    @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@override"])
+
+                type Query {
+                    field: String @deprecated(reason: null)
+                }
+
+                type User @key(fields: "id") {
+                    id: ID!
+                    name: String @override(from: "s2")
+                }
+            "#,
+        )
+        .unwrap();
+        let s2 = Subgraph::parse(
+            "s2",
+            "http://s2",
+            r#"
+                extend schema
+                    @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+
+                type Query {
+                    other: String
+                }
+
+                type User @key(fields: "id") {
+                    id: ID!
+                    name: String
+                }
+            "#,
+        )
+        .unwrap();
+        let result =
+            crate::composition::compose(vec![s1, s2], CompositionOptions::default()).unwrap();
+        let hint_codes: Vec<_> = result
+            .hints()
+            .iter()
+            .map(|h| h.code().to_string())
+            .collect();
+
+        let upgrade_pos = hint_codes
+            .iter()
+            .position(|c| c == "DEPRECATED_REASON_NULL")
+            .expect("expected DEPRECATED_REASON_NULL hint");
+        let merge_pos = hint_codes
+            .iter()
+            .position(|c| c == "OVERRIDDEN_FIELD_CAN_BE_REMOVED")
+            .expect("expected OVERRIDDEN_FIELD_CAN_BE_REMOVED hint");
+        assert!(
+            upgrade_pos < merge_pos,
+            "Upgrade hints should precede merge hints, got: {hint_codes:?}"
+        );
+    }
 }

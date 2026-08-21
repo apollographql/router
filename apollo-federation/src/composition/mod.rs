@@ -142,11 +142,9 @@ pub fn pre_merge_validations(subgraphs: &[Subgraph<Validated>]) -> Result<(), Co
 
 #[instrument(skip(subgraphs, options))]
 pub fn merge_subgraphs(
-    mut subgraphs: Vec<Subgraph<Validated>>,
+    subgraphs: Vec<Subgraph<Validated>>,
     options: &CompositionOptions,
 ) -> Result<Supergraph<Merged>, CompositionFailure> {
-    let upgrade_hints: Vec<CompositionHint> =
-        subgraphs.iter_mut().flat_map(|s| s.take_hints()).collect();
     let merger = Merger::new(subgraphs, options.clone()).map_err(|e| {
         CompositionFailure::from_errors(vec![CompositionError::InternalError {
             message: e.to_string(),
@@ -170,9 +168,7 @@ pub fn merge_subgraphs(
                 },
             ]));
         };
-        let mut hints = result.hints;
-        hints.extend(upgrade_hints);
-        let supergraph = Supergraph::with_hints(supergraph_schema, hints);
+        let supergraph = Supergraph::with_hints(supergraph_schema, result.hints);
         Ok(supergraph)
     } else {
         Err(CompositionFailure {
