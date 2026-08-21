@@ -131,17 +131,15 @@ pub(crate) async fn create_plugins(
     // `MaskingRulesMap` into context) may appear before telemetry without breaking this
     // invariant — they can't short-circuit a request away from telemetry.
     //
-    // Each entry below names the services the plugin hooks. Two plugins whose hooked
-    // services don't overlap can be reordered relative to each other; the annotations make
-    // that check possible without reading every plugin's source.
-    registrar.add_mandatory("include_subgraph_errors").await; // supergraph, subgraph
-    registrar.add_mandatory("headers").await; // router, subgraph, connector_request
+    // Two plugins whose hooked services don't overlap can be reordered relative to each
+    // other; check each plugin's service hooks before moving an entry.
+    registrar.add_mandatory("include_subgraph_errors").await;
+    registrar.add_mandatory("headers").await;
     if apollo_telemetry_plugin_mandatory {
         match initial_telemetry_plugin {
             None => {
-                // router, supergraph, execution, subgraph, connector_request, http_client —
-                // must come before any plugin below that can reject a request at the router
-                // service, so telemetry records the rejection.
+                // Must come before any plugin below that can reject a request at the
+                // router service, so telemetry records the rejection.
                 registrar.add_mandatory("telemetry").await;
             }
             Some(plugin) => {
@@ -153,36 +151,36 @@ pub(crate) async fn create_plugins(
             }
         }
     }
-    registrar.add_mandatory("license_enforcement").await; // router
-    registrar.add_mandatory("health_check").await; // router
-    registrar.add_mandatory("traffic_shaping").await; // router, subgraph, connector_request
-    registrar.add_mandatory("limits").await; // router, subgraph, connector_request
-    registrar.add_mandatory("csrf").await; // router
-    registrar.add_mandatory("fleet_detector").await; // router, http_client
-    registrar.add_mandatory("enhanced_client_awareness").await; // supergraph
-    registrar.add_mandatory("experimental_diagnostics").await; // no service hooks
+    registrar.add_mandatory("license_enforcement").await;
+    registrar.add_mandatory("health_check").await;
+    registrar.add_mandatory("traffic_shaping").await;
+    registrar.add_mandatory("limits").await;
+    registrar.add_mandatory("csrf").await;
+    registrar.add_mandatory("fleet_detector").await;
+    registrar.add_mandatory("enhanced_client_awareness").await;
+    registrar.add_mandatory("experimental_diagnostics").await;
 
-    registrar.add_oss("forbid_mutations").await; // execution
-    registrar.add_optional("subscription").await; // subgraph
-    registrar.add_oss("override_subgraph_url").await; // subgraph
-    registrar.add_optional("authorization").await; // supergraph, execution
-    registrar.add_optional("authentication").await; // router, subgraph, connector_request
-    registrar.add_oss("preview_file_uploads").await; // router, supergraph, execution, subgraph, http_client
-    registrar.add_mandatory("progressive_override").await; // router, supergraph
-    registrar.add_optional("demand_control").await; // execution, subgraph
+    registrar.add_oss("forbid_mutations").await;
+    registrar.add_optional("subscription").await;
+    registrar.add_oss("override_subgraph_url").await;
+    registrar.add_optional("authorization").await;
+    registrar.add_optional("authentication").await;
+    registrar.add_oss("preview_file_uploads").await;
+    registrar.add_mandatory("progressive_override").await;
+    registrar.add_optional("demand_control").await;
 
     // This relative ordering is documented publicly for native plugins
     // (/graphos/routing/customization/native-plugins):
-    registrar.add_oss("connectors").await; // supergraph, execution
-    registrar.add_oss("rhai").await; // router, supergraph, execution, subgraph
-    registrar.add_optional("coprocessor").await; // router, supergraph, execution, subgraph, connector_request
-    registrar.add_optional("response_cache").await; // supergraph, subgraph
+    registrar.add_oss("connectors").await;
+    registrar.add_oss("rhai").await;
+    registrar.add_optional("coprocessor").await;
+    registrar.add_optional("response_cache").await;
     registrar.add_user_plugins(user_plugins_config, extra).await;
 
     // Because this plugin intercepts subgraph requests
     // and does not forward them to the next service in the chain,
     // it needs to intervene after user plugins for users plugins to run at all.
-    registrar.add_optional("experimental_mock_subgraphs").await; // subgraph
+    registrar.add_optional("experimental_mock_subgraphs").await;
 
     registrar.finish()
 }

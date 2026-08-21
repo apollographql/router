@@ -77,7 +77,7 @@ Construction is slow enough to need its own observability — a reload blocks on
 
 ### Plugin ordering
 
-`create_plugins` instantiates plugins in a fixed sequence; the order sets the relative order of plugin hooks at each service. Each entry in the list carries a comment naming the services that plugin hooks, so two entries whose hooked services don't overlap are provably reorderable without reading the plugins' source. The general constraint stands above the list: telemetry must precede any plugin that can reject a request at the router service, so rejections are recorded.
+`create_plugins` processes plugins in a fixed sequence; the order sets the relative order of plugin hooks at each service. The general constraint stands above the list: telemetry must precede any plugin that can reject a request at the router service, so rejections are recorded. Two plugins whose hooked services don't overlap can be reordered relative to each other — check each plugin's service hooks before moving an entry. `PluginRegistrar::finish` panics if any registered Apollo plugin is missing from the sequence, so a new plugin cannot ship without an explicit position.
 
 ## Where things live
 
