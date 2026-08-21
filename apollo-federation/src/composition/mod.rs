@@ -95,9 +95,8 @@ pub fn compose_with_connectors(
     let expanded_subgraphs = expand_subgraphs(subgraphs)?;
 
     tracing::debug!("Upgrading subgraphs...");
-    let validated_subgraphs =
-        upgrade_subgraphs_if_necessary(expanded_subgraphs)
-            .map_err(CompositionFailure::from_errors)?;
+    let validated_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)
+        .map_err(CompositionFailure::from_errors)?;
 
     tracing::debug!("Pre-merge validations...");
     pre_merge_validations(&validated_subgraphs)?;

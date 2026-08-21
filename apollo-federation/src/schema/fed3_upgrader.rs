@@ -27,10 +27,7 @@ use crate::supergraph::CompositionHint;
 /// 2. `@deprecated` on an implementing field whose corresponding interface
 ///    field is *not* deprecated — disallowed by the 2025 spec. The directive
 ///    is stripped from the implementing field.
-pub(crate) fn apply_fed3_upgrade(
-    schema: &mut Schema,
-    subgraph_name: &str,
-) -> Vec<CompositionHint> {
+pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Vec<CompositionHint> {
     let mut hints = Vec::new();
 
     // Clone the source map before mutating types — it's Arc-backed so this is cheap.
@@ -44,18 +41,40 @@ pub(crate) fn apply_fed3_upgrade(
         match ty {
             ExtendedType::Object(object) => {
                 let object = object.make_mut();
-                upgrade_fields_and_args(&mut hints, &mut object.fields, type_name, subgraph_name, &sources);
+                upgrade_fields_and_args(
+                    &mut hints,
+                    &mut object.fields,
+                    type_name,
+                    subgraph_name,
+                    &sources,
+                );
                 strip_deprecated_on_non_deprecated_interface_fields(
-                    &mut hints, &object.implements_interfaces, &mut object.fields,
-                    &object.name, &iface_deprecated, subgraph_name, &sources,
+                    &mut hints,
+                    &object.implements_interfaces,
+                    &mut object.fields,
+                    &object.name,
+                    &iface_deprecated,
+                    subgraph_name,
+                    &sources,
                 );
             }
             ExtendedType::Interface(interface) => {
                 let interface = interface.make_mut();
-                upgrade_fields_and_args(&mut hints, &mut interface.fields, type_name, subgraph_name, &sources);
+                upgrade_fields_and_args(
+                    &mut hints,
+                    &mut interface.fields,
+                    type_name,
+                    subgraph_name,
+                    &sources,
+                );
                 strip_deprecated_on_non_deprecated_interface_fields(
-                    &mut hints, &interface.implements_interfaces, &mut interface.fields,
-                    &interface.name, &iface_deprecated, subgraph_name, &sources,
+                    &mut hints,
+                    &interface.implements_interfaces,
+                    &mut interface.fields,
+                    &interface.name,
+                    &iface_deprecated,
+                    subgraph_name,
+                    &sources,
                 );
             }
             ExtendedType::Enum(enum_type) => {
@@ -64,8 +83,12 @@ pub(crate) fn apply_fed3_upgrade(
                     let value_name = value.value.clone();
                     let value_def = value.make_mut();
                     strip_deprecated_reason_null(
-                        &mut hints, &mut value_def.directives,
-                        type_name, &value_name, subgraph_name, &sources,
+                        &mut hints,
+                        &mut value_def.directives,
+                        type_name,
+                        &value_name,
+                        subgraph_name,
+                        &sources,
                     );
                 }
             }
@@ -75,8 +98,12 @@ pub(crate) fn apply_fed3_upgrade(
                     let field_name = field.name.clone();
                     let field_def = field.make_mut();
                     strip_deprecated_reason_null(
-                        &mut hints, &mut field_def.directives,
-                        type_name, &field_name, subgraph_name, &sources,
+                        &mut hints,
+                        &mut field_def.directives,
+                        type_name,
+                        &field_name,
+                        subgraph_name,
+                        &sources,
                     );
                 }
             }
@@ -98,15 +125,23 @@ fn upgrade_fields_and_args(
         let field_name = field.name.clone();
         let field_def = field.make_mut();
         strip_deprecated_reason_null(
-            hints, &mut field_def.directives,
-            type_name, &field_name, subgraph_name, sources,
+            hints,
+            &mut field_def.directives,
+            type_name,
+            &field_name,
+            subgraph_name,
+            sources,
         );
         for arg in &mut field_def.arguments {
             let arg_name = arg.name.clone();
             let arg_def = arg.make_mut();
             strip_deprecated_reason_null(
-                hints, &mut arg_def.directives,
-                type_name, &arg_name, subgraph_name, sources,
+                hints,
+                &mut arg_def.directives,
+                type_name,
+                &arg_name,
+                subgraph_name,
+                sources,
             );
         }
     }
@@ -130,9 +165,13 @@ fn strip_deprecated_on_non_deprecated_interface_fields(
                 if !deprecated_fields.contains(&field_name) {
                     let field_def = field.make_mut();
                     strip_deprecated_without_interface(
-                        hints, &mut field_def.directives,
-                        type_name, &field_name, &iface_name.name,
-                        subgraph_name, sources,
+                        hints,
+                        &mut field_def.directives,
+                        type_name,
+                        &field_name,
+                        &iface_name.name,
+                        subgraph_name,
+                        sources,
                     );
                 }
             }
@@ -252,7 +291,11 @@ mod tests {
         let subgraph = Subgraph::parse("test", "http://localhost", sdl).unwrap();
         let result =
             crate::composition::compose(vec![subgraph], CompositionOptions::default()).unwrap();
-        let hints: Vec<_> = result.hints().iter().map(|h| h.code().to_string()).collect();
+        let hints: Vec<_> = result
+            .hints()
+            .iter()
+            .map(|h| h.code().to_string())
+            .collect();
         (result, hints)
     }
 
@@ -467,11 +510,7 @@ mod tests {
         let schema = supergraph.schema().schema();
         let c = coord!(Query.search);
         let field = schema.type_field(&c.ty, &c.attribute).unwrap();
-        let arg = field
-            .arguments
-            .iter()
-            .find(|a| a.name == "limit")
-            .unwrap();
+        let arg = field.arguments.iter().find(|a| a.name == "limit").unwrap();
         assert!(
             arg.directives.has("deprecated"),
             "Argument should still have @deprecated"
