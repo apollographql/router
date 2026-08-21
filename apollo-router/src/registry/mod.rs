@@ -118,8 +118,8 @@ pub(crate) struct OciContent {
 
 #[derive(Debug, Error)]
 pub(crate) enum OciError {
-    #[error("oci layer does not have a title")]
-    LayerMissingTitle,
+    #[error("expected oci layer with media type '{0}' not found in manifest")]
+    LayerNotFound(String),
     #[error("oci distribution error: {0}")]
     Distribution(OciDistributionError),
     #[error("oci parsing error: {0}")]
@@ -210,7 +210,7 @@ async fn fetch_oci_from_reference(
         .layers
         .iter()
         .find(|layer| layer.media_type == APOLLO_SCHEMA_MEDIA_TYPE)
-        .ok_or(OciError::LayerMissingTitle)?
+        .ok_or_else(|| OciError::LayerNotFound(APOLLO_SCHEMA_MEDIA_TYPE.to_string()))?
         .clone();
 
     tracing::debug!("pulling oci blob");
@@ -712,7 +712,7 @@ async fn fetch_license_from_reference(
         .layers
         .iter()
         .find(|layer| layer.media_type == ENTITLEMENTS_MEDIA_TYPE)
-        .ok_or(OciError::LayerMissingTitle)?
+        .ok_or_else(|| OciError::LayerNotFound(ENTITLEMENTS_MEDIA_TYPE.to_string()))?
         .clone();
 
     tracing::debug!("pulling oci blob for license layer");
@@ -758,7 +758,6 @@ mod tests {
     use wiremock::matchers::path;
 
     use super::*;
-    use crate::registry::OciError::LayerMissingTitle;
 
     // Same test JWT used by `license_enforcement::test_license_parse`. Signed
     // against the JWKS bundled at `src/uplink/license.jwks.json` via
@@ -1072,8 +1071,8 @@ mod tests {
             None => {
                 let err = result.expect_err("expect can't fetch oci bundle");
                 assert!(
-                    matches!(err, LayerMissingTitle),
-                    "expected LayerMissingTitle, got {err:?}"
+                    matches!(err, OciError::LayerNotFound(_)),
+                    "expected LayerNotFound, got {err:?}"
                 );
             }
         }
@@ -1090,8 +1089,8 @@ mod tests {
     fn assert_license_fetch_missing_layer(result: Result<License, OciError>) {
         let err = result.expect_err("expected missing entitlements layer");
         assert!(
-            matches!(err, OciError::LayerMissingTitle),
-            "expected LayerMissingTitle, got {err:?}"
+            matches!(err, OciError::LayerNotFound(_)),
+            "expected LayerNotFound, got {err:?}"
         );
     }
 
