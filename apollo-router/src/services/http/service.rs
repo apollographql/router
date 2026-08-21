@@ -55,6 +55,7 @@ use crate::plugins::traffic_shaping::Http2Config;
 use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
+use crate::services::subgraph::http::create_certificate_store;
 
 // Stores the wire (pre-decompression) body byte count in HTTP response extensions.
 #[derive(Clone)]
@@ -241,7 +242,7 @@ impl HttpClientInputs {
             .subgraphs
             .get(&name)
             .as_ref()
-            .and_then(|subgraph| subgraph.create_certificate_store())
+            .and_then(|subgraph| create_certificate_store(subgraph))
             .transpose()?
             .unwrap_or_else(|| tls_root_store.clone());
         let client_cert_config = configuration
@@ -284,7 +285,7 @@ impl HttpClientInputs {
             .sources
             .get(&name)
             .as_ref()
-            .and_then(|subgraph| subgraph.create_certificate_store())
+            .and_then(|subgraph| create_certificate_store(subgraph))
             .transpose()?
             .unwrap_or_else(|| tls_root_store.clone());
         let client_cert_config = configuration

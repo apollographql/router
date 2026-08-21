@@ -27,6 +27,7 @@ use crate::services::http::HttpClientService;
 use crate::services::http::service::HttpClientInputs;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::query_planner;
+use crate::services::subgraph::http::create_certificate_store;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
@@ -206,20 +207,14 @@ pub(crate) fn parse_http_client_inputs(
     // Build the subgraph and connector root stores once each and share them across
     // their clients:
     // native_roots_store re-reads the OS trust store on every call.
-    let subgraph_tls_root_store: RootCertStore = configuration
-        .tls
-        .subgraph
-        .all
-        .create_certificate_store()
-        .transpose()?
-        .unwrap_or_else(HttpClientService::native_roots_store);
-    let connector_tls_root_store: RootCertStore = configuration
-        .tls
-        .connector
-        .all
-        .create_certificate_store()
-        .transpose()?
-        .unwrap_or_else(HttpClientService::native_roots_store);
+    let subgraph_tls_root_store: RootCertStore =
+        create_certificate_store(&configuration.tls.subgraph.all)
+            .transpose()?
+            .unwrap_or_else(HttpClientService::native_roots_store);
+    let connector_tls_root_store: RootCertStore =
+        create_certificate_store(&configuration.tls.connector.all)
+            .transpose()?
+            .unwrap_or_else(HttpClientService::native_roots_store);
 
     let shaping = plugins
         .iter()

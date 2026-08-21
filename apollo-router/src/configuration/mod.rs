@@ -24,7 +24,6 @@ pub(crate) use persisted_queries::PersistedQueriesPrewarmQueryPlanCache;
 #[cfg(test)]
 pub(crate) use persisted_queries::PersistedQueriesSafelist;
 use regex::Regex;
-use rustls::RootCertStore;
 use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;
@@ -1349,52 +1348,6 @@ impl Default for TlsClient {
     fn default() -> Self {
         Self::builder().build()
     }
-}
-
-impl TlsClient {
-    pub(crate) fn create_certificate_store(
-        &self,
-    ) -> Option<Result<RootCertStore, ConfigurationError>> {
-        self.certificate_authorities
-            .as_deref()
-            .map(create_certificate_store)
-    }
-}
-
-fn create_certificate_store(
-    certificate_authorities: &str,
-) -> Result<RootCertStore, ConfigurationError> {
-    let mut store = RootCertStore::empty();
-    let certificates = load_root_certs(certificate_authorities).map_err(|e| {
-        ConfigurationError::CertificateAuthorities {
-            error: format!("could not parse the certificate list: {e}"),
-        }
-    })?;
-    for certificate in certificates {
-        store
-            .add(certificate)
-            .map_err(|e| ConfigurationError::CertificateAuthorities {
-                error: format!("could not add certificate to root store: {e}"),
-            })?;
-    }
-    if store.is_empty() {
-        Err(ConfigurationError::CertificateAuthorities {
-            error: "the certificate list is empty".to_string(),
-        })
-    } else {
-        Ok(store)
-    }
-}
-
-fn load_root_certs(certificates: &str) -> io::Result<Vec<CertificateDer<'static>>> {
-    tracing::debug!("loading root certificates");
-
-    // Load and return certificate.
-    rustls_pemfile::certs(&mut certificates.as_bytes())
-        .collect::<Result<Vec<_>, _>>()
-        // XXX(@goto-bus-stop): the error type here is already io::Error. Should we wrap it,
-        // instead of replacing it with this generic error message?
-        .map_err(|_| io::Error::other("failed to load certificate"))
 }
 
 /// TLS client authentication

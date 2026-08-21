@@ -44,6 +44,7 @@ use super::ValueType;
 use super::metrics::RedisMetricsCollector;
 use crate::cache::replica_filter::RouteableReplicaFilter;
 use crate::configuration::RedisCache;
+use crate::services::subgraph::http::create_certificate_store;
 use crate::services::subgraph::http::generate_tls_client_config;
 
 pub(super) static ACTIVE_CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -305,7 +306,7 @@ impl RedisCacheStorage {
         }
 
         if let Some(tls) = config.tls.as_ref() {
-            let tls_cert_store = tls.create_certificate_store().transpose()?;
+            let tls_cert_store = create_certificate_store(tls).transpose()?;
             let client_cert_config = tls.client_authentication.as_ref();
             let tls_client_config = generate_tls_client_config(
                 tls_cert_store,

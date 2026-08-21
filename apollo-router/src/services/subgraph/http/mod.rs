@@ -7,10 +7,13 @@ use bytes::Bytes;
 use http::response::Parts;
 use hyper_rustls::ConfigBuilderExt;
 use rustls::RootCertStore;
+use rustls::pki_types::CertificateDer;
 use serde_json_bytes::Entry;
 use serde_json_bytes::json;
 use tower::BoxError;
 
+use crate::configuration::ConfigurationError;
+use crate::configuration::TlsClient;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::graphql;
@@ -20,6 +23,53 @@ use crate::services::layers::content_negotiation::get_graphql_content_type;
 #[allow(clippy::declare_interior_mutable_const)]
 pub(crate) static APPLICATION_JSON_HEADER_VALUE: http::HeaderValue =
     http::HeaderValue::from_static("application/json");
+
+/// Builds the root-certificate store a [`TlsClient`] configuration describes, or `None`
+/// when it lists no certificate authorities.
+pub(crate) fn create_certificate_store(
+    tls_client: &TlsClient,
+) -> Option<Result<RootCertStore, ConfigurationError>> {
+    tls_client
+        .certificate_authorities
+        .as_deref()
+        .map(certificate_store_from_pem)
+}
+
+fn certificate_store_from_pem(
+    certificate_authorities: &str,
+) -> Result<RootCertStore, ConfigurationError> {
+    let mut store = RootCertStore::empty();
+    let certificates = load_root_certs(certificate_authorities).map_err(|e| {
+        ConfigurationError::CertificateAuthorities {
+            error: format!("could not parse the certificate list: {e}"),
+        }
+    })?;
+    for certificate in certificates {
+        store
+            .add(certificate)
+            .map_err(|e| ConfigurationError::CertificateAuthorities {
+                error: format!("could not add certificate to root store: {e}"),
+            })?;
+    }
+    if store.is_empty() {
+        Err(ConfigurationError::CertificateAuthorities {
+            error: "the certificate list is empty".to_string(),
+        })
+    } else {
+        Ok(store)
+    }
+}
+
+fn load_root_certs(certificates: &str) -> std::io::Result<Vec<CertificateDer<'static>>> {
+    tracing::debug!("loading root certificates");
+
+    // Load and return certificate.
+    rustls_pemfile::certs(&mut certificates.as_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        // XXX(@goto-bus-stop): the error type here is already io::Error. Should we wrap it,
+        // instead of replacing it with this generic error message?
+        .map_err(|_| std::io::Error::other("failed to load certificate"))
+}
 
 pub(crate) fn generate_tls_client_config(
     tls_cert_store: Option<RootCertStore>,
