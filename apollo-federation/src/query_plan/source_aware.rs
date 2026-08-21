@@ -80,6 +80,12 @@ impl SourceAwareQueryPlanner {
             Some(false),
             Some(true),
         )?;
+        // NOT WIRED IN: `connect_graph::apply_connector_parent_conditions` would
+        // graft each implicit connector's `$this` reads onto its field edge here,
+        // which does make the planner fetch them. It is left out because the
+        // resulting plan is not justifiable against the raw supergraph — see that
+        // function's docs and `plans_this_variable_reads_as_fetch_inputs`.
+        //
         // Restrictive-provides pass: prune each connector's landing-type copy to
         // the fields its `selection` returns, so the planner emits `_entities`
         // fetches (via entity-resolver connectors) instead of over-merging
@@ -456,6 +462,150 @@ mod tests {
                 stamps.iter().any(|(sg, c)| sg == "connectors"
                     && c.as_deref().is_some_and(|c| c.contains("Query.user["))),
                 "connectors root fetch stamped with Query.user, got {stamps:?}"
+            );
+        }
+    }
+
+    /// **KNOWN GAP — a connector's `$this` reads are not carried by the raw
+    /// graph.** A connector's mapping expressions can reference sibling fields
+    /// of its own parent type, and those reads are a real data dependency: the
+    /// fetch cannot be dispatched correctly until they are resolved.
+    ///
+    /// Expansion carries them structurally. It does not read
+    /// `@join__field(requires:)` at all — [`Connector::resolvable_key`] builds
+    /// the synthetic subgraph's `@key` from
+    /// [`variable_references`](Connector::variable_references), which spans the
+    /// transport *and* the selection. `simple.graphql`'s `User.d` is
+    /// `GET /{$this.c}/d` with `body: "with_b: $this.b"` and declares only
+    /// `requires: "c"`, and it expands to `key: "b c"` — the `b` comes from the
+    /// mapping, not from the declaration.
+    ///
+    /// Source-aware plans over the raw graph, where nothing encodes the `$this`
+    /// reads, so it satisfies only the declared `requires`. The `User.d` fetch
+    /// is therefore dispatched without `b`, and `with_b` in the request body has
+    /// no value to map. Note the parity oracle cannot see this:
+    /// `correctness::check_plan` validates a plan against the schemas, and `b`
+    /// is not a declared requirement in the raw schema, so
+    /// `raw_vs_expanded_plan_diff` classifies this operation `Equivalent`.
+    ///
+    /// **Why this is not a graph-only fix.** Grafting the reads onto the field
+    /// edge as conditions does make the planner fetch them —
+    /// [`apply_connector_parent_conditions`](crate::query_graph::connect_graph::apply_connector_parent_conditions)
+    /// is written and does exactly that, and with it wired in this test passes.
+    /// But the resulting plan is then rejected by `correctness::check_plan`:
+    ///
+    /// ```text
+    /// check_require: no matching require condition found (@key didn't match)
+    /// * plan requires:      { __typename  b  c  id }
+    /// * @key field set:     { id  __typename }
+    /// * @requires field set:{ c }
+    /// ```
+    ///
+    /// and that rejection is correct. `@requires` names **external** fields, and
+    /// in the raw supergraph `c` is `@join__field(graph: CONNECTORS, external:
+    /// true)` while `b` is an ordinary `CONNECTORS` field. A connector cannot
+    /// declare `requires: "b"`, because `b` is not external — it lives in the
+    /// same subgraph. So federation's vocabulary has no way to state "this field
+    /// needs that *sibling* field of the same subgraph," and the raw supergraph
+    /// therefore cannot justify the fetch the connector actually needs.
+    ///
+    /// Expansion never hits this because splitting each connector into its own
+    /// synthetic subgraph makes the sibling dependency *cross*-subgraph, at which
+    /// point it is expressible — as the `key: "b c"` on `connectors_User_d_0`.
+    /// The synthetic-subgraph split is not only a cost; it is what buys the
+    /// vocabulary. Closing this needs a decision about where intra-`connectors`
+    /// field dependencies are represented, not another graph pass.
+    #[test]
+    #[ignore = "known gap: a connector's $this reads on a same-subgraph sibling are not expressible in the raw supergraph (see doc comment)"]
+    fn plans_this_variable_reads_as_fetch_inputs() {
+        use crate::query_plan::requires_selection::Selection;
+
+        let sdl = include_str!("../connectors/expand/tests/schemas/expand/simple.graphql");
+        let planner = SourceAwareQueryPlanner::new(sdl, QueryPlannerConfig::default()).unwrap();
+
+        // What the `User.d` connector actually needs, per the connector itself:
+        // the same field set expansion would turn into its synthetic `@key`.
+        let d_connector = planner
+            .connectors()
+            .iter()
+            .find(|c| c.id.coordinate().contains("User.d"))
+            .expect("a connector for User.d");
+        let key = d_connector
+            .resolvable_key(planner.planner.supergraph_schema().schema())
+            .expect("resolvable_key")
+            .expect("User.d resolves an implicit entity, so it has a key");
+        let mut needed: Vec<String> = key
+            .selection_set
+            .selections
+            .iter()
+            .filter_map(|s| s.as_field().map(|f| f.name.to_string()))
+            .collect();
+        needed.sort();
+        assert_eq!(
+            needed,
+            vec!["b".to_string(), "c".to_string()],
+            "User.d reads $this.b and $this.c, so both are required"
+        );
+
+        // What the source-aware plan actually supplies as that fetch's inputs.
+        let doc = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            "{ users { d } }",
+            "q.graphql",
+        )
+        .unwrap();
+        let plan = planner.plan(&doc).unwrap();
+
+        fn find_d_fetch_inputs(node: &PlanNode, out: &mut Vec<String>) {
+            match node {
+                PlanNode::Fetch(f) => {
+                    if f.connector.as_deref().is_some_and(|c| c.contains("User.d")) {
+                        collect_field_names(&f.requires, out);
+                    }
+                }
+                PlanNode::Sequence(s) => s.nodes.iter().for_each(|n| find_d_fetch_inputs(n, out)),
+                PlanNode::Parallel(p) => p.nodes.iter().for_each(|n| find_d_fetch_inputs(n, out)),
+                PlanNode::Flatten(fl) => find_d_fetch_inputs(&fl.node, out),
+                PlanNode::Defer(_) | PlanNode::Condition(_) => {}
+            }
+        }
+        fn collect_field_names(selections: &[Selection], out: &mut Vec<String>) {
+            for selection in selections {
+                match selection {
+                    Selection::Field(f) => out.push(f.name.to_string()),
+                    Selection::InlineFragment(frag) => collect_field_names(&frag.selections, out),
+                }
+            }
+        }
+
+        let mut supplied = Vec::new();
+        match &plan.node {
+            Some(TopLevelPlanNode::Fetch(f)) => {
+                if f.connector.as_deref().is_some_and(|c| c.contains("User.d")) {
+                    collect_field_names(&f.requires, &mut supplied);
+                }
+            }
+            Some(TopLevelPlanNode::Sequence(s)) => s
+                .nodes
+                .iter()
+                .for_each(|n| find_d_fetch_inputs(n, &mut supplied)),
+            Some(TopLevelPlanNode::Parallel(p)) => p
+                .nodes
+                .iter()
+                .for_each(|n| find_d_fetch_inputs(n, &mut supplied)),
+            Some(TopLevelPlanNode::Flatten(fl)) => find_d_fetch_inputs(&fl.node, &mut supplied),
+            _ => panic!("expected a plan with a User.d fetch, got {plan}"),
+        }
+        assert!(
+            !supplied.is_empty(),
+            "expected to find the User.d fetch's inputs in {plan}"
+        );
+
+        for field in &needed {
+            assert!(
+                supplied.iter().any(|s| s == field),
+                "the User.d fetch must be given `{field}` (it reads $this.{field}); \
+                 inputs were {supplied:?} in {plan}"
             );
         }
     }

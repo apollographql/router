@@ -49,6 +49,7 @@ use crate::connectors::EntityResolver;
 use crate::connectors::source_aware::derive_condition;
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
+use crate::operation::merge_selection_sets;
 use crate::query_plan::connector_stamp::ProvidedTree;
 use crate::query_plan::connector_stamp::connector_provided_tree;
 use crate::query_plan::query_planning_traversal::non_local_selections_estimation::precompute_non_local_selection_metadata;
@@ -139,6 +140,154 @@ pub(crate) fn build_connector_source_edges(
         }
     }
     Ok(edges)
+}
+
+/// Graft each implicit-resolver connector's `$this` reads onto its own
+/// field-collecting edge as a planner condition — the source-aware counterpart
+/// of the `@key` expansion derives for the connector's synthetic subgraph.
+///
+/// A connector's mapping expressions can read sibling fields of its parent type
+/// (`User.d` as `GET /{$this.c}/d` with `body: "with_b: $this.b"`), and those
+/// reads are a data dependency: the fetch cannot be dispatched until they are
+/// resolved. Expansion does not learn this from `@join__field(requires:)` — it
+/// calls [`Connector::resolvable_key`], which reads
+/// [`variable_references`](Connector::variable_references) across transport
+/// *and* selection, and emits `key: "b c"` on the synthetic subgraph. Planning
+/// over the raw graph, nothing encodes those reads, so the planner satisfies
+/// only the declared `requires` and dispatches the connector without `b`.
+///
+/// This applies the same derivation ([`derive_condition`], which mirrors
+/// `resolvable_key`) to the raw graph, in exactly the representation
+/// `handle_requires` uses for `@requires`: a `SelectionSet` on the field edge's
+/// `conditions`, parsed against the supergraph schema and merged with whatever
+/// `@requires` already put there.
+///
+/// Scoped to [`EntityResolver::Implicit`] — a `Foo.bar @connect` reading
+/// `$this.*` from its own parent. The other resolver kinds derive a key rooted
+/// on the connector's *output* type (`$args` for an explicit `Query.foo`
+/// resolver, `$this`/`$batch` for a type-level one), which is a re-entry key
+/// rather than a requirement on the parent, and belongs on the re-entry edge the
+/// restrictive-provides pass already creates. The `__typename` singleton
+/// [`derive_condition`] fabricates for an implicit resolver with no `$this`
+/// reads is skipped too: it states no parent requirement.
+///
+/// **Not currently wired into [`SourceAwareQueryPlanner`], and the reason is the
+/// finding.** With this applied the planner does fetch the reads, but
+/// `correctness::check_plan` then rejects the plan, correctly: `@requires` names
+/// **external** fields, and a sibling field of the same subgraph is not
+/// external, so the raw supergraph has no way to declare the dependency this
+/// pass infers. Expansion escapes that by splitting each connector into its own
+/// synthetic subgraph, which makes the sibling dependency cross-subgraph and
+/// therefore expressible as a key. Where intra-`connectors` field dependencies
+/// should live is an open design question; this function is the graph half of
+/// whatever the answer turns out to be. See
+/// `source_aware::tests::plans_this_variable_reads_as_fetch_inputs`.
+///
+/// Returns whether the graph was mutated.
+pub(crate) fn apply_connector_parent_conditions(
+    query_graph: &mut QueryGraph,
+    supergraph_schema: &ValidFederationSchema,
+    connectors: &[Connector],
+) -> Result<bool, FederationError> {
+    if connectors.is_empty() {
+        return Ok(false);
+    }
+
+    // (edge, condition) pairs, collected before mutating so the borrow of the
+    // graph's edge weights ends first.
+    let mut grafts: Vec<(EdgeIndex, SelectionSet)> = Vec::new();
+
+    for edge in query_graph.graph.edge_indices() {
+        let edge_weight = query_graph.edge_weight(edge)?;
+        let QueryGraphEdgeTransition::FieldCollection {
+            source,
+            field_definition_position,
+            ..
+        } = &edge_weight.transition
+        else {
+            continue;
+        };
+        if *source == query_graph.current_source {
+            continue;
+        }
+        let simple_name = format!(
+            "{}.{}",
+            field_definition_position.type_name(),
+            field_definition_position.field_name()
+        );
+        let parent_type = field_definition_position.parent().type_name().clone();
+
+        // Every connector on this field in this subgraph. With several variants
+        // on one field (`[0]`, `[1]`, ...) the planner cannot tell them apart, so
+        // require the union: any field some variant reads must be available.
+        let mut all_conditions = Vec::new();
+        for connector in connectors {
+            if connector.id.subgraph_name.as_str() != source.as_ref()
+                || connector.id.directive.simple_name() != simple_name
+                || !matches!(connector.entity_resolver, Some(EntityResolver::Implicit))
+            {
+                continue;
+            }
+            let Some(condition) = derive_condition(connector, supergraph_schema.schema())
+                .map_err(FederationError::internal)?
+            else {
+                continue;
+            };
+            // The fabricated `__typename` singleton is not a parent requirement.
+            if condition
+                .selection_set
+                .selections
+                .iter()
+                .all(|s| s.as_field().is_some_and(|f| f.name == "__typename"))
+            {
+                continue;
+            }
+            all_conditions.push(parse_field_set(
+                supergraph_schema,
+                parent_type.clone(),
+                &condition.serialize().no_indent().to_string(),
+                true,
+            )?);
+        }
+        if all_conditions.is_empty() {
+            continue;
+        }
+        // Fold in whatever `@requires` already placed on this edge — the two
+        // describe the same thing (parent data this field needs) and the
+        // connector's reads are usually a superset, but neither subsumes the
+        // other by construction.
+        if let Some(existing) = &edge_weight.conditions {
+            all_conditions.push((**existing).clone());
+        }
+        let merged = if all_conditions.len() == 1 {
+            all_conditions.remove(0)
+        } else {
+            merge_selection_sets(all_conditions)?
+        };
+        grafts.push((edge, merged));
+    }
+
+    if grafts.is_empty() {
+        return Ok(false);
+    }
+
+    let grafted = grafts.len();
+    for (edge, conditions) in grafts {
+        query_graph.edge_weight_mut(edge)?.conditions = Some(Arc::new(conditions));
+    }
+
+    tracing::debug!(
+        edges = grafted,
+        "source-aware: grafted connector $this reads onto field edges as conditions"
+    );
+
+    // Conditions do not change topology, but the traversal-layer maps are
+    // precomputed at the end of graph building and the planner reads them, so
+    // refresh them rather than reason about which ones consult conditions.
+    precompute_non_trivial_followup_edges(query_graph)?;
+    query_graph.non_local_selection_metadata =
+        precompute_non_local_selection_metadata(query_graph)?;
+    Ok(true)
 }
 
 /// The source-aware "restrictive provides" pass: reconstruct, in the query
