@@ -2028,7 +2028,7 @@ mod tests {
 
         // Use different annotations with the same data (the license blob) to simulate
         // a change in data. The different annotations result in different manifest
-        // digests, so the stream sees a "changed" manifest and re-fetches 
+        // digests, so the stream sees a "changed" manifest and re-fetches
         // the data (the license) even though it hasn't changed.
         // [Using two distinct valid JWTs isn't possible here because the JWKS bundled
         // via `include_str!` only signs one test token.]
