@@ -69,12 +69,11 @@ fn hash_only_apq_request() -> SupergraphRequest {
 }
 
 #[test]
-fn create_query_planner_service_extracts_a_schema_per_subgraph() {
+fn create_query_planner_extracts_a_schema_per_subgraph() {
     let configuration = test_configuration();
     let schema = test_schema(&configuration);
 
-    let (_planner, subgraph_schemas) =
-        create_query_planner_service(&schema, &configuration).unwrap();
+    let (_planner, subgraph_schemas) = create_query_planner(&schema, &configuration).unwrap();
 
     let mut names: Vec<&str> = subgraph_schemas.keys().map(String::as_str).collect();
     names.sort_unstable();
@@ -87,11 +86,10 @@ async fn parse_http_client_inputs_covers_every_subgraph() {
     let schema = test_schema(&configuration);
     let plugins = plugins_with_traffic_shaping().await;
 
-    let (subgraph_inputs, connector_inputs) =
-        parse_http_client_inputs(&plugins, &schema, &configuration).unwrap();
+    let client_inputs = parse_http_client_inputs(&plugins, &schema, &configuration).unwrap();
 
-    assert_eq!(sorted_keys(&subgraph_inputs), FIXTURE_SUBGRAPHS);
-    assert!(connector_inputs.is_empty());
+    assert_eq!(sorted_keys(&client_inputs.subgraphs), FIXTURE_SUBGRAPHS);
+    assert!(client_inputs.connectors.is_empty());
 }
 
 #[tokio::test]
@@ -99,11 +97,10 @@ async fn build_http_services_builds_a_client_per_subgraph() {
     let configuration = test_configuration();
     let schema = test_schema(&configuration);
     let plugins = plugins_with_traffic_shaping().await;
-    let (subgraph_inputs, connector_inputs) =
-        parse_http_client_inputs(&plugins, &schema, &configuration).unwrap();
+    let client_inputs = parse_http_client_inputs(&plugins, &schema, &configuration).unwrap();
 
     let (subgraph_services, connector_services) =
-        build_http_services(subgraph_inputs, connector_inputs, &Arc::new(plugins));
+        build_http_services(client_inputs, &Arc::new(plugins));
 
     assert_eq!(sorted_keys(&subgraph_services), FIXTURE_SUBGRAPHS);
     assert!(connector_services.is_empty());
@@ -127,7 +124,7 @@ async fn create_plugins_instantiates_mandatory_plugins() {
     let configuration = test_configuration();
     let schema = test_schema(&configuration);
     let (_planner, subgraph_schemas) =
-        create_query_planner_service(&schema, &configuration).unwrap();
+        create_query_planner(&schema, &configuration).unwrap();
 
     let plugins = create_plugins(
         &configuration,

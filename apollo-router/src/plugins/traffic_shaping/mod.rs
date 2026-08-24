@@ -791,9 +791,7 @@ mod test {
         let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
         let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
         let query_planner_service =
-            QueryPlannerService::new(schema.clone(), config.clone(), qp_arc)
-                .unwrap()
-                .boxed_clone();
+            QueryPlannerService::new(schema.clone(), config.clone(), qp_arc).boxed_clone();
 
         let query_parser_service =
             crate::pipeline::build_query_parsing_service(schema.clone(), config.clone());

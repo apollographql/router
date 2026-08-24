@@ -7,7 +7,6 @@ use std::sync::Arc;
 use indexmap::IndexMap;
 use rustls::RootCertStore;
 use tower::BoxError;
-use tower::ServiceExt;
 use tracing::Instrument;
 
 use super::plugins::create_plugins;
@@ -20,26 +19,24 @@ use crate::plugin::PluginInit;
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::plugins::traffic_shaping::TrafficShaping;
+use apollo_federation::query_plan::query_planner::QueryPlanner;
+
 use crate::query_planner::QueryPlannerService;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::Plugins;
 use crate::services::http::HttpClientService;
 use crate::services::http::service::HttpClientInputs;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
-use crate::services::query_planner;
 use crate::services::subgraph::http::create_certificate_store;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
-/// Everything the acquire phase produces. Each field except `subgraph_schemas` (an
-/// infallible byproduct of planner creation) is a resource whose creation can fail; the
-/// assemble phase consumes them infallibly.
+/// Everything the acquire phase produces; the assemble phase consumes it infallibly.
 pub(super) struct Acquired {
-    pub(super) query_planner_service: query_planner::BoxCloneService,
+    pub(super) query_planner: Arc<QueryPlanner>,
     pub(super) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(super) plugins: Arc<Plugins>,
-    pub(super) subgraph_client_inputs: IndexMap<String, HttpClientInputs>,
-    pub(super) connector_client_inputs: IndexMap<String, HttpClientInputs>,
+    pub(super) http_client_inputs: HttpClientInputsMaps,
     pub(super) query_plan_redis: Option<RedisCacheStorage>,
     pub(super) apq_redis: Option<RedisCacheStorage>,
     pub(super) persisted_queries: Arc<PersistedQueryExpander>,
@@ -53,8 +50,7 @@ pub(super) async fn acquire(
     license: Arc<LicenseState>,
     bootstrap_telemetry_plugin: Option<Box<dyn DynPlugin>>,
 ) -> Result<Acquired, BoxError> {
-    let (query_planner_service, subgraph_schemas) =
-        create_query_planner_service(schema, configuration)?;
+    let (query_planner, subgraph_schemas) = create_query_planner(schema, configuration)?;
 
     let plugins: Arc<Plugins> = Arc::new(
         create_plugins(
@@ -72,9 +68,8 @@ pub(super) async fn acquire(
         .collect(),
     );
 
-    let (subgraph_client_inputs, connector_client_inputs) =
-        tracing::info_span!("http_client_inputs")
-            .in_scope(|| parse_http_client_inputs(&plugins, schema, configuration))?;
+    let http_client_inputs = tracing::info_span!("http_client_inputs")
+        .in_scope(|| parse_http_client_inputs(&plugins, schema, configuration))?;
 
     let query_plan_redis = connect_query_plan_redis(configuration)
         .instrument(tracing::info_span!("query_plan_redis_connect"))
@@ -90,11 +85,10 @@ pub(super) async fn acquire(
     );
 
     Ok(Acquired {
-        query_planner_service,
+        query_planner,
         subgraph_schemas,
         plugins,
-        subgraph_client_inputs,
-        connector_client_inputs,
+        http_client_inputs,
         query_plan_redis,
         apq_redis,
         persisted_queries,
@@ -166,34 +160,31 @@ pub(super) async fn maybe_bootstrap_telemetry(
     Ok(initial_telemetry_plugin)
 }
 
-/// Creates the federation query planner service and the subgraph schemas it extracts.
+/// Creates the federation query planner and the subgraph schemas it extracts.
 ///
 /// # Errors
-/// Fails when the schema uses unsupported federation versions or features, when its
-/// authorization directives do not validate, or when planner initialization fails for
-/// another reason.
-pub(crate) fn create_query_planner_service(
+/// Fails when the schema uses unsupported federation versions or features, or when
+/// planner initialization fails for another reason.
+pub(crate) fn create_query_planner(
     schema: &Arc<Schema>,
     configuration: &Arc<Configuration>,
-) -> Result<(query_planner::BoxCloneService, Arc<SubgraphSchemas>), BoxError> {
+) -> Result<(Arc<QueryPlanner>, Arc<SubgraphSchemas>), BoxError> {
     tracing::info_span!("query_planner_creation").in_scope(|| {
         let planner = QueryPlannerService::create_planner(schema, configuration)?;
         let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&planner);
 
-        let query_planner_service =
-            QueryPlannerService::new(schema.clone(), configuration.clone(), planner)?.boxed_clone();
-
-        Ok((query_planner_service, subgraph_schemas))
+        Ok((planner, subgraph_schemas))
     })
 }
 
-/// `(subgraph_inputs, connector_inputs)`: client inputs for regular subgraphs keyed
-/// by subgraph name, and for connector sources keyed by `source_config_key()`
-/// (`{subgraph_name}.{source_or_synthetic}`).
-pub(crate) type HttpClientInputsMaps = (
-    IndexMap<String, HttpClientInputs>,
-    IndexMap<String, HttpClientInputs>,
-);
+/// Parsed HTTP client inputs for every subgraph and connector source.
+pub(crate) struct HttpClientInputsMaps {
+    /// Client inputs for regular subgraphs, keyed by subgraph name.
+    pub(crate) subgraphs: IndexMap<String, HttpClientInputs>,
+    /// Client inputs for connector sources, keyed by `source_config_key()`
+    /// (`{subgraph_name}.{source_or_synthetic}`).
+    pub(crate) connectors: IndexMap<String, HttpClientInputs>,
+}
 
 /// Parses TLS and DNS client inputs for every non-connector subgraph and every
 /// connector source.
@@ -262,7 +253,10 @@ pub(crate) fn parse_http_client_inputs(
         connector_inputs.insert(name.clone(), inputs);
     }
 
-    Ok((subgraph_inputs, connector_inputs))
+    Ok(HttpClientInputsMaps {
+        subgraphs: subgraph_inputs,
+        connectors: connector_inputs,
+    })
 }
 
 /// Connects the Redis client for the query-plan cache, when one is configured.

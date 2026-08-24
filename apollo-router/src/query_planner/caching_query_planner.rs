@@ -185,7 +185,7 @@ impl<T> CachingQueryPlanner<T> {
         cache: QueryPlanCache,
     ) -> Self {
         let enable_authorization_directives =
-            AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
+            AuthorizationPlugin::enable_directives(configuration, &schema);
 
         let config_mode_hash = Arc::new(ConfigModeHash::from_configuration(configuration));
         let cooperative_cancellation = configuration

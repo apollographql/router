@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_federation::query_plan::query_planner::QueryPlanner;
 use indexmap::IndexMap;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -31,9 +32,11 @@ use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
+use super::acquire::HttpClientInputsMaps;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryQueryPlanCache;
 use crate::query_planner::QueryPlanCache;
+use crate::query_planner::QueryPlannerService;
 use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::warmup;
 use crate::services::Plugins;
@@ -48,7 +51,6 @@ use crate::services::execution::service::ExecutionService;
 use crate::services::fetch_service::FetchService;
 use crate::services::http;
 use crate::services::http::build_http_client_service;
-use crate::services::http::service::HttpClientInputs;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::apq::APQExpander;
 use crate::services::layers::apq::subgraph::SubgraphApqLayer;
@@ -107,16 +109,28 @@ pub(crate) fn build_apq_expander(
     }
 }
 
-/// Builds HTTP client services from parsed client inputs, keyed as
-/// [`HttpClientInputsMaps`](super::acquire::HttpClientInputsMaps) documents.
+/// Builds the query planner service around the acquired federation planner.
+pub(crate) fn build_query_planner_service(
+    schema: Arc<Schema>,
+    configuration: Arc<Configuration>,
+    planner: Arc<QueryPlanner>,
+) -> query_planner::BoxCloneService {
+    QueryPlannerService::new(schema, configuration, planner).boxed_clone()
+}
+
+/// Builds HTTP client services from parsed client inputs, keyed like
+/// [`HttpClientInputsMaps`].
 pub(crate) fn build_http_services(
-    subgraph_inputs: IndexMap<String, HttpClientInputs>,
-    connector_inputs: IndexMap<String, HttpClientInputs>,
+    client_inputs: HttpClientInputsMaps,
     plugins: &Arc<Plugins>,
 ) -> (
     IndexMap<String, http::BoxCloneService>,
     IndexMap<String, http::BoxCloneService>,
 ) {
+    let HttpClientInputsMaps {
+        subgraphs: subgraph_inputs,
+        connectors: connector_inputs,
+    } = client_inputs;
     let subgraph_services = subgraph_inputs
         .into_iter()
         .map(|(name, inputs)| {
@@ -466,7 +480,7 @@ pub(crate) fn build_router_service(
     plugins: Arc<Plugins>,
 ) -> router::BoxCloneService {
     let enable_authorization_directives =
-        AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
+        AuthorizationPlugin::enable_directives(configuration, &schema);
     let extended_references = matches!(
         TelemetryConfig::metrics_reference_mode(configuration),
         ApolloMetricsReferenceMode::Extended

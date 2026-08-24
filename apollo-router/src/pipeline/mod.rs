@@ -87,7 +87,7 @@ use self::acquire::acquire;
 use self::acquire::maybe_bootstrap_telemetry;
 pub(crate) use self::acquire::connect_apq_redis;
 pub(crate) use self::acquire::connect_query_plan_redis;
-pub(crate) use self::acquire::create_query_planner_service;
+pub(crate) use self::acquire::create_query_planner;
 pub(crate) use self::acquire::parse_http_client_inputs;
 pub(crate) use self::plugins::create_plugins;
 pub(crate) use self::stages::SupergraphPipeline;
@@ -95,6 +95,7 @@ pub(crate) use self::stages::build_apq_expander;
 pub(crate) use self::stages::build_http_services;
 pub(crate) use self::stages::build_query_parsing_service;
 pub(crate) use self::stages::build_query_plan_cache;
+pub(crate) use self::stages::build_query_planner_service;
 pub(crate) use self::stages::build_router_service;
 pub(crate) use self::stages::build_subgraph_services;
 pub(crate) use self::stages::build_supergraph_pipeline;
@@ -198,15 +199,17 @@ fn assemble(
     schema: Arc<Schema>,
 ) -> Pipeline {
     let Acquired {
-        query_planner_service,
+        query_planner,
         subgraph_schemas,
         plugins,
-        subgraph_client_inputs,
-        connector_client_inputs,
+        http_client_inputs,
         query_plan_redis,
         apq_redis,
         persisted_queries,
     } = acquired;
+
+    let query_planner_service =
+        build_query_planner_service(schema.clone(), configuration.clone(), query_planner);
 
     let query_plan_cache = build_query_plan_cache(&configuration, query_plan_redis);
     let apq_expander = build_apq_expander(&configuration, apq_redis);
@@ -218,7 +221,7 @@ fn assemble(
         caching_query_planner,
     } = tracing::info_span!("supergraph_creation").in_scope(|| {
         let (subgraph_http_services, connector_http_services) =
-            build_http_services(subgraph_client_inputs, connector_client_inputs, &plugins);
+            build_http_services(http_client_inputs, &plugins);
         let subgraph_services =
             build_subgraph_services(subgraph_http_services, &plugins, &configuration);
         build_supergraph_pipeline(
@@ -274,8 +277,7 @@ pub(crate) async fn build_supergraph_for_test_harness(
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
     license: Arc<LicenseState>,
 ) -> Result<(Arc<Plugins>, SupergraphPipeline), BoxError> {
-    let (query_planner_service, subgraph_schemas) =
-        create_query_planner_service(&schema, &configuration)?;
+    let (query_planner, subgraph_schemas) = create_query_planner(&schema, &configuration)?;
     let plugins: Arc<Plugins> = Arc::new(
         create_plugins(
             &configuration,
@@ -291,17 +293,18 @@ pub(crate) async fn build_supergraph_for_test_harness(
         .into_iter()
         .collect(),
     );
-    let (subgraph_client_inputs, connector_client_inputs) =
-        parse_http_client_inputs(&plugins, &schema, &configuration)?;
+    let http_client_inputs = parse_http_client_inputs(&plugins, &schema, &configuration)?;
     let query_plan_redis = connect_query_plan_redis(&configuration).await?;
 
     for (_, plugin) in plugins.iter() {
         plugin.activate();
     }
 
+    let query_planner_service =
+        build_query_planner_service(schema.clone(), configuration.clone(), query_planner);
     let query_plan_cache = build_query_plan_cache(&configuration, query_plan_redis);
     let (subgraph_http_services, connector_http_services) =
-        build_http_services(subgraph_client_inputs, connector_client_inputs, &plugins);
+        build_http_services(http_client_inputs, &plugins);
     let subgraph_services =
         build_subgraph_services(subgraph_http_services, &plugins, &configuration);
     let supergraph_pipeline = build_supergraph_pipeline(
