@@ -462,6 +462,7 @@ impl HttpClientService {
     }
 
     /// Creates a client for talking to subgraphs
+    #[cfg(test)]
     pub(crate) fn from_config_for_subgraph(
         service: impl Into<String>,
         configuration: &Configuration,
@@ -477,6 +478,7 @@ impl HttpClientService {
     }
 
     /// Creates a client for talking to connectors-connected subgraphs
+    #[cfg(test)]
     pub(crate) fn from_config_for_connector(
         source_name: impl Into<String>,
         configuration: &Configuration,
