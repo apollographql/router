@@ -29,16 +29,11 @@ use crate::uplink::license_enforcement::LicenseState;
 
 /// Processes the plugins in the order below and returns the built instances keyed by name.
 ///
-/// Apart from a pre-activated telemetry instance, which is spliced in directly, each
-/// Apollo plugin is added through one of three [`PluginRegistrar`] methods:
-///
-/// - [`add_mandatory`](PluginRegistrar::add_mandatory) instantiates the plugin even with
-///   no user config for it.
-/// - [`add_optional`](PluginRegistrar::add_optional) instantiates the plugin only if
-///   configured. When the plugin maps to a license-restricted feature, the license's
-///   allowed features gate it.
-/// - [`add_oss`](PluginRegistrar::add_oss) instantiates the plugin only if configured,
-///   with no license check.
+/// Mandatory plugins are instantiated even with no user config for them; optional
+/// plugins only when configured. A plugin that maps to a license-restricted feature is
+/// skipped, with a warning, when the license does not allow that feature. A
+/// pre-activated telemetry instance is spliced in directly instead of being built a
+/// second time.
 pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
@@ -161,19 +156,19 @@ pub(crate) async fn create_plugins(
     registrar.add_mandatory("enhanced_client_awareness").await;
     registrar.add_mandatory("experimental_diagnostics").await;
 
-    registrar.add_oss("forbid_mutations").await;
+    registrar.add_optional("forbid_mutations").await;
     registrar.add_optional("subscription").await;
-    registrar.add_oss("override_subgraph_url").await;
+    registrar.add_optional("override_subgraph_url").await;
     registrar.add_optional("authorization").await;
     registrar.add_optional("authentication").await;
-    registrar.add_oss("preview_file_uploads").await;
+    registrar.add_optional("preview_file_uploads").await;
     registrar.add_mandatory("progressive_override").await;
     registrar.add_optional("demand_control").await;
 
     // This relative ordering is documented publicly for native plugins
     // (/graphos/routing/customization/native-plugins):
-    registrar.add_oss("connectors").await;
-    registrar.add_oss("rhai").await;
+    registrar.add_optional("connectors").await;
+    registrar.add_optional("rhai").await;
     registrar.add_optional("coprocessor").await;
     registrar.add_optional("response_cache").await;
     registrar.add_user_plugins(user_plugins_config, extra).await;
@@ -294,23 +289,6 @@ impl PluginRegistrar<'_> {
                 tracing::warn!(
                     "{full_name} plugin is not registered, {full_name} is a restricted feature that requires a license"
                 );
-            }
-        }
-        .instrument(span)
-        .await;
-    }
-
-    /// Instantiates the Apollo plugin named `apollo.<name>` when the configuration has a
-    /// section for it, without a license check.
-    async fn add_oss(&mut self, name: &str) {
-        let full_name = format!("apollo.{name}");
-        let span = Self::plugin_span(&full_name);
-        async {
-            let factory = self.take_factory(&full_name);
-            if let Some(plugin_config) = self.apollo_plugins_config.remove(name) {
-                let previous_config = self.previous_apollo_plugins_config.get(name).copied();
-                self.add_plugin(full_name, factory, &plugin_config, previous_config, None)
-                    .await;
             }
         }
         .instrument(span)
