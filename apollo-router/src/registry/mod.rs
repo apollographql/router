@@ -599,6 +599,7 @@ pub(crate) fn create_oci_license_stream(
 ) -> Result<OciLicenseStream, anyhow::Error> {
     // Validate the reference to determine its type
     validate_oci_reference(&oci_config.reference)?;
+    // An infinite polling stream is intended here
     Ok(Box::pin(stream_license_from_oci(oci_config)))
 }
 
@@ -1937,7 +1938,7 @@ mod tests {
         ))
         .expect("url must be valid");
 
-        // Count blob requests: should only fire on the first poll.
+        // Count blob (data) requests: should only fire on the first poll.
         let blob_request_count = Arc::new(AtomicUsize::new(0));
         let blob_count = blob_request_count.clone();
         let license_data = manifest_info.license_data;
@@ -1960,17 +1961,23 @@ mod tests {
         ))
         .expect("url must be valid");
 
-        // HEAD always returns the same digest.
+        // Increment a counter for HEAD (digest) requests: used below to prove
+        // the poll loop has completed an additional unchanged-digest cycle.
+        let head_request_count = Arc::new(AtomicUsize::new(0));
+        let head_count = head_request_count.clone();
+        let head_manifest_digest = manifest_info.manifest_digest.clone();
         let _ = Mock::given(method("HEAD"))
             .and(path(manifest_url.path()))
-            .respond_with(
+            .respond_with(move |_request: &Request| {
+                head_count.fetch_add(1, Ordering::Relaxed);
                 ResponseTemplate::new(200)
-                    .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
-                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
-            )
+                    .append_header("Docker-Content-Digest", &head_manifest_digest)
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+            })
             .mount(mock_server)
             .await;
 
+        // Respond to a GET request with a valid OCI manifest and required headers
         let _ = Mock::given(method("GET"))
             .and(path(manifest_url.path()))
             .respond_with(
@@ -2003,14 +2010,19 @@ mod tests {
             "Blob should be fetched once on first poll"
         );
 
-        // Second poll: digest unchanged, blob should not be fetched again.
-        // Wait past one poll interval, then look for a stream item — a timeout
-        // means the stream correctly produced nothing.
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        let timeout_result = timeout(Duration::from_millis(100), stream.next()).await;
+        // Second poll: digest is unchanged, so blob should not be fetched again.
+        // Since the polling task runs independently, use the head counter to
+        // prove that a second unchanged-digest cycle actually completed.
+        // The outer timeout Duration prevents hanging by giving us a hard limit
+        let poll_completed = timeout(Duration::from_secs(5), async {
+            while head_request_count.load(Ordering::Relaxed) < 2 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await;
         assert!(
-            timeout_result.is_err(),
-            "Expected no new result when digest is unchanged"
+            poll_completed.is_ok(),
+            "expected a second unchanged-digest poll within timeout"
         );
         assert_eq!(
             blob_request_count.load(Ordering::Relaxed),
