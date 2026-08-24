@@ -1,9 +1,6 @@
 description: |
-  The `experimental.expose_query_plan` plugin has been promoted out of experimental
-  in Router 3.0. It is now registered under the `apollo` namespace, which means its
-  configuration moves from `plugins."experimental.expose_query_plan"` to a top-level
-  `expose_query_plan` key. The old location still works as a deprecated alias through
-  the Router 3.x line.
+  The `expose_query_plan` plugin has been promoted out of experimental in Router
+  3.0. Its configuration moves to a top-level key.
 actions:
   - type: move
     from: plugins.["experimental.expose_query_plan"]
