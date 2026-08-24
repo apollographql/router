@@ -78,6 +78,10 @@ pub(crate) enum SubgraphSelector {
         /// The subgraph name
         subgraph_name: bool,
     },
+    IsDeferred {
+        /// Set to `true` to emit whether this subgraph fetch is part of the deferred portion of an `@defer` query plan.
+        is_deferred: bool,
+    },
     SubgraphQuery {
         /// The graphql query to the subgraph.
         subgraph_query: SubgraphQuery,
@@ -280,6 +284,9 @@ impl Selector for SubgraphSelector {
             }
             SubgraphSelector::SubgraphName { subgraph_name } if *subgraph_name => {
                 Some(request.subgraph_name.clone().into())
+            }
+            SubgraphSelector::IsDeferred { is_deferred } if *is_deferred => {
+                Some(opentelemetry::Value::Bool(request.is_deferred_fetch))
             }
             // .clone()
             // .map(opentelemetry::Value::from),
@@ -772,6 +779,7 @@ impl Selector for SubgraphSelector {
                 SubgraphSelector::SubgraphOperationName { .. }
                     | SubgraphSelector::SupergraphOperationName { .. }
                     | SubgraphSelector::SubgraphName { .. }
+                    | SubgraphSelector::IsDeferred { .. }
                     | SubgraphSelector::SubgraphOperationKind { .. }
                     | SubgraphSelector::SupergraphOperationKind { .. }
                     | SubgraphSelector::SupergraphQuery { .. }
@@ -1438,6 +1446,80 @@ mod test {
     }
 
     #[test]
+<<<<<<< HEAD
+=======
+    fn is_deferred() {
+        let selector = SubgraphSelector::IsDeferred { is_deferred: true };
+        let context = crate::context::Context::new();
+
+        // Primary fetch: is_deferred_fetch is false by default.
+        let primary_request = crate::services::SubgraphRequest::fake_builder()
+            .context(context.clone())
+            .build();
+        assert_eq!(
+            selector.on_request(&primary_request),
+            Some(opentelemetry::Value::Bool(false))
+        );
+
+        // Deferred fetch: is_deferred_fetch is set to true by the query plan
+        // executor when entering a DeferredNode subtree.
+        let mut deferred_request = crate::services::SubgraphRequest::fake_builder()
+            .context(context)
+            .build();
+        deferred_request.is_deferred_fetch = true;
+        assert_eq!(
+            selector.on_request(&deferred_request),
+            Some(opentelemetry::Value::Bool(true))
+        );
+
+        // is_deferred: false in config means the selector is inactive and
+        // returns None, matching the convention of the other boolean-guarded
+        // selectors (SubgraphName, OnGraphQLError, IsPrimaryResponse).
+        let inactive_selector = SubgraphSelector::IsDeferred { is_deferred: false };
+        let request = crate::services::SubgraphRequest::fake_builder().build();
+        assert_eq!(inactive_selector.on_request(&request), None);
+    }
+
+    #[test]
+    fn entity_cache_hit_all_entities() {
+        let selector = SubgraphSelector::Cache {
+            cache: CacheKind::Hit,
+            entity_type: Some(EntityType::All(All::All)),
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .context(context.clone())
+                    .build(),
+            ),
+            None
+        );
+        let cache_info = CacheSubgraph(
+            [
+                ("Products".to_string(), CacheHitMiss { hit: 3, miss: 0 }),
+                ("Reviews".to_string(), CacheHitMiss { hit: 2, miss: 0 }),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let _ = context
+            .insert(CacheMetricContextKey::new("test".to_string()), cache_info)
+            .unwrap();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some(opentelemetry::Value::I64(5))
+        );
+    }
+
+    #[test]
+>>>>>>> origin/dev
     fn response_cache_status_all() {
         let selector = SubgraphSelector::ResponseCacheStatus {
             response_cache_status: CacheStatus::Status,
