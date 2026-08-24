@@ -210,6 +210,7 @@ impl FetchService {
             variables,
             current_dir,
             context,
+            is_deferred,
         } = request;
 
         let FetchNode {
@@ -283,6 +284,10 @@ impl FetchService {
             .build();
         subgraph_request.query_hash = fetch_node.schema_aware_hash.clone();
         subgraph_request.authorization = fetch_node.authorization.clone();
+        // Renamed at the boundary: the walker carries `is_deferred` as a property
+        // of the fetch; on the subgraph request it's `is_deferred_fetch` to make
+        // clear that it describes *this* fetch (not a query-level flag).
+        subgraph_request.is_deferred_fetch = is_deferred;
         Box::pin(async move {
             Ok(fetch_node
                 .subgraph_fetch(

@@ -10620,6 +10620,19 @@ expression: "&schema"
         {
           "additionalProperties": false,
           "properties": {
+            "is_deferred": {
+              "description": "Set to `true` to emit whether this subgraph fetch is part of the deferred portion of an `@defer` query plan.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "is_deferred"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "default": {
               "description": "Optional default value.",
               "type": [
