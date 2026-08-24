@@ -4,4 +4,4 @@ When every client of a router-side subgraph subscription disconnected, the pubsu
 
 `Handle` and `HandleStream` in the subscription notification module now drop their broadcast receiver before the guard that sends the unsubscribe notification, closing the race.
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/10061
