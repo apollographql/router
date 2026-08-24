@@ -18,4 +18,4 @@ Note that two branches which previously merged into one entity fetch will now be
 That is required for correctness, but it is one additional subgraph fetch for operations that were
 relying on the merged shape.
 
-By [@andy.garcia](https://github.com/andygarcia) in https://github.com/apollographql/router/pull/0000
+By [@andy.garcia](https://github.com/andygarcia) in https://github.com/apollographql/router/pull/10063
