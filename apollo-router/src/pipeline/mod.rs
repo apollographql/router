@@ -10,28 +10,19 @@
 //! A built pipeline is a chain of tower service stacks, one per protocol level. From the
 //! outside in:
 //!
-//! - **Router** — HTTP in, HTTP out. Static pages, each plugin's `router_service` hook,
-//!   content negotiation, batch splitting, the HTTP→GraphQL translation, APQ and
-//!   persisted-query expansion, and query parsing, dispatching to the supergraph
-//!   service.
-//! - **Supergraph** — GraphQL request in, GraphQL response out. Content negotiation, each
-//!   plugin's `supergraph_service` hook, mutation and operation-limit enforcement, then
-//!   `SupergraphService`: introspection and query planning (through the query-plan
-//!   cache), and dispatch to the execution service.
-//! - **Execution** — executes one query plan. Batch analysis, subscriptions, each
-//!   plugin's `execution_service` hook, then `ExecutionService`, whose `FetchService`
-//!   routes fetch nodes to subgraphs and connectors.
+//! - **Router** — HTTP in, HTTP out: turns HTTP requests into GraphQL requests.
+//! - **Supergraph** — GraphQL request in, GraphQL response out: plans the operation.
+//! - **Execution** — executes one query plan, routing its fetch nodes to subgraphs and
+//!   connectors.
 //! - **Subgraph / connector** — one pre-built stack per subgraph
 //!   ([`SubgraphServices`](crate::services::SubgraphServices)) and per connector
-//!   (`ConnectorServices` over `ConnectorRequestServices`), with their plugin hooks
-//!   (`subgraph_service`, `connector_request_service`) and per-entry buffers, ending in
-//!   an HTTP client.
-//! - **HTTP client** — one client per subgraph and per connector source: request
-//!   batching, response size limits, each plugin's `http_client_service` hook, then the
-//!   hyper-based `HttpClientService`.
+//!   (`ConnectorServices` over `ConnectorRequestServices`).
+//! - **HTTP client** — one client per subgraph and per connector source.
 //!
-//! Every one of these stacks is assembled by a `build_*` function in [`stages`], so the
-//! full layer composition of the pipeline is legible in that one file.
+//! Each stack applies that stage's plugin hooks. Every stack is assembled by a `build_*`
+//! function in [`stages`], so the full layer composition of the pipeline is legible in
+//! that one file — the service-builder chains there are the authoritative description of
+//! what runs where.
 //!
 //! # Construction: acquire → activate → assemble
 //!
@@ -111,7 +102,6 @@ use crate::plugin::DynPlugin;
 use crate::query_planner::InMemoryQueryPlanCache;
 use crate::query_planner::warmup;
 use crate::router_factory::RouterFactory;
-use crate::router_factory::STARTING_SPAN_NAME;
 use crate::services::Plugins;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::router;
@@ -176,7 +166,7 @@ pub(crate) async fn build_pipeline(
 
         Ok(pipeline)
     }
-    .instrument(tracing::info_span!(STARTING_SPAN_NAME))
+    .instrument(tracing::info_span!("pipeline_initialization"))
     .await
 }
 
@@ -193,8 +183,7 @@ fn activate(acquired: &Acquired) {
 
 /// Assembles the pipeline from the acquired resources.
 ///
-/// Call after [`activate`]: the query-plan and APQ caches built here register their
-/// gauges against the meter provider that activation installed.
+/// Call after [`activate`]: anything assembled here assumes that telemetry is active.
 fn assemble(
     acquired: Acquired,
     configuration: Arc<Configuration>,

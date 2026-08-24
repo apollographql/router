@@ -255,10 +255,8 @@ pub(crate) fn wrap_subgraph_service(
         .service(service)
 }
 
-/// Assembles the request service stack for each connector source, keyed by
-/// `source_config_key()`, outermost first: a per-source buffer, each plugin's
-/// `connector_request_service` hook, and the [`ConnectorRequestService`] around the
-/// source's HTTP client.
+/// Builds the request service stack for each connector source, keyed by
+/// `source_config_key()`.
 fn build_connector_request_services(
     connector_http_services: IndexMap<String, http::BoxCloneService>,
     plugins: &Arc<Plugins>,
@@ -283,9 +281,8 @@ fn build_connector_request_services(
     }
 }
 
-/// Assembles the [`ConnectorService`] stack for each of the schema's connectors, keyed
-/// by the connector's service name: a per-connector buffer around the
-/// [`ConnectorService`] holding its source's request service.
+/// Builds a [`ConnectorService`] for each of the schema's connectors, keyed by the
+/// connector's service name.
 fn build_connector_services(
     schema: Arc<Schema>,
     subgraph_schemas: Arc<SubgraphSchemas>,
@@ -418,9 +415,8 @@ pub(crate) fn build_supergraph_pipeline(
     }
 }
 
-/// Assembles the execution service stack: the batching and subscription layers, each plugin's
-/// `execution_service` hook, and the [`ExecutionService`] with its [`FetchService`] that
-/// dispatches to subgraphs and connectors.
+/// Builds the execution service stack, which executes query plans by dispatching their
+/// fetch nodes to subgraphs and connectors.
 fn build_execution_service(
     schema: Arc<Schema>,
     subgraph_schemas: Arc<SubgraphSchemas>,
@@ -475,9 +471,8 @@ fn build_execution_service(
         .boxed_clone()
 }
 
-/// Assembles the [`SupergraphService`] stack, outermost first: the content-negotiation
-/// and compute-job metrics layers, each plugin's `supergraph_service` hook, and the
-/// mutation-restriction and operation-limit layers.
+/// Builds the supergraph service stack, which plans GraphQL requests and dispatches
+/// them to the execution service.
 fn build_supergraph_service(
     query_planner_service: query_planner::CacheBoxCloneService,
     execution_service: execution::BoxCloneService,
@@ -507,11 +502,8 @@ fn build_supergraph_service(
         .service(supergraph_service)
 }
 
-/// Assembles the router service stack, outermost first: the static-page layer, each
-/// plugin's `router_service` hook, content negotiation, request logging, batch
-/// splitting, the HTTP→GraphQL translation, persisted-query and APQ expansion, query
-/// parsing, authorization and extended-reference extraction, and safelist enforcement,
-/// ending in the supergraph service.
+/// Builds the router service stack, which turns HTTP requests into GraphQL requests
+/// and dispatches them to the supergraph service.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_router_service(
     supergraph_service: supergraph::BoxCloneService,

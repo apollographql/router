@@ -13,8 +13,6 @@ use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
-pub(crate) const STARTING_SPAN_NAME: &str = "starting";
-
 /// A built pipeline's serving surface: the router service, the plugin web endpoints,
 /// and the pipeline handle.
 pub(crate) trait RouterFactory: Clone + Send + 'static {

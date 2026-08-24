@@ -6,7 +6,7 @@ This document describes how the router builds a serving pipeline from configurat
 
 ## The three phases
 
-`pipeline::build_pipeline` runs three phases, each a named function under its own tracing span nested in `starting`: async fallible `acquire`, then `activate`, then synchronous infallible `assemble`, which takes the `Acquired` struct whole. The point of no return sits between acquire and activate; everything after it is infallible. Query-plan warm-up runs after assemble as its own step (`Pipeline::warm_up`), so the pipeline is complete before the slow part of a reload starts.
+`pipeline::build_pipeline` runs three phases, each a named function under its own tracing span nested in `pipeline_initialization`: async fallible `acquire`, then `activate`, then synchronous infallible `assemble`, which takes the `Acquired` struct whole. The point of no return sits between acquire and activate; everything after it is infallible. Query-plan warm-up runs after assemble as its own step (`Pipeline::warm_up`), so the pipeline is complete before the slow part of a reload starts.
 
 ```mermaid
 sequenceDiagram
@@ -74,7 +74,7 @@ Nothing in the acquire phase creates and *holds* a telemetry instrument, because
 
 Construction is slow enough to need its own observability — a reload blocks on it, and query-plan warmup alone has historically dominated reload time (see the cost model in `dev-docs/reload-lifecycle.md`).
 
-- **Spans.** Everything runs inside `starting`; beneath it, `acquire`, `activate`, `assemble`, and `warmup`, with per-step spans inside the first and third (`query_planner_creation`, `plugins` with one child span per plugin, `query_plan_redis_connect`, `apq_redis_connect`, `persisted_queries_manifest`, `supergraph_creation`). A slow reload decomposes directly: a stalled Redis connect, a slow persisted-query manifest fetch, and a long warmup each show up as their own span. `maybe_bootstrap_telemetry` runs before the `starting` span is created, so on first boot every construction span is created against the real tracer provider and exports as one connected trace.
+- **Spans.** Everything runs inside `pipeline_initialization`; beneath it, `acquire`, `activate`, `assemble`, and `warmup`, with per-step spans inside the first and third (`query_planner_creation`, `plugins` with one child span per plugin, `query_plan_redis_connect`, `apq_redis_connect`, `persisted_queries_manifest`, `supergraph_creation`). A slow reload decomposes directly: a stalled Redis connect, a slow persisted-query manifest fetch, and a long warmup each show up as their own span. `maybe_bootstrap_telemetry` runs before the `pipeline_initialization` span is created, so on first boot every construction span is created against the real tracer provider and exports as one connected trace.
 - **Duration metrics.** `apollo.router.query_planning.warmup.duration` (histogram) for warmup, and `apollo.router.schema.load.duration` (histogram) for the schema parse that precedes construction in `try_start`. `apollo.router.lifecycle.query_planner.init` counts planner-initialization attempts with success/error attributes.
 
 ### Plugin ordering
