@@ -203,6 +203,28 @@ impl Display for Compression {
     }
 }
 
+/// Caches one DNS resolver per resolution strategy, so building the clients for many
+/// subgraphs and connector sources reads the system DNS configuration once per strategy
+/// instead of once per client.
+#[derive(Default)]
+pub(crate) struct DnsResolverCache(
+    std::collections::HashMap<crate::configuration::shared::DnsResolutionStrategy, AsyncHyperResolver>,
+);
+
+impl DnsResolverCache {
+    fn resolver(
+        &mut self,
+        strategy: crate::configuration::shared::DnsResolutionStrategy,
+    ) -> Result<AsyncHyperResolver, std::io::Error> {
+        Ok(match self.0.entry(strategy) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.get().clone(),
+            std::collections::hash_map::Entry::Vacant(entry) => entry
+                .insert(AsyncHyperResolver::new_from_system_conf(strategy)?)
+                .clone(),
+        })
+    }
+}
+
 /// Validated inputs for building an [`HttpClientService`].
 ///
 /// Parsing configuration into this type is the fallible half of client construction:
@@ -227,6 +249,7 @@ impl HttpClientInputs {
         configuration: &Configuration,
         tls_root_store: &RootCertStore,
         client_config: crate::configuration::shared::Client,
+        dns_resolvers: &mut DnsResolverCache,
     ) -> Result<Self, BoxError> {
         let name: String = service.into();
         let default_client_cert_config = configuration
@@ -260,7 +283,7 @@ impl HttpClientInputs {
             name: Arc::from(name.as_str()),
         };
 
-        Self::new(service_target, tls_config, client_config)
+        Self::new(service_target, tls_config, client_config, dns_resolvers)
     }
 
     /// Parses the client inputs for a connector source. Per-source TLS config in
@@ -270,6 +293,7 @@ impl HttpClientInputs {
         configuration: &Configuration,
         tls_root_store: &RootCertStore,
         client_config: crate::configuration::shared::Client,
+        dns_resolvers: &mut DnsResolverCache,
     ) -> Result<Self, BoxError> {
         let name: String = source_name.into();
         let default_client_cert_config = configuration
@@ -303,7 +327,7 @@ impl HttpClientInputs {
             name: Arc::from(name.as_str()),
         };
 
-        Self::new(service_target, tls_config, client_config)
+        Self::new(service_target, tls_config, client_config, dns_resolvers)
     }
 
     /// Parses the client inputs for the coprocessor client.
@@ -314,7 +338,12 @@ impl HttpClientInputs {
         // Coprocessors don't use client certificates, so use no client auth
         let tls_config = generate_tls_client_config(tls_root_store.clone(), None)?;
 
-        Self::new(ServiceTarget::Coprocessor, tls_config, client_config)
+        Self::new(
+            ServiceTarget::Coprocessor,
+            tls_config,
+            client_config,
+            &mut DnsResolverCache::default(),
+        )
     }
 
     /// Assembles the inputs from an already-resolved TLS config. Fails if the DNS resolver
@@ -323,10 +352,10 @@ impl HttpClientInputs {
         service_target: ServiceTarget,
         tls_config: ClientConfig,
         client_config: crate::configuration::shared::Client,
+        dns_resolvers: &mut DnsResolverCache,
     ) -> Result<Self, BoxError> {
-        let dns_resolver = AsyncHyperResolver::new_from_system_conf(
-            client_config.dns_resolution_strategy.unwrap_or_default(),
-        )?;
+        let dns_resolver =
+            dns_resolvers.resolver(client_config.dns_resolution_strategy.unwrap_or_default())?;
 
         Ok(Self {
             service_target,
@@ -365,6 +394,7 @@ impl HttpClientService {
             service_target,
             tls_config,
             client_config,
+            &mut DnsResolverCache::default(),
         )?))
     }
 
@@ -474,6 +504,7 @@ impl HttpClientService {
             configuration,
             tls_root_store,
             client_config,
+            &mut DnsResolverCache::default(),
         )?))
     }
 
@@ -490,6 +521,7 @@ impl HttpClientService {
             configuration,
             tls_root_store,
             client_config,
+            &mut DnsResolverCache::default(),
         )?))
     }
 
@@ -557,6 +589,7 @@ impl HttpClientService {
             service_target,
             tls_config,
             client_config,
+            &mut DnsResolverCache::default(),
         )?))
     }
 }
@@ -745,6 +778,7 @@ mod tests {
     use tracing_subscriber::registry::LookupSpan;
 
     use super::super::ServiceTarget;
+    use super::DnsResolverCache;
     use super::HttpClientInputs;
     use crate::Context;
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
@@ -863,6 +897,7 @@ mod tests {
                     .expect("Able to load native roots")
                     .with_no_client_auth(),
                 crate::configuration::shared::Client::builder().build(),
+                &mut DnsResolverCache::default(),
             )
             .expect("can create http client inputs"),
         );
@@ -1017,6 +1052,7 @@ mod tests {
                     .expect("Able to load native roots")
                     .with_no_client_auth(),
                 crate::configuration::shared::Client::builder().build(),
+                &mut DnsResolverCache::default(),
             )
             .expect("can create http client inputs"),
         );
@@ -1112,6 +1148,7 @@ mod tests {
                     .expect("read native TLS root certificates")
                     .with_no_client_auth(),
                 crate::configuration::shared::Client::builder().build(),
+                &mut DnsResolverCache::default(),
             )
             .expect("can create http client inputs"),
         );

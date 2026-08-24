@@ -37,6 +37,7 @@ pub(crate) fn test_http_client_service(name: &str) -> BoxCloneService {
         &crate::Configuration::default(),
         &rustls::RootCertStore::empty(),
         crate::configuration::shared::Client::default(),
+        &mut service::DnsResolverCache::default(),
     )
     .unwrap();
     crate::pipeline::build_http_client_service(name, inputs, Arc::new(indexmap::IndexMap::default()))

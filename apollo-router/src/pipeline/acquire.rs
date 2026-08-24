@@ -25,6 +25,7 @@ use crate::query_planner::QueryPlannerService;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::Plugins;
 use crate::services::http::HttpClientService;
+use crate::services::http::service::DnsResolverCache;
 use crate::services::http::service::HttpClientInputs;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::subgraph::http::create_certificate_store;
@@ -205,6 +206,9 @@ pub(crate) fn parse_http_client_inputs(
             .transpose()?
             .unwrap_or_else(HttpClientService::native_roots_store);
 
+    // One DNS resolver per resolution strategy, shared across every client below.
+    let mut dns_resolvers = DnsResolverCache::default();
+
     let shaping = plugins
         .iter()
         .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
@@ -232,6 +236,7 @@ pub(crate) fn parse_http_client_inputs(
             configuration,
             &subgraph_tls_root_store,
             shaping.subgraph_client_config(name),
+            &mut dns_resolvers,
         )?;
         subgraph_inputs.insert(name.clone(), inputs);
     }
@@ -249,6 +254,7 @@ pub(crate) fn parse_http_client_inputs(
             configuration,
             &connector_tls_root_store,
             shaping.connector_client_config(name),
+            &mut dns_resolvers,
         )?;
         connector_inputs.insert(name.clone(), inputs);
     }
