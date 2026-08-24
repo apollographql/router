@@ -608,6 +608,7 @@ pub(crate) fn create_oci_license_stream(
 fn stream_license_from_oci(oci_config: OciConfig) -> impl Stream<Item = Result<License, OciError>> {
     let (sender, receiver) = channel(2);
 
+    // Build an async task to poll for the license
     let task = async move {
         let mut last_digest: Option<String> = None;
         let mut polling_time = oci_config.poll_interval;
@@ -663,6 +664,9 @@ fn stream_license_from_oci(oci_config: OciConfig) -> impl Stream<Item = Result<L
             polling_time = oci_config.poll_interval;
         }
     };
+
+    // Here we drop the JoinHandle that tokio::task::spawn returns in order to explicitly
+    // detach it from this function since the stream is intended to outlive the function call
     drop(tokio::task::spawn(task.with_current_subscriber()));
     ReceiverStream::new(receiver).boxed()
 }
@@ -708,8 +712,6 @@ async fn fetch_license_from_reference(
     tracing::debug!("pulling oci manifest for license");
     let (manifest, _) = fetch_oci_manifest(client, auth, reference, oci_config).await?;
 
-    // Expect a layer with a media_type for license information
-    // You may want to adjust the media type string for your license blob
     let license_layer = manifest
         .layers
         .iter()
