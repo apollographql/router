@@ -1,5 +1,5 @@
-//! [`build_subgraph_services`] against a real local HTTP listener: subgraph APQ
-//! enablement per the `apq.subgraph` config, applied through `SubgraphServices`.
+//! Subgraph APQ enablement per the `apq.subgraph` config, exercised through the full
+//! per-subgraph service stack against a real local HTTP listener.
 
 use std::convert::Infallible;
 use std::str::FromStr;

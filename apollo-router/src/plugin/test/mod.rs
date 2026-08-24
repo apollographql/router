@@ -22,6 +22,26 @@ pub(crate) async fn await_mock_driver(driver: tokio::task::JoinHandle<()>) {
         .expect("mock driver panicked");
 }
 
+/// Keeps `handle` alive with unlimited readiness and panics if the mock ever receives
+/// a request.
+///
+/// For mocks that must report ready — so requests can reach the layers under test and
+/// be rejected there — but must never actually be called. The handle lives in a
+/// detached task for the rest of the test.
+pub(crate) fn allow_and_assert_never_called<Req, Res>(
+    mut handle: tower_test::mock::Handle<Req, Res>,
+) where
+    Req: Send + 'static,
+    Res: Send + 'static,
+{
+    handle.allow(u64::MAX);
+    tokio::spawn(async move {
+        if handle.next_request().await.is_some() {
+            panic!("mock service was called but should never be");
+        }
+    });
+}
+
 /// Assert that a mock service is never called during the test.
 ///
 /// Waits up to 10 ms after the test action for a request to arrive; if one does,

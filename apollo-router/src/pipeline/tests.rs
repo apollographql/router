@@ -13,7 +13,7 @@ use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
 mod plugin_instantiation;
-mod subgraph_services;
+mod subgraph_apq;
 
 /// Subgraph names in `testdata/supergraph.graphql`, sorted.
 const FIXTURE_SUBGRAPHS: [&str; 4] = ["accounts", "inventory", "products", "reviews"];

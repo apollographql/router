@@ -498,7 +498,7 @@ async fn it_displays_sandbox() {
         crate::services::supergraph::Request,
         crate::services::supergraph::Response,
     >();
-    crate::plugin::test::assert_no_mock_calls(handle).await;
+    crate::plugin::test::allow_and_assert_never_called(handle);
     let router_service =
         crate::pipeline::from_supergraph_mock_with_configuration(mock, conf.clone()).await;
 
@@ -545,7 +545,7 @@ async fn it_displays_sandbox_with_different_supergraph_path() {
         crate::services::supergraph::Request,
         crate::services::supergraph::Response,
     >();
-    crate::plugin::test::assert_no_mock_calls(handle).await;
+    crate::plugin::test::allow_and_assert_never_called(handle);
     let router_service =
         crate::pipeline::from_supergraph_mock_with_configuration(mock, conf.clone()).await;
     let (server, client) = init_with_config(router_service, conf, MultiMap::new())
@@ -1353,7 +1353,7 @@ async fn it_errors_on_bad_content_type_header() -> Result<(), ApolloRouterError>
         crate::services::supergraph::Request,
         crate::services::supergraph::Response,
     >();
-    crate::plugin::test::assert_no_mock_calls(handle).await;
+    crate::plugin::test::allow_and_assert_never_called(handle);
     let router_service = crate::pipeline::from_supergraph_mock(mock).await;
 
     let (server, client) = init(router_service).await;
@@ -1555,7 +1555,7 @@ async fn it_errors_on_bad_accept_header() -> Result<(), ApolloRouterError> {
         crate::services::supergraph::Request,
         crate::services::supergraph::Response,
     >();
-    crate::plugin::test::assert_no_mock_calls(handle).await;
+    crate::plugin::test::allow_and_assert_never_called(handle);
     let router_service = crate::pipeline::from_supergraph_mock(mock).await;
 
     let (server, client) = init(router_service).await;
@@ -1590,7 +1590,7 @@ async fn it_displays_homepage() {
         crate::services::supergraph::Request,
         crate::services::supergraph::Response,
     >();
-    crate::plugin::test::assert_no_mock_calls(handle).await;
+    crate::plugin::test::allow_and_assert_never_called(handle);
     let router_service =
         crate::pipeline::from_supergraph_mock_with_configuration(mock, conf.clone()).await;
 
@@ -1632,7 +1632,7 @@ async fn it_doesnt_display_disabled_homepage() {
         crate::services::supergraph::Request,
         crate::services::supergraph::Response,
     >();
-    crate::plugin::test::assert_no_mock_calls(handle).await;
+    crate::plugin::test::allow_and_assert_never_called(handle);
     let router_service =
         crate::pipeline::from_supergraph_mock_with_configuration(mock, conf.clone()).await;
 

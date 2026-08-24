@@ -68,8 +68,6 @@ use tower::BoxError;
 #[cfg(test)]
 use tower::Service;
 #[cfg(test)]
-use tower::ServiceBuilder;
-#[cfg(test)]
 use tower::ServiceExt;
 use tracing::Instrument;
 
@@ -387,19 +385,9 @@ pub(crate) async fn from_supergraph_mock_with_configuration(
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
 + Clone {
-    use crate::layers::ServiceBuilderExt as _;
-
     let (_, schema, plugins, supergraph_pipeline) = crate::TestHarness::builder()
         .configuration(configuration.clone())
-        // Buffer the mock so it stays permanently ready: a tower_test mock fails
-        // `poll_ready` once its handle is dropped (as in [`empty`]), which would fail
-        // requests before they reach the router layers under test.
-        .supergraph_hook(move |_| {
-            ServiceBuilder::new()
-                .buffered()
-                .service(mock.clone().boxed_clone())
-                .boxed_clone()
-        })
+        .supergraph_hook(move |_| mock.clone().boxed_clone())
         .build_common()
         .await
         .unwrap();
@@ -445,8 +433,9 @@ pub(crate) async fn empty() -> impl Service<
     Error = BoxError,
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send {
-    // empty() discards the handle: the service is never expected to be called, and any
-    // call fails with a `Closed` error.
-    let (mock, _handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+    let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+    // The supergraph service must stay ready — these tests exercise router-layer
+    // rejections — but must never be called.
+    crate::plugin::test::allow_and_assert_never_called(handle);
     from_supergraph_mock_with_configuration(mock, Arc::new(Configuration::default())).await
 }
