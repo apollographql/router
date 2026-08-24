@@ -1446,8 +1446,6 @@ mod test {
     }
 
     #[test]
-<<<<<<< HEAD
-=======
     fn is_deferred() {
         let selector = SubgraphSelector::IsDeferred { is_deferred: true };
         let context = crate::context::Context::new();
@@ -1481,45 +1479,6 @@ mod test {
     }
 
     #[test]
-    fn entity_cache_hit_all_entities() {
-        let selector = SubgraphSelector::Cache {
-            cache: CacheKind::Hit,
-            entity_type: Some(EntityType::All(All::All)),
-        };
-        let context = crate::context::Context::new();
-        assert_eq!(
-            selector.on_response(
-                &crate::services::SubgraphResponse::fake_builder()
-                    .subgraph_name("test".to_string())
-                    .context(context.clone())
-                    .build(),
-            ),
-            None
-        );
-        let cache_info = CacheSubgraph(
-            [
-                ("Products".to_string(), CacheHitMiss { hit: 3, miss: 0 }),
-                ("Reviews".to_string(), CacheHitMiss { hit: 2, miss: 0 }),
-            ]
-            .into_iter()
-            .collect(),
-        );
-        let _ = context
-            .insert(CacheMetricContextKey::new("test".to_string()), cache_info)
-            .unwrap();
-        assert_eq!(
-            selector.on_response(
-                &crate::services::SubgraphResponse::fake_builder()
-                    .subgraph_name("test".to_string())
-                    .context(context.clone())
-                    .build(),
-            ),
-            Some(opentelemetry::Value::I64(5))
-        );
-    }
-
-    #[test]
->>>>>>> origin/dev
     fn response_cache_status_all() {
         let selector = SubgraphSelector::ResponseCacheStatus {
             response_cache_status: CacheStatus::Status,

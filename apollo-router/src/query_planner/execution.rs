@@ -73,7 +73,6 @@ impl QueryPlan {
         log::trace_query_plan(self.root.as_deref());
         let deferred_fetches = HashMap::new();
 
-<<<<<<< HEAD
         let (value, errors) = match self.root.as_deref() {
             Some(root_node) => {
                 root_node
@@ -89,6 +88,7 @@ impl QueryPlan {
                             subscription_handle: &subscription_handle,
                             subscription_config,
                             subgraph_schemas,
+                            is_deferred: false,
                         },
                         &root,
                         &initial_value.unwrap_or_default(),
@@ -98,29 +98,6 @@ impl QueryPlan {
             }
             None => (Value::Object(Default::default()), vec![]),
         };
-=======
-        let (value, errors) = self
-            .root
-            .execute_recursively(
-                &ExecutionParameters {
-                    context,
-                    service_factory,
-                    schema,
-                    supergraph_request,
-                    deferred_fetches: &deferred_fetches,
-                    query: &self.query,
-                    root_node: &self.root,
-                    subscription_handle: &subscription_handle,
-                    subscription_config,
-                    subgraph_schemas,
-                    is_deferred: false,
-                },
-                &root,
-                &initial_value.unwrap_or_default(),
-                sender,
-            )
-            .await;
->>>>>>> origin/dev
         if !deferred_fetches.is_empty() {
             u64_counter!(
                 "apollo.router.operations.defer",
