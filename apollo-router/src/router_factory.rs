@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use multimap::MultiMap;
 use tower::BoxError;
-use tracing::Instrument;
 
 use crate::ListenAddr;
 use crate::axum_factory::Endpoint;
@@ -77,7 +76,6 @@ impl RouterServiceFactory for PipelineFactory {
             extra_plugins,
             license,
         )
-        .instrument(tracing::info_span!(STARTING_SPAN_NAME))
         .await
     }
 }

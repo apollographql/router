@@ -84,6 +84,7 @@ use tracing::Instrument;
 
 use self::acquire::Acquired;
 use self::acquire::acquire;
+use self::acquire::maybe_bootstrap_telemetry;
 pub(crate) use self::acquire::connect_apq_redis;
 pub(crate) use self::acquire::connect_query_plan_redis;
 pub(crate) use self::acquire::create_query_planner_service;
@@ -107,6 +108,7 @@ use crate::plugin::DynPlugin;
 use crate::query_planner::InMemoryQueryPlanCache;
 use crate::query_planner::warmup;
 use crate::router_factory::RouterFactory;
+use crate::router_factory::STARTING_SPAN_NAME;
 use crate::services::Plugins;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::router;
@@ -136,27 +138,43 @@ pub(crate) async fn build_pipeline(
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     license: Arc<LicenseState>,
 ) -> Result<Pipeline, BoxError> {
-    let acquired = acquire(
+    // Bootstrap telemetry before creating any spans: on first boot the global tracer
+    // provider is still the no-op bootstrap provider, so a span created earlier would
+    // never be exported and every span under it would arrive as an orphan.
+    let bootstrap_telemetry_plugin = maybe_bootstrap_telemetry(
         &configuration,
         &schema,
-        previous_config,
-        extra_plugins,
-        license,
+        &license,
+        previous_config.as_deref(),
     )
-    .instrument(tracing::info_span!("acquire"))
     .await?;
 
-    activate(&acquired);
+    async {
+        let acquired = acquire(
+            &configuration,
+            &schema,
+            previous_config,
+            extra_plugins,
+            license,
+            bootstrap_telemetry_plugin,
+        )
+        .instrument(tracing::info_span!("acquire"))
+        .await?;
 
-    let pipeline =
-        tracing::info_span!("assemble").in_scope(|| assemble(acquired, configuration, schema));
+        activate(&acquired);
 
-    pipeline
-        .warm_up(previous_cache)
-        .instrument(tracing::info_span!("warmup"))
-        .await;
+        let pipeline =
+            tracing::info_span!("assemble").in_scope(|| assemble(acquired, configuration, schema));
 
-    Ok(pipeline)
+        pipeline
+            .warm_up(previous_cache)
+            .instrument(tracing::info_span!("warmup"))
+            .await;
+
+        Ok(pipeline)
+    }
+    .instrument(tracing::info_span!(STARTING_SPAN_NAME))
+    .await
 }
 
 /// The point of no return: activating the telemetry plugin swaps in global tracer and

@@ -15,9 +15,10 @@ sequenceDiagram
 
     SM->>BP: create_pipeline(configuration, schema, previous?, license)
 
+    BP->>BP: maybe_bootstrap_telemetry (before any spans, so first-boot traces export)
+
     rect rgba(192, 106, 16, 0.15)
         Note over BP: Acquire — everything fallible lives here
-        BP->>BP: maybe_bootstrap_telemetry
         BP->>BP: create_query_planner_service (federation planner, schema + authorization validation)
         BP->>BP: create_plugins
         BP->>BP: parse_http_client_inputs (cert stores, client certs, DNS resolver)
@@ -73,7 +74,7 @@ Nothing in the acquire phase creates and *holds* a telemetry instrument, because
 
 Construction is slow enough to need its own observability — a reload blocks on it, and query-plan warmup alone has historically dominated reload time (see the cost model in `dev-docs/reload-lifecycle.md`).
 
-- **Spans.** Everything runs inside `starting`; beneath it, `acquire`, `activate`, `assemble`, and `warmup`, with per-step spans inside the first and third (`query_planner_creation`, `plugins` with one child span per plugin, `query_plan_redis_connect`, `apq_redis_connect`, `persisted_queries_manifest`, `supergraph_creation`). A slow reload decomposes directly: a stalled Redis connect, a slow persisted-query manifest fetch, and a long warmup each show up as their own span. `maybe_bootstrap_telemetry` runs first inside `acquire` so tracing is live for the rest of construction on first boot.
+- **Spans.** Everything runs inside `starting`; beneath it, `acquire`, `activate`, `assemble`, and `warmup`, with per-step spans inside the first and third (`query_planner_creation`, `plugins` with one child span per plugin, `query_plan_redis_connect`, `apq_redis_connect`, `persisted_queries_manifest`, `supergraph_creation`). A slow reload decomposes directly: a stalled Redis connect, a slow persisted-query manifest fetch, and a long warmup each show up as their own span. `maybe_bootstrap_telemetry` runs before the `starting` span is created, so on first boot every construction span is created against the real tracer provider and exports as one connected trace.
 - **Duration metrics.** `apollo.router.query_planning.warmup.duration` (histogram) for warmup, and `apollo.router.schema.load.duration` (histogram) for the schema parse that precedes construction in `try_start`. `apollo.router.lifecycle.query_planner.init` counts planner-initialization attempts with success/error attributes.
 
 ### Plugin ordering

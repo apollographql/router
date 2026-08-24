@@ -51,11 +51,8 @@ pub(super) async fn acquire(
     previous_config: Option<Arc<Configuration>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     license: Arc<LicenseState>,
+    bootstrap_telemetry_plugin: Option<Box<dyn DynPlugin>>,
 ) -> Result<Acquired, BoxError> {
-    let bootstrap_telemetry_plugin =
-        maybe_bootstrap_telemetry(configuration, schema, &license, previous_config.as_deref())
-            .await?;
-
     let (query_planner_service, subgraph_schemas) =
         create_query_planner_service(schema, configuration)?;
 
@@ -76,7 +73,8 @@ pub(super) async fn acquire(
     );
 
     let (subgraph_client_inputs, connector_client_inputs) =
-        parse_http_client_inputs(&plugins, schema, configuration)?;
+        tracing::info_span!("http_client_inputs")
+            .in_scope(|| parse_http_client_inputs(&plugins, schema, configuration))?;
 
     let query_plan_redis = connect_query_plan_redis(configuration)
         .instrument(tracing::info_span!("query_plan_redis_connect"))
