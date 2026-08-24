@@ -223,8 +223,8 @@ async fn fetch_includes_operation_name() {
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
-        None,
         Arc::new(ConnectorServices::empty(schema.clone())),
+        None,
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     );
 
@@ -281,8 +281,8 @@ async fn fetch_makes_post_requests() {
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
-        None,
         Arc::new(ConnectorServices::empty(schema.clone())),
+        None,
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     );
 
@@ -425,8 +425,8 @@ async fn defer() {
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
-        None,
         Arc::new(ConnectorServices::empty(schema.clone())),
+        None,
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     );
 
@@ -527,8 +527,8 @@ async fn defer_if_condition() {
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
-        None,
         Arc::new(ConnectorServices::empty(schema.clone())),
+        None,
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     );
 
@@ -686,8 +686,8 @@ async fn dependent_mutations() {
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
-        None,
         Arc::new(ConnectorServices::empty(schema.clone())),
+        None,
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     );
 
@@ -2145,8 +2145,8 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
-        None,
         Arc::new(ConnectorServices::empty(schema.clone())),
+        None,
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     );
 

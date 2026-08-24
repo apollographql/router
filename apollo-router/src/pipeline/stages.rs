@@ -438,8 +438,8 @@ fn build_execution_service(
         schema.clone(),
         subgraph_schemas.clone(),
         Arc::new(subgraph_services),
-        subscription_plugin_conf.clone(),
         Arc::new(connector_services),
+        subscription_plugin_conf.clone(),
         Arc::new(configuration.experimental_hoist_orphan_errors.clone()),
     );
 

@@ -48,8 +48,8 @@ impl FetchService {
         schema: Arc<Schema>,
         subgraph_schemas: Arc<SubgraphSchemas>,
         subgraph_services: Arc<SubgraphServices>,
-        subscription_config: Option<SubscriptionConfig>,
         connector_services: Arc<ConnectorServices>,
+        subscription_config: Option<SubscriptionConfig>,
         hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
     ) -> Self {
         Self {
