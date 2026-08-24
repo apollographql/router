@@ -57,7 +57,7 @@ use crate::schema::referencer::UnionTypeReferencers;
 /// Maybe that could be improved in the future by borrowing from the position values,
 /// if necessary.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum PositionLookupError {
+pub enum PositionLookupError {
     #[error("Schema has no directive `{0}`")]
     DirectiveMissing(DirectiveDefinitionPosition),
     #[error("Schema has no type `{0}`")]
@@ -85,7 +85,7 @@ impl From<PositionLookupError> for FederationError {
 /// The error type returned when a position conversion fails.
 #[derive(Debug, thiserror::Error)]
 #[error("Type `{actual}` was unexpectedly not {expected}")]
-pub(crate) struct PositionConvertError<T: Debug + Display> {
+pub struct PositionConvertError<T: Debug + Display> {
     actual: T,
     expected: &'static str,
 }
@@ -1018,7 +1018,7 @@ impl HasAppliedDirectives for DirectiveTargetPosition {
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
-pub(crate) enum TypeDefinitionPosition {
+pub enum TypeDefinitionPosition {
     Scalar(ScalarTypeDefinitionPosition),
     Object(ObjectTypeDefinitionPosition),
     Interface(InterfaceTypeDefinitionPosition),
@@ -1484,7 +1484,7 @@ infallible_conversions!(AbstractTypeDefinitionPosition::{Interface, Union} -> Ou
 infallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::{Object, Interface} -> OutputTypeDefinitionPosition);
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display, Serialize)]
-pub(crate) enum CompositeTypeDefinitionPosition {
+pub enum CompositeTypeDefinitionPosition {
     Object(ObjectTypeDefinitionPosition),
     Interface(InterfaceTypeDefinitionPosition),
     Union(UnionTypeDefinitionPosition),
@@ -1503,7 +1503,7 @@ impl Debug for CompositeTypeDefinitionPosition {
 impl CompositeTypeDefinitionPosition {
     const EXPECTED: &'static str = "a composite type";
 
-    pub(crate) fn is_object_type(&self) -> bool {
+    pub fn is_object_type(&self) -> bool {
         matches!(self, CompositeTypeDefinitionPosition::Object(_))
     }
 
@@ -1519,7 +1519,7 @@ impl CompositeTypeDefinitionPosition {
         self.is_interface_type() || self.is_union_type()
     }
 
-    pub(crate) fn type_name(&self) -> &Name {
+    pub fn type_name(&self) -> &Name {
         match self {
             CompositeTypeDefinitionPosition::Object(type_) => &type_.type_name,
             CompositeTypeDefinitionPosition::Interface(type_) => &type_.type_name,
@@ -1537,7 +1537,7 @@ impl CompositeTypeDefinitionPosition {
         }
     }
 
-    pub(crate) fn field(
+    pub fn field(
         &self,
         field_name: Name,
     ) -> Result<FieldDefinitionPosition, FederationError> {
@@ -1573,7 +1573,7 @@ impl CompositeTypeDefinitionPosition {
         }
     }
 
-    pub(crate) fn get<'schema>(
+    pub fn get<'schema>(
         &self,
         schema: &'schema Schema,
     ) -> Result<&'schema ExtendedType, PositionLookupError> {
@@ -1751,7 +1751,7 @@ fallible_conversions!(CompositeTypeDefinitionPosition::{Object, Interface} -> Ob
 fallible_conversions!(AbstractTypeDefinitionPosition::{Interface} -> ObjectOrInterfaceTypeDefinitionPosition);
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display, Serialize)]
-pub(crate) enum FieldDefinitionPosition {
+pub enum FieldDefinitionPosition {
     Object(ObjectFieldDefinitionPosition),
     Interface(InterfaceFieldDefinitionPosition),
     Union(UnionTypenameFieldDefinitionPosition),
@@ -1836,7 +1836,7 @@ impl FieldDefinitionPosition {
         }
     }
 
-    pub(crate) fn get<'schema>(
+    pub fn get<'schema>(
         &self,
         schema: &'schema Schema,
     ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
@@ -2502,7 +2502,7 @@ impl Display for SchemaRootDefinitionPosition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct ScalarTypeDefinitionPosition {
+pub struct ScalarTypeDefinitionPosition {
     pub(crate) type_name: Name,
 }
 
@@ -2825,14 +2825,14 @@ impl Display for ScalarTypeDefinitionPosition {
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Serialize)]
-pub(crate) struct ObjectTypeDefinitionPosition {
-    pub(crate) type_name: Name,
+pub struct ObjectTypeDefinitionPosition {
+    pub type_name: Name,
 }
 
 impl ObjectTypeDefinitionPosition {
     const EXPECTED: &'static str = "an object type";
 
-    pub(crate) fn new(type_name: Name) -> Self {
+    pub fn new(type_name: Name) -> Self {
         Self { type_name }
     }
 
@@ -2866,7 +2866,7 @@ impl ObjectTypeDefinitionPosition {
             .map(|name| self.field(name.clone())))
     }
 
-    pub(crate) fn try_get<'schema>(
+    pub fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
     ) -> Option<&'schema Node<ObjectType>> {
@@ -2877,7 +2877,7 @@ impl ObjectTypeDefinitionPosition {
         }
     }
 
-    pub(crate) fn get<'schema>(
+    pub fn get<'schema>(
         &self,
         schema: &'schema Schema,
     ) -> Result<&'schema Node<ObjectType>, PositionLookupError> {
@@ -3442,7 +3442,7 @@ impl HasDefaultValue for FieldArgumentDefinitionPosition {
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Serialize)]
-pub(crate) struct ObjectFieldDefinitionPosition {
+pub struct ObjectFieldDefinitionPosition {
     pub(crate) type_name: Name,
     pub(crate) field_name: Name,
 }
@@ -4206,8 +4206,8 @@ impl ObjectOrInterfaceFieldDirectivePosition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
-pub(crate) struct InterfaceTypeDefinitionPosition {
-    pub(crate) type_name: Name,
+pub struct InterfaceTypeDefinitionPosition {
+    pub type_name: Name,
 }
 
 impl InterfaceTypeDefinitionPosition {
@@ -4250,7 +4250,7 @@ impl InterfaceTypeDefinitionPosition {
         }
     }
 
-    pub(crate) fn get<'schema>(
+    pub fn get<'schema>(
         &self,
         schema: &'schema Schema,
     ) -> Result<&'schema Node<InterfaceType>, PositionLookupError> {
@@ -4698,7 +4698,7 @@ impl Display for InterfaceTypeDefinitionPosition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
-pub(crate) struct InterfaceFieldDefinitionPosition {
+pub struct InterfaceFieldDefinitionPosition {
     pub(crate) type_name: Name,
     pub(crate) field_name: Name,
 }
@@ -5407,7 +5407,7 @@ impl HasDefaultValue for InterfaceFieldArgumentDefinitionPosition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
-pub(crate) struct UnionTypeDefinitionPosition {
+pub struct UnionTypeDefinitionPosition {
     pub(crate) type_name: Name,
 }
 
@@ -5431,7 +5431,7 @@ impl UnionTypeDefinitionPosition {
         }
     }
 
-    pub(crate) fn get<'schema>(
+    pub fn get<'schema>(
         &self,
         schema: &'schema Schema,
     ) -> Result<&'schema Node<UnionType>, PositionLookupError> {
@@ -5808,7 +5808,7 @@ impl Display for UnionTypeDefinitionPosition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
-pub(crate) struct UnionTypenameFieldDefinitionPosition {
+pub struct UnionTypenameFieldDefinitionPosition {
     pub(crate) type_name: Name,
 }
 
@@ -5889,7 +5889,7 @@ impl Display for UnionTypenameFieldDefinitionPosition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct EnumTypeDefinitionPosition {
+pub struct EnumTypeDefinitionPosition {
     pub(crate) type_name: Name,
 }
 
@@ -6224,7 +6224,7 @@ impl Display for EnumTypeDefinitionPosition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct EnumValueDefinitionPosition {
+pub struct EnumValueDefinitionPosition {
     pub(crate) type_name: Name,
     pub(crate) value_name: Name,
 }
@@ -6426,7 +6426,7 @@ impl Display for EnumValueDefinitionPosition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct InputObjectTypeDefinitionPosition {
+pub struct InputObjectTypeDefinitionPosition {
     pub(crate) type_name: Name,
 }
 
@@ -7107,7 +7107,7 @@ impl HasDefaultValue for InputObjectFieldDefinitionPosition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct DirectiveDefinitionPosition {
+pub struct DirectiveDefinitionPosition {
     pub(crate) directive_name: Name,
 }
 
@@ -7350,7 +7350,7 @@ impl HasArguments for DirectiveDefinitionPosition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct DirectiveArgumentDefinitionPosition {
+pub struct DirectiveArgumentDefinitionPosition {
     pub(crate) directive_name: Name,
     pub(crate) argument_name: Name,
 }
@@ -7876,7 +7876,7 @@ pub(crate) fn is_graphql_reserved_name(name: &str) -> bool {
     name.starts_with("__")
 }
 
-pub(crate) static INTROSPECTION_TYPENAME_FIELD_NAME: Name = name!("__typename");
+pub static INTROSPECTION_TYPENAME_FIELD_NAME: Name = name!("__typename");
 
 fn validate_component_directives(
     directives: &[Component<Directive>],

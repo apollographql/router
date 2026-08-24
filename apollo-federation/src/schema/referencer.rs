@@ -33,7 +33,7 @@ use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::position::UnionTypenameFieldDefinitionPosition;
 
 #[derive(Clone, Default)]
-pub(crate) struct Referencers {
+pub struct Referencers {
     pub(crate) scalar_types: IndexMap<Name, ScalarTypeReferencers>,
     pub(crate) object_types: IndexMap<Name, ObjectTypeReferencers>,
     pub(crate) interface_types: IndexMap<Name, InterfaceTypeReferencers>,
@@ -170,7 +170,7 @@ impl Referencers {
             || self.input_object_types.contains_key(name)
     }
 
-    pub(crate) fn get_interface_type(
+    pub fn get_interface_type(
         &self,
         name: &str,
     ) -> Result<&InterfaceTypeReferencers, FederationError> {
@@ -611,8 +611,8 @@ impl ObjectTypeReferencers {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct InterfaceTypeReferencers {
-    pub(crate) object_types: IndexSet<ObjectTypeDefinitionPosition>,
+pub struct InterfaceTypeReferencers {
+    pub object_types: IndexSet<ObjectTypeDefinitionPosition>,
     pub(crate) object_fields: IndexSet<ObjectFieldDefinitionPosition>,
     pub(crate) interface_types: IndexSet<InterfaceTypeDefinitionPosition>,
     pub(crate) interface_fields: IndexSet<InterfaceFieldDefinitionPosition>,

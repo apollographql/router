@@ -81,17 +81,17 @@ pub(crate) const FEDERATION_OPERATION_TYPES: [Name; 3] = [
     FEDERATION_SERVICE_TYPE_NAME_IN_SPEC,
 ];
 
-pub(crate) struct KeyDirectiveArguments<'doc> {
-    pub(crate) fields: &'doc str,
-    pub(crate) resolvable: bool,
+pub struct KeyDirectiveArguments<'doc> {
+    pub fields: &'doc str,
+    pub resolvable: bool,
 }
 
 pub(crate) struct ExternalDirectiveArguments<'doc> {
     pub(crate) reason: Option<&'doc str>,
 }
 
-pub(crate) struct RequiresDirectiveArguments<'doc> {
-    pub(crate) fields: &'doc str,
+pub struct RequiresDirectiveArguments<'doc> {
+    pub fields: &'doc str,
 }
 
 pub(crate) struct TagDirectiveArguments<'doc> {
@@ -125,7 +125,7 @@ pub(crate) struct ComposeDirectiveArguments<'doc> {
 }
 
 #[derive(Debug)]
-pub(crate) struct FederationSpecDefinition {
+pub struct FederationSpecDefinition {
     url: Url,
 }
 
@@ -233,7 +233,7 @@ impl FederationSpecDefinition {
         }
     }
 
-    pub(crate) fn key_directive_definition<'schema>(
+    pub fn key_directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,
     ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
@@ -275,7 +275,7 @@ impl FederationSpecDefinition {
         })
     }
 
-    pub(crate) fn key_directive_arguments<'doc>(
+    pub fn key_directive_arguments<'doc>(
         &self,
         application: &'doc Node<Directive>,
     ) -> Result<KeyDirectiveArguments<'doc>, FederationError> {
@@ -437,7 +437,7 @@ impl FederationSpecDefinition {
         })
     }
 
-    pub(crate) fn requires_directive_definition<'schema>(
+    pub fn requires_directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,
     ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
@@ -482,7 +482,7 @@ impl FederationSpecDefinition {
         })
     }
 
-    pub(crate) fn requires_directive_arguments<'doc>(
+    pub fn requires_directive_arguments<'doc>(
         &self,
         application: &'doc Node<Directive>,
     ) -> Result<RequiresDirectiveArguments<'doc>, FederationError> {
@@ -1178,7 +1178,7 @@ pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDe
         definitions
     });
 
-pub(crate) fn get_federation_spec_definition_from_subgraph(
+pub fn get_federation_spec_definition_from_subgraph(
     schema: &FederationSchema,
 ) -> Result<&'static FederationSpecDefinition, FederationError> {
     if let Some(federation_link) = schema

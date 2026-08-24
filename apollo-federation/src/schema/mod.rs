@@ -73,8 +73,8 @@ pub(crate) mod definitions;
 pub(crate) mod directive_location;
 pub(crate) mod field_set;
 pub(crate) mod locations;
-pub(crate) mod position;
-pub(crate) mod referencer;
+pub mod position;
+pub mod referencer;
 pub(crate) mod schema_upgrader;
 pub(crate) mod subgraph_metadata;
 pub(crate) mod validators;
@@ -127,7 +127,7 @@ impl FederationSchema {
         self.subgraph_metadata.as_deref()
     }
 
-    pub(crate) fn referencers(&self) -> &Referencers {
+    pub fn referencers(&self) -> &Referencers {
         &self.referencers
     }
 
@@ -165,7 +165,7 @@ impl FederationSchema {
             })
     }
 
-    pub(crate) fn get_type(
+    pub fn get_type(
         &self,
         type_name: &Name,
     ) -> Result<TypeDefinitionPosition, FederationError> {
@@ -208,7 +208,7 @@ impl FederationSchema {
     /// For an interface, the possible runtime types are its implementers.
     ///
     /// Note this always allocates a set for the result. Avoid calling it frequently.
-    pub(crate) fn possible_runtime_types(
+    pub fn possible_runtime_types(
         &self,
         composite_type_definition_position: CompositeTypeDefinitionPosition,
     ) -> Result<IndexSet<ObjectTypeDefinitionPosition>, FederationError> {
@@ -296,7 +296,7 @@ impl FederationSchema {
 
     /// Note that a subgraph may have no "entities" and so no `_Entity` type.
     // PORT_NOTE: Corresponds to `FederationMetadata.entityType` in JS
-    pub(crate) fn entity_type(
+    pub fn entity_type(
         &self,
     ) -> Result<Option<UnionTypeDefinitionPosition>, FederationError> {
         // Note that the _Entity type is special in that:

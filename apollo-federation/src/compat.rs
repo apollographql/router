@@ -765,7 +765,7 @@ fn coerce_operation_values(schema: &Valid<Schema>, operation: &mut Node<executab
     coerce_selection_set_values(schema, &mut operation.selection_set);
 }
 
-pub(crate) fn coerce_executable_values(schema: &Valid<Schema>, document: &mut ExecutableDocument) {
+pub fn coerce_executable_values(schema: &Valid<Schema>, document: &mut ExecutableDocument) {
     if let Some(operation) = &mut document.operations.anonymous {
         coerce_operation_values(schema, operation);
     }
