@@ -135,8 +135,9 @@ const APOLLO_REGISTRY_USERNAME: &str = "apollo-registry";
 const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
 //  Keep in sync with value in mdg-private/monorepo/libs/entitlements/oci/model/src/main/kotlin/apollo/entitlements/oci/model/EntitlementArtifact.kt:15
 #[allow(dead_code)]
-const ENTITLEMENTS_MEDIA_TYPE: &str = "application/apollo.entitlements";
-const APOLLO_MANIFEST_LAUNCH_ID_ANNOTATION: &str = "com.apollograph.launch.id";
+const ENTITLEMENT_MEDIA_TYPE: &str = "application/apollo.entitlements";
+const APOLLO_MANIFEST_LAUNCH_ID_ANNOTATION: &str =
+    "application/vnd.apollographql.entitlement.v1+jwt";
 
 impl From<oci_client::ParseError> for OciError {
     fn from(value: oci_client::ParseError) -> Self {
@@ -712,8 +713,8 @@ async fn fetch_license_from_reference(
     let license_layer = manifest
         .layers
         .iter()
-        .find(|layer| layer.media_type == ENTITLEMENTS_MEDIA_TYPE)
-        .ok_or_else(|| OciError::LayerNotFound(ENTITLEMENTS_MEDIA_TYPE.to_string()))?
+        .find(|layer| layer.media_type == ENTITLEMENT_MEDIA_TYPE)
+        .ok_or_else(|| OciError::LayerNotFound(ENTITLEMENT_MEDIA_TYPE.to_string()))?
         .clone();
 
     tracing::debug!("pulling oci blob for license layer");
@@ -836,7 +837,7 @@ mod tests {
     ) -> LicenseLayerManifest {
         let license_layer = ImageLayer {
             data: license_data.to_owned().into(),
-            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
+            media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
             annotations: None,
         };
         let blob_digest = license_layer.sha256_digest();
@@ -954,7 +955,7 @@ mod tests {
     }
 
     fn license_layer(data: impl Into<bytes::Bytes>) -> ImageLayer {
-        ImageLayer::new(data, ENTITLEMENTS_MEDIA_TYPE.to_string(), None)
+        ImageLayer::new(data, ENTITLEMENT_MEDIA_TYPE.to_string(), None)
     }
 
     fn unrelated_layer() -> ImageLayer {
@@ -1906,7 +1907,7 @@ mod tests {
         let mock_server = &MockServer::start().await;
         let license_layer = ImageLayer {
             data: TEST_LICENSE_JWT.into(),
-            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
+            media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
             annotations: None,
         };
         let image_reference = setup_mocks(mock_server, vec![license_layer], None).await;
@@ -2270,7 +2271,7 @@ mod tests {
         let mock_server = &MockServer::start().await;
         let license_layer = ImageLayer {
             data: TEST_LICENSE_JWT.into(),
-            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
+            media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
             annotations: None,
         };
         let image_reference = setup_mocks(mock_server, vec![license_layer], None).await;
@@ -2307,7 +2308,7 @@ mod tests {
         let mock_server = &MockServer::start().await;
         let license_layer = ImageLayer {
             data: TEST_LICENSE_JWT.into(),
-            media_type: ENTITLEMENTS_MEDIA_TYPE.to_string(),
+            media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
             annotations: None,
         };
         let image_reference = setup_mocks(mock_server, vec![license_layer], None).await;
