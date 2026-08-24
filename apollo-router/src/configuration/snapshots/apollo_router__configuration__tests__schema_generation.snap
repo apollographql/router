@@ -950,6 +950,44 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "CdnInvalidationConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for surfacing invalidation labels to a CDN as a header (for example, Cloudflare)\nseparated by a delimiting character (by default, \",\")\n\nWhen enabled, the router collects the union of cache tags contributed by each subgraph\n(from `apolloCacheTags`, `apolloEntityCacheTags`, and resolved `@cacheTag` directive values)\nand emits them as a single configurable header on the supergraph response. The coarser\n`subgraph`/`type` labels are always recorded onto the request context (available to\ncoprocessors or Rhai regardless of this config), but the fine-grained tag values are only\naggregated when `enabled` is `true` — there's no way to read the full label set from context\nwithout also enabling header emission.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Whether to emit the configured header on the supergraph response. Defaults to false.",
+          "type": "boolean"
+        },
+        "experimental_on_overflow": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/OverflowBehavior"
+            }
+          ],
+          "default": "truncate",
+          "description": "What to do when the joined header value would exceed `max_bytes`.\n\nThis is an experimental configuration option that might be removed in future releases,\nplease use caution when deciding to use it. Defaults to `truncate`."
+        },
+        "header_delimiter": {
+          "default": ",",
+          "description": "The delimiter used by the invalidation labels header (eg, `\" \"`, `\",\"`). Defaults to `\",\"`.",
+          "type": "string"
+        },
+        "header_name": {
+          "default": "Cache-Tag",
+          "description": "Name of the invalidation labels header used by CDNs",
+          "type": "string"
+        },
+        "max_bytes": {
+          "default": 16384,
+          "description": "Maximum number of bytes for the joined header value. When the joined value would exceed\nthis size, `experimental_on_overflow` decides what to do. Defaults to 16kb.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "Client": {
       "additionalProperties": false,
       "description": "HTTP client configuration",
@@ -2042,6 +2080,21 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
+        "cdn_invalidation": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CdnInvalidationConfig"
+            }
+          ],
+          "default": {
+            "enabled": false,
+            "experimental_on_overflow": "truncate",
+            "header_delimiter": ",",
+            "header_name": "Cache-Tag",
+            "max_bytes": 16384
+          },
+          "description": "Propagation of aggregated response_cache cache tags to the supergraph response.\nOff by default; opt in to surface cache tags to a CDN for tag-based purging. See\n`CdnInvalidationConfig` for the individual fields."
+        },
         "debug": {
           "default": false,
           "description": "Enable debug mode for the debugger",
@@ -2960,6 +3013,14 @@ expression: "&schema"
           "default": null,
           "deprecated": true,
           "description": "Feature gate for Connect spec v0.4. Previously required to opt into the\nv0.4 spec during its preview phase; now a no-op, since `@link`-ing\nconnect/v0.4 in a subgraph is itself a sufficient opt-in.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "preview_connect_v0_5": {
+          "default": null,
+          "description": "Feature gate for Connect spec v0.5. Set to `true` to enable using\nthe v0.5 spec during the preview phase.",
           "type": [
             "boolean",
             "null"
@@ -6948,7 +7009,7 @@ expression: "&schema"
               "$ref": "#/definitions/OnError"
             }
           ],
-          "description": "Control the behavior when an error occurs during the authentication process.\n\nDefaults to `Error`. When set to `Continue`, requests that fail JWT authentication will\ncontinue to be processed by the router, but without the JWT claims in the context. When set\nto `Error`, requests that fail JWT authentication will be rejected with a HTTP 403 error."
+          "description": "Control the behavior when an error occurs during the authentication process.\n\nDefaults to `Error`.\n\n* When set to `Continue`, requests that fail JWT authentication will continue to be\n  processed by the router, but without the JWT claims in the context.\n* When set to `Error`, requests that fail JWT authentication will be rejected with a\n  HTTP 403 error.\n* When set to `RedactedError`, requests that fail JWT authentication are rejected in the\n  same way as `Error`, but the response contains a generic error message instead of the\n  details of the validation failure. The details remain available in the\n  `apollo::authentication::jwt_status` context value and in the\n  `apollo.router.operations.authentication.jwt` metric."
         },
         "sources": {
           "description": "Alternative sources to extract the JWT",
@@ -7482,14 +7543,19 @@ expression: "&schema"
       "description": "Request limits for a multipart request",
       "properties": {
         "max_file_size": {
-          "description": "The maximum size of each file, in bytes (default: 5MB)",
+          "description": "The maximum size of each file (default: 1MB)",
           "type": "string"
         },
         "max_files": {
-          "description": "The maximum amount of files allowed for a single query (default: 4)",
+          "description": "The maximum amount of files allowed for a single query (default: 5)",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
+        },
+        "max_overhead_size": {
+          "default": "2.0 MB",
+          "description": "The maximum amount of multipart framing — the preamble, part headers, boundary delimiters,\nand transport padding — permitted in a single upload request.\n\nThe parser cannot tell a framing byte from a content byte. The router therefore adds this\nallowance to the content the other limits already permit. It enforces the sum as a limit on\nthe whole request. A request over that sum gets a `413 Payload Too Large`. The sum grows\nwith `max_files` and `max_file_size`.",
+          "type": "string"
         },
         "operation_body_timeout": {
           "default": null,
@@ -7639,7 +7705,8 @@ expression: "&schema"
     "OnError": {
       "enum": [
         "Continue",
-        "Error"
+        "Error",
+        "RedactedError"
       ],
       "type": "string"
     },
@@ -7740,6 +7807,21 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "OverflowBehavior": {
+      "description": "What the router does when the joined `Cache-Tag`/invalidation-labels header value would\nexceed `max_bytes`. See `CdnInvalidationConfig::experimental_on_overflow`.",
+      "oneOf": [
+        {
+          "const": "truncate",
+          "description": "Pack the header coarsest-first (subgraph, then type, then tag) and drop whatever doesn't\nfit, finest-grained first, so an oversized response still gets a usable, if partial,\nheader.",
+          "type": "string"
+        },
+        {
+          "const": "drop",
+          "description": "Omit the header entirely rather than send a partial one. Note: this does not drop the\n`Cache-Control` header, so the response is still cached — this option is only useful\npaired with a CDN-side rule that treats a missing invalidation-labels header as a signal\nto bypass caching for that response (e.g. Cloudflare response rules setting `no-store`\nwhen the header is absent).",
+          "type": "string"
+        }
+      ]
     },
     "PersistedQueries": {
       "additionalProperties": false,
@@ -10807,6 +10889,19 @@ expression: "&schema"
         {
           "additionalProperties": false,
           "properties": {
+            "is_deferred": {
+              "description": "Set to `true` to emit whether this subgraph fetch is part of the deferred portion of an `@defer` query plan.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "is_deferred"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "default": {
               "description": "Optional default value.",
               "type": [
@@ -12989,6 +13084,13 @@ expression: "&schema"
           "default": "disabled",
           "description": "Heartbeat interval for graphql-ws protocol (default: disabled)"
         },
+        "max_reconnect_attempts": {
+          "default": 0,
+          "description": "Maximum number of times to attempt to reconnect a dropped WebSocket subscription connection.\nThe default is 0 (no reconnection attempts).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "path": {
           "default": null,
           "description": "Path on which WebSockets are listening",
@@ -13005,6 +13107,14 @@ expression: "&schema"
           ],
           "default": "graphql_ws",
           "description": "Which WebSocket GraphQL protocol to use for this subgraph possible values are: 'graphql_ws' | 'graphql_transport_ws' (default: graphql_ws)"
+        },
+        "reconnect_delay": {
+          "default": null,
+          "description": "Delay before each WebSocket reconnection attempt. Accepts durations like '1s', '500ms'. When unset (null) the default is 1 second; use '0s' for no delay.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"

@@ -825,6 +825,61 @@ mod tests {
         });
     }
 
+    // Authorization directives take precedence over `@include`/`@skip`: `internal` requires
+    // policies the request doesn't have, so it is reported as unauthorized even though the
+    // operation excludes it from the response. Whether a client may request a field is a
+    // separate question from whether the field is ultimately fetched. This precedence is
+    // documented in `docs/source/routing/security/authorization.mdx`; if it is ever changed
+    // deliberately, that documentation needs to change with it.
+    #[test]
+    fn include_skip_does_not_bypass_policy_requirements() {
+        static INCLUDE_FALSE: &str = r#"
+        query {
+            topProducts {
+                type
+                internal @include(if: false)
+            }
+        }
+        "#;
+
+        let (_doc, paths) = filter(BASIC_SCHEMA, INCLUDE_FALSE, HashSet::new());
+        assert_eq!(
+            paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
+            vec!["/topProducts/internal"]
+        );
+
+        static SKIP_TRUE: &str = r#"
+        query {
+            topProducts {
+                type
+                internal @skip(if: true)
+            }
+        }
+        "#;
+
+        let (_doc, paths) = filter(BASIC_SCHEMA, SKIP_TRUE, HashSet::new());
+        assert_eq!(
+            paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
+            vec!["/topProducts/internal"]
+        );
+
+        // The same holds when the condition is a variable rather than a literal.
+        static INCLUDE_VARIABLE: &str = r#"
+        query($shouldInclude: Boolean!) {
+            topProducts {
+                type
+                internal @include(if: $shouldInclude)
+            }
+        }
+        "#;
+
+        let (_doc, paths) = filter(BASIC_SCHEMA, INCLUDE_VARIABLE, HashSet::new());
+        assert_eq!(
+            paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
+            vec!["/topProducts/internal"]
+        );
+    }
+
     #[test]
     fn mutation() {
         static QUERY: &str = r#"

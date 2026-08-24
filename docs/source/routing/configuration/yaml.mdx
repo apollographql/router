@@ -626,12 +626,12 @@ This removal means some operations may have the same normalized signature though
 Enhanced normalization incorporates [input types](#input-types) and [aliases](#aliases) in signature generation.
 It also includes other improvements that make it more likely that two operations that only vary slightly have the same signature.
 
-Configure enhanced operation signature normalization in `router.yaml` with the `telemetry.apollo.signature_normalization_algorithm` option:
+In Router 2.x and above, enhanced operation signature normalization is enabled by default. To configure the normalization algorithm, update `telemetry.apollo.signature_normalization_algorithm` in `router.yaml`:
 
 ```yaml title="router.yaml"
 telemetry:
   apollo:
-    signature_normalization_algorithm: enhanced # Default is legacy
+    signature_normalization_algorithm: enhanced # Default is `enhanced`; disable by setting to `legacy`
 ```
 
 Once you enable this configuration, operations with enhanced signatures might appear with different operation IDs than they did previously in GraphOS Studio.
@@ -774,31 +774,6 @@ query AliasedQuery {
 }
 ```
 
-#### Extended reference reporting
-
-<MinVersionBadge version="Router v1.50.0" />
-
-<Note>
-
-The router supports extended reference reporting in the following versions:
-
-- [General availability](/resources/product-launch-stages/#general-availability) in v1.54.0 and later
-- [Experimental](/resources/product-launch-stages/#experimental-features) in v1.50.0 to v1.53.0
-
-</Note>
-
-You can configure the router to report enum and input object references for enhanced insights and operation checks.
-Apollo's legacy reference reporting doesn't include data about enum values and input object fields, meaning you can't view enum and input object field usage in GraphOS Studio.
-Legacy reporting can also cause [inaccurate operation checks](#enhanced-operation-checks).
-
-Configure extended reference reporting in `router.yaml` with the `telemetry.apollo.metrics_reference_mode` option like so:
-
-```yaml title="router.yaml"
-telemetry:
-  apollo:
-    metrics_reference_mode: extended # Default is legacy
-```
-
 #### Extended error reporting
 
 <MinVersionBadge version="Router v2.1.2" />
@@ -817,7 +792,7 @@ The router supports extended error reporting in the following versions:
 You can configure the router to report extended error information for improved diagnostics.
 Apollo's legacy error reporting doesn't include the service or error code, meaning you can't easily attribute errors to their root cause in GraphOS Studio.
 
-Configure extended reference reporting in `router.yaml` with the `telemetry.apollo.errors.preview_extended_error_metrics` option like so:
+Configure extended reference reporting in `router.yaml` with the `telemetry.apollo.errors.preview_extended_error_metrics` option:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -826,7 +801,32 @@ telemetry:
       preview_extended_error_metrics: enabled # Default is disabled
 ```
 
-[Learn more.](/graphos/routing/graphos-reporting#errors)
+[Learn more about GraphOS extended error reporting](/graphos/routing/observability/graphos/graphos-reporting#enabling-extended-error-reporting).
+
+#### Extended reference reporting
+
+<MinVersionBadge version="Router v1.50.0" />
+
+<Note>
+
+The router supports extended reference reporting in the following versions:
+
+- [General availability](/resources/product-launch-stages/#general-availability) in v1.54.0 and later
+- [Experimental](/resources/product-launch-stages/#experimental-features) in v1.50.0 to v1.53.0
+
+</Note>
+
+You can configure the router to report enum and input object references for enhanced insights and operation checks.
+Apollo's standard reference reporting doesn't include data about enum values and input object fields, meaning you can't view enum and input object field usage in GraphOS Studio.
+Standard reporting can also cause [inaccurate operation checks](#enhanced-operation-checks).
+
+Configure reference reporting by updating `telemetry.apollo.metrics_reference_mode` in `router.yaml`:
+
+```yaml title="router.yaml"
+telemetry:
+  apollo:
+    metrics_reference_mode: extended # Default is `extended`; disable by setting to `standard`
+```
 
 ##### Configuration effect timing
 

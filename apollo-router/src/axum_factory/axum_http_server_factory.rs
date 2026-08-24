@@ -55,6 +55,7 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
+use crate::metrics::FutureMetricsExt;
 use crate::plugins::telemetry::SpanMode;
 use crate::plugins::telemetry::config_new::router::instruments::RequestDurationBody;
 use crate::plugins::telemetry::config_new::router::instruments::RequestDurationRecording;
@@ -214,6 +215,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .local_addr()
                 .map_err(ApolloRouterError::ServerCreationError)?;
 
+            let sm = span_mode(&configuration);
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
                 all_routers.main.1,
                 pipeline_ref.clone(),
@@ -221,6 +223,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 main_listener,
                 configuration.clone(),
                 all_connections_stopped_sender.clone(),
+                sm,
             );
 
             tracing::info!(
@@ -268,6 +271,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             listener,
                             configuration.clone(),
                             all_connections_stopped_sender.clone(),
+                            sm,
                         );
                         (
                             server.map(|listener| (listen_addr, listener)),
@@ -307,12 +311,12 @@ impl HttpServerFactory for AxumHttpServerFactory {
             });
 
             // Spawn the main (GraphQL) server into a task
-            let main_future = tokio::task::spawn(main_server)
+            let main_future = tokio::task::spawn(main_server.with_current_meter_provider())
                 .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
                 .boxed();
 
             // Spawn all other servers (health, metrics, etc...) into a task
-            let extra_futures = tokio::task::spawn(join_all(servers))
+            let extra_futures = tokio::task::spawn(join_all(servers).with_current_meter_provider())
                 .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
                 .boxed();
 
