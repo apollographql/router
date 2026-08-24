@@ -145,13 +145,12 @@ impl RedisMetricsCollector {
                 loop {
                     interval.tick().await;
 
-                    // Build the gauges on every tick. A sync gauge records through the
-                    // meter-provider delegates captured when it was built, and the
-                    // telemetry plugin swaps providers on config reload while this task
-                    // may already be running (a pipeline's Redis pools are created in
-                    // the acquire phase, before plugin activation). Building from the
-                    // current provider each tick keeps recordings landing on the live
-                    // provider.
+                    // Recreate the gauges on every tick so they target the current
+                    // meter provider even across config reloads (this task can outlive
+                    // the provider it started under). OTel advises cloning gauges
+                    // rather than re-creating duplicates for performance; recreating a
+                    // handful of gauges once per collection interval is noise compared
+                    // to the Redis round-trip in the same tick.
                     let gauges = RedisGauges::new();
                     let metrics = Self::collect_client_metrics(&pool);
                     gauges.record(&metrics, caller);

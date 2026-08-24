@@ -123,8 +123,7 @@ async fn init_telemetry_returns_no_plugin_on_hot_reload() {
 async fn create_plugins_instantiates_mandatory_plugins() {
     let configuration = test_configuration();
     let schema = test_schema(&configuration);
-    let (_planner, subgraph_schemas) =
-        create_query_planner(&schema, &configuration).unwrap();
+    let (_planner, subgraph_schemas) = create_query_planner(&schema, &configuration).unwrap();
 
     let plugins = create_plugins(
         &configuration,

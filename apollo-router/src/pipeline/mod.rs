@@ -73,10 +73,10 @@ use tracing::Instrument;
 
 use self::acquire::Acquired;
 use self::acquire::acquire;
-use self::acquire::maybe_bootstrap_telemetry;
 pub(crate) use self::acquire::connect_apq_redis;
 pub(crate) use self::acquire::connect_query_plan_redis;
 pub(crate) use self::acquire::create_query_planner;
+use self::acquire::maybe_bootstrap_telemetry;
 pub(crate) use self::acquire::parse_http_client_inputs;
 pub(crate) use self::plugins::create_plugins;
 pub(crate) use self::stages::SupergraphPipeline;

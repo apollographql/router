@@ -28,6 +28,7 @@ pub(crate) async fn await_mock_driver(driver: tokio::task::JoinHandle<()>) {
 /// For mocks that must report ready — so requests can reach the layers under test and
 /// be rejected there — but must never actually be called. The handle lives in a
 /// detached task for the rest of the test.
+#[cfg(test)]
 pub(crate) fn allow_and_assert_never_called<Req, Res>(
     mut handle: tower_test::mock::Handle<Req, Res>,
 ) where

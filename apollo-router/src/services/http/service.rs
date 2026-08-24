@@ -208,7 +208,10 @@ impl Display for Compression {
 /// instead of once per client.
 #[derive(Default)]
 pub(crate) struct DnsResolverCache(
-    std::collections::HashMap<crate::configuration::shared::DnsResolutionStrategy, AsyncHyperResolver>,
+    std::collections::HashMap<
+        crate::configuration::shared::DnsResolutionStrategy,
+        AsyncHyperResolver,
+    >,
 );
 
 impl DnsResolverCache {

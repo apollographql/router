@@ -47,11 +47,13 @@ pub(crate) type InMemoryCache<K, V> = Arc<Mutex<LruCache<K, V>>>;
 
 /// Connects the Redis client a cache will use, applying the error tolerance `config` asks for.
 ///
+/// When `config.required_to_start` is not set, a failed connect logs the error and returns
+/// `Ok(None)`, leaving the cache to run on in-memory storage alone. A client that connects
+/// but fails to populate its pool is still returned after logging; commands issued through
+/// it will fail.
+///
 /// # Errors
-/// Connection failures return `Err` only when `config.required_to_start` is set. When it is
-/// not, a failed connect logs the error and returns `Ok(None)`, leaving the cache to run on
-/// in-memory storage alone. A client that connects but fails to populate its pool is still
-/// returned after logging; commands issued through it will fail.
+/// Connection failures return `Err` only when `config.required_to_start` is set.
 pub(crate) async fn connect_redis(
     config: RedisCache,
     caller: &'static str,
@@ -120,9 +122,12 @@ where
     /// Builds a cache from an in-memory LRU capacity and an optional pre-connected Redis
     /// client. Obtain the client with [`connect_redis`].
     ///
-    /// Registers the cache's size and estimated-storage gauges against the current meter
-    /// provider. Construct the cache after telemetry activation: a meter-provider swap
-    /// discards previously registered gauge callbacks.
+    /// Must be constructed _after_ telemetry activation: a meter-provider swap discards
+    /// previously registered gauge callbacks.
+    ///
+    /// # Metrics
+    /// - `apollo.router.cache.size`
+    /// - `apollo.router.cache.storage.estimated_size`
     pub(crate) fn new(
         max_capacity: NonZeroUsize,
         redis: Option<RedisCacheStorage>,

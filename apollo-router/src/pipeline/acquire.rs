@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use apollo_federation::query_plan::query_planner::QueryPlanner;
 use indexmap::IndexMap;
 use rustls::RootCertStore;
 use tower::BoxError;
@@ -19,8 +20,6 @@ use crate::plugin::PluginInit;
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::plugins::traffic_shaping::TrafficShaping;
-use apollo_federation::query_plan::query_planner::QueryPlanner;
-
 use crate::query_planner::QueryPlannerService;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::Plugins;
