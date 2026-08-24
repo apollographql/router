@@ -317,16 +317,15 @@ async fn call_http(
     ))
 }
 
+/// The full, buffered service stack for one subgraph.
+pub(crate) type BufferedSubgraphService =
+    UnconstrainedBuffer<subgraph::Request, BoxFuture<'static, subgraph::ServiceResult>>;
+
 /// The pre-built subgraph service stack for each subgraph, keyed by subgraph name.
 /// Stacks are built once; [`Self::get`] hands out cheap clones.
 #[derive(Clone)]
 pub(crate) struct SubgraphServices {
-    pub(crate) services: Arc<
-        HashMap<
-            String,
-            UnconstrainedBuffer<subgraph::Request, BoxFuture<'static, subgraph::ServiceResult>>,
-        >,
-    >,
+    pub(crate) services: Arc<HashMap<String, BufferedSubgraphService>>,
 }
 
 impl SubgraphServices {

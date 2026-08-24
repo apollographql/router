@@ -12,6 +12,7 @@ use tower::ServiceExt;
 use crate::Configuration;
 use crate::apollo_studio_interop::extended_references_layer::ExtendedReferencesLayer;
 use crate::batching::BatchQueryPlanAnalysisLayer;
+use crate::batching::JoinBatchRequestsLayer;
 use crate::batching::SplitBatchRequestLayer;
 use crate::cache::DeduplicatingCache;
 use crate::cache::redis::RedisCacheStorage;
@@ -24,6 +25,7 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
+use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -42,6 +44,7 @@ use crate::query_planner::warmup;
 use crate::services::Plugins;
 use crate::services::SubgraphService;
 use crate::services::SubgraphServices;
+use crate::services::subgraph::service::BufferedSubgraphService;
 use crate::services::connector::request_service::ConnectorRequestService;
 use crate::services::connector::request_service::ConnectorRequestServices;
 use crate::services::connector_service::ConnectorService;
@@ -50,7 +53,8 @@ use crate::services::execution;
 use crate::services::execution::service::ExecutionService;
 use crate::services::fetch_service::FetchService;
 use crate::services::http;
-use crate::services::http::build_http_client_service;
+use crate::services::http::HttpClientService;
+use crate::services::http::service::HttpClientInputs;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::apq::APQExpander;
 use crate::services::layers::apq::subgraph::SubgraphApqLayer;
@@ -118,6 +122,26 @@ pub(crate) fn build_query_planner_service(
     QueryPlannerService::new(schema, configuration, planner).boxed_clone()
 }
 
+/// Builds the HTTP client service stack for one target around the [`HttpClientService`]
+/// built from `inputs`.
+///
+/// `name` is the subgraph name — for a connector source's client, the name of the
+/// subgraph that owns the source — and is what the plugin hook receives.
+pub(crate) fn build_http_client_service(
+    name: &str,
+    inputs: HttpClientInputs,
+    plugins: Arc<Plugins>,
+) -> http::BoxCloneService {
+    ServiceBuilder::new()
+        .layer(JoinBatchRequestsLayer::new(name))
+        .layer(SubgraphResponseSizeLimitLayer::new(name))
+        .rust_plugins(plugins, |plugin, service| {
+            plugin.http_client_service(name, service)
+        })
+        .service(HttpClientService::new(inputs))
+        .boxed_clone()
+}
+
 /// Builds HTTP client services from parsed client inputs, keyed like
 /// [`HttpClientInputsMaps`].
 pub(crate) fn build_http_services(
@@ -151,65 +175,84 @@ pub(crate) fn build_http_services(
     (subgraph_services, connector_services)
 }
 
-/// Assembles the full service stack for each subgraph, keyed by subgraph name: a
-/// [`SubgraphService`] around the subgraph's HTTP client, wrapped by
-/// [`wrap_subgraph_services`].
+/// Builds the full service stack for one subgraph: a [`SubgraphService`] around its
+/// HTTP client, wrapped by [`wrap_subgraph_service`].
+pub(crate) fn build_subgraph_service(
+    name: &str,
+    http_service: http::BoxCloneService,
+    plugins: &Arc<Plugins>,
+    configuration: &Configuration,
+) -> BufferedSubgraphService {
+    wrap_subgraph_service(
+        name,
+        SubgraphService::new(name, http_service).boxed_clone(),
+        plugins,
+        configuration,
+    )
+}
+
+/// Builds the full service stack for every subgraph, keyed by subgraph name.
 pub(crate) fn build_subgraph_services(
     http_services: IndexMap<String, http::BoxCloneService>,
     plugins: &Arc<Plugins>,
     configuration: &Configuration,
 ) -> SubgraphServices {
-    let subgraph_services = http_services
-        .into_iter()
-        .map(|(name, http_service)| {
-            let svc = SubgraphService::new(&name, http_service);
-            (name, svc.boxed_clone())
-        })
-        .collect();
-    wrap_subgraph_services(subgraph_services, plugins, configuration)
+    let mut map = HashMap::with_capacity(http_services.len());
+    for (name, http_service) in http_services.into_iter() {
+        let service = build_subgraph_service(&name, http_service, plugins, configuration);
+        map.insert(name, service);
+    }
+    SubgraphServices {
+        services: Arc::new(map),
+    }
 }
 
-/// Wraps each subgraph service in its per-subgraph stack, outermost first: a buffer,
-/// each plugin's `subgraph_service` hook, and the subscription, APQ, and
-/// content-negotiation layers.
+/// Wraps a set of subgraph services in the per-subgraph stack, keyed by subgraph name.
+#[cfg(test)]
 pub(crate) fn wrap_subgraph_services(
     subgraph_services: Vec<(String, subgraph::BoxCloneService)>,
     plugins: &Arc<Plugins>,
     configuration: &Configuration,
 ) -> SubgraphServices {
-    use crate::layers::ServiceBuilderExt as _;
-
-    let subscription_config = subscription_plugin_config(plugins).map(Arc::new);
-
     let mut map = HashMap::with_capacity(subgraph_services.len());
     for (name, service) in subgraph_services.into_iter() {
-        // The subscription and APQ layers sit *after* all user plugins but *before* the
-        // subgraph service proper.
-        let apq_enabled = configuration.apq.subgraph.get(&name).enabled;
-
-        // One buffer per named subgraph provides per-subgraph backpressure and is
-        // required for correct LoadShed / RateLimit behaviour from traffic-shaping
-        // plugins (see ServiceBuilderExt::buffered).
-        let service = ServiceBuilder::new()
-            .buffered()
-            .rust_plugins(plugins.clone(), |plugin, service| {
-                plugin.subgraph_service(&name, service)
-            })
-            .layer(SubscriptionSubgraphLayer::new(
-                configuration.notify.clone(),
-                subscription_config.clone(),
-                Arc::from(name.clone()),
-            ))
-            .layer(SubgraphApqLayer::new(apq_enabled))
-            .layer(content_negotiation::SubgraphContentNegotiationLayer::default())
-            .service(service);
-
+        let service = wrap_subgraph_service(&name, service, plugins, configuration);
         map.insert(name, service);
     }
-
     SubgraphServices {
         services: Arc::new(map),
     }
+}
+
+/// Wraps one subgraph service in the per-subgraph layer stack.
+pub(crate) fn wrap_subgraph_service(
+    name: &str,
+    service: subgraph::BoxCloneService,
+    plugins: &Arc<Plugins>,
+    configuration: &Configuration,
+) -> BufferedSubgraphService {
+    use crate::layers::ServiceBuilderExt as _;
+
+    let subscription_config = subscription_plugin_config(plugins).map(Arc::new);
+    let apq_enabled = configuration.apq.subgraph.get(name).enabled;
+
+    // The subscription and APQ layers sit *after* all user plugins but *before* the
+    // subgraph service proper. One buffer per named subgraph provides per-subgraph
+    // backpressure and is required for correct LoadShed / RateLimit behaviour from
+    // traffic-shaping plugins (see ServiceBuilderExt::buffered).
+    ServiceBuilder::new()
+        .buffered()
+        .rust_plugins(plugins.clone(), |plugin, service| {
+            plugin.subgraph_service(name, service)
+        })
+        .layer(SubscriptionSubgraphLayer::new(
+            configuration.notify.clone(),
+            subscription_config,
+            Arc::from(name),
+        ))
+        .layer(SubgraphApqLayer::new(apq_enabled))
+        .layer(content_negotiation::SubgraphContentNegotiationLayer::default())
+        .service(service)
 }
 
 /// Assembles the request service stack for each connector source, keyed by

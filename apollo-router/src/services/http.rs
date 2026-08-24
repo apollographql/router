@@ -2,15 +2,9 @@
 use std::sync::Arc;
 
 use tower::BoxError;
-use tower::ServiceBuilder;
-use tower::ServiceExt;
 
-use super::Plugins;
 use super::router::body::RouterBody;
 use crate::Context;
-use crate::batching::JoinBatchRequestsLayer;
-use crate::layers::InternalServiceBuilderExt as _;
-use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
 
 pub(crate) mod connection_timing;
 pub(crate) mod service;
@@ -34,29 +28,8 @@ pub(crate) struct HttpResponse {
     pub(crate) context: Context,
 }
 
-/// Assembles the HTTP client service stack for one target, outermost first: the
-/// batching and response-size-limit layers, each plugin's `http_client_service` hook,
-/// and the [`HttpClientService`] built from `inputs`.
-///
-/// `name` is the subgraph name — for a connector source's client, the name of the
-/// subgraph that owns the source — and is what the plugin hook receives.
-pub(crate) fn build_http_client_service(
-    name: &str,
-    inputs: service::HttpClientInputs,
-    plugins: Arc<Plugins>,
-) -> BoxCloneService {
-    ServiceBuilder::new()
-        .layer(JoinBatchRequestsLayer::new(name))
-        .layer(SubgraphResponseSizeLimitLayer::new(name))
-        .rust_plugins(plugins, |plugin, service| {
-            plugin.http_client_service(name, service)
-        })
-        .service(HttpClientService::new(inputs))
-        .boxed_clone()
-}
-
-/// Test-only [`build_http_client_service`] wrapper: a subgraph client for `name` built
-/// from default configuration with no plugins.
+/// Test-only wrapper around the `build_http_client_service` pipeline function: a
+/// subgraph client for `name` built from default configuration with no plugins.
 #[cfg(test)]
 pub(crate) fn test_http_client_service(name: &str) -> BoxCloneService {
     let inputs = service::HttpClientInputs::for_subgraph(
@@ -66,7 +39,7 @@ pub(crate) fn test_http_client_service(name: &str) -> BoxCloneService {
         crate::configuration::shared::Client::default(),
     )
     .unwrap();
-    build_http_client_service(name, inputs, Arc::new(indexmap::IndexMap::default()))
+    crate::pipeline::build_http_client_service(name, inputs, Arc::new(indexmap::IndexMap::default()))
 }
 
 /// The kind of remote service an [`HttpClientService`] is configured to talk to.
