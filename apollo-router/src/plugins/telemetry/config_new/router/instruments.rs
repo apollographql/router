@@ -260,11 +260,6 @@ pub(crate) struct RequestDurationRecording {
     recorded: AtomicBool,
 }
 
-/// Carries an owned clone of the router request `Span` through the context so the axum layer
-/// can attach it to [`RequestDurationBody`], extending the span's lifetime to stream close.
-/// A newtype so it does not collide with other `Span`-typed context extensions.
-pub(crate) struct RequestSpanExtension(pub(crate) tracing::Span);
-
 impl RequestDurationRecording {
     pub(crate) fn new(
         histogram: Histogram<f64>,
@@ -313,33 +308,16 @@ pin_project! {
     ///
     /// Delegates `size_hint`/`is_end_stream` to the inner body so content-length and
     /// streaming semantics are preserved.
-    ///
-    /// Optionally carries an owned clone of the router request `Span`. Holding the clone
-    /// here keeps the span from closing (and thus from being exported) until the body
-    /// finishes streaming or is dropped, so the span covers the full request lifecycle —
-    /// including the `@defer` / subscription tail — rather than ending at response-ready.
     pub(crate) struct RequestDurationBody<B> {
         #[pin]
         inner: B,
         recording: RequestDurationRecording,
-        // Kept alive (never entered) for the duration of the body so the span's end
-        // timestamp lands at stream close. Never held across `.await` as an `Entered`
-        // guard, so this is `Send`-safe.
-        _span: Option<tracing::Span>,
     }
 }
 
 impl<B> RequestDurationBody<B> {
-    pub(crate) fn new(
-        inner: B,
-        recording: RequestDurationRecording,
-        span: Option<tracing::Span>,
-    ) -> Self {
-        Self {
-            inner,
-            recording,
-            _span: span,
-        }
+    pub(crate) fn new(inner: B, recording: RequestDurationRecording) -> Self {
+        Self { inner, recording }
     }
 }
 
@@ -555,7 +533,7 @@ mod tests {
                 let histogram = meter.f64_histogram("test.request.duration").build();
 
                 let body =
-                    RequestDurationBody::new(streamed_body(3), duration_recording(histogram), None);
+                    RequestDurationBody::new(streamed_body(3), duration_recording(histogram));
 
                 // Fully drain the body, like a client reading every `@defer` chunk.
                 let collected = body.collect().await.expect("body should drain");
@@ -574,7 +552,7 @@ mod tests {
                 let histogram = meter.f64_histogram("test.request.duration").build();
 
                 let mut body =
-                    RequestDurationBody::new(streamed_body(3), duration_recording(histogram), None);
+                    RequestDurationBody::new(streamed_body(3), duration_recording(histogram));
 
                 // Pull a single frame then drop mid-stream — emulates a client that hangs.
                 let first = body.frame().await;
@@ -595,7 +573,7 @@ mod tests {
                 let histogram = meter.f64_histogram("test.request.duration").build();
 
                 let body =
-                    RequestDurationBody::new(streamed_body(2), duration_recording(histogram), None);
+                    RequestDurationBody::new(streamed_body(2), duration_recording(histogram));
 
                 // Drain normally (records via end-of-body) then drop the guard (no-op).
                 let _ = body.collect().await.expect("body should drain");
@@ -613,7 +591,7 @@ mod tests {
                 let histogram = meter.f64_histogram("test.request.duration").build();
 
                 let mut body =
-                    RequestDurationBody::new(streamed_body(2), duration_recording(histogram), None);
+                    RequestDurationBody::new(streamed_body(2), duration_recording(histogram));
 
                 // Read one frame but do not finish the body: nothing recorded yet.
                 let _ = body.frame().await;

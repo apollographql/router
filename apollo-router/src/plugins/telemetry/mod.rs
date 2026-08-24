@@ -682,23 +682,6 @@ impl PluginPrivate for Telemetry {
                             custom_instruments.on_response(response);
                             custom_events.on_response(response);
 
-                            // If the duration instrument deferred its recording to stream
-                            // close, also carry a clone of the router span so its lifetime
-                            // extends to stream close (Bryn: spans must cover the entire
-                            // request). The clone is held — never entered — by the response
-                            // body wrapper in the axum layer.
-                            if response.context.extensions().with_lock(|lock| {
-                                lock.contains_key::<config_new::router::instruments::RequestDurationRecording>()
-                            }) {
-                                response.context.extensions().with_lock(|lock| {
-                                    lock.insert(
-                                        config_new::router::instruments::RequestSpanExtension(
-                                            span.clone(),
-                                        ),
-                                    )
-                                });
-                            }
-
                             let mut headers: HashMap<String, Vec<String>> =
                                 HashMap::with_capacity(2);
                             if expose_trace_id.enabled {
