@@ -38,7 +38,7 @@ pub fn generate_valid_operation(
         Document::try_from(tree.document()).expect("tree should not have errors"),
     )?;
     let operation_def: String = gql_doc.operation_definition()?.unwrap().into();
-    let doc: String = gql_doc.finish().into();
+    let doc: String = gql_doc.build()?.into();
 
     Ok((operation_def, doc))
 }
