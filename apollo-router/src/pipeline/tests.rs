@@ -206,3 +206,105 @@ async fn connect_apq_redis_is_none_without_redis_config() {
 
     assert!(redis.is_none());
 }
+
+/// Records every span created under the test subscriber, with its parent, so the
+/// construction span tree can be rendered and snapshotted.
+#[derive(Default, Clone)]
+struct SpanTreeLayer {
+    spans: Arc<parking_lot::Mutex<Vec<SpanRecord>>>,
+}
+
+struct SpanRecord {
+    id: tracing::span::Id,
+    parent: Option<tracing::span::Id>,
+    name: String,
+}
+
+impl<S> tracing_subscriber::Layer<S> for SpanTreeLayer
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    fn on_new_span(
+        &self,
+        attrs: &tracing::span::Attributes<'_>,
+        id: &tracing::span::Id,
+        ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        // Per-plugin spans are all named "plugin"; their otel.name field carries the
+        // plugin name, so prefer it when present.
+        struct OtelName(Option<String>);
+        impl tracing::field::Visit for OtelName {
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                if field.name() == "otel.name" {
+                    self.0 = Some(format!("{value:?}").trim_matches('"').to_string());
+                }
+            }
+        }
+        let mut otel_name = OtelName(None);
+        attrs.record(&mut otel_name);
+        let name = otel_name
+            .0
+            .unwrap_or_else(|| attrs.metadata().name().to_string());
+        let parent = attrs
+            .parent()
+            .cloned()
+            .or_else(|| ctx.current_span().id().cloned());
+        self.spans.lock().push(SpanRecord {
+            id: id.clone(),
+            parent,
+            name,
+        });
+    }
+}
+
+impl SpanTreeLayer {
+    /// Renders the spans reachable from `roots` as an indented tree, in creation order.
+    fn render(&self, roots: &[&str]) -> String {
+        let spans = self.spans.lock();
+        let mut out = String::new();
+        fn visit(spans: &[SpanRecord], parent: &tracing::span::Id, depth: usize, out: &mut String) {
+            for span in spans.iter().filter(|s| s.parent.as_ref() == Some(parent)) {
+                out.push_str(&"  ".repeat(depth));
+                out.push_str(&span.name);
+                out.push('\n');
+                visit(spans, &span.id, depth + 1, out);
+            }
+        }
+        for span in spans
+            .iter()
+            .filter(|s| s.parent.is_none() && roots.contains(&s.name.as_str()))
+        {
+            out.push_str(&span.name);
+            out.push('\n');
+            visit(&spans, &span.id, 1, &mut out);
+        }
+        out
+    }
+}
+
+/// Pins the construction span tree: `prepare_pipeline` covers everything before plugin
+/// activation, `apply_pipeline` everything after. A change to this snapshot is a change
+/// to the startup/reload traces operators see.
+#[tokio::test]
+async fn construction_spans_form_the_documented_tree() {
+    use tracing_subscriber::layer::SubscriberExt;
+
+    let layer = SpanTreeLayer::default();
+    let subscriber = tracing_subscriber::registry().with(layer.clone());
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let configuration = test_configuration();
+    let schema = test_schema(&configuration);
+    build_pipeline(
+        configuration,
+        schema,
+        None,
+        None,
+        None,
+        Arc::new(LicenseState::default()),
+    )
+    .await
+    .expect("pipeline builds");
+
+    insta::assert_snapshot!(layer.render(&["prepare_pipeline", "activate", "apply_pipeline"]));
+}

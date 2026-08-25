@@ -26,7 +26,8 @@
 //!
 //! # Construction: acquire → activate → assemble
 //!
-//! [`build_pipeline`] runs three phases, each under its own tracing span:
+//! [`build_pipeline`] runs three phases — `prepare_pipeline` and `apply_pipeline` spans
+//! surround the `activate` boundary:
 //!
 //! - **Acquire** (the [`acquire`](mod@self::acquire) submodule) gathers every resource whose
 //!   creation can fail: the telemetry plugin, the federation query planner, the other
@@ -140,22 +141,21 @@ pub(crate) async fn build_pipeline(
     )
     .await?;
 
+    let acquired = acquire(
+        &configuration,
+        &schema,
+        previous_config,
+        extra_plugins,
+        license,
+        bootstrap_telemetry_plugin,
+    )
+    .instrument(tracing::info_span!("prepare_pipeline"))
+    .await?;
+
+    activate(&acquired);
+
     async {
-        let acquired = acquire(
-            &configuration,
-            &schema,
-            previous_config,
-            extra_plugins,
-            license,
-            bootstrap_telemetry_plugin,
-        )
-        .instrument(tracing::info_span!("acquire"))
-        .await?;
-
-        activate(&acquired);
-
-        let pipeline =
-            tracing::info_span!("assemble").in_scope(|| assemble(acquired, configuration, schema));
+        let pipeline = assemble(acquired, configuration, schema);
 
         pipeline
             .warm_up(previous_cache)
@@ -164,7 +164,7 @@ pub(crate) async fn build_pipeline(
 
         Ok(pipeline)
     }
-    .instrument(tracing::info_span!("pipeline_initialization"))
+    .instrument(tracing::info_span!("apply_pipeline"))
     .await
 }
 
