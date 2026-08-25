@@ -9,6 +9,7 @@ import ElasticNotice from '../../../../shared/elastic-notice.mdx';
 This guide provides the following examples of running an Apollo Router container image in Docker:
 
 * Running a basic example with default configuration.
+* Choosing between the published image flavors.
 * Customizing your configuration to override the default configuration.
 * Debugging your containerized router.
 * Manually specifying a supergraph for your router.
@@ -60,6 +61,26 @@ services:
 Whether you use `docker run` or `docker compose`, make sure to replace `<router-image-version>` with whichever version you want to use, and `<your-graph-ref>` and `<your-graph-api-key>` with your graph reference and API key, respectively.
 
 For more complex configurations, such as overriding subgraph URLs or propagating headers, see [Router Configuration](/graphos/routing/configuration/overview/).
+
+## Image flavors
+
+Every router release publishes the same router binary in three image flavors, which differ only in their base image:
+
+| Tag | Base image | When to use it |
+| --- | --- | --- |
+| `<image version>` | `debian:bookworm-slim` | The default. Includes a shell and a package manager. |
+| `<image version>-distroless` | [`distroless/cc`](https://github.com/GoogleContainerTools/distroless) | For deployments that want a smaller attack surface. About half the size of the Debian image, with no shell, package manager, or other userland. |
+| `<image version>-debug` | `debian:bookworm-slim` | For investigating memory usage. Runs the router under heaptrack, as described in [Running the debug container](#running-the-debug-container-to-investigate-memory-issues). |
+
+Configuration, environment variables, command-line arguments, and the paths you mount over (`/dist/config/router.yaml` and `/dist/schema`) are the same in all three, and all three run as the `router` user (uid and gid `1000`), so switching between the images requires only changing the tag.
+
+### What the distroless image doesn't have
+
+A distroless image contains the router, the shared libraries it links against, CA certificates, and time zone data, and nothing else. As a result:
+
+* There is no shell, so the [debugging techniques](#debugging-your-container) that rely on one (`--entrypoint=bash`, `docker exec <container> sh`) have nothing to run. Reproduce the problem with the Debian image when you need to look around inside a container.
+* Container probes that shell out, such as a Kubernetes `exec` probe running `curl`, won't work. Use the router's [HTTP health check endpoint](/graphos/routing/self-hosted/health-checks) with an `httpGet` probe instead.
+* There is no distroless equivalent of the `-debug` flavor, because heaptrack and its tooling need a userland to run in.
 
 ## Override the configuration
 
