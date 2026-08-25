@@ -15,14 +15,17 @@ has to be taken on trust.
 Open [`apollo-federation/src/connectors/mod.rs`](../../apollo-federation/src/connectors/mod.rs)
 and find `ConnectId::synthetic_name`:
 
-> Until we have a source-aware query planner, work with connectors will need to
-> interface with standard query planning concepts while still enforcing
-> connector-specific rules.
+> Until we have a source-aware query planner, we'll need to split up connectors
+> into their own subgraphs when doing planning.
 
-The same sentence appears above `expand_connectors` in
-[`connectors/expand/mod.rs`](../../apollo-federation/src/connectors/expand/mod.rs).
-Both are present tense on `dev` today. Everything below is what happened when
-somebody tried to cash that check.
+The comment above `expand_connectors` in
+[`connectors/expand/mod.rs`](../../apollo-federation/src/connectors/expand/mod.rs)
+opens with the same clause, restates the problem as needing "to interface
+with standard query planning concepts while still enforcing
+connector-specific rules," and lands on the same conclusion: "each connector
+is separated into its own unique subgraph." Both are present tense on `dev`
+today. Everything below is what happened when somebody tried to cash that
+check.
 
 ## 2. The trade
 
@@ -43,9 +46,9 @@ product without touching composition, satisfiability, planning or execution.
 
 ## 3. The bill
 
-The bill is paid in three static currencies — query-graph size,
-satisfiability, and composition memory — at composition time and at router
-startup, before a single request is served.
+The bill is paid in two static currencies, query-graph size and composition
+cost, at composition time and at router startup, before a single request is
+served. The second is dominated by a single phase: satisfiability.
 
 `distance_probe_raw_vs_expanded_graph` in
 [`query_graph/connect_graph.rs`](../../apollo-federation/src/query_graph/connect_graph.rs)
@@ -57,7 +60,7 @@ entities. What survives asymptotically is the count: expansion makes logical
 subgraphs proportional to `@connect` directives, and everything downstream
 scales in that count.
 
-The second and third were measured on a real graph. Constellation staging's
+The second was measured on a real graph. Constellation staging's
 6 connector subgraphs expand into **1,398 synthetic ones**, and
 satisfiability over the expansion is essentially the whole composition bill
 — **~14 GB and ~260 seconds** in the Rust check alone, versus under 0.6 GB
@@ -67,12 +70,14 @@ buys time — 0.27 GB / 0.6 s, identical verdict — by merging subgraphs that
 share a resolvable-key signature; it shrinks nothing the router or planner
 sees.)
 
-The fleet is not at that wall yet: median 1 connector, p99 54, max 370,
-against Constellation's 1,300+ — runway bought by dogfooding, and short at
-N^3.5. And the wall is already operational, not just compositional: with one
-composed graph unable to carry 1,300+ connectors, Constellation is split
-across separate routers, with orchestration bolted on above (MCP, for now).
-The composition ceiling becomes deployment architecture.
+The fleet is not at that wall yet. Across the ~7,300 connector-using graphs
+in the May 2026 corpus snapshot: median 1 connector, p99 54, max 370, against
+Constellation's 1,300+ — runway bought by the expansion trick, cut short
+(thankfully) by our own dogfooding, and shrinking at N^3.5. And the wall is
+already operational, not just compositional: with one composed graph unable
+to carry 1,300+ connectors, Constellation is split across separate routers,
+with orchestration bolted on above (MCP, for now). The composition ceiling
+becomes deployment architecture.
 
 The quieter cost is the one that matters more. The planner's cost model prices
 **subgraph boundary crossings**. One HTTP backend that expansion splits into
@@ -250,6 +255,9 @@ So the shapes were counted directly, across the 7,375 graphs of the fleet corpus
 graphs, so "customer graphs" would overstate it)
 (`~/dev/connectors-corpus-may-2026`, snapshot of 2026-05-06) using
 `extractor/src/bin/probe.rs`, which runs the whole set in about five seconds.
+The corpus and the probe are internal to Apollo, which makes this the one
+section a reader cannot re-run from the repo alone; every number in it should
+be read with that caveat attached.
 
 Those 7,375 files collapse to **5,422 distinct schema families**, since some
 graphs appear as more than a hundred near-identical variants. Family counts are
@@ -261,9 +269,11 @@ the honest denominator.
 | sibling-position over-merge (section 5, right) | 298 | 21 | 0.39% |
 | connector under-provides against a keyless type | 732 | 514 | 9.5% |
 
-24,380 connectors were scanned. The reader refuses to half-parse, so 4.6% of
-selections were skipped rather than guessed at, which makes the first two rows
-**lower bounds**.
+24,380 connectors were scanned. The selection reader refuses to half-parse,
+so 4.6% of selections were skipped rather than guessed at, which makes the
+second and third rows **lower bounds**. The first row does not depend on that
+reader: it is a plain text scan of the whole directive, checked against keys
+parsed from the SDL, so it skips nothing.
 
 Representative hits, all of them the same shape as the fixture in section 5:
 
