@@ -298,6 +298,13 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling
             connect_extensions: None,
             connect_is_success: None,
         },
+        output_type: Some(
+            List(
+                Named(
+                    "User",
+                ),
+            ),
+        ),
         label: Label(
             "connectors.example http: GET /users",
         ),
@@ -540,6 +547,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling
             connect_extensions: None,
             connect_is_success: None,
         },
+        output_type: Some(
+            Named(
+                "Person",
+            ),
+        ),
         label: Label(
             "connectors.example http: GET /people/{$args.id}",
         ),

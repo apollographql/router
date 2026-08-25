@@ -224,6 +224,13 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/recursi
             connect_extensions: None,
             connect_is_success: None,
         },
+        output_type: Some(
+            List(
+                Named(
+                    "User",
+                ),
+            ),
+        ),
         label: Label(
             "connectors.example http: GET /users",
         ),
@@ -466,6 +473,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/recursi
             connect_extensions: None,
             connect_is_success: None,
         },
+        output_type: Some(
+            Named(
+                "User",
+            ),
+        ),
         label: Label(
             "connectors.example http: GET /users/{$args.id}",
         ),
