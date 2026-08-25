@@ -135,9 +135,8 @@ const APOLLO_REGISTRY_USERNAME: &str = "apollo-registry";
 const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
 //  Keep in sync with value in mdg-private/monorepo/libs/entitlements/oci/model/src/main/kotlin/apollo/entitlements/oci/model/EntitlementArtifact.kt:15
 #[allow(dead_code)]
-const ENTITLEMENT_MEDIA_TYPE: &str = "application/apollo.entitlements";
-const APOLLO_MANIFEST_LAUNCH_ID_ANNOTATION: &str =
-    "application/vnd.apollographql.entitlement.v1+jwt";
+const ENTITLEMENT_MEDIA_TYPE: &str = "application/vnd.apollographql.entitlement.v1+jwt";
+const APOLLO_MANIFEST_LAUNCH_ID_ANNOTATION: &str = "com.apollograph.launch.id";
 
 impl From<oci_client::ParseError> for OciError {
     fn from(value: oci_client::ParseError) -> Self {
