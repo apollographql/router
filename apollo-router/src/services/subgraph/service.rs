@@ -820,19 +820,20 @@ mod tests {
         }
     }
 
-    /// Wraps a bare `SubgraphService` with `SubgraphLayer`, mirroring the position it occupies in
-    /// `SubgraphServices::new`. Most unit tests construct a `SubgraphService` directly and
-    /// call it without going through `SubgraphServices`, which would otherwise skip
-    /// Accept/Content-Type header injection entirely.
+    /// Wraps a bare `SubgraphService` with `SubgraphContentNegotiationLayer`, mirroring
+    /// the position it occupies in the `build_subgraph_service` pipeline function. Most
+    /// unit tests construct a `SubgraphService` directly and call it without that stack,
+    /// which would otherwise skip Accept/Content-Type header injection entirely.
     fn with_content_negotiation_layer(
         s: SubgraphService,
     ) -> SubgraphContentNegotiationService<SubgraphService> {
         SubgraphContentNegotiationLayer::default().layer(s)
     }
 
-    /// Manually rebuilds the production layer stack (Subscription -> APQ -> SubgraphLayer ->
-    /// SubgraphService) for subscriptions tests, which construct a `SubgraphService` directly
-    /// instead of going through the `SubgraphServices`.
+    /// Manually rebuilds the production layer stack (Subscription -> APQ ->
+    /// ContentNegotiation -> SubgraphService) for subscriptions tests, which construct a
+    /// `SubgraphService` directly instead of going through the `build_subgraph_service`
+    /// pipeline function.
     fn with_subscription_layer(
         s: SubgraphService,
     ) -> SubscriptionSubgraphService<

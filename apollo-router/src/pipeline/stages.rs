@@ -198,9 +198,10 @@ pub(crate) fn build_subgraph_service(
     let apq_enabled = configuration.apq.subgraph.get(name).enabled;
 
     // The subscription and APQ layers sit *after* all user plugins but *before* the
-    // subgraph service proper. One buffer per named subgraph provides per-subgraph
-    // backpressure and is required for correct LoadShed / RateLimit behaviour from
-    // traffic-shaping plugins (see ServiceBuilderExt::buffered).
+    // subgraph service proper. The buffer makes the stored stack `Sync` (BoxCloneService
+    // is not) and shares one instance of it across per-request clones; the buffering
+    // that LoadShed / RateLimit correctness needs lives inside the traffic-shaping
+    // hooks themselves.
     ServiceBuilder::new()
         .buffered()
         .rust_plugins(plugins.clone(), |plugin, service| {
