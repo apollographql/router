@@ -36,7 +36,6 @@ use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::CachingQueryPlanner;
-use crate::query_planner::InMemoryQueryPlanCache;
 use crate::query_planner::QueryPlanCache;
 use crate::query_planner::QueryPlannerService;
 use crate::query_planner::SubgraphSchemas;
@@ -112,13 +111,25 @@ pub(crate) fn build_apq_expander(
     }
 }
 
-/// Builds the query planner service around the acquired federation planner.
+/// Builds the query planner service around the acquired federation planner, wrapped in
+/// the query-plan cache.
 pub(crate) fn build_query_planner_service(
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,
     planner: Arc<QueryPlanner>,
-) -> query_planner::BoxCloneService {
-    QueryPlannerService::new(schema, configuration, planner).boxed_clone()
+    subgraph_schemas: Arc<SubgraphSchemas>,
+    query_plan_cache: QueryPlanCache,
+) -> query_planner::CacheBoxCloneService {
+    let query_planner_service =
+        QueryPlannerService::new(schema.clone(), configuration.clone(), planner).boxed_clone();
+    CachingQueryPlanner::new(
+        query_planner_service,
+        schema,
+        subgraph_schemas,
+        &configuration,
+        query_plan_cache,
+    )
+    .boxed_clone()
 }
 
 /// Builds the HTTP client service stack for one target around the [`HttpClientService`]
@@ -323,37 +334,16 @@ pub(crate) fn build_query_parsing_service(
         .boxed_clone()
 }
 
-pub(crate) struct SupergraphPipeline {
-    /// The supergraph service; clone it for each consumer.
-    pub(crate) supergraph_service: supergraph::BoxCloneService,
-    /// Handle to the in-memory query-plan cache, kept for the next hot reload's warm-up.
-    pub(crate) in_memory_query_plan_cache: InMemoryQueryPlanCache,
-    /// The caching-wrapped planner, for replaying queries into the plan cache.
-    pub(crate) caching_query_planner: query_planner::CacheBoxCloneService,
-}
-
-/// Assembles the supergraph pipeline: wraps the query planner in `query_plan_cache`, then
-/// builds the execution and supergraph service stacks.
-#[allow(clippy::too_many_arguments)]
+/// Builds the supergraph service and the execution service it dispatches to.
 pub(crate) fn build_supergraph_pipeline(
-    query_planner_service: query_planner::BoxCloneService,
-    query_plan_cache: QueryPlanCache,
+    query_planner_service: query_planner::CacheBoxCloneService,
     schema: Arc<Schema>,
     subgraph_schemas: Arc<SubgraphSchemas>,
     configuration: Arc<Configuration>,
     plugins: Arc<Plugins>,
     subgraph_services: SubgraphServices,
     connector_http_services: IndexMap<String, http::BoxCloneService>,
-) -> SupergraphPipeline {
-    let query_planner_service = CachingQueryPlanner::new(
-        query_planner_service,
-        schema.clone(),
-        subgraph_schemas.clone(),
-        &configuration,
-        query_plan_cache.clone(),
-    )
-    .boxed_clone();
-
+) -> supergraph::BoxCloneService {
     let introspection_service = introspection::introspection_service(&configuration);
 
     let execution_service = build_execution_service(
@@ -365,20 +355,14 @@ pub(crate) fn build_supergraph_pipeline(
         configuration.clone(),
     );
 
-    let supergraph_service = build_supergraph_service(
-        query_planner_service.clone(),
+    build_supergraph_service(
+        query_planner_service,
         execution_service,
         introspection_service,
         schema,
         &configuration,
         plugins,
-    );
-
-    SupergraphPipeline {
-        supergraph_service,
-        in_memory_query_plan_cache: query_plan_cache.in_memory_cache(),
-        caching_query_planner: query_planner_service,
-    }
+    )
 }
 
 /// Builds the execution service stack, which executes query plans by dispatching their

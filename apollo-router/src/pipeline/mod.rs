@@ -80,7 +80,6 @@ pub(crate) use self::acquire::create_query_planner;
 use self::acquire::maybe_bootstrap_telemetry;
 pub(crate) use self::acquire::parse_http_client_inputs;
 pub(crate) use self::plugins::create_plugins;
-pub(crate) use self::stages::SupergraphPipeline;
 pub(crate) use self::stages::build_apq_expander;
 #[cfg(test)]
 pub(crate) use self::stages::build_http_client_service;
@@ -103,7 +102,6 @@ use crate::services::Plugins;
 use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
-#[cfg(test)]
 use crate::services::supergraph;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
@@ -195,25 +193,24 @@ fn assemble(
         persisted_queries,
     } = acquired;
 
-    let query_planner_service =
-        build_query_planner_service(schema.clone(), configuration.clone(), query_planner);
-
     let query_plan_cache = build_query_plan_cache(&configuration, query_plan_redis);
+    let query_planner_service = build_query_planner_service(
+        schema.clone(),
+        configuration.clone(),
+        query_planner,
+        subgraph_schemas.clone(),
+        query_plan_cache.clone(),
+    );
     let apq_expander = build_apq_expander(&configuration, apq_redis);
     let query_parsing_service = build_query_parsing_service(schema.clone(), configuration.clone());
 
-    let SupergraphPipeline {
-        supergraph_service,
-        in_memory_query_plan_cache,
-        caching_query_planner,
-    } = tracing::info_span!("supergraph_creation").in_scope(|| {
+    let supergraph_service = tracing::info_span!("supergraph_creation").in_scope(|| {
         let (subgraph_http_services, connector_http_services) =
             build_http_services(http_client_inputs, &plugins);
         let subgraph_services =
             build_subgraph_services(subgraph_http_services, &plugins, &configuration);
         build_supergraph_pipeline(
-            query_planner_service,
-            query_plan_cache,
+            query_planner_service.clone(),
             schema.clone(),
             subgraph_schemas,
             configuration.clone(),
@@ -223,7 +220,7 @@ fn assemble(
         )
     });
 
-    let warmup_service = build_warmup_service(query_parsing_service.clone(), caching_query_planner);
+    let warmup_service = build_warmup_service(query_parsing_service.clone(), query_planner_service);
 
     let service = build_router_service(
         supergraph_service,
@@ -246,7 +243,7 @@ fn assemble(
     Pipeline {
         schema,
         plugins,
-        in_memory_query_plan_cache,
+        in_memory_query_plan_cache: query_plan_cache.in_memory_cache(),
         service,
         warmup_service,
         persisted_queries,
@@ -263,7 +260,7 @@ pub(crate) async fn build_supergraph_for_test_harness(
     schema: Arc<Schema>,
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
     license: Arc<LicenseState>,
-) -> Result<(Arc<Plugins>, SupergraphPipeline), BoxError> {
+) -> Result<(Arc<Plugins>, supergraph::BoxCloneService), BoxError> {
     let (query_planner, subgraph_schemas) = create_query_planner(&schema, &configuration)?;
     let plugins: Arc<Plugins> = Arc::new(
         create_plugins(
@@ -287,16 +284,20 @@ pub(crate) async fn build_supergraph_for_test_harness(
         plugin.activate();
     }
 
-    let query_planner_service =
-        build_query_planner_service(schema.clone(), configuration.clone(), query_planner);
     let query_plan_cache = build_query_plan_cache(&configuration, query_plan_redis);
+    let query_planner_service = build_query_planner_service(
+        schema.clone(),
+        configuration.clone(),
+        query_planner,
+        subgraph_schemas.clone(),
+        query_plan_cache,
+    );
     let (subgraph_http_services, connector_http_services) =
         build_http_services(http_client_inputs, &plugins);
     let subgraph_services =
         build_subgraph_services(subgraph_http_services, &plugins, &configuration);
-    let supergraph_pipeline = build_supergraph_pipeline(
+    let supergraph_service = build_supergraph_pipeline(
         query_planner_service,
-        query_plan_cache,
         schema,
         subgraph_schemas,
         configuration,
@@ -305,7 +306,7 @@ pub(crate) async fn build_supergraph_for_test_harness(
         connector_http_services,
     );
 
-    Ok((plugins, supergraph_pipeline))
+    Ok((plugins, supergraph_service))
 }
 
 /// One built serving pipeline: the router service stack plus the schema, plugins, and
@@ -383,16 +384,12 @@ pub(crate) async fn from_supergraph_mock_with_configuration(
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
 + Clone {
-    let (_, schema, plugins, supergraph_pipeline) = crate::TestHarness::builder()
+    let (_, schema, plugins, supergraph_service) = crate::TestHarness::builder()
         .configuration(configuration.clone())
         .supergraph_hook(move |_| mock.clone().boxed_clone())
         .build_common()
         .await
         .unwrap();
-    let SupergraphPipeline {
-        supergraph_service, ..
-    } = supergraph_pipeline;
-
     let query_parsing_service = build_query_parsing_service(schema.clone(), configuration.clone());
 
     let apq_expander = build_apq_expander(

@@ -3910,14 +3910,18 @@ async fn test_cache_warmup() {
             .await
             .unwrap(),
     );
-    let crate::pipeline::SupergraphPipeline {
-        supergraph_service,
-        in_memory_query_plan_cache: previous_cache,
-        ..
-    } = build_supergraph_pipeline(
+    let previous_cache = query_plan_cache.in_memory_cache();
+    let caching_query_planner = crate::query_planner::CachingQueryPlanner::new(
         mock.map_err(|err| panic!("mock driver failed: {err}"))
             .boxed_clone(),
+        schema.clone(),
+        Arc::new(Default::default()),
+        &configuration,
         query_plan_cache,
+    )
+    .boxed_clone();
+    let supergraph_service = build_supergraph_pipeline(
+        caching_query_planner,
         schema.clone(),
         Arc::new(Default::default()),
         Arc::new(configuration.clone()),
@@ -3964,14 +3968,17 @@ async fn test_cache_warmup() {
             .await
             .unwrap(),
     );
-    let crate::pipeline::SupergraphPipeline {
-        supergraph_service,
-        caching_query_planner: query_planner_service,
-        ..
-    } = build_supergraph_pipeline(
+    let query_planner_service = crate::query_planner::CachingQueryPlanner::new(
         mock.map_err(|err| panic!("mock driver failed: {err}"))
             .boxed_clone(),
+        schema.clone(),
+        Arc::new(Default::default()),
+        &configuration,
         query_plan_cache,
+    )
+    .boxed_clone();
+    let supergraph_service = build_supergraph_pipeline(
+        query_planner_service.clone(),
         schema.clone(),
         Arc::new(Default::default()),
         Arc::new(configuration.clone()),

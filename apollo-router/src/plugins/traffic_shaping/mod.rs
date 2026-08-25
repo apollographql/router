@@ -790,8 +790,6 @@ mod test {
 
         let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
         let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
-        let query_planner_service =
-            QueryPlannerService::new(schema.clone(), config.clone(), qp_arc).boxed_clone();
 
         let query_parser_service =
             crate::pipeline::build_query_parsing_service(schema.clone(), config.clone());
@@ -828,6 +826,13 @@ mod test {
 
         let query_plan_cache =
             build_query_plan_cache(&config, connect_query_plan_redis(&config).await.unwrap());
+        let query_planner_service = crate::pipeline::build_query_planner_service(
+            schema.clone(),
+            config.clone(),
+            qp_arc,
+            subgraph_schemas.clone(),
+            query_plan_cache,
+        );
 
         let subgraph_services = crate::pipeline::build_subgraph_services(
             ["accounts", "reviews", "products"]
@@ -842,11 +847,8 @@ mod test {
             &plugins,
             &config,
         );
-        let crate::pipeline::SupergraphPipeline {
-            supergraph_service, ..
-        } = build_supergraph_pipeline(
+        let supergraph_service = build_supergraph_pipeline(
             query_planner_service,
-            query_plan_cache,
             schema.clone(),
             subgraph_schemas,
             config.clone(),
