@@ -43,19 +43,42 @@ product without touching composition, satisfiability, planning or execution.
 
 ## 3. The bill
 
+The bill is paid in three static currencies — query-graph size,
+satisfiability, and composition memory — at composition time and at router
+startup, before a single request is served.
+
 `distance_probe_raw_vs_expanded_graph` in
 [`query_graph/connect_graph.rs`](../../apollo-federation/src/query_graph/connect_graph.rs)
-measures the expansion against the fixture set. Worst case is `keys`: 8 nodes
-become 54, 28 edges become 246, and 3 key edges become 64, so **8.8x in edges
-and 21x in key edges**. Most fixtures land between 1.5x and 3x, and a few with
-no entity structure to duplicate do not grow at all. That is paid at composition
-and at router startup.
+measures the first against the fixture set: growth is a shape-dependent
+multiple, from nothing (no entity structure to duplicate) up to 8.8x edges
+and 21x key edges for `keys`. Treat those as illustrations, not a
+coefficient — the multiplier is a function of the schema's connectors and
+entities. What survives asymptotically is the count: expansion makes logical
+subgraphs proportional to `@connect` directives, and everything downstream
+scales in that count.
+
+The second and third were measured on a real graph. Constellation staging's
+6 connector subgraphs expand into **1,398 synthetic ones**, and
+satisfiability over the expansion is essentially the whole composition bill
+— **~14 GB and ~260 seconds** in the Rust check alone, versus under 0.6 GB
+for every other phase combined. Subset sweeps put satisfiability at roughly
+**N^2.5 in memory and N^3.5 in time** in synthetic-subgraph count. (PR #9663
+buys time — 0.27 GB / 0.6 s, identical verdict — by merging subgraphs that
+share a resolvable-key signature; it shrinks nothing the router or planner
+sees.)
+
+The fleet is not at that wall yet: median 1 connector, p99 54, max 370,
+against Constellation's 1,300+ — runway bought by dogfooding, and short at
+N^3.5. And the wall is already operational, not just compositional: with one
+composed graph unable to carry 1,300+ connectors, Constellation is split
+across separate routers, with orchestration bolted on above (MCP, for now).
+The composition ceiling becomes deployment architecture.
 
 The quieter cost is the one that matters more. The planner's cost model prices
-**subgraph boundary crossings**. One HTTP backend that expansion splits into six
-synthetic subgraphs is priced as six independent systems, so the cost model
-cannot express the question that actually matters for a connector plan: how many
-distinct external systems does this plan touch?
+**subgraph boundary crossings**. One HTTP backend that expansion splits into
+six synthetic subgraphs is priced as six independent systems, so the cost
+model cannot express the question that actually matters for a connector plan:
+how many distinct external systems does this plan touch?
 
 ## 4. The false summit
 

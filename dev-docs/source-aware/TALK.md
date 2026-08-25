@@ -37,17 +37,36 @@ fields it can serve, becomes that subgraph's field set. Both structural.
 *Say clearly that it was a good trade.* The talk does not work if the room thinks
 you are dunking on it.
 
-## 3. The bill (2 min)
+## 3. The bill (2.5 min)
 
-One number, not three: worst case `keys`, the expanded query graph runs **8.8x**
-larger in edges and **21x** in key edges (28 edges to 246, 3 key edges to 64),
-paid at composition and at router startup. Verified live this morning.
+The headline is not a ratio, it is a scaling law. Expansion makes the number
+of logical subgraphs proportional to the number of `@connect` directives, and
+satisfiability grows superlinearly in that count — measured on Constellation
+staging at roughly **N^2.5 in memory and N^3.5 in time**. Six connector
+subgraphs became **1,398 synthetic ones**; the satisfiability check over that
+expansion peaked at **~14 GB and ~260 seconds**, while every other
+composition phase combined stays under 0.6 GB.
 
-Then spend the time on the part that matters. The cost model prices **subgraph
-boundary crossings**, not backends. One HTTP backend split into six synthetic
-subgraphs is priced as six independent systems, so the planner cannot ask the
-only question that matters for a connector plan: how many distinct external
-systems does this plan touch?
+*If someone asks for the fixture numbers:* worst case is 8.8x edges / 21x key
+edges — a shape-dependent multiple, not a coefficient. The count underneath
+is what matters.
+
+Then the runway. Across the fleet (May snapshot): median **1** connector,
+p99 **54**, max **370**. Constellation is at **1,300+** — more than three
+times the largest customer graph. The expansion trick bought time, and
+dogfooding meant we hit the wall first, internally. At N^3.5, the head of
+that distribution does not have to grow much before customers hit it too.
+
+*And the consequence you can point at today:* the wall is already
+operational. One composed graph cannot carry 1,300+ connectors, so
+Constellation runs split across **separate routers**, orchestrated a level
+up (MCP, for now).
+
+Spend the last thirty seconds on the quieter cost. The cost model prices
+**subgraph boundary crossings**, not backends. One HTTP backend split into
+six synthetic subgraphs is priced as six independent systems, so the planner
+cannot ask the only question that matters for a connector plan: how many
+distinct external systems does this plan touch?
 
 That converts the bloat from motivation into premise.
 
@@ -293,10 +312,22 @@ cd ~/dev/connectors-corpus-may-2026
 
 All of them were computed today, against the branch tip:
 
-- **39/39 Equivalent** and the **8.8x / 21x** graph figures: re-run live this
-  morning via `cargo test -p apollo-federation raw_vs_expanded_plan_diff` and
-  `distance_probe_raw_vs_expanded_graph`. The README previously said 32
-  operations; the live count is 39, so the older figure understated it.
+- **39/39 Equivalent**: re-run live this
+  morning via `cargo test -p apollo-federation raw_vs_expanded_plan_diff`. The
+  README previously said 32 operations; the live count is 39, so the older
+  figure understated it.
+- **The 8.8x / 21x graph figures**: re-run this morning via
+  `distance_probe_raw_vs_expanded_graph`. Now backup-only — beat 3 leads with
+  the scaling law and keeps these for the Q&A.
+- **The expansion wall** (6 → 1,398 subgraphs; ~14 GB / ~260 s; ~N^2.5 memory
+  / N^3.5 time): measured on Constellation staging during the
+  satisfiability-collapse work (PR #9663 era), **not** re-run today. If anyone
+  presses, the honest answer is the exponents come from a subset sweep of that
+  one graph.
+- **Fleet connector distribution** (median 1 / p99 54 / max 370 vs our
+  1,300+): measured this morning by `extractor/src/bin/probe.rs` over the May
+  2026 snapshot. The snapshot is three and a half months old; there is no
+  growth-rate measurement, so "nobody is near it yet" is a fact about May.
 - **Corpus prevalence** (5,422 families; 21 / 13 / 514): computed today by
   `extractor/src/bin/probe.rs`, about five seconds, reproducible on stage.
 
