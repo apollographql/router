@@ -817,11 +817,15 @@ mod test {
         let query_plan_cache =
             build_query_plan_cache(&config, connect_query_plan_redis(&config).await.unwrap());
 
-        let crate::pipeline::SupergraphPipeline {
-            supergraph_service, ..
-        } = build_supergraph_pipeline(
+        let caching_query_planner = crate::pipeline::build_caching_query_planner(
             query_planner_service,
             query_plan_cache,
+            schema.clone(),
+            subgraph_schemas.clone(),
+            &config,
+        );
+        let supergraph_service = build_supergraph_pipeline(
+            caching_query_planner,
             schema.clone(),
             subgraph_schemas,
             config.clone(),
