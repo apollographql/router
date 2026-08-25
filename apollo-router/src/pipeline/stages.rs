@@ -121,7 +121,7 @@ pub(crate) fn build_query_planner_service(
     query_plan_cache: QueryPlanCache,
 ) -> query_planner::CacheBoxCloneService {
     let query_planner_service =
-        QueryPlannerService::new(schema.clone(), configuration.clone(), planner).boxed_clone();
+        QueryPlannerService::new(schema.clone(), configuration.clone(), planner);
     CachingQueryPlanner::new(
         query_planner_service,
         schema,
