@@ -1,0 +1,74 @@
+# Distroless flavor of the Router image, published alongside the Debian-based
+# image built by `Dockerfile.router` under a `-distroless` tag suffix.
+#
+# If a future dependency reintroduces a dynamic library that `distroless/cc`
+# lacks, the binary won't get as far as main() and `verify_distroless_image.sh`
+# will fail on its first check. Re-run the `readelf` above to see what's new.
+#
+# WHAT YOU GIVE UP
+#
+# There is no shell, no package manager, and no coreutils in the image, so
+# `--entrypoint=bash`, `docker exec ... sh`, and the heaptrack-based `-debug`
+# flavor are all unavailable here. Use the Debian image for those.
+
+# Named so the downloader stage below can read the base image's /etc/passwd.
+FROM gcr.io/distroless/cc-debian12:nonroot AS base
+
+FROM debian:bookworm-slim AS downloader
+ARG ROUTER_RELEASE=latest
+ARG ARTIFACT_URL=
+ARG CIRCLE_TOKEN=
+ARG ARTIFACT_URL_SHA256SUM=
+# We will use TARGETPLATFORM inside the download_and_validate_router.sh script
+# It is set automatically by Docker when doing a buildx build, see:
+#  https://docs.docker.com/build/building/multi-platform/
+ARG TARGETPLATFORM
+
+RUN \
+  apt-get update -y \
+  && apt-get install -y \
+    curl \
+  && rm -rf /var/lib/apt/lists/*
+
+# We work in /, and the tarball produces /dist/router after extraction.
+WORKDIR /
+
+# Copy and run the router download script
+COPY download_and_validate_router.sh /tmp/download_and_validate_router.sh
+RUN chmod +x /tmp/download_and_validate_router.sh && /tmp/download_and_validate_router.sh
+
+# Lay out /dist exactly as the Debian image does, so that anything mounting
+# over /dist/config/router.yaml or /dist/schema keeps working across flavors.
+COPY router.yaml /dist/config/router.yaml
+RUN mkdir -p /dist/schema
+
+# Give this image the same `router` user (uid/gid 1000) that the Debian image
+# creates with `useradd`, so that swapping flavors doesn't change the ownership
+# of files written to mounted volumes, and doesn't invalidate a `runAsUser` or
+# `fsGroup` pinned to 1000.
+COPY --from=base /etc/passwd /etc/group /staging/etc/
+RUN \
+  echo 'router:x:1000:1000::/home/router:/sbin/nologin' >> /staging/etc/passwd \
+  && echo 'router:x:1000:' >> /staging/etc/group \
+  && mkdir -p /staging/home/router
+
+FROM base AS distro
+ARG REPO_URL=https://github.com/apollographql/router
+ARG BASE_VERSION
+
+COPY --from=downloader /staging/etc/passwd /staging/etc/group /etc/
+COPY --from=downloader --chown=1000:1000 /staging/home/router /home/router
+COPY --from=downloader /dist /dist
+
+LABEL org.opencontainers.image.authors="Apollo Graph, Inc. ${REPO_URL}"
+LABEL org.opencontainers.image.source="${REPO_URL}"
+LABEL org.opencontainers.image.version="${BASE_VERSION}"
+
+ENV APOLLO_ROUTER_CONFIG_PATH="/dist/config/router.yaml"
+
+WORKDIR /dist
+
+# The `router` user added above
+USER 1000:1000
+
+ENTRYPOINT ["/dist/router"]
