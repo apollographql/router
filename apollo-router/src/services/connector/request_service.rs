@@ -19,7 +19,6 @@ use apollo_federation::connectors::runtime::mapping::Problem;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
 use apollo_federation::connectors::runtime::responses::handle_mapping_only_response;
 use futures::future::BoxFuture;
-use indexmap::IndexMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
@@ -30,7 +29,6 @@ use tower::ServiceExt;
 use crate::Context;
 use crate::error::FetchError;
 use crate::graphql;
-use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::request_limit::RequestLimits;
@@ -42,8 +40,6 @@ use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEventRequest;
 use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::log_event;
-use crate::services::Plugins;
-use crate::services::http::HttpClientServiceFactory;
 use crate::services::router;
 
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
@@ -156,44 +152,21 @@ impl Response {
     }
 }
 
+/// The pre-built request service stack for each connector source, keyed by
+/// `source_config_key()`. Stacks are built once; [`Self::get`] hands out cheap clones.
 #[derive(Clone)]
-pub(crate) struct ConnectorRequestServiceFactory {
+pub(crate) struct ConnectorRequestServices {
     pub(crate) services:
         Arc<HashMap<String, UnconstrainedBuffer<Request, BoxFuture<'static, ServiceResult>>>>,
 }
 
-impl ConnectorRequestServiceFactory {
-    /// `http_client_service_factory` contains the connector HTTP client factories
-    /// that we'll set up connector request services for.
-    pub(crate) fn new(
-        http_client_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
-        plugins: Arc<Plugins>,
-    ) -> Self {
-        let mut map = HashMap::with_capacity(http_client_service_factory.len());
-        for (source, factory) in http_client_service_factory.iter() {
-            // source_config_key() format is "{subgraph_name}.{source_or_synthetic}";
-            // the subgraph name is the first dot-separated component.
-            let subgraph_name = source.split('.').next().unwrap_or(source);
-            let http_client = factory.create(subgraph_name);
-            // One buffer per connector source provides per-source backpressure and is
-            // required for correct LoadShed / RateLimit behaviour from traffic-shaping
-            // plugins (mirrors the per-subgraph buffer in SubgraphServiceFactory).
-            let service = UnconstrainedBuffer::new(
-                plugins.iter().rev().fold(
-                    ConnectorRequestService { http_client }.boxed_clone(),
-                    |acc, (_, e)| e.connector_request_service(acc, source.clone()),
-                ),
-                DEFAULT_BUFFER_SIZE,
-            );
-            map.insert(source.clone(), service);
-        }
-
-        Self {
-            services: Arc::new(map),
-        }
-    }
-
-    pub(crate) fn create(&self, source_name: String) -> BoxCloneService {
+impl ConnectorRequestServices {
+    /// Retrieves the pre-built request service for `source_name`: a cheap clone of an
+    /// entry built once.
+    ///
+    /// # Panics
+    /// Panics if no service exists for `source_name`.
+    pub(crate) fn get(&self, source_name: String) -> BoxCloneService {
         // Note: We have to box our cloned service to erase the type of the Buffer.
         self.services
             .get(&source_name)

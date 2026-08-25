@@ -114,7 +114,6 @@ impl Response {
 }
 
 pub(crate) type ServiceError = MaybeBackPressureError<QueryPlannerError>;
-pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, ServiceError>;
 pub(crate) type CacheBoxCloneService =
     tower::util::BoxCloneService<CachingRequest, Response, CacheResolverError>;
 #[allow(dead_code)]
