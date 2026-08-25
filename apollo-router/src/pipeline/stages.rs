@@ -197,11 +197,6 @@ pub(crate) fn build_subgraph_service(
     let subscription_config = subscription_plugin_config(plugins).map(Arc::new);
     let apq_enabled = configuration.apq.subgraph.get(name).enabled;
 
-    // The subscription and APQ layers sit *after* all user plugins but *before* the
-    // subgraph service proper. The buffer makes the stored stack `Sync` (BoxCloneService
-    // is not) and shares one instance of it across per-request clones; the buffering
-    // that LoadShed / RateLimit correctness needs lives inside the traffic-shaping
-    // hooks themselves.
     ServiceBuilder::new()
         .buffered()
         .rust_plugins(plugins.clone(), |plugin, service| {
