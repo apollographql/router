@@ -21,7 +21,7 @@ each claim.
 | Triggers | **two, not one.** `experimental_connectors_source_aware`, default off; and separately a connect **v0.5** supergraph, which is never expanded and so is always planned source-aware regardless of config |
 | Flag off, v0.4 and earlier | byte-identical to today's expansion path |
 | Flag on | plans over the raw supergraph and dispatches real connector HTTP requests. **No longer always identical to expansion** — see "Where the two paths diverge" below |
-| Last verified | **2026-08-25 at `25a671117`**: `raw_vs_expanded_plan_diff` (39 ops, 39 Equivalent) and `distance_probe_raw_vs_expanded_graph` re-run live. Older, and not re-confirmed since: connectors suite (123 tests), the full `apollo-federation` suite (1930 + 834), and the `sibling-position-over-merge` sample; clippy and rustfmt clean on changed files. Re-run the recipe in "Working on it" before relying on the unconfirmed half |
+| Last verified | **2026-08-25 at [`25a671117`](https://github.com/apollographql/router/commit/25a671117532e976ac83a45023bd1dd2a33fca5a)**: `raw_vs_expanded_plan_diff` (39 ops, 39 Equivalent) and `distance_probe_raw_vs_expanded_graph` re-run live. Older, and not re-confirmed since: connectors suite (123 tests), the full `apollo-federation` suite (1930 + 834), and the `sibling-position-over-merge` sample; clippy and rustfmt clean on changed files. Re-run the recipe in "Working on it" before relying on the unconfirmed half |
 | Not built | source-aware cost model, composition-side satisfiability, type-level entity resolvers, interfaces/unions as connector output |
 | Recently built | **nested output *positions*** — one type reached at several positions with different sub-selections now gets a restricted node per position (`SOURCE_AWARE_NESTED_POSITIONS.md`). Distinct from nested output *shapes*, which is recursion into object-typed fields and is still unbuilt; see "What is not built". This also makes `User.friends: [User]` plannable, and under connect v0.5 validation now permits it (`CircularReference` is enforced only through v0.4) |
 | Tracking | exploratory, no engineering ticket |
@@ -110,7 +110,7 @@ suite*, not a corpus: it covers what its author thought to write down, over
 fixtures that exist to test the very mechanism being removed.
 
 **Result: 14 fixtures, 39 operations, 39 Equivalent, 0 Different, 0 Error.**
-(Re-run live on 2026-08-25 at `25a671117`.)
+(Re-run live on 2026-08-25 at [`25a671117`](https://github.com/apollographql/router/commit/25a671117532e976ac83a45023bd1dd2a33fca5a).)
 
 That spans root-field, entity, multi-key, key-not-selected, nested-entity
 chains, deep nested objects, interface objects, abstract inline fragments, the
