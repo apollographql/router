@@ -671,19 +671,28 @@ mod tests {
 
     #[tokio::test]
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
+        let (supergraph_mock, supergraph_handle) = tower_test::mock::pair::<
+            crate::services::supergraph::Request,
+            crate::services::supergraph::Response,
+        >();
         let configuration = Configuration::fake_builder().build().unwrap();
 
         init_with_config(
-            crate::pipeline::empty().await,
+            crate::pipeline::from_supergraph_mock(supergraph_mock).await,
             Arc::new(configuration),
             MultiMap::new(),
         )
         .await
         .unwrap();
+        crate::plugin::test::assert_no_mock_calls(supergraph_handle).await;
     }
 
     #[tokio::test]
     async fn it_makes_sure_different_listenaddrs_but_same_port_are_not_accepted() {
+        let (supergraph_mock, supergraph_handle) = tower_test::mock::pair::<
+            crate::services::supergraph::Request,
+            crate::services::supergraph::Response,
+        >();
         let configuration = Configuration::fake_builder()
             .supergraph(
                 Supergraph::fake_builder()
@@ -716,7 +725,7 @@ mod tests {
         );
 
         let error = init_with_config(
-            crate::pipeline::empty().await,
+            crate::pipeline::from_supergraph_mock(supergraph_mock).await,
             Arc::new(configuration),
             web_endpoints,
         )
@@ -725,11 +734,16 @@ mod tests {
         assert_eq!(
             "tried to bind 127.0.0.1 and 0.0.0.0 on port 4010",
             error.to_string()
-        )
+        );
+        crate::plugin::test::assert_no_mock_calls(supergraph_handle).await;
     }
 
     #[tokio::test]
     async fn it_makes_sure_extra_endpoints_cant_use_the_same_listenaddr_and_path() {
+        let (supergraph_mock, supergraph_handle) = tower_test::mock::pair::<
+            crate::services::supergraph::Request,
+            crate::services::supergraph::Response,
+        >();
         let configuration = Configuration::fake_builder()
             .supergraph(
                 Supergraph::fake_builder()
@@ -756,14 +770,19 @@ mod tests {
             Endpoint::from_router_service("/".to_string(), endpoint),
         );
 
-        let error = init_with_config(crate::pipeline::empty().await, Arc::new(configuration), mm)
-            .await
-            .unwrap_err();
+        let error = init_with_config(
+            crate::pipeline::from_supergraph_mock(supergraph_mock).await,
+            Arc::new(configuration),
+            mm,
+        )
+        .await
+        .unwrap_err();
 
         assert_eq!(
             "tried to register two endpoints on `127.0.0.1:4010/`",
             error.to_string()
-        )
+        );
+        crate::plugin::test::assert_no_mock_calls(supergraph_handle).await;
     }
     #[rstest::rstest]
     #[case::config_does_not_include_slash("/graphql", "/graphql")]
@@ -846,6 +865,10 @@ mod tests {
 
     #[tokio::test]
     async fn it_returns_431_when_too_many_headers() {
+        let (supergraph_mock, supergraph_handle) = tower_test::mock::pair::<
+            crate::services::supergraph::Request,
+            crate::services::supergraph::Response,
+        >();
         async {
             // Configure a very low header limit to trigger hyper's 431 response.
             let conf = Arc::new(
@@ -861,7 +884,7 @@ mod tests {
                     .unwrap(),
             );
 
-            let router_service = crate::pipeline::empty().await;
+            let router_service = crate::pipeline::from_supergraph_mock(supergraph_mock).await;
             let (server, _) = init_with_config(router_service, conf, MultiMap::new())
                 .await
                 .unwrap();
@@ -893,10 +916,15 @@ mod tests {
         }
         .with_metrics()
         .await;
+        crate::plugin::test::assert_no_mock_calls(supergraph_handle).await;
     }
 
     #[tokio::test]
     async fn it_returns_414_when_uri_too_long() {
+        let (supergraph_mock, supergraph_handle) = tower_test::mock::pair::<
+            crate::services::supergraph::Request,
+            crate::services::supergraph::Response,
+        >();
         use tokio::io::AsyncReadExt;
         use tokio::io::AsyncWriteExt;
         use tokio::net::TcpStream;
@@ -908,7 +936,7 @@ mod tests {
             //
             // reqwest rejects URLs this long before even connecting, so we use a raw TCP
             // stream and write the HTTP request manually.
-            let router_service = crate::pipeline::empty().await;
+            let router_service = crate::pipeline::from_supergraph_mock(supergraph_mock).await;
             let (server, _) = init_with_config(
                 router_service,
                 Arc::new(Configuration::fake_builder().build().unwrap()),
@@ -945,5 +973,6 @@ mod tests {
         }
         .with_metrics()
         .await;
+        crate::plugin::test::assert_no_mock_calls(supergraph_handle).await;
     }
 }

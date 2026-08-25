@@ -420,17 +420,3 @@ pub(crate) async fn from_supergraph_mock(
 + Clone {
     from_supergraph_mock_with_configuration(mock, Arc::new(Configuration::default())).await
 }
-
-#[cfg(test)]
-pub(crate) async fn empty() -> impl Service<
-    router::Request,
-    Response = router::Response,
-    Error = BoxError,
-    Future = BoxFuture<'static, router::ServiceResult>,
-> + Send {
-    let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
-    // The supergraph service must stay ready — these tests exercise router-layer
-    // rejections — but must never be called.
-    crate::plugin::test::allow_and_assert_never_called(handle);
-    from_supergraph_mock_with_configuration(mock, Arc::new(Configuration::default())).await
-}
