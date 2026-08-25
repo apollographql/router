@@ -1,6 +1,6 @@
 # Source-aware query planning: speaker sheet
 
-Ten beats, ~27 min at the times below, with two cut paths at the end (one for
+Ten beats, ~26 min at the times below, with two cut paths at the end (one for
 time, one for a mixed room).
 
 This is the shareable copy: the stage material about the work, without the
