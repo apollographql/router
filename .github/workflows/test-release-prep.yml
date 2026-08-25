@@ -200,6 +200,7 @@ jobs:
       # For now: log what auto-tag WOULD do, including the exact commit SHA.
       # ---------------------------------------------------------------------
       - name: Log what auto-tag would do (including exact SHA)
+        if: steps.vars.outputs.pre_release != 'true'
         run: |
           set -euo pipefail
           VERSION='${{ steps.vars.outputs.version }}'
@@ -281,16 +282,22 @@ jobs:
       # `git push` and the token is left out of any persistent config.
       # =====================================================================
 
-      - name: Commit prep on the dispatched branch (pre-release)
+      - name: Commit and tag prep on the dispatched branch (pre-release)
         if: steps.vars.outputs.dry_run != 'true' && steps.vars.outputs.pre_release == 'true'
         run: |
           set -euo pipefail
+          VERSION='${{ steps.vars.outputs.version }}'
           git config user.name "apollo-bot2"
           git config user.email "apollo-bot2@users.noreply.github.com"
           git add -A
-          git commit -m "prep release: v${{ steps.vars.outputs.version }}"
+          git commit -m "prep release: v$VERSION"
+          git tag --annotate --message "$VERSION" "v$VERSION" HEAD
 
-      - name: Push prep commit directly to ${{ github.ref_name }} (pre-release)
+      # Tag and commit go up in one atomic push: the tag is what triggers
+      # CircleCI to build the release, so it must never land without the
+      # commit it points at (or vice versa).  A re-run of an already-cut
+      # version is rejected here, leaving nothing behind to clean up.
+      - name: Push prep commit and tag to ${{ github.ref_name }} (pre-release)
         if: steps.vars.outputs.dry_run != 'true' && steps.vars.outputs.pre_release == 'true'
         env:
           APOLLO_BOT2_GITHUB_PAT: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
@@ -300,12 +307,14 @@ jobs:
             echo "::error::APOLLO_BOT2_GITHUB_PAT secret is required to push to a protected release branch."
             exit 1
           fi
+          TAG="v${{ steps.vars.outputs.version }}"
           # PAT-bearing URL only used for this single push command — never
           # persisted into the local repo's git config.
-          git push \
+          git push --atomic \
             "https://x-access-token:${APOLLO_BOT2_GITHUB_PAT}@github.com/${GITHUB_REPOSITORY}.git" \
+            "refs/tags/$TAG" \
             "HEAD:${GITHUB_REF_NAME}"
-          echo "Pushed prep commit directly to ${GITHUB_REF_NAME} as apollo-bot2."
+          echo "::notice::Pushed $TAG at $(git rev-parse HEAD) and updated ${GITHUB_REF_NAME}."
 
       # =====================================================================
       # Final-release path: existing fresh-branch + open-PR flow.  Reviewers
@@ -372,7 +381,8 @@ jobs:
           if [ '${{ steps.vars.outputs.dry_run }}' = 'true' ]; then
             echo "Dry-run complete.  No commit, push, or PR."
           elif [ '${{ steps.vars.outputs.pre_release }}' = 'true' ]; then
-            echo "Pre-release prep pushed directly to ${GITHUB_REF_NAME} as apollo-bot2."
+            echo "Pre-release prep pushed to ${GITHUB_REF_NAME} and tagged v${{ steps.vars.outputs.version }} as apollo-bot2."
+            echo "CircleCI builds the release from that tag; it appears in GitHub Releases when that finishes."
           else
             echo "Prep PR opened from $PREP_BRANCH into ${{ steps.vars.outputs.version }}."
           fi
