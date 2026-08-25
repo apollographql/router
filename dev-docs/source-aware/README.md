@@ -6,19 +6,24 @@ federated schema. Source-aware planning removes that step: the planner works
 directly on the raw supergraph, and each fetch carries the identity of the
 connector that serves it.
 
-This directory documents that work. Everything described here lives behind
-`experimental_connectors_source_aware`, which is off by default.
+This directory documents that work.
+
+This file is the **reference**: what is true about the branch, section by
+section. If you are meeting this work for the first time, or explaining it to
+someone, read [`WALK_THROUGH.md`](WALK_THROUGH.md) instead, which covers the
+same ground in the order it is best learned and links the file or test behind
+each claim.
 
 ## Status
 
 | | |
 |---|---|
-| Config flag | `experimental_connectors_source_aware`, default off |
-| Flag off | byte-identical to today's expansion path |
+| Triggers | **two, not one.** `experimental_connectors_source_aware`, default off; and separately a connect **v0.5** supergraph, which is never expanded and so is always planned source-aware regardless of config |
+| Flag off, v0.4 and earlier | byte-identical to today's expansion path |
 | Flag on | plans over the raw supergraph and dispatches real connector HTTP requests. **No longer always identical to expansion** — see "Where the two paths diverge" below |
-| Last verified | connectors suite (123 tests), the full `apollo-federation` suite (1930 + 834), and the `sibling-position-over-merge` sample pass; clippy and rustfmt clean on changed files. A past run, not a live signal; re-run the recipe in "Working on it" before relying on it |
+| Last verified | **2026-08-25 at `25a671117`**: `raw_vs_expanded_plan_diff` (39 ops, 39 Equivalent) and `distance_probe_raw_vs_expanded_graph` re-run live. Older, and not re-confirmed since: connectors suite (123 tests), the full `apollo-federation` suite (1930 + 834), and the `sibling-position-over-merge` sample; clippy and rustfmt clean on changed files. Re-run the recipe in "Working on it" before relying on the unconfirmed half |
 | Not built | source-aware cost model, composition-side satisfiability, type-level entity resolvers, interfaces/unions as connector output |
-| Recently built | **nested output shapes** — one type reached at several positions with different sub-selections now gets a restricted node per position (`SOURCE_AWARE_NESTED_POSITIONS.md`). This also makes `User.friends: [User]` plannable; validation still forbids it |
+| Recently built | **nested output *positions*** — one type reached at several positions with different sub-selections now gets a restricted node per position (`SOURCE_AWARE_NESTED_POSITIONS.md`). Distinct from nested output *shapes*, which is recursion into object-typed fields and is still unbuilt; see "What is not built". This also makes `User.friends: [User]` plannable, and under connect v0.5 validation now permits it (`CircularReference` is enforced only through v0.4) |
 | Tracking | exploratory, no engineering ticket |
 
 This is a feasibility spike that outgrew its original scope. It is not queued
@@ -64,9 +69,11 @@ Both are expressed structurally, in the schema.
 
 The explosion is per directive, not per backend. `distance_probe_raw_vs_expanded_graph`
 (in `apollo-federation/src/query_graph/connect_graph.rs`) measures it against the
-expand fixtures: the expanded query graph runs **2x to 9x larger** than the raw
-one, up to 6.8x in nodes, 8.8x in edges, and roughly 21x in key edges for the
-`keys` fixture. That inflation is paid at composition and at router startup.
+expand fixtures. The worst case is `keys`, at **6.8x nodes, 8.8x edges and 21x
+key edges** (8 nodes to 54, 28 edges to 246, 3 key edges to 64). Most fixtures
+land between 1.5x and 3x, and a few with no entity structure to duplicate
+(`types_used_twice`, `nested_inputs`, `recursive_input`) do not grow at all.
+That inflation is paid at composition and at router startup.
 
 There is a second, quieter cost. The planner's cost model prices boundary
 crossings between subgraphs. One HTTP backend that expansion splits into six
@@ -94,11 +101,16 @@ through the correctness oracle `crate::correctness::check_plan`:
 | `{ user(id) { d } }`, `d @requires(c)` | connectors, graphql, connectors | yes |
 | `{ user(id) { name d } }` | | yes |
 
-`raw_vs_expanded_plan_diff` then widened it to the whole corpus: every expand
-fixture with a usable query surface, planned both ways and classified by the
-`plan-diff` verdict (`Identical` / `Equivalent` / `Different` / `Error`).
+`raw_vs_expanded_plan_diff` then widened it, though not as far as "the corpus"
+would suggest: the test calls itself a "spike diagnostic, subset" and it is one.
+**39 hand-written operations across 14 of the 18 expand fixtures**, several of
+them a single query, planned both ways and classified by the `plan-diff` verdict
+(`Identical` / `Equivalent` / `Different` / `Error`). Read it as a *viability
+suite*, not a corpus: it covers what its author thought to write down, over
+fixtures that exist to test the very mechanism being removed.
 
-**Result: 14 fixtures, 32 operations, 32 Equivalent, 0 Different, 0 Error.**
+**Result: 14 fixtures, 39 operations, 39 Equivalent, 0 Different, 0 Error.**
+(Re-run live on 2026-08-25 at `25a671117`.)
 
 That spans root-field, entity, multi-key, key-not-selected, nested-entity
 chains, deep nested objects, interface objects, abstract inline fragments, the
@@ -151,7 +163,8 @@ Two consequences, both easy to get wrong later:
   deliberately; if expansion is ever fixed, that sample should fail loudly rather
   than be quietly updated.
 
-"Flag off is byte-identical to expansion" remains true and is unaffected — the
+"Flag off is byte-identical to expansion", on a v0.4-or-earlier supergraph,
+remains true and is unaffected — the
 restricted nodes only exist in a graph the source-aware pass has mutated.
 
 ## Priors worth updating
@@ -204,6 +217,18 @@ impossible to route a field to a connector that does not return it. Collapsing
 that away is what introduced the over-merge and the silent nulls. Expansion's
 explosion was doing correctness work, and source-aware has to pay for it
 deliberately. Row 3 in the table below is that bill, and it is not fully paid.
+
+**"Expansion's synthetic subgraphs only ever cost us something."** They also
+bought *vocabulary*. A connector's mapping expressions can read sibling fields of
+their own parent type through `$this`, and that is a real data dependency: the
+fetch cannot be dispatched until those reads resolve. Expansion learns it by
+accident, because `Connector::resolvable_key` derives the synthetic subgraph's
+`@key` from `variable_references()`, which is why `simple.graphql`'s `User.d`
+expands to key `"b c"` while declaring only `requires "c"`. Splitting each
+connector into its own subgraph makes an intra-connector dependency
+*cross-subgraph*, at which point federation can express it as a key. Collapse the
+split and the dependency becomes unsayable: `@requires` names external fields, and
+a sibling field of the same subgraph is not external. See "What is not built".
 
 **"The corpus result means source-aware and expansion produce the same plans."**
 It means each plan is independently correct against the operation. See "What
@@ -343,9 +368,24 @@ Covered by `plans_entity_resolver_fetch_for_unprovided_field`
 
 Six properties, each doing real work:
 
-**One flag, one fork.** `experimental_connectors_source_aware`, default off,
-branching at a single call site. With the flag off, `expand_connectors` runs
-exactly as it does today.
+**Two triggers, one helper.** `experimental_connectors_source_aware` is off by
+default, and a connect v0.5 supergraph is never expanded, so v0.5 is planned
+source-aware whether or not the flag is set. The spec version in the developer's
+`@link` is the single place that is configured: it is visible to composition,
+which relaxes `CircularReference`, and to the router at schema load, which skips
+expansion, so there is no second knob to keep in sync. Both router fork sites
+read one helper and each carries a comment pointing at the other, because
+`spec/schema.rs` decides whether `raw_sdl` holds the raw or the expanded
+supergraph and planning the wrong one against the wrong planner would be
+silently incorrect. Schema load logs when the switch came from the spec version
+rather than from configuration. With the flag off on a v0.4-or-earlier
+supergraph, `expand_connectors` runs exactly as it does today.
+
+Adoption is measured by two gauges in
+`apollo-router/src/configuration/metrics.rs`, because one cannot cover both
+paths: `apollo.router.config.connectors_source_aware` for the config path, and
+`apollo.router.supergraph.connectors_source_aware`, carrying an `enabled_by`
+attribute, for the schema-derived path the config mechanism cannot see.
 
 **Byte-identical when off, verified rather than asserted.** The identity channel
 is an `Option`, serde-skipped and absent from `Display`, so existing plans
@@ -387,13 +427,29 @@ follow-on begins by writing its own fixture.
   the work on the backend already open. The honest headline there is "fewer
   distinct backends touched", not "fewer calls"; genuine call-count collapse
   additionally needs a batch-aware connector cost model.
+- **Intra-connectors `$this` dependencies.** A connector reading `$this.<field>`
+  needs that sibling field fetched first. Source-aware plans over the raw graph,
+  where nothing encodes the read, so it satisfies only the declared `@requires`
+  and never fetches the field at all.
+  `apply_connector_parent_conditions` is the graph half of a fix and does make
+  the planner fetch the reads, but it is **deliberately not wired in**: with it
+  applied `correctness::check_plan` rejects the plan, and the rejection is right,
+  because `@requires` names external fields and a sibling field of the same
+  subgraph is not external. Federation has no way to say "this field needs that
+  sibling field of the same subgraph," so the raw supergraph cannot justify the
+  fetch the connector actually needs. Where an intra-connectors field dependency
+  should be represented is an open design question, and
+  `plans_this_variable_reads_as_fetch_inputs` records the gap by asking the
+  connector what it needs and the plan what it supplies, so it carries no
+  snapshot to rot and starts passing on its own if the gap closes.
 - **Composition-side satisfiability.** The measured 2x to 9x blowup is a
   compose-time cost, and it lives in the composer rather than the router.
   Nothing here addresses it.
-- **Nested output shapes.** `connector_provided_fields` reads only the top level
-  of the output shape, so a connector returning `address { city }` still lands
-  on a shared `Address` node exposing `zip`. Same silent-null bug, one level
-  down.
+- **Nested output shapes**, meaning recursion into object-typed fields. Not to be
+  confused with nested output *positions*, which is built and is in "Status"
+  above. `connector_provided_fields` reads only the top level of the output
+  shape, so a connector returning `address { city }` still lands on a shared
+  `Address` node exposing `zip`. Same silent-null bug, one level down.
 - **Observability parity (row 7).** Under one `connectors` subgraph, per
   connector spans and metrics may collapse to `service_name = "connectors"`
   unless reattached via the coordinate. Nobody has checked whether connector
