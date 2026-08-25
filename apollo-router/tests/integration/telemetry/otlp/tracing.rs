@@ -108,35 +108,64 @@ async fn test_basic() -> Result<(), BoxError> {
 /// then turned an otherwise clean SIGTERM into `exit(1)`.
 ///
 /// `assert_shutdown` ignores the exit code, which is why the rest of the suite never caught this.
+///
+/// The same shutdown is also what flushes the batch processor, so this covers the other half of
+/// the fix: the fixture's tracing `scheduled_delay` is far enough out that the spans from the
+/// query below cannot be exported on the schedule, only by the flush at exit.
+///
+/// Unix only: `graceful_shutdown` is a SIGTERM, which Windows has no equivalent of - there it
+/// falls back to a hard kill, and a killed process never reports a successful exit status.
+#[cfg(target_family = "unix")]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_graceful_shutdown_exits_cleanly() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
-    let config = include_str!("../fixtures/otlp.router.yaml")
+    let config = include_str!("../fixtures/otlp_shutdown_flush.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
-    let mut router = IntegrationTest::builder()
-        .telemetry(Telemetry::Otlp {
-            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
-        })
-        .config(&config)
-        .build()
-        .await;
+    // Deliberately no `.telemetry(Telemetry::Otlp { .. })`: that would point the *harness's* own
+    // tracer at the same collector on a 10ms schedule, and its exports would satisfy the
+    // post-shutdown assertion below without the router having flushed anything.
+    let mut router = IntegrationTest::builder().config(&config).build().await;
 
     router.start().await;
     router.assert_started().await;
     // Put spans through the batch processor so its background worker is running by the time we
     // signal, rather than idling before its first tick.
     router.execute_default_query().await;
+    let exports_before_shutdown = trace_export_count(&mock_server).await;
 
     router.graceful_shutdown().await;
 
     router.read_logs();
-    router.assert_log_not_contained("it is being shutdown");
     router.assert_clean_exit();
+    router.assert_log_not_contained("it is being shutdown");
+    // The router's stdout is forwarded by a background pump task, so the last lines it writes
+    // before `exit()` can still be in flight when the process is reaped. Drain for a bounded
+    // window as well, so the check above cannot pass merely because the panic line had not
+    // arrived yet.
+    router.assert_log_not_contains("it is being shutdown").await;
+
+    assert!(
+        trace_export_count(&mock_server).await > exports_before_shutdown,
+        "no spans were exported during shutdown: the spans the batch processor had buffered \
+         when SIGTERM arrived were dropped instead of flushed"
+    );
 
     Ok(())
+}
+
+/// Number of OTLP trace export requests the collector has received so far.
+#[cfg(target_family = "unix")]
+async fn trace_export_count(mock_server: &wiremock::MockServer) -> usize {
+    mock_server
+        .received_requests()
+        .await
+        .expect("mock server records requests")
+        .iter()
+        .filter(|request| request.url.path().ends_with("/traces"))
+        .count()
 }
 
 #[tokio::test(flavor = "multi_thread")]

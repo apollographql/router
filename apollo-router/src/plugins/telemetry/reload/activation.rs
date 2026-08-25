@@ -332,8 +332,13 @@ mod tests {
     /// of the provider it started under, so the drop here is not the last one. The old provider's
     /// batch processor would keep running — and its blocking shutdown would eventually fire on
     /// whichever async runtime worker closed that last span, or not at all.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn reload_shuts_down_the_replaced_tracer_provider() {
+    ///
+    /// This exercises the disposal half of [`swap_global_tracer_provider`] directly rather than
+    /// calling it: the other half is `opentelemetry::global::set_tracer_provider`, a
+    /// process-wide write with no way to restore what it replaced, which would leak this test's
+    /// provider into every other test in the binary.
+    #[test]
+    fn reload_shuts_down_the_replaced_tracer_provider() {
         let probe = ShutdownProbe::default();
         let replaced = SdkTracerProvider::builder()
             .with_span_processor(probe.clone())
@@ -343,7 +348,7 @@ mod tests {
             .start("in-flight");
         assert!(!probe.was_shut_down());
 
-        swap_global_tracer_provider(SdkTracerProvider::builder().build(), Some(replaced));
+        shutdown_tracer_provider(Some(replaced));
 
         assert!(
             probe.was_shut_down(),
