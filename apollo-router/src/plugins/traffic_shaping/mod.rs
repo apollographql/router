@@ -802,7 +802,19 @@ mod test {
                 &schema,
                 subgraph_schemas.clone(),
                 None,
-                Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
+                Some(vec![
+                    (APOLLO_TRAFFIC_SHAPING.to_string(), plugin),
+                    // Replaces each subgraph's transport with a mock. Must be last so
+                    // the traffic-shaping hooks under test still wrap the mocks.
+                    (
+                        "mocked_subgraphs".to_string(),
+                        Box::new(crate::test_harness::MockedSubgraphs(hashmap! {
+                            "accounts" => account_service,
+                            "reviews" => review_service,
+                            "products" => product_service,
+                        })),
+                    ),
+                ]),
                 Default::default(),
                 None,
             )
@@ -817,6 +829,19 @@ mod test {
         let query_plan_cache =
             build_query_plan_cache(&config, connect_query_plan_redis(&config).await.unwrap());
 
+        let subgraph_services = crate::pipeline::build_subgraph_services(
+            ["accounts", "reviews", "products"]
+                .into_iter()
+                .map(|name| {
+                    (
+                        name.to_string(),
+                        crate::services::http::test_http_client_service(name),
+                    )
+                })
+                .collect(),
+            &plugins,
+            &config,
+        );
         let crate::pipeline::SupergraphPipeline {
             supergraph_service, ..
         } = build_supergraph_pipeline(
@@ -826,15 +851,7 @@ mod test {
             subgraph_schemas,
             config.clone(),
             plugins.clone(),
-            crate::pipeline::wrap_subgraph_services(
-                vec![
-                    ("accounts".to_string(), account_service.boxed_clone()),
-                    ("reviews".to_string(), review_service.boxed_clone()),
-                    ("products".to_string(), product_service.boxed_clone()),
-                ],
-                &plugins,
-                &config,
-            ),
+            subgraph_services,
             Default::default(),
         );
 

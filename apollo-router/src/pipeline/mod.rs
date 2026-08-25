@@ -92,8 +92,6 @@ pub(crate) use self::stages::build_router_service;
 pub(crate) use self::stages::build_subgraph_services;
 pub(crate) use self::stages::build_supergraph_pipeline;
 use self::stages::build_warmup_service;
-#[cfg(test)]
-pub(crate) use self::stages::wrap_subgraph_services;
 use crate::Endpoint;
 use crate::ListenAddr;
 use crate::configuration::Configuration;

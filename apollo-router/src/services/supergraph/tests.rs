@@ -3922,7 +3922,9 @@ async fn test_cache_warmup() {
         Arc::new(Default::default()),
         Arc::new(configuration.clone()),
         Default::default(),
-        crate::pipeline::wrap_subgraph_services(Vec::new(), &Default::default(), &configuration),
+        crate::services::SubgraphServices {
+            services: Default::default(),
+        },
         Default::default(),
     );
 
@@ -3974,7 +3976,9 @@ async fn test_cache_warmup() {
         Arc::new(Default::default()),
         Arc::new(configuration.clone()),
         Default::default(),
-        crate::pipeline::wrap_subgraph_services(Vec::new(), &Default::default(), &configuration),
+        crate::services::SubgraphServices {
+            services: Default::default(),
+        },
         Default::default(),
     );
 

@@ -72,7 +72,6 @@ use crate::services::router::parse_query::ParseQueryLayer;
 use crate::services::router::service::DisplayRouterRequestLayer;
 use crate::services::router::service::RouterToSupergraphRequestLayer;
 use crate::services::router::tower_compat::APQCachingLayer;
-use crate::services::subgraph;
 use crate::services::subgraph::service::BufferedSubgraphService;
 use crate::services::supergraph;
 use crate::services::supergraph::service::SupergraphService;
@@ -175,59 +174,10 @@ pub(crate) fn build_http_services(
     (subgraph_services, connector_services)
 }
 
-/// Builds the full service stack for one subgraph: a [`SubgraphService`] around its
-/// HTTP client, wrapped by [`wrap_subgraph_service`].
+/// Builds the full service stack for one subgraph around its HTTP client.
 pub(crate) fn build_subgraph_service(
     name: &str,
     http_service: http::BoxCloneService,
-    plugins: &Arc<Plugins>,
-    configuration: &Configuration,
-) -> BufferedSubgraphService {
-    wrap_subgraph_service(
-        name,
-        SubgraphService::new(name, http_service).boxed_clone(),
-        plugins,
-        configuration,
-    )
-}
-
-/// Builds the full service stack for every subgraph, keyed by subgraph name.
-pub(crate) fn build_subgraph_services(
-    http_services: IndexMap<String, http::BoxCloneService>,
-    plugins: &Arc<Plugins>,
-    configuration: &Configuration,
-) -> SubgraphServices {
-    let mut map = HashMap::with_capacity(http_services.len());
-    for (name, http_service) in http_services.into_iter() {
-        let service = build_subgraph_service(&name, http_service, plugins, configuration);
-        map.insert(name, service);
-    }
-    SubgraphServices {
-        services: Arc::new(map),
-    }
-}
-
-/// Wraps a set of subgraph services in the per-subgraph stack, keyed by subgraph name.
-#[cfg(test)]
-pub(crate) fn wrap_subgraph_services(
-    subgraph_services: Vec<(String, subgraph::BoxCloneService)>,
-    plugins: &Arc<Plugins>,
-    configuration: &Configuration,
-) -> SubgraphServices {
-    let mut map = HashMap::with_capacity(subgraph_services.len());
-    for (name, service) in subgraph_services.into_iter() {
-        let service = wrap_subgraph_service(&name, service, plugins, configuration);
-        map.insert(name, service);
-    }
-    SubgraphServices {
-        services: Arc::new(map),
-    }
-}
-
-/// Wraps one subgraph service in the per-subgraph layer stack.
-pub(crate) fn wrap_subgraph_service(
-    name: &str,
-    service: subgraph::BoxCloneService,
     plugins: &Arc<Plugins>,
     configuration: &Configuration,
 ) -> BufferedSubgraphService {
@@ -252,7 +202,23 @@ pub(crate) fn wrap_subgraph_service(
         ))
         .layer(SubgraphApqLayer::new(apq_enabled))
         .layer(content_negotiation::SubgraphContentNegotiationLayer::default())
-        .service(service)
+        .service(SubgraphService::new(name, http_service))
+}
+
+/// Builds the full service stack for every subgraph, keyed by subgraph name.
+pub(crate) fn build_subgraph_services(
+    http_services: IndexMap<String, http::BoxCloneService>,
+    plugins: &Arc<Plugins>,
+    configuration: &Configuration,
+) -> SubgraphServices {
+    let mut map = HashMap::with_capacity(http_services.len());
+    for (name, http_service) in http_services.into_iter() {
+        let service = build_subgraph_service(&name, http_service, plugins, configuration);
+        map.insert(name, service);
+    }
+    SubgraphServices {
+        services: Arc::new(map),
+    }
 }
 
 /// Builds the request service stack for each connector source, keyed by
@@ -265,7 +231,7 @@ fn build_connector_request_services(
     for (source, http_client) in connector_http_services.into_iter() {
         // One buffer per connector source provides per-source backpressure and is
         // required for correct LoadShed / RateLimit behaviour from traffic-shaping
-        // plugins (mirrors the per-subgraph buffer in [`wrap_subgraph_services`]).
+        // plugins (mirrors the per-subgraph buffer in [`build_subgraph_service`]).
         let service = UnconstrainedBuffer::new(
             plugins.iter().rev().fold(
                 ConnectorRequestService { http_client }.boxed_clone(),
