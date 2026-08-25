@@ -19,6 +19,7 @@ use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::graphql;
+use crate::pipeline::SupergraphPipeline;
 use crate::pipeline::build_apq_expander;
 use crate::pipeline::build_query_parsing_service;
 use crate::pipeline::build_router_service;
@@ -310,7 +311,7 @@ impl<'a> TestHarness<'a> {
             Arc<Configuration>,
             Arc<Schema>,
             Arc<Plugins>,
-            supergraph::BoxCloneService,
+            SupergraphPipeline,
         ),
         BoxError,
     > {
@@ -340,7 +341,7 @@ impl<'a> TestHarness<'a> {
             limits: Default::default(),
         }));
 
-        let (plugins, supergraph_service) = build_supergraph_for_test_harness(
+        let (plugins, supergraph_pipeline) = build_supergraph_for_test_harness(
             config.clone(),
             schema.clone(),
             self.extra_plugins,
@@ -348,12 +349,13 @@ impl<'a> TestHarness<'a> {
         )
         .await?;
 
-        Ok((config, schema, plugins, supergraph_service))
+        Ok((config, schema, plugins, supergraph_pipeline))
     }
 
     /// Builds the supergraph service
     pub async fn build_supergraph(self) -> Result<supergraph::BoxCloneService, BoxError> {
-        let (config, schema, _plugins, supergraph_service) = self.build_common().await?;
+        let (config, schema, _plugins, supergraph_pipeline) = self.build_common().await?;
+        let supergraph_service = supergraph_pipeline.supergraph_service;
 
         Ok(tower::service_fn(move |request: supergraph::Request| {
             let router = supergraph_service.clone();
@@ -390,7 +392,10 @@ impl<'a> TestHarness<'a> {
 
     /// Builds the router service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
-        let (config, schema, plugins, supergraph_service) = self.build_common().await?;
+        let (config, schema, plugins, supergraph_pipeline) = self.build_common().await?;
+        let SupergraphPipeline {
+            supergraph_service, ..
+        } = supergraph_pipeline;
 
         let query_parsing_service = build_query_parsing_service(schema.clone(), config.clone());
 
@@ -424,7 +429,10 @@ impl<'a> TestHarness<'a> {
         use crate::axum_factory::axum_http_server_factory::make_axum_router;
         use crate::axum_factory::utils::connection_router_service;
 
-        let (config, schema, plugins, supergraph_service) = self.build_common().await?;
+        let (config, schema, plugins, supergraph_pipeline) = self.build_common().await?;
+        let SupergraphPipeline {
+            supergraph_service, ..
+        } = supergraph_pipeline;
 
         let query_parsing_service = build_query_parsing_service(schema.clone(), config.clone());
 

@@ -58,12 +58,6 @@ where
         }
     }
 
-    /// Re-registers the cache's gauges against the current meter provider; see
-    /// [`CacheStorage::register_gauges`].
-    pub(crate) fn register_gauges(&self) {
-        self.storage.register_gauges();
-    }
-
     /// Look up `key` in the cache, returning an [`Entry`] that describes how to proceed:
     ///
     /// - **In-memory hit (fast path)**: the value is returned immediately without acquiring

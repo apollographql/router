@@ -151,16 +151,6 @@ where
         Self::new(max_capacity, None, caller)
     }
 
-    /// Re-registers the gauges from [`Self::new`] against the current meter provider.
-    ///
-    /// For a cache built before a meter-provider swap (the query-plan cache is built
-    /// before telemetry activation so warm-up can populate it): the swap discarded the
-    /// callbacks the constructor registered.
-    pub(crate) fn register_gauges(&self) {
-        self.register_cache_size_gauge();
-        self.register_cache_estimated_storage_size_gauge();
-    }
-
     fn register_cache_size_gauge(&self) {
         let meter: opentelemetry::metrics::Meter = metrics::meter_provider().meter(METER_NAME);
         let current_cache_size_for_gauge = self.cache_size.clone();
