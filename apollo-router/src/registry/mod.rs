@@ -134,7 +134,6 @@ const APOLLO_REGISTRY_ENDING: &str = "apollographql.com";
 const APOLLO_REGISTRY_USERNAME: &str = "apollo-registry";
 const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
 //  Keep in sync with value in mdg-private/monorepo/libs/entitlements/oci/model/src/main/kotlin/apollo/entitlements/oci/model/EntitlementArtifact.kt:15
-#[allow(dead_code)]
 const ENTITLEMENT_MEDIA_TYPE: &str = "application/vnd.apollographql.entitlement.v1+jwt";
 const APOLLO_MANIFEST_LAUNCH_ID_ANNOTATION: &str = "com.apollograph.launch.id";
 
@@ -590,7 +589,6 @@ fn parse_rate_limit_error(error: &OciError) -> Option<Duration> {
     None
 }
 
-#[allow(dead_code)]
 type OciLicenseStream = Pin<Box<dyn Stream<Item = Result<License, OciError>> + Send>>;
 
 #[allow(dead_code)]
