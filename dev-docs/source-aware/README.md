@@ -21,7 +21,7 @@ each claim.
 | Triggers | **two, not one.** `experimental_connectors_source_aware`, default off; and separately a connect **v0.5** supergraph, which is never expanded and so is always planned source-aware regardless of config |
 | Flag off, v0.4 and earlier | byte-identical to today's expansion path |
 | Flag on | plans over the raw supergraph and dispatches real connector HTTP requests. **No longer always identical to expansion** — see "Where the two paths diverge" below |
-| Last verified | **2026-08-25 at [`d4e4da747`](https://github.com/apollographql/router/commit/d4e4da747d7320b77db35cba8cb9b29b4a1485d4)**: `raw_vs_expanded_plan_diff` (39 ops, 39 Equivalent), `distance_probe_raw_vs_expanded_graph`, the `sibling-position-over-merge` sample, and the full `apollo-federation` suite (1948 + 838, 0 failed) all run live, the suite after rebasing onto `origin/dev`. Older and not re-confirmed since: the router-side connectors suite, and clippy/rustfmt. Re-run the recipe in "Working on it" before relying on the unconfirmed half |
+| Last verified | **2026-08-25**, at the then-current branch tip: `raw_vs_expanded_plan_diff` (39 ops, 39 Equivalent), `distance_probe_raw_vs_expanded_graph`, the `sibling-position-over-merge` sample, and the full `apollo-federation` suite (1948 + 838, 0 failed) all run live, the suite after rebasing onto `origin/dev`. Older and not re-confirmed since: the router-side connectors suite, and clippy/rustfmt. Re-run the recipe in "Working on it" before relying on the unconfirmed half |
 | Not built | source-aware cost model, composition-side satisfiability, type-level entity resolvers, interfaces/unions as connector output |
 | Recently built | **nested output *positions*** — one type reached at several positions with different sub-selections now gets a restricted node per position (`SOURCE_AWARE_NESTED_POSITIONS.md`). Distinct from nested output *shapes*, which is recursion into object-typed fields and is still unbuilt; see "What is not built". This also makes `User.friends: [User]` plannable, and under connect v0.5 validation now permits it (`CircularReference` is enforced only through v0.4) |
 | Tracking | exploratory, no engineering ticket |
@@ -110,7 +110,7 @@ suite*, not a corpus: it covers what its author thought to write down, over
 fixtures that exist to test the very mechanism being removed.
 
 **Result: 14 fixtures, 39 operations, 39 Equivalent, 0 Different, 0 Error.**
-(Re-run live on 2026-08-25 at [`d4e4da747`](https://github.com/apollographql/router/commit/d4e4da747d7320b77db35cba8cb9b29b4a1485d4).)
+(Re-run live on 2026-08-25.)
 
 That spans root-field, entity, multi-key, key-not-selected, nested-entity
 chains, deep nested objects, interface objects, abstract inline fragments, the
@@ -566,6 +566,15 @@ design viable and left these unwired. Do not read them as the live identity
 mechanism; the live mechanism is the stamped coordinate.
 
 ## History
+
+### A note on commit hashes
+
+This branch is rebased onto `dev` periodically, which rewrites every commit on
+it. Hashes cited in prose therefore go stale by construction, and a link built
+from one becomes a 404 rather than a warning. So these documents date their
+claims instead of hashing them, and where a hash appears in `history/` it should
+be read as an artifact of when that document was written, not as something to
+look up. Please do not "fix" this by adding commit links.
 
 `history/` holds the eight design and handoff documents this README condenses.
 They are kept for their detail, particularly the file-and-line survey work in

@@ -58,7 +58,7 @@ seam ran the **existing** planner over the raw supergraph and produced a correct
 plan on the first try.
 
 Falsified deliberately: **39 operations, 39 `Equivalent`, 0 `Different`, 0
-`Error`** — re-run live this morning at [`d4e4da747`](https://github.com/apollographql/router/commit/d4e4da747d7320b77db35cba8cb9b29b4a1485d4), not quoted from a doc.
+`Error`** — re-run live this morning, not quoted from a doc.
 
 *Then disarm it yourself, before anyone asks:*
 
@@ -277,7 +277,7 @@ one stray key in `plan.json` skips the whole sample with no message.
 cargo test -p apollo-router --test samples --features snapshot connectors
 ```
 
-**Verified passing this morning** at [`d4e4da747`](https://github.com/apollographql/router/commit/d4e4da747d7320b77db35cba8cb9b29b4a1485d4): `1 passed; 0 failed` in 6.88s.
+**Verified passing this morning**: `1 passed; 0 failed` in 6.88s.
 The log shows the divergence happening: the expansion phase fetches only
 `/users`, then after the config reload the source-aware phase adds `/people/2`
 and `/people/9`, which are the entity-resolver fetches that produce `"Grace"`.
@@ -291,7 +291,7 @@ cd ~/dev/connectors-corpus-may-2026
 
 ## Provenance of every number on these slides
 
-All of them were computed today, at [`d4e4da747`](https://github.com/apollographql/router/commit/d4e4da747d7320b77db35cba8cb9b29b4a1485d4):
+All of them were computed today, against the branch tip:
 
 - **39/39 Equivalent** and the **8.8x / 21x** graph figures: re-run live this
   morning via `cargo test -p apollo-federation raw_vs_expanded_plan_diff` and
