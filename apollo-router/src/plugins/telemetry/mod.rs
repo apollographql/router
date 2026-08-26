@@ -294,6 +294,67 @@ impl EnabledFeatures {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct InstrumentExecutionLayer {
+    config: Arc<config::Conf>,
+}
+
+impl InstrumentExecutionLayer {
+    fn new(config: Arc<config::Conf>) -> Self {
+        Self { config }
+    }
+}
+
+impl<S> tower::Layer<S> for InstrumentExecutionLayer
+where
+    S: tower::Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = execution::BoxCloneService;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        let config = self.config.clone();
+
+        ServiceBuilder::new()
+            .instrument(move |req: &ExecutionRequest| {
+                let operation_kind = req.query_plan.query.operation.kind();
+
+                match operation_kind {
+                    OperationKind::Subscription => info_span!(
+                        EXECUTION_SPAN_NAME,
+                        "otel.kind" = "INTERNAL",
+                        "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
+                        "apollo_private.operation.subtype" =
+                            OperationSubType::SubscriptionRequest.as_str(),
+                    ),
+                    _ => info_span!(
+                        EXECUTION_SPAN_NAME,
+                        "otel.kind" = "INTERNAL",
+                        "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
+                    ),
+                }
+            })
+            .and_then(move |resp: ExecutionResponse| {
+                let config = config.clone();
+                async move {
+                    let resp = count_execution_errors(resp, &config.apollo.errors).await;
+                    Ok::<_, BoxError>(resp)
+                }
+            })
+            .service(inner)
+            .boxed_clone()
+    }
+}
+
+impl Telemetry {
+    pub(crate) fn instrument_execution_layer(&self) -> InstrumentExecutionLayer {
+        InstrumentExecutionLayer::new(self.config.clone())
+    }
+}
+
 #[async_trait::async_trait]
 impl PluginPrivate for Telemetry {
     type Config = config::Conf;
@@ -910,37 +971,9 @@ impl PluginPrivate for Telemetry {
     }
 
     fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
-        let config = self.config.clone();
-        let config_map_res_first = config.clone();
-
         ServiceBuilder::new()
-            .instrument(move |req: &ExecutionRequest| {
-                let operation_kind = req.query_plan.query.operation.kind();
-
-                match operation_kind {
-                    OperationKind::Subscription => info_span!(
-                        EXECUTION_SPAN_NAME,
-                        "otel.kind" = "INTERNAL",
-                        "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
-                        "apollo_private.operation.subtype" =
-                            OperationSubType::SubscriptionRequest.as_str(),
-                    ),
-                    _ => info_span!(
-                        EXECUTION_SPAN_NAME,
-                        "otel.kind" = "INTERNAL",
-                        "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
-                    ),
-                }
-            })
-            .and_then(move |resp: ExecutionResponse| {
-                let config = config_map_res_first.clone();
-                async move {
-                    let resp = count_execution_errors(resp, &config.apollo.errors).await;
-                    Ok::<_, BoxError>(resp)
-                }
-            })
+            .layer(self.instrument_execution_layer())
             .service(service)
-            .boxed_clone()
     }
 
     fn subgraph_service(
