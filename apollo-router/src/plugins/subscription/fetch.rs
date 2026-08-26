@@ -22,7 +22,7 @@ use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
 use crate::query_planner::subscription::SubscriptionNode;
 use crate::services::FetchResponse;
 use crate::services::SubgraphRequest;
-use crate::services::SubgraphServiceFactory;
+use crate::services::SubgraphServices;
 use crate::services::fetch::ErrorMapping;
 use crate::services::fetch::SubscriptionRequest;
 use crate::services::subgraph::BoxGqlStream;
@@ -31,13 +31,13 @@ use crate::spec::Schema;
 /// Execute the fetches required to fulfill a subscription query plan node.
 ///
 /// Calls into the relevant subgraph service to run the actual requests. This means the
-/// [SubgraphServiceFactory] must produce services that have the [SubscriptionSubgraphLayer][]
+/// [SubgraphServices] must produce services that have the [SubscriptionSubgraphLayer][]
 /// applied!
 ///
 /// [SubscriptionSubgraphLayer]: super::subgraph::SubscriptionSubgraphLayer
 pub(crate) fn fetch_service_handle_subscription(
     schema: Arc<Schema>,
-    subgraph_service_factory: Arc<SubgraphServiceFactory>,
+    subgraph_services: Arc<SubgraphServices>,
     request: SubscriptionRequest,
 ) -> Instrumented<BoxFuture<'static, Result<FetchResponse, BoxError>>> {
     let SubscriptionRequest {
@@ -58,7 +58,7 @@ pub(crate) fn fetch_service_handle_subscription(
     );
 
     // Subscriptions are not supported for connectors, so they always go to the subgraph service
-    subscription_with_subgraph_service(schema, subgraph_service_factory, request).instrument(
+    subscription_with_subgraph_service(schema, subgraph_services, request).instrument(
         tracing::info_span!(
             SUBSCRIBE_SPAN_NAME,
             "otel.kind" = "INTERNAL",
@@ -70,7 +70,7 @@ pub(crate) fn fetch_service_handle_subscription(
 
 fn subscription_with_subgraph_service(
     schema: Arc<Schema>,
-    subgraph_service_factory: Arc<SubgraphServiceFactory>,
+    subgraph_services: Arc<SubgraphServices>,
     request: SubscriptionRequest,
 ) -> BoxFuture<'static, Result<crate::services::fetch::Response, BoxError>> {
     let SubscriptionRequest {
@@ -136,7 +136,7 @@ fn subscription_with_subgraph_service(
         }
     };
 
-    let service = subgraph_service_factory
+    let service = subgraph_services
         .get(&service_name)
         .expect("we already checked that the service exists during planning; qed");
 
@@ -259,7 +259,7 @@ mod tests {
     use crate::query_planner::fetch::Variables;
     use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
     use crate::query_planner::subscription::SubscriptionNode;
-    use crate::services::SubgraphServiceFactory;
+    use crate::services::SubgraphServices;
     use crate::services::fetch::SubscriptionRequest;
 
     #[tokio::test]
@@ -297,7 +297,7 @@ mod tests {
                 .expect("could not parse schema"),
             );
 
-            let factory = Arc::new(SubgraphServiceFactory {
+            let services = Arc::new(SubgraphServices {
                 services: Arc::new(HashMap::new()),
             });
 
@@ -311,7 +311,7 @@ mod tests {
                 .subscription_config(subscription_config)
                 .build();
 
-            let (data, errors) = subscription_with_subgraph_service(schema, factory, request)
+            let (data, errors) = subscription_with_subgraph_service(schema, services, request)
                 .await
                 .expect("call should not fail");
 

@@ -3837,13 +3837,11 @@ async fn test_cache_warmup() {
 
     use tower::ServiceBuilder;
 
+    use crate::pipeline::build_supergraph_pipeline;
     use crate::query_planner::QueryPlan;
-    use crate::services::PluggableSupergraphServiceBuilder;
-    use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerResponse;
     use crate::services::layers::persisted_queries::PersistedQueryExpander;
     use crate::services::query_planner;
-    use crate::services::supergraph::service::SupergraphCreator;
 
     let configuration = Configuration::default();
     let schema = Arc::new(
@@ -3856,7 +3854,7 @@ async fn test_cache_warmup() {
 
     // We have to do a bunch of setup here...
     // XXX(@goto-bus-stop): we should probably just use the RouterService at this point?
-    let query_parsing_service = crate::services::query_parsing::query_parsing_service(
+    let query_parsing_service = crate::pipeline::build_query_parsing_service(
         schema.clone(),
         Arc::new(configuration.clone()),
     );
@@ -3865,9 +3863,7 @@ async fn test_cache_warmup() {
     /// Return an empty plan that doesn't require any subgraph requests to fulfill.
     fn empty_query_plan() -> QueryPlannerResponse {
         let plan = Arc::new(QueryPlan::fake_new(None, None));
-        QueryPlannerResponse::builder()
-            .content(QueryPlannerContent::Plan { plan })
-            .build()
+        QueryPlannerResponse::builder().content(plan).build()
     }
 
     /// Execute a constant mock query against the given supergraph service.
@@ -3908,15 +3904,33 @@ async fn test_cache_warmup() {
         responder.send_response(empty_query_plan());
     });
 
-    let (supergraph_creator, _warmup) = PluggableSupergraphServiceBuilder::new(
+    let query_plan_cache = crate::pipeline::build_query_plan_cache(
+        &configuration,
+        crate::pipeline::connect_query_plan_redis(&configuration)
+            .await
+            .unwrap(),
+    );
+    let previous_cache = query_plan_cache.in_memory_cache();
+    let caching_query_planner = crate::query_planner::CachingQueryPlanner::new(
         mock.map_err(|err| panic!("mock driver failed: {err}"))
             .boxed_clone(),
         schema.clone(),
         Arc::new(Default::default()),
+        &configuration,
+        query_plan_cache,
     )
-    .build()
-    .await
-    .unwrap();
+    .boxed_clone();
+    let supergraph_service = build_supergraph_pipeline(
+        caching_query_planner,
+        schema.clone(),
+        Arc::new(Default::default()),
+        Arc::new(configuration.clone()),
+        Default::default(),
+        crate::services::SubgraphServices {
+            services: Default::default(),
+        },
+        Default::default(),
+    );
 
     let supergraph_service = ServiceBuilder::new()
         .load_shed()
@@ -3924,14 +3938,12 @@ async fn test_cache_warmup() {
             query_parsing_service.clone(),
             configuration.supergraph.redact_query_validation_errors,
         ))
-        .service(supergraph_creator.make());
+        .service(supergraph_service);
 
     let response = execute_query(supergraph_service).await;
     assert!(response.errors.is_empty());
 
     crate::plugin::test::await_mock_driver(driver).await;
-
-    let previous_cache = supergraph_creator.previous_cache();
 
     // Second, we warm up a new service using the cache from the previous service.
 
@@ -3950,15 +3962,32 @@ async fn test_cache_warmup() {
         did_plan_2.store(true, std::sync::atomic::Ordering::Relaxed);
     });
 
-    let (supergraph_creator, query_planner_service) = PluggableSupergraphServiceBuilder::new(
+    let query_plan_cache = crate::pipeline::build_query_plan_cache(
+        &configuration,
+        crate::pipeline::connect_query_plan_redis(&configuration)
+            .await
+            .unwrap(),
+    );
+    let query_planner_service = crate::query_planner::CachingQueryPlanner::new(
         mock.map_err(|err| panic!("mock driver failed: {err}"))
             .boxed_clone(),
         schema.clone(),
         Arc::new(Default::default()),
+        &configuration,
+        query_plan_cache,
     )
-    .build()
-    .await
-    .unwrap();
+    .boxed_clone();
+    let supergraph_service = build_supergraph_pipeline(
+        query_planner_service.clone(),
+        schema.clone(),
+        Arc::new(Default::default()),
+        Arc::new(configuration.clone()),
+        Default::default(),
+        crate::services::SubgraphServices {
+            services: Default::default(),
+        },
+        Default::default(),
+    );
 
     let warmup_service = ServiceBuilder::new()
         .layer(crate::query_planner::warmup::WarmupParseQueryLayer::new(
@@ -3968,7 +3997,7 @@ async fn test_cache_warmup() {
         .service(query_planner_service)
         .boxed_clone();
 
-    SupergraphCreator::warm_up_query_planner(
+    crate::query_planner::warmup::warm_up_query_planner(
         warmup_service,
         &pq_layer,
         Some(previous_cache),
@@ -3990,7 +4019,7 @@ async fn test_cache_warmup() {
             query_parsing_service.clone(),
             configuration.supergraph.redact_query_validation_errors,
         ))
-        .service(supergraph_creator.make());
+        .service(supergraph_service);
 
     let response = execute_query(supergraph_service).await;
     assert!(response.errors.is_empty());

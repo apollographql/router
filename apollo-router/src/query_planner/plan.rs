@@ -12,8 +12,6 @@ use super::fetch;
 use super::subscription::SubscriptionNode;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::cache::estimate_size;
-use crate::configuration::Batching;
-use crate::error::CacheResolverError;
 use crate::error::ValidationErrors;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
@@ -23,7 +21,6 @@ use crate::query_planner::HashedSubgraphSchemas;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::query_planner::PlanOptions;
 use crate::spec::Query;
-use crate::spec::QueryHash;
 
 /// A planner key.
 ///
@@ -83,17 +80,6 @@ impl QueryPlan {
 
     pub(crate) fn is_subscription(&self) -> bool {
         matches!(self.query.operation.kind(), OperationKind::Subscription)
-    }
-
-    pub(crate) fn query_hashes(
-        &self,
-        batching_config: Batching,
-        variables: &Object,
-    ) -> Result<Vec<Arc<QueryHash>>, CacheResolverError> {
-        match &self.root {
-            Some(root) => root.query_hashes(batching_config, variables, &self.query),
-            None => Ok(vec![]),
-        }
     }
 
     pub(crate) fn estimated_size(&self) -> usize {
@@ -212,83 +198,6 @@ impl PlanNode {
                 false
             }
         }
-    }
-
-    /// Iteratively populate a Vec of QueryHashes representing Fetches in this plan.
-    ///
-    /// Do not include any operations which contain "requires" elements.
-    ///
-    /// This function is specifically designed to be used within the context of simple batching. It
-    /// explicitly fails if nodes which should *not* be encountered within that context are
-    /// encountered. e.g.: PlanNode::Defer
-    ///
-    /// It's unlikely/impossible that PlanNode::Defer or PlanNode::Subscription will ever be
-    /// supported, but it may be that PlanNode::Condition must eventually be supported (or other
-    /// new nodes types that are introduced). Explicitly fail each type to provide extra error
-    /// details and don't use _ so that future node types must be handled here.
-    pub(crate) fn query_hashes(
-        &self,
-        batching_config: Batching,
-        variables: &Object,
-        query: &Query,
-    ) -> Result<Vec<Arc<QueryHash>>, CacheResolverError> {
-        let mut query_hashes = vec![];
-        let mut new_targets = vec![self];
-
-        loop {
-            let targets = new_targets;
-            if targets.is_empty() {
-                break;
-            }
-
-            new_targets = vec![];
-            for target in targets {
-                match target {
-                    PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
-                        new_targets.extend(nodes);
-                    }
-                    PlanNode::Fetch(node) => {
-                        // If requires.is_empty() we may be able to batch it!
-                        if node.requires.is_empty()
-                            && batching_config.batch_include(&node.service_name)
-                        {
-                            query_hashes.push(node.schema_aware_hash.clone());
-                        }
-                    }
-                    PlanNode::Flatten(node) => new_targets.push(&node.node),
-                    PlanNode::Defer { .. } => {
-                        return Err(CacheResolverError::BatchingError(
-                            "unexpected defer node encountered during query_hash processing"
-                                .to_string(),
-                        ));
-                    }
-                    PlanNode::Subscription { .. } => {
-                        return Err(CacheResolverError::BatchingError(
-                            "unexpected subscription node encountered during query_hash processing"
-                                .to_string(),
-                        ));
-                    }
-                    PlanNode::Condition {
-                        if_clause,
-                        else_clause,
-                        condition,
-                    } => {
-                        if query
-                            .variable_value(condition.as_str(), variables)
-                            .map(|v| *v == Value::Bool(true))
-                            .unwrap_or(true)
-                        {
-                            if let Some(node) = if_clause {
-                                new_targets.push(node);
-                            }
-                        } else if let Some(node) = else_clause {
-                            new_targets.push(node);
-                        }
-                    }
-                }
-            }
-        }
-        Ok(query_hashes)
     }
 
     pub(crate) fn subgraph_fetches(&self) -> usize {

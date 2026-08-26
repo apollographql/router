@@ -12,6 +12,7 @@ use tower::ServiceExt;
 use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::graphql;
 use crate::plugin::test::MockSubgraph;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
@@ -42,8 +43,27 @@ fn assert_span_contains_authorization_error_event(span: &str) {
     assert!(contains_err_event_in_span.is_ok());
 }
 
+/// Asserts the `Authorization error` event for a refused operation was logged exactly
+/// once. One place decides a refusal, so a second event means two code paths both
+/// believe they own the log.
 fn assert_logs_contain_entire_request_authorization_error() {
-    assert_span_contains_authorization_error_event("query_planning");
+    let event_regex =
+        Regex::new(r"ERROR .*Authorization error unauthorized_query_paths=\[.*]$").unwrap();
+
+    let exactly_one = tracing_test::logs_assert(|lines| {
+        match lines
+            .iter()
+            .filter(|line| event_regex.captures(line).is_some())
+            .count()
+        {
+            1 => Ok(()),
+            n => Err(format!(
+                "expected exactly one authorization error event, found {n}:\n{}",
+                lines.join("\n")
+            )),
+        }
+    });
+    assert!(exactly_one.is_ok(), "{exactly_one:?}");
 }
 
 fn assert_logs_contain_partial_authorization_error() {
@@ -450,6 +470,561 @@ async fn authenticated_directive_reject_unauthorized() {
 
     insta::assert_json_snapshot!(response);
     assert_logs_contain_entire_request_authorization_error();
+}
+
+/// When a subgraph response includes authenticated fields, because of @requires or because
+/// the subgraph is misbehaving, the authenticated field should not be propagated to the client.
+#[tokio::test]
+async fn overfetched_unauthorized_field_is_not_returned() {
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "authorization": { "directives": { "enabled": true } }
+        }))
+        .unwrap()
+        .schema(AUTHENTICATED_SCHEMA)
+        .subgraph_hook(|_name, _service| {
+            let (mock, mut handle) =
+                tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+            tokio::spawn(async move {
+                while let Some((req, responder)) = handle.next_request().await {
+                    // `phone` is not in the filtered operation this subgraph was sent.
+                    responder.send_response(
+                        subgraph::Response::fake_builder()
+                            .context(req.context)
+                            .data(serde_json::json! {{
+                                "currentUser": { "name": "Ada", "phone": "1234" }
+                            }})
+                            .build(),
+                    );
+                }
+            });
+            mock.boxed_clone()
+        })
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query("query { currentUser { name phone } }")
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    let current_user = response
+        .data
+        .as_ref()
+        .expect("the operation kept `name`, so it must not reject outright")
+        .get("currentUser")
+        .expect("`currentUser` must survive; only `phone` is @authenticated");
+
+    assert_eq!(
+        current_user.get("phone"),
+        Some(&serde_json_bytes::Value::Null),
+        "the subgraph returned `phone` outside the filtered operation, so it must reach \
+         the client as null rather than as its value"
+    );
+    assert_eq!(current_user.get("name"), Some(&json!("Ada")));
+
+    // `phone` is null because it errored, and the error names it.
+    let phone_error = response
+        .errors
+        .iter()
+        .find(|error| {
+            error.path.as_ref().map(ToString::to_string).as_deref() == Some("/currentUser/phone")
+        })
+        .expect("an execution error nullified `phone`");
+    assert_eq!(
+        phone_error.extensions.get("code"),
+        Some(&json!("UNAUTHORIZED_FIELD_OR_TYPE"))
+    );
+}
+
+mod whole_operation_authorization {
+    //! Outcomes for operations that authorization affects as a whole, asserted on the
+    //! bytes the router sends.
+
+    use super::*;
+
+    /// `Organization.id` and `User.phone` are both `@authenticated`, so filtering
+    /// removes paths from an unauthenticated request, and `reject_unauthorized` turns
+    /// that into a whole-operation refusal.
+    const REJECTED_QUERY: &str = "query { orga(id: 1) { id creatorUser { id name phone } } }";
+
+    /// `A` asks for nothing unauthorized; `B` asks for `orga.id`, which is
+    /// `@authenticated`. Tests execute `A`.
+    const MULTI_OP_QUERY: &str = "query A { currentUser { name } } query B { orga(id: 1) { id } }";
+
+    type SubgraphHandles =
+        Arc<Mutex<Vec<tower_test::mock::Handle<subgraph::Request, subgraph::Response>>>>;
+
+    /// Builds a router with the given `directives` config, replacing every subgraph
+    /// with a `tower_test` mock. The mocks hold no canned responses, so reaching one
+    /// fails the test.
+    async fn router_with_unresponsive_subgraphs(
+        directives: serde_json::Value,
+    ) -> (router::BoxCloneService, SubgraphHandles) {
+        let handles: SubgraphHandles = Arc::new(Mutex::new(Vec::new()));
+        let handles_clone = handles.clone();
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({
+                "authorization": { "directives": directives }
+            }))
+            .unwrap()
+            .schema(AUTHENTICATED_SCHEMA)
+            .subgraph_hook(move |_name, _service| {
+                let (mock, handle) =
+                    tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+                handles_clone.lock().unwrap().push(handle);
+                mock.boxed_clone()
+            })
+            .build_router()
+            .await
+            .unwrap();
+
+        (service, handles)
+    }
+
+    /// A router configured to refuse `REJECTED_QUERY`.
+    async fn rejecting_router() -> (router::BoxCloneService, SubgraphHandles) {
+        router_with_unresponsive_subgraphs(serde_json::json!({
+            "enabled": true,
+            "reject_unauthorized": true
+        }))
+        .await
+    }
+
+    /// Fails if any subgraph mock received a request, or if the router built no
+    /// subgraph service at all, which would make the check vacuous.
+    async fn assert_no_subgraph_calls(handles: SubgraphHandles) {
+        let handles: Vec<_> = handles.lock().unwrap().drain(..).collect();
+        assert!(!handles.is_empty(), "no subgraph services were created");
+        for handle in handles {
+            crate::plugin::test::assert_no_mock_calls(handle).await;
+        }
+    }
+
+    fn graphql_post(
+        query: &str,
+        operation_name: Option<&str>,
+        context: Context,
+    ) -> router::Request {
+        let req = graphql::Request {
+            query: Some(query.to_string()),
+            operation_name: operation_name.map(str::to_string),
+            ..Default::default()
+        };
+        router::Request {
+            context,
+            router_request: http::Request::builder()
+                .method("POST")
+                .header(CONTENT_TYPE, "application/json")
+                .header(ACCEPT, "application/json")
+                .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+                .unwrap(),
+        }
+    }
+
+    /// Sends the request and parses the body as it goes on the wire.
+    ///
+    /// Deserializing into [`graphql::Response`] collapses a JSON `null` under `data`
+    /// into an absent key, so assertions on whether `data` is present read the bytes.
+    async fn wire_response(
+        service: router::BoxCloneService,
+        request: router::Request,
+    ) -> (http::StatusCode, serde_json::Value) {
+        let response = service.oneshot(request).await.unwrap();
+        let status = response.response.status();
+        let bytes = body::into_bytes(response.response.into_body())
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    /// Sends `REJECTED_QUERY`, asserts the router refused it on authorization grounds,
+    /// and returns the HTTP status and wire body.
+    async fn send_rejected_request(
+        service: router::BoxCloneService,
+        context: Context,
+    ) -> (http::StatusCode, serde_json::Value) {
+        let (status, body) =
+            wire_response(service, graphql_post(REJECTED_QUERY, None, context)).await;
+        assert_eq!(
+            body.pointer("/errors/0/extensions/code"),
+            Some(&serde_json::json!("UNAUTHORIZED_FIELD_OR_TYPE")),
+            "the operation was not refused on authorization grounds: {body}"
+        );
+        (status, body)
+    }
+
+    /// Supergraph-level gates run before the execution service, so variable validation
+    /// answers an unauthorized operation ahead of the authorization refusal. The client
+    /// fixes the variable and then receives the refusal. The same ordering applies to
+    /// the accept-header checks for subscriptions and `@defer`.
+    #[tokio::test]
+    async fn variable_validation_answers_before_the_refusal() {
+        let (service, _handles) = rejecting_router().await;
+
+        let (status, body) = wire_response(
+            service,
+            graphql_post(
+                // `orga.id` is `@authenticated`, and `$id` is required but not provided.
+                "query($id: ID!) { orga(id: $id) { id } }",
+                None,
+                Context::new(),
+            ),
+        )
+        .await;
+
+        assert_eq!(status, http::StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body.pointer("/errors/0/extensions/code"),
+            Some(&serde_json::json!("VALIDATION_INVALID_TYPE_VARIABLE")),
+            "body: {body}"
+        );
+        assert_eq!(body.pointer("/data"), None, "body: {body}");
+    }
+
+    #[tokio::test]
+    async fn does_not_reach_execution() {
+        let (service, handles) = rejecting_router().await;
+
+        send_rejected_request(service, Context::new()).await;
+
+        assert_no_subgraph_calls(handles).await;
+    }
+
+    /// A refusal answers as a field error: HTTP 200 with a present-but-`null` `data` and
+    /// the authorization errors, not as a GraphQL request error, which carries a 4xx
+    /// status and no `data` entry.
+    /// This is not a spec-compliant behaviour, but is asserted for backwards compatibility.
+    #[tokio::test]
+    async fn returns_http_200_with_null_data() {
+        let (service, _handles) = rejecting_router().await;
+
+        let (status, body) = send_rejected_request(service, Context::new()).await;
+
+        assert_eq!(status, http::StatusCode::OK);
+        assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
+    }
+
+    /// A refused operation reaches `CachingQueryPlanner` as a plan, so its usage
+    /// reporting lands in the context like any other operation's and Studio can
+    /// attribute the refusal to an operation signature.
+    /// `licensed_operation_count_tests` holds what the report bills.
+    #[tokio::test]
+    async fn records_usage_reporting() {
+        let (service, _handles) = rejecting_router().await;
+        let context = Context::new();
+
+        send_rejected_request(service, context.clone()).await;
+
+        let usage_reporting = context
+            .extensions()
+            .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
+            .expect("a refused operation records usage reporting");
+        assert!(
+            matches!(*usage_reporting, UsageReporting::Operation(_)),
+            "the report must carry operation details, not an error key: {usage_reporting:?}"
+        );
+    }
+
+    /// `errors.response: disabled` suppresses the authorization errors, so `data: null`
+    /// is the only thing telling the client the operation produced nothing.
+    /// This is not a spec-compliant behaviour, but is asserted for backwards compatibility.
+    #[tokio::test]
+    async fn rejection_with_errors_disabled_sends_null_data_and_no_errors() {
+        let (service, _handles) = router_with_unresponsive_subgraphs(serde_json::json!({
+            "enabled": true,
+            "reject_unauthorized": true,
+            "errors": { "response": "disabled" }
+        }))
+        .await;
+
+        let (_status, body) =
+            wire_response(service, graphql_post(REJECTED_QUERY, None, Context::new())).await;
+
+        assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
+        assert_eq!(body.get("errors"), None);
+    }
+
+    /// `errors.response: extensions` moves the authorization errors under
+    /// `extensions.authorizationErrors` and leaves `errors` out of the response.
+    /// This is not a spec-compliant behaviour, but is asserted for backwards compatibility.
+    #[tokio::test]
+    async fn rejection_with_errors_in_extensions() {
+        let (service, _handles) = router_with_unresponsive_subgraphs(serde_json::json!({
+            "enabled": true,
+            "reject_unauthorized": true,
+            "errors": { "response": "extensions" }
+        }))
+        .await;
+
+        let (_status, body) =
+            wire_response(service, graphql_post(REJECTED_QUERY, None, Context::new())).await;
+
+        assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
+        assert_eq!(body.get("errors"), None);
+        let authorization_errors = body
+            .pointer("/extensions/authorizationErrors")
+            .and_then(|value| value.as_array())
+            .expect("the errors must move under extensions.authorizationErrors");
+        assert_eq!(
+            authorization_errors.len(),
+            2,
+            "one error per unauthorized path: `orga.id` and `orga.creatorUser.phone`"
+        );
+    }
+
+    /// `dry_run` and `reject_unauthorized` combine rather than cancelling out: `dry_run`
+    /// reports the paths without modifying the operation, and `reject_unauthorized`
+    /// refuses on the reported paths. A refusal here can only come from configuration,
+    /// since `dry_run` never empties the document.
+    #[tokio::test]
+    async fn dry_run_with_reject_unauthorized_still_rejects() {
+        let (service, handles) = router_with_unresponsive_subgraphs(serde_json::json!({
+            "enabled": true,
+            "reject_unauthorized": true,
+            "dry_run": true
+        }))
+        .await;
+
+        let (_status, body) = send_rejected_request(service, Context::new()).await;
+
+        assert_eq!(body.get("data"), Some(&serde_json::Value::Null));
+        assert_no_subgraph_calls(handles).await;
+    }
+
+    /// Without `reject_unauthorized`, an emptied operation runs the same pipeline as a
+    /// partial filter: an empty plan executes nothing, and response formatting against
+    /// the original operation shapes the result. Each requested root field arrives as
+    /// null alongside the path errors.
+    #[tokio::test]
+    async fn emptied_operation_without_reject_returns_shaped_data() {
+        let (service, handles) = router_with_unresponsive_subgraphs(serde_json::json!({
+            "enabled": true
+        }))
+        .await;
+
+        // `orga.id` is `@authenticated` and the only selection, so filtering removes
+        // everything.
+        let (status, body) = wire_response(
+            service,
+            graphql_post("query { orga(id: 1) { id } }", None, Context::new()),
+        )
+        .await;
+
+        assert_eq!(status, http::StatusCode::OK);
+        assert_eq!(
+            body.get("data"),
+            Some(&serde_json::json!({ "orga": null })),
+            "body: {body}"
+        );
+        assert_eq!(
+            body.pointer("/errors/0/extensions/code"),
+            Some(&serde_json::json!("UNAUTHORIZED_FIELD_OR_TYPE")),
+            "body: {body}"
+        );
+        assert_eq!(
+            body.pointer("/errors/0/path"),
+            Some(&serde_json::json!(["orga", "id"])),
+            "body: {body}"
+        );
+
+        assert_no_subgraph_calls(handles).await;
+    }
+
+    /// The emptiness check in `filter_query` is document-wide, marked by its `FIXME`s:
+    /// fully filtering the executed operation while a sibling keeps the document
+    /// non-empty reports `Filtered`, planning fails to find the executed operation, and
+    /// the client is told the operation is unknown rather than refused.
+    #[tokio::test]
+    async fn fully_filtered_operation_beside_surviving_sibling_reports_unknown_operation() {
+        let (service, handles) = router_with_unresponsive_subgraphs(serde_json::json!({
+            "enabled": true
+        }))
+        .await;
+
+        let (status, body) = wire_response(
+            service,
+            graphql_post(
+                "query A { orga(id: 1) { id } } query B { currentUser { name } }",
+                Some("A"),
+                Context::new(),
+            ),
+        )
+        .await;
+
+        assert_eq!(status, http::StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body.pointer("/errors/0/extensions/code"),
+            Some(&serde_json::json!("GRAPHQL_UNKNOWN_OPERATION_NAME")),
+            "body: {body}"
+        );
+        assert_eq!(body.get("data"), None);
+
+        assert_no_subgraph_calls(handles).await;
+    }
+
+    /// `filter_query` collects unauthorized paths from the whole document, and the
+    /// execution layer's `reject_unauthorized` check reads them without knowing which
+    /// operation they came from. A fully authorized operation is refused when a sibling
+    /// operation asks for unauthorized fields, and the error cites a path from the
+    /// operation nobody ran.
+    #[tokio::test]
+    async fn authorized_operation_beside_unauthorized_sibling_is_refused() {
+        let (service, handles) = router_with_unresponsive_subgraphs(serde_json::json!({
+            "enabled": true,
+            "reject_unauthorized": true
+        }))
+        .await;
+
+        let (status, body) = wire_response(
+            service,
+            graphql_post(MULTI_OP_QUERY, Some("A"), Context::new()),
+        )
+        .await;
+
+        assert_eq!(status, http::StatusCode::OK);
+        assert_eq!(
+            body.get("data"),
+            Some(&serde_json::Value::Null),
+            "body: {body}"
+        );
+        assert_eq!(
+            body.pointer("/errors/0/extensions/code"),
+            Some(&serde_json::json!("UNAUTHORIZED_FIELD_OR_TYPE")),
+            "body: {body}"
+        );
+        // The path belongs to `B`, which nobody executed.
+        assert_eq!(
+            body.pointer("/errors/0/path"),
+            Some(&serde_json::json!(["orga", "id"])),
+            "body: {body}"
+        );
+
+        assert_no_subgraph_calls(handles).await;
+    }
+
+    /// Without `reject_unauthorized`, the authorized operation executes and returns its
+    /// data. Error-path reconciliation drops the sibling's path, since it matches
+    /// nothing in the executed operation's shape, so its error arrives with a code and
+    /// no path on a successful response.
+    #[tokio::test]
+    async fn authorized_operation_beside_unauthorized_sibling_executes() {
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({
+                "authorization": { "directives": { "enabled": true } }
+            }))
+            .unwrap()
+            .schema(AUTHENTICATED_SCHEMA)
+            .subgraph_hook(|_name, _service| {
+                let (mock, mut handle) =
+                    tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+                tokio::spawn(async move {
+                    while let Some((req, responder)) = handle.next_request().await {
+                        responder.send_response(
+                            subgraph::Response::fake_builder()
+                                .context(req.context)
+                                .data(serde_json::json! {{ "currentUser": { "name": "Ada" } }})
+                                .build(),
+                        );
+                    }
+                });
+                mock.boxed_clone()
+            })
+            .build_router()
+            .await
+            .unwrap();
+
+        let (status, body) = wire_response(
+            service,
+            graphql_post(MULTI_OP_QUERY, Some("A"), Context::new()),
+        )
+        .await;
+
+        assert_eq!(status, http::StatusCode::OK);
+        assert_eq!(
+            body.pointer("/data/currentUser/name"),
+            Some(&serde_json::json!("Ada")),
+            "body: {body}"
+        );
+        assert_eq!(
+            body.pointer("/errors/0/extensions/code"),
+            Some(&serde_json::json!("UNAUTHORIZED_FIELD_OR_TYPE")),
+            "body: {body}"
+        );
+        assert_eq!(body.pointer("/errors/0/path"), None, "body: {body}");
+    }
+}
+
+/// A partial filter can leave an operation with nothing to execute. Filtering removes
+/// `phone`, emptying `currentUser`, and `@skip(if: true)` removes the only other root
+/// field, so the plan comes back with no root node while the operation was filtered rather
+/// than refused.
+///
+/// The plan shape here matches what a refused operation produces, so anything deciding
+/// refusal from the absence of a root node together with the presence of unauthorized
+/// paths answers this operation as though the router had refused it.
+#[tokio::test]
+async fn partial_filter_leaving_no_executable_work() {
+    let handles: Arc<Mutex<Vec<tower_test::mock::Handle<subgraph::Request, subgraph::Response>>>> =
+        Arc::new(Mutex::new(Vec::new()));
+    let handles_clone = handles.clone();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "authorization": { "directives": { "enabled": true } }
+        }))
+        .unwrap()
+        .schema(AUTHENTICATED_SCHEMA)
+        .subgraph_hook(move |_name, _service| {
+            let (mock, handle) = tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+            handles_clone.lock().unwrap().push(handle);
+            mock.boxed_clone()
+        })
+        .build_router()
+        .await
+        .unwrap();
+
+    let req = graphql::Request {
+        query: Some(
+            "query { currentUser { phone } orga(id: 1) @skip(if: true) { name } }".to_string(),
+        ),
+        ..Default::default()
+    };
+    let response = service
+        .oneshot(router::Request {
+            context: Context::new(),
+            router_request: http::Request::builder()
+                .method("POST")
+                .header(CONTENT_TYPE, "application/json")
+                .header(ACCEPT, "application/json")
+                .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+                .unwrap(),
+        })
+        .await
+        .unwrap();
+    let bytes = body::into_bytes(response.response.into_body())
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+    // No subgraph answered, so the plan carried no executable work.
+    let handles: Vec<_> = handles.lock().unwrap().drain(..).collect();
+    assert!(!handles.is_empty(), "no subgraph services were created");
+    for handle in handles {
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
+    insta::assert_json_snapshot!(body);
 }
 
 #[tokio::test]

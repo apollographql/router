@@ -161,15 +161,44 @@ impl ConditionResolverCache {
         excluded_destinations: ExcludedDestinations,
         excluded_conditions: ExcludedConditions,
     ) {
-        self.edge_states
-            .entry(edge)
-            .or_default()
-            .push(CachedConditionEntry {
-                resolution,
-                context,
-                excluded_destinations,
-                excluded_conditions,
-            });
+        let entries = self.edge_states.entry(edge).or_default();
+        let resolution = Self::dedupe_resolution(entries, resolution);
+        entries.push(CachedConditionEntry {
+            resolution,
+            context,
+            excluded_destinations,
+            excluded_conditions,
+        });
+    }
+
+    /// Many cache entries for the same edge (differing only by context/exclusions) resolve to
+    /// structurally identical path trees, each independently allocated. Share the first equal
+    /// tree's `Arc` instead of storing another copy.
+    fn dedupe_resolution(
+        entries: &[CachedConditionEntry],
+        resolution: ConditionResolution,
+    ) -> ConditionResolution {
+        let ConditionResolution::Satisfied {
+            cost,
+            path_tree: Some(tree),
+            context_map: None,
+        } = &resolution
+        else {
+            return resolution;
+        };
+        for entry in entries {
+            if let ConditionResolution::Satisfied {
+                cost: cached_cost,
+                path_tree: Some(cached_tree),
+                context_map: None,
+            } = &entry.resolution
+                && cached_cost == cost
+                && (Arc::ptr_eq(tree, cached_tree) || tree == cached_tree)
+            {
+                return entry.resolution.clone();
+            }
+        }
+        resolution
     }
 }
 

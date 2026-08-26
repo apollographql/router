@@ -246,7 +246,9 @@ impl InstrumentData {
             opt.max_opened,
             "$[?(@.max_opened_subscriptions)]",
             opt.queue_capacity,
-            "$[?(@.queue_capacity)]"
+            "$[?(@.queue_capacity)]",
+            opt.reconnect,
+            "$.mode.passthrough..max_reconnect_attempts[?(@ > 0)]"
         );
 
         populate_config_instrument!(
