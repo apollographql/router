@@ -33,7 +33,7 @@ mod fleet_detector;
 mod forbid_mutations;
 mod headers;
 pub(crate) mod healthcheck;
-mod include_subgraph_errors;
+pub(crate) mod include_subgraph_errors;
 pub(crate) mod license_enforcement;
 pub(crate) mod limits;
 pub(crate) mod mock_subgraphs;

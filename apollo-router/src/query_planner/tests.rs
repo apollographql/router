@@ -11,6 +11,7 @@ use http::Method;
 use serde_json_bytes::json;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::ServiceExt;
+use tower::util::BoxCloneSyncService;
 
 use super::DeferredNode;
 use super::Depends;
@@ -173,7 +174,10 @@ fn subgraph_services(graphs: Vec<(String, subgraph::BoxCloneService)>) -> Subgra
                 .map(|(name, service)| {
                     (
                         name,
-                        UnconstrainedBuffer::new(service, crate::layers::DEFAULT_BUFFER_SIZE),
+                        BoxCloneSyncService::new(UnconstrainedBuffer::new(
+                            service,
+                            crate::layers::DEFAULT_BUFFER_SIZE,
+                        )),
                     )
                 })
                 .collect(),

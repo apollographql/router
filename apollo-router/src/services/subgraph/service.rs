@@ -21,7 +21,6 @@ use super::http::http_response_to_graphql_response;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
-use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::limits::response_size_limit::ResponseSizeLimitError;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::events::log_subgraph_request_event;
@@ -319,7 +318,7 @@ async fn call_http(
 
 /// The full, buffered service stack for one subgraph.
 pub(crate) type BufferedSubgraphService =
-    UnconstrainedBuffer<subgraph::Request, BoxFuture<'static, subgraph::ServiceResult>>;
+    tower::util::BoxCloneSyncService<subgraph::Request, subgraph::Response, BoxError>;
 
 /// The pre-built subgraph service stack for each subgraph, keyed by subgraph name.
 /// Stacks are built once; [`Self::get`] hands out cheap clones.
@@ -332,6 +331,8 @@ impl SubgraphServices {
     /// Retrieves the pre-built subgraph service stack for `name`, or `None` if no subgraph
     /// is registered under that name.
     pub(crate) fn get(&self, name: &str) -> Option<subgraph::BoxCloneService> {
+        // XXX(@goto-bus-stop): double-boxing, would be nice if we could just cast away the
+        // Sync-ness
         self.services.get(name).map(|svc| svc.clone().boxed_clone())
     }
 }

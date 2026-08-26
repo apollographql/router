@@ -8,6 +8,7 @@ use apollo_federation::query_plan::query_planner::QueryPlanner;
 use indexmap::IndexMap;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::util::BoxCloneSyncService;
 
 use super::acquire::HttpClientInputsMaps;
 use crate::Configuration;
@@ -25,6 +26,7 @@ use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
+use crate::plugins::include_subgraph_errors::IncludeSubgraphErrors;
 use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
@@ -197,8 +199,12 @@ pub(crate) fn build_subgraph_service(
     let subscription_config = subscription_plugin_config(plugins).map(Arc::new);
     let apq_enabled = configuration.apq.subgraph.get(name).enabled;
 
-    ServiceBuilder::new()
+    let service = ServiceBuilder::new()
         .buffered()
+        .apply_plugin_layer(
+            &plugins,
+            IncludeSubgraphErrors::tag_errors_with_subgraph_name_layer,
+        )
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.subgraph_service(name, service)
         })
@@ -209,7 +215,9 @@ pub(crate) fn build_subgraph_service(
         ))
         .layer(SubgraphApqLayer::new(apq_enabled))
         .layer(content_negotiation::SubgraphContentNegotiationLayer::default())
-        .service(SubgraphService::new(name, http_service))
+        .service(SubgraphService::new(name, http_service));
+
+    BoxCloneSyncService::new(service)
 }
 
 /// Builds the full service stack for every subgraph, keyed by subgraph name.
@@ -438,6 +446,10 @@ fn build_supergraph_service(
     ServiceBuilder::new()
         .layer(content_negotiation::SupergraphContentNegotiationLayer::default())
         .layer(crate::compute_job::ComputeJobMetricsLayer::new())
+        .apply_plugin_layer(
+            &plugins,
+            IncludeSubgraphErrors::redact_subgraph_errors_layer,
+        )
         .rust_plugins(plugins, |plugin, service| {
             plugin.supergraph_service(service)
         })
