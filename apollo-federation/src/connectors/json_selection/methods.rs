@@ -74,6 +74,7 @@ pub(super) enum ArrowMethod {
     Has,
     Keys,
     Values,
+    WithError,
 }
 
 #[macro_export]
@@ -195,6 +196,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Has => &future::HasMethod,
             Self::Keys => &future::KeysMethod,
             Self::Values => &future::ValuesMethod,
+            Self::WithError => &public::WithErrorMethod,
         }
     }
 }
@@ -252,6 +254,7 @@ impl ArrowMethod {
             "trim" => Some(Self::Trim),
             "trimStart" => Some(Self::TrimStart),
             "trimEnd" => Some(Self::TrimEnd),
+            "withError" => Some(Self::WithError),
             _ => None,
         };
 
@@ -306,6 +309,7 @@ impl ArrowMethod {
                 | Self::Trim
                 | Self::TrimStart
                 | Self::TrimEnd
+                | Self::WithError
         )
     }
 }
