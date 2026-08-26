@@ -21,6 +21,7 @@ use crate::layers::map_future_with_request_data::MapFutureWithRequestDataService
 use crate::layers::rust_plugins::RustPluginsLayer;
 use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::plugin::DynPlugin;
+use crate::plugin::PluginPrivate;
 use crate::services::Plugins;
 use crate::services::supergraph;
 
@@ -417,6 +418,9 @@ pub trait ServiceExt<Request>: Service<Request> {
 }
 impl<T: ?Sized, Request> ServiceExt<Request> for T where T: Service<Request> {}
 
+/// Helper type to name layers produced by [`ServiceBuilder::option_layer()`].
+type OptionLayer<L> = tower::util::Either<L, tower::layer::util::Identity>;
+
 /// Extension to [`ServiceBuilder`] for pipeline utilities that are not exposed to crate consumers.
 pub(crate) trait InternalServiceBuilderExt<L>: Sized {
     /// Apply plugins to a service stack.
@@ -440,6 +444,29 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
             &dyn DynPlugin,
             tower::util::BoxCloneService<R, Resp, Err>,
         ) -> tower::util::BoxCloneService<R, Resp, Err>;
+
+    /// Apply a plugin layer to a service stack.
+    ///
+    /// Provide the plugin layer to apply as a method reference.
+    ///
+    /// If the plugin isn't available in the `plugins` registry, this function is a no-op.
+    ///
+    /// ## Example
+    ///
+    /// To apply the execution span layer from the Telemetry plugin:
+    ///
+    /// ```rust,ignore
+    /// ServiceBuilder::new()
+    ///     .apply_plugin_layer(plugins.clone(), Telemetry::execution_span_layer)
+    ///     .service(execution_service)
+    /// ```
+    fn apply_plugin_layer<P, OutLayer>(
+        self,
+        plugins: Arc<Plugins>,
+        get_layer: impl FnOnce(&P) -> OutLayer,
+    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    where
+        P: PluginPrivate;
 }
 
 impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
@@ -455,5 +482,20 @@ impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
         ) -> tower::util::BoxCloneService<R, Resp, Err>,
     {
         self.layer(RustPluginsLayer::new(plugins, apply))
+    }
+
+    fn apply_plugin_layer<P, OutLayer>(
+        self,
+        plugins: Arc<Plugins>,
+        get_layer: impl FnOnce(&P) -> OutLayer,
+    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    where
+        P: PluginPrivate,
+    {
+        let layer = plugins
+            .values()
+            .find_map(|plugin| plugin.as_any().downcast_ref::<P>())
+            .map(get_layer);
+        self.option_layer(layer)
     }
 }
