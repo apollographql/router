@@ -16,7 +16,7 @@
 # Defaults to **dry-run**: prepares, diffs, logs auto-tag would-do — does
 # not commit, push, or open a PR unless explicitly opted in.
 
-name: Test release prep
+name: "Release: prep"
 
 on:
   workflow_dispatch:
@@ -366,7 +366,7 @@ jobs:
           >  - Version bumps (see _Files Changed_ for the true reality)
           >  - That it targets the right release branch (\`$VERSION\` in this case!)
           >
-          > Opened automatically by the \`test-release-prep\` workflow.
+          > Opened automatically by the \`release-prep\` workflow.
           EOF
           )
           gh pr create \
