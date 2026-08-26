@@ -21,6 +21,7 @@ use crate::introspection;
 use crate::introspection::IntrospectionService;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::InternalServiceBuilderExt as _;
+use crate::layers::ServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
@@ -208,6 +209,8 @@ pub(crate) fn build_subgraph_service(
             p.tag_errors_with_subgraph_name_layer(Arc::from(name))
         })
         .apply_required_plugin_layer(plugins, |h: &Headers| h.subgraph_headers_layer(name))
+        .apply_plugin_layer(plugins, Telemetry::instrument_subgraph_layer)
+        .apply_plugin_layer(plugins, Telemetry::subgraph_ftv1_layer)
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.subgraph_service(name, service)
         })
@@ -221,7 +224,9 @@ pub(crate) fn build_subgraph_service(
         .service(SubgraphService::new(name, http_service))
         .boxed_clone();
 
-    UnconstrainedBuffer::new(service, DEFAULT_BUFFER_SIZE)
+    // We apply the buffered() here separately so it works on an inner BoxCloneService, which makes
+    // the type easier to name
+    ServiceBuilder::new().buffered().service(service)
 }
 
 /// Builds the full service stack for every subgraph, keyed by subgraph name.
