@@ -1,6 +1,9 @@
 //TODO move telemetry logging functionality to this file
 #[cfg(test)]
 mod test {
+    use tower::Service as _;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt as _;
     use tracing_futures::WithSubscriber;
 
     use crate::assert_snapshot_subscriber;
@@ -83,15 +86,34 @@ mod test {
             .expect("test harness");
 
         async {
-            test_harness
-                .subgraph_service("subgraph", |_r| async {
-                    tracing::info!("response");
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(
                     subgraph::Response::fake2_builder()
                         .header("custom-header", "val1")
                         .data(serde_json::json!({"data": "res"}).to_string())
                         .subgraph_name("subgraph")
                         .build()
+                        .unwrap(),
+                );
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(test_harness.instrument_subgraph_layer())
+                // the spawned driver doesn't actually run _inside_ the subgraph span. it's a
+                // tower-test thing. map_response is one way to test what regular inner services do
+                .map_response(|resp: subgraph::Response| {
+                    tracing::info!("response");
+                    resp
                 })
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
                 .call(
                     subgraph::Request::fake_builder()
                         .subgraph_name("subgraph")
@@ -104,6 +126,8 @@ mod test {
                 )
                 .await
                 .expect("expecting successful response");
+
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_subscriber(assert_snapshot_subscriber!())
         .await

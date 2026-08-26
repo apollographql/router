@@ -200,8 +200,9 @@ pub(crate) fn build_subgraph_service(
     let subscription_config = subscription_plugin_config(plugins).map(Arc::new);
     let apq_enabled = configuration.apq.subgraph.get(name).enabled;
 
-    ServiceBuilder::new()
-        .buffered()
+    let service = ServiceBuilder::new()
+        .apply_plugin_layer(plugins, Telemetry::instrument_subgraph_layer)
+        .apply_plugin_layer(plugins, Telemetry::subgraph_ftv1_layer)
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.subgraph_service(name, service)
         })
@@ -213,6 +214,11 @@ pub(crate) fn build_subgraph_service(
         .layer(SubgraphApqLayer::new(apq_enabled))
         .layer(content_negotiation::SubgraphContentNegotiationLayer::default())
         .service(SubgraphService::new(name, http_service))
+        .boxed_clone();
+
+    // We apply the buffered() here separately so it works on an inner BoxCloneService, which makes
+    // the type easier to name
+    ServiceBuilder::new().buffered().service(service)
 }
 
 /// Builds the full service stack for every subgraph, keyed by subgraph name.

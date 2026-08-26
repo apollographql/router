@@ -9,6 +9,7 @@ use mime::APPLICATION_JSON;
 use opentelemetry::KeyValue;
 use serde_json_bytes::Value;
 use serde_json_bytes::json;
+use tower::Service as _;
 use tower::ServiceBuilder;
 use tower::ServiceExt as _;
 use uuid::Uuid;
@@ -883,18 +884,20 @@ async fn test_subgraph_error_counting() {
             .await
             .expect("test harness");
 
-        let router_service = test_harness.subgraph_service(subgraph_name, move |req| {
-            let subgraph_response = example_response.clone();
-            let subgraph_request_id = subgraph_request_id.clone();
-            async move {
-                Ok(SubgraphResponse::new_from_response(
-                    http::Response::new(subgraph_response.clone()),
-                    req.context,
-                    subgraph_name.to_string(),
-                    subgraph_request_id,
-                ))
-            }
+        let (mock, mut handle) = tower_test::mock::pair::<subgraph::Request, SubgraphResponse>();
+        let driver = tokio::task::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(SubgraphResponse::new_from_response(
+                http::Response::new(example_response.clone()),
+                req.context,
+                subgraph_name.to_string(),
+                subgraph_request_id.clone(),
+            ));
         });
+
+        let mut service = ServiceBuilder::new()
+            .layer(test_harness.instrument_subgraph_layer())
+            .service(mock);
 
         let context = Context::new();
         context.insert_json_value(APOLLO_OPERATION_ID, operation_id.into());
@@ -908,7 +911,9 @@ async fn test_subgraph_error_counting() {
             .subgraph_name(subgraph_name)
             .context(context)
             .build();
-        router_service.call(request).await.unwrap();
+        service.ready().await.unwrap().call(request).await.unwrap();
+
+        crate::plugin::test::await_mock_driver(driver).await;
 
         assert_counter!(
             "apollo.router.operations.error",

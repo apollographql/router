@@ -481,6 +481,195 @@ where
     }
 }
 
+/// Layer type for [Telemetry::subgraph_ftv1_layer].
+#[derive(Clone, Copy)]
+pub(crate) struct SubgraphFtv1Layer;
+
+impl SubgraphFtv1Layer {
+    fn new() -> Self {
+        Self
+    }
+}
+
+impl<S> tower::Layer<S> for SubgraphFtv1Layer
+where
+    S: tower::Service<SubgraphRequest, Response = SubgraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = subgraph::BoxCloneService;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        ServiceBuilder::new()
+            .map_request(request_ftv1)
+            .map_response(|resp: SubgraphResponse| {
+                let subgraph_name = ByteString::from(resp.subgraph_name.as_str());
+                store_ftv1(&subgraph_name, resp)
+            })
+            .service(inner)
+            .boxed_clone()
+    }
+}
+
+/// Layer type for [Telemetry::instrument_subgraph_layer].
+#[derive(Clone)]
+pub(crate) struct InstrumentSubgraphLayer {
+    config: Arc<config::Conf>,
+    static_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
+    static_apollo_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
+    static_cache_instruments: Arc<HashMap<String, StaticInstrument>>,
+}
+
+impl InstrumentSubgraphLayer {
+    fn new(
+        config: Arc<config::Conf>,
+        static_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
+        static_apollo_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
+        static_cache_instruments: Arc<HashMap<String, StaticInstrument>>,
+    ) -> Self {
+        Self {
+            config,
+            static_subgraph_instruments,
+            static_apollo_subgraph_instruments,
+            static_cache_instruments,
+        }
+    }
+}
+
+impl<S> tower::Layer<S> for InstrumentSubgraphLayer
+where
+    S: tower::Service<SubgraphRequest, Response = SubgraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = subgraph::BoxCloneService;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        let req_fn_config = self.config.clone();
+        let res_fn_config = self.config.clone();
+        let static_subgraph_instruments = self.static_subgraph_instruments.clone();
+        let static_apollo_subgraph_instruments = self.static_apollo_subgraph_instruments.clone();
+        let static_cache_instruments = self.static_cache_instruments.clone();
+
+        ServiceBuilder::new()
+            .instrument(move |req: &SubgraphRequest| {
+                span_factory::create_subgraph(req.subgraph_name.as_str(), req)
+            })
+            .map_future_with_request_data(
+                move |sub_request: &SubgraphRequest| {
+                    let custom_attributes = req_fn_config
+                        .instrumentation
+                        .spans
+                        .subgraph
+                        .attributes
+                        .on_request(sub_request);
+                    let custom_instruments = req_fn_config
+                        .instrumentation
+                        .instruments
+                        .new_subgraph_instruments(static_subgraph_instruments.clone());
+                    custom_instruments.on_request(sub_request);
+                    let mut custom_events =
+                        req_fn_config.instrumentation.events.new_subgraph_events();
+                    custom_events.on_request(sub_request);
+
+                    let apollo_instruments: ApolloSubgraphInstruments = req_fn_config
+                        .instrumentation
+                        .instruments
+                        .new_apollo_subgraph_instruments(
+                            static_apollo_subgraph_instruments.clone(),
+                            req_fn_config.apollo.clone(),
+                        );
+                    apollo_instruments.on_request(sub_request);
+
+                    let custom_cache_instruments: CacheInstruments = req_fn_config
+                        .instrumentation
+                        .instruments
+                        .new_cache_instruments(static_cache_instruments.clone());
+                    custom_cache_instruments.on_request(sub_request);
+
+                    (
+                        sub_request.context.clone(),
+                        custom_instruments,
+                        custom_attributes,
+                        custom_events,
+                        apollo_instruments,
+                        custom_cache_instruments,
+                    )
+                },
+                move |(
+                    context,
+                    custom_instruments,
+                    custom_attributes,
+                    mut custom_events,
+                    apollo_instruments,
+                    custom_cache_instruments,
+                ): (
+                    Context,
+                    SubgraphInstruments,
+                    Vec<KeyValue>,
+                    SubgraphEvents,
+                    ApolloSubgraphInstruments,
+                    CacheInstruments,
+                ),
+                      f| {
+                    let conf = res_fn_config.clone();
+                    async move {
+                        let span = Span::current();
+                        span.set_span_dyn_attributes(custom_attributes);
+                        let result: Result<SubgraphResponse, BoxError> = f.await;
+
+                        match &result {
+                            Ok(resp) => {
+                                if resp.response.status() >= StatusCode::BAD_REQUEST {
+                                    span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                                } else {
+                                    span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
+                                }
+                                span.set_span_dyn_attributes(
+                                    conf.instrumentation
+                                        .spans
+                                        .subgraph
+                                        .attributes
+                                        .on_response(resp),
+                                );
+                                apollo_instruments.on_response(resp);
+                                custom_cache_instruments.on_response(resp);
+                                custom_instruments.on_response(resp);
+                                custom_events.on_response(resp);
+                            }
+                            Err(err) => {
+                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                                span.set_span_dyn_attributes(
+                                    conf.instrumentation
+                                        .spans
+                                        .subgraph
+                                        .attributes
+                                        .on_error(err, &context),
+                                );
+                                apollo_instruments.on_error(err, &context);
+                                custom_cache_instruments.on_error(err, &context);
+                                custom_instruments.on_error(err, &context);
+                                custom_events.on_error(err, &context);
+                            }
+                        }
+
+                        if let Ok(resp) = result {
+                            Ok(count_subgraph_errors(resp, &conf.apollo.errors).await)
+                        } else {
+                            result
+                        }
+                    }
+                },
+            )
+            .service(inner)
+            .boxed_clone()
+    }
+}
+
 impl Telemetry {
     /// Returns a layer that instruments query planner execution with a span and error metrics.
     pub(crate) fn instrument_execution_layer(&self) -> InstrumentExecutionLayer {
@@ -502,6 +691,38 @@ impl Telemetry {
     /// Returns a layer that applies user-configured custom attributes to the active span.
     pub(crate) fn custom_instrument_http_client_layer(&self) -> CustomInstrumentHttpClientLayer {
         CustomInstrumentHttpClientLayer::new(self.config.clone())
+    }
+
+    /// Returns a layer that instruments a subgraph service with both Apollo and custom
+    /// instrumentation.
+    pub(crate) fn instrument_subgraph_layer(&self) -> InstrumentSubgraphLayer {
+        let static_subgraph_instruments = self
+            .builtin_instruments
+            .read()
+            .subgraph_custom_instruments
+            .clone();
+        let static_apollo_subgraph_instruments = self
+            .builtin_instruments
+            .read()
+            .apollo_subgraph_instruments
+            .clone();
+        let static_cache_instruments = self
+            .builtin_instruments
+            .read()
+            .cache_custom_instruments
+            .clone();
+        InstrumentSubgraphLayer::new(
+            self.config.clone(),
+            static_subgraph_instruments,
+            static_apollo_subgraph_instruments,
+            static_cache_instruments,
+        )
+    }
+
+    /// Returns a layer that propagates FTV1 tracing headers to subgraph requests and stashes the
+    /// traces from the response for processing.
+    pub(crate) fn subgraph_ftv1_layer(&self) -> SubgraphFtv1Layer {
+        SubgraphFtv1Layer::new()
     }
 }
 
@@ -1113,146 +1334,6 @@ impl PluginPrivate for Telemetry {
                             result,
                             enabled_features,
                         )
-                    }
-                },
-            )
-            .service(service)
-            .boxed_clone()
-    }
-
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: subgraph::BoxCloneService,
-    ) -> subgraph::BoxCloneService {
-        let config = self.config.clone();
-        let conf = self.config.clone();
-        let subgraph_name = ByteString::from(name);
-        let name = name.to_owned();
-        let static_subgraph_instruments = self
-            .builtin_instruments
-            .read()
-            .subgraph_custom_instruments
-            .clone();
-        let static_apollo_subgraph_instruments = self
-            .builtin_instruments
-            .read()
-            .apollo_subgraph_instruments
-            .clone();
-        let static_cache_instruments = self
-            .builtin_instruments
-            .read()
-            .cache_custom_instruments
-            .clone();
-        ServiceBuilder::new()
-            .instrument(move |req: &SubgraphRequest| {
-                span_factory::create_subgraph(name.as_str(), req)
-            })
-            .map_request(move |req: SubgraphRequest| request_ftv1(req))
-            .map_response(move |resp| store_ftv1(&subgraph_name, resp))
-            .map_future_with_request_data(
-                move |sub_request: &SubgraphRequest| {
-                    let custom_attributes = config
-                        .instrumentation
-                        .spans
-                        .subgraph
-                        .attributes
-                        .on_request(sub_request);
-                    let custom_instruments = config
-                        .instrumentation
-                        .instruments
-                        .new_subgraph_instruments(static_subgraph_instruments.clone());
-                    custom_instruments.on_request(sub_request);
-                    let mut custom_events = config.instrumentation.events.new_subgraph_events();
-                    custom_events.on_request(sub_request);
-
-                    let apollo_instruments: ApolloSubgraphInstruments = config
-                        .instrumentation
-                        .instruments
-                        .new_apollo_subgraph_instruments(
-                            static_apollo_subgraph_instruments.clone(),
-                            config.apollo.clone(),
-                        );
-                    apollo_instruments.on_request(sub_request);
-
-                    let custom_cache_instruments: CacheInstruments = config
-                        .instrumentation
-                        .instruments
-                        .new_cache_instruments(static_cache_instruments.clone());
-                    custom_cache_instruments.on_request(sub_request);
-
-                    (
-                        sub_request.context.clone(),
-                        custom_instruments,
-                        custom_attributes,
-                        custom_events,
-                        apollo_instruments,
-                        custom_cache_instruments,
-                    )
-                },
-                move |(
-                    context,
-                    custom_instruments,
-                    custom_attributes,
-                    mut custom_events,
-                    apollo_instruments,
-                    custom_cache_instruments,
-                ): (
-                    Context,
-                    SubgraphInstruments,
-                    Vec<KeyValue>,
-                    SubgraphEvents,
-                    ApolloSubgraphInstruments,
-                    CacheInstruments,
-                ),
-                      f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
-                    let conf = conf.clone();
-                    async move {
-                        let span = Span::current();
-                        span.set_span_dyn_attributes(custom_attributes);
-                        let result: Result<SubgraphResponse, BoxError> = f.await;
-
-                        match &result {
-                            Ok(resp) => {
-                                if resp.response.status() >= StatusCode::BAD_REQUEST {
-                                    span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                                } else {
-                                    span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
-                                }
-                                span.set_span_dyn_attributes(
-                                    conf.instrumentation
-                                        .spans
-                                        .subgraph
-                                        .attributes
-                                        .on_response(resp),
-                                );
-                                apollo_instruments.on_response(resp);
-                                custom_cache_instruments.on_response(resp);
-                                custom_instruments.on_response(resp);
-                                custom_events.on_response(resp);
-                            }
-                            Err(err) => {
-                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-
-                                span.set_span_dyn_attributes(
-                                    conf.instrumentation
-                                        .spans
-                                        .subgraph
-                                        .attributes
-                                        .on_error(err, &context),
-                                );
-                                apollo_instruments.on_error(err, &context);
-                                custom_cache_instruments.on_error(err, &context);
-                                custom_instruments.on_error(err, &context);
-                                custom_events.on_error(err, &context);
-                            }
-                        }
-
-                        if let Ok(resp) = result {
-                            Ok(count_subgraph_errors(resp, &conf.apollo.errors).await)
-                        } else {
-                            result
-                        }
                     }
                 },
             )
@@ -2203,6 +2284,7 @@ mod tests {
     use serde_json_bytes::ByteString;
     use serde_json_bytes::json;
     use tower::Service;
+    use tower::ServiceBuilder;
     use tower::ServiceExt;
 
     use super::CustomTraceIdPropagator;
@@ -2226,6 +2308,7 @@ mod tests {
     use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::telemetry::EnableSubgraphFtv1;
     use crate::plugins::telemetry::config::TraceIdFormat;
+    use crate::plugins::test::PluginTestHarness;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SubgraphRequest;
@@ -2838,10 +2921,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_custom_subgraph_instruments_level() {
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/custom_instruments_level.router.yaml"
-            ))
-            .await;
+            let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+                .config(include_str!(
+                    "testdata/custom_instruments_level.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
 
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
@@ -2870,8 +2956,9 @@ mod tests {
                     );
                 }
             });
-            let mut bad_request_subgraph_service =
-                plugin.subgraph_service("test", mock_bad_request_service.boxed_clone());
+            let mut bad_request_subgraph_service = ServiceBuilder::new()
+                .layer(test_harness.instrument_subgraph_layer())
+                .service(mock_bad_request_service);
             let sub_req = http::Request::builder()
                 .method("POST")
                 .uri("http://test")
@@ -2946,10 +3033,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_custom_subgraph_instruments() {
         async {
-            let plugin = Box::new(
-                create_plugin_with_config(include_str!("testdata/custom_instruments.router.yaml"))
-                    .await,
-            );
+            let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+                .config(include_str!("testdata/custom_instruments.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
 
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
@@ -2978,8 +3066,9 @@ mod tests {
                     );
                 }
             });
-            let mut bad_request_subgraph_service =
-                plugin.subgraph_service("test", mock_bad_request_service.boxed_clone());
+            let mut bad_request_subgraph_service = ServiceBuilder::new()
+                .layer(test_harness.instrument_subgraph_layer())
+                .service(mock_bad_request_service);
             let sub_req = http::Request::builder()
                 .method("POST")
                 .uri("http://test")
@@ -3116,9 +3205,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_metrics_ok() {
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
-                    .await;
+            let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+                .config(include_str!("testdata/custom_attributes.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
 
             let (mock_subgraph_service, mut handle) =
                 tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
@@ -3149,8 +3240,9 @@ mod tests {
                 );
             });
 
-            let mut subgraph_service =
-                plugin.subgraph_service("my_subgraph_name", mock_subgraph_service.boxed_clone());
+            let mut subgraph_service = ServiceBuilder::new()
+                .layer(test_harness.instrument_subgraph_layer())
+                .service(mock_subgraph_service);
             let subgraph_req = SubgraphRequest::fake_builder()
                 .subgraph_request(
                     http_ext::Request::fake_builder()
@@ -3192,9 +3284,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_metrics_http_error() {
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
-                    .await;
+            let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+                .config(include_str!("testdata/custom_attributes.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
 
             let (mock_subgraph_service_in_error, mut handle) =
                 tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
@@ -3207,10 +3301,9 @@ mod tests {
                 });
             });
 
-            let mut subgraph_service = plugin.subgraph_service(
-                "my_subgraph_name_error",
-                mock_subgraph_service_in_error.boxed_clone(),
-            );
+            let mut subgraph_service = ServiceBuilder::new()
+                .layer(test_harness.instrument_subgraph_layer())
+                .service(mock_subgraph_service_in_error);
 
             let subgraph_req = SubgraphRequest::fake_builder()
                 .subgraph_request(
