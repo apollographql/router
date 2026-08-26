@@ -250,7 +250,7 @@ impl ApolloExporter {
         let mut msg = "default error message".to_string();
         let mut has_traces = false;
 
-        for (_, traces_and_stats) in proto_report.traces_per_query.iter_mut() {
+        for traces_and_stats in proto_report.traces_per_query.values_mut() {
             if !traces_and_stats.trace.is_empty() {
                 has_traces = true;
                 if self.strip_traces.load(Ordering::SeqCst) {
