@@ -592,6 +592,10 @@ impl InstrumentData {
             atomic_is_true(&crate::executable::APOLLO_ROUTER_LICENCE_PATH_IS_SET),
         );
         attributes.insert(
+            "opt.apollo.graph_artifact_reference".to_string(),
+            mutex_is_some(&crate::executable::APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE),
+        );
+        attributes.insert(
             "opt.apollo.supergraph.urls".to_string(),
             atomic_is_true(&crate::executable::APOLLO_ROUTER_SUPERGRAPH_URLS_IS_SET),
         );
