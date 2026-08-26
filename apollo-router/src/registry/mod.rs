@@ -612,6 +612,7 @@ fn stream_license_from_oci(oci_config: OciConfig) -> impl Stream<Item = Result<L
         loop {
             match fetch_oci_manifest_digest(&oci_config).await {
                 Ok(current_digest) => {
+                    tracing::debug!("oci manifest digest fetch succeeded");
                     if last_digest.as_deref() == Some(current_digest.as_str()) {
                         tracing::debug!("oci manifest digest unchanged, skip fetching license");
                     } else {
@@ -657,6 +658,7 @@ fn stream_license_from_oci(oci_config: OciConfig) -> impl Stream<Item = Result<L
                     }
                 }
             }
+            // Repeat the fetch every polling_interval
             tokio::time::sleep(polling_time).await;
             polling_time = oci_config.poll_interval;
         }
