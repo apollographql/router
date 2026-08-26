@@ -91,18 +91,15 @@ impl CachingRequest {
 }
 
 assert_impl_all!(Response: Send);
+/// What query planning produces on success. An alias so the payload can change in one
+/// place.
+pub(crate) type QueryPlannerContent = Arc<QueryPlan>;
+
 /// [`Context`] and [`QueryPlan`] for the response.
 pub(crate) struct Response {
     /// Optional in case of error
     pub(crate) content: Option<QueryPlannerContent>,
     pub(crate) errors: Vec<graphql::Error>,
-}
-
-/// Query, QueryPlan and Introspection data.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) enum QueryPlannerContent {
-    Plan { plan: Arc<QueryPlan> },
-    Response { response: Box<graphql::Response> },
 }
 
 #[buildstructor::buildstructor]
@@ -111,16 +108,12 @@ impl Response {
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerResponse.
     #[builder]
-    pub(crate) fn new(
-        content: Option<QueryPlannerContent>,
-        errors: Vec<graphql::Error>,
-    ) -> Response {
+    pub(crate) fn new(content: Option<Arc<QueryPlan>>, errors: Vec<graphql::Error>) -> Response {
         Self { content, errors }
     }
 }
 
 pub(crate) type ServiceError = MaybeBackPressureError<QueryPlannerError>;
-pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, ServiceError>;
 pub(crate) type CacheBoxCloneService =
     tower::util::BoxCloneService<CachingRequest, Response, CacheResolverError>;
 #[allow(dead_code)]

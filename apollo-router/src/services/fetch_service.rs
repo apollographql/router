@@ -13,7 +13,7 @@ use tracing::instrument::Instrumented;
 use super::ConnectRequest;
 use super::FetchRequest;
 use super::SubgraphRequest;
-use super::connector_service::ConnectorServiceFactory;
+use super::connector_service::ConnectorServices;
 use super::fetch::AddSubgraphNameExt;
 use crate::configuration::HoistOrphanErrors;
 use crate::configuration::subgraph::SubgraphConfiguration;
@@ -26,7 +26,7 @@ use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
 use crate::services::FetchResponse;
-use crate::services::SubgraphServiceFactory;
+use crate::services::SubgraphServices;
 use crate::services::fetch::ErrorMapping;
 use crate::services::fetch::Request;
 use crate::spec::Schema;
@@ -35,11 +35,11 @@ use crate::spec::Schema;
 /// on whether connectors are present in the subgraph.
 #[derive(Clone)]
 pub(crate) struct FetchService {
-    pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
+    pub(crate) subgraph_services: Arc<SubgraphServices>,
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>, // TODO: add subscription support to FetchService
-    pub(crate) connector_service_factory: Arc<ConnectorServiceFactory>,
+    pub(crate) connector_services: Arc<ConnectorServices>,
     pub(crate) hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
 }
 
@@ -47,17 +47,17 @@ impl FetchService {
     pub(crate) fn new(
         schema: Arc<Schema>,
         subgraph_schemas: Arc<SubgraphSchemas>,
-        subgraph_service_factory: Arc<SubgraphServiceFactory>,
+        subgraph_services: Arc<SubgraphServices>,
+        connector_services: Arc<ConnectorServices>,
         subscription_config: Option<SubscriptionConfig>,
-        connector_service_factory: Arc<ConnectorServiceFactory>,
         hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
     ) -> Self {
         Self {
-            subgraph_service_factory,
+            subgraph_services,
             schema,
             subgraph_schemas,
             _subscription_config: subscription_config,
-            connector_service_factory,
+            connector_services,
             hoist_orphan_errors,
         }
     }
@@ -77,7 +77,7 @@ impl tower::Service<Request> for FetchService {
             Request::Fetch(request) => self.handle_fetch(request),
             Request::Subscription(request) => fetch_service_handle_subscription(
                 self.schema.clone(),
-                self.subgraph_service_factory.clone(),
+                self.subgraph_services.clone(),
                 request,
             ),
         }
@@ -101,13 +101,13 @@ impl FetchService {
         let hoist_orphan_errors = self.hoist_orphan_errors.get(&service_name).enabled;
 
         if let Some(connector) = self
-            .connector_service_factory
+            .connector_services
             .connectors_by_service_name
             .get(service_name.as_ref())
         {
             Self::fetch_with_connector_service(
                 self.schema.clone(),
-                self.connector_service_factory.clone(),
+                self.connector_services.clone(),
                 connector.id.subgraph_name.clone(),
                 request,
                 hoist_orphan_errors,
@@ -121,7 +121,7 @@ impl FetchService {
         } else {
             Self::fetch_with_subgraph_service(
                 self.schema.clone(),
-                self.subgraph_service_factory.clone(),
+                self.subgraph_services.clone(),
                 self.subgraph_schemas.clone(),
                 request,
                 hoist_orphan_errors,
@@ -137,7 +137,7 @@ impl FetchService {
 
     fn fetch_with_connector_service(
         schema: Arc<Schema>,
-        connector_service_factory: Arc<ConnectorServiceFactory>,
+        connector_services: Arc<ConnectorServices>,
         subgraph_name: String,
         request: FetchRequest,
         hoist_orphan_errors: bool,
@@ -163,7 +163,7 @@ impl FetchService {
 
             let keys = connector.resolvable_key(schema.supergraph_schema())?;
 
-            let (_parts, response) = match connector_service_factory
+            let (_parts, response) = match connector_services
                 .get(&fetch_node.service_name)
                 .expect("we already checked that the connector exists for this service name; qed")
                 .oneshot(
@@ -199,7 +199,7 @@ impl FetchService {
 
     fn fetch_with_subgraph_service(
         schema: Arc<Schema>,
-        subgraph_service_factory: Arc<SubgraphServiceFactory>,
+        subgraph_services: Arc<SubgraphServices>,
         subgraph_schemas: Arc<SubgraphSchemas>,
         request: FetchRequest,
         hoist_orphan_errors: bool,
@@ -210,6 +210,7 @@ impl FetchService {
             variables,
             current_dir,
             context,
+            is_deferred,
         } = request;
 
         let FetchNode {
@@ -256,7 +257,7 @@ impl FetchService {
 
         let aqs = aliased_operation.to_string(); // TODO
         let current_dir = current_dir.clone();
-        let service = subgraph_service_factory
+        let service = subgraph_services
             .get(&service_name.clone())
             .expect("we already checked that the service exists during planning; qed");
 
@@ -283,6 +284,10 @@ impl FetchService {
             .build();
         subgraph_request.query_hash = fetch_node.schema_aware_hash.clone();
         subgraph_request.authorization = fetch_node.authorization.clone();
+        // Renamed at the boundary: the walker carries `is_deferred` as a property
+        // of the fetch; on the subgraph request it's `is_deferred_fetch` to make
+        // clear that it describes *this* fetch (not a query-level flag).
+        subgraph_request.is_deferred_fetch = is_deferred;
         Box::pin(async move {
             Ok(fetch_node
                 .subgraph_fetch(

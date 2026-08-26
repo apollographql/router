@@ -29,12 +29,13 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
+use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
 use crate::services::SubgraphResponse;
-use crate::services::SubgraphServiceFactory;
-use crate::services::connector_service::ConnectorServiceFactory;
+use crate::services::SubgraphServices;
+use crate::services::connector_service::ConnectorServices;
 use crate::services::fetch_service::FetchService;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -162,17 +163,22 @@ fn assert_response_diagnostics(
     );
 }
 
-fn subgraph_service_factory(
-    graphs: Vec<(String, subgraph::BoxCloneService)>,
-) -> SubgraphServiceFactory {
-    SubgraphServiceFactory::new(
-        graphs,
-        Default::default(),
-        // Required for subscriptions: we are not testing that here
-        Default::default(),
-        None,
-        Default::default(),
-    )
+/// Bare mock services keyed by subgraph name, buffered like the production stack but
+/// without its layers.
+fn subgraph_services(graphs: Vec<(String, subgraph::BoxCloneService)>) -> SubgraphServices {
+    SubgraphServices {
+        services: Arc::new(
+            graphs
+                .into_iter()
+                .map(|(name, service)| {
+                    (
+                        name,
+                        UnconstrainedBuffer::new(service, crate::layers::DEFAULT_BUFFER_SIZE),
+                    )
+                })
+                .collect(),
+        ),
+    }
 }
 
 #[test]
@@ -220,7 +226,7 @@ async fn fetch_includes_operation_name() {
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
     let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
-    let ssf = subgraph_service_factory(vec![(
+    let ssf = subgraph_services(vec![(
         "product".into(),
         mock_products_service.boxed_clone(),
     )]);
@@ -228,8 +234,8 @@ async fn fetch_includes_operation_name() {
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
+        Arc::new(ConnectorServices::empty(schema.clone())),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     );
 
@@ -278,7 +284,7 @@ async fn fetch_makes_post_requests() {
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
     let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
-    let ssf = subgraph_service_factory(vec![(
+    let ssf = subgraph_services(vec![(
         "product".into(),
         mock_products_service.boxed_clone(),
     )]);
@@ -286,8 +292,8 @@ async fn fetch_makes_post_requests() {
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
+        Arc::new(ConnectorServices::empty(schema.clone())),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     );
 
@@ -422,7 +428,7 @@ async fn defer() {
 
     let schema = include_str!("testdata/defer_schema.graphql");
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
-    let ssf = subgraph_service_factory(vec![
+    let ssf = subgraph_services(vec![
         ("X".into(), mock_x_service.boxed_clone()),
         ("Y".into(), mock_y_service.boxed_clone()),
     ]);
@@ -430,8 +436,8 @@ async fn defer() {
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
+        Arc::new(ConnectorServices::empty(schema.clone())),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     );
 
@@ -527,20 +533,20 @@ async fn defer_if_condition() {
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
     let mut receiver_stream = ReceiverStream::new(receiver);
 
-    let ssf = subgraph_service_factory(vec![("accounts".into(), mocked_accounts.boxed_clone())]);
-    let service_factory = FetchService::new(
+    let ssf = subgraph_services(vec![("accounts".into(), mocked_accounts.boxed_clone())]);
+    let fetch_service = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
+        Arc::new(ConnectorServices::empty(schema.clone())),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     );
 
     let defer_primary_response = query_plan
         .execute(
             &Context::new(),
-            &service_factory,
+            &fetch_service,
             &Arc::new(
                 http::Request::builder()
                     .body(
@@ -571,7 +577,7 @@ async fn defer_if_condition() {
     let default_primary_response = query_plan
         .execute(
             &Context::new(),
-            &service_factory,
+            &fetch_service,
             &Default::default(),
             &schema,
             &Default::default(),
@@ -595,7 +601,7 @@ async fn defer_if_condition() {
     let defer_disabled = query_plan
         .execute(
             &Context::new(),
-            &service_factory,
+            &fetch_service,
             &Arc::new(
                 http::Request::builder()
                     .body(
@@ -683,7 +689,7 @@ async fn dependent_mutations() {
     });
 
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
-    let ssf = subgraph_service_factory(vec![
+    let ssf = subgraph_services(vec![
         ("A".into(), mock_a_service.boxed_clone()),
         ("B".into(), mock_b_service.boxed_clone()),
     ]);
@@ -691,8 +697,8 @@ async fn dependent_mutations() {
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
+        Arc::new(ConnectorServices::empty(schema.clone())),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     );
 
@@ -2141,7 +2147,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
 
     let schema = include_str!("testdata/defer_depends_schema.graphql");
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
-    let ssf = subgraph_service_factory(vec![
+    let ssf = subgraph_services(vec![
         ("X".into(), mock_x_service.boxed_clone()),
         ("Y".into(), mock_y_service.boxed_clone()),
         ("Z".into(), mock_z_service.boxed_clone()),
@@ -2150,8 +2156,8 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
+        Arc::new(ConnectorServices::empty(schema.clone())),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     );
 

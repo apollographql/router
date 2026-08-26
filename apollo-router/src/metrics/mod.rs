@@ -875,19 +875,16 @@ pub fn meter_provider() -> impl opentelemetry::metrics::MeterProvider {
 /// `NoopMeterProvider` and reached no exporter.
 ///
 /// This resolves [`meter_provider_internal`] per call rather than capturing it once, so each
-/// `global::meter*` call is answered by whichever provider is current at that moment. That is
-/// what makes the bridge work under test, where the provider is a task local, and what makes a
-/// meter requested after a config reload resolve against the new delegates.
+/// `global::meter*` call is answered by whichever provider is current at that moment — under
+/// test, where the provider is a task local, and across config reloads alike.
 ///
-/// Note what this does *not* buy: an already-created instrument is not rebound by a reload.
-/// `AggregateMeterProvider::meter_with_scope` snapshots the current delegate meters into the
-/// returned `Meter`, and `AggregateMeterProvider::set` only invalidates the instruments the
-/// router's own macros registered — it cannot reach instruments a library is holding. A
-/// dependency that caches its instruments across a reload (in a `static`, say) would keep
-/// writing into the previous, now shut down, provider. The dependencies bridged today are safe
-/// because their instruments are created per pipeline: plugins are activated in
-/// `PluggableSupergraphServiceBuilder::build` before `RouterCreator::new` builds the service
-/// stack, so every reload recreates them against the freshly installed providers.
+/// One caveat: an already-created instrument is not rebound by a reload. A dependency that
+/// caches its instruments across a reload (in a `static`, say) would keep writing into the
+/// previous, now shut down, provider; instruments must be created per pipeline, after
+/// plugin activation. The dependencies bridged today are safe
+/// because their instruments are created per pipeline: `build_pipeline` activates plugins
+/// before it assembles the service stacks, so every reload recreates them against the
+/// freshly installed providers.
 struct DelegatingMeterProvider;
 
 impl opentelemetry::metrics::MeterProvider for DelegatingMeterProvider {

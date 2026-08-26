@@ -16,6 +16,7 @@ use crate::query_planner::InMemoryQueryPlanCache;
 use crate::query_planner::QueryPlanningOutcome;
 use crate::services::CachingRequest;
 use crate::services::PlanOptions;
+use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::query_parsing;
 
 pub(crate) type BoxCloneService =
@@ -319,6 +320,34 @@ pub(crate) async fn warm_up(
     tracing::debug!("warmed up the query planner cache with {count} queries planned");
 }
 
+/// Warms up the query plan cache behind `warmup_query_planner_service`. Collects the
+/// operations to plan with [`queries_to_warm_up`], then attempts to plan each of them
+/// with [`warm_up`].
+pub(crate) async fn warm_up_query_planner(
+    warmup_query_planner_service: BoxCloneService,
+    persisted_queries: &PersistedQueryExpander,
+    previous_cache: Option<InMemoryQueryPlanCache>,
+    max_cached_queries: Option<usize>,
+    experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
+) {
+    let requests = queries_to_warm_up(
+        previous_cache,
+        max_cached_queries,
+        persisted_queries.all_operations(),
+        experimental_pql_prewarm,
+    )
+    .await;
+
+    if !requests.is_empty() {
+        tracing::info!(
+            "warming up the query plan cache with {} queries, this might take a while",
+            requests.len(),
+        );
+    }
+
+    warm_up(warmup_query_planner_service, requests).await;
+}
+
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
@@ -370,9 +399,7 @@ mod tests {
         let schema_hash = SchemaHash::new("");
 
         fn empty_query_plan() -> Result<QueryPlannerContent, Arc<QueryPlannerError>> {
-            Ok(QueryPlannerContent::Plan {
-                plan: Arc::new(QueryPlan::fake_new(None, None)),
-            })
+            Ok(Arc::new(QueryPlan::fake_new(None, None)))
         }
 
         {
@@ -583,7 +610,8 @@ mod tests {
                 Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
             );
 
-            let query_parsing_service = query_parsing::query_parsing_service(schema, configuration);
+            let query_parsing_service =
+                crate::pipeline::build_query_parsing_service(schema, configuration);
 
             let mut service = ServiceBuilder::new()
                 .layer(WarmupParseQueryLayer::new(query_parsing_service))
@@ -631,7 +659,8 @@ mod tests {
                 Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
             );
 
-            let query_parsing_service = query_parsing::query_parsing_service(schema, configuration);
+            let query_parsing_service =
+                crate::pipeline::build_query_parsing_service(schema, configuration);
 
             let mut service = ServiceBuilder::new()
                 .layer(WarmupParseQueryLayer::new(query_parsing_service))
@@ -735,7 +764,8 @@ mod tests {
                 Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
             );
 
-            let query_parsing_service = query_parsing::query_parsing_service(schema, configuration);
+            let query_parsing_service =
+                crate::pipeline::build_query_parsing_service(schema, configuration);
 
             let mut service = ServiceBuilder::new()
                 .layer(WarmupParseQueryLayer::new(query_parsing_service))

@@ -5,7 +5,7 @@ This is ordered from the point of view of a request to the router, starting at t
 
 Keep in mind that plugins can add hooks at various points of the pipeline. So a single plugin can have several entries in the list below. Also, requests flow from top to bottom, but responses flow bottom to top.
 
-Still missing are the execution and subgraph client parts of the onion, and layers added by plugins.
+For how these stacks get *built* — and for the execution, subgraph, and HTTP client stacks this inventory doesn't cover — see `dev-docs/pipeline-construction.md` and the stage builders in `apollo-router/src/pipeline/stages.rs`, which assemble every construction-time stack in one module.
 
 ## Axum
 Before entering the router service, we have some layers on our axum Router. These are already functioning properly in the tower service stack.
@@ -39,7 +39,7 @@ The router service consists of some layers in "front" of the service "proper", a
 
 I suspect that this is bad and that we should try to make all these layers part of a straightforward tower service stack.
 
-Front (`RouterCreator`):
+Front (`Pipeline::new`):
 - StaticPageLayer
   - If configured, responds to any request that accepts a "text/html" response (*at all*, regardless of preference), with a fixed HTML response.
   - This must occur before content negotiation, which rejects "Accept: text/html" requests.
@@ -95,7 +95,7 @@ Plugins:
 - Rhai/coprocessors
   - I have not looked deeply into it but I think this will be okay
 
-Proper (`RouterService`):
+Proper (the inner stack of `build_router_service`):
 - Batching
   - This is not a layer but the code can sort of be understood conceptually like one. Maybe it could, should be a layer?
   - Splits apart the incoming request into multiple requests that go through the rest of the pipeline, and puts the responses back together.
@@ -126,7 +126,7 @@ The supergraph service consists of some layers in "front" of the service "proper
 
 The implementation of those interactions is more complicated than in the router service, but I think many things could probably be implemented as a normal tower service stack, and we could benefit from doing that.
 
-Front (`SupergraphCreator`):
+Front (`build_supergraph_service`):
 - Content negotiation: Response-side
   - This layer sets the Content-Type header on the response.
 - AllowOnlyHttpPostMutationsLayer is the final step before going into the supergraph service proper.
