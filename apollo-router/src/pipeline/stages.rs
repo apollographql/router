@@ -400,7 +400,7 @@ fn build_execution_service(
         .layer(SubscriptionExecutionLayer::new(
             configuration.notify.clone(),
         ))
-        .apply_plugin_layer(plugins.clone(), Telemetry::instrument_execution_layer)
+        .apply_plugin_layer(&plugins, Telemetry::instrument_execution_layer)
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.execution_service(service)
         })

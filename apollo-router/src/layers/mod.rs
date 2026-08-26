@@ -462,7 +462,7 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
     /// ```
     fn apply_plugin_layer<P, OutLayer>(
         self,
-        plugins: Arc<Plugins>,
+        plugins: &Plugins,
         get_layer: impl FnOnce(&P) -> OutLayer,
     ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
     where
@@ -486,7 +486,7 @@ impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
 
     fn apply_plugin_layer<P, OutLayer>(
         self,
-        plugins: Arc<Plugins>,
+        plugins: &Plugins,
         get_layer: impl FnOnce(&P) -> OutLayer,
     ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
     where
