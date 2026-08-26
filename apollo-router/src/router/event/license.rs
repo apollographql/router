@@ -166,11 +166,7 @@ impl LicenseSource {
                             future::ready(match res {
                                 Ok(license) => Some(license),
                                 Err(e) => {
-                                    tracing::error!(
-                                        code = APOLLO_ROUTER_LICENSE_INVALID,
-                                        "{}",
-                                        e
-                                    );
+                                    tracing::error!(code = APOLLO_ROUTER_LICENSE_INVALID, "{}", e);
                                     None
                                 }
                             })
