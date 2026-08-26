@@ -66,7 +66,7 @@ executors:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
-      xcode: "26.4.0"
+      xcode: "26.6.0"
     resource_class: m4pro.large
     environment:
       MISE_ENV: ci,ci-mac
@@ -75,7 +75,7 @@ executors:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
-      xcode: "26.4.0"
+      xcode: "26.6.0"
     resource_class: m4pro.large
     environment:
       MISE_ENV: ci,ci-mac
