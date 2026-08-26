@@ -71,3 +71,5 @@ pub(crate) use arithmetic::DivMethod;
 pub(crate) use arithmetic::ModMethod;
 pub(crate) use arithmetic::MulMethod;
 pub(crate) use arithmetic::SubMethod;
+mod if_then;
+pub(crate) use if_then::IfThenMethod;
