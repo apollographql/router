@@ -1491,6 +1491,7 @@ mod test {
             authorization: Default::default(),
             executable_document: None,
             id: SubgraphRequestId(String::new()),
+            is_deferred_fetch: false,
         };
 
         let call = tokio::spawn(service.ready().await?.call(req));
@@ -1895,6 +1896,7 @@ mod test {
             authorization: Default::default(),
             executable_document: None,
             id: SubgraphRequestId(String::new()),
+            is_deferred_fetch: false,
         };
         HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, &mut request);
         let headers = request
@@ -1967,6 +1969,7 @@ mod test {
             authorization: Default::default(),
             executable_document: None,
             id: SubgraphRequestId(String::new()),
+            is_deferred_fetch: false,
         };
         HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, &mut request);
         let headers = request
@@ -2049,6 +2052,7 @@ mod test {
             authorization: Default::default(),
             executable_document: None,
             id: SubgraphRequestId(String::new()),
+            is_deferred_fetch: false,
         }
     }
 
@@ -2082,6 +2086,7 @@ mod test {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         };
         let key = ResponseKey::RootField {

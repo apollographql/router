@@ -359,6 +359,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/chained
             connect_extensions: None,
             connect_is_success: None,
         },
+        output_type: Some(
+            Named(
+                "ThingConnection",
+            ),
+        ),
         label: Label(
             "connectors.v1 http: GET /things",
         ),
@@ -763,6 +768,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/chained
             connect_extensions: None,
             connect_is_success: None,
         },
+        output_type: Some(
+            Named(
+                "ThingResult",
+            ),
+        ),
         label: Label(
             "connectors.v1 http: GET /things",
         ),
@@ -1217,6 +1227,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/chained
             connect_extensions: None,
             connect_is_success: None,
         },
+        output_type: Some(
+            Named(
+                "ThingResult",
+            ),
+        ),
         label: Label(
             "connectors.v1 http: GET /things",
         ),

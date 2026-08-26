@@ -788,7 +788,6 @@ mod tests {
     use crate::compute_job::ComputeJobType;
     use crate::plugins::authorization::CacheKeyMetadata;
     use crate::query_planner::QueryPlannerService;
-    use crate::services::QueryPlannerContent;
     use crate::services::QueryPlannerRequest;
     use crate::services::query_parsing::ParsedDocument;
     use crate::services::query_planner::PlanOptions;
@@ -892,7 +891,7 @@ mod tests {
         let schema_arc: Arc<crate::spec::Schema> = schema.into();
         let qp_arc = QueryPlannerService::create_planner(&schema_arc, &config).unwrap();
         let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
-        let mut planner = QueryPlannerService::new(schema_arc, config.clone(), qp_arc).unwrap();
+        let mut planner = QueryPlannerService::new(schema_arc, config.clone(), qp_arc);
 
         let ctx = Context::new();
         ctx.extensions()
@@ -909,10 +908,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        let query_plan = match planner_res.content.unwrap() {
-            QueryPlannerContent::Plan { plan } => plan,
-            _ => panic!("Query planner returned unexpected non-plan content"),
-        };
+        let query_plan = planner_res.content.unwrap();
 
         let schema = DemandControlledSchema::new(Arc::new(supergraph_schema)).unwrap();
         let mut demand_controlled_subgraph_schemas = HashMap::new();

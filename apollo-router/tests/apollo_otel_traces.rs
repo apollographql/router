@@ -100,16 +100,16 @@ async fn config(
     .expect("Could not sub in endpoint");
     config = jsonpath_lib::replace_with(
         config,
-        "$.telemetry.apollo.otlp_tracing_sampler",
-        &mut |_| Some(serde_json::Value::String("always_on".to_string())),
-    )
-    .expect("Could not sub in otlp sampler");
-    config = jsonpath_lib::replace_with(
-        config,
         "$.telemetry.apollo.otlp_tracing_protocol",
         &mut |_| Some(serde_json::Value::String("http".to_string())),
     )
     .expect("Could not sub in otlp protocol");
+    // The shared reports fixtures set `sampler: always_off` so the reports tests don't export
+    // traces to an unmocked endpoint. These trace tests mock the OTLP collector, so re-enable it.
+    config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.sampler", &mut |_| {
+        Some(serde_json::Value::String("always_on".to_string()))
+    })
+    .expect("Could not sub in apollo sampler");
     (task, config)
 }
 
@@ -294,8 +294,14 @@ async fn get_router_service_with_subgraph_mock(
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
     _mocked: bool,
 ) -> (JoinHandle<()>, BoxCloneService) {
-    let (task, mut config) = config(false, reports).await;
+    let (task, config) = config(false, reports).await;
+    build_router_with_subgraph_mock(task, config).await
+}
 
+async fn build_router_with_subgraph_mock(
+    task: JoinHandle<()>,
+    mut config: serde_json::Value,
+) -> (JoinHandle<()>, BoxCloneService) {
     let subgraph_mock = start_demo_subgraphs_mock_server().await;
     let mock_url = subgraph_mock.uri();
     // Leak so the wiremock outlives this helper's return — the harness
@@ -764,6 +770,37 @@ async fn get_trace_report_with_subgraph_mock(
     .await
 }
 
+async fn get_trace_report_with_subgraph_mock_demand_control(
+    reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
+    request: router::Request,
+) -> ExportTraceServiceRequest {
+    get_traces(
+        |reports, _mocked| async move {
+            let (task, config) = config(false, reports).await;
+            let config =
+                jsonpath_lib::replace_with(config, "$.demand_control.enabled", &mut |_| {
+                    Some(serde_json::Value::Bool(true))
+                })
+                .expect("could not enable demand_control");
+            build_router_with_subgraph_mock(task, config).await
+        },
+        reports,
+        false,
+        request,
+        |r| {
+            !r.resource_spans
+                .first()
+                .expect("resource spans required")
+                .scope_spans
+                .first()
+                .expect("scope spans required")
+                .spans
+                .is_empty()
+        },
+    )
+    .await
+}
+
 async fn get_connector_trace_report(
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
     request: router::Request,
@@ -1084,5 +1121,40 @@ async fn test_send_variable_value() {
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
     let report = get_trace_report_with_subgraph_mock(reports, req).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_demand_control_trace() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock_demand_control(reports, req).await;
+
+    // The demand-control cost data reaches Studio as `apollo_private.cost.*` span
+    // attributes.
+    // Assert their presence explicitly so this test fails loudly if the attributes
+    // ever stop flowing through the OTLP path, independent of the snapshot below.
+    let cost_keys: Vec<&str> = report
+        .resource_spans
+        .iter()
+        .flat_map(|rs| &rs.scope_spans)
+        .flat_map(|ss| &ss.spans)
+        .flat_map(|s| &s.attributes)
+        .map(|kv| kv.key.as_str())
+        .filter(|k| k.starts_with("apollo_private.cost."))
+        .collect();
+    assert!(
+        cost_keys.contains(&"apollo_private.cost.estimated"),
+        "estimated cost attribute missing from exported spans; saw {cost_keys:?}"
+    );
+    assert!(
+        cost_keys.contains(&"apollo_private.cost.actual"),
+        "actual cost attribute missing from exported spans; saw {cost_keys:?}"
+    );
+
     assert_report!(report);
 }

@@ -329,7 +329,6 @@ mod test {
     use crate::plugins::subscription;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
     use crate::plugins::telemetry::Telemetry;
-    use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::query_planner::OperationKind;
@@ -658,14 +657,11 @@ mod test {
             .collect::<Vec<_>>()
             .await
             .into_iter()
-            .filter_map(|m| match m {
-                apollo::SingleReport::Stats(mut m) => {
-                    m.stats.iter_mut().for_each(|(_k, v)| {
-                        v.stats_with_context.query_latency_stats.latency = default_latency
-                    });
-                    Some(m)
-                }
-                apollo::SingleReport::Traces(_) => None,
+            .map(|mut m| {
+                m.stats.iter_mut().for_each(|(_k, v)| {
+                    v.stats_with_context.query_latency_stats.latency = default_latency
+                });
+                m
             })
             .collect();
         Ok(results)

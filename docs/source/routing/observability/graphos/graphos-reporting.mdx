@@ -38,35 +38,25 @@ Starting in v1.49.0, the router can use OpenTelemetry Protocol (OTLP) to report 
 Usage metrics are still using the Apollo Usage Reporting protocol.
 
 <a id="configuring-usage-reporting-via-otlp"></a>
-#### Configuring trace reporting via OTLP
+#### Trace reporting via OTLP
 
-You can enable trace reporting via OTLP by an option that can also configure the ratio of traces sent via OTLP and Apollo Usage Reporting protocol:
+The router always exports traces to GraphOS via OTLP. Two samplers control how many traces are sent:
 
-- In router v1.49-1.60, this is controlled using the `experimental_otlp_tracing_sampler` option and is disabled by default.
-
-- In router v1.61, v2.x and later, this option is renamed to `otlp_tracing_sampler`.
-
-- In router v2.x and later, this option is enabled by default.
-
-The supported values of the OTLP sampler option are the following:
-
-- `always_off`: send all traces via Apollo Usage Reporting protocol. Default for v1.x.
-- `always_on`: send all traces via OTLP. Default for v2.x and later.
-- `0.0 - 1.0`: the ratio of traces to send via OTLP (for example, 0.6 = 60% OTLP, 40% Apollo Usage Reporting protocol).
-
-The OTLP sampler is applied _after_ the common tracing sampler. In the following example, the common sampler samples traces at 1% of all traffic. The OTLP sampler sets its ratio to 0.7. This results in 0.7% of all traffic having traces sent via OTLP, and the remaining 0.3% of all traffic having traces sent via Apollo Usage Reporting protocol:
+- `telemetry.exporters.tracing.common.sampler` sets the fraction of all requests that are traced at all.
+- `telemetry.apollo.sampler` sets the fraction of all requests whose traces reach GraphOS. This is an absolute fraction of all traffic, so it must not exceed the common sampler.
 
 ```yaml title="router.yaml"
 telemetry:
   apollo:
-    # Send 0.7 OTLP / 0.3 Apollo
-    otlp_tracing_sampler: 0.7
+    # Send 10% of all requests to GraphOS. This is an absolute fraction of all
+    # traffic and must not exceed the common sampler below.
+    sampler: 0.1
 
   exporters:
     tracing:
       common:
-        # Sample traces at 1% of all traffic
-        sampler: 0.01
+        # Trace 50% of all requests globally
+        sampler: 0.5
 ```
 
 <OTelEnvVarsCaution />

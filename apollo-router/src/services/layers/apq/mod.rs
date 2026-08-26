@@ -64,14 +64,6 @@ pub(crate) struct APQExpander {
 }
 
 impl APQExpander {
-    pub(crate) fn activate(&self) {
-        if let Some(cache) = &self.cache {
-            cache.activate();
-        }
-    }
-}
-
-impl APQExpander {
     pub(crate) fn with_cache(cache: DeduplicatingCache<String, String>) -> Self {
         Self { cache: Some(cache) }
     }
@@ -254,9 +246,9 @@ mod apq_tests {
     use crate::Context;
     use crate::assert_error_eq_ignoring_id;
     use crate::error::Error;
+    use crate::pipeline::from_supergraph_mock;
+    use crate::pipeline::from_supergraph_mock_with_configuration;
     use crate::services::router::ClientRequestAccepts;
-    use crate::services::router::service::from_supergraph_mock;
-    use crate::services::router::service::from_supergraph_mock_with_configuration;
 
     #[tokio::test]
     async fn it_works() {

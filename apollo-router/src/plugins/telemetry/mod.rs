@@ -61,7 +61,6 @@ use uuid::Uuid;
 use self::apollo::ForwardValues;
 use self::apollo::LicensedOperationCountByType;
 use self::apollo::OperationSubType;
-use self::apollo::SingleReport;
 use self::apollo_exporter::Sender;
 use self::apollo_exporter::proto;
 use self::config::Conf;
@@ -81,6 +80,7 @@ use crate::ListenAddr;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::ReferencedEnums;
 use crate::apollo_studio_interop::UsageReporting;
+use crate::axum_factory::Endpoint;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::ResponseVisitor;
@@ -128,7 +128,6 @@ use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::query_planner::OperationKind;
-use crate::router_factory::Endpoint;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::SubgraphRequest;
@@ -1700,7 +1699,7 @@ impl Telemetry {
                 ..Default::default()
             }
         };
-        sender.send(SingleReport::Stats(metrics));
+        sender.send(metrics);
     }
 
     /// Returns `[(subgraph_name, trace), …]`
@@ -2046,10 +2045,10 @@ impl TextMapPropagator for CustomTraceIdPropagator {
         cx: &opentelemetry::Context,
         extractor: &dyn Extractor,
     ) -> opentelemetry::Context {
-        cx.with_remote_span_context(
-            self.extract_span_context(extractor)
-                .unwrap_or_else(SpanContext::empty_context),
-        )
+        match self.extract_span_context(extractor) {
+            Some(span_context) => cx.with_remote_span_context(span_context),
+            None => cx.clone(),
+        }
     }
 
     fn fields(&self) -> FieldIter<'_> {
@@ -3371,6 +3370,71 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_with_context_preserves_existing_context_when_header_absent() {
+        let header = String::from("x-trace-id");
+        let propagator = CustomTraceIdPropagator::new(header, TraceIdFormat::Uuid);
+
+        let existing_span_context = SpanContext::new(
+            TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736").unwrap(),
+            SpanId::from_hex("00f067aa0ba902b7").unwrap(),
+            TraceFlags::default().with_sampled(true),
+            true,
+            TraceState::default(),
+        );
+        let cx =
+            opentelemetry::Context::new().with_remote_span_context(existing_span_context.clone());
+
+        let headers: HashMap<String, String> = HashMap::new();
+
+        let result_cx = propagator.extract_with_context(&cx, &headers);
+
+        assert_eq!(result_cx.span().span_context(), &existing_span_context);
+    }
+
+    #[test]
+    fn test_extract_with_context_stays_empty_when_header_absent_and_no_prior_context() {
+        let header = String::from("x-trace-id");
+        let propagator = CustomTraceIdPropagator::new(header, TraceIdFormat::Uuid);
+
+        let cx = opentelemetry::Context::new(); // no propagator has extracted anything yet
+        let headers: HashMap<String, String> = HashMap::new(); // custom header absent
+
+        let result_cx = propagator.extract_with_context(&cx, &headers);
+
+        assert_eq!(
+            result_cx.span().span_context(),
+            &SpanContext::empty_context()
+        );
+    }
+
+    #[test]
+    fn test_extract_with_context_overrides_when_header_present() {
+        let header = String::from("x-trace-id");
+        let propagator = CustomTraceIdPropagator::new(header.clone(), TraceIdFormat::Uuid);
+
+        // Prior context, as if W3C had already extracted a different traceparent.
+        let previous_span_context = SpanContext::new(
+            TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736").unwrap(),
+            SpanId::from_hex("00f067aa0ba902b7").unwrap(),
+            TraceFlags::default().with_sampled(true),
+            true,
+            TraceState::default(),
+        );
+        let cx = opentelemetry::Context::new().with_remote_span_context(previous_span_context);
+
+        // Custom header is present and must take precedence.
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert(header, "04f9e396-465c-4840-bc2b-f493b8b1a7fc".to_string());
+
+        let result_cx = propagator.extract_with_context(&cx, &headers);
+
+        assert_eq!(
+            result_cx.span().span_context().trace_id().to_string(),
+            "04f9e396465c4840bc2bf493b8b1a7fc"
+        );
+    }
+
+    #[test]
     fn test_header_propagation_format() {
         struct Injected(HashMap<String, String>);
         impl Injector for Injected {
@@ -3541,6 +3605,97 @@ mod tests {
                 10.0,
                 "cost.result" = "COST_ESTIMATED_TOO_EXPENSIVE"
             );
+        }
+        .with_metrics()
+        .await;
+    }
+}
+
+#[cfg(test)]
+mod licensed_operation_count_tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use crate::Context;
+    use crate::apollo_studio_interop::UsageReporting;
+    use crate::apollo_studio_interop::UsageReportingOperationDetails;
+    use crate::metrics::FutureMetricsExt as _;
+    use crate::plugins::telemetry::EnabledFeatures;
+    use crate::plugins::telemetry::Telemetry;
+    use crate::plugins::telemetry::apollo_exporter::Sender;
+    use crate::query_planner::OperationKind;
+
+    /// Drives `update_apollo_metrics` over a context and returns the licensed operation
+    /// count Studio would be billed for.
+    async fn licensed_operation_count_for(context: Context) -> u64 {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        Telemetry::update_apollo_metrics(
+            &context,
+            0.0,
+            Sender::Apollo(tx),
+            false,
+            Duration::from_millis(1),
+            OperationKind::Query,
+            None,
+            HashMap::new(),
+            EnabledFeatures {
+                distributed_apq_cache: false,
+                response_cache: false,
+            },
+        );
+
+        rx.recv()
+            .await
+            .expect("update_apollo_metrics must send a stats report")
+            .licensed_operation_count_by_type
+            .map(|by_type| by_type.licensed_operation_count)
+            .unwrap_or(0)
+    }
+
+    /// A context holding no `UsageReporting` bills one licensed operation. Billing does
+    /// not depend on the operation reaching execution or reporting anything about
+    /// itself.
+    #[tokio::test]
+    async fn missing_usage_reporting_is_billed_as_one_operation() {
+        async {
+            assert_eq!(licensed_operation_count_for(Context::new()).await, 1);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// `UsageReporting::Error` bills nothing: it is the one variant that zeroes the
+    /// licensed operation count, so an operation reported with it drops off the bill.
+    #[tokio::test]
+    async fn usage_reporting_error_is_not_billed() {
+        async {
+            let context = Context::new();
+            context.extensions().with_lock(|lock| {
+                lock.insert::<Arc<UsageReporting>>(Arc::new(UsageReporting::Error(
+                    "some error key".to_string(),
+                )))
+            });
+
+            assert_eq!(licensed_operation_count_for(context).await, 0);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// `UsageReporting::Operation` bills one licensed operation, the same as a context
+    /// holding no reporting at all: attribution does not change what an operation costs.
+    #[tokio::test]
+    async fn operation_details_are_billed_as_one_operation() {
+        async {
+            let context = Context::new();
+            context.extensions().with_lock(|lock| {
+                lock.insert::<Arc<UsageReporting>>(Arc::new(UsageReporting::Operation(
+                    UsageReportingOperationDetails::default(),
+                )))
+            });
+
+            assert_eq!(licensed_operation_count_for(context).await, 1);
         }
         .with_metrics()
         .await;
