@@ -81,7 +81,7 @@ executors:
       MISE_ENV: ci,ci-mac
   windows_build: &windows_build_executor
     machine:
-      image: "windows-server-2019-vs2019:2024.02.21"
+      image: "windows-server-2022-gui:current"
     resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
     environment:
@@ -89,7 +89,7 @@ executors:
       CARGO_BUILD_JOBS: 4
   windows_test: &windows_test_executor
     machine:
-      image: "windows-server-2019-vs2019:2024.02.21"
+      image: "windows-server-2022-gui:current"
     resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
     environment:
