@@ -970,12 +970,6 @@ impl PluginPrivate for Telemetry {
             .boxed_clone()
     }
 
-    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
-        ServiceBuilder::new()
-            .layer(self.instrument_execution_layer())
-            .service(service)
-    }
-
     fn subgraph_service(
         &self,
         name: &str,
