@@ -145,6 +145,9 @@ pub(crate) fn build_http_client_service(
     ServiceBuilder::new()
         .layer(JoinBatchRequestsLayer::new(name))
         .layer(SubgraphResponseSizeLimitLayer::new(name))
+        .apply_plugin_layer(&plugins, Telemetry::overhead_subgraph_request_timing_layer)
+        .apply_plugin_layer(&plugins, Telemetry::instrument_http_client_layer)
+        .apply_plugin_layer(&plugins, Telemetry::custom_instrument_http_client_layer)
         .rust_plugins(plugins, |plugin, service| {
             plugin.http_client_service(name, service)
         })
