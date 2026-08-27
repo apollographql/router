@@ -857,7 +857,6 @@ mod test {
     use serde_json_bytes::json;
     use subgraph::SubgraphRequestId;
     use tower::BoxError;
-    use tower::ServiceExt as _;
 
     use super::*;
     use crate::Context;

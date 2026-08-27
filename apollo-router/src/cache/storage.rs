@@ -10,7 +10,6 @@ use std::time::Duration;
 use lru::LruCache;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry::metrics::ObservableGauge;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::sync::Mutex;
@@ -46,6 +45,62 @@ where
 
 pub(crate) type InMemoryCache<K, V> = Arc<Mutex<LruCache<K, V>>>;
 
+/// Connects the Redis client a cache will use, applying the error tolerance `config` asks for.
+///
+/// When `config.required_to_start` is not set, a failed connect logs the error and returns
+/// `Ok(None)`, leaving the cache to run on in-memory storage alone. A client that connects
+/// but fails to populate its pool is still returned after logging; commands issued through
+/// it will fail.
+///
+/// # Errors
+/// Connection failures return `Err` only when `config.required_to_start` is set.
+pub(crate) async fn connect_redis(
+    config: RedisCache,
+    caller: &'static str,
+) -> Result<Option<RedisCacheStorage>, BoxError> {
+    let required_to_start = config.required_to_start;
+    let storage = match RedisCacheStorage::new(config, caller).await {
+        Ok(storage) => Some(storage),
+        Err(e) => {
+            tracing::error!(
+                cache = caller,
+                e,
+                "could not open connection to Redis for caching",
+            );
+            if required_to_start {
+                return Err(e);
+            }
+            // WARN: this is a terminal failure; we couldn't, for whatever reason noted in
+            // the error log, connect to redis--maybe it doesn't exist, maybe it's
+            // unreachable, who knows; but, this will prevent future commands from reaching
+            // redis
+            tracing::error!(
+                cache = caller,
+                e,
+                "terminal failure reached and all commands to Redis will fail",
+            );
+            None
+        }
+    };
+
+    // NOTE: this populates the inner client pool, but failure doesn't represent a terminal
+    // state unless the router is configured to require connections to start
+    if let Some(storage) = storage.as_ref()
+        && let Err(e) = storage.create_client_pool().await
+    {
+        tracing::error!(
+            cache = caller,
+            e,
+            "could not open connection to Redis for caching",
+        );
+        if required_to_start {
+            return Err(e);
+        }
+    }
+
+    Ok(storage)
+}
+
 // placeholder storage module
 //
 // this will be replaced by the multi level (in memory + redis/memcached) once we find
@@ -57,9 +112,6 @@ pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
     redis: Option<RedisCacheStorage>,
     cache_size: Arc<AtomicI64>,
     cache_estimated_storage: Arc<AtomicI64>,
-    // It's OK for these to be mutexes as they are only initialized once
-    cache_size_gauge: Arc<parking_lot::Mutex<Option<ObservableGauge<i64>>>>,
-    cache_estimated_storage_gauge: Arc<parking_lot::Mutex<Option<ObservableGauge<i64>>>>,
 }
 
 impl<K, V> CacheStorage<K, V>
@@ -67,81 +119,39 @@ where
     K: KeyType,
     V: ValueType,
 {
-    pub(crate) async fn new(
+    /// Builds a cache from an in-memory LRU capacity and an optional pre-connected Redis
+    /// client. Obtain the client with [`connect_redis`].
+    ///
+    /// Must be constructed _after_ telemetry activation: a meter-provider swap discards
+    /// previously registered gauge callbacks.
+    ///
+    /// # Metrics
+    /// - `apollo.router.cache.size`
+    /// - `apollo.router.cache.storage.estimated_size`
+    pub(crate) fn new(
         max_capacity: NonZeroUsize,
-        config: Option<RedisCache>,
+        redis: Option<RedisCacheStorage>,
         caller: &'static str,
-    ) -> Result<Self, BoxError> {
-        let maybe_redis_cache_storage = if let Some(config) = config {
-            let required_to_start = config.required_to_start;
-            let storage = match RedisCacheStorage::new(config, caller).await {
-                Ok(storage) => Some(storage),
-                Err(e) => {
-                    tracing::error!(
-                        cache = caller,
-                        e,
-                        "could not open connection to Redis for caching",
-                    );
-                    if required_to_start {
-                        return Err(e);
-                    }
-                    // WARN: this is a terminal failure; we couldn't, for whatever reason noted in
-                    // the error log, connect to redis--maybe it doesn't exist, maybe it's
-                    // unreachable, who knows; but, this will prevent future commands from reaching
-                    // redis
-                    tracing::error!(
-                        cache = caller,
-                        e,
-                        "terminal failure reached and all commands to Redis will fail",
-                    );
-                    None
-                }
-            };
-
-            // NOTE: this populates the inner client pool, but failure doesn't represent a terminal
-            // state unless the router is configred to require connections to start
-            if let Some(storage) = storage.as_ref()
-                && let Err(e) = storage.create_client_pool().await
-            {
-                tracing::error!(
-                    cache = caller,
-                    e,
-                    "could not open connection to Redis for caching",
-                );
-                if required_to_start {
-                    return Err(e);
-                }
-            }
-
-            storage
-        } else {
-            None
-        };
-
-        Ok(Self {
-            cache_size_gauge: Default::default(),
-            cache_estimated_storage_gauge: Default::default(),
+    ) -> Self {
+        let storage = Self {
             cache_size: Default::default(),
             cache_estimated_storage: Default::default(),
             caller,
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            redis: maybe_redis_cache_storage,
-        })
+            redis,
+        };
+        // The meter provider's callback registry owns the gauge callbacks (see
+        // `metrics::aggregation`); building the gauges leaves no handle worth storing.
+        storage.register_cache_size_gauge();
+        storage.register_cache_estimated_storage_size_gauge();
+        storage
     }
 
     pub(crate) fn new_in_memory(max_capacity: NonZeroUsize, caller: &'static str) -> Self {
-        Self {
-            cache_size_gauge: Default::default(),
-            cache_estimated_storage_gauge: Default::default(),
-            cache_size: Default::default(),
-            cache_estimated_storage: Default::default(),
-            caller,
-            inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            redis: None,
-        }
+        Self::new(max_capacity, None, caller)
     }
 
-    fn create_cache_size_gauge(&self) -> ObservableGauge<i64> {
+    fn register_cache_size_gauge(&self) {
         let meter: opentelemetry::metrics::Meter = metrics::meter_provider().meter(METER_NAME);
         let current_cache_size_for_gauge = self.cache_size.clone();
         let caller = self.caller;
@@ -157,10 +167,10 @@ where
                     ],
                 )
             })
-            .build()
+            .build();
     }
 
-    fn create_cache_estimated_storage_size_gauge(&self) -> ObservableGauge<i64> {
+    fn register_cache_estimated_storage_size_gauge(&self) {
         let meter: opentelemetry::metrics::Meter = metrics::meter_provider().meter(METER_NAME);
         let cache_estimated_storage_for_gauge = self.cache_estimated_storage.clone();
         let caller = self.caller;
@@ -182,7 +192,7 @@ where
                     )
                 }
             })
-            .build()
+            .build();
     }
 
     /// Check the in-memory cache, then Redis on a miss. A Redis hit is promoted to the
@@ -316,19 +326,6 @@ where
         self.inner.lock().await.len()
     }
 
-    pub(crate) fn activate(&self) {
-        // Gauges MUST be created after the meter provider is initialized.
-        // This means that on reload we need a non-fallible way to recreate the gauges.
-        *self.cache_size_gauge.lock() = Some(self.create_cache_size_gauge());
-        *self.cache_estimated_storage_gauge.lock() =
-            Some(self.create_cache_estimated_storage_size_gauge());
-
-        // Also activate Redis metrics if present
-        if let Some(redis) = &self.redis {
-            redis.activate();
-        }
-    }
-
     fn record_cache_hit_duration(&self, duration: Duration, storage: CacheStorageName) {
         f64_histogram!(
             "apollo.router.cache.hit.time",
@@ -403,10 +400,7 @@ mod test {
 
         async {
             let cache: CacheStorage<String, Stuff> =
-                CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test")
-                    .await
-                    .unwrap();
-            cache.activate();
+                CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test");
 
             cache.insert("test".to_string(), Stuff {}).await;
             assert_gauge!(
@@ -439,10 +433,7 @@ mod test {
 
         async {
             let cache: CacheStorage<String, Stuff> =
-                CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test")
-                    .await
-                    .unwrap();
-            cache.activate();
+                CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test");
 
             cache.insert("test".to_string(), Stuff {}).await;
             // This metric won't exist
@@ -473,10 +464,7 @@ mod test {
             // note that the cache size is 1
             // so the second insert will always evict
             let cache: CacheStorage<String, Stuff> =
-                CacheStorage::new(NonZeroUsize::new(1).unwrap(), None, "test")
-                    .await
-                    .unwrap();
-            cache.activate();
+                CacheStorage::new(NonZeroUsize::new(1).unwrap(), None, "test");
 
             cache
                 .insert(

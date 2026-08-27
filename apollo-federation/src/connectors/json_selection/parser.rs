@@ -4971,7 +4971,7 @@ mod tests {
                 },
                 _ => panic!(
                     "Expected variable at start of path, got: {:?}",
-                    &ext_var.path
+                    ext_var.path
                 ),
             };
         }
