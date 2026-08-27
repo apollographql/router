@@ -497,6 +497,7 @@ pub(crate) fn build_router_service(
     ServiceBuilder::new()
         .layer(StaticPageLayer::new(configuration))
         .apply_required_plugin_layer(&plugins, Headers::router_masking_layer)
+        .apply_plugin_layer(&plugins, Telemetry::allocation_metrics_layer)
         .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
         .layer(content_negotiation::RouterContentNegotiationLayer::default())
         .layer(DisplayRouterRequestLayer)

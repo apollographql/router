@@ -116,6 +116,7 @@ use crate::plugins::telemetry::error_counter::count_execution_errors;
 use crate::plugins::telemetry::error_counter::count_router_errors;
 use crate::plugins::telemetry::error_counter::count_subgraph_errors;
 use crate::plugins::telemetry::error_counter::count_supergraph_errors;
+use crate::plugins::telemetry::metrics::allocation::AllocationMetricsLayer;
 use crate::plugins::telemetry::metrics::apollo::histogram::ListLengthHistogram;
 use crate::plugins::telemetry::metrics::apollo::studio::LocalTypeStat;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
@@ -671,6 +672,11 @@ where
 }
 
 impl Telemetry {
+    /// Returns a layer that emits per-request memory allocation metrics.
+    pub(crate) fn allocation_metrics_layer(&self) -> AllocationMetricsLayer {
+        AllocationMetricsLayer::new()
+    }
+
     /// Returns a layer that instruments query planner execution with a span and error metrics.
     pub(crate) fn instrument_execution_layer(&self) -> InstrumentExecutionLayer {
         InstrumentExecutionLayer::new(self.config.clone())
@@ -811,7 +817,6 @@ impl PluginPrivate for Telemetry {
             .and_then(|a| a.key(CLIENT_VERSION_KEY));
 
         ServiceBuilder::new()
-            .layer(metrics::allocation::AllocationMetricsLayer::new())
             .map_response(move |response: router::Response| {
                 // The current span *should* be the request span as we are outside the instrument block.
                 let span = Span::current();
