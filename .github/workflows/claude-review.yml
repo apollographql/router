@@ -24,6 +24,7 @@ jobs:
         id: team-check
         env:
           COMMENTER: ${{ github.event.comment.user.login }}
+          GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
         run: |
           ROUTER_CORE_TEAM=(fnichol BrynCooke goto-bus-stop BobaFetters conwuegb alyssahursh aaronArinder rohan-b99)
           if [[ " ${ROUTER_CORE_TEAM[*]} " == *" $COMMENTER "* ]]; then
