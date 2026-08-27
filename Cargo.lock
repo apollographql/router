@@ -208,7 +208,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "2.16.3-rc.0"
+version = "2.16.3"
 dependencies = [
  "ahash",
  "apollo-compiler",
@@ -286,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "2.16.3-rc.0"
+version = "2.16.3"
 dependencies = [
  "addr2line 0.26.1",
  "ahash",
