@@ -208,7 +208,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "2.16.2"
+version = "2.16.3"
 dependencies = [
  "ahash",
  "apollo-compiler",
@@ -286,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "2.16.2"
+version = "2.16.3"
 dependencies = [
  "addr2line 0.26.1",
  "ahash",
@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "2.16.2"
+version = "2.16.3"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -3077,9 +3077,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.14"
+version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "171fefbc92fe4a4de27e0698d6a5b392d6a0e333506bc49133760b3bcf948733"
+checksum = "a9f37a958b41b3b19ee2707c06439c0e9e547e847223eb791ecb0cb821c65e27"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -6411,9 +6411,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json_bytes"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6a27c10711f94d1042b4c96d483556ec84371864e25d0e1cf3dc1024b0880b1"
+checksum = "56b373804afb2809c26851fc268912e12fde8fa64c231ca735edab3a6ad0e9f1"
 dependencies = [
  "ahash",
  "bytes",

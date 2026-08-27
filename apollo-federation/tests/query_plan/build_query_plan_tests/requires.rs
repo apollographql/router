@@ -2034,3 +2034,732 @@ fn avoids_selecting_inapplicable_key_from_parent_node() {
       "###
     );
 }
+
+/// The @requires here can only be resolved by first jumping to Subgraph2 to translate
+/// `SubEntity.id1` into `id2`, because Subgraph3's `Entity` key is `subEntity { id2 }`. That makes
+/// the key-resolution *conditions* get fetched at `unionField.subEntity`, which is *deeper* in the
+/// response than the `Entity` needing the @requires (at `unionField`). The key fetch node therefore
+/// has no derivable "path in parent" relative to that condition node, and several places used to
+/// mishandle the resulting absent path: the planner first computed a reversed (and invalid) path,
+/// then silently dropped the condition fetch nodes, which ordered the @requires fetch before the
+/// fetch producing the required field.
+///
+/// The expected plan below bounces Subgraph2 -> Subgraph3 -> Subgraph2 -> Subgraph3, which looks
+/// redundant but is the minimum this schema allows. Each hop unlocks the next, in a strictly linear
+/// chain (this is the same shape as `it_handles_simple_require_chain`, just spread over more
+/// subgraphs):
+///   1. Subgraph1 is the only subgraph with `Query.unionField`, and gives us `subEntity { id1 }`.
+///   2. Subgraph2 turns `id1` into `id2`: Subgraph3's `Entity` key is `subEntity { id2 }`, Subgraph1
+///      only knows `id1`, and Subgraph2 is the only subgraph declaring both keys.
+///   3. Subgraph3 gives us `requiredSubEntity { id2 }`. `requiredSubEntity` is declared *only* in
+///      Subgraph3, so there is no way to know *which* `SubEntity` the @requires refers to without
+///      first asking Subgraph3 -- hence the jump into Subgraph3 before the required field exists.
+///   4. Subgraph2 resolves `requiredField` on it. Subgraph3 declares that field `@external` on a
+///      `resolvable: false` key, so Subgraph3 cannot resolve it itself.
+///   5. Subgraph3 finally resolves `requiringField`, now that it has both the key (2) and the
+///      @requires data (4).
+///
+/// Note also that fetch 3 re-selects `subEntity { id2 }` in its output even though fetch 2 already
+/// fetched exactly that at `unionField.subEntity`. That is `add_post_require_inputs()` adding the
+/// key needed to resume after the @requires to the pre-@requires node unconditionally: as its
+/// comment notes, it cannot cheaply prove the key is already selected, so it adds it and accepts a
+/// no-op when it was. It costs no extra round trip, only a slightly larger response.
+#[test]
+fn handles_requires_when_key_conditions_are_fetched_below_the_entity() {
+    let planner = planner!(
+        Subgraph1: r#"
+            union Union = Entity | Dummy
+
+            type Dummy {
+              dummy: Boolean!
+            }
+
+            type Entity @key(fields: "subEntity { id1 }") {
+              subEntity: SubEntity!
+            }
+
+            type SubEntity @key(fields: "id1") {
+              id1: ID!
+            }
+
+            type Query {
+              unionField: Union
+            }
+        "#,
+        Subgraph2: r#"
+            type SubEntity @key(fields: "id1") @key(fields: "id2") {
+              id1: ID!
+              id2: ID!
+              requiredField: Boolean!
+            }
+        "#,
+        Subgraph3: r#"
+            type Entity @key(fields: "subEntity { id2 }") {
+              subEntity: SubEntity!
+              requiredSubEntity: SubEntity!
+              requiringField: Boolean @requires(fields: "requiredSubEntity { requiredField }")
+            }
+
+            type SubEntity @key(fields: "id2", resolvable: false) {
+              id2: ID!
+              requiredField: Boolean! @external
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+            query {
+              unionField {
+                ... on Entity {
+                  requiringField
+                }
+              }
+            }
+        "#,
+        @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            unionField {
+              __typename
+              ... on Entity {
+                __typename
+                subEntity {
+                  __typename
+                  id1
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "unionField.subEntity") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on SubEntity {
+                __typename
+                id1
+              }
+            } =>
+            {
+              ... on SubEntity {
+                id2
+              }
+            }
+          },
+        },
+        Flatten(path: "unionField") {
+          Fetch(service: "Subgraph3") {
+            {
+              ... on Entity {
+                __typename
+                subEntity {
+                  id2
+                }
+              }
+            } =>
+            {
+              ... on Entity {
+                __typename
+                requiredSubEntity {
+                  __typename
+                  id2
+                }
+                subEntity {
+                  id2
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "unionField.requiredSubEntity") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on SubEntity {
+                __typename
+                id2
+              }
+            } =>
+            {
+              ... on SubEntity {
+                requiredField
+              }
+            }
+          },
+        },
+        Flatten(path: "unionField") {
+          Fetch(service: "Subgraph3") {
+            {
+              ... on Entity {
+                __typename
+                requiredSubEntity {
+                  requiredField
+                }
+                subEntity {
+                  id2
+                }
+              }
+            } =>
+            {
+              ... on Entity {
+                requiringField
+              }
+            }
+          },
+        },
+      },
+    }
+    "#
+    );
+}
+
+#[test]
+fn rh1396_transitive_require_with_own_require() {
+    let planner = planner!(
+        hotelpage: r#"
+          type Query { t: T }
+          type T @key(fields: "id") {
+            id: ID!
+            property: Property
+          }
+          type Property @key(fields: "id") {
+            id: ID!
+            location: String
+            rooms: Int
+          }
+        "#,
+        room_details: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            property: Property @external
+            availableOffers: Offer @requires(fields: "property { location rooms }")
+          }
+          type Property @key(fields: "id") {
+            id: ID!
+            location: String @external
+            rooms: Int @external
+          }
+          type Offer {
+            price: Int
+            property: Property
+          }
+        "#,
+        value_merchandising: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            availableOffers: Offer @external
+            vMPricingData: Int @requires(fields: "availableOffers { price property { location rooms } }")
+          }
+          type Offer {
+            price: Int @external
+            property: Property @external
+          }
+          type Property @key(fields: "id") {
+            id: ID!
+            location: String @external
+            rooms: Int @external
+          }
+        "#
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          { t { vMPricingData } }
+        "#,
+        @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "hotelpage") {
+          {
+            t {
+              __typename
+              id
+              property {
+                location
+                rooms
+              }
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "room_details") {
+            {
+              ... on T {
+                __typename
+                property {
+                  location
+                  rooms
+                }
+                id
+              }
+            } =>
+            {
+              ... on T {
+                availableOffers {
+                  price
+                  property {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "t.availableOffers.property") {
+          Fetch(service: "hotelpage") {
+            {
+              ... on Property {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Property {
+                location
+                rooms
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "value_merchandising") {
+            {
+              ... on T {
+                __typename
+                availableOffers {
+                  price
+                  property {
+                    location
+                    rooms
+                  }
+                }
+                id
+              }
+            } =>
+            {
+              ... on T {
+                vMPricingData
+              }
+            }
+          },
+        },
+      },
+    }
+    "#
+    );
+}
+
+// Same shape as `rh1396_transitive_require_with_own_require`, but with the ROOT
+// field `t` owned by `room_details` — the same subgraph that owns
+// `availableOffers` (the field carrying the nested `@requires`). Hypothesis
+// (RH-1396): when the nested-`@requires` field is co-located in the entry
+// subgraph, the planner resolves it in the initial fetch and drops its own
+// `@requires` (on `property`), instead of sequencing the hotelpage fetch first.
+#[test]
+fn rh1396_nested_require_when_root_is_colocated() {
+    let planner = planner!(
+        room_details: r#"
+          type Query { t: T }
+          type T @key(fields: "id") {
+            id: ID!
+            property: Property @external
+            availableOffers: Offer @requires(fields: "property { location rooms }")
+          }
+          type Property @key(fields: "id") {
+            id: ID!
+            location: String @external
+            rooms: Int @external
+          }
+          type Offer {
+            price: Int
+          }
+        "#,
+        hotelpage: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            property: Property
+          }
+          type Property @key(fields: "id") {
+            id: ID!
+            location: String
+            rooms: Int
+          }
+        "#,
+        value_merchandising: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            availableOffers: Offer @external
+            vMPricingData: Int @requires(fields: "availableOffers { price }")
+          }
+          type Offer {
+            price: Int @external
+          }
+        "#
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          { t { vMPricingData } }
+        "#,
+        @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "room_details") {
+          {
+            t {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "hotelpage") {
+            {
+              ... on T {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on T {
+                property {
+                  location
+                  rooms
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "room_details") {
+            {
+              ... on T {
+                __typename
+                property {
+                  location
+                  rooms
+                }
+                id
+              }
+            } =>
+            {
+              ... on T {
+                availableOffers {
+                  price
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "value_merchandising") {
+            {
+              ... on T {
+                __typename
+                availableOffers {
+                  price
+                }
+                id
+              }
+            } =>
+            {
+              ... on T {
+                vMPricingData
+              }
+            }
+          },
+        },
+      },
+    }
+    "#
+    );
+}
+
+// RH-1396 generalization probe: same co-location trigger as
+// `rh1396_nested_require_when_root_is_colocated`, but with the nested `@requires`
+// chain THREE levels deep instead of two: `vMPricingData` requires `availableOffers`
+// (room_details, co-located with the root), which requires `property` (hotelpage),
+// which in turn requires `geoCoords` (geo). This checks whether the ancestor check
+// in `can_merge_child_in` still correctly blocks the wrongful merge when the
+// dependency chain is longer than the minimal repro.
+#[test]
+fn rh1396_three_level_nested_require_when_root_is_colocated() {
+    let planner = planner!(
+        room_details: r#"
+          type Query { t: T }
+          type T @key(fields: "id") {
+            id: ID!
+            property: Property @external
+            availableOffers: Offer @requires(fields: "property { location rooms }")
+          }
+          type Property @key(fields: "id") {
+            id: ID!
+            location: String @external
+            rooms: Int @external
+          }
+          type Offer {
+            price: Int
+          }
+        "#,
+        hotelpage: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            geoCoords: Coords @external
+            property: Property @requires(fields: "geoCoords { lat lng }")
+          }
+          type Coords {
+            lat: Float @external
+            lng: Float @external
+          }
+          type Property @key(fields: "id") {
+            id: ID!
+            location: String
+            rooms: Int
+          }
+        "#,
+        geo: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            geoCoords: Coords
+          }
+          type Coords {
+            lat: Float
+            lng: Float
+          }
+        "#,
+        value_merchandising: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            availableOffers: Offer @external
+            vMPricingData: Int @requires(fields: "availableOffers { price }")
+          }
+          type Offer {
+            price: Int @external
+          }
+        "#
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          { t { vMPricingData } }
+        "#,
+        @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "room_details") {
+          {
+            t {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "geo") {
+            {
+              ... on T {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on T {
+                geoCoords {
+                  lat
+                  lng
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "hotelpage") {
+            {
+              ... on T {
+                __typename
+                geoCoords {
+                  lat
+                  lng
+                }
+                id
+              }
+            } =>
+            {
+              ... on T {
+                property {
+                  location
+                  rooms
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "room_details") {
+            {
+              ... on T {
+                __typename
+                property {
+                  location
+                  rooms
+                }
+                id
+              }
+            } =>
+            {
+              ... on T {
+                availableOffers {
+                  price
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "value_merchandising") {
+            {
+              ... on T {
+                __typename
+                availableOffers {
+                  price
+                }
+                id
+              }
+            } =>
+            {
+              ... on T {
+                vMPricingData
+              }
+            }
+          },
+        },
+      },
+    }
+    "#
+    );
+}
+
+// RH-1396 generalization probe: same co-location trigger, but the root field
+// returns a LIST of entities (`ts: [T]`) rather than a single `T`. Checks whether
+// the fix holds when fetch node `merge_at` paths include a list index.
+#[test]
+fn rh1396_nested_require_when_root_is_colocated_list_entity() {
+    let planner = planner!(
+        room_details: r#"
+          type Query { ts: [T] }
+          type T @key(fields: "id") {
+            id: ID!
+            property: Property @external
+            availableOffers: Offer @requires(fields: "property { location rooms }")
+          }
+          type Property @key(fields: "id") {
+            id: ID!
+            location: String @external
+            rooms: Int @external
+          }
+          type Offer {
+            price: Int
+          }
+        "#,
+        hotelpage: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            property: Property
+          }
+          type Property @key(fields: "id") {
+            id: ID!
+            location: String
+            rooms: Int
+          }
+        "#,
+        value_merchandising: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            availableOffers: Offer @external
+            vMPricingData: Int @requires(fields: "availableOffers { price }")
+          }
+          type Offer {
+            price: Int @external
+          }
+        "#
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          { ts { vMPricingData } }
+        "#,
+        @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "room_details") {
+          {
+            ts {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "ts.@") {
+          Fetch(service: "hotelpage") {
+            {
+              ... on T {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on T {
+                property {
+                  location
+                  rooms
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "ts.@") {
+          Fetch(service: "room_details") {
+            {
+              ... on T {
+                __typename
+                property {
+                  location
+                  rooms
+                }
+                id
+              }
+            } =>
+            {
+              ... on T {
+                availableOffers {
+                  price
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "ts.@") {
+          Fetch(service: "value_merchandising") {
+            {
+              ... on T {
+                __typename
+                availableOffers {
+                  price
+                }
+                id
+              }
+            } =>
+            {
+              ... on T {
+                vMPricingData
+              }
+            }
+          },
+        },
+      },
+    }
+    "#
+    );
+}
