@@ -679,7 +679,6 @@ mod test {
     use tokio::task::JoinSet;
     use tokio::time::sleep;
     use tower::Service;
-    use tower::ServiceExt as _;
 
     use super::*;
     use crate::Configuration;

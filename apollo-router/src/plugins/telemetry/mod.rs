@@ -1488,10 +1488,9 @@ impl Telemetry {
                                                 start.elapsed(),
                                                 operation_kind,
                                                 Some(OperationSubType::SubscriptionRequest),
-                                                local_stat_recorder
-                                                    .local_type_stats
-                                                    .drain()
-                                                    .collect(),
+                                                std::mem::take(
+                                                    &mut local_stat_recorder.local_type_stats,
+                                                ),
                                                 enabled_features.clone(),
                                             );
                                         }
@@ -1508,7 +1507,9 @@ impl Telemetry {
                                                 .unwrap_or_else(|| start.elapsed()),
                                             operation_kind,
                                             Some(OperationSubType::SubscriptionEvent),
-                                            local_stat_recorder.local_type_stats.drain().collect(),
+                                            std::mem::take(
+                                                &mut local_stat_recorder.local_type_stats,
+                                            ),
                                             enabled_features.clone(),
                                         );
                                     }
@@ -1523,7 +1524,9 @@ impl Telemetry {
                                             start.elapsed(),
                                             operation_kind,
                                             None,
-                                            local_stat_recorder.local_type_stats.drain().collect(),
+                                            std::mem::take(
+                                                &mut local_stat_recorder.local_type_stats,
+                                            ),
                                             enabled_features.clone(),
                                         );
                                     }
