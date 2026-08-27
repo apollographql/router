@@ -20,11 +20,10 @@ use uuid::Uuid;
 use crate::Configuration;
 use crate::configuration::generate_config_schema;
 use crate::executable::Opt;
+use crate::pipeline::Pipeline;
 use crate::plugin::DynPlugin;
-use crate::router_factory::RouterSuperServiceFactory;
-use crate::router_factory::YamlRouterFactory;
-use crate::services::HasSchema;
-use crate::services::router::service::RouterCreator;
+use crate::router_factory::PipelineFactory;
+use crate::router_factory::RouterServiceFactory;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
@@ -54,9 +53,9 @@ struct UsageReport {
     usage: Map<String, Value>,
 }
 
-impl OrbiterRouterSuperServiceFactory {
-    pub(crate) fn new(delegate: YamlRouterFactory) -> OrbiterRouterSuperServiceFactory {
-        OrbiterRouterSuperServiceFactory { delegate }
+impl OrbiterPipelineFactory {
+    pub(crate) fn new(delegate: PipelineFactory) -> OrbiterPipelineFactory {
+        OrbiterPipelineFactory { delegate }
     }
 }
 
@@ -86,15 +85,15 @@ impl OrbiterRouterSuperServiceFactory {
 /// }
 /// ```
 #[derive(Default)]
-pub(crate) struct OrbiterRouterSuperServiceFactory {
-    delegate: YamlRouterFactory,
+pub(crate) struct OrbiterPipelineFactory {
+    delegate: PipelineFactory,
 }
 
 #[async_trait]
-impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
-    type RouterFactory = RouterCreator;
+impl RouterServiceFactory for OrbiterPipelineFactory {
+    type RouterFactory = Pipeline;
 
-    async fn create(
+    async fn create_pipeline(
         &mut self,
         is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
@@ -104,7 +103,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
         license: Arc<LicenseState>,
     ) -> Result<Self::RouterFactory, BoxError> {
         self.delegate
-            .create(
+            .create_pipeline(
                 is_telemetry_disabled,
                 configuration.clone(),
                 schema.clone(),
@@ -115,7 +114,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
             .await
             .inspect(|factory| {
                 if !is_telemetry_disabled {
-                    let schema = factory.supergraph_creator.schema();
+                    let schema = factory.schema.clone();
 
                     tokio::task::spawn(async move {
                         tracing::debug!("sending anonymous usage data to Apollo");

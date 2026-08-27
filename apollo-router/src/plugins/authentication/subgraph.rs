@@ -532,7 +532,6 @@ mod test {
     use http::header::HOST;
     use regex::Regex;
     use tower::Service;
-    use tower::ServiceExt as _;
 
     use super::*;
     use crate::Context;
