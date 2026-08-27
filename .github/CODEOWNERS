@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 /apollo-federation/ @apollographql/fed-core @apollographql/rust-platform
 /apollo-federation/src/connectors @apollographql/graph-dev
 /apollo-router/ @apollographql/router-core
@@ -6,3 +7,12 @@
 /apollo-router-benchmarks/ @apollographql/router-core @apollographql/fed-core
 /examples/ @apollographql/router-core @apollographql/fed-core
 /.github/CODEOWNERS @apollographql/router-core @apollographql/fed-core
+=======
+/apollo-federation/ @apollographql/orchestration-language @apollographql/router-core
+/apollo-router/ @apollographql/router-core
+/apollo-router/src/plugins/connectors @apollographql/orchestration-language @apollographql/router-core
+/apollo-router/src/plugins/fleet_detector.rs @apollographql/runtime-readiness @apollographql/router-core
+/apollo-router-benchmarks/ @apollographql/router-core @apollographql/orchestration-language
+/examples/ @apollographql/router-core
+/.github/CODEOWNERS @apollographql/router-core
+>>>>>>> 9b8816b (chore: update codeowners `graphos` to `router-core` team name (#10078))
