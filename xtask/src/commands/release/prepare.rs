@@ -87,7 +87,7 @@ impl Prepare {
                 replace_in_file!(
                     "./helm/chart/router/values.yaml",
                     "^  repository: ghcr.io/apollographql/router$",
-                    format!("  repository: ghcr.io/apollographql/nightly/router")
+                    "  repository: ghcr.io/apollographql/nightly/router".to_string()
                 );
 
                 // Update the version string for nightly builds
