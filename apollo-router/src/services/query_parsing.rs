@@ -10,17 +10,10 @@ use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::validation::Valid;
-use tower::ServiceBuilder;
-use tower::ServiceExt as _;
 
-use self::cache::QueryParsingCacheLayer;
-use self::recursive_selections_limit::LimitRecursiveSelectionLayer;
-use self::service::QueryParsingService;
-use crate::Configuration;
 use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
 use crate::spec::QueryHash;
-use crate::spec::Schema;
 use crate::spec::SpecError;
 
 pub(crate) mod cache;
@@ -139,29 +132,3 @@ impl Eq for ParsedDocumentInner {}
 pub(crate) type ServiceError = MaybeBackPressureError<SpecError>;
 pub(crate) type BoxCloneService =
     tower::util::BoxCloneService<Request, ParsedDocument, ServiceError>;
-
-/// Build a query parsing service with in-memory caching.
-///
-/// The cache size is the same as the query plan cache size.
-pub(crate) fn query_parsing_service(
-    schema: Arc<Schema>,
-    configuration: Arc<Configuration>,
-) -> BoxCloneService {
-    let cache_limit = configuration
-        .supergraph
-        .query_planning
-        .cache
-        .in_memory
-        .limit;
-    let max_recursive_selections = configuration.limits.router.max_recursive_selections;
-    let warn_only = configuration.limits.router.warn_only;
-
-    ServiceBuilder::new()
-        .layer(QueryParsingCacheLayer::new(cache_limit))
-        .layer(LimitRecursiveSelectionLayer::new(
-            max_recursive_selections,
-            warn_only,
-        ))
-        .service(QueryParsingService::new(schema, configuration))
-        .boxed_clone()
-}

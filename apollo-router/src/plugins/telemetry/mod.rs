@@ -80,6 +80,7 @@ use crate::ListenAddr;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::ReferencedEnums;
 use crate::apollo_studio_interop::UsageReporting;
+use crate::axum_factory::Endpoint;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::ResponseVisitor;
@@ -127,7 +128,6 @@ use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::query_planner::OperationKind;
-use crate::router_factory::Endpoint;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::SubgraphRequest;
@@ -1488,10 +1488,9 @@ impl Telemetry {
                                                 start.elapsed(),
                                                 operation_kind,
                                                 Some(OperationSubType::SubscriptionRequest),
-                                                local_stat_recorder
-                                                    .local_type_stats
-                                                    .drain()
-                                                    .collect(),
+                                                std::mem::take(
+                                                    &mut local_stat_recorder.local_type_stats,
+                                                ),
                                                 enabled_features.clone(),
                                             );
                                         }
@@ -1508,7 +1507,9 @@ impl Telemetry {
                                                 .unwrap_or_else(|| start.elapsed()),
                                             operation_kind,
                                             Some(OperationSubType::SubscriptionEvent),
-                                            local_stat_recorder.local_type_stats.drain().collect(),
+                                            std::mem::take(
+                                                &mut local_stat_recorder.local_type_stats,
+                                            ),
                                             enabled_features.clone(),
                                         );
                                     }
@@ -1523,7 +1524,9 @@ impl Telemetry {
                                             start.elapsed(),
                                             operation_kind,
                                             None,
-                                            local_stat_recorder.local_type_stats.drain().collect(),
+                                            std::mem::take(
+                                                &mut local_stat_recorder.local_type_stats,
+                                            ),
                                             enabled_features.clone(),
                                         );
                                     }
