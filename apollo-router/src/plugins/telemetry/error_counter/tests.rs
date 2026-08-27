@@ -9,6 +9,9 @@ use mime::APPLICATION_JSON;
 use opentelemetry::KeyValue;
 use serde_json_bytes::Value;
 use serde_json_bytes::json;
+use tower::Service as _;
+use tower::ServiceBuilder;
+use tower::ServiceExt as _;
 use uuid::Uuid;
 
 use crate::Context;
@@ -881,18 +884,20 @@ async fn test_subgraph_error_counting() {
             .await
             .expect("test harness");
 
-        let router_service = test_harness.subgraph_service(subgraph_name, move |req| {
-            let subgraph_response = example_response.clone();
-            let subgraph_request_id = subgraph_request_id.clone();
-            async move {
-                Ok(SubgraphResponse::new_from_response(
-                    http::Response::new(subgraph_response.clone()),
-                    req.context,
-                    subgraph_name.to_string(),
-                    subgraph_request_id,
-                ))
-            }
+        let (mock, mut handle) = tower_test::mock::pair::<subgraph::Request, SubgraphResponse>();
+        let driver = tokio::task::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(SubgraphResponse::new_from_response(
+                http::Response::new(example_response.clone()),
+                req.context,
+                subgraph_name.to_string(),
+                subgraph_request_id.clone(),
+            ));
         });
+
+        let mut service = ServiceBuilder::new()
+            .layer(test_harness.instrument_subgraph_layer())
+            .service(mock);
 
         let context = Context::new();
         context.insert_json_value(APOLLO_OPERATION_ID, operation_id.into());
@@ -906,7 +911,9 @@ async fn test_subgraph_error_counting() {
             .subgraph_name(subgraph_name)
             .context(context)
             .build();
-        router_service.call(request).await.unwrap();
+        service.ready().await.unwrap().call(request).await.unwrap();
+
+        crate::plugin::test::await_mock_driver(driver).await;
 
         assert_counter!(
             "apollo.router.operations.error",
@@ -996,15 +1003,19 @@ async fn test_execution_error_counting() {
             .await
             .expect("test harness");
 
-        let router_service = test_harness.execution_service(move |req| {
-            let execution_response = example_response.clone();
-            async move {
-                Ok(ExecutionResponse::new_from_graphql_response(
-                    execution_response.clone(),
-                    req.context,
-                ))
-            }
+        let (mock, mut handle) =
+            tower_test::mock::pair::<execution::Request, execution::Response>();
+        let driver = tokio::task::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+            responder.send_response(ExecutionResponse::new_from_graphql_response(
+                example_response.clone(),
+                request.context,
+            ));
         });
+
+        let service = ServiceBuilder::new()
+            .layer(test_harness.instrument_execution_layer())
+            .service(mock);
 
         let context = Context::new();
         context.insert_json_value(APOLLO_OPERATION_ID, operation_id.into());
@@ -1014,10 +1025,12 @@ async fn test_execution_error_counting() {
         context.insert_json_value(CLIENT_VERSION, client_version.into());
         let _ = context.insert(COUNTED_ERRORS, HashSet::from([previously_counted_error_id]));
 
-        router_service
-            .call(execution::Request::fake_builder().context(context).build())
+        service
+            .oneshot(execution::Request::fake_builder().context(context).build())
             .await
             .unwrap();
+
+        crate::plugin::test::await_mock_driver(driver).await;
 
         assert_counter!(
             "apollo.router.operations.error",

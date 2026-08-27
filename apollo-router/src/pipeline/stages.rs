@@ -145,6 +145,9 @@ pub(crate) fn build_http_client_service(
     ServiceBuilder::new()
         .layer(JoinBatchRequestsLayer::new(name))
         .layer(SubgraphResponseSizeLimitLayer::new(name))
+        .apply_plugin_layer(&plugins, Telemetry::overhead_subgraph_request_timing_layer)
+        .apply_plugin_layer(&plugins, Telemetry::instrument_http_client_layer)
+        .apply_plugin_layer(&plugins, Telemetry::custom_instrument_http_client_layer)
         .rust_plugins(plugins, |plugin, service| {
             plugin.http_client_service(name, service)
         })
@@ -197,8 +200,9 @@ pub(crate) fn build_subgraph_service(
     let subscription_config = subscription_plugin_config(plugins).map(Arc::new);
     let apq_enabled = configuration.apq.subgraph.get(name).enabled;
 
-    ServiceBuilder::new()
-        .buffered()
+    let service = ServiceBuilder::new()
+        .apply_plugin_layer(plugins, Telemetry::instrument_subgraph_layer)
+        .apply_plugin_layer(plugins, Telemetry::subgraph_ftv1_layer)
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.subgraph_service(name, service)
         })
@@ -210,6 +214,11 @@ pub(crate) fn build_subgraph_service(
         .layer(SubgraphApqLayer::new(apq_enabled))
         .layer(content_negotiation::SubgraphContentNegotiationLayer::default())
         .service(SubgraphService::new(name, http_service))
+        .boxed_clone();
+
+    // We apply the buffered() here separately so it works on an inner BoxCloneService, which makes
+    // the type easier to name
+    ServiceBuilder::new().buffered().service(service)
 }
 
 /// Builds the full service stack for every subgraph, keyed by subgraph name.
@@ -400,6 +409,7 @@ fn build_execution_service(
         .layer(SubscriptionExecutionLayer::new(
             configuration.notify.clone(),
         ))
+        .apply_plugin_layer(&plugins, Telemetry::instrument_execution_layer)
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.execution_service(service)
         })
@@ -469,6 +479,7 @@ pub(crate) fn build_router_service(
 
     ServiceBuilder::new()
         .layer(StaticPageLayer::new(configuration))
+        .apply_plugin_layer(&plugins, Telemetry::allocation_metrics_layer)
         .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
         .layer(content_negotiation::RouterContentNegotiationLayer::default())
         .layer(DisplayRouterRequestLayer)
