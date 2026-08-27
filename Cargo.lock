@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "2.16.3-rc.0"
+version = "2.16.3"
 dependencies = [
  "apollo-parser",
  "apollo-router",
