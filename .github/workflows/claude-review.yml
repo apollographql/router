@@ -19,13 +19,15 @@ jobs:
 
     steps:
       # we only want certain folks to be able to do this to control spend (for now); currently that's the router-core team
+      # NOTE: hardcoded due to an issue with the GitHub PAT; update this list as team membership changes
       - name: Check team membership
         id: team-check
         env:
           COMMENTER: ${{ github.event.comment.user.login }}
           GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
         run: |
-          if gh api "orgs/apollographql/teams/router-core/memberships/${COMMENTER}" --silent 2>/dev/null; then
+          ROUTER_CORE_TEAM=(fnichol BrynCooke goto-bus-stop BobaFetters conwuegb alyssahursh aaronArinder rohan-b99)
+          if [[ " ${ROUTER_CORE_TEAM[*]} " == *" $COMMENTER "* ]]; then
             echo "is_member=true" >> $GITHUB_OUTPUT
           else
             echo "is_member=false" >> $GITHUB_OUTPUT
