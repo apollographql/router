@@ -26,6 +26,7 @@ use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
+use crate::plugins::headers::Headers;
 use crate::plugins::include_subgraph_errors::IncludeSubgraphErrors;
 use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
@@ -205,6 +206,7 @@ pub(crate) fn build_subgraph_service(
             &plugins,
             IncludeSubgraphErrors::tag_errors_with_subgraph_name_layer,
         )
+        .apply_plugin_layer(&plugins, |h: &Headers| h.subgraph_headers_layer(name))
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.subgraph_service(name, service)
         })
@@ -248,10 +250,13 @@ fn build_connector_request_services(
         // required for correct LoadShed / RateLimit behaviour from traffic-shaping
         // plugins (mirrors the per-subgraph buffer in [`build_subgraph_service`]).
         let service = UnconstrainedBuffer::new(
-            plugins.iter().rev().fold(
-                ConnectorRequestService { http_client }.boxed_clone(),
-                |acc, (_, e)| e.connector_request_service(acc, source.clone()),
-            ),
+            ServiceBuilder::new()
+                .apply_plugin_layer(plugins, |h: &Headers| h.connector_headers_layer(&source))
+                .rust_plugins(plugins.clone(), |plugin, service| {
+                    plugin.connector_request_service(service, source.clone())
+                })
+                .service(ConnectorRequestService { http_client }.boxed_clone())
+                .boxed_clone(),
             DEFAULT_BUFFER_SIZE,
         );
         map.insert(source, service);
@@ -481,6 +486,7 @@ pub(crate) fn build_router_service(
 
     ServiceBuilder::new()
         .layer(StaticPageLayer::new(configuration))
+        .apply_plugin_layer(&plugins, Headers::router_masking_layer)
         .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
         .layer(content_negotiation::RouterContentNegotiationLayer::default())
         .layer(DisplayRouterRequestLayer)

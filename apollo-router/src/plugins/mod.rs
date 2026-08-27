@@ -31,7 +31,7 @@ pub(crate) mod expose_query_plan;
 pub(crate) mod file_uploads;
 mod fleet_detector;
 mod forbid_mutations;
-mod headers;
+pub(crate) mod headers;
 pub(crate) mod healthcheck;
 pub(crate) mod include_subgraph_errors;
 pub(crate) mod license_enforcement;
