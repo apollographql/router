@@ -20,6 +20,17 @@
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
 
+// Install the crypto provider explicitly, before any TLS client is built. The
+// workspace standardizes on aws-lc-rs across all rustls-backed dependencies; an
+// explicit install avoids relying on rustls' own auto-detection. The equivalent call
+// for the router binary itself lives in `executable::main`; this one covers `cargo
+// test`/`cargo nextest` unit test binaries, which never go through that entry point.
+#[cfg(test)]
+#[ctor::ctor(unsafe)]
+fn install_default_crypto_provider_for_tests() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
 macro_rules! failfast_debug {
     ($($tokens:tt)+) => {{
         tracing::debug!($($tokens)+);
@@ -68,6 +79,7 @@ mod introspection;
 pub mod layers;
 pub(crate) mod logging;
 mod orbiter;
+mod pipeline;
 mod plugins;
 pub(crate) mod protocols;
 mod query_planner;
@@ -81,14 +93,9 @@ pub mod tracer;
 mod uplink;
 
 pub(crate) mod allocator;
-#[doc(hidden)]
-#[deprecated(
-    since = "2.16.0",
-    note = "Will be removed in 3.0. Use opentelemetry_http::HeaderExtractor / opentelemetry_http::HeaderInjector directly."
-)]
-pub mod otel_compat;
 mod registry;
 
+pub use crate::axum_factory::Endpoint;
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
 pub use crate::context::Context;
@@ -103,7 +110,6 @@ pub use crate::router::LicenseSource;
 pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
-pub use crate::router_factory::Endpoint;
 pub use crate::test_harness::MockedSubgraphs;
 pub use crate::test_harness::TestHarness;
 #[cfg(any(test, feature = "snapshot"))]

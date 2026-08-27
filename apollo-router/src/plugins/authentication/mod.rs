@@ -1,6 +1,7 @@
 //! Authentication plugin
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -28,6 +29,7 @@ use self::jwks::JwksManager;
 use self::subgraph::SigningParams;
 use self::subgraph::SigningParamsConfig;
 use self::subgraph::SubgraphAuth;
+use crate::Context;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
@@ -40,9 +42,9 @@ use crate::plugins::authentication::jwks::Audiences;
 use crate::plugins::authentication::jwks::Issuers;
 use crate::plugins::authentication::jwks::JwksConfig;
 use crate::plugins::authentication::subgraph::make_signing_params;
-use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::connector_service::ConnectorSourceRef;
 use crate::services::router;
+use crate::services::subgraph::http::APPLICATION_JSON_HEADER_VALUE;
 
 pub(crate) mod jwks;
 
@@ -57,6 +59,9 @@ mod tests;
 pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication_plugin";
 pub(crate) const APOLLO_AUTHENTICATION_JWT_CLAIMS: &str = "apollo::authentication::jwt_claims";
 const HEADER_TOKEN_TRUNCATED: &str = "(truncated)";
+/// The single message returned to clients when `on_error` is `RedactedError`, in place of the
+/// detailed validation error.
+const REDACTED_AUTH_ERROR_MESSAGE: &str = "Authentication failed";
 
 const DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL: Duration = Duration::from_secs(60);
@@ -74,11 +79,18 @@ struct AuthenticationPlugin {
     connector: Option<ConnectorAuth>,
 }
 
+// TODO: in the next major version, rename these values to snake_case (`continue`, `error`,
+// `redacted_error`). This is the only config option in the router whose values are PascalCase; every
+// other one is snake_case. It needs a config migration, so it can't ship in a patch release.
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Default)]
 enum OnError {
     Continue,
+    // TODO: make `RedactedError` the default in the next major version. Returning the full
+    // validation error to an unauthenticated caller discloses details of the authentication setup
+    // that no client can act on, so the redacting behavior is the safer default.
     #[default]
     Error,
+    RedactedError,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
@@ -100,9 +112,17 @@ struct JWTConf {
     sources: Vec<Source>,
     /// Control the behavior when an error occurs during the authentication process.
     ///
-    /// Defaults to `Error`. When set to `Continue`, requests that fail JWT authentication will
-    /// continue to be processed by the router, but without the JWT claims in the context. When set
-    /// to `Error`, requests that fail JWT authentication will be rejected with a HTTP 403 error.
+    /// Defaults to `Error`.
+    ///
+    /// * When set to `Continue`, requests that fail JWT authentication will continue to be
+    ///   processed by the router, but without the JWT claims in the context.
+    /// * When set to `Error`, requests that fail JWT authentication will be rejected with a
+    ///   HTTP 403 error.
+    /// * When set to `RedactedError`, requests that fail JWT authentication are rejected in the
+    ///   same way as `Error`, but the response contains a generic error message instead of the
+    ///   details of the validation failure. The details remain available in the
+    ///   `apollo::authentication::jwt_status` context value and in the
+    ///   `apollo.router.operations.authentication.jwt` metric.
     #[serde(default)]
     on_error: OnError,
 }
@@ -236,7 +256,7 @@ impl PluginPrivate for AuthenticationPlugin {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         // Return without layering if no router config was defined
         let Some(router_config) = &self.router else {
             return service;
@@ -257,18 +277,20 @@ impl PluginPrivate for AuthenticationPlugin {
 
         ServiceBuilder::new()
             .instrument(authentication_service_span())
-            .checkpoint(move |request: router::Request| {
-                Ok(authenticate(&configuration, &jwks_manager, request))
+            .checkpoint_async(move |request: router::Request| {
+                let configuration = configuration.clone();
+                let jwks_manager = jwks_manager.clone();
+                async move { Ok(authenticate(&configuration, &jwks_manager, request)) }
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn subgraph_service(
         &self,
         name: &str,
-        service: crate::services::subgraph::BoxService,
-    ) -> crate::services::subgraph::BoxService {
+        service: crate::services::subgraph::BoxCloneService,
+    ) -> crate::services::subgraph::BoxCloneService {
         // Return without layering if no subgraph config was defined
         let Some(subgraph) = &self.subgraph else {
             return service;
@@ -279,9 +301,9 @@ impl PluginPrivate for AuthenticationPlugin {
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneService,
         _: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         // Return without layering if no connector config was defined
         let Some(connector_auth) = &self.connector else {
             return service;
@@ -482,8 +504,7 @@ fn authenticate(
         source: Option<&Source>,
     ) -> ControlFlow<router::Response, router::Request> {
         // This is a metric and will not appear in the logs
-        let failed = true;
-        increment_jwt_counter_metric(failed);
+        increment_jwt_counter_metric(Some(error.code()));
         // Record span attributes for JWT failure
         let span = tracing::Span::current();
         span.record("authentication.jwt.failed", true);
@@ -499,33 +520,52 @@ fn authenticate(
             serde_json_bytes::json!(JwtStatus::new_failure(source, error.as_context_object())),
         );
 
-        if config.on_error == OnError::Error {
-            let response = router::Response::infallible_builder()
-                .error(
-                    graphql::Error::builder()
-                        .message(error.to_string())
-                        .extension_code("AUTH_ERROR")
-                        .build(),
-                )
-                .status_code(status)
-                .header(header::CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone())
-                .context(request.context)
-                .build();
+        // The error message is the only part of the response that varies by mode. Note that the
+        // full detail is always kept in the context value inserted above, so redacting here does
+        // not deprive operators of the reason for the failure.
+        let message = match config.on_error {
+            OnError::Continue => return ControlFlow::Continue(request),
+            OnError::Error => error.to_string(),
+            OnError::RedactedError => REDACTED_AUTH_ERROR_MESSAGE.to_string(),
+        };
 
-            ControlFlow::Break(response)
-        } else {
-            ControlFlow::Continue(request)
-        }
+        let response = router::Response::infallible_builder()
+            .error(
+                graphql::Error::builder()
+                    .message(message)
+                    .extension_code("AUTH_ERROR")
+                    .build(),
+            )
+            .status_code(status)
+            .header(header::CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone())
+            .context(request.context)
+            .build();
+
+        ControlFlow::Break(response)
     }
 
-    /// This is the documented metric
-    fn increment_jwt_counter_metric(failed: bool) {
-        u64_counter!(
-            "apollo.router.operations.authentication.jwt",
-            "Number of requests with JWT authentication",
-            1,
-            authentication.jwt.failed = failed
-        );
+    /// This is the documented metric. `failure_code` is the machine-readable code for the
+    /// authentication failure, or `None` when authentication succeeded.
+    fn increment_jwt_counter_metric(failure_code: Option<&'static str>) {
+        match failure_code {
+            Some(code) => {
+                u64_counter!(
+                    "apollo.router.operations.authentication.jwt",
+                    "Number of requests with JWT authentication",
+                    1,
+                    authentication.jwt.failed = true,
+                    authentication.jwt.failure_code = code
+                );
+            }
+            None => {
+                u64_counter!(
+                    "apollo.router.operations.authentication.jwt",
+                    "Number of requests with JWT authentication",
+                    1,
+                    authentication.jwt.failed = false
+                );
+            }
+        }
     }
 
     let mut jwt = None;
@@ -615,20 +655,9 @@ fn authenticate(
         if token_data.claims.get("exp").is_none() {
             tracing::debug!("accepted JWT without `exp` claim");
         }
-        // This is a metric and will not appear in the logs
-        //
-        // Apparently intended to be `apollo.router.operations.authentication.jwt` like above,
-        // but has existed for two years with a buggy name. Keep it for now.
-        u64_counter!(
-            "apollo.router.operations.jwt",
-            "Number of requests with JWT successful authentication (deprecated, \
-                use `apollo.router.operations.authentication.jwt` \
-                with `authentication.jwt.failed = false` instead)",
-            1
-        );
-        // Use the fixed name too:
-        let failed = false;
-        increment_jwt_counter_metric(failed);
+
+        let failure_code = None;
+        increment_jwt_counter_metric(failure_code);
 
         let _ = request.context.insert_json_value(
             JWT_CONTEXT_KEY,
@@ -651,6 +680,24 @@ fn authenticate(
         StatusCode::UNAUTHORIZED,
         source_of_extracted_jwt,
     )
+}
+
+/// Returns whether this request presented a JWT that passed validation. This is currently
+/// equivalent to "has this request authenticated" since JWT is the router's only inbound
+/// authentication mechanism — but if another one is ever added, callers relying on this for
+/// a general "is authenticated" answer will need it updated (or a new check added) too.
+pub(crate) fn has_authenticated_jwt(context: &Context) -> bool {
+    context.contains_key(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+}
+
+/// Returns the space-delimited OAuth `scope` claim from the request's validated JWT, if any.
+pub(crate) fn jwt_scopes(context: &Context) -> Option<HashSet<String>> {
+    context
+        .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)?
+        .as_object()?
+        .get("scope")?
+        .as_str()
+        .map(|s| s.split(' ').map(|s| s.to_string()).collect())
 }
 
 // This macro allows us to use it in our plugin registry!

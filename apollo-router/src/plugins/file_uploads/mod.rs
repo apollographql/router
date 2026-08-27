@@ -2,7 +2,6 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use futures::FutureExt;
-use http::HeaderName;
 use http::HeaderValue;
 use http::StatusCode;
 use http::header::CONTENT_LENGTH;
@@ -19,6 +18,7 @@ use tower::ServiceExt;
 use self::config::FileUploadsConfig;
 use self::config::MultipartRequestLimits;
 use self::error::FileUploadError;
+use self::file_upload_layer::FileUploadLayer;
 use self::map_field::MapField;
 use self::multipart_form_data::MultipartFormData;
 use self::multipart_request::MultipartRequest;
@@ -31,12 +31,12 @@ use crate::plugin::PluginPrivate;
 use crate::plugins::limits::BodyLimitControl;
 use crate::services::execution;
 use crate::services::router;
-use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
 mod config;
 mod error;
+mod file_upload_layer;
 mod map_field;
 mod multipart_form_data;
 mod multipart_request;
@@ -62,7 +62,7 @@ impl PluginPrivate for FileUploadsPlugin {
         Ok(Self { enabled, limits })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         if !self.enabled {
             return service;
         }
@@ -98,12 +98,14 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
-            .buffered()
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         if !self.enabled {
             return service;
         }
@@ -123,17 +125,16 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
-            .buffered()
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         if !self.enabled {
             return service;
         }
         ServiceBuilder::new()
-            .checkpoint(|req: execution::Request| {
+            .checkpoint_async(|req: execution::Request| async move {
                 let context = req.context.clone();
                 Ok(match execution_layer(req) {
                     Ok(req) => ControlFlow::Continue(req),
@@ -146,14 +147,14 @@ impl PluginPrivate for FileUploadsPlugin {
                 })
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         if !self.enabled {
             return service;
         }
@@ -164,9 +165,22 @@ impl PluginPrivate for FileUploadsPlugin {
                     .map(|req| Ok(ControlFlow::Continue(req)))
                     .boxed()
             })
-            .buffered()
             .service(service)
-            .boxed()
+            .boxed_clone()
+    }
+
+    fn http_client_service(
+        &self,
+        _subgraph_name: &str,
+        service: crate::services::http::BoxCloneService,
+    ) -> crate::services::http::BoxCloneService {
+        if !self.enabled {
+            return service;
+        }
+        ServiceBuilder::new()
+            .layer(FileUploadLayer)
+            .service(service)
+            .boxed_clone()
     }
 }
 
@@ -412,30 +426,6 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
                 .extensions_mut()
                 .insert(MultipartFormData::new(subgraph_map, multipart));
         }
-    }
-    req
-}
-
-static APOLLO_REQUIRE_PREFLIGHT: HeaderName = HeaderName::from_static("apollo-require-preflight");
-static TRUE: http::HeaderValue = HeaderValue::from_static("true");
-
-pub(crate) async fn http_request_wrapper(
-    mut req: http::Request<RouterBody>,
-) -> http::Request<RouterBody> {
-    let form = req.extensions_mut().get::<MultipartFormData>().cloned();
-    if let Some(form) = form {
-        let (mut request_parts, operations) = req.into_parts();
-        request_parts
-            .headers
-            .insert(APOLLO_REQUIRE_PREFLIGHT.clone(), TRUE.clone());
-
-        // override Content-Type to be 'multipart/form-data'
-        request_parts
-            .headers
-            .insert(CONTENT_TYPE, form.content_type());
-        let request_body = router::body::from_result_stream(form.into_stream(operations).await);
-
-        return http::Request::from_parts(request_parts, request_body);
     }
     req
 }

@@ -13,34 +13,24 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use apollo_router::graphql;
-    use apollo_router::plugin::test;
     use apollo_router::services::supergraph;
     use http::StatusCode;
     use tower::util::ServiceExt;
 
     #[tokio::test]
     async fn test_router_service_adds_timestamp_header() {
-        let mut mock_service = test::MockSupergraphService::new();
-        // create a mock service we will use to test our plugin
-
-        // The expected reply is going to be JSON returned in the SupergraphResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
-
-        // Let's set up our mock to make sure it will be called once
-        mock_service.expect_clone().return_once(move || {
-            let mut mock_service = test::MockSupergraphService::new();
-            mock_service
-                .expect_call()
-                .once()
-                .returning(move |req: supergraph::Request| {
-                    // Preserve our context from request to response
-                    Ok(supergraph::Response::fake_builder()
-                        .context(req.context)
-                        .data(expected_mock_response_data)
-                        .build()
-                        .unwrap())
-                });
-            mock_service
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::fake_builder()
+                    .context(req.context)
+                    .data(expected_mock_response_data)
+                    .build()
+                    .unwrap(),
+            );
         });
 
         let config = serde_json::json!({
@@ -52,7 +42,7 @@ mod tests {
         let test_harness = apollo_router::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
-            .supergraph_hook(move |_| mock_service.clone().boxed())
+            .supergraph_hook(move |_| mock_service.clone().boxed_clone())
             .build_router()
             .await
             .unwrap();
@@ -93,5 +83,9 @@ mod tests {
 
         // with the expected message
         assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+        tokio::time::timeout(std::time::Duration::from_secs(5), driver)
+            .await
+            .expect("mock driver timed out — service was not called within 5 s")
+            .unwrap();
     }
 }

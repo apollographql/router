@@ -35,7 +35,7 @@ jobs:
 
       - name: Checkout PR code
         if: steps.team-check.outputs.is_member == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: refs/pull/${{ github.event.issue.number }}/head
 
@@ -45,7 +45,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          claude_args: '--model claude-opus-4-8 --append-system-prompt "Always post a PR comment summarizing your decision, even if you decide to STOP without doing a full review."'
+          claude_args: '--model claude-fable-5 --append-system-prompt "Always post a PR comment summarizing your decision, even if you decide to STOP without doing a full review. Never launch a Task/Agent in background or async mode (i.e. never pass run_in_background: true, and never say you will wait for an agent and then end your turn) -- this is a one-shot headless run with no mechanism to resume the session when a background agent completes, so backgrounded work is silently lost and the review never gets posted. Launch every subagent synchronously: batch independent agent calls into a single turn and wait for all of them to return real results before proceeding. When the code-review command eligibility check says the PR already has a code review from an earlier run, treat that as disqualifying only if no commits have landed since that earlier review comment was posted -- compare the timestamp of the prior review comment against the timestamp of the most recent commit on the PR. If new commits were pushed after the last review comment, treat the PR as eligible and proceed with a fresh review of the current diff."'
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.issue.number }} --comment'

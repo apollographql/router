@@ -4,6 +4,9 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use insta::assert_yaml_snapshot;
+use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
+use prost::Message;
 use serde_json::json;
 use tower::BoxError;
 use wiremock::Mock;
@@ -13,7 +16,9 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 use crate::integration::IntegrationTest;
+use crate::integration::ValueExt;
 use crate::integration::common::Query;
+use crate::integration::common::Telemetry;
 use crate::integration::common::graph_os_enabled;
 use crate::integration::common::redact_cache_debug_query_hash;
 
@@ -102,6 +107,130 @@ async fn test_coprocessor_limit_payload() -> Result<(), BoxError> {
 
     router.graceful_shutdown().await;
     Ok(())
+}
+
+/// Regression test for ROUTER-1948: the coprocessor's server span must be parented under the
+/// router's outbound HTTP CLIENT span (the `http_request` span), not the surrounding
+/// `external_plugin` span.
+///
+/// The router injects a W3C `traceparent` into the coprocessor request; its parent-id must point
+/// at that outbound HTTP span.  We assert this end-to-end: capture the `traceparent` the mock
+/// coprocessor actually receives, then look up the router's own exported spans (via a mock OTLP
+/// collector) and confirm the span whose id equals that parent-id is the CLIENT span for the
+/// coprocessor call.  Its exported OTel name follows the HTTP convention `POST <url>` (the
+/// `http_request` tracing span carries `otel.name = "POST <url>"`).
+///
+/// On the pre-fix code the parent-id is `external_plugin`'s span id, so this fails.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_trace_context_parented_under_http_request_span() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Mock coprocessor: capture the `traceparent` it receives, echo the payload back as `continue`.
+    let captured_traceparent: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let captured = captured_traceparent.clone();
+    let coprocessor = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(move |req: &wiremock::Request| {
+            if let Some(traceparent) = req.headers.get("traceparent") {
+                *captured.lock().unwrap() = traceparent.to_str().ok().map(str::to_string);
+            }
+            let mut body: serde_json::Value = serde_json::from_slice(&req.body)
+                .unwrap_or_else(|_| json!({"version": 1, "stage": "RouterRequest"}));
+            body["control"] = json!("continue");
+            ResponseTemplate::new(200).set_body_json(body)
+        })
+        .mount(&coprocessor)
+        .await;
+
+    // Mock OTLP collector: accept and retain the router's exported spans.
+    let otlp = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/traces"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            ExportTraceServiceResponse::default().encode_to_vec(),
+            "application/x-protobuf",
+        ))
+        .mount(&otlp)
+        .await;
+
+    let config = include_str!("fixtures/coprocessor_trace_context_propagation.router.yaml")
+        .replace("<coprocessor-address>", &coprocessor.uri())
+        .replace("<otel-collector-endpoint>", &otlp.uri());
+
+    let mut router = IntegrationTest::builder()
+        .config(config)
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", otlp.uri())),
+        })
+        // Disable keep-alive so the router isn't held open at shutdown (see module note).
+        .reqwest_client(no_keepalive_reqwest_client())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    // Spans arrive asynchronously via the batch processor, so poll (10s / 50ms) until the
+    // http_request span the coprocessor was parented under has been exported.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let parent_span_name = loop {
+        // Clone the captured value out and drop the lock before awaiting.
+        let traceparent = captured_traceparent.lock().unwrap().clone();
+        if let Some(traceparent) = traceparent {
+            // traceparent: version "-" trace-id "-" parent-id "-" flags
+            let parent_id = traceparent
+                .split('-')
+                .nth(2)
+                .unwrap_or_default()
+                .to_string();
+            if let Some(name) = exported_span_name_by_id(&otlp, &parent_id).await {
+                break Some(name);
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            break None;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+
+    router.graceful_shutdown().await;
+
+    assert!(
+        captured_traceparent.lock().unwrap().is_some(),
+        "coprocessor must have received a traceparent header"
+    );
+    // The coprocessor's outbound HTTP CLIENT span is exported as `POST <coprocessor-url>`.
+    // On the pre-fix code the parent-id resolves to the `external_plugin` span instead.
+    assert_eq!(
+        parent_span_name,
+        Some(format!("POST {}", coprocessor.uri())),
+        "coprocessor's parent span must be the outbound HTTP CLIENT span, not external_plugin"
+    );
+    Ok(())
+}
+
+/// Decode the spans the router exported to the mock OTLP collector and return the `name` of the
+/// span whose `spanId` matches `span_id` (16 lowercase hex), if present.
+async fn exported_span_name_by_id(otlp: &wiremock::MockServer, span_id: &str) -> Option<String> {
+    let requests = otlp.received_requests().await?;
+    let spans = serde_json::Value::Array(
+        requests
+            .iter()
+            .filter(|r| r.url.path().ends_with("/v1/traces"))
+            .filter_map(|r| ExportTraceServiceRequest::decode(r.body.as_slice()).ok())
+            .filter_map(|trace| serde_json::to_value(trace).ok())
+            .collect(),
+    );
+    spans
+        .select_path(&format!("$..spans..[?(@.spanId == '{span_id}')].name"))
+        .ok()?
+        .first()
+        .and_then(|v| v.as_string())
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1182,13 +1311,13 @@ coprocessor:
   router:
     request:
       headers: true
-      context: true
+      context: all
       url: {}  # Override for router stage
   supergraph:
     request:
       headers: true
       body: true
-      context: true
+      context: all
       url: {}  # Override for supergraph stage
 "#,
         router_uds_url, supergraph_uds_url
@@ -1327,13 +1456,13 @@ coprocessor:
   router:
     request:
       headers: true
-      context: true
+      context: all
       url: {}  # Unix socket for router stage
   supergraph:
     request:
       headers: true
       body: true
-      context: true
+      context: all
       url: {}  # HTTP for supergraph stage
 "#,
         router_uds_url, supergraph_http_url

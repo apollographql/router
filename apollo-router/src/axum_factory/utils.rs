@@ -3,22 +3,28 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use http::StatusCode;
 use opentelemetry::global;
 use opentelemetry::trace::TraceContextExt;
+use tower::ServiceBuilder;
+use tower::load_shed::error::Overloaded;
 use tower_http::trace::MakeSpan;
-use tower_service::Service;
 use tracing::Span;
 
-use crate::plugins::telemetry::SpanMode;
+use crate::Context;
+use crate::graphql;
+use crate::layers::ServiceBuilderExt;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
+use crate::plugins::telemetry::pipeline_bypass::record_bypassed_request;
+use crate::plugins::telemetry::span_factory;
+use crate::services::router;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 use crate::uplink::license_enforcement::LicenseState;
 
 #[derive(Clone, Default)]
 pub(crate) struct PropagatingMakeSpan {
     pub(crate) license: Arc<LicenseState>,
-    pub(crate) span_mode: SpanMode,
 }
 
 impl<B> MakeSpan<B> for PropagatingMakeSpan {
@@ -29,7 +35,6 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         let context = global::get_text_map_propagator(|propagator| {
             propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
         });
-        let use_legacy_request_span = matches!(self.span_mode, SpanMode::Deprecated);
 
         // If there was no span from the request then it will default to the NOOP span.
         // Attaching the NOOP span has the effect of preventing further tracing.
@@ -38,18 +43,10 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         {
             // We have a valid remote span, attach it to the current thread before creating the root span.
             let _context_guard = context.attach();
-            if use_legacy_request_span {
-                self.span_mode.create_request(request, &self.license)
-            } else {
-                self.span_mode.create_router(request)
-            }
+            span_factory::create_router(request)
         } else {
             // No remote span, we can go ahead and create the span without context.
-            if use_legacy_request_span {
-                self.span_mode.create_request(request, &self.license)
-            } else {
-                self.span_mode.create_router(request)
-            }
+            span_factory::create_router(request)
         };
         if matches!(
             &*self.license,
@@ -64,45 +61,189 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
 }
 
 #[derive(Clone)]
-pub(crate) struct InjectConnectionInfo<S> {
-    inner: S,
-    connection_info: ConnectionInfo,
-}
-
-#[derive(Clone)]
 pub(crate) struct ConnectionInfo {
     pub(crate) peer_address: Option<SocketAddr>,
     pub(crate) server_address: Option<SocketAddr>,
 }
 
-impl<S> InjectConnectionInfo<S> {
-    pub(crate) fn new(service: S, connection_info: ConnectionInfo) -> Self {
-        InjectConnectionInfo {
-            inner: service,
-            connection_info,
+pub(crate) type ConnectionRouterService =
+    tower::util::BoxCloneSyncService<router::Request, router::Response, tower::BoxError>;
+
+/// Wraps a router service so every connection can share one instance, cloning it per request.
+///
+/// Requests queue while the pipeline is busy and answer with a 503 once the queue is full,
+/// rather than waiting without bound.
+pub(crate) fn connection_router_service(
+    service: router::BoxCloneService,
+) -> ConnectionRouterService {
+    ConnectionRouterService::new(
+        ServiceBuilder::new()
+            .map_future_with_request_data(|req: &router::Request| req.context.clone(), shed_as_503)
+            // hyper awaits `poll_ready` inside each request's future, so a layer reporting
+            // `Pending` there stalls that request instead of applying backpressure to the
+            // connection. `load_shed` always reports `Ready`, so it has to sit above the queue
+            // for the shed decision to be immediate.
+            .load_shed()
+            // Unconstrained, so tokio's cooperative budget cannot report a spurious `Pending`
+            // and shed a request the queue had room for.
+            .buffered()
+            .service(service),
+    )
+}
+
+/// Answers a shed request with a 503 so callers never handle [`Overloaded`] themselves.
+///
+/// Belongs directly outside the `load_shed` whose errors it renders.
+async fn shed_as_503(
+    context: Context,
+    future: impl Future<Output = Result<router::Response, tower::BoxError>>,
+) -> Result<router::Response, tower::BoxError> {
+    match future.await {
+        Err(err) if err.is::<Overloaded>() => {
+            // Shedding happens before the router pipeline, and its `http.server.*` instruments
+            // with it, so record the duration here to keep shed requests visible.
+            record_bypassed_request(
+                StatusCode::SERVICE_UNAVAILABLE.as_u16(),
+                context.created_at.elapsed(),
+            );
+
+            // Debug rather than warn: shedding is per-request, so a sustained overload would
+            // otherwise emit a line per rejected request while the router is already struggling.
+            tracing::debug!(
+                code = "REQUEST_CONCURRENCY_LIMITED",
+                "the connection queue is full, shedding request",
+            );
+
+            Ok(router::Response::error_builder()
+                .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                .error(
+                    graphql::Error::builder()
+                        .message("Your request has been concurrency limited waiting for the router")
+                        .extension_code("REQUEST_CONCURRENCY_LIMITED")
+                        .build(),
+                )
+                .context(context)
+                .build()
+                .expect("overloaded response should build"))
         }
+        other => other,
     }
 }
 
-impl<S, B> Service<http::Request<B>> for InjectConnectionInfo<S>
-where
-    S: Service<http::Request<B>>,
-{
-    type Response = <S as Service<http::Request<B>>>::Response;
+/// Stands in for a saturated pipeline: `poll_ready` never resolves, so `load_shed` should
+/// short-circuit before `call` is reached.
+#[cfg(test)]
+#[derive(Clone)]
+pub(crate) struct NeverReady;
 
-    type Error = <S as Service<http::Request<B>>>::Error;
-
-    type Future = <S as Service<http::Request<B>>>::Future;
+#[cfg(test)]
+impl tower::Service<router::Request> for NeverReady {
+    type Response = router::Response;
+    type Error = tower::BoxError;
+    type Future = std::future::Pending<Result<router::Response, tower::BoxError>>;
 
     fn poll_ready(
         &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::result::Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Pending
     }
 
-    fn call(&mut self, mut req: http::Request<B>) -> Self::Future {
-        req.extensions_mut().insert(self.connection_info.clone());
-        self.inner.call(req)
+    fn call(&mut self, _req: router::Request) -> Self::Future {
+        unreachable!("load_shed should short-circuit calls to a never-ready service")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tower::Service;
+
+    use super::*;
+    use crate::metrics::FutureMetricsExt;
+
+    /// An unready pipeline must not stall readiness, because hyper awaits `poll_ready` inside
+    /// each request's future. Shedding once the queue fills is covered by
+    /// `unconstrained_buffer::tests::full_buffer_should_still_cause_load_shedding`, which
+    /// exercises the same `LoadShed` over `UnconstrainedBuffer` pairing with a capacity it can
+    /// actually exhaust.
+    // `Buffer` spawns its worker, so this needs a runtime even though nothing is awaited.
+    #[tokio::test]
+    async fn connection_router_service_always_reports_ready() {
+        let mut connection_service =
+            connection_router_service(router::BoxCloneService::new(NeverReady));
+
+        let ready = futures::future::poll_fn(|cx| {
+            std::task::Poll::Ready(connection_service.poll_ready(cx))
+        })
+        .await;
+
+        assert!(
+            matches!(ready, std::task::Poll::Ready(Ok(()))),
+            "poll_ready must never report Pending to hyper"
+        );
+    }
+
+    /// A shed request has to come back as a response rather than an error, so callers can return
+    /// it without knowing that `load_shed` exists.
+    #[tokio::test]
+    async fn shed_requests_answer_with_a_503_graphql_error() {
+        let response = shed_as_503(
+            Context::new(),
+            std::future::ready(Err(Overloaded::new().into())),
+        )
+        .await
+        .expect("a shed request should answer, not error");
+
+        assert_eq!(response.response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let body = router::body::into_bytes(response.response.into_body())
+            .await
+            .expect("the body should be readable");
+        let body: graphql::Response =
+            serde_json::from_slice(&body).expect("the body should be a GraphQL response");
+
+        let error = body.errors.first().expect("a GraphQL error is expected");
+        assert_eq!(
+            error.extensions.get("code").and_then(|code| code.as_str()),
+            Some("REQUEST_CONCURRENCY_LIMITED")
+        );
+        assert_eq!(
+            error.message,
+            "Your request has been concurrency limited waiting for the router"
+        );
+    }
+
+    /// The router pipeline's `http.server.*` instruments never see a shed request, so the shed
+    /// path has to record the duration itself.
+    #[tokio::test]
+    async fn shed_requests_record_a_request_duration() {
+        async {
+            let _ = shed_as_503(
+                Context::new(),
+                std::future::ready(Err(Overloaded::new().into())),
+            )
+            .await;
+
+            assert_histogram_count!(
+                "http.server.request.duration",
+                1,
+                "http.response.status_code" = 503i64
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// Anything other than an `Overloaded` has to pass through untouched.
+    #[tokio::test]
+    async fn other_errors_pass_through() {
+        let err = shed_as_503(
+            Context::new(),
+            std::future::ready(Err("something else".into())),
+        )
+        .await
+        .expect_err("a non-overload error should stay an error");
+
+        assert_eq!(err.to_string(), "something else");
     }
 }

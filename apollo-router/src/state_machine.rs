@@ -1,3 +1,29 @@
+//! Decides what the router serves, and what happens when it cannot serve what it has
+//! been given.
+//!
+//! `StateMachine::process_events` drives a single loop over one event stream. Each
+//! iteration accumulates the new input into the current state (`accumulate_inputs`,
+//! pure, no I/O) and then attempts a reload (`attempt_reload`, where all the work and
+//! all the I/O happen).
+//!
+//! Three things are worth knowing before changing anything here:
+//!
+//! - **The three inputs are independent.** Configuration, schema and license arrive
+//!   from unrelated sources and are never versioned together, so a reload is always a
+//!   combination that may never have been published as a set.
+//! - **A pending input is never discarded.** `PendingChange` keeps what is serving
+//!   (`committed()`) separately from what we are trying to apply (`target()`), and a
+//!   value that failed to apply is retained so that a later change to a *different*
+//!   input can make the combination succeed. This is deliberate and long-standing.
+//! - **The cheap checks and the permanent failures are the same set.** Schema parsing
+//!   and the two enforcement checks are pure; everything expensive and everything
+//!   retryable lives in `router_configurator.create_pipeline()`, which builds the query planner,
+//!   initializes plugins, and warms the query plan cache inline.
+//!
+//! `dev-docs/reload-lifecycle.md` covers all of this properly, including the cost model,
+//! the retry budget, the change-notification rules, and the known sharp edges — notably
+//! that an input which can never be applied blocks every input behind it.
+
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
@@ -33,18 +59,15 @@ use super::router::Event::UpdateSchema;
 use super::router::Event::{self};
 use crate::ApolloRouterError::NoLicense;
 use crate::configuration::Configuration;
-use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
 use crate::configuration::metrics::Metrics;
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::router::Event::UpdateLicense;
 use crate::router_factory::RouterFactory;
-use crate::router_factory::RouterSuperServiceFactory;
+use crate::router_factory::RouterServiceFactory;
 use crate::spec::Schema;
 use crate::uplink::feature_gate_enforcement::FeatureGateEnforcementReport;
-use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
-use crate::uplink::license_enforcement::LicenseLimits;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::schema::SchemaState;
 
@@ -135,7 +158,7 @@ impl<T> PendingChange<T> {
 
 /// This state maintains private information that is not exposed to the user via state listener.
 #[allow(clippy::large_enum_variant)]
-enum State<FA: RouterSuperServiceFactory> {
+enum State<FA: RouterServiceFactory> {
     Startup {
         configuration: Option<Arc<Configuration>>,
         schema: Option<Arc<SchemaState>>,
@@ -169,7 +192,9 @@ enum State<FA: RouterSuperServiceFactory> {
         license: PendingChange<Arc<LicenseState>>,
         retry_after: Instant,
         /// Retries remaining for the current pending (configuration, schema, license).
-        /// `None` means unlimited; `Some(0)` means exhausted.
+        /// `None` means unlimited; `Some(0)` means no further timer-driven attempt,
+        /// either because the budget ran out or because the last failure was permanent
+        /// (see `ReloadError`) and retrying the same inputs cannot help.
         /// Reset to the configured `max_retries` whenever a new publish is received
         /// so that each publish gets a fresh budget of attempts.
         retries_remaining: Option<u32>,
@@ -178,7 +203,7 @@ enum State<FA: RouterSuperServiceFactory> {
     Errored(ApolloRouterError),
 }
 
-impl<FA: RouterSuperServiceFactory> Debug for State<FA> {
+impl<FA: RouterServiceFactory> Debug for State<FA> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Startup { .. } => write!(f, "Startup"),
@@ -190,7 +215,55 @@ impl<FA: RouterSuperServiceFactory> Debug for State<FA> {
     }
 }
 
-impl<FA: RouterSuperServiceFactory> State<FA> {
+/// Why a reload attempt failed, classified by whether retrying the *same* inputs
+/// could ever succeed.
+///
+/// A permanent failure is a property of the inputs themselves — a schema that does
+/// not parse, or a configuration the current license forbids — so every attempt
+/// fails in exactly the same place. Retrying those on a timer burns CPU and floods
+/// logs without ever converging, so `attempt_reload` disarms the retry timer and
+/// keeps serving the last good state until the inputs change. Anything else is
+/// transient (a resource or network blip while building the new pipelines) and is
+/// retried as before.
+///
+/// Note that "permanent" is scoped to one set of inputs, not to the router: a new
+/// publish resets the retry budget in `accumulate_inputs`, so the next schema,
+/// configuration or license still gets an immediate attempt.
+enum ReloadError {
+    Transient(ApolloRouterError),
+    Permanent(ApolloRouterError),
+}
+
+impl ReloadError {
+    /// The value recorded as the `error_kind` attribute of
+    /// `apollo.router.state.reload.attempt`.
+    ///
+    /// This covers only what is intrinsic to the error. Whether a failure is *fatal*
+    /// is positional rather than intrinsic — it depends on whether `try_start` had
+    /// already consumed the server handle — so `attempt_reload` supplies that label
+    /// from the arm that knows.
+    fn error_kind(&self) -> &'static str {
+        match self {
+            Self::Transient(_) => "transient",
+            Self::Permanent(_) => "permanent",
+        }
+    }
+
+    /// True when a later attempt with the same inputs might succeed.
+    fn is_transient(&self) -> bool {
+        matches!(self, Self::Transient(_))
+    }
+
+    /// The underlying error, discarding the classification. Used once the retry
+    /// decision has been made and the failure is reported or becomes terminal.
+    fn into_inner(self) -> ApolloRouterError {
+        match self {
+            Self::Transient(err) | Self::Permanent(err) => err,
+        }
+    }
+}
+
+impl<FA: RouterServiceFactory> State<FA> {
     async fn no_more_configuration(self) -> Self {
         match self {
             Startup {
@@ -226,7 +299,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
 
     /// Returns the scheduled retry instant if the state machine is in `Reloading`
     /// with at least one attempt remaining.  Returns `None` when not reloading or
-    /// when the retry budget is exhausted (`retries_remaining == Some(0)`).
+    /// when no timer-driven attempt should be made (`retries_remaining == Some(0)`,
+    /// set either by exhausting the budget or by a permanent failure).
     fn retry_after(&self) -> Option<Instant> {
         match self {
             Reloading {
@@ -409,7 +483,9 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     &mut listen_addresses_guard,
                     vec![],
                 )
-                .map_ok_or_else(Errored, |f| f.0)
+                // Nothing is serving yet, so any startup failure is terminal and the
+                // classification does not apply.
+                .map_ok_or_else(|e| Errored(e.into_inner()), |f| f.0)
                 .await
             }
 
@@ -434,7 +510,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 match Self::try_start(
                     state_machine,
                     &mut server_handle,
-                    Some(&router_service_factory),
+                    Some(router_service_factory.clone()),
                     configuration.target().clone(),
                     schema.target().clone(),
                     license.target().clone(),
@@ -451,6 +527,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                             event = STATE_CHANGE,
                             "reload complete"
                         );
+                        record_reload_attempt(None);
                         // Explicitly drop the old factory before broadcasting notifications so
                         // that its resources (connections, background tasks) are fully torn down
                         // before any listeners act on the reload-complete signal.
@@ -472,11 +549,24 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         new_state
                     }
                     Err(e) if server_handle.is_some() => {
-                        // Decrement the retry budget (saturating so it stops at 0, not wrapping).
-                        let retries_remaining = retries_remaining.map(|n| n.saturating_sub(1));
+                        let error_kind = e.error_kind();
+                        record_reload_attempt(Some(error_kind));
+
+                        let retries_remaining = if e.is_transient() {
+                            // Decrement the retry budget (saturating so it stops at 0, not wrapping).
+                            retries_remaining.map(|n| n.saturating_sub(1))
+                        } else {
+                            // Retrying will not help. Pin the budget at 0 to disarm the
+                            // timer — not a dead end, since `accumulate_inputs` resets it
+                            // on the next publish, which also gets an immediate attempt.
+                            Some(0)
+                        };
+
+                        let e = e.into_inner();
 
                         tracing::error!(
                             error = %e,
+                            error_kind,
                             retries_remaining = retries_remaining
                                 .map_or("unlimited".to_string(), |n| n.to_string()),
                             event = STATE_CHANGE,
@@ -502,8 +592,13 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         }
                     }
                     // The point of no return was passed — server handle consumed
-                    // before the failure. Fatal.
+                    // before the failure. Fatal, whatever the classification.
                     Err(e) => {
+                        // Fatal is a property of this arm, not of the error: whatever kind
+                        // of failure it was, the server handle is gone and the router
+                        // cannot keep serving.
+                        record_reload_attempt(Some("fatal"));
+                        let e = e.into_inner();
                         tracing::error!(
                             error = %e,
                             event = STATE_CHANGE,
@@ -555,113 +650,34 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
     async fn try_start<S>(
         state_machine: &mut StateMachine<S, FA>,
         server_handle: &mut Option<HttpServerHandle>,
-        previous_router_service_factory: Option<&FA::RouterFactory>,
+        previous_router_service_factory: Option<FA::RouterFactory>,
         configuration: Arc<Configuration>,
         schema_state: Arc<SchemaState>,
         license: Arc<LicenseState>,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
         mut all_connections_stopped_signals: Vec<mpsc::Receiver<()>>,
-    ) -> Result<(State<FA>, Arc<Schema>), ApolloRouterError>
+    ) -> Result<(State<FA>, Arc<Schema>), ReloadError>
     where
         S: HttpServerFactory,
-        FA: RouterSuperServiceFactory,
+        FA: RouterServiceFactory,
     {
         let schema = Arc::new(
-            Schema::parse_arc(schema_state.clone(), &configuration)
-                .map_err(|e| ServiceCreationError(e.to_string().into()))?,
+            Schema::parse_arc(schema_state.clone(), &configuration).map_err(|e| {
+                // The same SDL and the same configuration parse identically every
+                // time, so there is nothing for a retry to fix.
+                ReloadError::Permanent(ServiceCreationError(e.to_string().into()))
+            })?,
         );
-        // Check the license
-        let report = LicenseEnforcementReport::build(&configuration, &schema, &license);
 
-        let license_limits = match &*license {
-            LicenseState::Licensed { limits } => {
-                if report.uses_restricted_features() {
-                    tracing::error!(
-                        "The router is using features not available for your license:\n\n{}",
-                        report
-                    );
-                    return Err(ApolloRouterError::LicenseViolation(
-                        report.restricted_features_in_use(),
-                    ));
-                } else {
-                    tracing::debug!("A valid Apollo license has been detected.");
-                    limits
-                }
-            }
-            LicenseState::LicensedWarn { limits } => {
-                if report.uses_restricted_features() {
-                    tracing::error!(
-                        "License violation, the router is using features not available for your license:\n\n{}\n\nThe license warning period has started. The Router will stop serving requests after the license expires. See {LICENSE_EXPIRED_URL} for more information.",
-                        report
-                    );
-                    return Err(ApolloRouterError::LicenseViolation(
-                        report.restricted_features_in_use(),
-                    ));
-                } else {
-                    tracing::warn!(
-                        "License warning period has started. The Router will stop serving requests after the license expires. In order to continue using these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{:?}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
-                        // The report does not contain any features because they are contained within the allowedFeatures claim,
-                        // therefore we output all of the allowed features that the user's license enables them to use.
-                        license.get_allowed_features()
-                    );
-                    limits
-                }
-            }
-            // LicensedHalt doesn't return an error, which might be surprising; rather, the middleware in the axum
-            // server (`license_handler`) will check for halted licenses and send back a canned response
-            LicenseState::LicensedHalt { limits } => {
-                if report.uses_restricted_features() {
-                    tracing::error!(
-                        "License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
-                        report
-                    );
-                    limits
-                } else {
-                    tracing::error!(
-                        "License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{:?}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
-                        // The report does not contain any features because they are contained within the allowedFeatures claim,
-                        // therefore we output all of the allowed features that the user's license enables them to use.
-                        license.get_allowed_features()
-                    );
-                    limits
-                }
-            }
-            LicenseState::Unlicensed if report.uses_restricted_features() => {
-                // This is OSS, so fail to reload or start.
-                if crate::services::APOLLO_KEY.lock().is_some()
-                    && crate::services::APOLLO_GRAPH_REF.lock().is_some()
-                {
-                    tracing::error!(
-                        "License not found. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides a license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
-                        report
-                    );
-                } else {
-                    tracing::error!(
-                        "Not connected to GraphOS. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS (using APOLLO_KEY and APOLLO_GRAPH_REF) that provides a license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
-                        report
-                    );
-                }
-                return Err(ApolloRouterError::LicenseViolation(
-                    report.restricted_features_in_use(),
-                ));
-            }
-            _ => {
-                tracing::debug!(
-                    "A valid Apollo license was not detected. However, no restricted features are in use."
-                );
-                // Without restricted features, there's no need to limit the router
-                &Option::<LicenseLimits>::None
-            }
-        };
-
-        // If there are no restricted features in use then the effective license is Licensed as we don't need warn or halt behavior.
-        let effective_license = if !report.uses_restricted_features() {
-            Arc::new(LicenseState::Licensed {
-                limits: license_limits.clone(),
-            })
-        } else {
-            license.clone()
-        };
+        // Check the license. A violation is permanent: enforcement is a pure function of
+        // the configuration, schema and license, so retrying these same three inputs
+        // re-derives the same violation. A newly published license is a separate event
+        // and gets its own attempt. `LicenseEnforcementViolation` is the only error `enforce` can
+        // return, which is what makes this blanket mapping safe.
+        let report = LicenseEnforcementReport::build(&configuration, &schema, license.clone());
+        let effective_license = report
+            .enforce()
+            .map_err(|violation| ReloadError::Permanent(violation.into()))?;
 
         if let Err(feature_gate_violations) =
             FeatureGateEnforcementReport::build(&configuration, &schema).check()
@@ -670,12 +686,14 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 "The schema contains preview features not enabled in configuration.\n\n{}",
                 feature_gate_violations.iter().join("\n")
             );
-            return Err(ApolloRouterError::FeatureGateViolation);
+            return Err(ReloadError::Permanent(
+                ApolloRouterError::FeatureGateViolation,
+            ));
         }
 
         let router_service_factory = state_machine
             .router_configurator
-            .create(
+            .create_pipeline(
                 state_machine.is_telemetry_disabled,
                 configuration.clone(),
                 schema.clone(),
@@ -684,54 +702,52 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 effective_license.clone(),
             )
             .await
-            .map_err(ServiceCreationError)?;
+            // Building the pipelines can fail for reasons that have nothing to do with
+            // the inputs — a plugin failing to reach a dependency while it initializes,
+            // for example — so this is treated as transient and retried. A genuinely
+            // bad configuration will simply fail the same way on each attempt until the
+            // retry budget runs out.
+            .map_err(|e| ReloadError::Transient(ServiceCreationError(e)))?;
         // used to track if there are still in flight connections when shutting down
         let (all_connections_stopped_sender, all_connections_stopped_signal) =
             mpsc::channel::<()>(1);
         all_connections_stopped_signals.push(all_connections_stopped_signal);
         let web_endpoints = router_service_factory.web_endpoints();
 
-        // The point of no return. We take the previous server handle.
+        // The point of no return. We take the previous server handle, so a failure from
+        // here on is fatal — `attempt_reload` has no server left to fall back to, and it
+        // detects that from the handle rather than from the error. The classification
+        // below is therefore never acted on; transient is the honest label for these
+        // (a listen address in use does free up).
         let server_handle = match server_handle.take() {
-            None => {
-                state_machine
-                    .http_server_factory
-                    .create(
-                        router_service_factory.clone(),
-                        configuration.clone(),
-                        Default::default(),
-                        Default::default(),
-                        web_endpoints,
-                        effective_license,
-                        all_connections_stopped_sender,
-                    )
-                    .await?
-            }
-            Some(server_handle) => {
-                server_handle
-                    .restart(
-                        &state_machine.http_server_factory,
-                        router_service_factory.clone(),
-                        configuration.clone(),
-                        web_endpoints,
-                        effective_license,
-                    )
-                    .await?
-            }
+            None => state_machine
+                .http_server_factory
+                .create(
+                    router_service_factory.clone(),
+                    configuration.clone(),
+                    Default::default(),
+                    Default::default(),
+                    web_endpoints,
+                    effective_license,
+                    all_connections_stopped_sender,
+                )
+                .await
+                .map_err(ReloadError::Transient)?,
+            Some(server_handle) => server_handle
+                .restart(
+                    &state_machine.http_server_factory,
+                    router_service_factory.clone(),
+                    configuration.clone(),
+                    web_endpoints,
+                    effective_license,
+                )
+                .await
+                .map_err(ReloadError::Transient)?,
         };
 
         listen_addresses_guard.extra_listen_addresses = server_handle.listen_addresses().to_vec();
         listen_addresses_guard.graphql_listen_address =
             server_handle.graphql_listen_address().clone();
-
-        // Log that we are using experimental features. It is best to do this here rather than config
-        // validation as it will actually log issues rather than return structured validation errors.
-        // Logging here also means that this is actually configuration that took effect
-        if let Some(yaml) = &configuration.validated_yaml {
-            let discussed = Discussed::new();
-            discussed.log_experimental_used(yaml);
-            discussed.log_preview_used(yaml);
-        }
 
         let metrics = apollo_opentelemetry_initialized()
             .then(|| Metrics::new(&configuration, Arc::as_ref(&license)));
@@ -760,7 +776,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
 pub(crate) struct StateMachine<S, FA>
 where
     S: HttpServerFactory,
-    FA: RouterSuperServiceFactory,
+    FA: RouterServiceFactory,
 {
     is_telemetry_disabled: bool,
     http_server_factory: S,
@@ -774,7 +790,7 @@ where
 impl<S, FA> StateMachine<S, FA>
 where
     S: HttpServerFactory,
-    FA: RouterSuperServiceFactory + Send,
+    FA: RouterServiceFactory + Send,
     FA::RouterFactory: RouterFactory,
 {
     pub(crate) fn new(
@@ -923,6 +939,38 @@ where
     }
 }
 
+/// Records the outcome of a single reload attempt, following the shape of
+/// `apollo.router.lifecycle.query_planner.init`: one counter per attempt carrying a
+/// success flag, plus the kind of failure when there is one. Emitting successes too
+/// is what makes a reload failure rate computable from this metric alone.
+///
+/// `error_kind` is `None` on success, and otherwise one of:
+/// - `"transient"` — the attempt may succeed if retried with the same inputs.
+/// - `"permanent"` — it cannot; the router waits for new inputs (see `ReloadError`).
+/// - `"fatal"` — the failure came after the point of no return, so the router stops.
+///
+/// Startup is not a reload and is deliberately not counted here.
+fn record_reload_attempt(error_kind: Option<&'static str>) {
+    if let Some(error_kind) = error_kind {
+        u64_counter_with_unit!(
+            "apollo.router.state.reload.attempt",
+            "Router reload attempts",
+            "{attempt}",
+            1,
+            "error_kind" = error_kind,
+            "is_success" = false
+        );
+    } else {
+        u64_counter_with_unit!(
+            "apollo.router.state.reload.attempt",
+            "Router reload attempts",
+            "{attempt}",
+            1,
+            "is_success" = true
+        );
+    }
+}
+
 /// Computes the retry delay: base delay plus up to 25% random positive jitter.
 /// `rand::random::<f64>()` returns a value in [0.0, 1.0), so the result is always
 /// at least `base` and at most `base * 1.25` — never shorter than the base delay.
@@ -955,21 +1003,19 @@ mod tests {
     use serde_json::json;
     use test_log::test;
     use tower::BoxError;
-    use tower::Service;
 
     use super::*;
     use crate::AllowedFeature;
+    use crate::axum_factory::Endpoint;
     use crate::configuration::Homepage;
     use crate::http_server_factory::Listener;
     use crate::metrics::FutureMetricsExt;
     use crate::plugin::DynPlugin;
-    use crate::router_factory::Endpoint;
     use crate::router_factory::RouterFactory;
-    use crate::router_factory::RouterSuperServiceFactory;
-    use crate::services::RouterRequest;
-    use crate::services::new_service::ServiceFactory;
+    use crate::router_factory::RouterServiceFactory;
     use crate::services::router;
-    use crate::services::router::pipeline_handle::PipelineRef;
+    use crate::services::router::pipeline_handle::PipelineHandle;
+    use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::schema::SchemaState;
 
     type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
@@ -2042,7 +2088,7 @@ mod tests {
     async fn router_factory_error_startup() {
         let mut router_factory = MockMyRouterConfigurator::new();
         router_factory
-            .expect_create()
+            .expect_create_pipeline()
             .times(1)
             .returning(|_, _, _, _, _, _| Err(BoxError::from("Error")));
 
@@ -2069,17 +2115,17 @@ mod tests {
         let mut seq = Sequence::new();
         let mut router_factory = MockMyRouterConfigurator::new();
         router_factory
-            .expect_create()
+            .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
         router_factory
-            .expect_create()
+            .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _, _, _, _, _| Err(BoxError::from("error")));
@@ -2113,28 +2159,28 @@ mod tests {
         let mut seq = Sequence::new();
         let mut router_factory = MockMyRouterConfigurator::new();
         router_factory
-            .expect_create()
+            .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
         router_factory
-            .expect_create()
+            .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _, _, _, _, _| Err(BoxError::from("error")));
         router_factory
-            .expect_create()
+            .expect_create_pipeline()
             .times(1)
             .in_sequence(&mut seq)
             .withf(|_, configuration, _, _, _, _| configuration.homepage.enabled)
             .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2271,15 +2317,15 @@ mod tests {
         MyRouterConfigurator {}
 
         #[async_trait::async_trait]
-        impl RouterSuperServiceFactory for MyRouterConfigurator {
+        impl RouterServiceFactory for MyRouterConfigurator {
             type RouterFactory = MockMyRouterFactory;
 
-            async fn create<'a>(
-                &'a mut self,
+            async fn create_pipeline(
+                &mut self,
                 is_telemetry_disabled: bool,
                 configuration: Arc<Configuration>,
                 schema: Arc<Schema>,
-                previous_router_service_factory: Option<&'a MockMyRouterFactory>,
+                previous_router_service_factory: Option<MockMyRouterFactory>,
                 extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
                 license: Arc<LicenseState>
             ) -> Result<MockMyRouterFactory, BoxError>;
@@ -2291,14 +2337,9 @@ mod tests {
         MyRouterFactory {}
 
         impl RouterFactory for MyRouterFactory {
-            type RouterService = router::BoxService;
-            type Future = <Self::RouterService as Service<RouterRequest>>::Future;
+            fn create(&self) -> router::BoxCloneService;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
-            fn pipeline_ref(&self) -> Arc<PipelineRef>;
-        }
-        impl ServiceFactory<RouterRequest> for MyRouterFactory {
-            type Service = router::BoxService;
-            fn create(&self) -> router::BoxService;
+            fn pipeline_handle(&self) -> Arc<PipelineHandle>;
         }
 
         impl Clone for MyRouterFactory {
@@ -2406,7 +2447,7 @@ mod tests {
         let mut router_factory = MockMyRouterConfigurator::new();
 
         router_factory
-            .expect_create()
+            .expect_create_pipeline()
             .times(if expect_times_called > 1 {
                 1
             } else {
@@ -2414,7 +2455,7 @@ mod tests {
             })
             .returning(move |_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2422,19 +2463,19 @@ mod tests {
         // verify reloads have the last previous_router_service_factory parameter
         if expect_times_called > 0 {
             router_factory
-                .expect_create()
+                .expect_create_pipeline()
                 .times(expect_times_called - 1)
                 .withf(
                     move |_,
                           _configuration: &Arc<Configuration>,
                           _,
-                          previous_router_service_factory: &Option<&MockMyRouterFactory>,
+                          previous_router_service_factory: &Option<MockMyRouterFactory>,
                           _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>,
                           _| { previous_router_service_factory.is_some() },
                 )
                 .returning(move |_, _, _, _, _, _| {
                     let mut router = MockMyRouterFactory::new();
-                    router.expect_clone().return_once(MockMyRouterFactory::new);
+                    router.expect_clone().returning(MockMyRouterFactory::new);
                     router.expect_web_endpoints().returning(MultiMap::new);
                     Ok(router)
                 });
@@ -2449,11 +2490,11 @@ mod tests {
         let mut router_factory = MockMyRouterConfigurator::new();
 
         router_factory
-            .expect_create()
+            .expect_create_pipeline()
             .times(expect_times_called)
             .returning(move |_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
-                router.expect_clone().return_once(MockMyRouterFactory::new);
+                router.expect_clone().returning(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
@@ -2477,20 +2518,20 @@ mod tests {
 
         fn mock_router_ok() -> MockMyRouterFactory {
             let mut router = MockMyRouterFactory::new();
-            router.expect_clone().return_once(MockMyRouterFactory::new);
+            router.expect_clone().returning(MockMyRouterFactory::new);
             router.expect_web_endpoints().returning(MultiMap::new);
             router
         }
 
         /// Build a factory from a sequence of outcomes: `Ok(())` → one successful
-        /// `create()` call, `Err(())` → one failing call.  Ordering is enforced by a
+        /// `create_pipeline()` call, `Err(())` → one failing call.  Ordering is enforced by a
         /// mockall `Sequence` (the Arc counter inside it outlives the helper frame).
         fn factory(outcomes: &[Result<(), ()>]) -> MockMyRouterConfigurator {
             let mut seq = Sequence::new();
             let mut factory = MockMyRouterConfigurator::new();
             for &outcome in outcomes {
                 factory
-                    .expect_create()
+                    .expect_create_pipeline()
                     .times(1)
                     .in_sequence(&mut seq)
                     .returning(move |_, _, _, _, _, _| {
@@ -2531,7 +2572,15 @@ mod tests {
                     StateMachine::for_tests(server_factory, router_factory, notify.clone());
                 let (tx, rx) = tokio::sync::mpsc::channel::<Event>(16);
                 let stream = ReceiverStream::new(rx);
-                let handle = tokio::spawn(state_machine.process_events(stream));
+                // The state machine runs in its own task, so it needs the calling test's
+                // meter provider explicitly — task locals do not cross `spawn`. Without
+                // this, metrics emitted by a reload would land in a different registry
+                // and `assert_counter!` would see nothing.
+                let handle = tokio::spawn(
+                    state_machine
+                        .process_events(stream)
+                        .with_current_meter_provider(),
+                );
                 Self { tx, notify, handle }
             }
 
@@ -2565,7 +2614,7 @@ mod tests {
 
             /// Shut down and assert the state machine exited cleanly.
             /// Dropping `self` also drops the mock router factory, which causes
-            /// mockall to assert that all expected `create()` calls were made.
+            /// mockall to assert that all expected `create_pipeline()` calls were made.
             async fn finish(self) {
                 self.tx.send(Shutdown).await.unwrap();
                 drop(self.tx);
@@ -2727,6 +2776,129 @@ mod tests {
             }
             harness.advance_and_wait(Duration::from_secs(11)).await; // 7th attempt succeeds
             harness.finish().await;
+        }
+
+        /// A schema that does not parse — the cheapest permanent failure to trigger,
+        /// and one that fails before `create_pipeline()` is ever reached.
+        fn unparseable_schema() -> SchemaState {
+            SchemaState {
+                sdl: "this is not valid graphql".to_owned(),
+                launch_id: None,
+            }
+        }
+
+        // A permanent failure must disarm the retry timer rather than churn on it: the
+        // same inputs will fail in the same place every time.
+        //
+        // These failures happen early in try_start, before `create_pipeline()` is reached, so the
+        // mock router factory's call count cannot observe the retries at all — it would
+        // pass whether or not the timer fired. Assert on the state machine's own
+        // transition signal instead: every loop iteration notifies exactly once, so a
+        // retry that fires leaves a permit behind.
+        #[test(tokio::test(start_paused = true))]
+        async fn permanent_failure_stops_retrying() {
+            // Only the startup build: the unparseable schema never reaches create_pipeline().
+            let harness = Harness::new(factory(&[Ok(())]), 1);
+            harness.startup().await;
+            harness
+                .send_and_wait(UpdateSchema(unparseable_schema()))
+                .await;
+
+            let retried = harness.notify.notified();
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            assert!(
+                retried.now_or_never().is_none(),
+                "a permanent failure must not schedule a retry"
+            );
+
+            // Still serving the previous schema, and still able to shut down cleanly.
+            harness.finish().await;
+        }
+
+        // The same as `permanent_failure_stops_retrying`, but for a permanent failure that
+        // comes from license enforcement rather than the schema. Enforcement is derived
+        // from the configuration, schema and license together, so retrying an unlicensed
+        // router with a configuration that uses restricted features re-derives the
+        // identical violation.
+        #[test(tokio::test(start_paused = true))]
+        async fn permanent_license_failure_stops_retrying() {
+            // Startup is unlicensed with no restricted features in use, which is allowed.
+            let harness = Harness::new(factory(&[Ok(())]), 1);
+            harness.startup().await;
+            // Publishing a configuration that uses restricted features is a violation,
+            // and fails before create_pipeline().
+            harness
+                .send_and_wait(UpdateConfiguration(test_config_restricted()))
+                .await;
+
+            let retried = harness.notify.notified();
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            assert!(
+                retried.now_or_never().is_none(),
+                "a permanent license violation must not schedule a retry"
+            );
+
+            harness.finish().await;
+        }
+
+        // Disarming the timer must not wedge the state machine. A permanent failure is
+        // permanent for *those inputs* only — the next publish resets the retry budget
+        // and gets an immediate attempt via the event arm.
+        #[test(tokio::test(start_paused = true))]
+        async fn permanent_failure_recovers_on_new_input() {
+            // Startup, then one more build for the good schema published after the
+            // unparseable one; the unparseable schema itself never reaches create_pipeline().
+            let harness = Harness::new(factory(&[Ok(()), Ok(())]), 2);
+            harness.startup().await;
+            harness
+                .send_and_wait(UpdateSchema(unparseable_schema()))
+                .await;
+            harness.send_and_wait(UpdateSchema(minimal_schema())).await;
+            harness.finish().await;
+        }
+
+        // Every reload attempt is counted with its outcome, so that a reload failure rate
+        // is computable from this metric alone and a router stuck on a stale schema is
+        // distinguishable from one still retrying.
+        #[test(tokio::test(start_paused = true))]
+        async fn reload_attempt_metric_records_outcome() {
+            async {
+                let zero_retries = Arc::new(
+                    Configuration::from_str("reload:\n  max_retries: 0")
+                        .expect("config with max_retries: 0 must be valid"),
+                );
+                let harness = Harness::new(factory(&[Ok(()), Err(()), Ok(())]), 2);
+                harness.startup_with_config(zero_retries).await;
+
+                // A failing create_pipeline() is transient: the same inputs may well build next time.
+                harness.send_and_wait(UpdateSchema(minimal_schema())).await;
+                assert_counter!(
+                    "apollo.router.state.reload.attempt",
+                    1,
+                    "error_kind" = "transient",
+                    "is_success" = false
+                );
+
+                // A schema that does not parse is permanent.
+                harness
+                    .send_and_wait(UpdateSchema(unparseable_schema()))
+                    .await;
+                assert_counter!(
+                    "apollo.router.state.reload.attempt",
+                    1,
+                    "error_kind" = "permanent",
+                    "is_success" = false
+                );
+
+                // A reload that builds is counted too — startup, which is not a reload,
+                // is not, so this is the first success recorded.
+                harness.send_and_wait(UpdateSchema(minimal_schema())).await;
+                assert_counter!("apollo.router.state.reload.attempt", 1, "is_success" = true);
+
+                harness.finish().await;
+            }
+            .with_metrics()
+            .await;
         }
 
         // Verify that the router can perform more than two consecutive successful reloads

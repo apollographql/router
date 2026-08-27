@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
-use apollo_compiler::collections::HashMap;
 use apollo_compiler::validation::Valid;
 use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
@@ -33,12 +32,13 @@ use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::query_planner::HashedSubgraphSchemas;
+use crate::query_planner::SubgraphSchemas;
 use crate::services::SubgraphRequest;
 use crate::services::fetch::ErrorMapping;
-use crate::services::subgraph::BoxService;
+use crate::services::subgraph::BoxCloneService;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
-use crate::spec::SchemaHash;
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -93,24 +93,6 @@ impl From<ast::OperationType> for OperationKind {
             ast::OperationType::Query => OperationKind::Query,
             ast::OperationType::Mutation => OperationKind::Mutation,
             ast::OperationType::Subscription => OperationKind::Subscription,
-        }
-    }
-}
-
-pub(crate) type SubgraphSchemas = HashMap<String, SubgraphSchema>;
-
-pub(crate) struct SubgraphSchema {
-    pub(crate) schema: Arc<Valid<apollo_compiler::Schema>>,
-    // TODO: Ideally should have separate nominal type for subgraph's schema hash
-    pub(crate) hash: SchemaHash,
-}
-
-impl SubgraphSchema {
-    pub(crate) fn new(schema: Valid<apollo_compiler::Schema>) -> Self {
-        let sdl = schema.serialize().no_indent().to_string();
-        Self {
-            schema: Arc::new(schema),
-            hash: SchemaHash::new(&sdl),
         }
     }
 }
@@ -267,7 +249,7 @@ impl FetchNode {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn subgraph_fetch(
         &self,
-        service: BoxService,
+        service: BoxCloneService,
         subgraph_request: SubgraphRequest,
         current_dir: &Path,
         schema: &Schema,
@@ -513,17 +495,17 @@ impl FetchNode {
         subgraph_schemas: &SubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
         let schema = &subgraph_schemas[self.service_name.as_ref()];
-        self.operation.init_parsed(&schema.schema)?;
+        self.operation.init_parsed(schema)?;
         Ok(())
     }
 
-    pub(crate) fn init_parsed_operation_and_hash_subquery(
+    pub(super) fn init_parsed_operation_and_hash_subquery(
         &mut self,
-        subgraph_schemas: &SubgraphSchemas,
+        subgraph_schemas: &HashedSubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
-        let schema = &subgraph_schemas[self.service_name.as_ref()];
-        self.operation.init_parsed(&schema.schema)?;
-        self.schema_aware_hash = Arc::new(schema.hash.operation_hash(
+        let subgraph_schema = &subgraph_schemas[self.service_name.as_ref()];
+        self.operation.init_parsed(&subgraph_schema.schema)?;
+        self.schema_aware_hash = Arc::new(subgraph_schema.hash.operation_hash(
             self.operation.as_serialized(),
             self.operation_name.as_deref(),
         ));

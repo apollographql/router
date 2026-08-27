@@ -62,7 +62,6 @@ use crate::graphql::Error;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
-use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -165,20 +164,6 @@ impl StorageInterface {
     pub(crate) fn get(&self, subgraph: &str) -> Option<&Storage> {
         let storage = self.subgraphs.get(subgraph).or(self.all.as_ref())?;
         storage.get()
-    }
-
-    /// Activate all storages so they can start emitting metrics.
-    pub(crate) fn activate(&self) {
-        if let Some(all) = &self.all
-            && let Some(storage) = all.get()
-        {
-            storage.activate();
-        }
-        for storage in self.subgraphs.values() {
-            if let Some(storage) = storage.get() {
-                storage.activate();
-            }
-        }
     }
 }
 
@@ -483,11 +468,10 @@ impl PluginPrivate for ResponseCache {
         })
     }
 
-    fn activate(&self) {
-        self.storage.activate();
-    }
-
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         let debug = self.debug;
         let include_cache_control_header_on_router_response =
             self.include_cache_control_header_on_router_response;
@@ -596,10 +580,14 @@ impl PluginPrivate for ResponseCache {
                 response
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         let subgraph_ttl = self
             .subgraph_ttl(name)
             .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // The unwrap should not happen because it's checked when creating the plugin (except for tests)
@@ -628,10 +616,7 @@ impl PluginPrivate for ResponseCache {
                     response
                 })
                 .service(CacheService {
-                    service: ServiceBuilder::new()
-                        .buffered()
-                        .service(service)
-                        .boxed_clone(),
+                    service,
                     entity_type: self.entity_type.clone(),
                     name: name.to_string(),
                     storage: self.storage.clone(),
@@ -645,7 +630,7 @@ impl PluginPrivate for ResponseCache {
                     indexes,
                     cdn_invalidation_enabled: self.cdn_invalidation.enabled,
                 });
-            tower::util::BoxService::new(inner)
+            tower::util::BoxCloneService::new(inner)
         } else {
             ServiceBuilder::new()
                 .map_response(move |response: subgraph::Response| {
@@ -659,7 +644,7 @@ impl PluginPrivate for ResponseCache {
                     response
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone()
         }
     }
 
@@ -701,7 +686,7 @@ impl PluginPrivate for ResponseCache {
                     let endpoint = Endpoint::from_router_service(
                         endpoint_config.path.clone(),
                         InvalidationService::new(self.subgraphs.clone(), self.invalidation.clone())
-                            .boxed(),
+                            .boxed_clone(),
                     );
                     tracing::info!(
                         "Response cache invalidation endpoint listening on: {}{}",
@@ -984,7 +969,7 @@ struct CacheService {
 impl Service<subgraph::Request> for CacheService {
     type Response = subgraph::Response;
     type Error = BoxError;
-    type Future = <subgraph::BoxService as Service<subgraph::Request>>::Future;
+    type Future = <subgraph::BoxCloneService as Service<subgraph::Request>>::Future;
 
     fn poll_ready(
         &mut self,

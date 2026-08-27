@@ -1352,6 +1352,90 @@ async fn subscription_without_header() {
     insta::assert_json_snapshot!(res);
 }
 
+/// Requests without the correct `Accept` header should not reach the batching execution layer.
+#[tokio::test]
+async fn batching_defer_unsupported_and_incorrect_header() {
+    let configuration: Configuration = serde_json::from_value(serde_json::json!({
+        "include_subgraph_errors": { "all": true },
+        "batching": {
+            "enabled": true,
+            "mode": "batch_http_link",
+        },
+    }))
+    .unwrap();
+    let batching = configuration.batching.clone();
+
+    let service = TestHarness::builder()
+        .configuration(Arc::new(configuration))
+        .schema(SCHEMA)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let context = Context::new();
+    context.extensions().with_lock(|lock| {
+        lock.insert(batching);
+    });
+
+    let request = supergraph::Request::fake_builder()
+        .query("query { currentUser { id ...@defer { name } } }")
+        .context(context)
+        .build()
+        .unwrap();
+
+    let mut stream = service.oneshot(request).await.unwrap();
+    let res = stream.next_response().await.unwrap();
+
+    assert!(
+        res.contains_error_code("DEFER_BAD_HEADER"),
+        "expected DEFER_BAD_HEADER, got: {res:?}"
+    );
+}
+
+/// Requests with invalid variables do not reach the execution service, so batching + defer +
+/// invalid variable raises a variable error instead of a batching + defer error.
+#[tokio::test]
+async fn batching_defer_unsupported_and_incorrect_variable() {
+    let configuration: Configuration = serde_json::from_value(serde_json::json!({
+        "include_subgraph_errors": { "all": true },
+        "batching": {
+            "enabled": true,
+            "mode": "batch_http_link",
+        },
+    }))
+    .unwrap();
+    let batching = configuration.batching.clone();
+
+    let service = TestHarness::builder()
+        .configuration(Arc::new(configuration))
+        .schema(SCHEMA)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let context = defer_context();
+    // XXX(@goto-bus-stop): not ideal but this implies that the `Accept` header was passed in
+    // correctly; the router service is normally responsible for populating this context value
+    context.extensions().with_lock(|lock| {
+        lock.insert(batching);
+    });
+
+    let request = supergraph::Request::fake_builder()
+        .query("query($skip: Boolean!) { currentUser { id ...@defer { name @skip(if: $skip) } } }")
+        .variable("skip", "not-a-boolean")
+        .context(context)
+        .build()
+        .unwrap();
+
+    let mut stream = service.oneshot(request).await.unwrap();
+    let res = stream.next_response().await.unwrap();
+
+    assert!(
+        res.contains_error_code("VALIDATION_INVALID_TYPE_VARIABLE"),
+        "expected VALIDATION_INVALID_TYPE_VARIABLE, got: {res:?}"
+    );
+}
+
 #[tokio::test]
 async fn root_typename_with_defer_and_empty_first_response() {
     let subgraphs = MockedSubgraphs([
@@ -3297,7 +3381,7 @@ async fn id_scalar_can_overflow_i32() {
                 let id = &request.subgraph_request.body().variables["id"];
                 Err(format!("$id = {id}").into())
             })
-            .boxed()
+            .boxed_clone()
         })
         .build_supergraph()
         .await
@@ -3746,6 +3830,203 @@ async fn invalid_input_enum() {
     insta::assert_json_snapshot!(response);
 }
 
+#[tokio::test]
+async fn test_cache_warmup() {
+    use std::fmt::Debug;
+    use std::sync::atomic::AtomicBool;
+
+    use tower::ServiceBuilder;
+
+    use crate::pipeline::build_supergraph_pipeline;
+    use crate::query_planner::QueryPlan;
+    use crate::services::QueryPlannerResponse;
+    use crate::services::layers::persisted_queries::PersistedQueryExpander;
+    use crate::services::query_planner;
+
+    let configuration = Configuration::default();
+    let schema = Arc::new(
+        Schema::parse(
+            include_str!("../../testdata/starstuff@current.graphql"),
+            &configuration,
+        )
+        .unwrap(),
+    );
+
+    // We have to do a bunch of setup here...
+    // XXX(@goto-bus-stop): we should probably just use the RouterService at this point?
+    let query_parsing_service = crate::pipeline::build_query_parsing_service(
+        schema.clone(),
+        Arc::new(configuration.clone()),
+    );
+    let pq_layer = PersistedQueryExpander::new(&configuration).await.unwrap();
+
+    /// Return an empty plan that doesn't require any subgraph requests to fulfill.
+    fn empty_query_plan() -> QueryPlannerResponse {
+        let plan = Arc::new(QueryPlan::fake_new(None, None));
+        QueryPlannerResponse::builder().content(plan).build()
+    }
+
+    /// Execute a constant mock query against the given supergraph service.
+    async fn execute_query(
+        mut supergraph_service: impl tower::Service<
+            supergraph::Request,
+            Response = supergraph::Response,
+            Error: Debug,
+        >,
+    ) -> graphql::Response {
+        supergraph_service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                supergraph::Request::fake_builder()
+                    .query("query ExampleQuery { me { name } }")
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap()
+    }
+
+    // First we run a query normally, so that the plan enters the in-memory cache.
+
+    let (mock, mut handle) =
+        tower_test::mock::pair::<query_planner::Request, query_planner::Response>();
+    let driver = tokio::spawn(async move {
+        let (_req, responder) = handle
+            .next_request()
+            .await
+            .expect("mock planner should receive exactly one request");
+        // HACK: Return an empty plan so we don't do any work in execution
+        responder.send_response(empty_query_plan());
+    });
+
+    let query_plan_cache = crate::pipeline::build_query_plan_cache(
+        &configuration,
+        crate::pipeline::connect_query_plan_redis(&configuration)
+            .await
+            .unwrap(),
+    );
+    let previous_cache = query_plan_cache.in_memory_cache();
+    let caching_query_planner = crate::query_planner::CachingQueryPlanner::new(
+        mock.map_err(|err| panic!("mock driver failed: {err}"))
+            .boxed_clone(),
+        schema.clone(),
+        Arc::new(Default::default()),
+        &configuration,
+        query_plan_cache,
+    )
+    .boxed_clone();
+    let supergraph_service = build_supergraph_pipeline(
+        caching_query_planner,
+        schema.clone(),
+        Arc::new(Default::default()),
+        Arc::new(configuration.clone()),
+        Default::default(),
+        crate::services::SubgraphServices {
+            services: Default::default(),
+        },
+        Default::default(),
+    );
+
+    let supergraph_service = ServiceBuilder::new()
+        .load_shed()
+        .layer(crate::services::router::parse_query::ParseQueryLayer::new(
+            query_parsing_service.clone(),
+            configuration.supergraph.redact_query_validation_errors,
+        ))
+        .service(supergraph_service);
+
+    let response = execute_query(supergraph_service).await;
+    assert!(response.errors.is_empty());
+
+    crate::plugin::test::await_mock_driver(driver).await;
+
+    // Second, we warm up a new service using the cache from the previous service.
+
+    let (mock, mut handle) =
+        tower_test::mock::pair::<query_planner::Request, query_planner::Response>();
+    // ...warm-up should submit the query that we planned above to the new query planner service
+    let did_plan = Arc::new(AtomicBool::new(false));
+    let did_plan_2 = did_plan.clone();
+    let driver = tokio::spawn(async move {
+        let (_req, responder) = handle
+            .next_request()
+            .await
+            .expect("mock planner should receive exactly one request");
+        // HACK: Return an empty plan so we don't do any work in execution
+        responder.send_response(empty_query_plan());
+        did_plan_2.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+
+    let query_plan_cache = crate::pipeline::build_query_plan_cache(
+        &configuration,
+        crate::pipeline::connect_query_plan_redis(&configuration)
+            .await
+            .unwrap(),
+    );
+    let query_planner_service = crate::query_planner::CachingQueryPlanner::new(
+        mock.map_err(|err| panic!("mock driver failed: {err}"))
+            .boxed_clone(),
+        schema.clone(),
+        Arc::new(Default::default()),
+        &configuration,
+        query_plan_cache,
+    )
+    .boxed_clone();
+    let supergraph_service = build_supergraph_pipeline(
+        query_planner_service.clone(),
+        schema.clone(),
+        Arc::new(Default::default()),
+        Arc::new(configuration.clone()),
+        Default::default(),
+        crate::services::SubgraphServices {
+            services: Default::default(),
+        },
+        Default::default(),
+    );
+
+    let warmup_service = ServiceBuilder::new()
+        .layer(crate::query_planner::warmup::WarmupParseQueryLayer::new(
+            query_parsing_service.clone(),
+        ))
+        .map_response(drop) // Ignore response
+        .service(query_planner_service)
+        .boxed_clone();
+
+    crate::query_planner::warmup::warm_up_query_planner(
+        warmup_service,
+        &pq_layer,
+        Some(previous_cache),
+        Some(1),
+        &Default::default(),
+    )
+    .await;
+
+    assert!(
+        did_plan.load(std::sync::atomic::Ordering::Relaxed),
+        "should have submitted a query to the planner"
+    );
+
+    // Our query planner mock doesn't expect any further requests. Check that the same query can
+    // still be resolved because it hits the cache.
+    let supergraph_service = ServiceBuilder::new()
+        .load_shed()
+        .layer(crate::services::router::parse_query::ParseQueryLayer::new(
+            query_parsing_service.clone(),
+            configuration.supergraph.redact_query_validation_errors,
+        ))
+        .service(supergraph_service);
+
+    let response = execute_query(supergraph_service).await;
+    assert!(response.errors.is_empty());
+
+    crate::plugin::test::await_mock_driver(driver).await;
+}
+
 const INPUT_OBJECT_SCHEMA: &str = r#"schema
     @link(url: "https://specs.apollo.dev/link/v1.0")
     @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
@@ -3885,7 +4166,7 @@ async fn invalid_input_object_inaccessible_field(
                     )
                 }
             })
-            .boxed()
+            .boxed_clone()
         })
         .build_supergraph()
         .await?;
@@ -3932,7 +4213,7 @@ async fn invalid_input_enum_inaccessible_value() -> Result<(), BoxError> {
                     )
                 }
             })
-            .boxed()
+            .boxed_clone()
         })
         .build_supergraph()
         .await?;

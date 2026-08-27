@@ -1,12 +1,17 @@
 mod layer;
 mod limited;
+pub(crate) mod operation_limits;
+pub(crate) mod operation_limits_layer;
+pub(crate) mod response_size_limit;
 
 use std::error::Error;
 
 use async_trait::async_trait;
 use bytesize::ByteSize;
 use http::StatusCode;
+use http::header::CONTENT_TYPE;
 pub(crate) use layer::BodyLimitControl;
+use mime::APPLICATION_JSON;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -23,10 +28,10 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
 use crate::plugins::limits::layer::RequestSizeLimitError;
+use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
 use crate::services::SubgraphRequest;
 use crate::services::connector;
 use crate::services::router;
-use crate::services::router::BoxService;
 use crate::services::subgraph;
 
 /// Configuration for operation limits, parser limits, HTTP limits, etc.
@@ -76,7 +81,7 @@ pub(crate) struct RouterLimitsConfig {
 
     /// If set, requests with operations higher than this maximum
     /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
-    /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
+    /// `"extensions": {"code": "MAX_HEIGHT_LIMIT"}`
     ///
     /// Height is based on simple merging of fields using the same name or alias,
     /// but only within the same selection set.
@@ -195,10 +200,6 @@ pub(crate) struct SubgraphLimits {
     pub(crate) http_max_response_size: Option<ByteSize>,
 }
 
-/// Extension type placed on the request context to signal the subgraph response size limit.
-#[derive(Clone, Copy, Debug, Ord, PartialOrd, PartialEq, Eq)]
-pub(crate) struct SubgraphResponseSizeLimit(pub usize);
-
 /// Per-connector-source response size limits.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
@@ -265,7 +266,7 @@ impl PluginPrivate for LimitsPlugin {
         })
     }
 
-    fn router_service(&self, service: BoxService) -> BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         ServiceBuilder::new()
             .map_future_with_request_data(
                 |r: &router::Request| r.context.clone(),
@@ -280,10 +281,14 @@ impl PluginPrivate for LimitsPlugin {
             .map_request(Into::into)
             .map_response(Into::into)
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         match self.config.subgraph_response_size_limit(name) {
             None => service,
             Some(limit) => ServiceBuilder::new()
@@ -292,15 +297,15 @@ impl PluginPrivate for LimitsPlugin {
                     req
                 })
                 .service(service)
-                .boxed(),
+                .boxed_clone(),
         }
     }
 
     fn connector_request_service(
         &self,
-        service: connector::request_service::BoxService,
+        service: connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> connector::request_service::BoxService {
+    ) -> connector::request_service::BoxCloneService {
         match self.config.connector_response_size_limit(&source_name) {
             None => service,
             Some(limit) => ServiceBuilder::new()
@@ -309,7 +314,7 @@ impl PluginPrivate for LimitsPlugin {
                     req
                 })
                 .service(service)
-                .boxed(),
+                .boxed_clone(),
         }
     }
 }
@@ -372,6 +377,7 @@ impl RequestSizeLimitError {
                     .build(),
             )
             .status_code(self.status_code())
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
             .context(ctx)
             .build()
             .unwrap()
@@ -407,8 +413,8 @@ mod test {
 
     use crate::Context;
     use crate::plugins::limits::LimitsPlugin;
-    use crate::plugins::limits::SubgraphResponseSizeLimit;
     use crate::plugins::limits::layer::BodyLimitControl;
+    use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::router;
 
@@ -432,6 +438,10 @@ mod test {
         assert!(resp.is_ok());
         let resp = resp.unwrap();
         assert_eq!(resp.response.status(), expected_status);
+        assert_eq!(
+            resp.response.headers().get(http::header::CONTENT_TYPE),
+            Some(&http::HeaderValue::from_static("application/json"))
+        );
         let expected_body = format!(
             r#"{{"errors":[{{"message":"{expected_message}","extensions":{{"details":"{expected_message}","code":"INVALID_GRAPHQL_REQUEST"}}}}]}}"#
         );
@@ -706,7 +716,7 @@ mod test {
         use crate::configuration::subgraph::SubgraphConfiguration;
         use crate::plugins::limits::Config;
         use crate::plugins::limits::SubgraphLimits;
-        use crate::plugins::limits::SubgraphResponseSizeLimit;
+        use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
 
         #[test]
         fn get_response_limit_no_config() {
@@ -903,6 +913,7 @@ mod test {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         };
         let key = ResponseKey::RootField {

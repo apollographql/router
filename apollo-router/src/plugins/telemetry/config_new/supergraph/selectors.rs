@@ -11,6 +11,7 @@ use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_jsonpath;
+use crate::plugins::limits::operation_limits::OperationLimits;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Stage;
@@ -27,7 +28,6 @@ use crate::plugins::telemetry::config_new::selectors::Query;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
 use crate::services::FIRST_EVENT_CONTEXT_KEY;
 use crate::services::supergraph;
-use crate::spec::operation_limits::OperationLimits;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
@@ -147,8 +147,6 @@ pub(crate) enum SupergraphSelector {
         #[serde(skip)]
         mocked_env_var: Option<String>,
     },
-    /// Deprecated, should not be used anymore, use static field instead
-    Static(String),
     StaticField {
         /// A static value
         r#static: AttributeValue,
@@ -288,7 +286,6 @@ impl Selector for SupergraphSelector {
                     .or_else(|| default.clone())
                     .map(opentelemetry::Value::from)
             }
-            SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             SupergraphSelector::ContextId { context_id } if *context_id => {
                 Some(opentelemetry::Value::from(request.context.id.clone()))
@@ -400,7 +397,6 @@ impl Selector for SupergraphSelector {
             SupergraphSelector::IsPrimaryResponse {
                 is_primary_response: is_primary,
             } if *is_primary => Some(true.into()),
-            SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             SupergraphSelector::ContextId { context_id } if *context_id => {
                 Some(opentelemetry::Value::from(response.context.id.clone()))
@@ -501,7 +497,6 @@ impl Selector for SupergraphSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
-            SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             SupergraphSelector::ContextId { context_id } if *context_id => {
                 Some(opentelemetry::Value::from(ctx.id.clone()))
@@ -554,7 +549,6 @@ impl Selector for SupergraphSelector {
                 }
             }
             SupergraphSelector::Error { .. } => Some(error.to_string().into()),
-            SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             SupergraphSelector::ResponseContext {
                 response_context,
@@ -580,7 +574,6 @@ impl Selector for SupergraphSelector {
 
     fn on_drop(&self) -> Option<Value> {
         match self {
-            SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
@@ -598,7 +591,6 @@ impl Selector for SupergraphSelector {
                     | SupergraphSelector::RequestContext { .. }
                     | SupergraphSelector::Baggage { .. }
                     | SupergraphSelector::Env { .. }
-                    | SupergraphSelector::Static(_)
                     | SupergraphSelector::StaticField { .. }
                     | SupergraphSelector::ContextId { .. }
             ),
@@ -612,7 +604,6 @@ impl Selector for SupergraphSelector {
                     | SupergraphSelector::OperationName { .. }
                     | SupergraphSelector::OperationKind { .. }
                     | SupergraphSelector::IsPrimaryResponse { .. }
-                    | SupergraphSelector::Static(_)
                     | SupergraphSelector::StaticField { .. }
                     | SupergraphSelector::ContextId { .. }
             ),
@@ -626,7 +617,6 @@ impl Selector for SupergraphSelector {
                     | SupergraphSelector::OperationKind { .. }
                     | SupergraphSelector::IsPrimaryResponse { .. }
                     | SupergraphSelector::ResponseContext { .. }
-                    | SupergraphSelector::Static(_)
                     | SupergraphSelector::StaticField { .. }
                     | SupergraphSelector::ContextId { .. }
             ),
@@ -637,16 +627,12 @@ impl Selector for SupergraphSelector {
                     | SupergraphSelector::OperationKind { .. }
                     | SupergraphSelector::Query { .. }
                     | SupergraphSelector::Error { .. }
-                    | SupergraphSelector::Static(_)
                     | SupergraphSelector::StaticField { .. }
                     | SupergraphSelector::ResponseContext { .. }
                     | SupergraphSelector::IsPrimaryResponse { .. }
                     | SupergraphSelector::ContextId { .. }
             ),
-            Stage::Drop => matches!(
-                self,
-                SupergraphSelector::Static(_) | SupergraphSelector::StaticField { .. }
-            ),
+            Stage::Drop => matches!(self, SupergraphSelector::StaticField { .. }),
         }
     }
 }
@@ -671,6 +657,7 @@ mod test {
 
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
+    use crate::plugins::limits::operation_limits::OperationLimits;
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::config_new::selectors::OperationKind;
@@ -681,7 +668,6 @@ mod test {
     use crate::services::FIRST_EVENT_CONTEXT_KEY;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
-    use crate::spec::operation_limits::OperationLimits;
 
     #[test]
     fn supergraph_request_header() {
@@ -722,22 +708,6 @@ mod test {
             ),
             None
         );
-    }
-
-    #[test]
-    fn supergraph_static() {
-        let selector = SupergraphSelector::Static("test_static".to_string());
-        assert_eq!(
-            selector
-                .on_request(
-                    &crate::services::SupergraphRequest::fake_builder()
-                        .build()
-                        .unwrap()
-                )
-                .unwrap(),
-            "test_static".into()
-        );
-        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
     }
 
     #[test]

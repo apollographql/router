@@ -9,8 +9,6 @@ use crate::TestHarness;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::plugin::test::MockRouterService;
-use crate::plugin::test::MockSupergraphService;
 use crate::plugins::progressive_override::Config;
 use crate::plugins::progressive_override::JOIN_FIELD_DIRECTIVE_NAME;
 use crate::plugins::progressive_override::JOIN_SPEC_VERSION_RANGE;
@@ -18,8 +16,9 @@ use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::progressive_override::ProgressiveOverridePlugin;
 use crate::plugins::progressive_override::UNRESOLVED_LABELS_KEY;
 use crate::services::RouterResponse;
+use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::services::layers::query_analysis::ParsedDocument;
+use crate::services::query_parsing::ParsedDocument;
 use crate::services::router;
 use crate::services::supergraph;
 
@@ -123,14 +122,15 @@ async fn plugin_router_service_adds_all_arbitrary_labels_to_context() {
     // This test ensures that the _router_service_ adds all of the arbitrary
     // labels to the context so coprocessors can resolve them. At this stage,
     // there's no concern about any percentage-based labels yet.
-    let mut mock_service = MockRouterService::new();
-    mock_service.expect_call().returning(move |request| {
+    let (mock, mut handle) = tower_test::mock::pair::<router::Request, RouterResponse>();
+
+    let driver = tokio::spawn(async move {
+        let (request, responder) = handle.next_request().await.unwrap();
         let labels_on_context = request
             .context
             .get::<_, Vec<Arc<String>>>(UNRESOLVED_LABELS_KEY)
             .unwrap()
             .unwrap();
-
         // this plugin handles the percent-based labels, so we don't want to add
         // those to the context for other coprocessors to resolve
         assert!(!labels_on_context.contains(&Arc::new("percent(0)".to_string())));
@@ -141,7 +141,7 @@ async fn plugin_router_service_adds_all_arbitrary_labels_to_context() {
                 .into_iter()
                 .all(|s| labels_on_context.contains(&Arc::new(s.to_string())))
         );
-        RouterResponse::fake_builder().build()
+        responder.send_response(RouterResponse::fake_builder().build().unwrap());
     });
 
     let service_stack = ProgressiveOverridePlugin::new(PluginInit::fake_new(
@@ -150,11 +150,13 @@ async fn plugin_router_service_adds_all_arbitrary_labels_to_context() {
     ))
     .await
     .unwrap()
-    .router_service(mock_service.boxed());
+    .router_service(mock.boxed_clone());
 
     let _ = service_stack
         .oneshot(router::Request::fake_builder().build().unwrap())
         .await;
+
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 struct LabelAssertions {
@@ -181,22 +183,22 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
         labels_from_coprocessors,
     } = label_assertions;
 
-    let mut mock_service = MockSupergraphService::new();
+    let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
 
-    mock_service.expect_call().returning(move |request| {
+    let driver = tokio::spawn(async move {
+        let (request, responder) = handle.next_request().await.unwrap();
         let labels_to_override = request
             .context
             .get::<_, Vec<String>>(LABELS_TO_OVERRIDE_KEY)
             .unwrap()
             .unwrap();
-
         for label in &expected_labels {
             assert!(labels_to_override.contains(&label.to_string()));
         }
         for label in &absent_labels {
             assert!(!labels_to_override.contains(&label.to_string()));
         }
-        SupergraphResponse::fake_builder().build()
+        responder.send_response(SupergraphResponse::fake_builder().build().unwrap());
     });
 
     let service_stack = ProgressiveOverridePlugin::new(PluginInit::fake_new(
@@ -205,7 +207,7 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
     ))
     .await
     .unwrap()
-    .supergraph_service(mock_service.boxed());
+    .supergraph_service(mock.boxed_clone());
 
     let schema = crate::spec::Schema::parse(
         include_str!("./testdata/supergraph.graphql"),
@@ -238,6 +240,8 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
         .unwrap();
 
     let _ = service_stack.oneshot(request).await;
+
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
@@ -343,10 +347,12 @@ async fn overridden_field_yields_expected_query_plan() {
 }
 
 async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
-    let mut mock_service = MockSupergraphService::new();
-    mock_service
-        .expect_call()
-        .returning(|_| SupergraphResponse::fake_builder().build());
+    let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+
+    let driver = tokio::spawn(async move {
+        let (_req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(SupergraphResponse::fake_builder().build().unwrap());
+    });
 
     let service_stack = ProgressiveOverridePlugin::new(PluginInit::fake_new(
         Config {},
@@ -354,7 +360,7 @@ async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
     ))
     .await
     .unwrap()
-    .supergraph_service(mock_service.boxed());
+    .supergraph_service(mock.boxed_clone());
 
     let schema = crate::spec::Schema::parse(
         include_str!("./testdata/supergraph.graphql"),
@@ -387,6 +393,8 @@ async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
         .unwrap();
 
     let _ = service_stack.oneshot(request).await;
+
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]

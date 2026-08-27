@@ -3,9 +3,12 @@
 //! Currently includes:
 //! * TPS Rate Limiting: a certain threshold, set via License claim, for how many operations over a certain interval can be serviced
 
-use std::num::NonZeroU64;
-use std::time::Duration;
+pub(crate) mod layer;
 
+use std::num::NonZeroU32;
+
+use apollo_errors::HeapErrorExt;
+use apollo_qos::rate_limit::RateLimitConfig;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -13,8 +16,6 @@ use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::limit::RateLimitLayer;
-use tower::load_shed::error::Overloaded;
 
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
@@ -23,24 +24,12 @@ use crate::plugin::PluginPrivate;
 use crate::services::RouterResponse;
 use crate::services::router;
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// The limits placed on a router in virtue of what's in a user's license
 pub(crate) struct LicenseEnforcement {
     /// Transactions per second allowed based on license tier
-    pub(crate) tps: Option<TpsLimitConf>,
-}
-
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-/// Configuration for transactions per second
-pub(crate) struct TpsLimitConf {
-    /// The number of operations allowed during a certain interval
-    pub(crate) capacity: NonZeroU64,
-    /// The interval as specified in the user's license; this is in milliseconds
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
-    #[schemars(with = "String")]
-    pub(crate) interval: Duration,
+    pub(crate) tps: Option<RateLimitConfig>,
 }
 
 /// The license enforcement plugin has no configuration.
@@ -54,9 +43,9 @@ impl PluginPrivate for LicenseEnforcement {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let tps = init.license.get_limits().and_then(|limits| {
             limits.tps.and_then(|tps| {
-                NonZeroU64::new(tps.capacity as u64).map(|capacity| TpsLimitConf {
-                    capacity,
-                    interval: tps.interval,
+                NonZeroU32::new(tps.capacity as u32).map(|capacity| RateLimitConfig {
+                    limit: capacity,
+                    period: tps.interval.into(),
                 })
             })
         });
@@ -64,7 +53,7 @@ impl PluginPrivate for LicenseEnforcement {
         Ok(Self { tps })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         ServiceBuilder::new()
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
@@ -72,7 +61,7 @@ impl PluginPrivate for LicenseEnforcement {
                     let response: Result<RouterResponse, BoxError> = future.await;
                     match response {
                         Ok(ok) => Ok(ok),
-                        Err(err) if err.is::<Overloaded>() => {
+                        Err(err) if err.http_status() == StatusCode::TOO_MANY_REQUESTS.as_u16() => {
                             let error = graphql::Error::builder()
                                 .message("Your request has been rate limited. You've reached the limits for the Free plan. Consider upgrading to a higher plan for increased limits.")
                                 .extension_code("ROUTER_FREE_PLAN_RATE_LIMIT_REACHED")
@@ -88,14 +77,15 @@ impl PluginPrivate for LicenseEnforcement {
                     }
                 },
             )
-            .load_shed()
-            .option_layer(
-                self.tps
-                    .as_ref()
-                    .map(|config| RateLimitLayer::new(config.capacity.into(), config.interval)),
-            )
+            .option_layer(self.tps.as_ref().map(|config| {
+                apollo_qos::rate_limit::RateLimitLayer::with_key(
+                    "license",
+                    config.clone(),
+                    |_req: &router::Request| Some("license"),
+                )
+            }))
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -105,6 +95,7 @@ register_private_plugin!("apollo", "license_enforcement", LicenseEnforcement);
 mod test {
     use std::sync::Arc;
     use std::sync::Mutex;
+    use std::time::Duration;
 
     use super::*;
     use crate::metrics::FutureMetricsExt;
@@ -253,6 +244,24 @@ mod test {
                 "apollo.router.graphql_error",
                 1,
                 code = "ROUTER_FREE_PLAN_RATE_LIMIT_REACHED"
+            );
+
+            // * and the rate limiting layer's own counter reached the meter provider. The layer
+            //   lives in `apollo-qos` and creates its instruments from `opentelemetry::global`,
+            //   so this only holds while the global meter provider is bridged onto the router's.
+            assert_counter!(
+                "apollo.platform.qos.limits.requests",
+                1u64,
+                "limit.kind" = "rate",
+                "limit.name" = "license",
+                "limit.status" = "accepted"
+            );
+            assert_counter!(
+                "apollo.platform.qos.limits.requests",
+                1u64,
+                "limit.kind" = "rate",
+                "limit.name" = "license",
+                "limit.status" = "rejected"
             );
         }
         .with_metrics()

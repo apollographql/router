@@ -29,15 +29,15 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
-use crate::plugin;
+use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
 use crate::services::SubgraphResponse;
-use crate::services::SubgraphServiceFactory;
-use crate::services::connector_service::ConnectorServiceFactory;
-use crate::services::fetch_service::FetchServiceFactory;
-use crate::services::subgraph_service::MakeSubgraphService;
+use crate::services::SubgraphServices;
+use crate::services::connector_service::ConnectorServices;
+use crate::services::fetch_service::FetchService;
+use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Query;
 use crate::spec::Schema;
@@ -163,16 +163,22 @@ fn assert_response_diagnostics(
     );
 }
 
-fn subgraph_service_factory(
-    graphs: Vec<(String, Arc<dyn MakeSubgraphService>)>,
-) -> SubgraphServiceFactory {
-    SubgraphServiceFactory::new(
-        graphs,
-        Default::default(),
-        // Required for subscriptions: we are not testing that here
-        Default::default(),
-        None,
-    )
+/// Bare mock services keyed by subgraph name, buffered like the production stack but
+/// without its layers.
+fn subgraph_services(graphs: Vec<(String, subgraph::BoxCloneService)>) -> SubgraphServices {
+    SubgraphServices {
+        services: Arc::new(
+            graphs
+                .into_iter()
+                .map(|(name, service)| {
+                    (
+                        name,
+                        UnconstrainedBuffer::new(service, crate::layers::DEFAULT_BUFFER_SIZE),
+                    )
+                })
+                .collect(),
+        ),
+    }
 }
 
 #[test]
@@ -192,71 +198,6 @@ fn service_usage() {
     );
 }
 
-/// This test panics in the product subgraph. HOWEVER, this does not result in a panic in the
-/// test, since the buffer() functionality in the tower stack "loses" the panic and we end up
-/// with a closed service.
-///
-/// See: https://github.com/tower-rs/tower/issues/455
-///
-/// The query planner reports the failed subgraph fetch as an error with a reason of "service
-/// closed", which is what this test expects.
-#[tokio::test]
-async fn mock_subgraph_service_with_panics_should_be_reported_as_service_closed() {
-    let query_plan: QueryPlan = QueryPlan {
-        root: serde_json::from_str(test_query_plan!()).unwrap(),
-        formatted_query_plan: Default::default(),
-        query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
-        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
-        estimated_size: Default::default(),
-    };
-
-    let mut mock_products_service = plugin::test::MockSubgraphService::new();
-    // This clone happens in the `MakeSubgraphService` impl for MockSubgraphService.
-    mock_products_service.expect_clone().return_once(|| {
-        let mut mock_products_service = plugin::test::MockSubgraphService::new();
-        mock_products_service.expect_call().times(1).withf(|_| {
-            panic!("this panic should be propagated to the test harness");
-        });
-        mock_products_service
-    });
-
-    let (sender, _) = tokio::sync::mpsc::channel(10);
-
-    let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
-    let ssf = subgraph_service_factory(vec![(
-        "product".into(),
-        Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
-    )]);
-    let sf = Arc::new(FetchServiceFactory::new(
-        schema.clone(),
-        Default::default(),
-        Arc::new(ssf),
-        None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
-        Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
-
-    let result = query_plan
-        .execute(
-            &Context::new(),
-            &sf,
-            &Default::default(),
-            &schema,
-            &Default::default(),
-            sender,
-            None,
-            &None,
-            None,
-        )
-        .await;
-    assert_eq!(result.errors.len(), 1);
-    let reason: String =
-        serde_json_bytes::from_value(result.errors[0].extensions.get("reason").unwrap().clone())
-            .unwrap();
-    assert_eq!(reason, "buffer's worker closed unexpectedly".to_string());
-}
-
 #[tokio::test]
 async fn fetch_includes_operation_name() {
     let query_plan: QueryPlan = QueryPlan {
@@ -264,47 +205,39 @@ async fn fetch_includes_operation_name() {
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
     let succeeded: Arc<AtomicBool> = Default::default();
     let inner_succeeded = Arc::clone(&succeeded);
 
-    let mut mock_products_service = plugin::test::MockSubgraphService::new();
-    mock_products_service.expect_clone().return_once(|| {
-        let mut mock_products_service = plugin::test::MockSubgraphService::new();
-        mock_products_service
-            .expect_call()
-            .times(1)
-            .withf(move |request| {
-                let matches = request.subgraph_request.body().operation_name
-                    == Some("topProducts_product_0".into());
-                inner_succeeded.store(matches, Ordering::SeqCst);
-                matches
-            })
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
-        mock_products_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_products_service
+    let (mock_products_service, mut handle) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        let matches =
+            req.subgraph_request.body().operation_name == Some("topProducts_product_0".into());
+        inner_succeeded.store(matches, Ordering::SeqCst);
+        responder.send_response(SubgraphResponse::fake_builder().build());
     });
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
     let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
-    let ssf = subgraph_service_factory(vec![(
+    let ssf = subgraph_services(vec![(
         "product".into(),
-        Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
+        mock_products_service.boxed_clone(),
     )]);
-    let sf = Arc::new(FetchServiceFactory::new(
+    let sf = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
+        Arc::new(ConnectorServices::empty(schema.clone())),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let _response = query_plan
         .execute(
@@ -320,6 +253,7 @@ async fn fetch_includes_operation_name() {
         )
         .await;
 
+    crate::plugin::test::await_mock_driver(driver).await;
     assert!(succeeded.load(Ordering::SeqCst), "incorrect operation name");
 }
 
@@ -330,47 +264,38 @@ async fn fetch_makes_post_requests() {
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
     let succeeded: Arc<AtomicBool> = Default::default();
     let inner_succeeded = Arc::clone(&succeeded);
 
-    let mut mock_products_service = plugin::test::MockSubgraphService::new();
-
-    mock_products_service.expect_clone().return_once(|| {
-        let mut mock_products_service = plugin::test::MockSubgraphService::new();
-        mock_products_service
-            .expect_call()
-            .times(1)
-            .withf(move |request| {
-                let matches = request.subgraph_request.method() == Method::POST;
-                inner_succeeded.store(matches, Ordering::SeqCst);
-                matches
-            })
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
-        mock_products_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_products_service
+    let (mock_products_service, mut handle) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        let matches = req.subgraph_request.method() == Method::POST;
+        inner_succeeded.store(matches, Ordering::SeqCst);
+        responder.send_response(SubgraphResponse::fake_builder().build());
     });
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
     let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
-    let ssf = subgraph_service_factory(vec![(
+    let ssf = subgraph_services(vec![(
         "product".into(),
-        Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
+        mock_products_service.boxed_clone(),
     )]);
-    let sf = Arc::new(FetchServiceFactory::new(
+    let sf = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
+        Arc::new(ConnectorServices::empty(schema.clone())),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let _response = query_plan
         .execute(
@@ -386,6 +311,7 @@ async fn fetch_makes_post_requests() {
         )
         .await;
 
+    crate::plugin::test::await_mock_driver(driver).await;
     assert!(
         succeeded.load(Ordering::SeqCst),
         "subgraph requests must be http post"
@@ -396,144 +322,124 @@ async fn fetch_makes_post_requests() {
 async fn defer() {
     // plan for { t { x ... @defer { y } }}
     let query_plan: QueryPlan = QueryPlan {
-            formatted_query_plan: Default::default(),
-            root: PlanNode::Defer {
-                primary: Primary {
-                    subselection: Some("{ t { x } }".to_string()),
-                    node: Some(Box::new(PlanNode::Fetch(FetchNode {
-                        service_name: "X".into(),
-                        requires: vec![],
+        formatted_query_plan: Default::default(),
+        root: Some(Arc::new(PlanNode::Defer {
+            primary: Primary {
+                subselection: Some("{ t { x } }".to_string()),
+                node: Some(Box::new(PlanNode::Fetch(FetchNode {
+                    service_name: "X".into(),
+                    requires: vec![],
+                    variable_usages: vec![],
+                    operation: SerializableDocument::from_string("{ t { id __typename x } }"),
+                    operation_name: Some("t".into()),
+                    operation_kind: OperationKind::Query,
+                    id: Some("fetch1".into()),
+                    input_rewrites: None,
+                    output_rewrites: None,
+                    context_rewrites: None,
+                    schema_aware_hash: Default::default(),
+                    authorization: Default::default(),
+                }))),
+            },
+            deferred: vec![DeferredNode {
+                depends: vec![Depends {
+                    id: "fetch1".into(),
+                }],
+                label: None,
+                query_path: Path(vec![PathElement::Key("t".to_string(), None)]),
+                subselection: Some("{ y }".to_string()),
+                node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
+                    path: Path(vec![PathElement::Key("t".to_string(), None)]),
+                    node: Box::new(PlanNode::Fetch(FetchNode {
+                        service_name: "Y".into(),
+                        requires: vec![requires_selection::Selection::InlineFragment(
+                            requires_selection::InlineFragment {
+                                type_condition: Some(name!("T")),
+                                selections: vec![
+                                    requires_selection::Selection::Field(
+                                        requires_selection::Field {
+                                            alias: None,
+                                            name: name!("id"),
+                                            selections: Vec::new(),
+                                        },
+                                    ),
+                                    requires_selection::Selection::Field(
+                                        requires_selection::Field {
+                                            alias: None,
+                                            name: name!("__typename"),
+                                            selections: Vec::new(),
+                                        },
+                                    ),
+                                ],
+                            },
+                        )],
                         variable_usages: vec![],
-                        operation: SerializableDocument::from_string("{ t { id __typename x } }"),
-                        operation_name: Some("t".into()),
+                        operation: SerializableDocument::from_string(
+                            "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}",
+                        ),
+                        operation_name: None,
                         operation_kind: OperationKind::Query,
-                        id: Some("fetch1".into()),
+                        id: Some("fetch2".into()),
                         input_rewrites: None,
                         output_rewrites: None,
                         context_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
-                    }))),
-                },
-                deferred: vec![DeferredNode {
-                    depends: vec![Depends {
-                        id: "fetch1".into(),
-                    }],
-                    label: None,
-                    query_path: Path(vec![PathElement::Key("t".to_string(), None)]),
-                    subselection: Some("{ y }".to_string()),
-                    node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
-                        path: Path(vec![PathElement::Key("t".to_string(), None)]),
-                        node: Box::new(PlanNode::Fetch(FetchNode {
-                            service_name: "Y".into(),
-                            requires: vec![requires_selection::Selection::InlineFragment(
-                                requires_selection::InlineFragment {
-                                    type_condition: Some(name!("T")),
-                                    selections: vec![
-                                        requires_selection::Selection::Field(
-                                            requires_selection::Field {
-                                                alias: None,
-                                                name: name!("id"),
-                                                selections: Vec::new(),
-                                            },
-                                        ),
-                                        requires_selection::Selection::Field(
-                                            requires_selection::Field {
-                                                alias: None,
-                                                name: name!("__typename"),
-                                                selections: Vec::new(),
-                                            },
-                                        ),
-                                    ],
-                                },
-                            )],
-                            variable_usages: vec![],
-                            operation: SerializableDocument::from_string(
-                                "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}"
-                            ),
-                            operation_name: None,
-                            operation_kind: OperationKind::Query,
-                            id: Some("fetch2".into()),
-                            input_rewrites: None,
-                            output_rewrites: None,
-                            context_rewrites: None,
-                            schema_aware_hash: Default::default(),
-                            authorization: Default::default(),
-                        })),
-                    }))),
-                }],
-            }.into(),
-            usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
-            query: Arc::new(Query::empty_for_tests()),
-            query_metrics: Default::default(),
-            estimated_size: Default::default(),
-        };
+                    })),
+                }))),
+            }],
+        })),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
+        query: Arc::new(Query::empty_for_tests()),
+        estimated_size: Default::default(),
+    };
 
-    let mut mock_x_service = plugin::test::MockSubgraphService::new();
-    mock_x_service.expect_clone().return_once(|| {
-        let mut mock_x_service = plugin::test::MockSubgraphService::new();
-        mock_x_service
-            .expect_call()
-            .times(1)
-            .withf(move |_request| true)
-            .returning(|_| {
-                Ok(SubgraphResponse::fake_builder()
-                    .data(serde_json::json! {{
-                        "t": {"id": 1234,
-                        "__typename": "T",
-                         "x": "X"
-                        }
-                    }})
-                    .build())
-            });
-        mock_x_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_x_service
+    let (mock_x_service, mut handle_x) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_x = tokio::spawn(async move {
+        let (_req, responder) = handle_x.next_request().await.unwrap();
+        responder.send_response(
+            SubgraphResponse::fake_builder()
+                .data(serde_json::json! {{
+                    "t": {"id": 1234, "__typename": "T", "x": "X"}
+                }})
+                .build(),
+        );
     });
 
-    let mut mock_y_service = plugin::test::MockSubgraphService::new();
-    mock_y_service.expect_clone().return_once(|| {
-        let mut mock_y_service = plugin::test::MockSubgraphService::new();
-        mock_y_service
-            .expect_call()
-            .times(1)
-            .withf(move |_request| true)
-            .returning(|_| {
-                Ok(SubgraphResponse::fake_builder()
-                    .data(serde_json::json! {{
-                        "_entities": [{"y": "Y", "__typename": "T"}]
-                    }})
-                    .build())
-            });
-        mock_y_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_y_service
+    let (mock_y_service, mut handle_y) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_y = tokio::spawn(async move {
+        let (_req, responder) = handle_y.next_request().await.unwrap();
+        responder.send_response(
+            SubgraphResponse::fake_builder()
+                .data(serde_json::json! {{
+                    "_entities": [{"y": "Y", "__typename": "T"}]
+                }})
+                .build(),
+        );
     });
 
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
 
     let schema = include_str!("testdata/defer_schema.graphql");
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
-    let ssf = subgraph_service_factory(vec![
-        (
-            "X".into(),
-            Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
-        ),
-        (
-            "Y".into(),
-            Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
-        ),
+    let ssf = subgraph_services(vec![
+        ("X".into(), mock_x_service.boxed_clone()),
+        ("Y".into(), mock_y_service.boxed_clone()),
     ]);
-    let sf = Arc::new(FetchServiceFactory::new(
+    let sf = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
+        Arc::new(ConnectorServices::empty(schema.clone())),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let response = query_plan
         .execute(
@@ -564,6 +470,8 @@ async fn defer() {
         // unneeded parts are removed in response formatting
         serde_json::json! {{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}},"path":["t"]}}
     );
+    crate::plugin::test::await_mock_driver(driver_x).await;
+    crate::plugin::test::await_mock_driver(driver_y).await;
 }
 
 #[tokio::test]
@@ -587,7 +495,7 @@ async fn defer_if_condition() {
         .unwrap(),
     );
 
-    let root: Arc<PlanNode> =
+    let root: Option<Arc<PlanNode>> =
         serde_json::from_str(include_str!("testdata/defer_clause_plan.json")).unwrap();
 
     let query_plan = QueryPlan {
@@ -603,7 +511,6 @@ async fn defer_if_condition() {
             .unwrap(),
         ),
         formatted_query_plan: None,
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
@@ -626,23 +533,20 @@ async fn defer_if_condition() {
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
     let mut receiver_stream = ReceiverStream::new(receiver);
 
-    let ssf = subgraph_service_factory(vec![(
-        "accounts".into(),
-        Arc::new(mocked_accounts) as Arc<dyn MakeSubgraphService>,
-    )]);
-    let service_factory = Arc::new(FetchServiceFactory::new(
+    let ssf = subgraph_services(vec![("accounts".into(), mocked_accounts.boxed_clone())]);
+    let fetch_service = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
+        Arc::new(ConnectorServices::empty(schema.clone())),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let defer_primary_response = query_plan
         .execute(
             &Context::new(),
-            &service_factory,
+            &fetch_service,
             &Arc::new(
                 http::Request::builder()
                     .body(
@@ -673,7 +577,7 @@ async fn defer_if_condition() {
     let default_primary_response = query_plan
         .execute(
             &Context::new(),
-            &service_factory,
+            &fetch_service,
             &Default::default(),
             &schema,
             &Default::default(),
@@ -697,7 +601,7 @@ async fn defer_if_condition() {
     let defer_disabled = query_plan
         .execute(
             &Context::new(),
-            &service_factory,
+            &fetch_service,
             &Arc::new(
                 http::Request::builder()
                     .body(
@@ -761,50 +665,42 @@ async fn dependent_mutations() {
         .unwrap(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
-    let mut mock_a_service = plugin::test::MockSubgraphService::new();
-    mock_a_service.expect_clone().returning(|| {
-        let mut mock_a_service = plugin::test::MockSubgraphService::new();
-        mock_a_service
-            .expect_call()
-            .times(1)
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
-        mock_a_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-
-        mock_a_service
+    let (mock_a_service, mut handle_a) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_a = tokio::spawn(async move {
+        let (_req, responder) = handle_a.next_request().await.unwrap();
+        responder.send_response(SubgraphResponse::fake_builder().build());
     });
 
     // the first fetch returned null, so there should never be a call to B
-    let mut mock_b_service = plugin::test::MockSubgraphService::new();
-    mock_b_service
-        .expect_clone()
-        .returning(plugin::test::MockSubgraphService::new);
-    mock_b_service.expect_call().never();
+    let (mock_b_service, mut handle_b) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_b = tokio::spawn(async move {
+        if handle_b.next_request().await.is_some() {
+            panic!("service B should not be called");
+        }
+    });
 
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
-    let ssf = subgraph_service_factory(vec![
-        (
-            "A".into(),
-            Arc::new(mock_a_service) as Arc<dyn MakeSubgraphService>,
-        ),
-        (
-            "B".into(),
-            Arc::new(mock_b_service) as Arc<dyn MakeSubgraphService>,
-        ),
+    let ssf = subgraph_services(vec![
+        ("A".into(), mock_a_service.boxed_clone()),
+        ("B".into(), mock_b_service.boxed_clone()),
     ]);
-    let sf = Arc::new(FetchServiceFactory::new(
+    let sf = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
+        Arc::new(ConnectorServices::empty(schema.clone())),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
     let _response = query_plan
@@ -820,6 +716,9 @@ async fn dependent_mutations() {
             None,
         )
         .await;
+    crate::plugin::test::await_mock_driver(driver_a).await;
+    drop(sf);
+    crate::plugin::test::await_mock_driver(driver_b).await;
 }
 
 #[tokio::test]
@@ -1966,7 +1865,7 @@ fn broken_plan_does_not_panic() {
     let operation = "{ invalid }";
     let subgraph_schema = "type Query { field: Int }";
     let mut plan = QueryPlan {
-        root: PlanNode::Fetch(FetchNode {
+        root: Some(Arc::new(PlanNode::Fetch(FetchNode {
             service_name: "X".into(),
             requires: vec![],
             variable_usages: vec![],
@@ -1979,23 +1878,22 @@ fn broken_plan_does_not_panic() {
             context_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
-        })
-        .into(),
+        }))),
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
     let subgraph_schema = apollo_compiler::Schema::parse_and_validate(subgraph_schema, "").unwrap();
     let mut subgraph_schemas = HashMap::default();
     subgraph_schemas.insert(
         "X".to_owned(),
-        query_planner::fetch::SubgraphSchema::new(subgraph_schema),
+        query_planner::HashedSubgraphSchema::new(subgraph_schema),
     );
     // Run the plan initialization code to make sure it doesn't panic.
+    let root_node = plan.root.as_mut().expect("non-empty query plan");
     let result =
-        Arc::make_mut(&mut plan.root).init_parsed_operations_and_hash_subqueries(&subgraph_schemas);
+        Arc::make_mut(root_node).init_parsed_operations_and_hash_subqueries(&subgraph_schemas);
     assert_eq!(
         result.unwrap_err().to_string(),
         r#"[1:3] Cannot query field "invalid" on type "Query"."#
@@ -2028,7 +1926,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
     // and the deferred fetch (Z) requires inner.__typename + id + sub { subId data }
     let query_plan: QueryPlan = QueryPlan {
         formatted_query_plan: Default::default(),
-        root: PlanNode::Defer {
+        root: Some(Arc::new(PlanNode::Defer {
             primary: Primary {
                 subselection: Some("{ start { id inner { __typename id } } }".to_string()),
                 node: Some(Box::new(PlanNode::Sequence {
@@ -2061,29 +1959,27 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                             ]),
                             node: Box::new(PlanNode::Fetch(FetchNode {
                                 service_name: "Y".into(),
-                                requires: vec![
-                                    requires_selection::Selection::InlineFragment(
-                                        requires_selection::InlineFragment {
-                                            type_condition: Some(name!("Sub")),
-                                            selections: vec![
-                                                requires_selection::Selection::Field(
-                                                    requires_selection::Field {
-                                                        alias: None,
-                                                        name: name!("__typename"),
-                                                        selections: Vec::new(),
-                                                    },
-                                                ),
-                                                requires_selection::Selection::Field(
-                                                    requires_selection::Field {
-                                                        alias: None,
-                                                        name: name!("subId"),
-                                                        selections: Vec::new(),
-                                                    },
-                                                ),
-                                            ],
-                                        },
-                                    ),
-                                ],
+                                requires: vec![requires_selection::Selection::InlineFragment(
+                                    requires_selection::InlineFragment {
+                                        type_condition: Some(name!("Sub")),
+                                        selections: vec![
+                                            requires_selection::Selection::Field(
+                                                requires_selection::Field {
+                                                    alias: None,
+                                                    name: name!("__typename"),
+                                                    selections: Vec::new(),
+                                                },
+                                            ),
+                                            requires_selection::Selection::Field(
+                                                requires_selection::Field {
+                                                    alias: None,
+                                                    name: name!("subId"),
+                                                    selections: Vec::new(),
+                                                },
+                                            ),
+                                        ],
+                                    },
+                                )],
                                 variable_usages: vec![],
                                 operation: SerializableDocument::from_string(
                                     "query($representations:[_Any!]!){_entities(representations:$representations){...on Sub{data}}}",
@@ -2123,51 +2019,49 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                     ]),
                     node: Box::new(PlanNode::Fetch(FetchNode {
                         service_name: "Z".into(),
-                        requires: vec![
-                            requires_selection::Selection::InlineFragment(
-                                requires_selection::InlineFragment {
-                                    type_condition: Some(name!("Inner")),
-                                    selections: vec![
-                                        requires_selection::Selection::Field(
-                                            requires_selection::Field {
-                                                alias: None,
-                                                name: name!("__typename"),
-                                                selections: Vec::new(),
-                                            },
-                                        ),
-                                        requires_selection::Selection::Field(
-                                            requires_selection::Field {
-                                                alias: None,
-                                                name: name!("id"),
-                                                selections: Vec::new(),
-                                            },
-                                        ),
-                                        requires_selection::Selection::Field(
-                                            requires_selection::Field {
-                                                alias: None,
-                                                name: name!("sub"),
-                                                selections: vec![
-                                                    requires_selection::Selection::Field(
-                                                        requires_selection::Field {
-                                                            alias: None,
-                                                            name: name!("subId"),
-                                                            selections: Vec::new(),
-                                                        },
-                                                    ),
-                                                    requires_selection::Selection::Field(
-                                                        requires_selection::Field {
-                                                            alias: None,
-                                                            name: name!("data"),
-                                                            selections: Vec::new(),
-                                                        },
-                                                    ),
-                                                ],
-                                            },
-                                        ),
-                                    ],
-                                },
-                            ),
-                        ],
+                        requires: vec![requires_selection::Selection::InlineFragment(
+                            requires_selection::InlineFragment {
+                                type_condition: Some(name!("Inner")),
+                                selections: vec![
+                                    requires_selection::Selection::Field(
+                                        requires_selection::Field {
+                                            alias: None,
+                                            name: name!("__typename"),
+                                            selections: Vec::new(),
+                                        },
+                                    ),
+                                    requires_selection::Selection::Field(
+                                        requires_selection::Field {
+                                            alias: None,
+                                            name: name!("id"),
+                                            selections: Vec::new(),
+                                        },
+                                    ),
+                                    requires_selection::Selection::Field(
+                                        requires_selection::Field {
+                                            alias: None,
+                                            name: name!("sub"),
+                                            selections: vec![
+                                                requires_selection::Selection::Field(
+                                                    requires_selection::Field {
+                                                        alias: None,
+                                                        name: name!("subId"),
+                                                        selections: Vec::new(),
+                                                    },
+                                                ),
+                                                requires_selection::Selection::Field(
+                                                    requires_selection::Field {
+                                                        alias: None,
+                                                        name: name!("data"),
+                                                        selections: Vec::new(),
+                                                    },
+                                                ),
+                                            ],
+                                        },
+                                    ),
+                                ],
+                            },
+                        )],
                         variable_usages: vec![],
                         operation: SerializableDocument::from_string(
                             "query($representations:[_Any!]!){_entities(representations:$representations){...on Inner{target{x}}}}",
@@ -2183,20 +2077,21 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                     })),
                 }))),
             }],
-        }
-        .into(),
+        })),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
 
     // Mock X service: returns the root query data for start
-    let mut mock_x_service = plugin::test::MockSubgraphService::new();
-    mock_x_service.expect_clone().return_once(|| {
-        let mut mock_x_service = plugin::test::MockSubgraphService::new();
-        mock_x_service.expect_call().times(1).returning(|_| {
-            Ok(SubgraphResponse::fake_builder()
+    let (mock_x_service, mut handle_x) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_x = tokio::spawn(async move {
+        let (_req, responder) = handle_x.next_request().await.unwrap();
+        responder.send_response(
+            SubgraphResponse::fake_builder()
                 .data(serde_json::json! {{
                     "start": {
                         "__typename": "T",
@@ -2211,75 +2106,60 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                         }
                     }
                 }})
-                .build())
-        });
-        mock_x_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_x_service
+                .build(),
+        );
     });
 
     // Mock Y service: entity fetch for Sub, returns data field
-    let mut mock_y_service = plugin::test::MockSubgraphService::new();
-    mock_y_service.expect_clone().return_once(|| {
-        let mut mock_y_service = plugin::test::MockSubgraphService::new();
-        mock_y_service.expect_call().times(1).returning(|_| {
-            Ok(SubgraphResponse::fake_builder()
+    let (mock_y_service, mut handle_y) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_y = tokio::spawn(async move {
+        let (_req, responder) = handle_y.next_request().await.unwrap();
+        responder.send_response(
+            SubgraphResponse::fake_builder()
                 .data(serde_json::json! {{
                     "_entities": [{"data": "d1"}]
                 }})
-                .build())
-        });
-        mock_y_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_y_service
+                .build(),
+        );
     });
 
     // Mock Z service: entity fetch for Inner, returns target
     // If the bug exists, this service will NOT be called (fetch is skipped).
-    let mut mock_z_service = plugin::test::MockSubgraphService::new();
-    mock_z_service.expect_clone().return_once(|| {
-        let mut mock_z_service = plugin::test::MockSubgraphService::new();
-        mock_z_service.expect_call().times(1).returning(|_| {
-            Ok(SubgraphResponse::fake_builder()
+    let (mock_z_service, mut handle_z) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_z = tokio::spawn(async move {
+        let (_req, responder) = handle_z.next_request().await.unwrap();
+        responder.send_response(
+            SubgraphResponse::fake_builder()
                 .data(serde_json::json! {{
                     "_entities": [{"target": {"x": "42"}}]
                 }})
-                .build())
-        });
-        mock_z_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_z_service
+                .build(),
+        );
     });
 
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
 
     let schema = include_str!("testdata/defer_depends_schema.graphql");
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
-    let ssf = subgraph_service_factory(vec![
-        (
-            "X".into(),
-            Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
-        ),
-        (
-            "Y".into(),
-            Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
-        ),
-        (
-            "Z".into(),
-            Arc::new(mock_z_service) as Arc<dyn MakeSubgraphService>,
-        ),
+    let ssf = subgraph_services(vec![
+        ("X".into(), mock_x_service.boxed_clone()),
+        ("Y".into(), mock_y_service.boxed_clone()),
+        ("Z".into(), mock_z_service.boxed_clone()),
     ]);
-    let sf = Arc::new(FetchServiceFactory::new(
+    let sf = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
+        Arc::new(ConnectorServices::empty(schema.clone())),
         None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let response = query_plan
         .execute(
@@ -2337,6 +2217,9 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
         inner_data["target"]["x"], "42",
         "target should have x from Z fetch"
     );
+    crate::plugin::test::await_mock_driver(driver_x).await;
+    crate::plugin::test::await_mock_driver(driver_y).await;
+    crate::plugin::test::await_mock_driver(driver_z).await;
 }
 
 // Documents that the user-visible "errors" array stays SILENT when the

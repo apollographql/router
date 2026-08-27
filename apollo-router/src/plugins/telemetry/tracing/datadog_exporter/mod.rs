@@ -446,16 +446,32 @@ pub(crate) mod propagator {
                 );
 
                 if span_context.trace_flags() & TRACE_FLAG_DEFERRED != TRACE_FLAG_DEFERRED {
-                    // The sampling priority
+                    // The sampling priority. `trace_state` propagates verbatim across every
+                    // descendant span regardless of each span's own sampling decision, so a
+                    // cached priority can go stale relative to `is_sampled()` (e.g. an
+                    // upstream "keep" surviving past a later "drop" decision made by this
+                    // router). Only trust the cached value when its keep/reject polarity still
+                    // agrees with the current decision; otherwise derive it fresh.
+                    let is_sampled = span_context.is_sampled();
                     let sampling_priority = span_context
                         .trace_state()
                         .sampling_priority()
-                        .unwrap_or_else(|| {
-                            if span_context.is_sampled() {
-                                SamplingPriority::AutoKeep
-                            } else {
-                                SamplingPriority::AutoReject
-                            }
+                        .filter(|p| {
+                            matches!(
+                                (is_sampled, p),
+                                (
+                                    true,
+                                    SamplingPriority::AutoKeep | SamplingPriority::UserKeep
+                                ) | (
+                                    false,
+                                    SamplingPriority::AutoReject | SamplingPriority::UserReject
+                                )
+                            )
+                        })
+                        .unwrap_or(if is_sampled {
+                            SamplingPriority::AutoKeep
+                        } else {
+                            SamplingPriority::AutoReject
                         });
                     injector.set(
                         DATADOG_SAMPLING_PRIORITY_HEADER,
@@ -512,6 +528,10 @@ pub(crate) mod propagator {
                 (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "0")], SpanContext::new(TraceId::from_bytes(1234u128.to_be_bytes()), SpanId::from_bytes(12u64.to_be_bytes()), TraceFlags::default(), true, DatadogTraceStateBuilder::default().with_priority_sampling(SamplingPriority::AutoReject).build())),
                 (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "1")], SpanContext::new(TraceId::from_bytes(1234u128.to_be_bytes()), SpanId::from_bytes(12u64.to_be_bytes()), TraceFlags::SAMPLED, true, DatadogTraceStateBuilder::default().with_priority_sampling(SamplingPriority::AutoKeep).build())),
                 (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "2")], SpanContext::new(TraceId::from_bytes(1234u128.to_be_bytes()), SpanId::from_bytes(12u64.to_be_bytes()), TraceFlags::SAMPLED, true, DatadogTraceStateBuilder::default().with_priority_sampling(SamplingPriority::UserKeep).build())),
+                // A span carrying a stale "keep" trace_state left over from an upstream request,
+                // but whose own sampling decision was `Drop` (not sampled): the stale priority
+                // must not leak out, since it disagrees with the span's own `is_sampled()`.
+                (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "0")], SpanContext::new(TraceId::from_bytes(1234u128.to_be_bytes()), SpanId::from_bytes(12u64.to_be_bytes()), TraceFlags::default(), true, DatadogTraceStateBuilder::default().with_priority_sampling(SamplingPriority::AutoKeep).build())),
             ]
         }
 

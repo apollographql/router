@@ -1,6 +1,5 @@
 //! Authorization plugin
 
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::ControlFlow;
 
@@ -28,17 +27,14 @@ use self::scopes::ScopeFilteringVisitor;
 use crate::Configuration;
 use crate::Context;
 use crate::error::QueryPlannerError;
-use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
-use crate::query_planner::FilteredQuery;
+use crate::plugins::authentication;
 use crate::query_planner::QueryKey;
 use crate::services::execution;
-use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::supergraph;
 use crate::spec::Schema;
 use crate::spec::SpecError;
@@ -46,6 +42,7 @@ use crate::spec::query::transform;
 use crate::spec::query::traverse;
 
 pub(crate) mod authenticated;
+pub(crate) mod extract_authorization_checks_layer;
 pub(crate) mod policy;
 pub(crate) mod scopes;
 
@@ -139,6 +136,18 @@ pub(crate) struct UnauthorizedPaths {
     pub(crate) errors: ErrorConfig,
 }
 
+/// What [`AuthorizationPlugin::filter_query`] did to an operation.
+pub(crate) enum FilterResult {
+    /// The operation asks for nothing the request lacks authorization for.
+    Unchanged,
+    /// `document` is the operation with `paths` removed. Filtering can empty the
+    /// document entirely, leaving no definitions.
+    Filtered {
+        paths: Vec<Path>,
+        document: ast::Document,
+    },
+}
+
 impl UnauthorizedPaths {
     pub(crate) fn log_unauthorized_paths(&self) {
         // nothing to do if we have no paths or we're not supposed to log
@@ -195,13 +204,11 @@ fn default_enable_directives() -> bool {
 
 pub(crate) struct AuthorizationPlugin {
     require_authentication: bool,
+    reject_unauthorized: bool,
 }
 
 impl AuthorizationPlugin {
-    pub(crate) fn enable_directives(
-        configuration: &Configuration,
-        schema: &Schema,
-    ) -> Result<bool, ServiceBuildError> {
+    pub(crate) fn enable_directives(configuration: &Configuration, schema: &Schema) -> bool {
         let has_config = Self::configuration(configuration).directives.enabled;
 
         let has_authorization_directives = schema.has_spec(
@@ -213,7 +220,7 @@ impl AuthorizationPlugin {
         ) || schema
             .has_spec(&Identity::policy_identity(), POLICY_SPEC_VERSION_RANGE);
 
-        Ok(has_config && has_authorization_directives)
+        has_config && has_authorization_directives
     }
 
     pub(crate) fn configuration(configuration: &Configuration) -> Conf {
@@ -223,37 +230,6 @@ impl AuthorizationPlugin {
             .get("authorization")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default()
-    }
-
-    pub(crate) fn query_analysis(
-        doc: &ParsedDocumentInner,
-        operation_name: Option<&str>,
-        schema: &Schema,
-        context: &Context,
-    ) {
-        let CacheKeyMetadata {
-            is_authenticated,
-            scopes,
-            policies,
-        } = Self::generate_cache_metadata(
-            &doc.executable,
-            operation_name,
-            schema.supergraph_schema(),
-            false,
-        );
-        if is_authenticated {
-            context.insert(AUTHENTICATION_REQUIRED_KEY, true).unwrap();
-        }
-
-        if !scopes.is_empty() {
-            context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
-        }
-
-        if !policies.is_empty() {
-            let policies: HashMap<String, Option<bool>> =
-                policies.into_iter().map(|policy| (policy, None)).collect();
-            context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
-        }
     }
 
     pub(crate) fn generate_cache_metadata(
@@ -300,18 +276,9 @@ impl AuthorizationPlugin {
     }
 
     pub(crate) fn update_cache_key(context: &Context) {
-        let is_authenticated = context.contains_key(APOLLO_AUTHENTICATION_JWT_CLAIMS);
+        let is_authenticated = authentication::has_authenticated_jwt(context);
 
-        let request_scopes = context
-            .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
-            .and_then(|value| {
-                value.as_object().and_then(|object| {
-                    object.get("scope").and_then(|v| {
-                        v.as_str()
-                            .map(|s| s.split(' ').map(|s| s.to_string()).collect::<HashSet<_>>())
-                    })
-                })
-            });
+        let request_scopes = authentication::jwt_scopes(context);
         let query_scopes = context.get_json_value(REQUIRED_SCOPES_KEY).and_then(|v| {
             v.as_array().map(|v| {
                 v.iter()
@@ -378,8 +345,7 @@ impl AuthorizationPlugin {
         configuration: &Conf,
         key: &QueryKey,
         schema: &Schema,
-    ) -> Result<Option<FilteredQuery>, QueryPlannerError> {
-        let reject_unauthorized = configuration.directives.reject_unauthorized;
+    ) -> Result<FilterResult, QueryPlannerError> {
         let dry_run = configuration.directives.dry_run;
 
         // The filtered query will then be used
@@ -407,7 +373,10 @@ impl AuthorizationPlugin {
 
                 // FIXME: consider only `filtered_doc.operations.get(key.operation_name)`?
                 if filtered_doc.definitions.is_empty() {
-                    return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
+                    return Ok(FilterResult::Filtered {
+                        paths: unauthorized_paths,
+                        document: filtered_doc,
+                    });
                 }
 
                 is_filtered = true;
@@ -425,7 +394,10 @@ impl AuthorizationPlugin {
 
                 // FIXME: consider only `filtered_doc.operations.get(key.operation_name)`?
                 if filtered_doc.definitions.is_empty() {
-                    return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
+                    return Ok(FilterResult::Filtered {
+                        paths: unauthorized_paths,
+                        document: filtered_doc,
+                    });
                 }
 
                 is_filtered = true;
@@ -443,7 +415,10 @@ impl AuthorizationPlugin {
 
                 // FIXME: consider only `filtered_doc.operations.get(key.operation_name)`?
                 if filtered_doc.definitions.is_empty() {
-                    return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
+                    return Ok(FilterResult::Filtered {
+                        paths: unauthorized_paths,
+                        document: filtered_doc,
+                    });
                 }
 
                 is_filtered = true;
@@ -452,14 +427,13 @@ impl AuthorizationPlugin {
             }
         };
 
-        if reject_unauthorized && !unauthorized_paths.is_empty() {
-            return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
-        }
-
         if is_filtered {
-            Ok(Some((unauthorized_paths, doc)))
+            Ok(FilterResult::Filtered {
+                paths: unauthorized_paths,
+                document: doc,
+            })
         } else {
-            Ok(None)
+            Ok(FilterResult::Unchanged)
         }
     }
 
@@ -583,19 +557,21 @@ impl Plugin for AuthorizationPlugin {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(AuthorizationPlugin {
             require_authentication: init.config.require_authentication,
+            reject_unauthorized: init.config.directives.reject_unauthorized,
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         if self.require_authentication {
             ServiceBuilder::new()
-                .checkpoint(move |request: supergraph::Request| {
-                    // XXX(@goto-bus-stop): Why are we doing this here, as opposed to the
-                    // authentication plugin, which manages this context value?
-                    if request
-                        .context
-                        .contains_key(APOLLO_AUTHENTICATION_JWT_CLAIMS)
-                    {
+                .checkpoint_async(move |request: supergraph::Request| async move {
+                    // Whether to reject unauthenticated requests is an authorization policy,
+                    // same as `@authenticated`/`@requiresScopes`/`@policy` — authentication only
+                    // verifies tokens, it doesn't decide this.
+                    if authentication::has_authenticated_jwt(&request.context) {
                         Ok(ControlFlow::Continue(request))
                     } else {
                         tracing::error!("rejecting unauthenticated request");
@@ -613,14 +589,37 @@ impl Plugin for AuthorizationPlugin {
                     }
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone()
         } else {
             service
         }
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
+        let reject_unauthorized = self.reject_unauthorized;
+
         ServiceBuilder::new()
+            // Ahead of the counter below, so a refused operation stays uncounted.
+            .checkpoint_async(move |request: execution::Request| async move {
+                if reject_unauthorized && !request.query_plan.query.unauthorized.paths.is_empty() {
+                    let unauthorized = request.query_plan.query.unauthorized.clone();
+                    unauthorized.log_unauthorized_paths();
+
+                    // We knowingly build an invalid response here. Execution was prevented,
+                    // so we should respond with a request error and no data. Instead, we're
+                    // responding with execution errors and a fake/incorrect `data: null`. We
+                    // maintain backwards compatibility for the time being.
+                    // Tracked in ROUTER-2063.
+                    let mut response = graphql::Response::builder().data(Value::Null).build();
+                    unauthorized.update_response_with_unauthorized_path_errors(&mut response);
+
+                    return Ok(ControlFlow::Break(
+                        execution::Response::new_from_graphql_response(response, request.context),
+                    ));
+                }
+
+                Ok(ControlFlow::Continue(request))
+            })
             .map_request(|request: execution::Request| {
                 let filtered = !request.query_plan.query.unauthorized.paths.is_empty();
                 let needs_authenticated = request.context.contains_key(AUTHENTICATION_REQUIRED_KEY);
@@ -640,7 +639,7 @@ impl Plugin for AuthorizationPlugin {
                 request
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 

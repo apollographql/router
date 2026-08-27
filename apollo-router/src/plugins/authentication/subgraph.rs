@@ -117,7 +117,7 @@ impl AWSSigV4Config {
                         &SdkConfig::builder()
                             .http_client(
                                 aws_smithy_http_client::Builder::new()
-                                    .tls_provider(Provider::Rustls(CryptoMode::Ring))
+                                    .tls_provider(Provider::Rustls(CryptoMode::AwsLc))
                                     .build_https(),
                             )
                             .sleep_impl(TokioSleep::new())
@@ -190,7 +190,7 @@ fn credentials_chain_builder() -> aws_config::default_provider::credentials::Bui
         ProviderConfig::default()
             .with_http_client(
                 aws_smithy_http_client::Builder::new()
-                    .tls_provider(Provider::Rustls(CryptoMode::Ring))
+                    .tls_provider(Provider::Rustls(CryptoMode::AwsLc))
                     .build_https(),
             )
             .with_sleep_impl(TokioSleep::new())
@@ -493,8 +493,8 @@ impl SubgraphAuth {
     pub(super) fn subgraph_service(
         &self,
         name: &str,
-        service: crate::services::subgraph::BoxService,
-    ) -> crate::services::subgraph::BoxService {
+        service: crate::services::subgraph::BoxCloneService,
+    ) -> crate::services::subgraph::BoxCloneService {
         if let Some(signing_params) = self.params_for_service(name) {
             ServiceBuilder::new()
                 .map_request(move |mut req: SubgraphRequest| {
@@ -504,7 +504,7 @@ impl SubgraphAuth {
                     req
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone()
         } else {
             service
         }
@@ -532,14 +532,15 @@ mod test {
     use http::header::HOST;
     use regex::Regex;
     use tower::Service;
+    use tower::ServiceExt as _;
 
     use super::*;
     use crate::Context;
     use crate::graphql::Request;
-    use crate::plugin::test::MockSubgraphService;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
+    use crate::services::subgraph;
     use crate::services::subgraph::SubgraphRequestId;
 
     async fn test_signing_settings(service_name: &str) -> SigningSettings {
@@ -638,23 +639,21 @@ mod test {
     async fn test_lattice_body_payload_should_be_unsigned() -> Result<(), BoxError> {
         let subgraph_request = example_request();
 
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                let http_request = get_signed_request(request, "products".to_string());
-                assert_eq!(
-                    "UNSIGNED-PAYLOAD",
-                    http_request
-                        .headers()
-                        .get("x-amz-content-sha256")
-                        .unwrap()
-                        .to_str()
-                        .unwrap()
-                );
-                true
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+            let http_request = get_signed_request(&request, "products".to_string());
+            assert_eq!(
+                "UNSIGNED-PAYLOAD",
+                http_request
+                    .headers()
+                    .get("x-amz-content-sha256")
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+            );
+            responder.send_response(example_response(request).unwrap());
+        });
 
         let mut service = SubgraphAuth {
             signing_params: Arc::new(SigningParams {
@@ -674,9 +673,10 @@ mod test {
                 subgraphs: Default::default(),
             }),
         }
-        .subgraph_service("test_subgraph", mock.boxed());
+        .subgraph_service("test_subgraph", mock.boxed_clone());
 
         service.ready().await?.call(subgraph_request).await?;
+        crate::plugin::test::await_mock_driver(driver).await;
         Ok(())
     }
 
@@ -684,30 +684,44 @@ mod test {
     async fn test_aws_sig_v4_headers() -> Result<(), BoxError> {
         let subgraph_request = example_request();
 
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                let http_request = get_signed_request(request, "products".to_string());
-                let authorization_regex = Regex::new(r"AWS4-HMAC-SHA256 Credential=id/\d{8}/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=[a-f0-9]{64}").unwrap();
-                let authorization_header_str = http_request.headers().get("authorization").unwrap().to_str().unwrap();
-                assert_eq!(match authorization_regex.find(authorization_header_str) {
+        let (mock, mut handle) = tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+            let http_request = get_signed_request(&request, "products".to_string());
+            let authorization_regex = Regex::new(r"AWS4-HMAC-SHA256 Credential=id/\d{8}/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=[a-f0-9]{64}").unwrap();
+            let authorization_header_str = http_request
+                .headers()
+                .get("authorization")
+                .unwrap()
+                .to_str()
+                .unwrap();
+            assert_eq!(
+                match authorization_regex.find(authorization_header_str) {
                     Some(m) => m.as_str(),
-                    None => "no match"
-                }, authorization_header_str);
-
-                let x_amz_date_regex = Regex::new(r"\d{8}T\d{6}Z").unwrap();
-                let x_amz_date_header_str = http_request.headers().get("x-amz-date").unwrap().to_str().unwrap();
-                assert_eq!(match x_amz_date_regex.find(x_amz_date_header_str) {
+                    None => "no match",
+                },
+                authorization_header_str
+            );
+            let x_amz_date_regex = Regex::new(r"\d{8}T\d{6}Z").unwrap();
+            let x_amz_date_header_str = http_request
+                .headers()
+                .get("x-amz-date")
+                .unwrap()
+                .to_str()
+                .unwrap();
+            assert_eq!(
+                match x_amz_date_regex.find(x_amz_date_header_str) {
                     Some(m) => m.as_str(),
-                    None => "no match"
-                }, x_amz_date_header_str);
-
-                assert_eq!(http_request.headers().get("x-amz-content-sha256").unwrap(), "255959b4c6e11c1080f61ce0d75eb1b565c1772173335a7828ba9c13c25c0d8c");
-
-                true
-            })
-            .returning(example_response);
+                    None => "no match",
+                },
+                x_amz_date_header_str
+            );
+            assert_eq!(
+                http_request.headers().get("x-amz-content-sha256").unwrap(),
+                "255959b4c6e11c1080f61ce0d75eb1b565c1772173335a7828ba9c13c25c0d8c"
+            );
+            responder.send_response(example_response(request).unwrap());
+        });
 
         let mut service = SubgraphAuth {
             signing_params: Arc::new(SigningParams {
@@ -727,9 +741,10 @@ mod test {
                 subgraphs: Default::default(),
             }),
         }
-        .subgraph_service("test_subgraph", mock.boxed());
+        .subgraph_service("test_subgraph", mock.boxed_clone());
 
         service.ready().await?.call(subgraph_request).await?;
+        crate::plugin::test::await_mock_driver(driver).await;
         Ok(())
     }
 
@@ -742,9 +757,9 @@ mod test {
         use super::*;
         use crate::Context;
         use crate::graphql::Request;
-        use crate::plugin::test::MockSubgraphService;
         use crate::query_planner::fetch::OperationKind;
         use crate::services::SubgraphRequest;
+        use crate::services::subgraph;
 
         async fn call_subgraph(
             name: &str,
@@ -770,17 +785,20 @@ mod test {
                 .subgraph_name(name.to_string())
                 .build();
 
-            let mut mock = MockSubgraphService::new();
-            mock.expect_call()
-                .times(1)
-                .returning(super::example_response);
+            let (mock, mut handle) =
+                tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(super::example_response(req).unwrap());
+            });
 
             SubgraphAuth { signing_params }
-                .subgraph_service(name, mock.boxed())
+                .subgraph_service(name, mock.boxed_clone())
                 .ready()
                 .await?
                 .call(request)
                 .await?;
+            crate::plugin::test::await_mock_driver(driver).await;
 
             Ok(())
         }

@@ -23,7 +23,6 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
-use crate::plugin::test::MockSubgraphService;
 use crate::plugins::response_cache::debugger::CacheKeysContext;
 use crate::plugins::response_cache::debugger::CdnInvalidationDebug;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
@@ -2812,19 +2811,26 @@ async fn no_data() {
         .collect(),
     );
 
+    let drain_drivers = std::sync::Arc::new(std::sync::Mutex::new(Vec::<
+        tokio::task::JoinHandle<()>,
+    >::new()));
+    let drain_drivers_clone = drain_drivers.clone();
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_private_plugin(response_cache)
-        .subgraph_hook(|name, service| {
+        .subgraph_hook(move |name, service| {
             if name == "orga" {
-                let mut subgraph = MockSubgraphService::new();
-                subgraph
-                    .expect_call()
-                    .times(1)
-                    .returning(move |_req: subgraph::Request| Err("orga not found".into()));
-                subgraph.boxed()
+                let (mock, mut handle) =
+                    tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+                let driver = tokio::spawn(async move {
+                    while let Some((_req, responder)) = handle.next_request().await {
+                        responder.send_error("orga not found");
+                    }
+                });
+                drain_drivers_clone.lock().unwrap().push(driver);
+                mock.boxed_clone()
             } else {
                 service
             }
@@ -2872,7 +2878,7 @@ async fn no_data() {
       },
       "errors": [
         {
-          "message": "HTTP fetch failed from 'orga': orga not found",
+          "message": "HTTP fetch failed: orga not found",
           "path": [
             "currentUser",
             "allOrganizations",
@@ -2887,6 +2893,13 @@ async fn no_data() {
       ]
     }
     "#);
+    for driver in std::sync::Arc::try_unwrap(drain_drivers)
+        .unwrap()
+        .into_inner()
+        .unwrap()
+    {
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
 }
 
 #[tokio::test]
@@ -5116,7 +5129,7 @@ async fn no_store_on_subgraph_timeout() {
                     // Unreachable in practice — the traffic shaping timeout fires first.
                     Err::<subgraph::Response, tower::BoxError>("orga sleep exceeded".into())
                 })
-                .boxed()
+                .boxed_clone()
             } else {
                 service
             }

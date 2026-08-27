@@ -43,7 +43,6 @@ use crate::plugins::demand_control::strategy::Strategy;
 use crate::plugins::demand_control::strategy::StrategyFactory;
 use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::services::execution;
-use crate::services::execution::BoxService;
 use crate::services::subgraph;
 
 pub(crate) mod cost_calculator;
@@ -87,9 +86,6 @@ pub(crate) enum StrategyConfig {
         ///
         /// * `by_subgraph` (default) computes the cost of each subgraph response and sums them
         ///   to get the total query cost.
-        /// * `by_response_shape` computes the cost based on the final structure of the composed
-        ///   response, not including any interim structures from subgraph responses that did not
-        ///   make it to the composed response.
         #[serde(default)]
         actual_cost_mode: ActualCostMode,
 
@@ -111,12 +107,6 @@ pub(crate) enum ActualCostMode {
     /// Computes the cost of each subgraph response and sums them to get the total query cost.
     #[default]
     BySubgraph,
-
-    /// Computes the cost based on the final structure of the composed response, not including any
-    /// interim structures from subgraph responses that did not make it to the composed response.
-    #[deprecated(since = "TBD", note = "use `BySubgraph` instead")]
-    #[warn(deprecated_in_future)]
-    ByResponseShape,
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize, JsonSchema)]
@@ -130,22 +120,11 @@ pub(crate) struct SubgraphStrategyConfig {
 
 impl StrategyConfig {
     fn validate(&self, subgraph_names: HashSet<&String>) -> Result<(), BoxError> {
-        let (actual_cost_mode, subgraphs) = match self {
-            StrategyConfig::StaticEstimated {
-                actual_cost_mode,
-                subgraph,
-                ..
-            } => (actual_cost_mode, subgraph),
+        let subgraphs = match self {
+            StrategyConfig::StaticEstimated { subgraph, .. } => subgraph,
             #[cfg(test)]
             StrategyConfig::Test { .. } => return Ok(()),
         };
-
-        #[allow(deprecated_in_future)]
-        if matches!(actual_cost_mode, ActualCostMode::ByResponseShape) {
-            tracing::warn!(
-                "Actual cost computation mode `by_response_shape` will be deprecated in the future; migrate to `by_subgraph` when possible",
-            );
-        }
 
         if subgraphs.all.max.is_some_and(|s| s < 0.0) {
             return Err("Maximum per-subgraph query cost for `all` is negative".into());
@@ -552,49 +531,52 @@ impl Plugin for DemandControl {
         })
     }
 
-    fn execution_service(&self, service: BoxService) -> BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         if !self.config.enabled {
             service
         } else {
             let strategy = self.strategy_factory.create();
             ServiceBuilder::new()
-                .checkpoint(move |req: execution::Request| {
-                    req.context
-                        .insert_demand_control_context(DemandControlContext {
-                            strategy: strategy.clone(),
-                            variables: req.supergraph_request.body().variables.clone(),
-                        });
-
-                    // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
-                    Ok(match strategy.on_execution_request(&req) {
-                        Ok(_) => ControlFlow::Continue(req),
-                        Err(err) => {
-                            let mut graphql_errors = err
-                                .into_graphql_errors()
-                                .expect("must be able to convert to graphql error");
-                            graphql_errors.iter_mut().for_each(|mapped_error| {
-                                if let Some(Value::String(error_code)) =
-                                    mapped_error.extensions.get("code")
-                                {
-                                    // Emit here so the event attaches to the demand_control
-                                    // checkpoint span; mark so the centralized emit skips it.
-                                    emit_error_event(
-                                        error_code.as_str(),
-                                        &mapped_error.message,
-                                        mapped_error.path.clone(),
-                                    );
-                                    mapped_error.set_span_event_emitted(true);
-                                }
+                .checkpoint_async(move |req: execution::Request| {
+                    let strategy = strategy.clone();
+                    async move {
+                        req.context
+                            .insert_demand_control_context(DemandControlContext {
+                                strategy: strategy.clone(),
+                                variables: req.supergraph_request.body().variables.clone(),
                             });
-                            ControlFlow::Break(
-                                execution::Response::builder()
-                                    .errors(graphql_errors)
-                                    .context(req.context.clone())
-                                    .build()
-                                    .expect("Must be able to build response"),
-                            )
-                        }
-                    })
+
+                        // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
+                        Ok(match strategy.on_execution_request(&req) {
+                            Ok(_) => ControlFlow::Continue(req),
+                            Err(err) => {
+                                let mut graphql_errors = err
+                                    .into_graphql_errors()
+                                    .expect("must be able to convert to graphql error");
+                                graphql_errors.iter_mut().for_each(|mapped_error| {
+                                    if let Some(Value::String(error_code)) =
+                                        mapped_error.extensions.get("code")
+                                    {
+                                        // Emit here so the event attaches to the demand_control
+                                        // checkpoint span; mark so the centralized emit skips it.
+                                        emit_error_event(
+                                            error_code.as_str(),
+                                            &mapped_error.message,
+                                            mapped_error.path.clone(),
+                                        );
+                                        mapped_error.set_span_event_emitted(true);
+                                    }
+                                });
+                                ControlFlow::Break(
+                                    execution::Response::builder()
+                                        .errors(graphql_errors)
+                                        .context(req.context.clone())
+                                        .build()
+                                        .expect("Must be able to build response"),
+                                )
+                            }
+                        })
+                    }
                 })
                 .map_response(|mut resp: execution::Response| {
                     let req = resp
@@ -650,40 +632,43 @@ impl Plugin for DemandControl {
                     resp
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone()
         }
     }
 
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         if !self.config.enabled {
             service
         } else {
             let subgraph_name = subgraph_name.to_owned();
             let subgraph_name_map_fut = subgraph_name.to_owned();
             ServiceBuilder::new()
-                .checkpoint(move |req: subgraph::Request| {
-                    let strategy = req.context.get_demand_control_context().map(|c| c.strategy).expect("must have strategy");
+                .checkpoint_async(move |req: subgraph::Request| {
+                    let subgraph_name = subgraph_name.clone();
+                    async move {
+                        let strategy = req.context.get_demand_control_context().map(|c| c.strategy).expect("must have strategy");
 
-                    // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
-                    Ok(match strategy.on_subgraph_request(&req) {
-                        Ok(_) => ControlFlow::Continue(req),
-                        Err(err) => ControlFlow::Break(
-                            subgraph::Response::builder()
-                                .errors(
-                                    err.into_graphql_errors()
-                                        .expect("must be able to convert to graphql error"),
-                                )
-                                .id(req.id)
-                                .context(req.context.clone())
-                                .extensions(crate::json_ext::Object::new())
-                                .subgraph_name(subgraph_name.clone())
-                                .build(),
-                        ),
-                    })
+                        // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
+                        Ok(match strategy.on_subgraph_request(&req) {
+                            Ok(_) => ControlFlow::Continue(req),
+                            Err(err) => ControlFlow::Break(
+                                subgraph::Response::builder()
+                                    .errors(
+                                        err.into_graphql_errors()
+                                            .expect("must be able to convert to graphql error"),
+                                    )
+                                    .id(req.id)
+                                    .context(req.context.clone())
+                                    .extensions(crate::json_ext::Object::new())
+                                    .subgraph_name(subgraph_name.clone())
+                                    .build(),
+                            ),
+                        })
+                    }
                 })
                 .map_future_with_request_data(
                     move |req: &subgraph::Request| {
@@ -714,7 +699,7 @@ impl Plugin for DemandControl {
                     },
                 )
                 .service(service)
-                .boxed()
+                .boxed_clone()
         }
     }
 }
@@ -743,8 +728,8 @@ mod test {
     use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::execution;
-    use crate::services::layers::query_analysis::ParsedDocument;
-    use crate::services::layers::query_analysis::ParsedDocumentInner;
+    use crate::services::query_parsing::ParsedDocument;
+    use crate::services::query_parsing::ParsedDocumentInner;
     use crate::services::subgraph;
 
     #[tokio::test]

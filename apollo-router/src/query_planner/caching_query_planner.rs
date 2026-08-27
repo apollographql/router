@@ -7,14 +7,11 @@ use std::sync::atomic::Ordering;
 use std::task;
 
 use futures::future::BoxFuture;
-use indexmap::IndexMap;
-use query_planner::QueryPlannerPlugin;
-use rand::seq::SliceRandom;
 use sha2::Digest;
 use sha2::Sha256;
 use tokio_util::time::FutureExt;
+#[cfg(test)]
 use tower::BoxError;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
@@ -30,24 +27,18 @@ use crate::cache::storage::ValueType;
 use crate::compute_job::ComputeBackPressureError;
 use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
-use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::configuration::mode::Mode;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
-use crate::plugins::limits;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
-use crate::plugins::telemetry::utils::Timer;
-use crate::query_planner::QueryPlannerService;
-use crate::query_planner::fetch::SubgraphSchemas;
+use crate::query_planner::SubgraphSchemas;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
-use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::ParsedDocument;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::query_parsing::ParsedDocument;
 use crate::services::query_planner;
 use crate::services::query_planner::PlanOptions;
 use crate::spec::QueryHash;
@@ -64,7 +55,6 @@ enum Outcome {
     Success = 3,
     Error = 4,
     Backpressure = 5,
-    BatchingError = 6,
 }
 
 impl std::fmt::Display for Outcome {
@@ -76,15 +66,21 @@ impl std::fmt::Display for Outcome {
             Outcome::Success => write!(f, "success"),
             Outcome::Error => write!(f, "error"),
             Outcome::Backpressure => write!(f, "backpressure"),
-            Outcome::BatchingError => write!(f, "batching_error"),
         }
     }
 }
 
-/// An [`IndexMap`] of available plugins.
-pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
-pub(crate) type InMemoryCachePlanner =
+pub(crate) type QueryPlanCache = Arc<
+    DeduplicatingCache<
+        CachingQueryKey,
+        Result<QueryPlannerContent, Arc<QueryPlannerError>>,
+        ComputeBackPressureError,
+    >,
+>;
+
+pub(crate) type InMemoryQueryPlanCache =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
+
 pub(crate) const APOLLO_OPERATION_ID: &str = "apollo::supergraph::operation_id";
 
 /// Hashed value of query planner configuration for use in cache keys.
@@ -92,6 +88,14 @@ pub(crate) const APOLLO_OPERATION_ID: &str = "apollo::supergraph::operation_id";
 // XXX(@goto-bus-stop): I think this probably should not be pub(crate), but right now all fields in
 // the cache keys are pub(crate), which I'm not going to change at this time :)
 pub(crate) struct ConfigModeHash(Vec<u8>);
+
+impl ConfigModeHash {
+    pub(crate) fn from_configuration(configuration: &Configuration) -> Self {
+        let mut hasher = StructHasher::new();
+        configuration.rust_query_planner_config().hash(&mut hasher);
+        Self(hasher.finalize())
+    }
+}
 
 impl std::fmt::Display for ConfigModeHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -110,319 +114,95 @@ impl std::fmt::Debug for ConfigModeHash {
 /// A query planner wrapper that caches results.
 ///
 /// The query planner performs LRU caching.
+///
+/// ## Context
+/// Required context keys:
+/// - [`ParsedDocument`]
+///
+/// Optional context keys:
+/// - [`ComputeJobType`] (defaults to [`ComputeJobType::QueryPlanning`])
+/// - "apollo::authentication::jwt_claims"
+/// - "apollo::authorization::required_scopes"
+/// - "apollo::authorization::required_policies"
+/// - "apollo::progressive_override::labels_to_override"
+///
+/// Inserts context:
+/// - `Arc<`[`UsageReporting`]`>`
 #[derive(Clone)]
-pub(crate) struct CachingQueryPlanner<T: Clone> {
-    cache: Arc<
-        DeduplicatingCache<
-            CachingQueryKey,
-            Result<QueryPlannerContent, Arc<QueryPlannerError>>,
-            ComputeBackPressureError,
-        >,
-    >,
+pub(crate) struct CachingQueryPlanner<T> {
+    cache: QueryPlanCache,
     delegate: T,
     schema: Arc<Schema>,
     subgraph_schemas: Arc<SubgraphSchemas>,
-    plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
     config_mode_hash: Arc<ConfigModeHash>,
     cooperative_cancellation: CooperativeCancellation,
-    config_limits: limits::RouterLimitsConfig,
 }
 
 fn init_query_plan_from_redis(
     subgraph_schemas: &SubgraphSchemas,
     cache_entry: &mut Result<QueryPlannerContent, Arc<QueryPlannerError>>,
 ) -> Result<(), String> {
-    if let Ok(QueryPlannerContent::Plan { plan }) = cache_entry {
+    if let Ok(plan) = cache_entry {
         // Arc freshly deserialized from Redis should be unique, so this doesn't clone:
         let plan = Arc::make_mut(plan);
-        let root = Arc::make_mut(&mut plan.root);
-        root.init_parsed_operations(subgraph_schemas)
-            .map_err(|e| format!("Invalid subgraph operation: {e}"))?
+        if let Some(root) = plan.root.as_mut() {
+            let root = Arc::make_mut(root);
+            root.init_parsed_operations(subgraph_schemas)
+                .map_err(|e| format!("Invalid subgraph operation: {e}"))?
+        }
     }
     Ok(())
 }
 
-impl<T: Clone + 'static> CachingQueryPlanner<T>
-where
-    T: tower::Service<
-            QueryPlannerRequest,
-            Response = QueryPlannerResponse,
-            Error = MaybeBackPressureError<QueryPlannerError>,
-        > + Send,
-    <T as tower::Service<QueryPlannerRequest>>::Future: Send,
-{
-    /// Creates a new query planner that caches the results of another [`QueryPlanner`].
-    pub(crate) async fn new(
+impl<T> CachingQueryPlanner<T> {
+    #[cfg(test)]
+    pub(crate) async fn for_test(
         delegate: T,
         schema: Arc<Schema>,
         subgraph_schemas: Arc<SubgraphSchemas>,
         configuration: &Configuration,
-        plugins: Plugins,
-    ) -> Result<CachingQueryPlanner<T>, BoxError> {
-        let cache = Arc::new(
-            DeduplicatingCache::from_configuration(
-                &configuration.supergraph.query_planning.cache.clone().into(),
-                "query planner",
-            )
-            .await?,
+    ) -> Result<Self, BoxError> {
+        let cache = crate::pipeline::build_query_plan_cache(
+            configuration,
+            crate::pipeline::connect_query_plan_redis(configuration).await?,
         );
+        Ok(Self::new(
+            delegate,
+            schema,
+            subgraph_schemas,
+            configuration,
+            cache,
+        ))
+    }
 
+    /// Creates a new query planner that caches the results of another [`QueryPlanner`].
+    pub(crate) fn new(
+        delegate: T,
+        schema: Arc<Schema>,
+        subgraph_schemas: Arc<SubgraphSchemas>,
+        configuration: &Configuration,
+        cache: QueryPlanCache,
+    ) -> Self {
         let enable_authorization_directives =
-            AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
+            AuthorizationPlugin::enable_directives(configuration, &schema);
 
-        let mut hasher = StructHasher::new();
-        configuration.rust_query_planner_config().hash(&mut hasher);
-        let config_mode_hash = Arc::new(ConfigModeHash(hasher.finalize()));
+        let config_mode_hash = Arc::new(ConfigModeHash::from_configuration(configuration));
         let cooperative_cancellation = configuration
             .supergraph
             .query_planning
             .experimental_cooperative_cancellation
             .clone();
 
-        Ok(Self {
+        Self {
             cache,
             delegate,
             schema,
             subgraph_schemas,
-            plugins: Arc::new(plugins),
             enable_authorization_directives,
             cooperative_cancellation,
             config_mode_hash,
-            config_limits: configuration.limits.router.clone(),
-        })
-    }
-
-    pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
-        self.cache.in_memory_cache()
-    }
-
-    pub(crate) async fn warm_up(
-        &mut self,
-        query_analysis: &QueryAnalysisLayer,
-        persisted_query_layer: &PersistedQueryLayer,
-        previous_cache: Option<InMemoryCachePlanner>,
-        count: Option<usize>,
-        experimental_reuse_query_plans: bool,
-        experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
-    ) {
-        let _timer = Timer::new(|duration| {
-            f64_histogram!(
-                "apollo.router.query_planning.warmup.duration",
-                "Time spent warming up the query planner queries in seconds",
-                duration.as_secs_f64()
-            );
-        });
-
-        let mut service = ServiceBuilder::new().service(
-            self.plugins
-                .iter()
-                .rev()
-                .fold(self.delegate.clone().boxed(), |acc, (_, e)| {
-                    e.query_planner_service(acc)
-                }),
-        );
-
-        let mut cache_keys = match previous_cache {
-            Some(ref previous_cache) => {
-                let cache = previous_cache.lock().await;
-
-                let count = count.unwrap_or(cache.len() / 3);
-
-                cache
-                    .iter()
-                    .map(
-                        |(
-                            CachingQueryKey {
-                                query,
-                                operation,
-                                hash,
-                                metadata,
-                                plan_options,
-                                config_mode_hash: _,
-                                schema_id: _,
-                            },
-                            _,
-                        )| WarmUpCachingQueryKey {
-                            query: query.clone(),
-                            operation_name: operation.clone(),
-                            hash: Some(hash.clone()),
-                            metadata: metadata.clone(),
-                            plan_options: plan_options.clone(),
-                            config_mode_hash: self.config_mode_hash.clone(),
-                        },
-                    )
-                    .take(count)
-                    .collect::<Vec<_>>()
-            }
-            None => Vec::new(),
-        };
-
-        cache_keys.shuffle(&mut rand::rng());
-
-        let should_warm_with_pqs = (experimental_pql_prewarm.on_startup
-            && previous_cache.is_none())
-            || (experimental_pql_prewarm.on_reload && previous_cache.is_some());
-        let persisted_queries_operations = persisted_query_layer.all_operations();
-
-        let capacity = if should_warm_with_pqs {
-            cache_keys.len()
-                + persisted_queries_operations
-                    .as_ref()
-                    .map(|ops| ops.len())
-                    .unwrap_or(0)
-        } else {
-            cache_keys.len()
-        };
-
-        if capacity > 0 {
-            tracing::info!(
-                "warming up the query plan cache with {} queries, this might take a while",
-                capacity
-            );
         }
-
-        // persisted queries are added first because they should get a lower priority in the LRU cache,
-        // since a lot of them may be there to support old clients
-        let mut all_cache_keys: Vec<WarmUpCachingQueryKey> = Vec::with_capacity(capacity);
-        if should_warm_with_pqs && let Some(queries) = persisted_queries_operations {
-            for query in queries {
-                all_cache_keys.push(WarmUpCachingQueryKey {
-                    query,
-                    operation_name: None,
-                    hash: None,
-                    metadata: CacheKeyMetadata::default(),
-                    plan_options: PlanOptions::default(),
-                    config_mode_hash: self.config_mode_hash.clone(),
-                });
-            }
-        }
-
-        all_cache_keys.shuffle(&mut rand::rng());
-
-        all_cache_keys.extend(cache_keys);
-
-        let mut count = 0usize;
-        let mut reused = 0usize;
-        'all_cache_keys_loop: for WarmUpCachingQueryKey {
-            query,
-            operation_name,
-            hash,
-            metadata,
-            plan_options,
-            config_mode_hash: _,
-        } in all_cache_keys
-        {
-            // NB: warmup tasks have a low priority so that real requests are prioritized
-            let doc = loop {
-                match query_analysis
-                    .parse_document(
-                        &query,
-                        operation_name.as_deref(),
-                        ComputeJobType::QueryParsingWarmup,
-                    )
-                    .await
-                {
-                    Ok(doc) => break doc,
-                    Err(MaybeBackPressureError::PermanentError(_)) => {
-                        continue 'all_cache_keys_loop;
-                    }
-                    Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        // try again
-                    }
-                }
-            };
-
-            let caching_key = CachingQueryKey {
-                query: query.clone(),
-                operation: operation_name.clone(),
-                hash: doc.hash.clone(),
-                schema_id: self.schema.schema_id.clone(),
-                metadata,
-                plan_options,
-                config_mode_hash: self.config_mode_hash.clone(),
-            };
-
-            if experimental_reuse_query_plans {
-                // check if prewarming via seeing if the previous cache exists (aka a reloaded router); if reloading, try to reuse the
-                if let Some(ref previous_cache) = previous_cache {
-                    // if the query hash did not change with the schema update, we can reuse the previously cached entry
-                    if let Some(hash) = hash
-                        && hash == doc.hash
-                        && let Some(entry) =
-                            { previous_cache.lock().await.get(&caching_key).cloned() }
-                    {
-                        self.cache.insert_in_memory(caching_key, entry).await;
-                        reused += 1;
-                        continue;
-                    }
-                }
-            };
-
-            let entry = self
-                .cache
-                .get(&caching_key, |v| {
-                    init_query_plan_from_redis(&self.subgraph_schemas, v)
-                })
-                .await;
-            if entry.is_first() {
-                loop {
-                    let request = QueryPlannerRequest {
-                        query: query.clone(),
-                        operation_name: operation_name.clone(),
-                        document: doc.clone(),
-                        metadata: caching_key.metadata.clone(),
-                        plan_options: caching_key.plan_options.clone(),
-                        compute_job_type: ComputeJobType::QueryPlanningWarmup,
-                        variables: Default::default(),
-                    };
-                    let res = match service.ready().await {
-                        Ok(service) => service.call(request).await,
-                        Err(_) => break 'all_cache_keys_loop,
-                    };
-
-                    match res {
-                        Ok(QueryPlannerResponse { content, .. }) => {
-                            if let Some(content) = content.clone() {
-                                count += 1;
-                                tokio::spawn(async move {
-                                    entry.insert(Ok(content.clone())).await;
-                                });
-                            }
-                            break;
-                        }
-                        Err(MaybeBackPressureError::PermanentError(error)) => {
-                            count += 1;
-                            let e = Arc::new(error);
-                            tokio::spawn(async move {
-                                entry.insert(Err(e)).await;
-                            });
-                            break;
-                        }
-                        Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
-                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                            // try again
-                        }
-                    }
-                }
-            }
-        }
-
-        tracing::debug!(
-            "warmed up the query planner cache with {count} queries planned and {reused} queries reused"
-        );
-    }
-}
-
-impl CachingQueryPlanner<QueryPlannerService> {
-    pub(crate) fn subgraph_schemas(&self) -> Arc<SubgraphSchemas> {
-        self.delegate.subgraph_schemas()
-    }
-
-    pub(crate) fn activate(&self) {
-        self.cache.activate();
-        self.delegate.activate();
     }
 }
 
@@ -440,6 +220,13 @@ where
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> task::Poll<Result<(), Self::Error>> {
+        // We don't propagate backpressure from the query planner itself,
+        // because compared to short-lived work, query planning can take a long time and is
+        // more sensitive to pool saturation. In that case, we want the router to stop serving
+        // requests containing _new_ queries, but it's still capable of serving requests with
+        // already planned queries.
+        // XXX(@goto-bus-stop): to maintain this behaviour once we adopt apollo-cache layers, we can
+        // add a load shed layer on the query planner.
         task::Poll::Ready(Ok(()))
     }
 
@@ -493,55 +280,83 @@ where
         + 'static,
     <T as Service<QueryPlannerRequest>>::Future: Send,
 {
+    /// Plan a query, first hitting the cache.
+    ///
+    /// Uses context keys:
+    /// - apollo::authentication::jwt_claims
+    /// - apollo::authorization::required_scopes
+    /// - apollo::authorization::required_policies
+    /// - apollo::progressive_override::labels_to_override
+    /// - [`ParsedDocument`]
+    /// - [`ComputeJobType`]
+    ///
+    /// Inserts context:
+    /// - `Arc<`[`UsageReporting`]`>`
     async fn plan(
         mut self,
         request: query_planner::CachingRequest,
     ) -> Result<<T as Service<QueryPlannerRequest>>::Response, CacheResolverError> {
+        let query_planner::CachingRequest {
+            query,
+            operation_name,
+            context,
+        } = request;
+
         if self.enable_authorization_directives {
-            AuthorizationPlugin::update_cache_key(&request.context);
+            AuthorizationPlugin::update_cache_key(&context);
         }
 
         let plan_options = PlanOptions {
-            override_conditions: request
-                .context
+            override_conditions: context
                 .get(LABELS_TO_OVERRIDE_KEY)
                 .unwrap_or_default()
                 .unwrap_or_default(),
         };
 
-        let doc = match request
-            .context
+        let Some(doc) = context
             .extensions()
             .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
-        {
-            None => {
-                return Err(CacheResolverError::RetrievalError(Arc::new(
-                    // TODO: dedicated error variant?
-                    QueryPlannerError::SpecError(SpecError::TransformError(
-                        "missing parsed document".to_string(),
-                    )),
-                )));
-            }
-            Some(d) => d.clone(),
+        else {
+            return Err(CacheResolverError::RetrievalError(Arc::new(
+                // FIXME(@goto-bus-stop): we should make it impossible to call the query planning
+                // service without having a ParsedDocument available.
+                QueryPlannerError::SpecError(SpecError::TransformError(
+                    "missing parsed document".to_string(),
+                )),
+            )));
         };
 
-        let metadata = request
-            .context
+        let metadata = context
             .extensions()
             .with_lock(|lock| lock.get::<CacheKeyMetadata>().cloned())
             .unwrap_or_default();
 
+        let compute_job_type = context
+            .extensions()
+            .with_lock(|lock| lock.get::<ComputeJobType>().copied())
+            .unwrap_or(ComputeJobType::QueryPlanning);
+
+        // Build the inner query planner request.
+        let request = QueryPlannerRequest::builder()
+            .query(&query)
+            .and_operation_name(operation_name.clone())
+            .document(doc.clone())
+            .metadata(metadata.clone())
+            .plan_options(plan_options.clone())
+            .compute_job_type(compute_job_type)
+            .build();
+
+        // Check the cache first
         let caching_key = CachingQueryKey {
-            query: request.query.clone(),
-            operation: request.operation_name.to_owned(),
+            query: query.clone(),
+            operation: operation_name.clone(),
             hash: doc.hash.clone(),
-            schema_id: self.schema.schema_id.clone(),
             metadata,
             plan_options,
+            schema_id: self.schema.schema_id.clone(),
             config_mode_hash: self.config_mode_hash.clone(),
         };
 
-        let context = request.context.clone();
         let entry = self
             .cache
             .get(&caching_key, |v| {
@@ -550,23 +365,6 @@ where
             .await;
 
         if entry.is_first() {
-            let query_planner::CachingRequest {
-                query,
-                operation_name,
-                context,
-                variables,
-            } = request;
-
-            let request = QueryPlannerRequest::builder()
-                .query(&query)
-                .and_operation_name(operation_name)
-                .document(doc)
-                .metadata(caching_key.metadata)
-                .plan_options(caching_key.plan_options)
-                .compute_job_type(ComputeJobType::QueryPlanning)
-                .variables(variables)
-                .build();
-
             let planning_task = async move {
                 let service = match self.delegate.ready().await {
                     Ok(service) => service,
@@ -593,26 +391,13 @@ where
                 match res {
                     Ok(QueryPlannerResponse { content, errors }) => {
                         if let Some(content) = content.clone() {
-                            let can_cache = match &content {
-                                // Already cached in an introspection-specific, small-size,
-                                // in-memory-only cache.
-                                QueryPlannerContent::CachedIntrospectionResponse { .. } => false,
-                                _ => true,
-                            };
-
-                            if can_cache {
-                                tokio::spawn(async move {
-                                    entry.insert(Ok(content)).await;
-                                });
-                            } else {
-                                tokio::spawn(async move {
-                                    entry.send(Ok(Ok(content))).await;
-                                });
-                            }
+                            tokio::spawn(async move {
+                                entry.insert(Ok(content)).await;
+                            });
                         }
 
                         // This will be overridden by the Rust usage reporting implementation
-                        if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
+                        if let Some(plan) = &content {
                             context.extensions().with_lock(|lock| {
                                 lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
                             });
@@ -806,9 +591,6 @@ where
                     Err(CacheResolverError::Backpressure(_)) => {
                         record_outcome_if_none(&outcome_recorded, Outcome::Backpressure);
                     }
-                    Err(CacheResolverError::BatchingError(_)) => {
-                        record_outcome_if_none(&outcome_recorded, Outcome::BatchingError);
-                    }
                 };
             })
             .map_err(convert_join_error)?
@@ -821,19 +603,10 @@ where
 
             match res {
                 Ok(content) => {
-                    if let QueryPlannerContent::Plan { plan, .. } = &content {
-                        context.extensions().with_lock(|lock| {
-                            lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
-                        });
-
-                        crate::spec::operation_limits::check_measured(
-                            &plan.query_metrics,
-                            &self.config_limits,
-                            &caching_key.query,
-                            caching_key.operation.as_deref(),
-                        )
-                        .map_err(|e| CacheResolverError::RetrievalError(Arc::new(e.into())))?;
-                    }
+                    let plan = &content;
+                    context.extensions().with_lock(|lock| {
+                        lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
+                    });
 
                     Ok(QueryPlannerResponse::builder().content(content).build())
                 }
@@ -890,16 +663,6 @@ impl std::fmt::Display for CachingQueryKey {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub(crate) struct WarmUpCachingQueryKey {
-    pub(crate) query: String,
-    pub(crate) operation_name: Option<String>,
-    pub(crate) hash: Option<Arc<QueryHash>>,
-    pub(crate) metadata: CacheKeyMetadata,
-    pub(crate) plan_options: PlanOptions,
-    pub(crate) config_mode_hash: Arc<ConfigModeHash>,
-}
-
 struct StructHasher {
     hasher: Sha256,
 }
@@ -929,12 +692,7 @@ impl Hasher for StructHasher {
 impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
     fn estimated_size(&self) -> Option<usize> {
         match self {
-            Ok(QueryPlannerContent::Plan { plan }) => Some(plan.estimated_size()),
-            Ok(QueryPlannerContent::Response { response })
-            | Ok(QueryPlannerContent::CachedIntrospectionResponse { response }) => {
-                Some(estimate_size(response))
-            }
-            Ok(QueryPlannerContent::IntrospectionDisabled) => None,
+            Ok(plan) => Some(plan.estimated_size()),
             Err(e) => Some(estimate_size(e)),
         }
     }
@@ -943,13 +701,12 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::atomic::AtomicUsize;
     use std::time::Duration;
 
     #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     use bytesize::ByteSize;
-    use mockall::mock;
     use parking_lot::Mutex;
-    use serde_json_bytes::json;
     use test_log::test;
     use tower::Service;
     use tracing::Subscriber;
@@ -965,7 +722,7 @@ mod tests {
     use crate::apollo_studio_interop::UsageReporting;
     use crate::configuration::QueryPlanning;
     use crate::configuration::Supergraph;
-    use crate::json_ext::Object;
+    use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
     use crate::spec::Schema;
@@ -1049,9 +806,7 @@ mod tests {
                 } else {
                     // In measurement mode, this should complete successfully even after timeout
                     let plan = Arc::new(QueryPlan::fake_new(None, None));
-                    Ok(QueryPlannerResponse::builder()
-                        .content(QueryPlannerContent::Plan { plan })
-                        .build())
+                    Ok(QueryPlannerResponse::builder().content(plan).build())
                 }
             })
         }
@@ -1087,70 +842,43 @@ mod tests {
                 } else {
                     // In measurement mode, this should complete successfully even after exceeding the memory limit
                     let plan = Arc::new(QueryPlan::fake_new(None, None));
-                    Ok(QueryPlannerResponse::builder()
-                        .content(QueryPlannerContent::Plan { plan })
-                        .build())
+                    Ok(QueryPlannerResponse::builder().content(plan).build())
                 }
             })
         }
     }
 
-    mock! {
-        #[derive(Debug)]
-        MyQueryPlanner {
-            fn sync_call(
-                &self,
-                key: QueryPlannerRequest,
-            ) -> Result<QueryPlannerResponse, MaybeBackPressureError<QueryPlannerError>>;
-        }
-
-        impl Clone for MyQueryPlanner {
-            fn clone(&self) -> MockMyQueryPlanner;
-        }
-    }
-
-    impl Service<QueryPlannerRequest> for MockMyQueryPlanner {
-        type Response = QueryPlannerResponse;
-
-        type Error = MaybeBackPressureError<QueryPlannerError>;
-
-        type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-        fn poll_ready(
-            &mut self,
-            _cx: &mut task::Context<'_>,
-        ) -> task::Poll<Result<(), Self::Error>> {
-            task::Poll::Ready(Ok(()))
-        }
-
-        fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
-            let res = self.sync_call(req);
-            Box::pin(async move { res })
-        }
+    /// Adapts a `tower_test::mock::Mock`'s boxed error back into the concrete
+    /// `MaybeBackPressureError<QueryPlannerError>` that `CachingQueryPlanner` requires.
+    fn downcast_mock_error(err: BoxError) -> MaybeBackPressureError<QueryPlannerError> {
+        *err.downcast::<MaybeBackPressureError<QueryPlannerError>>()
+            .expect("mock should only ever send MaybeBackPressureError<QueryPlannerError>")
     }
 
     #[test(tokio::test)]
     async fn test_plan() {
-        let mut delegate = MockMyQueryPlanner::new();
-        delegate.expect_clone().returning(|| {
-            let mut planner = MockMyQueryPlanner::new();
-            planner
-                .expect_sync_call()
-                .times(0..2)
-                .returning(|_| Err(QueryPlannerError::UnhandledPlannerResult.into()));
-            planner
+        let (mock, mut handle) =
+            tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let call_count_clone = call_count.clone();
+        let driver = tokio::task::spawn(async move {
+            while let Some((_request, responder)) = handle.next_request().await {
+                call_count_clone.fetch_add(1, Ordering::SeqCst);
+                responder.send_error(MaybeBackPressureError::PermanentError(
+                    QueryPlannerError::UnhandledPlannerResult,
+                ));
+            }
         });
 
         let configuration = Arc::new(crate::Configuration::default());
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
-            delegate,
+        let mut planner = CachingQueryPlanner::for_test(
+            mock.map_err(downcast_mock_error),
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -1170,19 +898,46 @@ mod tests {
             .extensions()
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc1));
 
-        for _ in 0..5 {
+        let query1 = "query Me { me { username } }".to_string();
+        assert!(
+            planner
+                .call(query_planner::CachingRequest::new(
+                    query1.clone(),
+                    Some("".into()),
+                    context.clone()
+                ))
+                .await
+                .is_err()
+        );
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+
+        // Cache insertion is spawned asynchronously; wait until a follow-up call is
+        // served from cache (delegate call count stops increasing).
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        let mut last_count = call_count.load(Ordering::SeqCst);
+        loop {
             assert!(
                 planner
                     .call(query_planner::CachingRequest::new(
-                        "query Me { me { username } }".to_string(),
+                        query1.clone(),
                         Some("".into()),
-                        context.clone(),
-                        Default::default()
+                        context.clone()
                     ))
                     .await
                     .is_err()
             );
+            let count = call_count.load(Ordering::SeqCst);
+            if count == last_count {
+                break;
+            }
+            last_count = count;
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "permanent error was not cached (delegate kept being invoked)"
+            );
+            tokio::task::yield_now().await;
         }
+
         let doc2 = Query::parse_document(
             "query Me { me { name { first } } }",
             None,
@@ -1196,17 +951,25 @@ mod tests {
             .extensions()
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc2));
 
+        let cached_count = call_count.load(Ordering::SeqCst);
         assert!(
             planner
                 .call(query_planner::CachingRequest::new(
                     "query Me { me { name { first } } }".to_string(),
                     Some("".into()),
-                    context.clone(),
-                    Default::default()
+                    context.clone()
                 ))
                 .await
                 .is_err()
         );
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            cached_count + 1,
+            "a different query must miss the cache and invoke the delegate"
+        );
+
+        drop(planner);
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[test(tokio::test)]
@@ -1232,12 +995,11 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             SlowQueryPlanner { enforce: true },
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -1265,7 +1027,6 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default(),
             ))
             .await;
 
@@ -1308,12 +1069,11 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             ExcessiveMemoryQueryPlanner { enforce: true },
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -1341,7 +1101,6 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1420,14 +1179,13 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             SlowQueryPlanner {
                 barrier: barrier_clone,
             },
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -1458,7 +1216,6 @@ mod tests {
                     "query Me { me { name { first } } }".to_string(),
                     Some("".into()),
                     context.clone(),
-                    Default::default(),
                 ))
                 .await
         });
@@ -1507,12 +1264,11 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             SlowQueryPlanner { enforce: false },
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -1542,7 +1298,6 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default(),
             ))
             .await;
 
@@ -1584,12 +1339,11 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             ExcessiveMemoryQueryPlanner { enforce: false },
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -1619,7 +1373,6 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1663,12 +1416,11 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             SlowQueryPlanner { enforce: true },
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -1696,7 +1448,6 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1741,12 +1492,11 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             ExcessiveMemoryQueryPlanner { enforce: true },
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -1774,7 +1524,6 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1820,12 +1569,11 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             SlowQueryPlanner { enforce: false },
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -1855,7 +1603,6 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1900,12 +1647,11 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             ExcessiveMemoryQueryPlanner { enforce: false },
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -1935,7 +1681,6 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1954,80 +1699,6 @@ mod tests {
         assert_eq!(layer.get("outcome"), Some("cancelled".to_string()));
     }
 
-    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
-    #[test(tokio::test)]
-    async fn test_allocation_stats_recorded_without_cooperative_cancellation() {
-        use crate::allocator::AllocationStats;
-
-        async {
-            let configuration = Configuration::default();
-            let schema_str = include_str!("testdata/schema.graphql");
-            let schema = Arc::new(Schema::parse(schema_str, &configuration).unwrap());
-
-            let planning_task_stats: Arc<Mutex<Option<Arc<AllocationStats>>>> =
-                Arc::new(Mutex::new(None));
-
-            let planning_task_stats_delegate = planning_task_stats.clone();
-
-            let mut delegate = MockMyQueryPlanner::new();
-            delegate.expect_clone().returning(move || {
-                let mut planner = MockMyQueryPlanner::new();
-                let planning_task_stats_clone = planning_task_stats_delegate.clone();
-
-                planner.expect_sync_call().times(0..2).returning(move |_| {
-                    let plan = Arc::new(QueryPlan::fake_new(None, None));
-                    *planning_task_stats_clone.lock() = crate::allocator::current();
-
-                    Ok(QueryPlannerResponse::builder()
-                        .content(QueryPlannerContent::Plan { plan })
-                        .build())
-                });
-                planner
-            });
-
-            let mut planner = CachingQueryPlanner::new(
-                delegate,
-                schema.clone(),
-                Default::default(),
-                &configuration,
-                IndexMap::default(),
-            )
-            .await
-            .unwrap();
-
-            let doc = Query::parse_document(
-                "query Me { me { name { first } } }",
-                None,
-                &schema,
-                &configuration,
-            )
-            .unwrap();
-
-            let context = Context::new();
-            context
-                .extensions()
-                .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
-
-            // Call the CachingQueryPlanner (no cooperative cancellation configured)
-            let _ = planner
-                .call(query_planner::CachingRequest::new(
-                    "query Me { me { name { first } } }".to_string(),
-                    Some("".into()),
-                    context.clone(),
-                    Default::default(),
-                ))
-                .await;
-
-            let stats = planning_task_stats
-                .lock()
-                .clone()
-                .expect("planning task stats should be set");
-            assert_eq!(stats.name(), "planning_task");
-        }
-        .with_memory_tracking("test_request")
-        .await;
-    }
-
     macro_rules! test_query_plan {
         () => {
             include_str!("testdata/query_plan.json")
@@ -2036,26 +1707,24 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_usage_reporting() {
-        let mut delegate = MockMyQueryPlanner::new();
-        delegate.expect_clone().returning(|| {
-            let mut planner = MockMyQueryPlanner::new();
-            planner.expect_sync_call().times(0..2).returning(|_| {
-                let query_plan: QueryPlan = QueryPlan {
-                    formatted_query_plan: Default::default(),
-                    root: serde_json::from_str(test_query_plan!()).unwrap(),
-                    usage_reporting: UsageReporting::Error("this is a test report key".to_string())
-                        .into(),
-                    query: Arc::new(Query::empty_for_tests()),
-                    query_metrics: Default::default(),
-                    estimated_size: Default::default(),
-                };
-                let qp_content = QueryPlannerContent::Plan {
-                    plan: Arc::new(query_plan),
-                };
+        let (mock, mut handle) =
+            tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
+        let driver = tokio::task::spawn(async move {
+            let query_plan: QueryPlan = QueryPlan {
+                formatted_query_plan: Default::default(),
+                root: serde_json::from_str(test_query_plan!()).unwrap(),
+                usage_reporting: UsageReporting::Error("this is a test report key".to_string())
+                    .into(),
+                query: Arc::new(Query::empty_for_tests()),
+                estimated_size: Default::default(),
+            };
+            let plan = Arc::new(query_plan);
 
-                Ok(QueryPlannerResponse::builder().content(qp_content).build())
-            });
-            planner
+            while let Some((_request, responder)) = handle.next_request().await {
+                let qp_content = plan.clone();
+                responder
+                    .send_response(QueryPlannerResponse::builder().content(qp_content).build());
+            }
         });
 
         let configuration = Configuration::default();
@@ -2071,12 +1740,11 @@ mod tests {
         )
         .unwrap();
 
-        let mut planner = CachingQueryPlanner::new(
-            delegate,
+        let mut planner = CachingQueryPlanner::for_test(
+            mock.map_err(downcast_mock_error),
             Arc::new(schema),
             Default::default(),
             &configuration,
-            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -2092,7 +1760,6 @@ mod tests {
                     "query Me { me { username } }".to_string(),
                     Some("".into()),
                     context.clone(),
-                    Default::default(),
                 ))
                 .await
                 .unwrap();
@@ -2102,215 +1769,275 @@ mod tests {
                     .with_lock(|lock| lock.contains_key::<Arc<UsageReporting>>())
             );
         }
-    }
 
-    #[test(tokio::test)]
-    async fn test_introspection_cache() {
-        let mut delegate = MockMyQueryPlanner::new();
-        delegate
-            .expect_clone()
-            // This is the main point of the test: if introspection queries are not cached, then the delegate
-            // will be called twice when we send the same request twice
-            .times(2)
-            .returning(|| {
-                let mut planner = MockMyQueryPlanner::new();
-                planner.expect_sync_call().returning(|_| {
-                    let qp_content = QueryPlannerContent::CachedIntrospectionResponse {
-                        response: Box::new(
-                            crate::graphql::Response::builder()
-                                .data(Object::new())
-                                .build(),
-                        ),
-                    };
-
-                    Ok(QueryPlannerResponse::builder().content(qp_content).build())
-                });
-                planner
-            });
-
-        let configuration = Default::default();
-        let schema = include_str!("testdata/schema.graphql");
-        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
-
-        let mut planner = CachingQueryPlanner::new(
-            delegate,
-            schema.clone(),
-            Default::default(),
-            &configuration,
-            IndexMap::default(),
-        )
-        .await
-        .unwrap();
-
-        let configuration = Configuration::default();
-
-        let doc1 = Query::parse_document(
-            "{
-              __schema {
-                  types {
-                  name
-                }
-              }
-            }",
-            None,
-            &schema,
-            &configuration,
-        )
-        .unwrap();
-
-        let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|lock| lock.insert::<ParsedDocument>(doc1));
-
-        assert!(
-            planner
-                .call(query_planner::CachingRequest::new(
-                    "{
-                    __schema {
-                        types {
-                        name
-                      }
-                    }
-                  }"
-                    .to_string(),
-                    Some("".into()),
-                    context.clone(),
-                    Default::default()
-                ))
-                .await
-                .is_ok()
-        );
-
-        assert!(
-            planner
-                .call(query_planner::CachingRequest::new(
-                    "{
-                        __schema {
-                            types {
-                            name
-                          }
-                        }
-                      }"
-                    .to_string(),
-                    Some("".into()),
-                    context.clone(),
-                    Default::default()
-                ))
-                .await
-                .is_ok()
-        );
+        drop(planner);
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     // Expect that if we call the CQP twice, the second call will return cached data
     #[test(tokio::test)]
     async fn test_cache_works() {
-        let mut delegate = MockMyQueryPlanner::new();
-        delegate.expect_clone().times(2).returning(|| {
-            let mut planner = MockMyQueryPlanner::new();
-            planner
-                .expect_sync_call()
-                // Don't allow the delegate to be called more than once
-                .times(1)
-                .returning(|_| {
-                    let qp_content = QueryPlannerContent::CachedIntrospectionResponse {
-                        response: Box::new(
-                            crate::graphql::Response::builder()
-                                .data(json!(r#"{"data":{"me":{"name":"Ada Lovelace"}}}%"#))
-                                .build(),
-                        ),
-                    };
+        let (mock, mut handle) =
+            tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
+        let driver = tokio::task::spawn(async move {
+            let (_request, responder) = handle
+                .next_request()
+                .await
+                .expect("should receive one request");
 
-                    Ok(QueryPlannerResponse::builder().content(qp_content).build())
-                });
-            planner
+            let content = Arc::new(QueryPlan::fake_new(None, None));
+
+            responder.send_response(QueryPlannerResponse::builder().content(content).build());
         });
 
         let configuration = Default::default();
         let schema = include_str!("../testdata/starstuff@current.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
-            delegate,
+        let mut service = CachingQueryPlanner::for_test(
+            mock.map_err(|err| panic!("tower-test errored: {err}")),
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::default(),
         )
         .await
         .unwrap();
 
-        let doc = Query::parse_document(
-            "query ExampleQuery { me { name } }",
-            None,
-            &schema,
-            &configuration,
-        )
-        .unwrap();
+        let query = "query ExampleQuery { me { name } }";
+        let doc = Query::parse_document(query, None, &schema, &configuration).unwrap();
         let context = Context::new();
         context
             .extensions()
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
 
-        let _ = planner
+        let _ = service
+            .ready()
+            .await
+            .unwrap()
             .call(query_planner::CachingRequest::new(
-                "query ExampleQuery {
-                  me {
-                    name
-                  }
-                }"
-                .to_string(),
+                query.to_string(),
                 None,
                 context.clone(),
-                Default::default(),
             ))
             .await
             .unwrap();
 
-        let _ = planner
+        let _ = service
+            .ready()
+            .await
+            .unwrap()
             .call(query_planner::CachingRequest::new(
-                "query ExampleQuery {
-                  me {
-                    name
-                  }
-                }"
-                .to_string(),
+                query.to_string(),
                 None,
                 context.clone(),
-                Default::default(),
             ))
             .await
             .unwrap();
+
+        drop(service);
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    /// Drives the planner mock, counting requests and answering each with `content`.
+    fn spawn_counting_planner(
+        mut handle: tower_test::mock::Handle<QueryPlannerRequest, QueryPlannerResponse>,
+        content: QueryPlannerContent,
+    ) -> (tokio::task::JoinHandle<()>, Arc<AtomicUsize>) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = calls.clone();
+        let driver = tokio::task::spawn(async move {
+            while let Some((_request, responder)) = handle.next_request().await {
+                calls_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                responder.send_response(
+                    QueryPlannerResponse::builder()
+                        .content(content.clone())
+                        .build(),
+                );
+            }
+        });
+        (driver, calls)
+    }
+
+    /// A configuration and schema pair that enables auth directives to work.
+    fn authorization_enabled_config_and_schema() -> (Configuration, Arc<Schema>) {
+        let configuration: Configuration = serde_json::from_value(serde_json::json!({
+            "authorization": { "directives": { "enabled": true } }
+        }))
+        .unwrap();
+        let schema = include_str!("../../tests/fixtures/supergraph-auth.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+        (configuration, schema)
+    }
+
+    /// Builds a request the way the router does: authorization state travels in the
+    /// context as JWT claims, and `plan` derives `CacheKeyMetadata` from them via
+    /// `AuthorizationPlugin::update_cache_key`, overwriting any metadata inserted into
+    /// the context directly.
+    fn authorization_caching_request(
+        query: &str,
+        schema: &Schema,
+        configuration: &Configuration,
+        authenticated: bool,
+    ) -> query_planner::CachingRequest {
+        let doc = Query::parse_document(query, None, schema, configuration).unwrap();
+        let context = Context::new();
+        if authenticated {
+            context
+                .insert(APOLLO_AUTHENTICATION_JWT_CLAIMS, "placeholder".to_string())
+                .unwrap();
+        }
+        context.extensions().with_lock(|lock| {
+            lock.insert::<ParsedDocument>(doc);
+        });
+        query_planner::CachingRequest::new(query.to_string(), None, context)
+    }
+
+    /// `CacheKeyMetadata` is part of `CachingQueryKey`'s `Hash`/`Eq`, so the same query
+    /// under different authorization state reaches the inner planner again. That keeps an
+    /// unauthenticated request from receiving a plan built for an authenticated one.
+    #[test(tokio::test)]
+    async fn plan_cache_is_segmented_by_authorization_metadata() {
+        let (mock, handle) = tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
+        let (driver, planner_calls) =
+            spawn_counting_planner(handle, Arc::new(QueryPlan::fake_new(None, None)));
+
+        let (configuration, schema) = authorization_enabled_config_and_schema();
+        let mut service = CachingQueryPlanner::for_test(
+            mock.map_err(|err| panic!("tower-test errored: {err}")),
+            schema.clone(),
+            Default::default(),
+            &configuration,
+        )
+        .await
+        .unwrap();
+
+        let query = "query ExampleQuery { me { name } }";
+
+        for authenticated in [
+            false, true, // Repeats the first key, which must now hit the cache.
+            false,
+        ] {
+            service
+                .ready()
+                .await
+                .unwrap()
+                .call(authorization_caching_request(
+                    query,
+                    &schema,
+                    &configuration,
+                    authenticated,
+                ))
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(
+            planner_calls.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "each distinct authorization state must be planned separately, \
+             and a repeated state must be served from cache"
+        );
+
+        drop(service);
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    /// The cache stores an emptied operation's plan like any other — and, like any
+    /// other, it stays keyed by authorization state, so a plan cached for an
+    /// unauthenticated request is never served to an authenticated one.
+    #[test(tokio::test)]
+    async fn emptied_operation_plan_is_cached() {
+        let (mock, handle) = tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
+        // The plan `QueryPlannerService::get` returns for an emptied operation: no
+        // root node.
+        let emptied_query = Query::empty_for_tests();
+        let emptied_plan = QueryPlan {
+            usage_reporting: Arc::new(UsageReporting::Operation(Default::default())),
+            root: None,
+            formatted_query_plan: None,
+            query: Arc::new(emptied_query),
+            estimated_size: Default::default(),
+        };
+        let (driver, planner_calls) = spawn_counting_planner(handle, Arc::new(emptied_plan));
+
+        let (configuration, schema) = authorization_enabled_config_and_schema();
+        let mut service = CachingQueryPlanner::for_test(
+            mock.map_err(|err| panic!("tower-test errored: {err}")),
+            schema.clone(),
+            Default::default(),
+            &configuration,
+        )
+        .await
+        .unwrap();
+
+        let query = "query ExampleQuery { me { name } }";
+
+        for _ in 0..2 {
+            service
+                .ready()
+                .await
+                .unwrap()
+                .call(authorization_caching_request(
+                    query,
+                    &schema,
+                    &configuration,
+                    false,
+                ))
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(
+            planner_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the second identical request must be served from cache"
+        );
+
+        service
+            .ready()
+            .await
+            .unwrap()
+            .call(authorization_caching_request(
+                query,
+                &schema,
+                &configuration,
+                true,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            planner_calls.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "a cached rejection must not be served to a request in a different \
+             authorization state"
+        );
+
+        drop(service);
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[test(tokio::test)]
     async fn test_temporary_errors_arent_cached() {
-        let mut delegate = MockMyQueryPlanner::new();
-        delegate
-            .expect_clone()
-            // We're calling the caching QP twice, so we expect the delegate to be cloned twice
-            .times(2)
-            .returning(|| {
-                // Expect each clone to be called once since the return value isn't cached
-                let mut planner = MockMyQueryPlanner::new();
-                planner.expect_sync_call().times(1).returning(|_| {
-                    Err(MaybeBackPressureError::TemporaryError(
-                        ComputeBackPressureError,
-                    ))
-                });
-                planner
-            });
+        let (mock, mut handle) =
+            tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
+        let driver = tokio::task::spawn(async move {
+            while let Some((_request, responder)) = handle.next_request().await {
+                responder.send_error(MaybeBackPressureError::<QueryPlannerError>::TemporaryError(
+                    ComputeBackPressureError,
+                ));
+            }
+        });
 
         let configuration = Default::default();
         let schema = include_str!("../testdata/starstuff@current.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
-            delegate,
+        let mut planner = CachingQueryPlanner::for_test(
+            mock.map_err(downcast_mock_error),
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -2329,6 +2056,9 @@ mod tests {
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
 
         let r = planner
+            .ready()
+            .await
+            .unwrap()
             .call(query_planner::CachingRequest::new(
                 "query ExampleQuery {
                   me {
@@ -2338,11 +2068,13 @@ mod tests {
                 .to_string(),
                 None,
                 context.clone(),
-                Default::default(),
             ))
             .await;
 
         let r2 = planner
+            .ready()
+            .await
+            .unwrap()
             .call(query_planner::CachingRequest::new(
                 "query ExampleQuery {
                   me {
@@ -2352,7 +2084,6 @@ mod tests {
                 .to_string(),
                 None,
                 context.clone(),
-                Default::default(),
             ))
             .await;
 
@@ -2361,86 +2092,8 @@ mod tests {
         } else {
             panic!("Expected both calls to return same error");
         }
-    }
 
-    #[tokio::test]
-    async fn test_cache_warmup() {
-        let create_delegate = |call_count| {
-            let mut delegate = MockMyQueryPlanner::new();
-            delegate.expect_clone().times(1).returning(move || {
-                let mut planner = MockMyQueryPlanner::new();
-                planner.expect_sync_call().times(call_count).returning(|_| {
-                    let plan = Arc::new(QueryPlan::fake_new(None, None));
-                    Ok(QueryPlannerResponse::builder()
-                        .content(QueryPlannerContent::Plan { plan })
-                        .build())
-                });
-                planner
-            });
-            delegate
-        };
-
-        let configuration: Configuration = Default::default();
-        let schema = Arc::new(
-            Schema::parse(
-                include_str!("../testdata/starstuff@current.graphql"),
-                &configuration,
-            )
-            .unwrap(),
-        );
-
-        let create_planner = async |delegate| {
-            CachingQueryPlanner::new(
-                delegate,
-                schema.clone(),
-                Default::default(),
-                &configuration,
-                IndexMap::default(),
-            )
-            .await
-            .unwrap()
-        };
-
-        let create_request = || {
-            let query_str = "query ExampleQuery { me { name } }".to_string();
-            let doc = Query::parse_document(&query_str, None, &schema, &configuration).unwrap();
-            let context = Context::new();
-            context
-                .extensions()
-                .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
-            query_planner::CachingRequest::new(query_str, None, context, Default::default())
-        };
-
-        // send query to caching planner. it should save this query plan in its cache
-        let mut planner = create_planner(create_delegate(1)).await;
-        let response = planner.call(create_request()).await.unwrap();
-        assert!(response.content.is_some());
-        assert_eq!(planner.cache.len().await, 1);
-
-        // create and warm up a new planner. new planner's delegate should be called once during
-        // the warm-up phase to populate the cache
-        let query_analysis_layer =
-            QueryAnalysisLayer::new(schema.clone(), Arc::new(configuration.clone())).await;
-        let mut new_planner = create_planner(create_delegate(1)).await;
-        new_planner
-            .warm_up(
-                &query_analysis_layer,
-                &Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
-                Some(planner.previous_cache()),
-                Some(1),
-                Default::default(),
-                &Default::default(),
-            )
-            .await;
-        // wait a beat - items are added to cache asynchronously, so this helps avoid flakiness
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        assert_eq!(new_planner.cache.len().await, 1);
-
-        // create a new delegate that _shouldn't_ be called since the new planner already has the
-        // result in its cache
-        new_planner.delegate = create_delegate(0);
-        let response = new_planner.call(create_request()).await.unwrap();
-        assert!(response.content.is_some());
-        assert_eq!(new_planner.cache.len().await, 1);
+        drop(planner);
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 }

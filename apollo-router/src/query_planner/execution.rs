@@ -37,15 +37,14 @@ use crate::query_planner::FlattenNode;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::Primary;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
+use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::fetch::FetchNode;
-use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::fetch::Variables;
 use crate::services::FetchRequest;
 use crate::services::fetch;
 use crate::services::fetch::ErrorMapping;
 use crate::services::fetch::SubscriptionRequest;
-use crate::services::fetch_service::FetchServiceFactory;
-use crate::services::new_service::ServiceFactory;
+use crate::services::fetch_service::FetchService;
 use crate::spec::Query;
 use crate::spec::Schema;
 
@@ -55,7 +54,7 @@ impl QueryPlan {
     pub(crate) async fn execute<'a>(
         &self,
         context: &'a Context,
-        service_factory: &'a Arc<FetchServiceFactory>,
+        service: &'a FetchService,
         // The original supergraph request is used to populate variable values and for plugin
         // features like propagating headers or subgraph telemetry based on supergraph request
         // values.
@@ -71,29 +70,34 @@ impl QueryPlan {
     ) -> Response {
         let root = Path::empty();
 
-        log::trace_query_plan(&self.root);
+        log::trace_query_plan(self.root.as_deref());
         let deferred_fetches = HashMap::new();
 
-        let (value, errors) = self
-            .root
-            .execute_recursively(
-                &ExecutionParameters {
-                    context,
-                    service_factory,
-                    schema,
-                    supergraph_request,
-                    deferred_fetches: &deferred_fetches,
-                    query: &self.query,
-                    root_node: &self.root,
-                    subscription_handle: &subscription_handle,
-                    subscription_config,
-                    subgraph_schemas,
-                },
-                &root,
-                &initial_value.unwrap_or_default(),
-                sender,
-            )
-            .await;
+        let (value, errors) = match self.root.as_deref() {
+            Some(root_node) => {
+                root_node
+                    .execute_recursively(
+                        &ExecutionParameters {
+                            context,
+                            service,
+                            schema,
+                            supergraph_request,
+                            deferred_fetches: &deferred_fetches,
+                            query: &self.query,
+                            root_node,
+                            subscription_handle: &subscription_handle,
+                            subscription_config,
+                            subgraph_schemas,
+                            is_deferred: false,
+                        },
+                        &root,
+                        &initial_value.unwrap_or_default(),
+                        sender,
+                    )
+                    .await
+            }
+            None => (Value::Object(Default::default()), vec![]),
+        };
         if !deferred_fetches.is_empty() {
             u64_counter!(
                 "apollo.router.operations.defer",
@@ -106,18 +110,23 @@ impl QueryPlan {
     }
 
     pub fn contains_mutations(&self) -> bool {
-        self.root.contains_mutations()
+        self.root
+            .as_ref()
+            .is_some_and(|node| node.contains_mutations())
     }
 
     pub fn subgraph_fetches(&self) -> usize {
-        self.root.subgraph_fetches()
+        self.root
+            .as_ref()
+            .map(|node| node.subgraph_fetches())
+            .unwrap_or(0)
     }
 }
 
 // holds the query plan executon arguments that do not change between calls
 pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
-    pub(crate) service_factory: &'a Arc<FetchServiceFactory>,
+    pub(crate) service: &'a FetchService,
     pub(crate) schema: &'a Arc<Schema>,
     pub(crate) subgraph_schemas: &'a Arc<SubgraphSchemas>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
@@ -126,6 +135,14 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) root_node: &'a PlanNode,
     pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
     pub(crate) subscription_config: &'a Option<SubscriptionConfig>,
+    /// `true` when the fetch's results are delivered in a deferred chunk rather
+    /// than the primary response: inside a `DeferredNode` subtree, or inside a
+    /// `PlanNode::Defer` primary branch that is itself nested under an outer
+    /// `DeferredNode` (the primary branch inherits the enclosing status). `false`
+    /// at the top level and in a top-level `Defer`'s primary branch. Propagated
+    /// to each `FetchRequest` so subgraph telemetry can split primary vs deferred
+    /// fetches.
+    pub(crate) is_deferred: bool,
 }
 
 impl PlanNode {
@@ -239,7 +256,7 @@ impl PlanNode {
                             &None,
                         ) {
                             Some(variables) => {
-                                let service = parameters.service_factory.create();
+                                let service = parameters.service.clone();
                                 let request = fetch::Request::Subscription(
                                     SubscriptionRequest::builder()
                                         .context(parameters.context.clone())
@@ -295,7 +312,7 @@ impl PlanNode {
                         ) {
                             Some(variables) => {
                                 let paths = variables.inverted_paths.clone();
-                                let service = parameters.service_factory.create();
+                                let service = parameters.service.clone();
                                 let request = fetch::Request::Fetch(
                                     FetchRequest::builder()
                                         .context(parameters.context.clone())
@@ -303,6 +320,7 @@ impl PlanNode {
                                         .supergraph_request(parameters.supergraph_request.clone())
                                         .variables(variables)
                                         .current_dir(current_dir.clone())
+                                        .is_deferred(parameters.is_deferred)
                                         .build(),
                                 );
                                 let raw_errors;
@@ -394,7 +412,7 @@ impl PlanNode {
                                 .execute_recursively(
                                     &ExecutionParameters {
                                         context: parameters.context,
-                                        service_factory: parameters.service_factory,
+                                        service: parameters.service,
                                         schema: parameters.schema,
                                         supergraph_request: parameters.supergraph_request,
                                         deferred_fetches: &deferred_fetches,
@@ -403,6 +421,12 @@ impl PlanNode {
                                         subscription_handle: parameters.subscription_handle,
                                         subscription_config: parameters.subscription_config,
                                         subgraph_schemas: parameters.subgraph_schemas,
+                                        // Inherit the enclosing deferred status rather than
+                                        // resetting to false. This Defer's primary branch is only
+                                        // non-deferred when the Defer itself is not already nested
+                                        // under an outer DeferredNode; a doubly-nested defer keeps
+                                        // is_deferred = true for its primary branch.
+                                        is_deferred: parameters.is_deferred,
                                     },
                                     current_dir,
                                     &value,
@@ -544,7 +568,7 @@ impl DeferredNode {
         let sc = parameters.schema.clone();
         let subgraph_schemas = parameters.subgraph_schemas.clone();
         let orig = parameters.supergraph_request.clone();
-        let sf = parameters.service_factory.clone();
+        let service = parameters.service.clone();
         let root_node = parameters.root_node.clone();
         let ctx = parameters.context.clone();
         let query = parameters.query.clone();
@@ -581,7 +605,7 @@ impl DeferredNode {
                     .execute_recursively(
                         &ExecutionParameters {
                             context: &ctx,
-                            service_factory: &sf,
+                            service: &service,
                             schema: &sc,
                             supergraph_request: &orig,
                             deferred_fetches: &deferred_fetches,
@@ -590,6 +614,7 @@ impl DeferredNode {
                             subscription_handle: &subscription_handle,
                             subscription_config: &subscription_config,
                             subgraph_schemas: &subgraph_schemas,
+                            is_deferred: true,
                         },
                         &Path::default(),
                         &value,

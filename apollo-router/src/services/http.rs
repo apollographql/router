@@ -2,10 +2,7 @@
 use std::sync::Arc;
 
 use tower::BoxError;
-use tower::ServiceExt;
-use tower_service::Service;
 
-use super::Plugins;
 use super::router::body::RouterBody;
 use crate::Context;
 
@@ -16,7 +13,6 @@ mod tests;
 
 pub(crate) use service::HttpClientService;
 
-pub(crate) type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
 
@@ -32,66 +28,23 @@ pub(crate) struct HttpResponse {
     pub(crate) context: Context,
 }
 
-#[derive(Clone)]
-pub(crate) struct HttpClientServiceFactory {
-    pub(crate) service: HttpClientService,
-    pub(crate) plugins: Arc<Plugins>,
-}
-
-impl HttpClientServiceFactory {
-    pub(crate) fn new(service: HttpClientService, plugins: Arc<Plugins>) -> Self {
-        HttpClientServiceFactory { service, plugins }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_config(
-        service: impl Into<String>,
-        configuration: &crate::Configuration,
-        client_config: crate::configuration::shared::Client,
-    ) -> Self {
-        use indexmap::IndexMap;
-
-        let service = HttpClientService::from_config_for_subgraph(
-            service,
-            configuration,
-            &rustls::RootCertStore::empty(),
-            client_config,
-        )
-        .unwrap();
-
-        HttpClientServiceFactory {
-            service,
-            plugins: Arc::new(IndexMap::default()),
-        }
-    }
-
-    pub(crate) fn create(&self, name: &str) -> BoxService {
-        let service = self.service.clone();
-        self.plugins
-            .iter()
-            .rev()
-            .fold(service.boxed(), |acc, (_, e)| {
-                e.http_client_service(name, acc)
-            })
-    }
-}
-
-pub(crate) trait MakeHttpService: Send + Sync + 'static {
-    fn make(&self) -> BoxService;
-}
-
-impl<S> MakeHttpService for S
-where
-    S: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <S as Service<HttpRequest>>::Future: Send,
-{
-    fn make(&self) -> BoxService {
-        self.clone().boxed()
-    }
+/// Test-only wrapper around the `build_http_client_service` pipeline function: a
+/// subgraph client for `name` built from default configuration with no plugins.
+#[cfg(test)]
+pub(crate) fn test_http_client_service(name: &str) -> BoxCloneService {
+    let inputs = service::HttpClientInputs::for_subgraph(
+        name,
+        &crate::Configuration::default(),
+        &rustls::RootCertStore::empty(),
+        crate::configuration::shared::Client::default(),
+        &mut service::DnsResolverCache::default(),
+    )
+    .unwrap();
+    crate::pipeline::build_http_client_service(
+        name,
+        inputs,
+        Arc::new(indexmap::IndexMap::default()),
+    )
 }
 
 /// The kind of remote service an [`HttpClientService`] is configured to talk to.

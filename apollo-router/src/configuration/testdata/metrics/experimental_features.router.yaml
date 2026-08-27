@@ -23,7 +23,6 @@ supergraph:
   query_planning:
     experimental_plans_limit: 10
     experimental_paths_limit: 10
-    experimental_reuse_query_plans: true
     experimental_cooperative_cancellation:
       enabled: true
 
@@ -35,9 +34,9 @@ persisted_queries:
 telemetry:
   apollo:
     experimental_local_field_metrics: true
-    experimental_otlp_endpoint: "https://custom.example.com/otlp"
-    experimental_otlp_tracing_protocol: grpc
-    experimental_otlp_metrics_protocol: http
+    otlp_endpoint: "https://custom.example.com/otlp"
+    otlp_tracing_protocol: grpc
+    otlp_metrics_protocol: http
   exporters:
     tracing:
       experimental_response_trace_id:

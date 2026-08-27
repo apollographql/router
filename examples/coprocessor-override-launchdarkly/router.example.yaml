@@ -4,4 +4,4 @@ coprocessor:
                              # and Unix Domain Socket (unix:///tmp/coprocessor.sock) URLs.
   supergraph: # Hook into the supergraph service
     request:
-      context: true
+      context: all

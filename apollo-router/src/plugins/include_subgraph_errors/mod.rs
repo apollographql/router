@@ -22,7 +22,7 @@ use crate::plugin::PluginInit;
 use crate::services::SupergraphResponse;
 use crate::services::fetch::AddSubgraphNameExt;
 use crate::services::fetch::SubgraphNameExt;
-use crate::services::supergraph::BoxService;
+use crate::services::supergraph::BoxCloneService;
 
 static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
@@ -56,7 +56,7 @@ impl Plugin for IncludeSubgraphErrors {
         Ok(IncludeSubgraphErrors { config })
     }
 
-    fn supergraph_service(&self, service: BoxService) -> BoxService {
+    fn supergraph_service(&self, service: BoxCloneService) -> BoxCloneService {
         let config = Arc::clone(&self.config);
 
         service
@@ -74,14 +74,14 @@ impl Plugin for IncludeSubgraphErrors {
                     graphql_response
                 })
             })
-            .boxed()
+            .boxed_clone()
     }
 
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: crate::services::subgraph::BoxService,
-    ) -> crate::services::subgraph::BoxService {
+        service: crate::services::subgraph::BoxCloneService,
+    ) -> crate::services::subgraph::BoxCloneService {
         // We need to attach the subgraph name to each error so that we can do the filtering in the supergraph service.
         // The reason filtering is not done here is that other types of request may also generate errors that need filtering.
         // Pushing the error filtering to supergraph will ensure that everything gets filtered.
@@ -94,7 +94,7 @@ impl Plugin for IncludeSubgraphErrors {
                 }
                 r
             })
-            .boxed()
+            .boxed_clone()
     }
 }
 

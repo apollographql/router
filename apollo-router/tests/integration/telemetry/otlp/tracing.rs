@@ -15,6 +15,7 @@ use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
 use crate::integration::common::graph_os_enabled;
 use crate::integration::telemetry::TraceSpec;
+use crate::integration::telemetry::unique_trace_id;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_trace_error() -> Result<(), BoxError> {
@@ -94,6 +95,77 @@ async fn test_basic() -> Result<(), BoxError> {
     }
     router.graceful_shutdown().await;
     Ok(())
+}
+
+/// SIGTERM must produce a clean exit, not a panic on the way out.
+///
+/// The OTel batch span processor runs its background loop on a `spawn_blocking` thread via
+/// `Handle::block_on` (see `BlockingSafeTokioRuntime`), and that loop only terminates on an
+/// explicit shutdown — a closed message channel is not enough, because its interval ticker keeps
+/// the stream alive. Nothing dropped the last clone of the installed tracer provider, so the
+/// processor was still polling `tokio::time::sleep` when the runtime was torn down, tripping
+/// tokio's `A Tokio 1.x context was found, but it is being shutdown` assert. The panic handler
+/// then turned an otherwise clean SIGTERM into `exit(1)`.
+///
+/// `assert_shutdown` ignores the exit code, which is why the rest of the suite never caught this.
+///
+/// The same shutdown is also what flushes the batch processor, so this covers the other half of
+/// the fix: the fixture's tracing `scheduled_delay` is far enough out that the spans from the
+/// query below cannot be exported on the schedule, only by the flush at exit.
+///
+/// Unix only: `graceful_shutdown` is a SIGTERM, which Windows has no equivalent of - there it
+/// falls back to a hard kill, and a killed process never reports a successful exit status.
+#[cfg(target_family = "unix")]
+#[tokio::test(flavor = "multi_thread")]
+async fn test_graceful_shutdown_exits_cleanly() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mock_server = mock_otlp_server(1..).await;
+    let config = include_str!("../fixtures/otlp_shutdown_flush.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    // Deliberately no `.telemetry(Telemetry::Otlp { .. })`: that would point the *harness's* own
+    // tracer at the same collector on a 10ms schedule, and its exports would satisfy the
+    // post-shutdown assertion below without the router having flushed anything.
+    let mut router = IntegrationTest::builder().config(&config).build().await;
+
+    router.start().await;
+    router.assert_started().await;
+    // Put spans through the batch processor so its background worker is running by the time we
+    // signal, rather than idling before its first tick.
+    router.execute_default_query().await;
+    let exports_before_shutdown = trace_export_count(&mock_server).await;
+
+    router.graceful_shutdown().await;
+
+    router.read_logs();
+    router.assert_clean_exit();
+    router.assert_log_not_contained("it is being shutdown");
+    // The router's stdout is forwarded by a background pump task, so the last lines it writes
+    // before `exit()` can still be in flight when the process is reaped. Drain for a bounded
+    // window as well, so the check above cannot pass merely because the panic line had not
+    // arrived yet.
+    router.assert_log_not_contains("it is being shutdown").await;
+
+    assert!(
+        trace_export_count(&mock_server).await > exports_before_shutdown,
+        "no spans were exported during shutdown: the spans the batch processor had buffered \
+         when SIGTERM arrived were dropped instead of flushed"
+    );
+
+    Ok(())
+}
+
+/// Number of OTLP trace export requests the collector has received so far.
+#[cfg(target_family = "unix")]
+async fn trace_export_count(mock_server: &wiremock::MockServer) -> usize {
+    mock_server
+        .received_requests()
+        .await
+        .expect("mock server records requests")
+        .iter()
+        .filter(|request| request.url.path().ends_with("/traces"))
+        .count()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -252,14 +324,13 @@ async fn test_otlp_request_with_datadog_propagator_no_agent() -> Result<(), BoxE
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
--> Result<(), BoxError> {
+async fn test_otlp_request_with_trace_context_propagator_with_datadog() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
     let config =
-        include_str!("../fixtures/otlp_datadog_request_with_zipkin_propagator.router.yaml")
+        include_str!("../fixtures/otlp_datadog_request_with_trace_context_propagator.router.yaml")
             .replace("<otel-collector-endpoint>", &mock_server.uri());
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
@@ -284,26 +355,6 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
             Query::builder().traced(true).build(),
         )
         .await?;
-    // ---------------------- zipkin propagator with unsampled trace
-    // Testing for an unsampled trace, so it should be sent to the otlp exporter with sampling priority set 0
-    // But it shouldn't send the trace to subgraph as the trace is originally not sampled, the main goal is to measure it at the DD agent level
-    TraceSpec::builder()
-        .services(["router"].into())
-        .priority_sampled("0")
-        .subgraph_sampled(false)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder()
-                .traced(false)
-                .header("X-B3-TraceId", "80f198ee56343ba864fe8b2a57d3eff7")
-                .header("X-B3-ParentSpanId", "05e3ac9a4f6e3b90")
-                .header("X-B3-SpanId", "e457b5a2e4d86bd1")
-                .header("X-B3-Sampled", "0")
-                .build(),
-        )
-        .await?;
     // ---------------------- trace context propagation
     // Testing for a trace containing the right tracestate with m and psr for DD and a sampled trace, so it should be sent to the otlp exporter with sampling priority set to 1
     // And it should also send the trace to subgraph as the trace is sampled
@@ -319,7 +370,7 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
                 .traced(true)
                 .header(
                     "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+                    format!("00-{}-b7ad6b7169203331-01", unique_trace_id()),
                 )
                 .header("tracestate", "m=1,psr=1")
                 .build(),
@@ -340,7 +391,7 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
                 .traced(false)
                 .header(
                     "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-02",
+                    format!("00-{}-b7ad6b7169203331-02", unique_trace_id()),
                 )
                 .header("tracestate", "m=1,psr=0")
                 .build(),
@@ -361,14 +412,13 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
                 .traced(false)
                 .header(
                     "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-03",
+                    format!("00-{}-b7ad6b7169203331-03", unique_trace_id()),
                 )
                 .header("tracestate", "m=1,psr=1")
                 .build(),
         )
         .await?;
 
-    // Be careful if you add the same kind of test crafting your own trace id, make sure to increment the previous trace id by 1 if not you'll receive all the previous spans tested with the same trace id before
     router.graceful_shutdown().await;
     Ok(())
 }

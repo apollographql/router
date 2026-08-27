@@ -257,6 +257,14 @@ pub(crate) struct WebSocketConfiguration {
     /// Heartbeat interval for graphql-ws protocol (default: disabled)
     #[serde(default = "HeartbeatInterval::new_disabled")]
     pub(crate) heartbeat_interval: HeartbeatInterval,
+    /// Maximum number of times to attempt to reconnect a dropped WebSocket subscription connection.
+    /// The default is 0 (no reconnection attempts).
+    #[serde(default)]
+    pub(crate) max_reconnect_attempts: u32,
+    /// Delay before each WebSocket reconnection attempt. Accepts durations like '1s', '500ms'. When unset (null) the default is 1 second; use '0s' for no delay.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) reconnect_delay: Option<Duration>,
 }
 
 fn default_callback_path() -> String {
@@ -297,12 +305,12 @@ impl Plugin for Subscription {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: crate::services::subgraph::BoxService,
-    ) -> crate::services::subgraph::BoxService {
+        service: crate::services::subgraph::BoxCloneService,
+    ) -> crate::services::subgraph::BoxCloneService {
         let enabled = self.config.enabled
             && (self.config.mode.callback.is_some() || self.config.mode.passthrough.is_some());
         ServiceBuilder::new()
-            .checkpoint(move |req: SubgraphRequest| {
+            .checkpoint_async(move |req: SubgraphRequest| async move {
                 if req.operation_kind == OperationKind::Subscription && !enabled {
                     Ok(ControlFlow::Break(
                         SubgraphResponse::builder()
@@ -322,7 +330,7 @@ impl Plugin for Subscription {
                 }
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
@@ -338,7 +346,7 @@ impl Plugin for Subscription {
             let endpoint = Endpoint::from_router_service(
                 format!("{path}/{{callback}}"),
                 CallbackService::new(self.notify.clone(), path.to_string(), callback_hmac_key)
-                    .boxed(),
+                    .boxed_clone(),
             );
             map.insert(listen.clone().unwrap_or_else(default_listen_addr), endpoint);
         }
@@ -358,7 +366,7 @@ mod tests {
     use serde_json::Value;
     use tower::Service;
     use tower::ServiceExt;
-    use tower::util::BoxService;
+    use tower::util::BoxCloneService;
 
     use super::*;
     use crate::Notify;
@@ -366,7 +374,6 @@ mod tests {
     use crate::graphql::Request;
     use crate::http_ext;
     use crate::plugin::DynPlugin;
-    use crate::plugin::test::MockSubgraphService;
     use crate::plugins::subscription::callback::create_verifier;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
@@ -791,18 +798,11 @@ mod tests {
             .await
             .unwrap();
 
-        let mut mock_subgraph_service = MockSubgraphService::new();
-        mock_subgraph_service
-            .expect_call()
-            .times(0)
-            .returning(move |req: SubgraphRequest| {
-                Ok(SubgraphResponse::fake_builder()
-                    .context(req.context)
-                    .build())
-            });
+        // The subscription plugin intercepts this request and never calls the inner service.
+        let (mock, handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut subgraph_service =
-            dyn_plugin.subgraph_service("my_subgraph_name", BoxService::new(mock_subgraph_service));
+            dyn_plugin.subgraph_service("my_subgraph_name", BoxCloneService::new(mock));
         let subgraph_req = SubgraphRequest::fake_builder()
             .subgraph_request(
                 http_ext::Request::fake_builder()
@@ -841,6 +841,7 @@ mod tests {
                 .extensions(Object::default())
                 .build()
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[test]
@@ -1152,6 +1153,46 @@ mod tests {
         .unwrap();
 
         assert!(config_no_lifetime.max_lifetime.is_none());
+    }
+
+    #[test]
+    fn it_test_subscription_config_reconnect() {
+        // Reconnect policy lives on the per-subgraph passthrough WebSocketConfiguration, with the
+        // `all` block providing the default and per-subgraph entries overriding it.
+        let config: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "mode": {
+                "passthrough": {
+                    "all": {
+                        "path": "/subscriptions",
+                        "max_reconnect_attempts": 5,
+                        "reconnect_delay": "2s"
+                    },
+                    "subgraphs": {
+                        "no_reconnect": {
+                            "path": "/subscriptions"
+                        }
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        // The `all` default carries the reconnect policy.
+        let all_cfg = match config.mode.get_subgraph_config("some_other_subgraph") {
+            Some(SubscriptionMode::Passthrough(ws)) => ws,
+            other => panic!("expected passthrough config, got {other:?}"),
+        };
+        assert_eq!(all_cfg.max_reconnect_attempts, 5);
+        assert_eq!(all_cfg.reconnect_delay, Some(Duration::from_secs(2)));
+
+        // A subgraph that doesn't set the fields falls back to their defaults (no reconnection).
+        let no_reconnect_cfg = match config.mode.get_subgraph_config("no_reconnect") {
+            Some(SubscriptionMode::Passthrough(ws)) => ws,
+            other => panic!("expected passthrough config, got {other:?}"),
+        };
+        assert_eq!(no_reconnect_cfg.max_reconnect_attempts, 0);
+        assert!(no_reconnect_cfg.reconnect_delay.is_none());
     }
 }
 

@@ -12,7 +12,6 @@ apq:
 telemetry:
   instrumentation:
     spans:
-      mode: spec_compliant
       default_attribute_requirement_level: recommended
       router:
         attributes:
@@ -65,7 +64,9 @@ telemetry:
           unit: request
           description: "supergraph requests"
           attributes:
-            static: hello
+            static:
+              static: hello
+
             graphql_operation_kind:
               operation_kind: string
       subgraph:
