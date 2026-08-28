@@ -61,16 +61,28 @@ assert_impl_all!(Response: Send);
 /// Request type for a single connector request
 #[derive(Debug)]
 pub struct Request {
-    /// The request context
+    /// The request context, shared with the rest of the router pipeline for this
+    /// operation. Readable and writable: a plugin may store values here for later
+    /// stages, matching what the coprocessor `ConnectorRequest` stage can do.
     pub context: Context,
 
-    /// The connector associated with this request
-    // If this service moves into the public API, consider whether this exposes too much
-    // internal information about the connector. A new type may be needed which exposes only
-    // what is necessary for customizations.
+    /// The connector associated with this request.
+    //
+    // Deliberately kept `pub(crate)` now that this service is public: `Connector`
+    // carries the full expanded connector definition, far more internal detail than a
+    // customization needs. If plugins turn out to need something from it, expose that
+    // through a narrow accessor or a purpose-built type rather than the whole struct.
     pub(crate) connector: Arc<Connector>,
 
-    /// The request to the underlying transport
+    /// The request to the underlying transport.
+    ///
+    /// [`TransportRequest::Http`] holds the outgoing [`http::Request`], so a plugin can
+    /// read and rewrite its URI, headers, body and method.
+    ///
+    /// Note that the method is writable here but *not* through the coprocessor
+    /// `ConnectorRequest` stage, which sends the method to the coprocessor but ignores
+    /// any method it sends back. A plugin that rewrites the method therefore has no
+    /// coprocessor equivalent.
     pub transport_request: TransportRequest,
 
     /// Information about how to map the response to GraphQL
@@ -79,8 +91,9 @@ pub struct Request {
     /// Mapping problems encountered when creating the transport request
     pub(crate) mapping_problems: Vec<Problem>,
 
-    /// Original request to the Router.
-    pub supergraph_request: Arc<http::Request<graphql::Request>>,
+    /// Original request to the Router. Read it through
+    /// [`Request::supergraph_request`].
+    pub(crate) supergraph_request: Arc<http::Request<graphql::Request>>,
 
     /// The operation being executed. Together with
     /// req.connector.schema_subtypes_map, this document enables GraphQL
@@ -88,25 +101,151 @@ pub struct Request {
     pub(crate) operation: Option<Arc<Valid<ExecutableDocument>>>,
 }
 
+impl Request {
+    /// The original request made to the router, which produced this connector request.
+    ///
+    /// Read-only on purpose. `ConnectorRequestService::call` and its callees read this
+    /// request while handling the connector call, and every other plugin on the chain
+    /// sees the same value, so letting one plugin swap it out would change behaviour
+    /// well outside that plugin. Rewrite [`Request::transport_request`] instead to
+    /// change what goes over the wire.
+    pub fn supergraph_request(&self) -> &Arc<http::Request<graphql::Request>> {
+        &self.supergraph_request
+    }
+
+    /// Consume this request and produce a failed [`Response`] for it, without making
+    /// the outbound call.
+    ///
+    /// This is the in-process equivalent of a coprocessor returning `Control::Break`
+    /// from the `ConnectorRequest` stage: the connector call is not made, and `message`
+    /// and `code` are reported to the client as a GraphQL error at this connector's
+    /// path. Use it to fail a connector request deliberately, for example to circuit
+    /// break on an upstream a plugin knows to be unhealthy.
+    ///
+    /// The error's remaining fields are derived from the request and are not settable,
+    /// for the same reason the coprocessor does not let a coprocessor set them: the
+    /// path and response key are what merge the failure back into the right place in
+    /// the GraphQL response.
+    pub fn into_error_response(
+        self,
+        message: impl Into<String>,
+        code: impl Into<String>,
+    ) -> Response {
+        let message = message.into();
+        let subgraph_name = self.connector.id.subgraph_name.to_string();
+        let error = RuntimeError::new(message.clone(), &self.key).with_code(code);
+
+        Response {
+            context: self.context,
+            subgraph_name,
+            transport_result: Err(Error::TransportFailure(message)),
+            mapped_response: MappedResponse::Error {
+                error,
+                key: self.key,
+                problems: Vec::new(),
+            },
+        }
+    }
+}
+
 /// Response type for a connector
 #[derive(Debug)]
 pub struct Response {
-    /// The request context
-    pub(crate) context: Context,
+    /// The request context, shared with the rest of the router pipeline for this
+    /// operation. Readable and writable, matching what the coprocessor
+    /// `ConnectorResponse` stage can do.
+    pub context: Context,
 
     /// Originating federation subgraph name for this connector call. Carried
     /// on the response (rather than passed through shared context) so parallel
     /// connector calls don't race when resolving per-subgraph response rules.
     pub(crate) subgraph_name: String,
 
-    /// The result of the transport request
+    /// The result of the transport request.
+    ///
+    /// This is the raw transport outcome: HTTP status, headers and transport-level
+    /// errors. Telemetry and downstream plugins read it, but the data returned to the
+    /// client comes from the mapped response, which is *not* recomputed when this
+    /// changes. Rewriting the status or headers here therefore makes telemetry
+    /// disagree with what the client actually receives unless you make the
+    /// corresponding change through the mapped-response accessors.
     pub transport_result: Result<TransportResponse, Error>,
 
-    /// The mapped response, including any mapping problems encountered when processing the response
+    /// The mapped response, including any mapping problems encountered when processing
+    /// the response. This is what is merged into the GraphQL response returned to the
+    /// client. Kept private so that only the parts a customization may safely change
+    /// are reachable; see the accessors on [`Response`].
     pub(crate) mapped_response: MappedResponse,
 }
 
 impl Response {
+    /// The mapped response data returned to the client, or `None` if this connector
+    /// call produced an error instead. See [`Response::error`] for that case.
+    pub fn data(&self) -> Option<&serde_json_bytes::Value> {
+        match &self.mapped_response {
+            MappedResponse::Data { data, .. } => Some(data),
+            MappedResponse::Error { .. } => None,
+        }
+    }
+
+    /// Replace the mapped response data returned to the client.
+    ///
+    /// Returns `false` and changes nothing if this is an error response: a
+    /// customization cannot turn a failed connector call into a successful one, which
+    /// is also true of the coprocessor `ConnectorResponse` stage.
+    ///
+    /// This does not touch [`Response::transport_result`], so telemetry continues to
+    /// report the status and headers actually received from the upstream.
+    pub fn set_data(&mut self, data: serde_json_bytes::Value) -> bool {
+        match &mut self.mapped_response {
+            MappedResponse::Data { data: current, .. } => {
+                *current = data;
+                true
+            }
+            MappedResponse::Error { .. } => false,
+        }
+    }
+
+    /// The error returned to the client, or `None` if this connector call produced
+    /// data instead. See [`Response::data`] for that case.
+    pub fn error(&self) -> Option<&RuntimeError> {
+        match &self.mapped_response {
+            MappedResponse::Error { error, .. } => Some(error),
+            MappedResponse::Data { .. } => None,
+        }
+    }
+
+    /// Replace the message of the error returned to the client.
+    ///
+    /// Returns `false` and changes nothing if this is a successful response: a
+    /// customization cannot turn a successful connector call into a failed one here,
+    /// which is also true of the coprocessor `ConnectorResponse` stage. To fail a
+    /// connector call, break it before it is made with
+    /// [`Request::into_error_response`].
+    pub fn set_error_message(&mut self, message: impl Into<String>) -> bool {
+        match &mut self.mapped_response {
+            MappedResponse::Error { error, .. } => {
+                error.message = message.into();
+                true
+            }
+            MappedResponse::Data { .. } => false,
+        }
+    }
+
+    /// Replace the `code` extension of the error returned to the client.
+    ///
+    /// Returns `false` and changes nothing if this is a successful response, as for
+    /// [`Response::set_error_message`].
+    pub fn set_error_code(&mut self, code: impl Into<String>) -> bool {
+        match &mut self.mapped_response {
+            MappedResponse::Error { error, .. } => {
+                error.set_code(code);
+                true
+            }
+            MappedResponse::Data { .. } => false,
+        }
+    }
+
     pub(crate) fn error_new(
         context: Context,
         subgraph_name: String,

@@ -13,8 +13,26 @@ fn connector_request_service(
 }
 ```
 
-`apollo_router::services::connector::request_service` is public along with the fields a plugin needs: `Request.context`, `Request.transport_request`, `Request.supergraph_request`, and `Response.transport_result`. Because `TransportRequest` carries the underlying `http::Request`, a plugin can read and rewrite the URI, method, headers, and body per connector request.
+`apollo_router::services::connector::request_service` is public along with what a plugin needs to read and change. One GraphQL operation can produce many connector requests, so this service runs once per outbound HTTP request rather than once per operation.
 
-The coprocessor `ConnectorRequest` stage already covered this, and still does. The difference is that this runs in process, without a round trip per connector request.
+On the request:
+
+- `Request.transport_request` carries the underlying `http::Request`, so a plugin can read and rewrite the URI, method, headers and body.
+- `Request.supergraph_request()` returns the router request that produced this connector call, for reading.
+- `Request.context` is readable and writable for request-scoped state.
+- `Request::into_error_response(message, code)` fails a connector request without making it, for cases like circuit breaking on an upstream the plugin knows to be unhealthy.
+
+On the response:
+
+- `Response.context` is readable and writable.
+- `Response.transport_result` exposes the raw transport outcome: status, headers, and transport-level errors.
+- `Response::data()` / `set_data()` and `Response::error()` / `set_error_message()` / `set_error_code()` read and change what is returned to the client.
+
+Two things are worth knowing when moving a customization between a coprocessor and a plugin:
+
+- The coprocessor `ConnectorRequest` stage cannot change the HTTP method; a plugin can.
+- Changing `Response.transport_result` does not recompute the mapped response, so telemetry will report the transport outcome you set while the client receives the unchanged mapped data. Change both, or neither.
+
+The coprocessor `ConnectorRequest` and `ConnectorResponse` stages already covered this, and still do. The difference is that this runs in process, without a round trip per connector request.
 
 By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/10049

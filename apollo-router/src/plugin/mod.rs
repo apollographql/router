@@ -487,13 +487,37 @@ pub trait PluginUnstable: Send + Sync + 'static {
     /// dynamically add headers to pass to a REST API. The `source_name` parameter is useful if
     /// you need to apply a customization only to specific connectors.
     ///
-    /// A plugin can read and mutate the outbound HTTP request through
-    /// [`Request::transport_request`], and read the router request that produced it through
-    /// [`Request::supergraph_request`]. One GraphQL operation may produce many connector
-    /// requests, so this service is called once per outbound request, not once per operation.
+    /// One GraphQL operation may produce many connector requests, so this service is
+    /// called once per outbound request, not once per operation.
+    ///
+    /// On the request, a plugin can:
+    ///
+    /// - read and rewrite the outbound HTTP request — URI, headers, body and method —
+    ///   through [`Request::transport_request`]. Note that the method is *not*
+    ///   rewritable through the coprocessor `ConnectorRequest` stage, so a plugin that
+    ///   changes it has no coprocessor equivalent;
+    /// - read the router request that produced it, through
+    ///   [`Request::supergraph_request`];
+    /// - read and write request-scoped state through [`Request::context`];
+    /// - fail the request without making it, through
+    ///   [`Request::into_error_response`] — the equivalent of a coprocessor returning
+    ///   `Control::Break`.
+    ///
+    /// On the response, a plugin can read and write [`Response::context`], read and
+    /// rewrite the raw transport outcome through [`Response::transport_result`], and
+    /// read or replace what is returned to the client through [`Response::data`],
+    /// [`Response::error`] and their setters. Rewriting `transport_result` does not
+    /// recompute the mapped response, so changing one without the other makes
+    /// telemetry disagree with what the client receives.
     ///
     /// [`Request::transport_request`]: crate::services::connector::request_service::Request::transport_request
     /// [`Request::supergraph_request`]: crate::services::connector::request_service::Request::supergraph_request
+    /// [`Request::context`]: crate::services::connector::request_service::Request::context
+    /// [`Request::into_error_response`]: crate::services::connector::request_service::Request::into_error_response
+    /// [`Response::context`]: crate::services::connector::request_service::Response::context
+    /// [`Response::transport_result`]: crate::services::connector::request_service::Response::transport_result
+    /// [`Response::data`]: crate::services::connector::request_service::Response::data
+    /// [`Response::error`]: crate::services::connector::request_service::Response::error
     fn connector_request_service(
         &self,
         service: crate::services::connector::request_service::BoxService,
