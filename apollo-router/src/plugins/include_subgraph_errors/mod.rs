@@ -157,15 +157,6 @@ impl IncludeSubgraphErrors {
     /// Returns a layer that tags each subgraph error with the name of the subgraph it came
     /// from, so that [`Self::redact_subgraph_errors_layer`] can apply that subgraph's
     /// redaction config once the error reaches the supergraph response.
-    ///
-    /// The tag is the private `apollo.private.subgraph.name` extension (see
-    /// [`AddSubgraphNameExt`]), *not* the user-facing `service` extension: `process_error`
-    /// removes the private one during redaction and adds `service` separately, subject to the
-    /// configured allow/deny lists.
-    ///
-    /// Filtering deliberately does not happen here. Other kinds of request also generate
-    /// errors that need filtering, so pushing the filtering out to the supergraph response
-    /// ensures everything gets filtered.
     pub(crate) fn tag_errors_with_subgraph_name_layer(
         &self,
         subgraph_name: Arc<str>,
