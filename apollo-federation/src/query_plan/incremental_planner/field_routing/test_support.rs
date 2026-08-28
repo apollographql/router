@@ -32,6 +32,7 @@ pub(super) fn search_space(subgraphs: &[(&str, &str)]) -> FieldRoutingSearchSpac
         supergraph_schema: schema,
         override_conditions: Default::default(),
         disabled_subgraphs: Default::default(),
+        key_hops_in_flight: Default::default(),
     }
 }
 
