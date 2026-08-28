@@ -99,7 +99,7 @@ impl SelectionId {
 /// All arguments and input object values are sorted in a consistent order.
 ///
 /// This type is immutable and cheaply cloneable.
-#[derive(Clone, PartialEq, Eq, Default, serde::Serialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Default, serde::Serialize)]
 pub(crate) struct ArgumentList {
     /// The inner list *must* be sorted with `sort_arguments`.
     #[serde(
@@ -768,6 +768,7 @@ mod field_selection {
             SelectionKey::Field {
                 response_name: self.response_name(),
                 directives: &self.directives,
+                arguments: &self.arguments,
             }
         }
     }
@@ -1621,6 +1622,7 @@ impl SelectionSet {
         const TYPENAME_KEY: SelectionKey = SelectionKey::Field {
             response_name: &TYPENAME_FIELD,
             directives: &DirectiveList::new(),
+            arguments: &ArgumentList::new(),
         };
 
         self.selections.contains_key(TYPENAME_KEY)
