@@ -185,7 +185,7 @@ fn run_bulb_and_finalize(
         "starting BULB search",
     );
 
-    let (result, stats) = bulb_search(
+    let (mut result, stats) = bulb_search(
         search_space,
         initial,
         config,
@@ -229,6 +229,8 @@ fn run_bulb_and_finalize(
             result.pending.len(),
         )));
     }
+
+    result.graph.merge_sibling_entities();
 
     let mut operation_compression = if parameters.config.generate_query_fragments {
         SubgraphOperationCompression::GenerateFragments
