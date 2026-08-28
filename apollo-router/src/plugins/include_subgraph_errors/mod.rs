@@ -11,9 +11,6 @@ use config::Config;
 use config::ErrorMode;
 use config::SubgraphConfig;
 use effective_config::EffectiveConfig;
-use futures::FutureExt as _;
-use futures::TryFutureExt as _;
-use futures::future::BoxFuture;
 use tower::BoxError;
 use tower::ServiceExt;
 
@@ -74,9 +71,12 @@ where
     }
 }
 
-/// Layer type for [`IncludeSubgraphErrors::tag_errors_with_subgraph_name_layer`], which
-/// documents which extension the tag uses and why filtering happens at the supergraph stage.
+/// Layer type for [`IncludeSubgraphErrors::tag_errors_with_subgraph_name_layer`].
 pub(crate) struct TagSubgraphErrorsLayer {
+    /// The subgraph this layer was built for. Taken from the pipeline rather than from
+    /// `request.subgraph_name` so that it cannot disagree with the stack it is installed
+    /// on. A mis-tagged error falls back to the default redaction config in
+    /// `process_error`.
     subgraph_name: Arc<str>,
 }
 
@@ -88,58 +88,26 @@ impl TagSubgraphErrorsLayer {
 
 impl<S> tower::Layer<S> for TagSubgraphErrorsLayer
 where
-    S: tower::Service<subgraph::Request, Response = subgraph::Response> + Clone + Send + 'static,
+    S: tower::Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send + 'static,
 {
-    type Service = TagSubgraphErrorsService<S>;
+    type Service = subgraph::BoxCloneService;
 
     fn layer(&self, inner: S) -> Self::Service {
-        TagSubgraphErrorsService {
-            inner,
-            subgraph_name: self.subgraph_name.clone(),
-        }
-    }
-}
-
-/// Service type for [`IncludeSubgraphErrors::tag_errors_with_subgraph_name_layer`].
-#[derive(Clone)]
-pub(crate) struct TagSubgraphErrorsService<S> {
-    inner: S,
-    /// The subgraph this service stack was built for. Taken from the pipeline rather than
-    /// from `request.subgraph_name` so that it cannot disagree with the stack it is
-    /// installed on -- a mis-tagged error silently falls back to the default redaction
-    /// config in `process_error`.
-    subgraph_name: Arc<str>,
-}
-
-impl<S> tower::Service<subgraph::Request> for TagSubgraphErrorsService<S>
-where
-    S: tower::Service<subgraph::Request, Response = subgraph::Response> + Clone + Send + 'static,
-    S::Future: Send + 'static,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: subgraph::Request) -> Self::Future {
         let subgraph_name = self.subgraph_name.clone();
-        self.inner
-            .call(req)
-            .map_ok(move |mut response| {
+
+        inner
+            .map_response(move |mut response: subgraph::Response| {
                 let body = response.response.body_mut();
                 for error in &mut body.errors {
                     error.add_subgraph_name(&subgraph_name);
                 }
                 response
             })
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -157,6 +125,15 @@ impl IncludeSubgraphErrors {
     /// Returns a layer that tags each subgraph error with the name of the subgraph it came
     /// from, so that [`Self::redact_subgraph_errors_layer`] can apply that subgraph's
     /// redaction config once the error reaches the supergraph response.
+    ///
+    /// The tag is the private `apollo.private.subgraph.name` extension (see
+    /// [`AddSubgraphNameExt`]), not the user-facing `service` extension. `process_error`
+    /// removes the private one during redaction and adds `service` separately, subject to
+    /// the configured allow and deny lists.
+    ///
+    /// Filtering deliberately does not happen here. Other kinds of request also generate
+    /// errors that need filtering, so pushing the filtering out to the supergraph response
+    /// ensures everything gets filtered.
     pub(crate) fn tag_errors_with_subgraph_name_layer(
         &self,
         subgraph_name: Arc<str>,
