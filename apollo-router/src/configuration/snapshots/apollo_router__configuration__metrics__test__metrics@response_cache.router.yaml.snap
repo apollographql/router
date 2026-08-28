@@ -7,6 +7,7 @@ expression: "& metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
+          opt.connector.enabled: true
           opt.debug: true
           opt.enabled: true
           opt.subgraph.enabled: true

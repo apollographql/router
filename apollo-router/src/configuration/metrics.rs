@@ -341,7 +341,9 @@ impl InstrumentData {
             opt.subgraph.ttl,
             "$[?(@.subgraph.all.ttl || @.subgraph.subgraphs..ttl)]",
             opt.subgraph.invalidation.enabled,
-            "$[?(@.subgraph.all.invalidation.enabled || @.subgraph.subgraphs..invalidation.enabled)]"
+            "$[?(@.subgraph.all.invalidation.enabled || @.subgraph.subgraphs..invalidation.enabled)]",
+            opt.connector.enabled,
+            "$[?(@.connector.all.redis || @.connector.sources..redis)]"
         );
         populate_config_instrument!(
             apollo.router.config.telemetry,
