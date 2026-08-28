@@ -2289,4 +2289,46 @@ mod test {
         )
         .await;
     }
+
+    /// A dropped `.apply_required_plugin_layer(..)` call in `stages.rs` would leave every
+    /// consumer falling back to `default_masking_rules()`, so the wiring needs a test of its
+    /// own. The probe header is absent from the built-in sensitive list, so only rules built
+    /// from this configuration mask it.
+    #[tokio::test]
+    async fn masking_rules_are_wired_into_the_router_pipeline() {
+        let service = crate::TestHarness::builder()
+            .configuration_json(serde_json::json!({
+                "headers": {
+                    "all": {
+                        "request": {
+                            "masking": { "sensitive_headers": ["x-wiring-probe"] }
+                        }
+                    }
+                }
+            }))
+            .expect("valid config")
+            .build_router()
+            .await
+            .expect("router pipeline");
+
+        let response = tower::ServiceExt::oneshot(
+            service,
+            crate::services::router::Request::fake_builder()
+                .build()
+                .expect("valid request"),
+        )
+        .await
+        .expect("router call");
+
+        let masks_probe = response.context.extensions().with_lock(|lock| {
+            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
+                .map(|rules| rules.get_request(None).should_mask("x-wiring-probe"))
+        });
+
+        assert_eq!(
+            masks_probe,
+            Some(true),
+            "the configured masking rules never reached the request context",
+        );
+    }
 }

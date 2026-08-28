@@ -609,3 +609,56 @@ async fn subgraph_name_tagging_is_wired_into_the_pipeline() {
         error.extensions
     );
 }
+
+/// The layer tags with the subgraph its stack was built for, not the name the request
+/// carries.
+///
+/// `subgraph_name_tagging_is_wired_into_the_pipeline` cannot catch a regression here,
+/// because a real pipeline always dispatches a request to the stack of the same name. Only
+/// a request whose name disagrees with its stack tells the two readings apart.
+#[tokio::test]
+async fn tag_uses_the_stacks_subgraph_name_not_the_requests() {
+    let (mock, mut handle) = tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+
+    let mut service = ServiceBuilder::new()
+        .layer(TagSubgraphErrorsLayer::new(Arc::from("accounts")))
+        .service(mock);
+
+    let driver = tokio::spawn(async move {
+        let (_request, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            subgraph::Response::fake_builder()
+                .error(
+                    graphql::Error::builder()
+                        .message("the subgraph blew up")
+                        .extension_code("SUBGRAPH_BOOM")
+                        .build(),
+                )
+                .build(),
+        );
+    });
+
+    let response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            subgraph::Request::fake_builder()
+                .subgraph_name("reviews")
+                .build(),
+        )
+        .await
+        .unwrap();
+
+    await_mock_driver(driver).await;
+
+    let error = response.response.body().errors.first().expect("one error");
+    assert_eq!(
+        error
+            .extensions
+            .get("apollo.private.subgraph.name")
+            .and_then(|value| value.as_str()),
+        Some("accounts"),
+        "the tag must name the stack's subgraph, not the request's",
+    );
+}
