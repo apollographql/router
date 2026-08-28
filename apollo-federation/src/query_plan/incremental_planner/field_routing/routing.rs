@@ -44,6 +44,7 @@ pub(crate) struct RoutingChoice {
     /// anchoring the field can select the condition fields in place. Commit
     /// applies this verdict instead of re-deriving it. True when the edge
     /// has no conditions.
+    #[allow(dead_code)]
     pub(crate) requires_resolvable_in_place: bool,
     /// When the field is only reachable through a multi-hop key chain,
     /// this captures the intermediate hops in order. Commit creates a
@@ -134,6 +135,7 @@ enum RoutingPreference {
     Provides,
     DirectLocal,
     /// Same-subgraph entity re-entry for in-place-unresolvable @requires.
+    #[allow(dead_code)]
     SelfRequiresHop,
     LocallySatisfiableKeyHop,
     RemoteKeyHop,
@@ -695,6 +697,7 @@ impl FieldRoutingSearchSpace {
     /// True when the node has no reachable cross-subgraph edges: every
     /// descendant field is local, so the entire subtree can be added in one
     /// shot instead of field-by-field.
+    #[allow(dead_code)]
     pub(super) fn is_fully_local(
         &self,
         query_graph_node: NodeIndex,
@@ -705,6 +708,7 @@ impl FieldRoutingSearchSpace {
 
     /// Recursively check that every sub-selection has an edge at the given
     /// node.
+    #[allow(dead_code)]
     pub(super) fn all_sub_selections_available(
         &self,
         node: NodeIndex,

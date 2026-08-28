@@ -69,6 +69,7 @@ impl SelectionBuilder {
     /// Absorb all entries from `other`, for post-search merging of sibling
     /// entity groups. Caller must verify compatibility via
     /// [`field_signatures`](Self::field_signatures) first.
+    #[allow(dead_code)]
     pub(super) fn merge_from(&mut self, other: &SelectionBuilder) {
         self.entries.extend(other.entries.iter().cloned());
     }
@@ -87,6 +88,7 @@ impl SelectionBuilder {
     /// Returns `None` if any response path has more than one distinct
     /// field signature within this builder, which indicates a bug in the
     /// commit logic.
+    #[allow(dead_code)]
     pub(super) fn field_signatures(&self) -> Option<HashMap<String, String>> {
         fn record_selection_set(
             out: &mut HashMap<String, String>,
