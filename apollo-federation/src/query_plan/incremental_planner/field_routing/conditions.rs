@@ -1,23 +1,17 @@
-//! Condition satisfiability: can a set of @requires / @key fields be resolved
-//! at a given query graph node?
-//!
-//! Three flavors of check, each deeper than the last:
-//! - `can_satisfy_conditions`: pure schema lookup (field exists, not external).
-//! - `conditions_resolvable_at_node`: graph-based, path-sensitive variant.
-//! - `conditions_have_requires`: detects @requires on condition edges.
-
 use std::sync::Arc;
 
+use apollo_compiler::name;
 use petgraph::graph::NodeIndex;
 
-use super::FieldRoutingSearchSpace;
-use super::NodeSource;
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::operation::SelectionSet;
-use crate::operation::TYPENAME_FIELD;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
+
+const TYPENAME_FIELD: apollo_compiler::Name = name!("__typename");
+
+use super::FieldRoutingSearchSpace;
 
 impl FieldRoutingSearchSpace {
     /// Can this subgraph resolve every field in `conditions` at `type_pos`?
@@ -118,13 +112,16 @@ impl FieldRoutingSearchSpace {
         self.walk_conditions_graph(node, conditions, false)
     }
 
-    /// Filter key conditions to the subset the source subgraph can resolve.
+    /// Filter a key selection set to only the fields the source subgraph can
+    /// resolve locally: each field must exist and not be @external. Returns
+    /// `None` when no field survives.
     pub(super) fn locally_satisfiable_subset(
         &self,
-        conditions: &Arc<SelectionSet>,
-        source: &NodeSource,
+        conditions: &SelectionSet,
+        source_type: &CompositeTypeDefinitionPosition,
+        source_schema: &ValidFederationSchema,
     ) -> Option<Arc<SelectionSet>> {
-        satisfiable_subset(conditions, &source.type_pos, &source.schema)
+        satisfiable_subset(conditions, source_type, source_schema)
     }
 }
 

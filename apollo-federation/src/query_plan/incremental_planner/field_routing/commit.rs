@@ -47,6 +47,9 @@ pub(super) struct CommitTarget {
     pub(super) fetch_node: NodeIndex,
     pub(super) op_path: SharedPath<Arc<OpPathElement>>,
     pub(super) response_path: SharedPath<FetchDataPathElement>,
+    /// Children start at a fresh entity/root group rather than extending
+    /// the current position; @provides provenance does not carry across.
+    pub(super) entity_root: bool,
 }
 
 impl FieldRoutingSearchSpace {
@@ -231,9 +234,20 @@ impl FieldRoutingSearchSpace {
             .first()
             .map_or(Some(&key_info.key_conditions), |hop| hop.entry_key.as_ref());
 
+        // `conditions_provided` short-circuits the in-place re-derivation:
+        // enumeration already verified, against the query graph at this
+        // exact position, that an ancestor's @provides makes every key
+        // field available here (the subgraph echoes provided fields),
+        // including through downcasts out of the provides-copy layer that
+        // `can_resolve_in_place` cannot see.
         let key_locally_resolvable = match first_key {
             Some(key_conditions) => {
-                self.can_resolve_in_place(pending.query_graph_node, key_conditions, &source)?
+                choice.conditions_provided
+                    || self.can_resolve_in_place(
+                        pending.query_graph_node,
+                        key_conditions,
+                        &source,
+                    )?
             }
             None => true,
         };
@@ -351,7 +365,8 @@ impl FieldRoutingSearchSpace {
         anchor_path: &SharedPath<Arc<OpPathElement>>,
         new_group: NodeIndex,
     ) -> Result<(), FederationError> {
-        let resolvable = self.locally_satisfiable_subset(key_conditions, source);
+        let resolvable =
+            self.locally_satisfiable_subset(key_conditions, &source.type_pos, &source.schema);
         let covers_key = resolvable.as_ref().is_some_and(|subset| {
             key_conditions
                 .selections
@@ -431,7 +446,8 @@ impl FieldRoutingSearchSpace {
                         .fork(pending.selection.clone())
                         .at(hop.target_node, prev_group)
                         .with_op_path(hop_path.clone())
-                        .with_response_path(SharedPath::new());
+                        .with_response_path(SharedPath::new())
+                        .with_provides_anchor(None);
                     self.push_condition_pendings(state, &hop_anchor, key_conds, next_group)?;
                 }
             }
@@ -727,6 +743,7 @@ impl FieldRoutingSearchSpace {
             fetch_node,
             op_path,
             response_path,
+            entity_root: choice.hop_kind != HopKind::Direct,
         })
     }
 
@@ -839,15 +856,57 @@ impl FieldRoutingSearchSpace {
             return Ok(());
         };
 
+        let child_provides_anchor =
+            self.child_provides_anchor(pending, target_qg_node, target.entity_root)?;
+
         for sub_sel in sub_ss.selections.values().rev().cloned() {
             state.push_pending(
                 pending
                     .fork(sub_sel)
                     .at(target_qg_node, fetch_node)
                     .with_op_path(target.op_path.clone())
-                    .with_response_path(target.response_path.clone()),
+                    .with_response_path(target.response_path.clone())
+                    .with_provides_anchor(child_provides_anchor),
             );
         }
         Ok(())
+    }
+
+    /// @provides provenance for a committed selection's children (see
+    /// [`PendingSelection::provides_anchor`]): an inline fragment whose
+    /// downcast leaves the provides-copy layer (copy source, non-copy
+    /// target) anchors children at the copy node, keeping its provided-field
+    /// edges visible. An interface-level @provides applies to every runtime
+    /// type, but only the interface node was copied. Other fragments inherit
+    /// the anchor; fields reset it (their children draw on the field's own
+    /// target node, which IS a copy whenever the field was provided); entity
+    /// roots leave the position entirely.
+    fn child_provides_anchor(
+        &self,
+        pending: &PendingSelection,
+        target_qg_node: NodeIndex,
+        entity_root: bool,
+    ) -> Result<Option<NodeIndex>, FederationError> {
+        if entity_root || matches!(&pending.selection, Selection::Field(_)) {
+            return Ok(None);
+        }
+        let source_is_copy = self
+            .query_graph
+            .node_weight(pending.query_graph_node)?
+            .provide_id
+            .is_some();
+        let target_is_copy = self
+            .query_graph
+            .node_weight(target_qg_node)?
+            .provide_id
+            .is_some();
+        Ok(match (source_is_copy, target_is_copy) {
+            // Leaving the copy layer: remember where the provided edges live.
+            (true, false) => Some(pending.query_graph_node),
+            // Inside the copy layer, the node's own edges carry provenance.
+            (_, true) => None,
+            // Outside it, fragments carry any anchor along unchanged.
+            (false, false) => pending.provides_anchor,
+        })
     }
 }
