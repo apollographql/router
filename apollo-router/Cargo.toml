@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.96.0"
+rust-version = "1.97.1"
 edition = "2024"
 build = "build/main.rs"
 default-run = "router"
@@ -39,11 +39,6 @@ global-allocator = ["tikv-jemallocator/profiling", "tikv-jemalloc-ctl/stats", "t
 # if you are doing heap profiling
 dhat-heap = ["dhat"]
 dhat-ad-hoc = ["dhat"]
-
-# Prevents the query execution to continue if any error occurs while fetching
-# the data of a subgraph. This is useful in development as you want to be
-# alerted early when something is wrong instead of receiving an invalid result.
-failfast = []
 
 # Enables the use of new telemetry features that are under development
 # and not yet ready for production use.

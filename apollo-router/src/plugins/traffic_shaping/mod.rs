@@ -679,26 +679,27 @@ mod test {
     use tokio::task::JoinSet;
     use tokio::time::sleep;
     use tower::Service;
-    use tower::ServiceExt as _;
 
     use super::*;
     use crate::Configuration;
     use crate::Context;
     use crate::json_ext::Object;
+    use crate::pipeline::build_apq_expander;
+    use crate::pipeline::build_query_plan_cache;
+    use crate::pipeline::build_supergraph_pipeline;
+    use crate::pipeline::connect_apq_redis;
+    use crate::pipeline::connect_query_plan_redis;
+    use crate::pipeline::create_plugins;
     use crate::plugin::DynPlugin;
     use crate::plugin::test::MockConnector;
     use crate::plugin::test::MockSubgraph;
     use crate::query_planner::QueryPlannerService;
-    use crate::router_factory::RouterFactory;
-    use crate::router_factory::create_plugins;
-    use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
     use crate::services::connector::request_service::Request as ConnectorRequest;
     use crate::services::layers::persisted_queries::PersistedQueryExpander;
     use crate::services::router;
-    use crate::services::router::service::RouterCreator;
     use crate::spec::Schema;
 
     static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
@@ -788,53 +789,83 @@ mod test {
 
         let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
         let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
-        let query_planner_service =
-            QueryPlannerService::new(schema.clone(), config.clone(), qp_arc)
-                .unwrap()
-                .boxed_clone();
 
         let query_parser_service =
-            crate::services::query_parsing::query_parsing_service(schema.clone(), config.clone());
-
-        let mut builder = PluggableSupergraphServiceBuilder::new(
-            query_planner_service,
-            schema.clone(),
-            subgraph_schemas.clone(),
-        )
-        .with_configuration(config.clone());
+            crate::pipeline::build_query_parsing_service(schema.clone(), config.clone());
 
         let plugins = Arc::new(
             create_plugins(
                 &config,
                 &schema,
-                subgraph_schemas,
+                subgraph_schemas.clone(),
                 None,
-                Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
+                Some(vec![
+                    (APOLLO_TRAFFIC_SHAPING.to_string(), plugin),
+                    // Replaces each subgraph's transport with a mock. Must be last so
+                    // the traffic-shaping hooks under test still wrap the mocks.
+                    (
+                        "mocked_subgraphs".to_string(),
+                        Box::new(crate::test_harness::MockedSubgraphs(hashmap! {
+                            "accounts" => account_service,
+                            "reviews" => review_service,
+                            "products" => product_service,
+                        })),
+                    ),
+                ]),
                 Default::default(),
                 None,
             )
             .await
             .expect("create plugins should work"),
         );
-        builder = builder.with_plugins(plugins);
 
-        let builder = builder
-            .with_subgraph_service("accounts", account_service.boxed_clone())
-            .with_subgraph_service("reviews", review_service.boxed_clone())
-            .with_subgraph_service("products", product_service.boxed_clone());
+        for (_, plugin) in plugins.iter() {
+            plugin.activate();
+        }
 
-        let (supergraph_creator, _planner) = builder.build().await.expect("should build");
+        let query_plan_cache =
+            build_query_plan_cache(&config, connect_query_plan_redis(&config).await.unwrap());
+        let query_planner_service = crate::pipeline::build_query_planner_service(
+            schema.clone(),
+            config.clone(),
+            qp_arc,
+            subgraph_schemas.clone(),
+            query_plan_cache,
+        );
 
-        RouterCreator::new(
+        let subgraph_services = crate::pipeline::build_subgraph_services(
+            ["accounts", "reviews", "products"]
+                .into_iter()
+                .map(|name| {
+                    (
+                        name.to_string(),
+                        crate::services::http::test_http_client_service(name),
+                    )
+                })
+                .collect(),
+            &plugins,
+            &config,
+        );
+        let supergraph_service = build_supergraph_pipeline(
+            query_planner_service,
+            schema.clone(),
+            subgraph_schemas,
+            config.clone(),
+            plugins.clone(),
+            subgraph_services,
+            Default::default(),
+        );
+
+        let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await.unwrap());
+        crate::pipeline::build_router_service(
+            supergraph_service,
+            apq_expander,
             Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
-            Arc::new(supergraph_creator),
             query_parser_service,
-            config,
+            schema,
+            &config,
+            plugins,
         )
-        .await
-        .unwrap()
-        .create()
-        .boxed_clone()
     }
 
     async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {

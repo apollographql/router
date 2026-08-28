@@ -31,6 +31,7 @@ use crate::configuration::validate_yaml_configuration;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
+use crate::plugins::telemetry::reload::otel::shutdown_installed_tracer_provider;
 use crate::registry::OciConfig;
 use crate::registry::should_use_ssl;
 use crate::registry::validate_oci_reference;
@@ -457,10 +458,12 @@ impl Executable {
         if apollo_telemetry_initialized {
             // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
             tokio::task::spawn_blocking(move || {
-                // Setting a new default provider causes the old one to be dropped and shut down
-                opentelemetry::global::set_tracer_provider(
-                    opentelemetry_sdk::trace::SdkTracerProvider::default(),
-                );
+                // Flush and stop the span processors of the provider installed by the last
+                // activation. Without this, buffered spans are lost and the processors'
+                // background workers are still polling Tokio timers when the runtime is torn
+                // down. The provider left in `opentelemetry::global` is the same one, so it
+                // hands out non-recording spans from here on and needs no replacing.
+                shutdown_installed_tracer_provider();
                 if let Err(error) = meter_provider_internal().shutdown() {
                     tracing::error!(%error, "Failed to shut down OTel meter provider cleanly");
                 }

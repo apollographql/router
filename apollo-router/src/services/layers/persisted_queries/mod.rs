@@ -226,6 +226,7 @@ impl PersistedQueryExpander {
     /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
     /// (using an `Err()` return value).
     /// The user of this function is responsible for propagating short-circuiting.
+    #[expect(clippy::result_large_err, reason = "err is smaller than ok")]
     pub(crate) async fn supergraph_request_with_analyzed_query(
         &self,
         request: SupergraphRequest,
@@ -1018,7 +1019,7 @@ mod tests {
 
             let schema = Arc::new(Schema::parse(include_str!("../../../testdata/supergraph.graphql"), &Default::default()).unwrap());
 
-            let query_parsing_service = query_parsing::query_parsing_service(schema, Arc::new(config));
+            let query_parsing_service = crate::pipeline::build_query_parsing_service(schema, Arc::new(config));
 
             // A random query is blocked.
             denied_by_safelist(
@@ -1235,7 +1236,8 @@ mod tests {
             )
             .unwrap(),
         );
-        let query_parsing_service = query_parsing::query_parsing_service(schema, Arc::new(config));
+        let query_parsing_service =
+            crate::pipeline::build_query_parsing_service(schema, Arc::new(config));
 
         // The client-scoped body is only accepted for its registered client.
         assert_allowed_for_client(

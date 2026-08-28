@@ -30,9 +30,9 @@ pub(crate) mod expose_query_plan;
 pub(crate) mod file_uploads;
 mod fleet_detector;
 mod forbid_mutations;
-mod headers;
+pub(crate) mod headers;
 pub(crate) mod healthcheck;
-mod include_subgraph_errors;
+pub(crate) mod include_subgraph_errors;
 pub(crate) mod license_enforcement;
 pub(crate) mod limits;
 #[cfg(any(test, feature = "mock_subgraphs_testing"))]
