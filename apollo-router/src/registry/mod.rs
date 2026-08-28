@@ -1256,11 +1256,13 @@ mod tests {
         );
 
         // Second poll: digest is unchanged, so blob should not be fetched again.
-        // Since the polling task runs independently, use the head counter to
-        // prove that a second unchanged-digest cycle actually completed.
+        // Wait for a third HEAD before asserting: the polling loop is
+        // sequential (HEAD -> fetch -> sleep -> HEAD), so once HEAD #3 has
+        // been observed, any blob fetch the second cycle would have made has
+        // already been counted.
         // The outer timeout Duration prevents hanging by giving us a hard limit
         let poll_completed = timeout(Duration::from_secs(5), async {
-            while head_request_count.load(Ordering::Relaxed) < 2 {
+            while head_request_count.load(Ordering::Relaxed) < 3 {
                 tokio::time::sleep(Duration::from_millis(1)).await;
             }
         })
