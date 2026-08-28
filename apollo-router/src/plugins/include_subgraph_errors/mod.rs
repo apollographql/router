@@ -31,7 +31,7 @@ static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
 register_plugin!("apollo", "include_subgraph_errors", IncludeSubgraphErrors);
 
-/// Layer type for [IncludeSubgraphErrors::redact_subgraph_errors_layer].
+/// Layer type for [`IncludeSubgraphErrors::redact_subgraph_errors_layer`].
 pub(crate) struct RedactSubgraphErrorsLayer {
     config: Arc<EffectiveConfig>,
 }
@@ -74,7 +74,8 @@ where
     }
 }
 
-/// Layer type for [IncludeSubgraphErrors::tag_errors_with_subgraph_name_layer].
+/// Layer type for [`IncludeSubgraphErrors::tag_errors_with_subgraph_name_layer`], which
+/// documents which extension the tag uses and why filtering happens at the supergraph stage.
 pub(crate) struct TagSubgraphErrorsLayer {
     _private: (),
 }
@@ -97,7 +98,7 @@ where
     }
 }
 
-/// Service type for [IncludeSubgraphErrors::tag_errors_with_subgraph_name_layer].
+/// Service type for [`IncludeSubgraphErrors::tag_errors_with_subgraph_name_layer`].
 pub(crate) struct TagSubgraphErrorsService<S> {
     inner: S,
 }
@@ -144,7 +145,18 @@ impl IncludeSubgraphErrors {
         RedactSubgraphErrorsLayer::new(self.config.clone())
     }
 
-    /// Returns a layer that adds a `service` extension to each error, containing the subgraph name.
+    /// Returns a layer that tags each subgraph error with the name of the subgraph it came
+    /// from, so that [`Self::redact_subgraph_errors_layer`] can apply that subgraph's
+    /// redaction config once the error reaches the supergraph response.
+    ///
+    /// The tag is the private `apollo.private.subgraph.name` extension (see
+    /// [`AddSubgraphNameExt`]), *not* the user-facing `service` extension: `process_error`
+    /// removes the private one during redaction and adds `service` separately, subject to the
+    /// configured allow/deny lists.
+    ///
+    /// Filtering deliberately does not happen here. Other kinds of request also generate
+    /// errors that need filtering, so pushing the filtering out to the supergraph response
+    /// ensures everything gets filtered.
     pub(crate) fn tag_errors_with_subgraph_name_layer(&self) -> TagSubgraphErrorsLayer {
         TagSubgraphErrorsLayer::new()
     }
