@@ -1077,3 +1077,285 @@ fn inc_fuel_zero_still_finds_complete_plan_for_keyless_child() {
         "plan must route through the key hop to reach `leaf`: {plan_str}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Circular keys
+// ---------------------------------------------------------------------------
+
+/// A forced condition commit whose greedy choice strands a descendant on a
+/// circular key must backtrack to the ancestor's alternative. `target` lives
+/// only in T, keyed on `c { cid cm }`. Routing that key: `c` commits
+/// greedily to A (direct), but A cannot resolve `cm`. Its only hop from C
+/// is T's circular `{cid cm}` key, so the commit fails. The condition `c`
+/// was forced (never a BULB decision), so recovery must come from the
+/// fast-forward trail: rewind `c` to its key hop into B, where the whole
+/// key resolves.
+#[test]
+fn inc_circular_key_backtracks_to_alternative() {
+    // Pre-composed with join/v0.2 because join/v0.5 composition omits
+    // per-field @join__field annotations on fields present in every subgraph,
+    // and the query graph builder then fails to rebase key conditions that
+    // reference fields absent from a source subgraph. The circular key
+    // pattern (E's key in T requires `c { cid cm }`, but A's C has no `cm`)
+    // triggers this rebase gap before the incremental planner's circular-key
+    // detection can kick in.
+    let supergraph_sdl = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {
+  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")
+  T @join__graph(name: "t", url: "http://t")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: A)
+{
+  entry: E @join__field(graph: A)
+}
+
+type E
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: T, key: "c { cid cm }")
+{
+  id: ID! @join__field(graph: A) @join__field(graph: B)
+  c: C @join__field(graph: A) @join__field(graph: B) @join__field(graph: T)
+  target: String @join__field(graph: T)
+}
+
+type C
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__type(graph: T, key: "cid cm")
+{
+  cid: ID! @join__field(graph: A) @join__field(graph: B) @join__field(graph: T)
+  cm: String @join__field(graph: B) @join__field(graph: T)
+}
+"#;
+    let supergraph = apollo_federation::Supergraph::new(supergraph_sdl).expect("valid supergraph");
+    let planner = apollo_federation::query_plan::query_planner::QueryPlanner::new(
+        &supergraph,
+        incremental_config(),
+    )
+    .expect("can create query planner");
+    let api_schema = planner.api_schema();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        "{ entry { target } }",
+        "test.graphql",
+    )
+    .expect("valid graphql document");
+    let result = planner.build_query_plan(&document, None, Default::default());
+    let plan_str = result
+        .as_ref()
+        .map(|p| p.to_string())
+        .unwrap_or_else(|e| format!("<error: {e}>"));
+    assert!(
+        result.is_ok(),
+        "Planning should succeed for circular key schema: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("target"),
+        "Plan should fetch 'target' from T: {plan_str}"
+    );
+    // The key's `c` subtree must route through B (where `cm` resolves),
+    // not A (where `cm` is missing and the key is circular).
+    assert!(
+        plan_str.contains("service: \"b\""),
+        "Plan should route the key's `c` subtree through subgraph b: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("cm"),
+        "Plan should fetch the key field 'cm': {plan_str}"
+    );
+}
+
+/// A field reachable only through two key hops (A has `id`, B has `id` and
+/// `bid`, C has `bid` and the field). No single hop from A reaches `target`
+/// because A lacks `bid`, so the planner must chain A->B->C.
+#[test]
+fn inc_multi_hop_key_chain_reaches_transitive_subgraph() {
+    let supergraph_sdl = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {
+  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")
+  C @join__graph(name: "c", url: "http://c")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: A)
+{
+  entry: T @join__field(graph: A)
+}
+
+type T
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: B, key: "bid")
+  @join__type(graph: C, key: "bid")
+{
+  id: ID! @join__field(graph: A) @join__field(graph: B)
+  bid: ID! @join__field(graph: B) @join__field(graph: C)
+  name: String @join__field(graph: A)
+  target: String @join__field(graph: C)
+}
+"#;
+    let supergraph = apollo_federation::Supergraph::new(supergraph_sdl).expect("valid supergraph");
+    let planner = apollo_federation::query_plan::query_planner::QueryPlanner::new(
+        &supergraph,
+        incremental_config(),
+    )
+    .expect("can create query planner");
+    let api_schema = planner.api_schema();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        "{ entry { target } }",
+        "test.graphql",
+    )
+    .expect("valid graphql document");
+    let result = planner.build_query_plan(&document, None, Default::default());
+    let plan_str = result
+        .as_ref()
+        .map(|p| p.to_string())
+        .unwrap_or_else(|e| format!("<error: {e}>"));
+    assert!(
+        result.is_ok(),
+        "Planning should succeed for multi-hop chain schema: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("target"),
+        "Plan should fetch 'target': {plan_str}"
+    );
+    // The chain must transit through B to reach C.
+    assert!(
+        plan_str.contains("service: \"b\""),
+        "Plan should include an intermediate fetch from subgraph b: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("service: \"c\""),
+        "Plan should include a final fetch from subgraph c: {plan_str}"
+    );
+}
+
+/// When the only key hop to a target has statically circular conditions
+/// and no chain alternative exists, the planner must error rather than
+/// silently dropping the field. Here `target` lives only in T, keyed on
+/// `c { cid cm }`, but `cm` exists only in T (the same subgraph). No
+/// intermediate subgraph (like B in the backtrack test) can resolve `cm`,
+/// so no chain or fallback is available.
+#[test]
+fn inc_unresolvable_circular_key_errors() {
+    let supergraph_sdl = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {
+  A @join__graph(name: "a", url: "http://a")
+  T @join__graph(name: "t", url: "http://t")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: A)
+{
+  entry: E @join__field(graph: A)
+}
+
+type E
+  @join__type(graph: A, key: "id")
+  @join__type(graph: T, key: "c { cid cm }")
+{
+  id: ID! @join__field(graph: A)
+  c: C @join__field(graph: A) @join__field(graph: T)
+  target: String @join__field(graph: T)
+}
+
+type C
+  @join__type(graph: A)
+  @join__type(graph: T, key: "cid cm")
+{
+  cid: ID! @join__field(graph: A) @join__field(graph: T)
+  cm: String @join__field(graph: T)
+}
+"#;
+    let supergraph = apollo_federation::Supergraph::new(supergraph_sdl).expect("valid supergraph");
+    let planner = apollo_federation::query_plan::query_planner::QueryPlanner::new(
+        &supergraph,
+        incremental_config(),
+    )
+    .expect("can create query planner");
+    let api_schema = planner.api_schema();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        "{ entry { target } }",
+        "test.graphql",
+    )
+    .expect("valid graphql document");
+    let result = planner.build_query_plan(&document, None, Default::default());
+    assert!(
+        result.is_err(),
+        "Unresolvable circular key should fail planning, got:\n{}",
+        result.as_ref().map(|p| p.to_string()).unwrap_or_default(),
+    );
+}

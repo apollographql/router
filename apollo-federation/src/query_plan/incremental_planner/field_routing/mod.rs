@@ -17,6 +17,7 @@ mod requires;
 mod routing;
 pub(super) mod state;
 
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -68,6 +69,13 @@ pub(crate) struct FieldRoutingSearchSpace {
     pub(crate) override_conditions: OverrideConditions,
     #[allow(dead_code)]
     pub(crate) inconsistent_abstract_types: Arc<apollo_compiler::collections::IndexSet<Name>>,
+    /// In-flight guard for breaking the mutual recursion between
+    /// `conditions_routable` and `key_hop_options`. A (node, key) pair
+    /// present in this set means that key-hop enumeration for that
+    /// position is on the call stack; re-entering it would loop
+    /// forever, so the guard returns "no hops" (the fixpoint for
+    /// circular keys).
+    pub(super) key_hops_in_flight: RefCell<HashSet<(NodeIndex, RoutingCacheKey)>>,
 }
 
 impl FieldRoutingSearchSpace {

@@ -13,6 +13,7 @@ use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
 use crate::error::FederationError;
+use crate::operation::HasSelectionKey;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraphEdgeTransition;
@@ -225,9 +226,23 @@ impl FieldRoutingSearchSpace {
 
         // Keys the current fetch cannot resolve directly are routed as
         // pending selections; ordering edges to the new group are wired as
-        // they commit.
+        // they commit. Statically circular keys are the exception: routing
+        // their conditions would recurse without progress, so they are
+        // handled via locally_satisfiable_subset instead.
         if !key_locally_resolvable && let Some(key_conditions) = &choice.key_conditions {
-            self.push_condition_pendings(state, pending, key_conditions, new_group)?;
+            if choice.conditions_circular {
+                self.commit_circular_key_conditions(
+                    state,
+                    pending,
+                    key_conditions,
+                    &source,
+                    pending.fetch_node,
+                    &pending.op_path,
+                    new_group,
+                )?;
+            } else {
+                self.push_condition_pendings(state, pending, key_conditions, new_group)?;
+            }
         }
 
         // Multi-hop key chain: walk through intermediate subgraphs,
@@ -237,6 +252,44 @@ impl FieldRoutingSearchSpace {
         }
 
         Ok((new_group, edge))
+    }
+
+    /// Handle a circular key at commit time: its conditions can't be
+    /// independently routed: pushing them as pendings would recurse without
+    /// progress. If the anchor can resolve the whole key, select it there; a
+    /// key it can only partially resolve can never match an entity at
+    /// runtime, so fail the commit and let backtracking look for an
+    /// alternative instead of emitting a fetch that is dead on arrival.
+    #[allow(clippy::too_many_arguments)]
+    fn commit_circular_key_conditions(
+        &self,
+        state: &mut PlanState,
+        pending: &PendingSelection,
+        key_conditions: &Arc<SelectionSet>,
+        source: &NodeSource,
+        anchor_fetch: NodeIndex,
+        anchor_path: &SharedPath<Arc<OpPathElement>>,
+        new_group: NodeIndex,
+    ) -> Result<(), FederationError> {
+        let resolvable = self.locally_satisfiable_subset(key_conditions, source);
+        let covers_key = resolvable.as_ref().is_some_and(|subset| {
+            key_conditions
+                .selections
+                .values()
+                .all(|sel| subset.selections.contains_key(sel.key()))
+        });
+        if !covers_key {
+            return Err(FederationError::internal(format!(
+                "circular key conditions unsatisfiable at {}: {}",
+                source.type_pos.type_name(),
+                key_conditions,
+            )));
+        }
+        if let Some(resolvable) = &resolvable {
+            self.append_entity_inputs(state, anchor_fetch, anchor_path, Some(resolvable), source);
+            self.push_condition_pendings(state, pending, resolvable, new_group)?;
+        }
+        Ok(())
     }
 
     fn commit_intermediate_hops(

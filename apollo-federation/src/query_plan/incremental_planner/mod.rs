@@ -103,6 +103,7 @@ pub(crate) fn build_bulb_plan(
         inconsistent_abstract_types: parameters
             .abstract_types_with_inconsistent_runtime_types
             .clone(),
+        key_hops_in_flight: Default::default(),
     };
 
     let root_qg_node = parameters.head;
