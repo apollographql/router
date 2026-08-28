@@ -1,3 +1,45 @@
+//! Field-by-field query planner using BULB (Beam search Using Limited
+//! discrepancy Backtracking).
+//!
+//! The planner walks the operation one selection at a time, routing each
+//! field or inline fragment to a subgraph via the federated query graph.
+//! It replaces the traversal-based planner's all-at-once approach with an
+//! incremental one: each selection is a decision point, and BULB explores
+//! alternatives only where the greedy choice is demonstrably suboptimal.
+//!
+//! # Architecture
+//!
+//! The system is layered bottom-up:
+//!
+//! - [`bulb_search`]: Generic beam search engine parameterized by a
+//!   `BulbSearchSpace` trait. Knows nothing about federation.
+//!
+//! - [`shared_path`]: Immutable, structurally-shared path segments used
+//!   by the fetch graph to track where selections sit in the response.
+//!
+//! - [`fetch_graph`]: Mutable graph of fetch groups (subgraph calls)
+//!   with an undo log for checkpoint/rollback during search. Each node
+//!   is a fetch group; edges encode data dependencies.
+//!
+//! - [`field_routing`]: The `BulbSearchSpace` implementation. Routes
+//!   selections through the query graph, enumerating subgraph edges and
+//!   key hops as options, committing choices into the fetch graph, and
+//!   managing the pending-selection stack.
+//!
+//! - This module: entry point ([`build_bulb_plan`]) that seeds the
+//!   initial state from the operation root and materializes the
+//!   finished fetch graph into a `QueryPlan`.
+//!
+//! # Flow
+//!
+//! `build_bulb_plan` constructs a `FieldRoutingSearchSpace` and an
+//! initial `PlanState` (pending stack seeded from the operation root),
+//! then hands both to `bulb_search`. The search alternates between
+//! fast-forwarding (greedily committing single-option selections) and
+//! branching at multi-option decision points. When complete, the
+//! `FetchGraph` in the winning state is converted to a `QueryPlan` via
+//! the plan builder.
+
 pub mod bulb_search;
 pub(crate) mod fetch_graph;
 pub(crate) mod field_routing;
