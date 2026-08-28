@@ -326,7 +326,7 @@ impl JSONSelection {
         match get_connect_spec(&input) {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => Self::parse_span_v0_2(input),
             ConnectSpec::V0_3 => Self::parse_span_v0_3(input),
-            ConnectSpec::V0_4 => Self::parse_span_v0_4(input),
+            ConnectSpec::V0_4 | ConnectSpec::V0_5 => Self::parse_span_v0_4(input),
         }
     }
 
@@ -705,7 +705,7 @@ impl NamedSelection {
         match get_connect_spec(&input) {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => Self::parse_v0_2(input),
             ConnectSpec::V0_3 => Self::parse_v0_3(input),
-            ConnectSpec::V0_4 => Self::parse_v0_4(input),
+            ConnectSpec::V0_4 | ConnectSpec::V0_5 => Self::parse_v0_4(input),
         }
     }
 
@@ -1328,7 +1328,7 @@ impl PathList {
                     // a single struct in connect/v0.3, the ambiguity between
                     // single-key paths and field selections is no longer a
                     // problem, since they are now represented the same way.
-                    ConnectSpec::V0_3 | ConnectSpec::V0_4 => {
+                    ConnectSpec::V0_3 | ConnectSpec::V0_4 | ConnectSpec::V0_5 => {
                         let full_range = merge_ranges(key.range(), rest.range());
                         Ok((remainder, WithRange::new(Self::Key(key, rest), full_range)))
                     }
@@ -1369,7 +1369,7 @@ impl PathList {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => {
                 // The ? token was not introduced until connect/v0.3.
             }
-            ConnectSpec::V0_3 | ConnectSpec::V0_4 => {
+            ConnectSpec::V0_3 | ConnectSpec::V0_4 | ConnectSpec::V0_5 => {
                 if let Ok((suffix, question)) = ranged_span("?").parse(input.clone()) {
                     let (remainder, rest) = Self::parse_with_depth(suffix.clone(), depth + 1)?;
 
@@ -1696,7 +1696,9 @@ impl SubSelection {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 | ConnectSpec::V0_3 => {
                 Self::parse_naked_selections_legacy(input.clone())
             }
-            ConnectSpec::V0_4 => Self::parse_naked_selections_v0_4(input.clone()),
+            ConnectSpec::V0_4 | ConnectSpec::V0_5 => {
+                Self::parse_naked_selections_v0_4(input.clone())
+            }
         };
 
         match selections_result {
@@ -2293,11 +2295,10 @@ mod tests {
 
         assert_result_and_names(
             "hi: 'hello world'",
-            NamedSelection::field(
-                Some(Alias::new("hi")),
-                Key::quoted("hello world").into_with_range(),
-                None,
-            ),
+            NamedSelection {
+                prefix: NamingPrefix::Alias(Alias::new("hi")),
+                path: WithRange::new(LitExpr::String("hello world".to_string()), None),
+            },
             &["hi"],
         );
 
@@ -2353,22 +2354,54 @@ mod tests {
 
         assert_result_and_names(
             "leggo: 'my ego'",
-            NamedSelection::field(
-                Some(Alias::new("leggo")),
-                Key::quoted("my ego").into_with_range(),
-                None,
-            ),
+            NamedSelection {
+                prefix: NamingPrefix::Alias(Alias::new("leggo")),
+                path: WithRange::new(LitExpr::String("my ego".to_string()), None),
+            },
             &["leggo"],
         );
 
         assert_result_and_names(
             "'let go': 'my ego'",
+            NamedSelection {
+                prefix: NamingPrefix::Alias(Alias::quoted("let go")),
+                path: WithRange::new(LitExpr::String("my ego".to_string()), None),
+            },
+            &["let go"],
+        );
+    }
+
+    #[test]
+    fn test_aliased_quoted_string_value_v0_3() {
+        // In v0.3 and earlier, a quoted string after an alias with no trailing
+        // subselection is a key/field selection (`Key::quoted`), not a string
+        // literal — the `leggo`/`let go` cases in `test_named_selection` assert
+        // the v0.4 `LitExpr::String` reinterpretation. Pinned to V0_3 so bumping
+        // `ConnectSpec::latest()` can't silently drop this v0.3 coverage.
+        let spec = ConnectSpec::V0_3;
+
+        let (remainder, selection) =
+            NamedSelection::parse(new_span_with_spec("leggo: 'my ego'", spec)).unwrap();
+        assert!(span_is_all_spaces_or_comments(remainder));
+        assert_eq!(
+            selection.strip_ranges(),
+            NamedSelection::field(
+                Some(Alias::new("leggo")),
+                Key::quoted("my ego").into_with_range(),
+                None,
+            ),
+        );
+
+        let (remainder, selection) =
+            NamedSelection::parse(new_span_with_spec("'let go': 'my ego'", spec)).unwrap();
+        assert!(span_is_all_spaces_or_comments(remainder));
+        assert_eq!(
+            selection.strip_ranges(),
             NamedSelection::field(
                 Some(Alias::quoted("let go")),
                 Key::quoted("my ego").into_with_range(),
                 None,
             ),
-            &["let go"],
         );
     }
 
@@ -2592,6 +2625,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_path_selection(#[case] spec: ConnectSpec) {
         check_path_selection(
             spec,
@@ -2721,7 +2755,7 @@ mod tests {
             // `LitExpr::String` directly — no `PathList::Expr` wrap, since
             // that node is reserved for source `$(...)`. To look up a field
             // called `my ego`, users write `leggo: $.'my ego'` instead.
-            let leggo_selection = if matches!(spec, ConnectSpec::V0_4) {
+            let leggo_selection = if spec >= ConnectSpec::V0_4 {
                 NamedSelection {
                     prefix: NamingPrefix::Alias(Alias::new("leggo")),
                     path: WithRange::new(LitExpr::String("my ego".to_string()), None),
@@ -2889,6 +2923,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_path_selection_vars(#[case] spec: ConnectSpec) {
         check_path_selection(
             spec,
@@ -3307,6 +3342,22 @@ mod tests {
     fn test_error_snapshots_v0_4() {
         let spec = ConnectSpec::V0_4;
 
+        // The .data shorthand is no longer allowed, since it can be mistakenly
+        // parsed as a continuation of a previous selection. Instead, use $.data
+        // to achieve the same effect without ambiguity.
+        assert_debug_snapshot!(JSONSelection::parse_with_spec(".data", spec));
+
+        // If you want to mix a path selection with other named selections, the
+        // path selection must have a trailing subselection, to enforce that it
+        // returns an object with statically known keys, or be inlined/spread
+        // with a ... token.
+        assert_debug_snapshot!(JSONSelection::parse_with_spec("id $.object", spec));
+    }
+
+    #[test]
+    fn test_error_snapshots_v0_5() {
+        let spec = ConnectSpec::V0_5;
+
         // When this assertion fails, don't panic, but it's time to decide how
         // the next-next version should behave in these error cases (possibly
         // exactly the same).
@@ -3328,6 +3379,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_path_selection_at(#[case] spec: ConnectSpec) {
         check_path_selection(
             spec,
@@ -3387,6 +3439,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_expr_path_selections(#[case] spec: ConnectSpec) {
         fn check_simple_lit_expr(spec: ConnectSpec, input: &str, expected: LitExpr) {
             check_path_selection(
@@ -3499,6 +3552,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_path_methods(#[case] spec: ConnectSpec) {
         check_path_selection(
             spec,
@@ -4917,7 +4971,7 @@ mod tests {
                 },
                 _ => panic!(
                     "Expected variable at start of path, got: {:?}",
-                    &ext_var.path
+                    ext_var.path
                 ),
             };
         }

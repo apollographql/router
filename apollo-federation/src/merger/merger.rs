@@ -12,6 +12,7 @@ use apollo_compiler::Schema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
+use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
@@ -1890,7 +1891,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             self.error_reporter.report_mismatch_hint(
                 HintCode::InconsistentEntity,
                 format!("Type \"{}\" is declared as an entity (has a @key applied) in some but not all defining subgraphs: ",
-                    &obj.type_name,
+                    obj.type_name,
                 ),
                 obj,
                 &sources,
@@ -1988,6 +1989,8 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     ) -> Result<(), FederationError> {
         let mut fields_to_insert: IndexMap<ObjectFieldDefinitionPosition, FieldDefinition> =
             IndexMap::default();
+        let mut external_fields_to_update: IndexMap<ObjectFieldDefinitionPosition, DirectiveList> =
+            IndexMap::default();
 
         let access_control_directive_names: IndexSet<Name> = self
             .access_control_directives_in_supergraph
@@ -2006,9 +2009,56 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                                 type_name: name.clone(),
                                 field_name: intf_field_name.clone(),
                             };
-                            if !object.fields.contains_key(intf_field_name)
-                                && !fields_to_insert.contains_key(&candidate_field)
+
+                            // check if field was already processed
+                            if fields_to_insert.contains_key(&candidate_field)
+                                || external_fields_to_update.contains_key(&candidate_field)
                             {
+                                continue;
+                            }
+
+                            if let Some(obj_field) = object.fields.get(intf_field_name) {
+                                // An implementation may locally declare a field as `@external` purely to reference it in
+                                // a `@requires` clause, in which case it already exists on the object so it won't be
+                                // propagated from interface object. But that field's only "real" definition is the abstracting
+                                // `@interfaceObject` field, so directives that only apply there (e.g. `@tag`) still need
+                                // to be propagated onto it.
+
+                                // we need to check if field is fully @external i.e. it is defined in all subgraphs as @external
+                                if !obj_field.directives.is_empty()
+                                    && obj_field.directives.iter().all(|d| {
+                                        self.join_spec_definition
+                                            .field_directive_arguments(d)
+                                            .is_ok_and(|args| args.external.is_some_and(|e| e))
+                                    })
+                                {
+                                    // NOTE: This is a sanity check as this field HAS TO be provided by
+                                    // @interfaceObject. Otherwise, it would result in invalid graph as
+                                    // we wouldn't be able to resolve a field that is external everywhere
+                                    // (we already validated it when merging field).
+                                    if self.is_field_provided_by_an_interface_object(
+                                        intf_field_name,
+                                        intf,
+                                    ) {
+                                        let copied_directives = intf_field
+                                            .directives
+                                            .iter()
+                                            .filter(|d| {
+                                                // filter access control directives for now as they will be merged later one
+                                                !access_control_directive_names.contains(&d.name)
+                                                // filter join__field directives as they don't have to be added
+                                                && !self
+                                                .join_spec_definition
+                                                .is_spec_directive_name(&self.merged, &d.name)
+                                                .unwrap_or(false)
+                                            })
+                                            .cloned()
+                                            .collect();
+                                        external_fields_to_update
+                                            .insert(candidate_field, copied_directives);
+                                    }
+                                }
+                            } else {
                                 // Note that we don't blindly add the field yet, that would be incorrect in many cases (and we
                                 // have a specific validation that return a user-friendly error in such incorrect cases, see
                                 // `postMergeValidations`). We must first check that there is some subgraph that implement
@@ -2092,6 +2142,27 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 &dest.clone().into(),
                 &FieldMergeContext::new(sources.keys().copied()),
             )?;
+        }
+
+        for (external_field, directives_to_copy) in external_fields_to_update {
+            trace!("Propagating @interfaceObject directives onto external field {external_field}");
+            let dest_position: DirectiveTargetPosition = external_field.clone().into();
+            external_field
+                .directives_mut(self.merged.schema_mut())?
+                .extend(directives_to_copy);
+
+            let additional_sources = self.access_control_additional_sources()?;
+            let ac_directives_to_merge: Vec<_> = self
+                .access_control_directives_in_supergraph
+                .iter()
+                .filter(|(ac_name, _)| {
+                    additional_sources.contains_key(&format!("{dest_position}_{ac_name}"))
+                })
+                .map(|(_, name_in_supergraph)| name_in_supergraph.clone())
+                .collect();
+            for name in &ac_directives_to_merge {
+                self.merge_applied_directive(name, &Default::default(), &dest_position)?;
+            }
         }
 
         Ok(())
@@ -2328,6 +2399,9 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         }
     }
 
+    /// Returns whether the second type is a strict subtype of the first type. This code resembles
+    /// [Type::is_assignable_to], except it (1) does not allow strict equality and (2) allows for
+    /// the named types to be subtypes.
     pub(in crate::merger) fn is_strict_subtype(
         &self,
         potential_supertype: &Type,
@@ -2340,54 +2414,58 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         // - NonNullablePropagation: NonNull T is subtype of NonNull U if T is subtype of U
         // - ListUpgrade is NOT supported (was excluded by default)
 
-        match (potential_subtype, potential_supertype) {
-            // -------- List & NonNullList --------
-            // ListPropagation: [T] is subtype of [U] if T is subtype of U
-            (Type::List(inner_sub), Type::List(inner_super)) => {
-                self.is_strict_subtype(inner_super, inner_sub)
-            }
-            // NonNullableDowngrade: [T]! is subtype of [T]
-            (Type::NonNullList(inner_sub), Type::List(inner_super)) if inner_sub == inner_super => {
-                Ok(true)
-            }
-            // NonNullablePropagation: [T]! is subtype of [U]! if T is subtype of U
-            (Type::NonNullList(inner_sub), Type::NonNullList(inner_super)) => {
-                self.is_strict_subtype(inner_super, inner_sub)
-            }
-            // NonNullablePropagation + NonNullableDowngrade: [T]! is subtype of [U] if T is subtype of U
-            (Type::NonNullList(inner_sub), Type::List(inner_super)) => {
-                self.is_strict_subtype(inner_super, inner_sub)
-            }
-
-            // Anything else with list on the left is not a strict subtype
-            (Type::List(_), _) | (Type::NonNullList(_), _) => Ok(false),
-
-            // -------- Named & NonNullNamed --------
-            // Same named type => not strict subtype
-            (Type::Named(a), Type::Named(b)) | (Type::Named(a), Type::NonNullNamed(b))
-                if a == b =>
-            {
+        match (potential_supertype, potential_subtype) {
+            // A nullable type cannot be a subtype of a non-nullable type.
+            (Type::NonNullNamed(_) | Type::NonNullList(_), Type::Named(_) | Type::List(_)) => {
                 Ok(false)
             }
-            (Type::NonNullNamed(a), Type::NonNullNamed(b)) if a == b => Ok(false),
-
-            // NonNull downgrade: T! ⊑ T
-            (Type::NonNullNamed(sub), Type::Named(super_)) if sub == super_ => Ok(true),
-
-            // Interface/Union relationships (includes downgrade handled above)
-            (Type::Named(sub), Type::Named(super_))
-            | (Type::Named(sub), Type::NonNullNamed(super_))
-            | (Type::NonNullNamed(sub), Type::Named(super_))
-            | (Type::NonNullNamed(sub), Type::NonNullNamed(super_)) => {
-                self.is_named_type_subtype(super_, sub)
+            // A list type cannot be a subtype of a non-list type.
+            (Type::Named(_) | Type::NonNullNamed(_), Type::List(_) | Type::NonNullList(_)) => {
+                Ok(false)
             }
-
-            // ListUpgrade not supported; any other combination is not strict
-            _ => Ok(false),
+            // A non-list type cannot be a subtype of a list type (no list upgrades).
+            (Type::List(_) | Type::NonNullList(_), Type::Named(_) | Type::NonNullNamed(_)) => {
+                Ok(false)
+            }
+            // A nullable named type can be a subtype of another nullable named type if the inner
+            // types are strict subtypes.
+            (Type::Named(potential_supertype), Type::Named(potential_subtype)) => {
+                self.is_named_type_strict_subtype(potential_supertype, potential_subtype)
+            }
+            // A non-null named type can be a subtype of another non-null named type if the inner
+            // types are strict subtypes.
+            (Type::NonNullNamed(potential_supertype), Type::NonNullNamed(potential_subtype)) => {
+                self.is_named_type_strict_subtype(potential_supertype, potential_subtype)
+            }
+            // A nullable list type can be a subtype of another nullable list type if the inner
+            // types are strict subtypes.
+            (Type::List(potential_supertype), Type::List(potential_subtype)) => {
+                self.is_strict_subtype(potential_supertype, potential_subtype)
+            }
+            // A non-null list type can be a subtype of another non-null list type if the inner
+            // types are strict subtypes.
+            (Type::NonNullList(potential_supertype), Type::NonNullList(potential_subtype)) => {
+                self.is_strict_subtype(potential_supertype, potential_subtype)
+            }
+            // A non-null named type can be a subtype of a nullable named type if the inner types
+            // are subtypes.
+            (Type::Named(potential_supertype), Type::NonNullNamed(potential_subtype)) => {
+                Ok(potential_supertype == potential_subtype
+                    || self.is_named_type_strict_subtype(potential_supertype, potential_subtype)?)
+            }
+            // A non-null list type can be a subtype of a nullable list type if the inner types are
+            // subtypes.
+            (Type::List(potential_supertype), Type::NonNullList(potential_subtype)) => {
+                Ok(potential_supertype == potential_subtype
+                    || self.is_strict_subtype(potential_supertype, potential_subtype)?)
+            } // You'll notice we didn't need a "_ => Ok(false)" at the end here. That's because the
+              // compiler can prove that the above match arms cover all cases. If you ever change
+              // this code, try to keep it that way.
         }
     }
 
-    fn is_named_type_subtype(
+    /// Returns whether the second named type is a strict subtype of the first named type.
+    fn is_named_type_strict_subtype(
         &self,
         potential_supertype: &NamedType,
         potential_subtype: &NamedType,

@@ -1,4 +1,6 @@
 use std::fmt::Write as _;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::iter;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -17,12 +19,17 @@ use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
 use itertools::Itertools;
-use multimap::MultiMap;
+use petgraph::adj::List as AdjList;
+use petgraph::algo::tred::dag_transitive_reduction_closure;
+use petgraph::graph::IndexType;
 use petgraph::stable_graph::EdgeIndex;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::stable_graph::StableDiGraph;
 use petgraph::visit::EdgeRef;
+use petgraph::visit::IntoEdgeReferences;
+use petgraph::visit::IntoNeighbors;
 use petgraph::visit::IntoNodeReferences;
+use petgraph::visit::NodeIndexable;
 use serde::Serialize;
 
 use super::FetchDataKeyRenamer;
@@ -79,6 +86,7 @@ use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
+use crate::utils::MultiIndexMap;
 use crate::utils::iter_into_single_item;
 use crate::utils::logging::snapshot;
 
@@ -176,6 +184,11 @@ pub(crate) struct FetchDependencyGraphNode {
     /// As query plan execution runs, it accumulates fetch data into a response object. This is the
     /// path at which to merge in the data for this particular fetch.
     merge_at: Option<Vec<FetchDataPathElement>>,
+    /// Precomputed hash of (subgraph_name, merge_at, defer_ref) for fast-reject in
+    /// `can_merge_sibling_in`. Not used in `can_merge_grand_child_in` because that
+    /// method compares fields from mixed nodes (child vs parent).
+    #[serde(skip)]
+    merge_key_hash: u64,
     /// The fetch ID generation, if one is necessary (used when handling `@defer`).
     ///
     /// This can be treated as an Option using `OnceLock::get()`.
@@ -191,6 +204,18 @@ pub(crate) struct FetchDependencyGraphNode {
     /// If true, then we skip an expensive computation during `is_useless()`. (This partially
     /// caches that computation.)
     is_known_useful: bool,
+}
+
+fn compute_merge_key_hash(
+    subgraph_name: &str,
+    merge_at: &Option<Vec<FetchDataPathElement>>,
+    defer_ref: &Option<DeferRef>,
+) -> u64 {
+    let mut hasher = ahash::AHasher::default();
+    subgraph_name.hash(&mut hasher);
+    merge_at.hash(&mut hasher);
+    defer_ref.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Safely generate IDs for fetch dependency nodes without mutable access.
@@ -610,10 +635,9 @@ impl FetchDependencyGraphNodePath {
 
         let mut res: IndexSet<Name> = self
             .possible_types
-            .clone()
-            .into_iter()
+            .iter()
             .map(|pt| {
-                let field = CompositeTypeDefinitionPosition::try_from(self.schema.get_type(&pt)?)?
+                let field = CompositeTypeDefinitionPosition::try_from(self.schema.get_type(pt)?)?
                     .field(element.name().clone())?
                     .get(self.schema.schema())?;
                 let typ = self
@@ -784,6 +808,7 @@ impl FetchDependencyGraph {
             .schema_by_source(&subgraph_name)?
             .clone();
         self.on_modification();
+        let merge_key_hash = compute_merge_key_hash(&subgraph_name, &merge_at, &defer_ref);
         Ok(self.graph.add_node(Arc::new(FetchDependencyGraphNode {
             subgraph_name,
             root_kind,
@@ -794,6 +819,7 @@ impl FetchDependencyGraph {
                 .then(|| Arc::new(FetchInputs::empty(self.supergraph_schema.clone()))),
             input_rewrites: Default::default(),
             merge_at,
+            merge_key_hash,
             id: OnceLock::new(),
             defer_ref,
             cached_cost: None,
@@ -1194,31 +1220,49 @@ impl FetchDependencyGraph {
     }
 
     /// Do a transitive reduction (https://en.wikipedia.org/wiki/Transitive_reduction) of the graph
-    /// We keep it simple and do a DFS from each vertex. The complexity is not amazing, but dependency
-    /// graphs between fetch nodes will almost surely never be huge and query planning performance
-    /// is not paramount so this is almost surely "good enough".
+    /// using petgraph's Habib-Morvan-Rampon algorithm.
+    ///
+    /// `StableDiGraph` does not implement `NodeCompactIndexable`, so we build
+    /// the toposorted adjacency list manually using a `Vec` to map stable
+    /// `NodeIndex` values to dense toposort ranks.
     fn reduce(&mut self) {
         if self.is_reduced {
             return;
         }
 
-        // Two phases for mutability reasons: first all redundant edges coming out of all nodes are
-        // collected and then they are all removed.
-        let mut redundant_edges = IndexSet::default();
-        for node_index in self.graph.node_indices() {
-            self.collect_redundant_edges(node_index, &mut redundant_edges);
-        }
+        let Some((adj, tred_index_of)) = to_toposorted_adjacency_list(&self.graph) else {
+            return;
+        };
+        let (tred, _) = dag_transitive_reduction_closure(&adj);
+
+        let edge_in_reduction = |source: NodeIndex, target: NodeIndex| {
+            let src_tred_idx = tred_index_of[source.index()];
+            let tgt_tred_idx = tred_index_of[target.index()];
+            tred.neighbors(petgraph::adj::NodeIndex::new(src_tred_idx))
+                .any(|n| n.index() == tgt_tred_idx)
+        };
 
         // Remember defer-crossing edges before they're removed, so we can
         // restore them as defer dependencies later.
-        self.record_reduced_defer_edges(&redundant_edges);
+        let mut modified = false;
+        for edge in self.graph.edge_references() {
+            if !edge_in_reduction(edge.source(), edge.target()) {
+                if self.graph[edge.source()].defer_ref != self.graph[edge.target()].defer_ref {
+                    self.reduced_defer_edges
+                        .push((edge.source(), edge.target()));
+                }
+                modified = true;
+            }
+        }
 
         // PORT_NOTE: JS version calls `FetchGroup.removeChild`, which calls onModification.
-        if !redundant_edges.is_empty() {
+        if modified {
             self.on_modification();
-        }
-        for edge in redundant_edges {
-            self.graph.remove_edge(edge);
+            self.graph
+                .retain_edges(|graph, edge_idx| match graph.edge_endpoints(edge_idx) {
+                    Some((source, target)) => edge_in_reduction(source, target),
+                    None => false,
+                });
         }
 
         self.is_reduced = true;
@@ -1602,8 +1646,8 @@ impl FetchDependencyGraph {
             // the `merge_sibling_in` would shrink `children_nodes` dynamically. I found it easier
             // to reason about it the other way around by incrementing `i` when it's merged into
             // `j` without modifying `children_nodes`.
-            for (i, i_node_index) in children_nodes.iter().cloned().enumerate() {
-                for (_j, j_node_index) in children_nodes.iter().cloned().enumerate().skip(i + 1) {
+            for (i, i_node_index) in children_nodes.iter().copied().enumerate() {
+                for (_j, j_node_index) in children_nodes.iter().copied().enumerate().skip(i + 1) {
                     if self.can_merge_sibling_in(j_node_index, i_node_index)? {
                         // Merge node `i` into node `j`.
                         // In theory, we can merge in any direction. But, we merge i into j,
@@ -1669,9 +1713,15 @@ impl FetchDependencyGraph {
         // merge an ancestor node into a descendant node. JS version's insertion order is almost
         // topologically sorted, thanks to the way the graph is constructed from the root. However,
         // it's not exactly topologically sorted. So, it's unclear whether that is 100% safe.
-        // Note: MultiMap preserves insertion order for values of the same key. Thus, the values
-        // of the same key in `by_subgraphs` will be topologically sorted as well.
-        let mut by_subgraphs = MultiMap::new();
+        // Note: `by_subgraphs` must be an insertion-ordered map. A HashMap-backed map here
+        // iterates its keys in a `RandomState`-random order per planning call, which executes
+        // the per-key merges below in a random across-key order; the merge order changes edge
+        // insertion order and merge outcomes downstream, producing nondeterministic plan shapes
+        // (differing `_entities` type-condition batching) across identical calls.
+        // `MultiIndexMap` preserves insertion order for both keys and the values of each key:
+        // keys are inserted in topological-sort order, and values pushed under the same key
+        // inherit that order too, so each key's values remain topologically sorted as well.
+        let mut by_subgraphs = MultiIndexMap::new();
         let sorted_nodes = petgraph::algo::toposort(&self.graph, None)
             .map_err(|_| FederationError::internal("Failed to sort nodes due to cycle(s)"))?;
         for node_index in sorted_nodes {
@@ -2252,9 +2302,32 @@ impl FetchDependencyGraph {
         let parent_relation = self.parent_relation(child_id, node_id);
 
         // we compare the subgraph names last because on average it improves performance
-        Ok(parent_relation.is_some_and(|r| r.path_in_parent.is_some())
+        if !(parent_relation.is_some_and(|r| r.path_in_parent.is_some())
             && node.defer_ref == child.defer_ref
             && node.subgraph_name == child.subgraph_name)
+        {
+            return Ok(false);
+        }
+
+        // `child` may have other parents besides `node_id` -- for instance, a node created to
+        // satisfy `child`'s own `@requires`. Merging `child` into `node_id` collapses `child`'s
+        // selection into `node_id`'s, which silently drops the dependency edge from any other
+        // parent unless `node_id` already (transitively) depends on it. Without this check, an
+        // unsatisfied `@requires` on `child` can be merged away entirely (RH-1396).
+        //
+        // Note this is conservative: some of those other parents may just be fetching `@key`
+        // fields (potentially a compound `@key`) for the very subgraph jump this merge would
+        // remove, in which case merging would still be safe and this rejects an optimization we
+        // could otherwise make. There's no cheap way to distinguish that case from a genuine
+        // unsatisfied dependency today, and it's a niche case -- plan correctness matters more
+        // than plan optimality here, so we accept the missed optimization.
+        for other_parent_id in self.parents_of(child_id) {
+            if other_parent_id != node_id && !self.is_descendant_of(node_id, other_parent_id) {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 
     /// We only allow merging sibling on the same subgraph, same "merge_at" and when the common parent is their only parent:
@@ -2290,8 +2363,10 @@ impl FetchDependencyGraph {
             return Ok(false);
         };
 
-        // we compare the subgraph names last because on average it improves performance
-        Ok(node.merge_at == sibling.merge_at
+        // Hash check rejects mismatched merge keys without deep Vec comparison.
+        // We compare the subgraph names last because on average it improves performance.
+        Ok(node.merge_key_hash == sibling.merge_key_hash
+            && node.merge_at == sibling.merge_at
             && own_parent_id == sibling_parent_id
             && node.defer_ref == sibling.defer_ref
             && node.subgraph_name == sibling.subgraph_name)
@@ -3147,23 +3222,16 @@ impl FetchDependencyGraphNode {
     }
 
     // PORT_NOTE: In JS version, this value is memoized on the node struct.
-    fn subgraph_and_merge_at_key(&self) -> Option<String> {
-        // PORT_NOTE: In JS version, this hash value is defined as below.
-        // ```
-        // hasInputs ? `${toValidGraphQLName(subgraphName)}-${mergeAt?.join('::') ?? ''}` : undefined,
-        // ```
-        // TODO: We could use a numeric hash key in Rust, instead of a string key as done in JS.
+    // Uses a numeric hash instead of the JS string key to avoid per-node
+    // string allocation + formatting. Hash collisions are safe because the
+    // caller (merge_fetches_with_same_subgraph_and_merge_at) does a full
+    // equality check via has_equal_inputs within each bucket.
+    fn subgraph_and_merge_at_key(&self) -> Option<u64> {
         self.inputs.as_ref()?;
-        let subgraph_name = &self.subgraph_name;
-        let merge_at_str = match self.merge_at {
-            Some(ref merge_at) => merge_at
-                .iter()
-                .map(|m| m.to_string())
-                .collect::<Vec<_>>()
-                .join("::"),
-            None => "".to_string(),
-        };
-        Some(format!("{subgraph_name}-{merge_at_str}"))
+        let mut hasher = ahash::AHasher::default();
+        self.subgraph_name.hash(&mut hasher);
+        self.merge_at.hash(&mut hasher);
+        Some(hasher.finish())
     }
 
     fn add_context_renamer(&mut self, renamer: FetchDataKeyRenamer) {
@@ -3243,6 +3311,43 @@ impl FetchDependencyGraphNode {
         }
         Ok(())
     }
+}
+
+/// Toposort a `StableDiGraph` and convert it into a dense `petgraph::adj::List`
+/// suitable for `dag_transitive_reduction_closure`.
+///
+/// Returns `None` if the graph contains a cycle. Otherwise returns the
+/// adjacency list and a rank-of lookup (`tred_index_of[node.index()] → toposort
+/// rank`) so the caller can map results back to `NodeIndex` values.
+fn to_toposorted_adjacency_list<N, E>(
+    graph: &StableDiGraph<N, E>,
+) -> Option<(AdjList<(), u32>, Vec<usize>)> {
+    let sorted = petgraph::algo::toposort(graph, None).ok()?;
+    let node_count = sorted.len();
+    let node_bound = graph.node_bound();
+
+    let mut tred_index_of: Vec<usize> = vec![usize::MAX; node_bound];
+    for (rank, &node) in sorted.iter().enumerate() {
+        tred_index_of[node.index()] = rank;
+    }
+
+    let mut adj: AdjList<(), u32> = AdjList::with_capacity(node_count);
+    for _ in 0..node_count {
+        adj.add_node();
+    }
+    for &node in &sorted {
+        let node_tred_idx = tred_index_of[node.index()];
+        for parent in graph.neighbors_directed(node, petgraph::Direction::Incoming) {
+            let parent_tred_idx = tred_index_of[parent.index()];
+            adj.add_edge(
+                petgraph::adj::NodeIndex::new(parent_tred_idx),
+                petgraph::adj::NodeIndex::new(node_tred_idx),
+                (),
+            );
+        }
+    }
+
+    Some((adj, tred_index_of))
 }
 
 fn operation_for_entities_fetch(
@@ -3891,14 +3996,28 @@ fn compute_nodes_for_key_resolution<'a>(
         // then we can infer the path of `new_node_id` into that condition node
         // by looking at the paths of each to their common parent.
         // But otherwise, we cannot have a proper "path in parent".
+        //
+        // Note that the conditions are resolved starting from the very position of
+        // `new_node_id` (see `compute_nodes_for_tree` above, which is passed
+        // `stack_item.node_path`), so `condition_node`'s path into the common parent is always
+        // `path_in_parent` possibly followed by a deeper suffix. A non-empty suffix means
+        // `condition_node` sits *below* `new_node_id` in the data, and so there is no downward
+        // path from `condition_node` to `new_node_id`: the suffix describes the reverse
+        // relation and must not be used here. Only equal paths give us a usable (empty) path.
+        //
+        // Note that this is stricter than it strictly needs to be: if `condition_path` were a
+        // *prefix* of `path_in_parent`, then `condition_node` would sit above `new_node_id` and
+        // `path_in_parent.strip_prefix(condition_path)` would be a usable downward path. That case
+        // is not known to be reachable and was not handled before either, so we leave it out.
         let mut path = None;
         let mut iter = dependency_graph.parents_relations_of(condition_node);
         if let (Some(condition_node_parent), None) = (iter.next(), iter.next()) {
             // There is exactly one parent
             if condition_node_parent.parent_node_id == stack_item.node_id
                 && let Some(condition_path) = condition_node_parent.path_in_parent
+                && condition_path == *path_in_parent
             {
-                path = condition_path.strip_prefix(path_in_parent).map(Arc::new)
+                path = Some(Arc::new(OpPath::default()))
             }
         }
         drop(iter);
@@ -4898,6 +5017,13 @@ fn handle_conditions_tree(
                         unmerged_node_ids.push(created_node_id);
                     }
                 }
+            } else {
+                // Without a path into the parent, we cannot even evaluate the "merge into the
+                // grand parent" optimization, so none of the created nodes can be merged. They
+                // must still all be reported as created: they fetch the condition fields that the
+                // post-@requires node depends on, and dropping them here would lose that
+                // dependency and let the @requires be resolved before its conditions are fetched.
+                unmerged_node_ids.extend(newly_created_node_ids);
             }
         }
 
@@ -4967,9 +5093,17 @@ fn create_post_requires_node(
     // aligned with the JS query planner. This could change in the future though, to permit simpler
     // handling and further optimization. (There's also some arguably buggy behavior in this
     // function we ought to resolve in the future.)
+    // Note that we also require a path into the parent: relocating the @requires into the parent
+    // is only possible if we know where in the parent the current node applies. Without it there is
+    // nothing to optimize, and we use the general handling below (which does not need that path).
     let parent_if_tried_optimizing =
         match iter_into_single_item(dependency_graph.parents_relations_of(fetch_node_id)) {
-            Some(parent) if fetch_node_path.path_in_node.has_only_fragments() => Some(parent),
+            Some(parent)
+                if fetch_node_path.path_in_node.has_only_fragments()
+                    && parent.path_in_parent.is_some() =>
+            {
+                Some(parent)
+            }
             _ => None,
         };
 
@@ -5214,7 +5348,7 @@ fn inputs_for_require(
             |_| {
                 Err(FederationError::internal(format!(
                     "Type {} should exist in the supergraph and be a composite type",
-                    &input_type_name
+                    input_type_name
                 )))
             },
             Ok,

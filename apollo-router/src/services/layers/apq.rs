@@ -90,6 +90,7 @@ impl APQLayer {
     /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
     /// (using an `Err()` return value).
     /// The user of this function is responsible for propagating short-circuiting.
+    #[expect(clippy::result_large_err, reason = "err is smaller than ok")]
     pub(crate) async fn supergraph_request(
         &self,
         request: SupergraphRequest,
@@ -110,6 +111,7 @@ impl APQLayer {
 /// If the request contains only a hash, attempts to read the query from the APQ cache, and
 /// populates the query string in the request body.
 /// The request is rejected if the hash is not present in the cache.
+#[expect(clippy::result_large_err, reason = "err is smaller than ok")]
 async fn apq_request(
     cache: &DeduplicatingCache<String, String>,
     mut request: SupergraphRequest,
@@ -205,6 +207,7 @@ pub(crate) fn calculate_hash_for_query(query: &str) -> String {
 }
 
 /// Used when APQ is disabled. Rejects requests that try to use a persisted query hash anyways.
+#[expect(clippy::result_large_err, reason = "err is smaller than ok")]
 async fn disabled_apq_request(
     request: SupergraphRequest,
 ) -> Result<SupergraphRequest, SupergraphResponse> {
@@ -251,8 +254,8 @@ mod apq_tests {
     use crate::assert_error_eq_ignoring_id;
     use crate::error::Error;
     use crate::services::router::ClientRequestAccepts;
-    use crate::services::router::service::from_supergraph_mock_callback;
-    use crate::services::router::service::from_supergraph_mock_callback_and_configuration;
+    use crate::services::router::service::from_supergraph_mock;
+    use crate::services::router::service::from_supergraph_mock_with_configuration;
 
     #[tokio::test]
     async fn it_works() {
@@ -265,30 +268,36 @@ mod apq_tests {
             .extension_code("PERSISTED_QUERY_NOT_FOUND")
             .build();
 
-        let mut router_service = from_supergraph_mock_callback(move |req| {
-            let body = req.supergraph_request.body();
-            let as_json = body.extensions.get("persistedQuery").unwrap();
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+        let router_driver = tokio::spawn(async move {
+            while let Some((req, responder)) = router_handle.next_request().await {
+                let body = req.supergraph_request.body();
+                let as_json = body.extensions.get("persistedQuery").unwrap();
 
-            let persisted_query: PersistedQuery =
-                serde_json_bytes::from_value(as_json.clone()).unwrap();
+                let persisted_query: PersistedQuery =
+                    serde_json_bytes::from_value(as_json.clone()).unwrap();
 
-            assert_eq!(persisted_query.sha256hash, hash2);
+                assert_eq!(persisted_query.sha256hash, hash2);
 
-            assert!(body.query.is_some());
+                assert!(body.query.is_some());
 
-            let hash = hex::decode(hash2.as_bytes()).unwrap();
+                let hash = hex::decode(hash2.as_bytes()).unwrap();
 
-            assert!(query_matches_hash(
-                body.query.clone().unwrap().as_str(),
-                hash.as_slice()
-            ));
+                assert!(query_matches_hash(
+                    body.query.clone().unwrap().as_str(),
+                    hash.as_slice()
+                ));
 
-            Ok(SupergraphResponse::fake_builder()
-                .context(req.context)
-                .build()
-                .expect("expecting valid request"))
-        })
-        .await;
+                responder.send_response(
+                    SupergraphResponse::fake_builder()
+                        .context(req.context)
+                        .build()
+                        .expect("expecting valid request"),
+                );
+            }
+        });
+        let mut router_service = from_supergraph_mock(router_mock).await;
 
         let persisted = json!({
             "version" : 1,
@@ -374,6 +383,8 @@ mod apq_tests {
 
         // the cache control header shouldn't have been tampered with
         assert!(apq_response.response.headers().get(CACHE_CONTROL).is_none());
+        drop(router_service);
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
@@ -387,23 +398,29 @@ mod apq_tests {
             .extension_code("PERSISTED_QUERY_NOT_FOUND")
             .build();
 
-        let mut router_service = from_supergraph_mock_callback(move |req| {
-            let body = req.supergraph_request.body();
-            let as_json = body.extensions.get("persistedQuery").unwrap();
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+        let router_driver = tokio::spawn(async move {
+            while let Some((req, responder)) = router_handle.next_request().await {
+                let body = req.supergraph_request.body();
+                let as_json = body.extensions.get("persistedQuery").unwrap();
 
-            let persisted_query: PersistedQuery =
-                serde_json_bytes::from_value(as_json.clone()).unwrap();
+                let persisted_query: PersistedQuery =
+                    serde_json_bytes::from_value(as_json.clone()).unwrap();
 
-            assert_eq!(persisted_query.sha256hash, hash2);
+                assert_eq!(persisted_query.sha256hash, hash2);
 
-            assert!(body.query.is_some());
+                assert!(body.query.is_some());
 
-            Ok(SupergraphResponse::fake_builder()
-                .context(req.context)
-                .build()
-                .expect("expecting valid request"))
-        })
-        .await;
+                responder.send_response(
+                    SupergraphResponse::fake_builder()
+                        .context(req.context)
+                        .build()
+                        .expect("expecting valid request"),
+                );
+            }
+        });
+        let mut router_service = from_supergraph_mock(router_mock).await;
 
         let persisted = json!({
             "version" : 1,
@@ -502,6 +519,8 @@ mod apq_tests {
             .unwrap();
 
         assert_error_eq_ignoring_id!(expected_apq_miss_error, second_apq_error.errors[0]);
+        drop(router_service);
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[test]
@@ -538,16 +557,20 @@ mod apq_tests {
         let mut config = Configuration::default();
         config.apq.enabled = false;
 
-        let mut router_service = from_supergraph_mock_callback_and_configuration(
-            move |req| {
-                Ok(SupergraphResponse::fake_builder()
-                    .context(req.context)
-                    .build()
-                    .expect("expecting valid request"))
-            },
-            Arc::new(config),
-        )
-        .await;
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+        let router_driver = tokio::spawn(async move {
+            while let Some((req, responder)) = router_handle.next_request().await {
+                responder.send_response(
+                    SupergraphResponse::fake_builder()
+                        .context(req.context)
+                        .build()
+                        .expect("expecting valid request"),
+                );
+            }
+        });
+        let mut router_service =
+            from_supergraph_mock_with_configuration(router_mock, Arc::new(config)).await;
 
         let persisted = json!({
             "version" : 1,
@@ -631,6 +654,8 @@ mod apq_tests {
             .unwrap();
 
         assert!(without_apq_graphql_response.errors.is_empty());
+        drop(router_service);
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     fn new_context() -> Context {

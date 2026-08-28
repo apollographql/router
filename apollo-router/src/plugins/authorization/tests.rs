@@ -1,8 +1,12 @@
+use std::sync::Arc;
+use std::sync::Mutex;
+
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use regex::Regex;
 use serde_json_bytes::json;
+use tokio::task::JoinHandle;
 use tower::ServiceExt;
 
 use crate::Context;
@@ -10,8 +14,7 @@ use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::graphql;
 use crate::plugin::test::MockSubgraph;
-use crate::plugin::test::MockSubgraphService;
-use crate::plugins::authorization::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::router;
 use crate::services::router::body;
@@ -1088,6 +1091,8 @@ type Organization
 async fn cache_key_metadata() {
     let query = "query { currentUser { id name phone } }";
 
+    let drivers = Arc::new(Mutex::new(Vec::<JoinHandle<()>>::new()));
+    let drivers_clone = drivers.clone();
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
             "include_subgraph_errors": {
@@ -1101,10 +1106,11 @@ async fn cache_key_metadata() {
         }))
         .unwrap()
         .schema(CACHE_KEY_SCHEMA)
-        .subgraph_hook(|_name, _service| {
-            let mut mock_subgraph_service = MockSubgraphService::new();
-            mock_subgraph_service.expect_call().times(1).returning(
-                move |req: subgraph::Request| {
+        .subgraph_hook(move |_name, _service| {
+            let (mock, mut handle) =
+                tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+            let driver = tokio::spawn(async move {
+                while let Some((req, responder)) = handle.next_request().await {
                     assert_eq!(
                         *req.authorization,
                         CacheKeyMetadata {
@@ -1113,22 +1119,23 @@ async fn cache_key_metadata() {
                             policies: vec![]
                         }
                     );
-
-                    Ok(subgraph::Response::fake_builder()
-                        .context(req.context)
-                        .data(serde_json::json! {{
-
+                    // name will be null in the response: it requires @policy(["name"]) which we don't hold
+                    responder.send_response(
+                        subgraph::Response::fake_builder()
+                            .context(req.context)
+                            .data(serde_json::json! {{
                                 "currentUser": {
                                     "id": 1,
-                                    "name": "A", // This will be filtered because we don't have the policy
+                                    "name": "A",
                                     "phone": "1234"
                                 }
-
-                        }})
-                        .build())
-                },
-            );
-            mock_subgraph_service.boxed()
+                            }})
+                            .build(),
+                    );
+                }
+            });
+            drivers_clone.lock().unwrap().push(driver);
+            mock.boxed()
         })
         .build_router()
         .await
@@ -1155,6 +1162,10 @@ async fn cache_key_metadata() {
     let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
 
     insta::assert_json_snapshot!(response);
+
+    for driver in Arc::try_unwrap(drivers).unwrap().into_inner().unwrap() {
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
 }
 
 // Verifies that the refactored typed config parsing produces the same values as the
