@@ -1162,6 +1162,7 @@ fn t_pending(
             dependent,
             depth: 1,
         }),
+        provides_anchor: None,
     }
 }
 
