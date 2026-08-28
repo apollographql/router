@@ -88,3 +88,30 @@ The router's default process-wide rustls `CryptoProvider` is now `aws-lc-rs` ins
 - If your binary depends directly on `ring`-backed features of `reqwest`, `tonic`, `fred`, or `aws-smithy-http-client`, switch to their `aws-lc-rs`-backed equivalents to avoid pulling in a second copy of `ring` alongside the router's `aws-lc-rs` build.
 
 Deployments that only use the `router` binary as-is are unaffected.
+
+### Renamed Prometheus metrics
+
+Several duration and byte-count metrics gained a UCUM unit (`s` for durations, `By` for bytes). The `opentelemetry-prometheus` exporter appends a suffix derived from the unit to the exported name, so these metrics are renamed on the Prometheus scrape endpoint:
+
+| Legacy Prometheus name | New Prometheus name |
+| --- | --- |
+| `apollo_router_cache_hit_time` | `apollo_router_cache_hit_time_seconds` |
+| `apollo_router_cache_miss_time` | `apollo_router_cache_miss_time_seconds` |
+| `apollo_router_operations_coprocessor_duration` | `apollo_router_operations_coprocessor_duration_seconds` |
+| `apollo_router_query_planning_plan_duration` | `apollo_router_query_planning_plan_duration_seconds` |
+| `apollo_router_query_planning_total_duration` | `apollo_router_query_planning_total_duration_seconds` |
+| `apollo_router_query_planning_warmup_duration` | `apollo_router_query_planning_warmup_duration_seconds` |
+| `apollo_router_schema_load_duration` | `apollo_router_schema_load_duration_seconds` |
+| `apollo_router_uplink_fetch_duration_seconds` | `apollo_router_uplink_fetch_duration_seconds` (Prometheus output unchanged; the underlying OTel metric name changes from `apollo.router.uplink.fetch.duration.seconds` to `apollo.router.uplink.fetch.duration`, which matters for OTLP consumers) |
+| `apollo_router_operations_fetch_request_size_total` | `apollo_router_operations_fetch_request_size_bytes_total` |
+| `apollo_router_operations_fetch_response_size_total` | `apollo_router_operations_fetch_response_size_bytes_total` |
+| `apollo_router_operations_request_size_total` | `apollo_router_operations_request_size_bytes_total` |
+| `apollo_router_operations_response_size_total` | `apollo_router_operations_response_size_bytes_total` |
+| `apollo_router_operations_file_uploads_file_size` | `apollo_router_operations_file_uploads_file_size_bytes` |
+
+These are renames, not new metrics: each row is the same underlying instrument exported under a new name, with no change in what it measures.
+
+**Upgrade step**:
+
+- Update any dashboards, alerts, or recording rules that reference the legacy names above to use the new names instead.
+- If you need the legacy names to keep working while you migrate, add a Prometheus recording rule that copies the new series under the old name.
