@@ -6,12 +6,14 @@
 pub(crate) mod plan_builder;
 pub(crate) mod selection_builder;
 
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use indexmap::IndexMap;
 use petgraph::Direction;
 use petgraph::stable_graph::EdgeIndex;
 use petgraph::stable_graph::NodeIndex;
@@ -629,7 +631,6 @@ impl FetchGraph {
         self.graph.node_count()
     }
 
-    #[allow(dead_code)]
     pub(crate) fn node_indices(&self) -> impl Iterator<Item = NodeIndex> + '_ {
         self.graph.node_indices()
     }
@@ -672,6 +673,347 @@ impl FetchGraph {
         }
         false
     }
+
+    /// Merge entity nodes sharing the same (subgraph, merge_at) into one
+    /// node. Called once post-search on the winning candidate.
+    ///
+    /// Grouping ignores type conditions on merge_at elements: siblings
+    /// differing only in concrete type are merged, the widened path merely
+    /// offering extra candidate objects that the `requires` representations
+    /// (still gated by `__typename`) reject. Without this, deeply nested
+    /// polymorphic queries fragment into one fetch per concrete-type
+    /// combination.
+    ///
+    /// Transitively dependent nodes are NOT merged — that would create
+    /// cycles (multi-hop @requires chains can revisit a subgraph at
+    /// different stages).
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn merge_sibling_entities(&mut self) {
+        // Group by (subgraph, condition-stripped merge_at).
+        // IndexMap for deterministic processing order: when merged groups
+        // have edges to each other, order decides how relocated edge inputs
+        // interleave, which is visible in the serialized plan.
+        let mut groups: IndexMap<(Arc<str>, Vec<FetchDataPathElement>), Vec<NodeIndex>> =
+            IndexMap::new();
+        for node_idx in self.graph.node_indices() {
+            let node = &self.graph[node_idx];
+            if let FetchGroupKind::Entity { merge_at } = &node.kind {
+                let key = (node.subgraph.clone(), strip_merge_at_conditions(merge_at));
+                groups.entry(key).or_default().push(node_idx);
+            }
+        }
+
+        for (_key, group) in groups {
+            if group.len() <= 1 {
+                continue;
+            }
+
+            // Partition into sets with no transitive dependency between members.
+            let merge_sets = self.partition_by_reachability(&group);
+
+            for set in merge_sets {
+                if set.len() <= 1 {
+                    continue;
+                }
+                for bucket in self.bucket_by_merge_compatibility(set) {
+                    if bucket.len() <= 1 {
+                        continue;
+                    }
+                    let survivor = bucket[0];
+                    self.union_merge_at_conditions(&bucket);
+                    self.merge_nodes_into(survivor, &bucket[1..]);
+                }
+            }
+        }
+    }
+
+    /// Bucket a merge set into merge-compatible subsets. Nodes are
+    /// incompatible when their selections assign different field signatures
+    /// to the same response path (e.g. `value` vs `value(scale: 100)`) or
+    /// when their input conditions disagree for the same source type — the
+    /// merged entity representation cannot satisfy both branches.
+    fn bucket_by_merge_compatibility(&self, mergeable: Vec<NodeIndex>) -> Vec<Vec<NodeIndex>> {
+        struct Bucket {
+            signatures: HashMap<String, String>,
+            merge_at: Option<Vec<FetchDataPathElement>>,
+            input_conditions: HashMap<Name, BTreeSet<String>>,
+            nodes: Vec<NodeIndex>,
+        }
+        let mut buckets: Vec<Bucket> = Vec::new();
+        for n in mergeable {
+            let signatures = self.graph[n].selection_builder.field_signatures();
+            let input_conditions = self.input_condition_fingerprints(n);
+            let FetchGroupKind::Entity { merge_at } = &self.graph[n].kind else {
+                continue;
+            };
+            let merge_at = merge_at.clone();
+            match buckets.iter_mut().find(|bucket| {
+                signatures.iter().all(|(path, signature)| {
+                    bucket
+                        .signatures
+                        .get(path)
+                        .is_none_or(|taken| taken == signature)
+                }) && input_conditions.iter().all(|(ty, conditions)| {
+                    bucket
+                        .input_conditions
+                        .get(ty)
+                        .is_none_or(|taken| taken == conditions)
+                })
+            }) {
+                Some(bucket) => {
+                    bucket.signatures.extend(signatures);
+                    if bucket.merge_at.as_ref() != Some(&merge_at) {
+                        bucket.merge_at = None;
+                    }
+                    for (ty, conditions) in input_conditions {
+                        bucket
+                            .input_conditions
+                            .entry(ty)
+                            .or_default()
+                            .extend(conditions);
+                    }
+                    bucket.nodes.push(n);
+                }
+                None => buckets.push(Bucket {
+                    signatures,
+                    merge_at: Some(merge_at),
+                    input_conditions,
+                    nodes: vec![n],
+                }),
+            }
+        }
+        buckets.into_iter().map(|bucket| bucket.nodes).collect()
+    }
+
+    /// Condition selections this node's entity representation receives per
+    /// source type, rendered to strings for cheap set comparison. Two nodes
+    /// disagreeing here would union into a per-type representation neither
+    /// branch's runtime objects satisfy.
+    fn input_condition_fingerprints(&self, node: NodeIndex) -> HashMap<Name, BTreeSet<String>> {
+        let mut fingerprints: HashMap<Name, BTreeSet<String>> = HashMap::new();
+        for edge in self.graph.edges_directed(node, Direction::Incoming) {
+            for input in &edge.weight().inputs {
+                fingerprints
+                    .entry(input.source_type_name.clone())
+                    .or_default()
+                    .insert(input.conditions.to_string());
+            }
+        }
+        fingerprints
+    }
+
+    /// Rewrite the bucket's merge_at paths to the shared condition-stripped
+    /// path when members' type conditions differ. The widened flatten path
+    /// offers extra candidate objects at runtime, but entity
+    /// representations still gate on `__typename`, so non-matching objects
+    /// contribute nothing.
+    fn union_merge_at_conditions(&mut self, bucket: &[NodeIndex]) {
+        let Some((&first, rest)) = bucket.split_first() else {
+            return;
+        };
+        let FetchGroupKind::Entity { merge_at } = &self.graph[first].kind else {
+            return;
+        };
+        if rest.iter().all(|&n| {
+            matches!(&self.graph[n].kind, FetchGroupKind::Entity { merge_at: other } if other == merge_at)
+        }) {
+            return;
+        }
+        let stripped = strip_merge_at_conditions(merge_at);
+        for &n in bucket {
+            if let FetchGroupKind::Entity { merge_at } = &mut self.graph[n].kind {
+                *merge_at = stripped.clone();
+            }
+        }
+    }
+
+    /// Partition a group into sets where no member is transitively
+    /// reachable from another member of the same set.
+    ///
+    /// The common case (type-explosion siblings, no inter-dependencies) is
+    /// handled by a cheap direct-edge check; per-member BFS is the fallback.
+    fn partition_by_reachability(&self, group: &[NodeIndex]) -> Vec<Vec<NodeIndex>> {
+        let member_set: HashSet<NodeIndex> = group.iter().copied().collect();
+
+        // Fast path: no direct edges between members, O(G * avg_out_degree).
+        let has_direct_edge = group.iter().any(|&node| {
+            self.graph
+                .edges_directed(node, Direction::Outgoing)
+                .any(|e| member_set.contains(&e.target()))
+        });
+        if !has_direct_edge {
+            // Transitive paths through non-members remain possible, but
+            // need a shared intermediate — impossible when every member is
+            // a leaf (out-degree 0), which makes them trivially independent.
+            let all_leaves = group.iter().all(|&node| {
+                self.graph
+                    .edges_directed(node, Direction::Outgoing)
+                    .next()
+                    .is_none()
+            });
+            if all_leaves {
+                return vec![group.to_vec()];
+            }
+        }
+
+        // General case: BFS from each member to find reachable group peers.
+        let member_index: HashMap<NodeIndex, usize> =
+            group.iter().enumerate().map(|(i, &n)| (n, i)).collect();
+
+        let mut reachable_from: Vec<HashSet<usize>> = Vec::with_capacity(group.len());
+        for (src_idx, &node) in group.iter().enumerate() {
+            let mut reached = HashSet::new();
+            let mut visited = HashSet::new();
+            let mut stack = vec![node];
+            while let Some(current) = stack.pop() {
+                if !visited.insert(current) {
+                    continue;
+                }
+                if let Some(&idx) = member_index.get(&current)
+                    && idx != src_idx
+                {
+                    reached.insert(idx);
+                }
+                for edge in self.graph.edges_directed(current, Direction::Outgoing) {
+                    stack.push(edge.target());
+                }
+            }
+            reachable_from.push(reached);
+        }
+
+        let mut sets: Vec<Vec<usize>> = Vec::new();
+        'outer: for i in 0..group.len() {
+            for set in &mut sets {
+                let conflict = set
+                    .iter()
+                    .any(|&j| reachable_from[i].contains(&j) || reachable_from[j].contains(&i));
+                if !conflict {
+                    set.push(i);
+                    continue 'outer;
+                }
+            }
+            sets.push(vec![i]);
+        }
+
+        sets.into_iter()
+            .map(|set| set.into_iter().map(|i| group[i]).collect())
+            .collect()
+    }
+
+    /// Merge nodes into a survivor, relocating edges and absorbing selections.
+    fn merge_nodes_into(&mut self, survivor: NodeIndex, to_merge: &[NodeIndex]) {
+        // Removals and relocations below bypass the incremental depth
+        // bookkeeping. Merging runs once, post-search, so nothing rolls
+        // back past this.
+        self.depth_dirty = true;
+        for &merged in to_merge {
+            // Absorb selections from the merged node.
+            let merged_builder = self.graph[merged].selection_builder.clone();
+            self.graph[survivor]
+                .selection_builder
+                .merge_from(&merged_builder);
+
+            // Relocate incoming edges.
+            let incoming: Vec<_> = self
+                .graph
+                .edges_directed(merged, Direction::Incoming)
+                .map(|e| (e.source(), e.weight().inputs.clone()))
+                .collect();
+            for (parent, inputs) in incoming {
+                if parent == survivor {
+                    continue;
+                }
+                if let Some(existing) = self.find_edge(parent, survivor) {
+                    self.graph[existing].inputs.extend(inputs);
+                } else {
+                    self.graph
+                        .add_edge(parent, survivor, FetchEdgeWeight { inputs });
+                }
+            }
+
+            // Relocate outgoing edges.
+            let outgoing: Vec<_> = self
+                .graph
+                .edges_directed(merged, Direction::Outgoing)
+                .map(|e| (e.target(), e.weight().inputs.clone()))
+                .collect();
+            for (child, inputs) in outgoing {
+                if child == survivor {
+                    continue;
+                }
+                if let Some(existing) = self.find_edge(survivor, child) {
+                    self.graph[existing].inputs.extend(inputs);
+                } else {
+                    self.graph
+                        .add_edge(survivor, child, FetchEdgeWeight { inputs });
+                }
+            }
+
+            self.graph.remove_node(merged);
+        }
+    }
+}
+
+/// A merge_at path with all type conditions removed, for grouping sibling
+/// fetches that differ only in which concrete types they apply to.
+pub(super) fn strip_merge_at_conditions(
+    merge_at: &[FetchDataPathElement],
+) -> Vec<FetchDataPathElement> {
+    merge_at
+        .iter()
+        .map(|element| match element {
+            FetchDataPathElement::Key(name, _) => FetchDataPathElement::Key(name.clone(), None),
+            FetchDataPathElement::AnyIndex(_) => FetchDataPathElement::AnyIndex(None),
+            other => other.clone(),
+        })
+        .collect()
+}
+
+/// Structural containment of selection sets by response shape: every field
+/// of `needed` (by name; `__typename` skipped) appears in `have` with its
+/// sub-selections contained recursively; inline fragments match by type
+/// condition. Conservative — a miss only means the caller falls back to
+/// routing the conditions.
+#[allow(dead_code)]
+fn selection_contains(have: &SelectionSet, needed: &SelectionSet) -> bool {
+    use crate::operation::Selection;
+    needed
+        .selections
+        .values()
+        .all(|needed_sel| match needed_sel {
+            Selection::Field(needed_field) => {
+                if *needed_field.field.name() == crate::operation::TYPENAME_FIELD {
+                    return true;
+                }
+                have.selections.values().any(|have_sel| match have_sel {
+                    Selection::Field(have_field) => {
+                        have_field.field.name() == needed_field.field.name()
+                            && have_field.field.alias.is_none()
+                            && match (&needed_field.selection_set, &have_field.selection_set) {
+                                (Some(needed_sub), Some(have_sub)) => {
+                                    selection_contains(have_sub, needed_sub)
+                                }
+                                (None, _) => true,
+                                (Some(_), None) => false,
+                            }
+                    }
+                    Selection::InlineFragment(_) => false,
+                })
+            }
+            Selection::InlineFragment(needed_frag) => {
+                have.selections.values().any(|have_sel| match have_sel {
+                    Selection::InlineFragment(have_frag) => {
+                        have_frag.inline_fragment.type_condition_position
+                            == needed_frag.inline_fragment.type_condition_position
+                            && selection_contains(
+                                &have_frag.selection_set,
+                                &needed_frag.selection_set,
+                            )
+                    }
+                    Selection::Field(_) => false,
+                })
+            }
+        })
 }
 
 #[cfg(test)]
@@ -1071,5 +1413,130 @@ mod tests {
         assert!(g.add_ordering_dependency(child, other).is_ok());
         assert_eq!(g.edge_count(), 2);
         assert!(g.has_edge(child, other));
+    }
+
+    // --- merge_sibling_entities ---
+
+    #[test]
+    fn merge_sibling_entities_merges_same_path_siblings() {
+        let mut g = FetchGraph::new();
+        let root_sg: Arc<str> = Arc::from("A");
+        let sg: Arc<str> = Arc::from("B");
+        let root = g.get_or_create_root_group(&root_sg, dummy_root_type());
+        // Identical merge_at on both siblings: union_merge_at_conditions takes
+        // its all-equal early return.
+        let e1 = g.add_entity_group(&sg, user_path(None));
+        let e2 = g.add_entity_group(&sg, user_path(None));
+        g.add_dependency(root, e1, vec![]);
+        g.add_dependency(root, e2, vec![]);
+
+        g.merge_sibling_entities();
+
+        assert_eq!(g.node_count(), 2);
+        assert_eq!(g.edge_count(), 1);
+        assert!(g.has_edge(root, e1));
+        assert_eq!(g.merge_at(e1), user_path(None).as_slice());
+    }
+
+    #[test]
+    fn merge_sibling_entities_unions_differing_merge_at_conditions() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("B");
+        // Same subgraph and path, differing only in type conditions: siblings
+        // merge and the survivor's merge_at is widened to the stripped path.
+        let e1 = g.add_entity_group(&sg, user_path(Some(vec![apollo_compiler::name!("Admin")])));
+        let _e2 = g.add_entity_group(&sg, user_path(None));
+
+        g.merge_sibling_entities();
+
+        assert_eq!(g.node_count(), 1);
+        assert_eq!(g.merge_at(e1), user_path(None).as_slice());
+    }
+
+    #[test]
+    fn merge_sibling_entities_does_not_merge_dependent_nodes() {
+        let mut g = FetchGraph::new();
+        let root_sg: Arc<str> = Arc::from("A");
+        let sg: Arc<str> = Arc::from("B");
+        let root = g.get_or_create_root_group(&root_sg, dummy_root_type());
+        // Three same-key siblings where e1 -> e2 is a dependency: e2 must stay
+        // separate (merging it would create a cycle), while e3 joins e1's set.
+        let e1 = g.add_entity_group(&sg, user_path(None));
+        let e2 = g.add_entity_group(&sg, user_path(None));
+        let e3 = g.add_entity_group(&sg, user_path(None));
+        g.add_dependency(root, e1, vec![]);
+        g.add_dependency(root, e3, vec![]);
+        g.add_dependency(e1, e2, vec![]);
+
+        g.merge_sibling_entities();
+
+        // root + merged(e1, e3) + e2.
+        assert_eq!(g.node_count(), 3);
+        assert!(g.has_edge(e1, e2));
+        assert!(g.has_edge(root, e1));
+        assert!(!g.has_edge(e1, e1));
+    }
+
+    #[test]
+    fn merge_nodes_into_relocates_edges() {
+        let mut g = FetchGraph::new();
+        let root_sg: Arc<str> = Arc::from("A");
+        let sg: Arc<str> = Arc::from("B");
+        let root = g.get_or_create_root_group(&root_sg, dummy_root_type());
+        let survivor = g.add_entity_group(&sg, user_path(None));
+        let merged = g.add_entity_group(&sg, user_path(None));
+        let c1 = g.add_entity_group(&sg, vec![]);
+        let c2 = g.add_entity_group(&sg, vec![]);
+
+        // Shared parent (incoming relocation extends the existing root->survivor
+        // edge), a child only the merged node had (edge is recreated on the
+        // survivor), and a shared child (outgoing relocation extends).
+        g.add_dependency(root, survivor, vec![]);
+        g.add_dependency(root, merged, vec![]);
+        g.add_dependency(merged, c1, vec![]);
+        g.add_dependency(survivor, c2, vec![]);
+        g.add_dependency(merged, c2, vec![]);
+        // Raw edges both ways between survivor and merged exercise the
+        // self-edge skips during relocation (raw to avoid depth maintenance
+        // rejecting the cycle).
+        g.graph
+            .add_edge(survivor, merged, FetchEdgeWeight { inputs: vec![] });
+        g.graph
+            .add_edge(merged, survivor, FetchEdgeWeight { inputs: vec![] });
+
+        g.merge_nodes_into(survivor, &[merged]);
+
+        assert_eq!(g.node_count(), 4); // root, survivor, c1, c2
+        assert!(g.has_edge(root, survivor));
+        assert!(g.has_edge(survivor, c1));
+        assert!(g.has_edge(survivor, c2));
+        assert!(!g.has_edge(survivor, survivor));
+        assert_eq!(g.edge_count(), 3);
+    }
+
+    // --- strip_merge_at_conditions ---
+
+    #[test]
+    fn strip_merge_at_conditions_covers_all_variants() {
+        let path = vec![
+            FetchDataPathElement::Key(
+                apollo_compiler::name!("user"),
+                Some(vec![apollo_compiler::name!("Admin")]),
+            ),
+            FetchDataPathElement::AnyIndex(Some(vec![apollo_compiler::name!("Admin")])),
+            FetchDataPathElement::TypenameEquals(apollo_compiler::name!("Admin")),
+            FetchDataPathElement::Parent,
+        ];
+        let stripped = strip_merge_at_conditions(&path);
+        assert!(matches!(
+            &stripped[0],
+            FetchDataPathElement::Key(name, None) if name == "user"
+        ));
+        assert!(matches!(&stripped[1], FetchDataPathElement::AnyIndex(None)));
+        assert!(matches!(
+            &stripped[2],
+            FetchDataPathElement::TypenameEquals(name) if name == "Admin"
+        ));
+        assert!(matches!(&stripped[3], FetchDataPathElement::Parent));
     }
 }
