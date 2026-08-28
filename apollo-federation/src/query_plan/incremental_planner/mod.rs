@@ -115,6 +115,7 @@ pub(crate) fn build_bulb_plan(
         supergraph_schema: supergraph_schema.clone(),
         override_conditions: parameters.override_conditions.clone(),
         disabled_subgraphs: parameters.disabled_subgraphs.clone(),
+        key_hops_in_flight: Default::default(),
     };
 
     let root_qg_node = parameters.head;
