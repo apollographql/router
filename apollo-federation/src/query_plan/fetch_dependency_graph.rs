@@ -3350,7 +3350,7 @@ fn to_toposorted_adjacency_list<N, E>(
     Some((adj, tred_index_of))
 }
 
-fn operation_for_entities_fetch(
+pub(crate) fn operation_for_entities_fetch(
     subgraph_schema: &ValidFederationSchema,
     selection_set: SelectionSet,
     mut variable_definitions: Vec<Node<VariableDefinition>>,
@@ -3424,7 +3424,7 @@ fn operation_for_entities_fetch(
     })
 }
 
-fn operation_for_query_fetch(
+pub(crate) fn operation_for_query_fetch(
     subgraph_schema: &ValidFederationSchema,
     root_kind: SchemaRootDefinitionKind,
     selection_set: SelectionSet,
@@ -4633,7 +4633,7 @@ fn wrap_selection_with_type_and_conditions<T>(
     })
 }
 
-fn wrap_input_selections(
+pub(crate) fn wrap_input_selections(
     supergraph_schema: &ValidFederationSchema,
     wrapping_type: &CompositeTypeDefinitionPosition,
     selections: SelectionSet,
@@ -4686,7 +4686,7 @@ fn create_fetch_initial_path(
     )))
 }
 
-fn compute_input_rewrites_on_key_fetch(
+pub(crate) fn compute_input_rewrites_on_key_fetch(
     input_type_name: &Name,
     dest_type: &CompositeTypeDefinitionPosition,
     dest_schema: &ValidFederationSchema,
