@@ -1895,7 +1895,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             self.error_reporter.report_mismatch_hint(
                 HintCode::InconsistentEntity,
                 format!("Type \"{}\" is declared as an entity (has a @key applied) in some but not all defining subgraphs: ",
-                    &obj.type_name,
+                    obj.type_name,
                 ),
                 obj,
                 &sources,
