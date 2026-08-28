@@ -528,8 +528,7 @@ async fn it_processes_incremental_responses() {
 /// `pipeline::stages`, and returns the response the client would see.
 ///
 /// The tests above stack the layers by hand, which says nothing about whether they are
-/// installed in the real pipeline. `apply_required_plugin_layer` can only report a missing
-/// plugin, not prevent one, and a dropped `.apply_required_plugin_layer(..)` call in
+/// installed in the real pipeline. A dropped `.apply_required_plugin_layer(..)` call in
 /// `stages.rs` would leave every error unredacted — so the wiring needs a test of its own.
 async fn error_through_real_pipeline(config: Value) -> graphql::Response {
     let service = crate::TestHarness::builder()

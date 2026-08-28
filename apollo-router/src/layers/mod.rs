@@ -451,7 +451,7 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
     ///
     /// If the plugin isn't available in the `plugins` registry, this function is a no-op.
     /// For a plugin that `create_plugins` always registers, prefer
-    /// [`Self::apply_required_plugin_layer`], which reports the miss instead of silently
+    /// [`Self::apply_required_plugin_layer`], which panics on a miss instead of silently
     /// dropping the layer.
     ///
     /// ## Example
@@ -474,15 +474,8 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
     /// Apply the layer of a *mandatory* plugin to a service stack.
     ///
     /// Same as [`Self::apply_plugin_layer`], except that a missing plugin is treated as a
-    /// bug rather than a supported configuration: the miss is logged at `error` level
-    /// instead of quietly reducing the stack to a no-op. Several of these layers are
-    /// security-relevant -- losing `IncludeSubgraphErrors::redact_subgraph_errors_layer`
-    /// means every subgraph error reaches clients unredacted -- so a silent drop is the
-    /// worst possible failure mode.
-    ///
-    /// This deliberately does not panic. Test fixtures legitimately build pipelines from an
-    /// empty plugin registry, and those are not what this is guarding against, so a wholly
-    /// empty registry is not reported at all.
+    /// bug rather than a supported configuration: the miss panics instead of quietly
+    /// reducing the stack to a no-op.
     fn apply_required_plugin_layer<P, OutLayer>(
         self,
         plugins: &Plugins,
@@ -534,12 +527,41 @@ impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
         P: PluginPrivate,
     {
         if find_plugin::<P>(plugins).is_none() && !plugins.is_empty() {
-            tracing::error!(
-                plugin = std::any::type_name::<P>(),
-                "mandatory plugin is missing from the plugin registry, so its layer will not \
-                 be applied to the pipeline; this is a router bug"
+            panic!(
+                "mandatory plugin {} is missing from the plugin registry, so its layer will not \
+                 be applied to the pipeline; this is a router bug",
+                std::any::type_name::<P>()
             );
         }
         self.apply_plugin_layer(plugins, get_layer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tower::ServiceBuilder;
+
+    use super::InternalServiceBuilderExt;
+    use crate::plugins::headers::Headers;
+    use crate::services::Plugins;
+    use crate::test_harness::MockedSubgraphs;
+
+    #[test]
+    fn apply_required_plugin_layer_skips_empty_registry() {
+        let plugins = Plugins::default();
+        let _ = ServiceBuilder::new()
+            .apply_required_plugin_layer(&plugins, Headers::router_masking_layer);
+    }
+
+    #[test]
+    #[should_panic(expected = "mandatory plugin")]
+    fn apply_required_plugin_layer_panics_when_mandatory_plugin_is_missing() {
+        let mut plugins = Plugins::default();
+        plugins.insert(
+            "unrelated".to_string(),
+            Box::new(MockedSubgraphs::default()),
+        );
+        let _ = ServiceBuilder::new()
+            .apply_required_plugin_layer(&plugins, Headers::router_masking_layer);
     }
 }
