@@ -264,7 +264,7 @@ pub(crate) struct Config {
     include_cache_control_header_on_router_response: bool,
 
     /// Configure invalidation per subgraph
-    #[serde(default)]
+    #[serde(default = "default_disabled_subgraph")]
     pub(crate) subgraph: SubgraphConfiguration<Subgraph>,
 
     /// Configure response caching per connector source
@@ -354,6 +354,23 @@ const fn default_lru_private_queries_size() -> NonZeroUsize {
 
 const fn default_include_cache_control_header_on_router_response() -> bool {
     true
+}
+
+/// Default for the `subgraph` field when it is omitted entirely from `response_cache` config.
+///
+/// This deliberately differs from `Subgraph::default()` (which sets `enabled: Some(true)`): an
+/// *omitted* `subgraph:` block — e.g. a connectors-only config — must not implicitly turn on any
+/// subgraph-side behavior. A *present* `subgraph: { all: { .. } }` block still inherits
+/// `Subgraph::default()` via the container's `#[serde(default)]`, so existing deployments that
+/// specify a subgraph block without `enabled` keep their default-on behavior.
+fn default_disabled_subgraph() -> SubgraphConfiguration<Subgraph> {
+    SubgraphConfiguration {
+        all: Subgraph {
+            enabled: Some(false),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
 }
 
 /// Per subgraph configuration for response caching
@@ -3585,6 +3602,26 @@ mod tests {
     use crate::services::subgraph;
 
     const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
+
+    #[test]
+    fn omitted_subgraph_block_defaults_to_disabled() {
+        // An omitted `subgraph:` block (e.g. a connectors-only config) must NOT implicitly enable
+        // subgraph-side caching/behavior. The field-level `default_disabled_subgraph` yields
+        // `enabled: Some(false)` for the absent case.
+        let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({})).unwrap();
+        assert_eq!(config.subgraph.all.enabled, Some(false));
+    }
+
+    #[test]
+    fn present_subgraph_block_without_enabled_stays_enabled() {
+        // A *present* `subgraph: { all: {} }` block without `enabled` keeps the historical
+        // default-on behavior (backward compatibility): the container's `#[serde(default)]` fills
+        // `all` from `Subgraph::default()`, which is `enabled: Some(true)`.
+        let config: super::Config =
+            serde_json_bytes::from_value(serde_json_bytes::json!({ "subgraph": { "all": {} } }))
+                .unwrap();
+        assert_eq!(config.subgraph.all.enabled, Some(true));
+    }
 
     #[tokio::test]
     async fn test_subgraph_enabled() {

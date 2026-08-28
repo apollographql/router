@@ -2144,7 +2144,7 @@ expression: "&schema"
           ],
           "default": {
             "all": {
-              "enabled": true,
+              "enabled": false,
               "invalidation": null,
               "private_id": null,
               "redis": null,
