@@ -11,6 +11,9 @@ use config::Config;
 use config::ErrorMode;
 use config::SubgraphConfig;
 use effective_config::EffectiveConfig;
+use futures::FutureExt as _;
+use futures::TryFutureExt as _;
+use futures::future::BoxFuture;
 use tower::BoxError;
 use tower::ServiceExt;
 
@@ -19,18 +22,147 @@ use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::services::SupergraphResponse;
 use crate::services::fetch::AddSubgraphNameExt;
 use crate::services::fetch::SubgraphNameExt;
-use crate::services::supergraph::BoxCloneService;
+use crate::services::subgraph;
+use crate::services::supergraph;
 
 static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
 register_plugin!("apollo", "include_subgraph_errors", IncludeSubgraphErrors);
 
-struct IncludeSubgraphErrors {
+/// Layer type for [`IncludeSubgraphErrors::redact_subgraph_errors_layer`].
+pub(crate) struct RedactSubgraphErrorsLayer {
+    config: Arc<EffectiveConfig>,
+}
+
+impl RedactSubgraphErrorsLayer {
+    fn new(config: Arc<EffectiveConfig>) -> Self {
+        Self { config }
+    }
+}
+
+impl<S> tower::Layer<S> for RedactSubgraphErrorsLayer
+where
+    S: tower::Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = supergraph::BoxCloneService;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        let config = self.config.clone();
+
+        inner
+            .map_response(move |response: supergraph::Response| {
+                response.map_stream(move |mut graphql_response: graphql::Response| {
+                    for error in &mut graphql_response.errors {
+                        IncludeSubgraphErrors::process_error(&config, error);
+                    }
+                    for incremental in &mut graphql_response.incremental {
+                        for error in &mut incremental.errors {
+                            IncludeSubgraphErrors::process_error(&config, error);
+                        }
+                    }
+
+                    graphql_response
+                })
+            })
+            .boxed_clone()
+    }
+}
+
+/// Layer type for [`IncludeSubgraphErrors::tag_errors_with_subgraph_name_layer`], which
+/// documents which extension the tag uses and why filtering happens at the supergraph stage.
+pub(crate) struct TagSubgraphErrorsLayer {
+    subgraph_name: Arc<str>,
+}
+
+impl TagSubgraphErrorsLayer {
+    fn new(subgraph_name: Arc<str>) -> Self {
+        Self { subgraph_name }
+    }
+}
+
+impl<S> tower::Layer<S> for TagSubgraphErrorsLayer
+where
+    S: tower::Service<subgraph::Request, Response = subgraph::Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = TagSubgraphErrorsService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        TagSubgraphErrorsService {
+            inner,
+            subgraph_name: self.subgraph_name.clone(),
+        }
+    }
+}
+
+/// Service type for [`IncludeSubgraphErrors::tag_errors_with_subgraph_name_layer`].
+#[derive(Clone)]
+pub(crate) struct TagSubgraphErrorsService<S> {
+    inner: S,
+    /// The subgraph this service stack was built for. Taken from the pipeline rather than
+    /// from `request.subgraph_name` so that it cannot disagree with the stack it is
+    /// installed on -- a mis-tagged error silently falls back to the default redaction
+    /// config in `process_error`.
+    subgraph_name: Arc<str>,
+}
+
+impl<S> tower::Service<subgraph::Request> for TagSubgraphErrorsService<S>
+where
+    S: tower::Service<subgraph::Request, Response = subgraph::Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: subgraph::Request) -> Self::Future {
+        let subgraph_name = self.subgraph_name.clone();
+        self.inner
+            .call(req)
+            .map_ok(move |mut response| {
+                let body = response.response.body_mut();
+                for error in &mut body.errors {
+                    error.add_subgraph_name(&subgraph_name);
+                }
+                response
+            })
+            .boxed()
+    }
+}
+
+pub(crate) struct IncludeSubgraphErrors {
     // Store the calculated effective configuration
     config: Arc<EffectiveConfig>,
+}
+
+impl IncludeSubgraphErrors {
+    /// Returns a layer that redacts subgraph errors from a supergraph response.
+    pub(crate) fn redact_subgraph_errors_layer(&self) -> RedactSubgraphErrorsLayer {
+        RedactSubgraphErrorsLayer::new(self.config.clone())
+    }
+
+    /// Returns a layer that tags each subgraph error with the name of the subgraph it came
+    /// from, so that [`Self::redact_subgraph_errors_layer`] can apply that subgraph's
+    /// redaction config once the error reaches the supergraph response.
+    pub(crate) fn tag_errors_with_subgraph_name_layer(
+        &self,
+        subgraph_name: Arc<str>,
+    ) -> TagSubgraphErrorsLayer {
+        TagSubgraphErrorsLayer::new(subgraph_name)
+    }
 }
 
 #[async_trait::async_trait]
@@ -54,47 +186,6 @@ impl Plugin for IncludeSubgraphErrors {
         let config = Arc::new(init.config.try_into()?);
 
         Ok(IncludeSubgraphErrors { config })
-    }
-
-    fn supergraph_service(&self, service: BoxCloneService) -> BoxCloneService {
-        let config = Arc::clone(&self.config);
-
-        service
-            .map_response(move |response: SupergraphResponse| {
-                response.map_stream(move |mut graphql_response: graphql::Response| {
-                    for error in &mut graphql_response.errors {
-                        Self::process_error(&config, error);
-                    }
-                    for incremental in &mut graphql_response.incremental {
-                        for error in &mut incremental.errors {
-                            Self::process_error(&config, error);
-                        }
-                    }
-
-                    graphql_response
-                })
-            })
-            .boxed_clone()
-    }
-
-    fn subgraph_service(
-        &self,
-        subgraph_name: &str,
-        service: crate::services::subgraph::BoxCloneService,
-    ) -> crate::services::subgraph::BoxCloneService {
-        // We need to attach the subgraph name to each error so that we can do the filtering in the supergraph service.
-        // The reason filtering is not done here is that other types of request may also generate errors that need filtering.
-        // Pushing the error filtering to supergraph will ensure that everything gets filtered.
-        let subgraph_name = subgraph_name.to_string();
-        service
-            .map_response(move |mut r| {
-                let body = r.response.body_mut();
-                for error in &mut body.errors {
-                    error.add_subgraph_name(&subgraph_name);
-                }
-                r
-            })
-            .boxed_clone()
     }
 }
 
