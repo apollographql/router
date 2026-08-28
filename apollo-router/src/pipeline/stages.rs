@@ -8,7 +8,6 @@ use apollo_federation::query_plan::query_planner::QueryPlanner;
 use indexmap::IndexMap;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::util::BoxCloneSyncService;
 
 use super::acquire::HttpClientInputsMaps;
 use crate::Configuration;
@@ -195,13 +194,13 @@ pub(crate) fn build_subgraph_service(
     plugins: &Arc<Plugins>,
     configuration: &Configuration,
 ) -> BufferedSubgraphService {
-    use crate::layers::ServiceBuilderExt as _;
-
     let subscription_config = subscription_plugin_config(plugins).map(Arc::new);
     let apq_enabled = configuration.apq.subgraph.get(name).enabled;
 
+    // Box *inside* the buffer, as [`build_connector_request_services`] does: it erases the
+    // stack's type without a second box on the way out of [`SubgraphServices::get`], which
+    // runs once per fetch node per request.
     let service = ServiceBuilder::new()
-        .buffered()
         .apply_required_plugin_layer(plugins, |p: &IncludeSubgraphErrors| {
             p.tag_errors_with_subgraph_name_layer(Arc::from(name))
         })
@@ -216,9 +215,10 @@ pub(crate) fn build_subgraph_service(
         ))
         .layer(SubgraphApqLayer::new(apq_enabled))
         .layer(content_negotiation::SubgraphContentNegotiationLayer::default())
-        .service(SubgraphService::new(name, http_service));
+        .service(SubgraphService::new(name, http_service))
+        .boxed_clone();
 
-    BoxCloneSyncService::new(service)
+    UnconstrainedBuffer::new(service, DEFAULT_BUFFER_SIZE)
 }
 
 /// Builds the full service stack for every subgraph, keyed by subgraph name.

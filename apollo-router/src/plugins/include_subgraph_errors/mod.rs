@@ -102,6 +102,7 @@ where
 }
 
 /// Service type for [`IncludeSubgraphErrors::tag_errors_with_subgraph_name_layer`].
+#[derive(Clone)]
 pub(crate) struct TagSubgraphErrorsService<S> {
     inner: S,
     /// The subgraph this service stack was built for. Taken from the pipeline rather than
