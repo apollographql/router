@@ -41,6 +41,19 @@ pub(crate) struct PendingSelection {
     /// Set when this selection is a condition (@requires / @key field set);
     /// `None` for ordinary query selections.
     pub(crate) condition: Option<ConditionScope>,
+    /// @provides provenance across downcasts: the provides-copy query graph
+    /// node this position descended from via inline fragments, when the
+    /// current node itself is NOT a copy. An ancestor's `@provides` on an
+    /// interface-typed field applies to every runtime type, but the query
+    /// graph only copies the nodes named in the provides field set. A
+    /// downcast out of the copy layer lands on the original node, where the
+    /// provided fields have no edges. The anchor keeps the copy node (whose
+    /// edges ARE the provided fields) visible to key-hop enumeration, so
+    /// "are these key conditions provided here?" stays an exact graph check
+    /// instead of a schema-level guess. `None` whenever the current node's
+    /// own edges carry the provenance (inside a copy layer) or no @provides
+    /// is in scope.
+    pub(crate) provides_anchor: Option<NodeIndex>,
 }
 
 impl PendingSelection {
@@ -54,6 +67,7 @@ impl PendingSelection {
             op_path: self.op_path.clone(),
             path_in_fetch: self.path_in_fetch.clone(),
             condition: self.condition,
+            provides_anchor: self.provides_anchor,
         }
     }
 
@@ -73,6 +87,11 @@ impl PendingSelection {
         path_in_fetch: SharedPath<FetchDataPathElement>,
     ) -> Self {
         self.path_in_fetch = path_in_fetch;
+        self
+    }
+
+    pub(super) fn with_provides_anchor(mut self, provides_anchor: Option<NodeIndex>) -> Self {
+        self.provides_anchor = provides_anchor;
         self
     }
 
