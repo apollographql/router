@@ -142,9 +142,8 @@ impl FieldRoutingSearchSpace {
         let satisfiable = self.can_satisfy(
             conditions,
             &source.type_pos,
-            &source.subgraph,
             &source.schema,
-        ) || self.conditions_resolvable_at_node(node, conditions)?;
+        ) || self.conditions_resolvable_at_node(node, conditions.as_ref())?;
         Ok(satisfiable && !self.conditions_have_requires(node, conditions)?)
     }
 

@@ -1617,3 +1617,79 @@ fn inc_user_field_argument_conflict_with_requires_condition() {
     "###
     );
 }
+
+/// A field satisfied by an ancestor's @provides is preferred over hopping
+/// to another subgraph for the same field.
+#[test]
+fn inc_provides_prefers_local_resolution() {
+    let planner = planner!(
+        config = incremental_config(),
+        SubgraphA: r#"
+        type Query {
+            product: Product
+        }
+
+        type Product @key(fields: "id") {
+            id: ID!
+            details: Details @provides(fields: "price")
+        }
+
+        type Details @key(fields: "id") {
+            id: ID!
+            price: Float @external
+        }
+        "#,
+        SubgraphB: r#"
+        type Details @key(fields: "id") {
+            id: ID!
+            price: Float @shareable
+            description: String
+        }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        {
+            product {
+                details {
+                    price
+                    description
+                }
+            }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "SubgraphA") {
+          {
+            product {
+              details {
+                __typename
+                id
+                price
+              }
+            }
+          }
+        },
+        Flatten(path: "product.details") {
+          Fetch(service: "SubgraphB") {
+            {
+              ... on Details {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Details {
+                description
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
