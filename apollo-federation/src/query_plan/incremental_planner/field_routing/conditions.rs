@@ -1,12 +1,21 @@
 //! Condition satisfiability: can a set of @requires / @key fields be resolved
 //! at a given query graph node?
+//!
+//! Three flavors of check, each deeper than the last:
+//! - `can_satisfy_conditions`: pure schema lookup (field exists, not external).
+//! - `conditions_resolvable_at_node`: graph-based, path-sensitive variant.
+//! - `conditions_have_requires`: detects @requires on condition edges.
+
+use std::sync::Arc;
 
 use petgraph::graph::NodeIndex;
 
 use super::FieldRoutingSearchSpace;
+use super::NodeSource;
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::operation::SelectionSet;
+use crate::operation::TYPENAME_FIELD;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
@@ -30,9 +39,17 @@ impl FieldRoutingSearchSpace {
         for selection in conditions.selections.values() {
             match selection {
                 crate::operation::Selection::Field(field_sel) => {
+                    if *field_sel.field.name() == TYPENAME_FIELD {
+                        continue;
+                    }
                     let Some(edge) = self.edge_for_field(node, &field_sel.field) else {
                         return Ok(false);
                     };
+                    // A field carrying @requires draws data from the entity
+                    // representation; it cannot be selected in place.
+                    if self.query_graph.edge_weight(edge)?.conditions.is_some() {
+                        return Ok(false);
+                    }
                     if let Some(sub) = &field_sel.selection_set {
                         let (_, tail) = self.query_graph.edge_endpoints(edge)?;
                         if !self.conditions_resolvable_at_node(tail, sub)? {
@@ -101,6 +118,15 @@ impl FieldRoutingSearchSpace {
             }
         }
         Ok(false)
+    }
+
+    /// Filter key conditions to the subset the source subgraph can resolve.
+    pub(super) fn locally_satisfiable_subset(
+        &self,
+        conditions: &Arc<SelectionSet>,
+        source: &NodeSource,
+    ) -> Option<Arc<SelectionSet>> {
+        satisfiable_subset(conditions, &source.type_pos, &source.schema)
     }
 }
 
@@ -200,6 +226,55 @@ fn has_progressive_override(
                 .override_directive_arguments(d)
                 .is_ok_and(|args| args.label.is_some())
     })
+}
+
+/// Filter a key selection set to only the fields the source subgraph can
+/// resolve: each field must exist, not be @external, and not be routed
+/// away by a progressive @override label. Fields that fail are dropped.
+/// Returns `None` when no field survives.
+fn satisfiable_subset(
+    conditions: &SelectionSet,
+    type_pos: &CompositeTypeDefinitionPosition,
+    schema: &ValidFederationSchema,
+) -> Option<Arc<SelectionSet>> {
+    let mut kept: Vec<crate::operation::Selection> = Vec::new();
+    for selection in conditions.selections.values() {
+        match selection {
+            crate::operation::Selection::Field(field_sel) => {
+                if *field_sel.field.name() == TYPENAME_FIELD {
+                    kept.push(selection.clone());
+                    continue;
+                }
+                let Ok(field_pos) = type_pos.field(field_sel.field.name().clone()) else {
+                    continue;
+                };
+                let Some(definition) = field_pos.try_get(schema.schema()) else {
+                    continue;
+                };
+                if schema
+                    .subgraph_metadata()
+                    .is_some_and(|meta| meta.external_metadata().is_external(&field_pos))
+                {
+                    continue;
+                }
+                if has_progressive_override(definition, schema) {
+                    continue;
+                }
+                kept.push(selection.clone());
+            }
+            crate::operation::Selection::InlineFragment(_) => {
+                kept.push(selection.clone());
+            }
+        }
+    }
+    if kept.is_empty() {
+        return None;
+    }
+    Some(Arc::new(SelectionSet::from_raw_selections(
+        conditions.schema.clone(),
+        conditions.type_position.clone(),
+        kept,
+    )))
 }
 
 #[cfg(test)]
@@ -318,6 +393,38 @@ mod tests {
                 .conditions_resolvable_at_node(s2_t, &cond)
                 .expect("check runs"),
             "S2 has an edge for a but none for A.c",
+        );
+    }
+
+    /// A condition field that itself carries @requires cannot be resolved
+    /// in place; the graph check must reject it.
+    #[test]
+    fn requires_fields_are_not_resolvable_in_place() {
+        let (space, _, s2_schema) = space_and_schemas();
+        let cond = conditions(&s2_schema, "y");
+        let s2_t = t_node(&space, "S2");
+        assert!(
+            !space
+                .conditions_resolvable_at_node(s2_t, &cond)
+                .expect("check runs"),
+            "y carries @requires and must not count as resolvable in place",
+        );
+    }
+
+    /// Subsetting keeps resolvable fields and drops @external ones; a key
+    /// with no resolvable field yields None.
+    #[test]
+    fn satisfiable_subset_drops_unresolvable_fields() {
+        let (_, s2_schema) = composed_schemas();
+        let key = Arc::new(conditions(&s2_schema, "k x"));
+        let subset = satisfiable_subset(&key, &t_pos(&s2_schema), &s2_schema)
+            .expect("k survives the subset");
+        assert_eq!(subset.selections.len(), 1, "only k survives; x is external");
+
+        let all_external = Arc::new(conditions(&s2_schema, "x"));
+        assert!(
+            satisfiable_subset(&all_external, &t_pos(&s2_schema), &s2_schema).is_none(),
+            "a key with no resolvable field has no satisfiable subset",
         );
     }
 
