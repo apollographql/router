@@ -168,7 +168,6 @@ mod tests {
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use tower::Service;
-    use tower::ServiceExt as _;
 
     use super::*;
     use crate::MockedSubgraphs;

@@ -29,7 +29,7 @@ async fn only_source_no_error() {
         .mount(&mock_server)
         .await;
 
-    let connector_uri = format!("{}/", &mock_server.uri());
+    let connector_uri = format!("{}/", mock_server.uri());
     let override_config = json!({
         "connectors": {
             "sources": {
@@ -93,7 +93,7 @@ async fn only_source_with_error() {
         .mount(&mock_server)
         .await;
 
-    let connector_uri = format!("{}/", &mock_server.uri());
+    let connector_uri = format!("{}/", mock_server.uri());
     let override_config = json!({
         "connectors": {
             "sources": {
@@ -169,7 +169,7 @@ async fn only_connect_no_error() {
         .mount(&mock_server)
         .await;
 
-    let connector_uri = format!("{}/", &mock_server.uri());
+    let connector_uri = format!("{}/", mock_server.uri());
     let override_config = json!({
         "connectors": {
             "sources": {
@@ -233,7 +233,7 @@ async fn only_connect_with_error() {
         .mount(&mock_server)
         .await;
 
-    let connector_uri = format!("{}/", &mock_server.uri());
+    let connector_uri = format!("{}/", mock_server.uri());
     let override_config = json!({
         "connectors": {
             "sources": {
@@ -308,7 +308,7 @@ async fn both_source_and_connect_no_error() {
         .mount(&mock_server)
         .await;
 
-    let connector_uri = format!("{}/", &mock_server.uri());
+    let connector_uri = format!("{}/", mock_server.uri());
     let override_config = json!({
         "connectors": {
             "sources": {
@@ -372,7 +372,7 @@ async fn both_source_and_connect_with_error() {
         .mount(&mock_server)
         .await;
 
-    let connector_uri = format!("{}/", &mock_server.uri());
+    let connector_uri = format!("{}/", mock_server.uri());
     let override_config = json!({
         "connectors": {
             "sources": {
@@ -440,7 +440,7 @@ async fn partial_source_and_partial_connect() {
         .mount(&mock_server)
         .await;
 
-    let connector_uri = format!("{}/", &mock_server.uri());
+    let connector_uri = format!("{}/", mock_server.uri());
     let override_config = json!({
         "connectors": {
             "sources": {
@@ -510,7 +510,7 @@ async fn redact_errors_when_include_subgraph_errors_disabled() {
         .mount(&mock_server)
         .await;
 
-    let connector_uri = format!("{}/", &mock_server.uri());
+    let connector_uri = format!("{}/", mock_server.uri());
     let override_config = json!({
         "connectors": {
             "sources": {
@@ -569,7 +569,7 @@ async fn does_not_redact_errors_when_include_subgraph_errors_enabled() {
         .mount(&mock_server)
         .await;
 
-    let connector_uri = format!("{}/", &mock_server.uri());
+    let connector_uri = format!("{}/", mock_server.uri());
     let override_config = json!({
         "connectors": {
             "sources": {
