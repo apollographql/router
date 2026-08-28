@@ -1359,3 +1359,184 @@ type C
         result.as_ref().map(|p| p.to_string()).unwrap_or_default(),
     );
 }
+
+// ---------------------------------------------------------------------------
+// @requires: condition aliasing and cross-subgraph routing
+// ---------------------------------------------------------------------------
+
+// @requires chains alias required fields as __require_N_* in generated
+// operations; the correctness checker must accept these renames.
+// Based on: requires.rs::it_handles_simple_require_chain
+#[test]
+fn inc_requires_rename_correctness_check() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            v: Int!
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            v: Int! @external
+            inner: Int! @requires(fields: "v")
+          }
+        "#,
+        Subgraph3: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            inner: Int! @external
+            outer: Int! @requires(fields: "inner")
+          }
+        "#
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            t {
+              outer
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            t {
+              __typename
+              id
+              v
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T {
+                __typename
+                id
+                v
+              }
+            } =>
+            {
+              ... on T {
+                __require_0_inner: inner
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "Subgraph3") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_inner: inner
+              }
+            } =>
+            {
+              ... on T {
+                outer
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// A @requires chain that must route its condition field through a key
+/// hop into another subgraph before the dependent field can be fetched.
+#[test]
+fn inc_requires_routes_condition_via_key_hop() {
+    let planner = planner!(
+        config = incremental_config(),
+        SubgraphA: r#"
+        type Query {
+            product: Product
+        }
+
+        type Product @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        SubgraphB: r#"
+        type Product @key(fields: "id") {
+            id: ID!
+            weight: Float
+        }
+        "#,
+        SubgraphC: r#"
+        type Product @key(fields: "id") {
+            id: ID!
+            weight: Float @external
+            shippingEstimate: Float @requires(fields: "weight")
+        }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        {
+            product {
+                shippingEstimate
+            }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "SubgraphA") {
+          {
+            product {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "product") {
+          Fetch(service: "SubgraphB") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                __require_0_weight: weight
+              }
+            }
+          },
+        },
+        Flatten(path: "product") {
+          Fetch(service: "SubgraphC") {
+            {
+              ... on Product {
+                __typename
+                id
+                __require_0_weight: weight
+              }
+            } =>
+            {
+              ... on Product {
+                shippingEstimate
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}

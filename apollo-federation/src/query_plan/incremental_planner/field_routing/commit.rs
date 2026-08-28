@@ -32,6 +32,16 @@ use super::selection_label;
 use super::state::PendingSelection;
 use super::state::PlanState;
 
+/// Shared inputs of one `commit_choice` invocation, threaded through the
+/// @requires stage.
+pub(super) struct CommitCtx<'a> {
+    pub(super) pending: &'a PendingSelection,
+    pub(super) choice: &'a RoutingChoice,
+    /// The parent-to-entity dependency edge, when the choice was a hop.
+    /// @requires inputs ride on this edge.
+    pub(super) key_hop_edge: Option<EdgeIndex>,
+}
+
 /// Where a committed selection's children begin: fetch node, operation
 /// path, and response path.
 pub(super) struct CommitTarget {
@@ -70,7 +80,7 @@ impl FieldRoutingSearchSpace {
         };
 
         // Mutating half: commit the hop or resolve the direct fetch group.
-        let (fetch_node, _key_hop_edge) = match choice.hop_kind {
+        let (fetch_node, key_hop_edge) = match choice.hop_kind {
             HopKind::RootHop => {
                 let (group, hop_edge) = self.commit_root_hop(state, pending, choice)?;
                 (group, Some(hop_edge))
@@ -83,13 +93,23 @@ impl FieldRoutingSearchSpace {
         };
 
         // Pure half: assemble op and response paths for children.
-        let target = self.target_paths(
+        let mut target = self.target_paths(
             pending,
             choice,
             choice.hop_kind,
             fetch_node,
             response_path_elements,
         )?;
+
+        let ctx = CommitCtx {
+            pending,
+            choice,
+            key_hop_edge,
+        };
+        let edge = qg.edge_weight(choice.edge_index())?;
+        if let Some(requires_conditions) = &edge.conditions {
+            target = self.apply_requires(state, &ctx, requires_conditions, target)?;
+        }
 
         // Condition selections carry an ordering dependent: their consuming
         // group must run after every group they commit into. A would-be
@@ -217,6 +237,7 @@ impl FieldRoutingSearchSpace {
                     dest_type,
                     dest_subgraph: first_subgraph.clone(),
                 }),
+                condition_alias_rewrites: Vec::new(),
             })
         } else {
             None
@@ -367,6 +388,7 @@ impl FieldRoutingSearchSpace {
                         dest_type,
                         dest_subgraph: next_subgraph.clone(),
                     }),
+                    condition_alias_rewrites: Vec::new(),
                 })
             } else {
                 None

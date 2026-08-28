@@ -53,6 +53,10 @@ pub(crate) struct InputContribution {
     /// Present for key-hop inputs (triggers `compute_input_rewrites_on_key_fetch`);
     /// absent for @requires inputs.
     pub(crate) rewrite_info: Option<InputRewriteInfo>,
+    /// Alias to original-name pairs for @requires condition fields aliased
+    /// to avoid cross-fetch response path collisions; each generates an
+    /// input KeyRenamer rewrite undoing the alias before the subgraph send.
+    pub(crate) condition_alias_rewrites: Vec<(Name, Name)>,
 }
 
 #[derive(Clone, Debug)]
@@ -416,9 +420,51 @@ impl FetchGraph {
     }
 
     /// Get a reference to an edge's weight.
-    #[allow(dead_code)]
     pub(crate) fn edge_weight_raw(&self, edge: EdgeIndex) -> &FetchEdgeWeight {
         &self.graph[edge]
+    }
+
+    /// All input contributions on edges into `node`.
+    pub(crate) fn incoming_inputs(
+        &self,
+        node: NodeIndex,
+    ) -> impl Iterator<Item = &InputContribution> {
+        self.graph
+            .edges_directed(node, Direction::Incoming)
+            .flat_map(|edge| edge.weight().inputs.iter())
+    }
+
+    /// Whether adding `new_rewrites` to `edge` would rename two different
+    /// aliases to the same original field name.
+    pub(crate) fn has_conflicting_condition_rewrites(
+        &self,
+        edge: EdgeIndex,
+        new_rewrites: &[(Name, Name)],
+    ) -> bool {
+        let existing = &self.graph[edge].inputs;
+        for (_alias, original) in new_rewrites {
+            for input in existing {
+                if input
+                    .condition_alias_rewrites
+                    .iter()
+                    .any(|(_, orig)| orig == original)
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Clone an edge's key-hop inputs (those with `rewrite_info`), for
+    /// splitting an entity group.
+    pub(crate) fn clone_key_inputs(&self, edge: EdgeIndex) -> Vec<InputContribution> {
+        self.graph[edge]
+            .inputs
+            .iter()
+            .filter(|i| i.rewrite_info.is_some())
+            .cloned()
+            .collect()
     }
 
     /// Append an input to an existing edge (e.g. @requires conditions
