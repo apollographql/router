@@ -186,7 +186,7 @@ fn run_bulb_and_finalize(
         "starting BULB search",
     );
 
-    let (result, stats) = bulb_search(
+    let (mut result, stats) = bulb_search(
         search_space,
         initial.clone(),
         config.clone(),
