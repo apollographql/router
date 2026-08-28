@@ -446,7 +446,6 @@ fn parse_accept(headers: &HeaderMap) -> ClientRequestAccepts {
 mod tests {
     use http::HeaderValue;
     use http::StatusCode;
-    use tower::ServiceExt as _;
 
     use super::*;
     use crate::services::SubgraphRequest;

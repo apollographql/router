@@ -16,7 +16,6 @@
 //! * [`services`] - the various services handling a GraphQL requests,
 //!   and APIs for plugins to intercept them
 
-#![cfg_attr(feature = "failfast", allow(unreachable_code))]
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
 
@@ -29,28 +28,6 @@
 #[ctor::ctor(unsafe)]
 fn install_default_crypto_provider_for_tests() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-}
-
-macro_rules! failfast_debug {
-    ($($tokens:tt)+) => {{
-        tracing::debug!($($tokens)+);
-        #[cfg(feature = "failfast")]
-        panic!(
-            "failfast triggered. \
-            Please remove the feature failfast if you don't want to see these panics"
-        );
-    }};
-}
-
-macro_rules! failfast_error {
-    ($($tokens:tt)+) => {{
-        tracing::error!($($tokens)+);
-        #[cfg(feature = "failfast")]
-        panic!(
-            "failfast triggered. \
-            Please remove the feature failfast if you don't want to see these panics"
-        );
-    }};
 }
 
 #[macro_use]
@@ -79,6 +56,7 @@ mod introspection;
 pub mod layers;
 pub(crate) mod logging;
 mod orbiter;
+mod pipeline;
 mod plugins;
 pub(crate) mod protocols;
 mod query_planner;
@@ -94,6 +72,7 @@ mod uplink;
 pub(crate) mod allocator;
 mod registry;
 
+pub use crate::axum_factory::Endpoint;
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
 pub use crate::context::Context;
@@ -108,7 +87,6 @@ pub use crate::router::LicenseSource;
 pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
-pub use crate::router_factory::Endpoint;
 pub use crate::test_harness::MockedSubgraphs;
 pub use crate::test_harness::TestHarness;
 #[cfg(any(test, feature = "snapshot"))]
