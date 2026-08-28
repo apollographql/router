@@ -24,6 +24,7 @@ use query_plan_analysis::AnalysisContext;
 use crate::FederationError;
 use crate::compat::coerce_executable_values;
 use crate::correctness::response_shape_compare::ComparisonError;
+use crate::correctness::response_shape_compare::PossibleTypes;
 use crate::correctness::response_shape_compare::compare_response_shapes_with_constraint;
 use crate::query_plan::QueryPlan;
 use crate::schema::ValidFederationSchema;
@@ -60,8 +61,15 @@ pub fn compare_response_shapes(
     other: &response_shape::ResponseShape,
 ) -> Result<(), ComparisonError> {
     let path_constraint = schema_constraint::SchemaConstraint::new(schema);
+    let possible_types = PossibleTypes::All; // unconstrained at the top level
     let assumption = response_shape::Clause::default(); // empty assumption at the top level
-    compare_response_shapes_with_constraint(&path_constraint, &assumption, this, other)
+    compare_response_shapes_with_constraint(
+        &path_constraint,
+        &possible_types,
+        &assumption,
+        this,
+        other,
+    )
 }
 
 /// Check if `this` response shape is a subset of `other` in a federated context (supergraph
@@ -79,8 +87,15 @@ pub fn compare_response_shapes_in_supergraph(
         schema_constraint::SchemaConstraint::new(supergraph_schema),
         subgraph_constraint::SubgraphConstraint::new(subgraphs_by_name),
     );
+    let possible_types = PossibleTypes::All; // unconstrained at the top level
     let assumption = response_shape::Clause::default(); // empty assumption at the top level
-    compare_response_shapes_with_constraint(&path_constraint, &assumption, this, other)
+    compare_response_shapes_with_constraint(
+        &path_constraint,
+        &possible_types,
+        &assumption,
+        this,
+        other,
+    )
 }
 
 /// Check if `this`'s response shape is a subset of `other`'s response shape.
