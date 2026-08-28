@@ -3272,6 +3272,7 @@ async fn invalidate_by_cache_tag() {
         // now we invalidate data
         let res = invalidation
             .invalidate(vec![InvalidationRequest::CacheTag {
+                scope: crate::plugins::response_cache::cache_tag::CacheScope::Subgraph,
                 subgraphs: vec!["orga".to_string()].into_iter().collect(),
                 cache_tag: String::from("organization-1"),
             }])

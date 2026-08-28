@@ -17,6 +17,7 @@ use tower::Service;
 use tracing::Span;
 use tracing_futures::Instrument;
 
+use super::cache_tag::CacheScope;
 use super::connectors::ConnectorCacheConfiguration;
 use super::invalidation::Invalidation;
 use super::plugin::Subgraph;
@@ -248,23 +249,31 @@ impl Service<router::Request> for InvalidationService {
                                             req,
                                         )
                                     } else {
-                                        // Only `cache_tag` requests may name connector sources
-                                        // (via `sources`, folded into `subgraphs` at parse time),
-                                        // so only they may authorize with the connector shared
-                                        // key. `subgraph`/`type` kinds target subgraph storage
-                                        // exclusively and must present the subgraph key.
-                                        let allow_connector_key = matches!(
+                                        // Authorize against only the config for the scope the
+                                        // caller addressed. A `cache_tag` request that named
+                                        // `sources` (connector scope) requires the connector
+                                        // shared key; every other request in this branch
+                                        // (subgraph/type kinds, and cache_tag over `subgraphs`)
+                                        // requires the subgraph shared key. This keeps a connector
+                                        // credential from purging subgraph cache tags — and vice
+                                        // versa — instead of accepting either key for `cache_tag`.
+                                        let use_connector_key = matches!(
                                             req,
-                                            InvalidationRequest::CacheTag { .. }
+                                            InvalidationRequest::CacheTag {
+                                                scope: CacheScope::Connector,
+                                                ..
+                                            }
                                         );
                                         req.subgraph_names().iter().all(|name| {
-                                            validate_shared_key(&config, shared_key, name)
-                                                || (allow_connector_key
-                                                    && validate_connector_shared_key_by_source(
-                                                        &connector_config,
-                                                        shared_key,
-                                                        name,
-                                                    ))
+                                            if use_connector_key {
+                                                validate_connector_shared_key_by_source(
+                                                    &connector_config,
+                                                    shared_key,
+                                                    name,
+                                                )
+                                            } else {
+                                                validate_shared_key(&config, shared_key, name)
+                                            }
                                         })
                                     }
                                 });
@@ -795,6 +804,7 @@ indexes:
         let mut subgraphs = std::collections::HashSet::new();
         subgraphs.insert("users".to_string());
         let body = vec![InvalidationRequest::CacheTag {
+            scope: CacheScope::Subgraph,
             subgraphs,
             cache_tag: "homepage".to_string(),
         }];
@@ -836,6 +846,7 @@ indexes:
         subgraphs.insert("users".to_string());
         subgraphs.insert("orders".to_string());
         let body = vec![InvalidationRequest::CacheTag {
+            scope: CacheScope::Subgraph,
             subgraphs,
             cache_tag: "homepage".to_string(),
         }];
@@ -945,6 +956,7 @@ indexes:
         let mut subgraphs = std::collections::HashSet::new();
         subgraphs.insert("graph.api".to_string());
         let body = vec![InvalidationRequest::CacheTag {
+            scope: CacheScope::Subgraph,
             subgraphs,
             cache_tag: "tag-1".to_string(),
         }];
@@ -1553,27 +1565,51 @@ mod tests {
         }
     }
 
-    /// `cache_tag` requests may target either scope, so both keys must authorize them.
+    /// `cache_tag` authorization is scope-specific: a request that names `sources` (connector
+    /// scope) is authorized only by the connector key; one that names `subgraphs` (subgraph scope)
+    /// only by the subgraph key. Neither key may cross into the other scope's tags — in
+    /// particular a connector credential must not purge subgraph cache tags (the vulnerability
+    /// this replaces the old accept-either-key behavior to close).
     #[tokio::test]
-    async fn cache_tag_kind_accepts_either_shared_key() {
-        let service = service_with_split_keys("cache_tag_kind_accepts_either_shared_key").await;
-        for key in ["subgraph-key", "connector-key"] {
-            let req = router::Request::fake_builder()
-                .method(http::Method::POST)
-                .header(AUTHORIZATION, key)
-                .body(body::from_bytes(
-                    serde_json::to_vec(
-                        &serde_json::json!([{"kind": "cache_tag", "sources": ["graph.api"], "cache_tag": "tag-1"}]),
-                    )
-                    .unwrap(),
-                ))
-                .build()
-                .unwrap();
-            let res = service.clone().oneshot(req).await.unwrap();
+    async fn cache_tag_shared_key_is_scope_specific() {
+        let service = service_with_split_keys("cache_tag_shared_key_is_scope_specific").await;
+
+        // (request body, key that must be accepted, cross-scope key that must be rejected)
+        let cases = [
+            (
+                serde_json::json!([{"kind": "cache_tag", "sources": ["graph.api"], "cache_tag": "tag-1"}]),
+                "connector-key",
+                "subgraph-key",
+            ),
+            (
+                serde_json::json!([{"kind": "cache_tag", "subgraphs": ["accounts"], "cache_tag": "tag-1"}]),
+                "subgraph-key",
+                "connector-key",
+            ),
+        ];
+
+        for (body_json, matching_key, wrong_key) in cases {
+            let build = |key: &str| {
+                router::Request::fake_builder()
+                    .method(http::Method::POST)
+                    .header(AUTHORIZATION, key)
+                    .body(body::from_bytes(serde_json::to_vec(&body_json).unwrap()))
+                    .build()
+                    .unwrap()
+            };
+
+            let res = service.clone().oneshot(build(matching_key)).await.unwrap();
             assert_eq!(
                 res.response.status(),
                 StatusCode::ACCEPTED,
-                "{key} should authorize cache_tag requests"
+                "{matching_key} should authorize {body_json}"
+            );
+
+            let res = service.clone().oneshot(build(wrong_key)).await.unwrap();
+            assert_eq!(
+                res.response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{wrong_key} must not authorize {body_json}"
             );
         }
     }

@@ -163,6 +163,7 @@ impl Invalidation {
             InvalidationRequest::CacheTag {
                 subgraphs,
                 cache_tag,
+                ..
             } => {
                 let subgraph_counts = storage
                     .invalidate(
@@ -305,24 +306,23 @@ impl Invalidation {
                     Some(s) => vec![(CacheScope::Subgraph, s)],
                     None => continue,
                 },
-                // A cache_tag name can belong to either scope (`sources` is folded into
-                // `subgraphs` at parse time), and `StorageInterface::get` falls back to the
-                // subgraph `all` storage for ANY name — so an `.or_else` chain would never reach
-                // connector storage when subgraph caching is configured. Run the invalidation
-                // against BOTH scopes' storages, each under its own scope: tag ZSET keys render
-                // per scope+name, so the non-owning storage simply deletes nothing (idempotent).
-                InvalidationRequest::CacheTag { subgraphs, .. } => subgraphs
+                // The caller stated which scope it meant (`subgraphs` vs `sources`), recorded on
+                // the variant. Target only that scope's storage — a `sources` request purges
+                // connector tags, a `subgraphs` request purges subgraph tags, never the other.
+                // `get`/`get_connector` each fall back to their own `all` storage, so sources that
+                // rely entirely on `connector.all` (or subgraphs on `subgraph.all`) still resolve.
+                InvalidationRequest::CacheTag {
+                    scope, subgraphs, ..
+                } => subgraphs
                     .iter()
-                    .flat_map(|subgraph| {
-                        self.storage
-                            .get(subgraph)
-                            .map(|s| (CacheScope::Subgraph, s))
-                            .into_iter()
-                            .chain(
-                                self.storage
-                                    .get_connector(subgraph)
-                                    .map(|s| (CacheScope::Connector, s)),
-                            )
+                    .filter_map(|name| match scope {
+                        CacheScope::Subgraph => {
+                            self.storage.get(name).map(|s| (CacheScope::Subgraph, s))
+                        }
+                        CacheScope::Connector => self
+                            .storage
+                            .get_connector(name)
+                            .map(|s| (CacheScope::Connector, s)),
                     })
                     .collect(),
                 InvalidationRequest::ConnectorSource { source }
@@ -375,6 +375,14 @@ pub(crate) enum InvalidationRequest {
         r#type: String,
     },
     CacheTag {
+        /// Which scope the caller addressed: `Subgraph` when the request used the `subgraphs`
+        /// field, `Connector` when it used `sources`. The deserializer records this so the request
+        /// can be authorized against — and targeted at — only that scope's storage. Without it, a
+        /// connector shared key could authorize purging subgraph cache tags (and vice versa), and
+        /// the delete would fan out across the trust boundary. `#[serde(skip)]`: the wire form is
+        /// still `subgraphs`/`sources`; scope is internal, so serialization is unchanged.
+        #[serde(skip)]
+        scope: CacheScope,
         subgraphs: HashSet<String>,
         cache_tag: String,
     },
@@ -481,9 +489,9 @@ impl<'de> Deserialize<'de> for InvalidationRequest {
                 Ok(InvalidationRequest::ConnectorSource { source })
             }
             "cache_tag" => {
-                let subgraphs = match (raw.subgraphs, raw.sources) {
-                    (Some(subgraphs), None) => subgraphs,
-                    (None, Some(sources)) => sources,
+                let (scope, subgraphs) = match (raw.subgraphs, raw.sources) {
+                    (Some(subgraphs), None) => (CacheScope::Subgraph, subgraphs),
+                    (None, Some(sources)) => (CacheScope::Connector, sources),
                     (Some(_), Some(_)) => {
                         return Err(D::Error::custom(
                             "cannot specify both `subgraphs` and `sources` for kind `cache_tag`",
@@ -502,6 +510,7 @@ impl<'de> Deserialize<'de> for InvalidationRequest {
                 reject_field::<D::Error>("source", raw.source.is_some(), kind)?;
                 reject_field::<D::Error>("type", raw.r#type.is_some(), kind)?;
                 Ok(InvalidationRequest::CacheTag {
+                    scope,
                     subgraphs,
                     cache_tag,
                 })
@@ -643,6 +652,7 @@ mod tests {
         );
         assert!(
             !InvalidationRequest::CacheTag {
+                scope: CacheScope::Subgraph,
                 subgraphs: HashSet::new(),
                 cache_tag: "tag".to_string()
             }
@@ -784,6 +794,7 @@ mod tests {
         assert_eq!(
             req,
             InvalidationRequest::CacheTag {
+                scope: CacheScope::Connector,
                 subgraphs: HashSet::from(["connector-graph.random_person_api".to_string()]),
                 cache_tag: "test-1".to_string(),
             }
@@ -797,6 +808,7 @@ mod tests {
         assert_eq!(
             req,
             InvalidationRequest::CacheTag {
+                scope: CacheScope::Subgraph,
                 subgraphs: HashSet::from(["my-subgraph".to_string()]),
                 cache_tag: "test-1".to_string(),
             }
