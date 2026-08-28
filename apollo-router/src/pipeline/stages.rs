@@ -202,10 +202,9 @@ pub(crate) fn build_subgraph_service(
 
     let service = ServiceBuilder::new()
         .buffered()
-        .apply_plugin_layer(
-            plugins,
-            IncludeSubgraphErrors::tag_errors_with_subgraph_name_layer,
-        )
+        .apply_plugin_layer(plugins, |p: &IncludeSubgraphErrors| {
+            p.tag_errors_with_subgraph_name_layer(Arc::from(name))
+        })
         .apply_plugin_layer(plugins, |h: &Headers| h.subgraph_headers_layer(name))
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.subgraph_service(name, service)

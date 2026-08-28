@@ -77,12 +77,12 @@ where
 /// Layer type for [`IncludeSubgraphErrors::tag_errors_with_subgraph_name_layer`], which
 /// documents which extension the tag uses and why filtering happens at the supergraph stage.
 pub(crate) struct TagSubgraphErrorsLayer {
-    _private: (),
+    subgraph_name: Arc<str>,
 }
 
 impl TagSubgraphErrorsLayer {
-    fn new() -> Self {
-        Self { _private: () }
+    fn new(subgraph_name: Arc<str>) -> Self {
+        Self { subgraph_name }
     }
 }
 
@@ -94,13 +94,21 @@ where
     type Service = TagSubgraphErrorsService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        TagSubgraphErrorsService { inner }
+        TagSubgraphErrorsService {
+            inner,
+            subgraph_name: self.subgraph_name.clone(),
+        }
     }
 }
 
 /// Service type for [`IncludeSubgraphErrors::tag_errors_with_subgraph_name_layer`].
 pub(crate) struct TagSubgraphErrorsService<S> {
     inner: S,
+    /// The subgraph this service stack was built for. Taken from the pipeline rather than
+    /// from `request.subgraph_name` so that it cannot disagree with the stack it is
+    /// installed on -- a mis-tagged error silently falls back to the default redaction
+    /// config in `process_error`.
+    subgraph_name: Arc<str>,
 }
 
 impl<S> tower::Service<subgraph::Request> for TagSubgraphErrorsService<S>
@@ -120,7 +128,7 @@ where
     }
 
     fn call(&mut self, req: subgraph::Request) -> Self::Future {
-        let subgraph_name = req.subgraph_name.clone();
+        let subgraph_name = self.subgraph_name.clone();
         self.inner
             .call(req)
             .map_ok(move |mut response| {
@@ -157,8 +165,11 @@ impl IncludeSubgraphErrors {
     /// Filtering deliberately does not happen here. Other kinds of request also generate
     /// errors that need filtering, so pushing the filtering out to the supergraph response
     /// ensures everything gets filtered.
-    pub(crate) fn tag_errors_with_subgraph_name_layer(&self) -> TagSubgraphErrorsLayer {
-        TagSubgraphErrorsLayer::new()
+    pub(crate) fn tag_errors_with_subgraph_name_layer(
+        &self,
+        subgraph_name: Arc<str>,
+    ) -> TagSubgraphErrorsLayer {
+        TagSubgraphErrorsLayer::new(subgraph_name)
     }
 }
 
