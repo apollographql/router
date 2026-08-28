@@ -81,6 +81,8 @@ Construction is slow enough to need its own observability — a reload blocks on
 
 `create_plugins` processes plugins in a fixed sequence; the order sets the relative order of plugin hooks at each service. The general constraint stands above the list: telemetry must precede any plugin that can reject a request at the router service, so rejections are recorded. Two plugins whose hooked services don't overlap can be reordered relative to each other — check each plugin's service hooks before moving an entry. `PluginRegistrar::finish` panics if any registered Apollo plugin is missing from the sequence, so a new plugin cannot ship without an explicit position.
 
+The sequence governs a plugin only while it implements wrap hooks. `include_subgraph_errors` and `headers` no longer do. Their layers are placed explicitly in `pipeline/stages.rs`, so their position comes from those call sites rather than from this list, and moving either entry changes nothing. Both stay in the sequence because the registry still owns their construction. Converting the remaining internal plugins the same way is ROUTER-2070.
+
 ## Where things live
 
 | Concern | Function / type | File |

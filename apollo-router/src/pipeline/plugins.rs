@@ -121,13 +121,18 @@ pub(crate) async fn create_plugins(
     // the router service must flow through telemetry so we can record errors.
     //
     // Broadly, for telemetry to record errors, we must make sure the telemetry plugin runs
-    // before any plugin that can *reject* a request at the router service. Plugins whose
-    // router-service hook is an infallible `map_request` (eg `headers`, which only injects
-    // `MaskingRulesMap` into context) may appear before telemetry without breaking this
-    // invariant — they can't short-circuit a request away from telemetry.
+    // before any plugin that can *reject* a request at the router service. A plugin whose
+    // router-service hook is an infallible `map_request` may appear before telemetry
+    // without breaking this invariant — it can't short-circuit a request away from
+    // telemetry.
     //
     // Two plugins whose hooked services don't overlap can be reordered relative to each
     // other; check each plugin's service hooks before moving an entry.
+    //
+    // The next two entries are exceptions. Neither plugin implements a wrap hook any more,
+    // so this list no longer governs where their behaviour runs: their layers are placed
+    // explicitly in `pipeline::stages`, and moving either line changes nothing. Both are
+    // still registered here because the registry owns their construction. See ROUTER-2070.
     registrar.add_mandatory("include_subgraph_errors").await;
     registrar.add_mandatory("headers").await;
     if apollo_telemetry_plugin_mandatory {

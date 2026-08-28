@@ -450,19 +450,13 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
     /// Provide the plugin layer to apply as a method reference.
     ///
     /// If the plugin isn't available in the `plugins` registry, this function is a no-op.
-    /// For a plugin that `create_plugins` always registers, prefer
-    /// [`Self::apply_required_plugin_layer`], which panics on a miss instead of silently
-    /// dropping the layer.
+    /// That covers both a plugin the configuration leaves out and one the license
+    /// disables. Gating removes the plugin during construction, so placement sees one kind
+    /// of absence.
     ///
-    /// ## Example
-    ///
-    /// To apply the masking-context layer from the Headers plugin:
-    ///
-    /// ```rust,ignore
-    /// ServiceBuilder::new()
-    ///     .apply_plugin_layer(&plugins, Headers::router_masking_layer)
-    ///     .service(router_service)
-    /// ```
+    /// For a plugin that `create_plugins` always registers, use
+    /// [`Self::apply_required_plugin_layer`] instead. It panics on a miss rather than
+    /// silently dropping the layer.
     fn apply_plugin_layer<P, OutLayer>(
         self,
         plugins: &Plugins,
@@ -473,9 +467,22 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
 
     /// Apply the layer of a *mandatory* plugin to a service stack.
     ///
-    /// Same as [`Self::apply_plugin_layer`], except that a missing plugin is treated as a
-    /// bug rather than a supported configuration: the miss panics instead of quietly
-    /// reducing the stack to a no-op.
+    /// Same as [`Self::apply_plugin_layer`], except that a missing plugin is a bug rather
+    /// than a supported configuration. The miss panics instead of quietly reducing the
+    /// stack to a no-op. Several of these layers are security-relevant: losing
+    /// `IncludeSubgraphErrors::redact_subgraph_errors_layer` would send every subgraph
+    /// error to clients unredacted, so a silent drop is the worst failure mode available.
+    ///
+    /// A wholly empty registry is left alone. Test fixtures legitimately build pipelines
+    /// with no plugins at all.
+    ///
+    /// ## Example
+    ///
+    /// ```rust,ignore
+    /// ServiceBuilder::new()
+    ///     .apply_required_plugin_layer(&plugins, Headers::masking_rules_context_layer)
+    ///     .service(router_service)
+    /// ```
     fn apply_required_plugin_layer<P, OutLayer>(
         self,
         plugins: &Plugins,
@@ -550,7 +557,7 @@ mod tests {
     fn apply_required_plugin_layer_skips_empty_registry() {
         let plugins = Plugins::default();
         let _ = ServiceBuilder::new()
-            .apply_required_plugin_layer(&plugins, Headers::router_masking_layer);
+            .apply_required_plugin_layer(&plugins, Headers::masking_rules_context_layer);
     }
 
     #[test]
@@ -562,6 +569,6 @@ mod tests {
             Box::new(MockedSubgraphs::default()),
         );
         let _ = ServiceBuilder::new()
-            .apply_required_plugin_layer(&plugins, Headers::router_masking_layer);
+            .apply_required_plugin_layer(&plugins, Headers::masking_rules_context_layer);
     }
 }

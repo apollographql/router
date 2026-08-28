@@ -455,7 +455,7 @@ impl Headers {
     /// Returns a layer that applies this subgraph's header operations.
     ///
     /// Note: masking rules aren't installed here — they're inserted into request context
-    /// once by [`Headers::router_masking_layer`], and consumers resolve per-subgraph rules
+    /// once by [`Headers::masking_rules_context_layer`], and consumers resolve per-subgraph rules
     /// at read time via `MaskingRulesMap::get_request(Some(name))` / `get_response(...)`.
     pub(crate) fn subgraph_headers_layer(&self, name: &str) -> HeadersLayer {
         let operations = self
@@ -480,12 +480,12 @@ impl Headers {
     }
 
     /// Returns a layer that inserts a [`MaskingRulesMap`] into the request context.
-    pub(crate) fn router_masking_layer(&self) -> MaskingContextLayer {
+    pub(crate) fn masking_rules_context_layer(&self) -> MaskingContextLayer {
         MaskingContextLayer::new(self.masking_rules_map.clone())
     }
 }
 
-/// Layer type for [`Headers::router_masking_layer`].
+/// Layer type for [`Headers::masking_rules_context_layer`].
 pub(crate) struct MaskingContextLayer {
     masking_rules_map: Arc<crate::services::header_masking::MaskingRulesMap>,
 }
