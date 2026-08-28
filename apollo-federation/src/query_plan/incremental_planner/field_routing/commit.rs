@@ -226,10 +226,8 @@ impl FieldRoutingSearchSpace {
         // Keys the current fetch cannot resolve directly are routed as
         // pending selections; ordering edges to the new group are wired as
         // they commit.
-        if !key_locally_resolvable {
-            if let Some(key_conditions) = &choice.key_conditions {
-                self.push_condition_pendings(state, pending, key_conditions, new_group)?;
-            }
+        if !key_locally_resolvable && let Some(key_conditions) = &choice.key_conditions {
+            self.push_condition_pendings(state, pending, key_conditions, new_group)?;
         }
 
         // Multi-hop key chain: walk through intermediate subgraphs,
@@ -365,14 +363,13 @@ impl FieldRoutingSearchSpace {
         dedupe_same_type_key: bool,
     ) -> EdgeIndex {
         if let Some(existing_edge) = state.graph.find_edge(anchor, group) {
-            if let Some(input) = key_input {
-                if !(dedupe_same_type_key
+            if let Some(input) = key_input
+                && !(dedupe_same_type_key
                     && state
                         .graph
                         .edge_has_key_input(existing_edge, &input.source_type_name))
-                {
-                    state.graph.add_input_to_edge(existing_edge, input);
-                }
+            {
+                state.graph.add_input_to_edge(existing_edge, input);
             }
             existing_edge
         } else {
@@ -635,11 +632,10 @@ impl FieldRoutingSearchSpace {
             let target_data = self.query_graph.node_weight(target_qg_node)?;
             if let Ok(target_pos) =
                 CompositeTypeDefinitionPosition::try_from(target_data.type_.clone())
+                && target_pos.is_abstract_type()
             {
-                if target_pos.is_abstract_type() {
-                    let target_source = self.node_source(target_qg_node)?;
-                    self.append_typename(state, fetch_node, op_path, &target_source);
-                }
+                let target_source = self.node_source(target_qg_node)?;
+                self.append_typename(state, fetch_node, op_path, &target_source);
             }
         }
         Ok(())
