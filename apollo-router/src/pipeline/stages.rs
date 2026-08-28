@@ -202,10 +202,10 @@ pub(crate) fn build_subgraph_service(
 
     let service = ServiceBuilder::new()
         .buffered()
-        .apply_plugin_layer(plugins, |p: &IncludeSubgraphErrors| {
+        .apply_required_plugin_layer(plugins, |p: &IncludeSubgraphErrors| {
             p.tag_errors_with_subgraph_name_layer(Arc::from(name))
         })
-        .apply_plugin_layer(plugins, |h: &Headers| h.subgraph_headers_layer(name))
+        .apply_required_plugin_layer(plugins, |h: &Headers| h.subgraph_headers_layer(name))
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.subgraph_service(name, service)
         })
@@ -250,7 +250,9 @@ fn build_connector_request_services(
         // plugins (mirrors the per-subgraph buffer in [`build_subgraph_service`]).
         let service = UnconstrainedBuffer::new(
             ServiceBuilder::new()
-                .apply_plugin_layer(plugins, |h: &Headers| h.connector_headers_layer(&source))
+                .apply_required_plugin_layer(plugins, |h: &Headers| {
+                    h.connector_headers_layer(&source)
+                })
                 .rust_plugins(plugins.clone(), |plugin, service| {
                     plugin.connector_request_service(service, source.clone())
                 })
@@ -450,7 +452,7 @@ fn build_supergraph_service(
     ServiceBuilder::new()
         .layer(content_negotiation::SupergraphContentNegotiationLayer::default())
         .layer(crate::compute_job::ComputeJobMetricsLayer::new())
-        .apply_plugin_layer(
+        .apply_required_plugin_layer(
             &plugins,
             IncludeSubgraphErrors::redact_subgraph_errors_layer,
         )
@@ -485,7 +487,7 @@ pub(crate) fn build_router_service(
 
     ServiceBuilder::new()
         .layer(StaticPageLayer::new(configuration))
-        .apply_plugin_layer(&plugins, Headers::router_masking_layer)
+        .apply_required_plugin_layer(&plugins, Headers::router_masking_layer)
         .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
         .layer(content_negotiation::RouterContentNegotiationLayer::default())
         .layer(DisplayRouterRequestLayer)

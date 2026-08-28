@@ -450,15 +450,18 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
     /// Provide the plugin layer to apply as a method reference.
     ///
     /// If the plugin isn't available in the `plugins` registry, this function is a no-op.
+    /// For a plugin that `create_plugins` always registers, prefer
+    /// [`Self::apply_required_plugin_layer`], which reports the miss instead of silently
+    /// dropping the layer.
     ///
     /// ## Example
     ///
-    /// To apply the execution span layer from the Telemetry plugin:
+    /// To apply the masking-context layer from the Headers plugin:
     ///
     /// ```rust,ignore
     /// ServiceBuilder::new()
-    ///     .apply_plugin_layer(plugins.clone(), Telemetry::execution_span_layer)
-    ///     .service(execution_service)
+    ///     .apply_plugin_layer(&plugins, Headers::router_masking_layer)
+    ///     .service(router_service)
     /// ```
     fn apply_plugin_layer<P, OutLayer>(
         self,
@@ -467,6 +470,33 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
     ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
     where
         P: PluginPrivate;
+
+    /// Apply the layer of a *mandatory* plugin to a service stack.
+    ///
+    /// Same as [`Self::apply_plugin_layer`], except that a missing plugin is treated as a
+    /// bug rather than a supported configuration: the miss is logged at `error` level
+    /// instead of quietly reducing the stack to a no-op. Several of these layers are
+    /// security-relevant -- losing `IncludeSubgraphErrors::redact_subgraph_errors_layer`
+    /// means every subgraph error reaches clients unredacted -- so a silent drop is the
+    /// worst possible failure mode.
+    ///
+    /// This deliberately does not panic. Test fixtures legitimately build pipelines from an
+    /// empty plugin registry, and those are not what this is guarding against, so a wholly
+    /// empty registry is not reported at all.
+    fn apply_required_plugin_layer<P, OutLayer>(
+        self,
+        plugins: &Plugins,
+        get_layer: impl FnOnce(&P) -> OutLayer,
+    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    where
+        P: PluginPrivate;
+}
+
+/// Find the single instance of plugin type `P` in the registry, if it was built.
+fn find_plugin<P: PluginPrivate>(plugins: &Plugins) -> Option<&P> {
+    plugins
+        .values()
+        .find_map(|plugin| plugin.as_any().downcast_ref::<P>())
 }
 
 impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
@@ -492,10 +522,24 @@ impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
     where
         P: PluginPrivate,
     {
-        let layer = plugins
-            .values()
-            .find_map(|plugin| plugin.as_any().downcast_ref::<P>())
-            .map(get_layer);
-        self.option_layer(layer)
+        self.option_layer(find_plugin::<P>(plugins).map(get_layer))
+    }
+
+    fn apply_required_plugin_layer<P, OutLayer>(
+        self,
+        plugins: &Plugins,
+        get_layer: impl FnOnce(&P) -> OutLayer,
+    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    where
+        P: PluginPrivate,
+    {
+        if find_plugin::<P>(plugins).is_none() && !plugins.is_empty() {
+            tracing::error!(
+                plugin = std::any::type_name::<P>(),
+                "mandatory plugin is missing from the plugin registry, so its layer will not \
+                 be applied to the pipeline; this is a router bug"
+            );
+        }
+        self.apply_plugin_layer(plugins, get_layer)
     }
 }
