@@ -12,6 +12,7 @@
 
 mod conditions;
 mod requires;
+mod routing;
 pub(super) mod state;
 #[cfg(test)]
 mod test_support;
