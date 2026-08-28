@@ -8,7 +8,6 @@ use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::PrettyPrintable;
 use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
-use crate::connectors::json_selection::helpers::vec_push;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
@@ -39,12 +38,13 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 /// the tail applies to it exactly as if the method were absent. If any argument
 /// produces no value the method produces none either, short-circuiting without
 /// recording the author's message, the way every other method in the language
-/// propagates an absent argument. Two errors are reported in that case: the one
-/// from evaluating the argument, saying why it produced nothing, and a distinct
-/// one from this method, saying that the message it was asked to record never
-/// happened. That second error carries the syntax of the call and of the
-/// argument that failed, so a discarded diagnostic can be traced back to the
-/// expression meant to produce it.
+/// propagates an absent argument. Two errors are reported for each argument
+/// that fails: the one from evaluating it, saying why it produced nothing, and
+/// a distinct one from this method, saying that the message it was asked to
+/// record never happened. That second error carries the syntax of the call and
+/// of the argument that failed, so a discarded diagnostic can be traced back to
+/// the expression meant to produce it. Every argument is evaluated either way,
+/// so an author who broke more than one hears about all of them.
 ///
 /// An author who wants the message reported even when a path may be missing
 /// says so with `??`, which supplies a value where there would have been none:
@@ -61,11 +61,7 @@ fn with_error_method(
     input_path: &InputPath<JSON>,
     spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    let mut errors = Vec::new();
-
-    let args = method_args.map_or(&[][..], |method_args| method_args.args.as_slice());
-
-    if args.is_empty() {
+    if method_args.is_none_or(|method_args| method_args.args.is_empty()) {
         // A malformed call produces no value, the same as any other method
         // called wrongly. The shape function reports this too, so a schema this
         // wrong does not compose in the first place.
@@ -81,87 +77,99 @@ fn with_error_method(
                 spec,
             )],
         );
-    } else {
-        // The call's own syntax, so a discarded message can be traced back to
-        // the expression that was supposed to produce it. Without this, an
-        // author reading the problems sees that some ->withError somewhere
-        // reported nothing, which is exactly the opacity the method exists to
-        // avoid.
-        let printed_args = method_args
+    }
+
+    let args = method_args.map_or(&[][..], |method_args| method_args.args.as_slice());
+
+    let mut errors = Vec::new();
+    let mut parts = Vec::with_capacity(args.len());
+
+    // Whether the author's message can still be recorded. An argument that
+    // produces no value, or a value that cannot be serialized, costs the whole
+    // message, but the loop runs to the end regardless, so an author who broke
+    // two arguments hears about both rather than only the first. This is tracked
+    // separately because it cannot be read off `errors`: an argument can produce
+    // a value and report errors from inside it (a subselection over an array
+    // where one element lacks a field, say), and the message is still recorded
+    // in that case.
+    let mut can_record_message = true;
+
+    // The call's own syntax, so a discarded message can be traced back to the
+    // expression that was supposed to produce it. Without this, an author
+    // reading the problems sees that some ->withError somewhere reported
+    // nothing, which is exactly the opacity the method exists to avoid. Behind a
+    // closure because pretty-printing allocates and only a failing argument ever
+    // reads it, and this method is meant to be cheap enough to drop into a ->map
+    // over a large array.
+    let printed_args = || {
+        method_args
             .map(|method_args| method_args.pretty_print_with_indentation(true, 0))
-            .unwrap_or_default();
-        let mut parts = Vec::with_capacity(args.len());
+            .unwrap_or_default()
+    };
 
-        for arg in args {
-            let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, spec);
-            errors.extend(arg_errors);
+    for arg in args {
+        let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path, spec);
+        errors.extend(arg_errors);
 
-            match value_opt {
-                // A string argument is interpolated as written, so prose reads
-                // as prose rather than arriving wrapped in quotes.
-                Some(JSON::String(string)) => parts.push(string.as_str().to_string()),
+        match value_opt {
+            // A string argument is interpolated as written, so prose reads
+            // as prose rather than arriving wrapped in quotes.
+            Some(JSON::String(string)) => parts.push(string.as_str().to_string()),
 
-                // Everything else is serialized the way ->jsonStringify would
-                // serialize it, so a structured argument survives legibly.
-                Some(value) => match serde_json::to_string(&value) {
-                    Ok(json) => parts.push(json),
-                    Err(err) => {
-                        return (
-                            None,
-                            vec_push(
-                                errors,
-                                ApplyToError::new(
-                                    format!(
-                                        "Method ->{}{} recorded no message because argument {} could not be serialized: {err}",
-                                        method_name.as_ref(),
-                                        printed_args,
-                                        arg.pretty_print_with_indentation(true, 0),
-                                    ),
-                                    input_path.to_vec(),
-                                    arg.range(),
-                                    spec,
-                                ),
-                            ),
-                        );
-                    }
-                },
-
-                // An absent argument makes the whole method absent, the way it
-                // does for every other method. arg_errors (already collected)
-                // say why the argument produced nothing, and the error added
-                // here says what that cost: the message the author asked for
-                // was never recorded. Without it, a mapping author reading the
-                // problems sees only a failed path and has no reason to connect
-                // it to their missing diagnostic.
-                None => {
-                    return (
-                        None,
-                        vec_push(
-                            errors,
-                            ApplyToError::new(
-                                format!(
-                                    "Method ->{}{} recorded no message because argument {} produced no value",
-                                    method_name.as_ref(),
-                                    printed_args,
-                                    arg.pretty_print_with_indentation(true, 0),
-                                ),
-                                input_path.to_vec(),
-                                arg.range(),
-                                spec,
-                            ),
+            // Everything else is serialized the way ->jsonStringify would
+            // serialize it, so a structured argument survives legibly.
+            Some(value) => match serde_json::to_string(&value) {
+                Ok(json) => parts.push(json),
+                Err(err) => {
+                    can_record_message = false;
+                    errors.push(ApplyToError::new(
+                        format!(
+                            "Method ->{}{} recorded no message because argument {} could not be serialized: {err}",
+                            method_name.as_ref(),
+                            printed_args(),
+                            arg.pretty_print_with_indentation(true, 0),
                         ),
-                    );
+                        input_path.to_vec(),
+                        arg.range(),
+                        spec,
+                    ));
                 }
+            },
+
+            // An absent argument makes the whole method absent, the way it
+            // does for every other method. arg_errors (already collected)
+            // say why the argument produced nothing, and the error added
+            // here says what that cost: the message the author asked for
+            // was never recorded. Without it, a mapping author reading the
+            // problems sees only a failed path and has no reason to connect
+            // it to their missing diagnostic.
+            None => {
+                can_record_message = false;
+                errors.push(ApplyToError::new(
+                    format!(
+                        "Method ->{}{} recorded no message because argument {} produced no value",
+                        method_name.as_ref(),
+                        printed_args(),
+                        arg.pretty_print_with_indentation(true, 0),
+                    ),
+                    input_path.to_vec(),
+                    arg.range(),
+                    spec,
+                ));
             }
         }
-
-        errors.push(ApplyToError::new(
-            parts.join(" "),
-            input_path.to_vec(),
-            method_args.and_then(Ranged::range),
-            spec,
-        ));
     }
+
+    if !can_record_message {
+        return (None, errors);
+    }
+
+    errors.push(ApplyToError::new(
+        parts.join(" "),
+        input_path.to_vec(),
+        method_args.and_then(Ranged::range),
+        spec,
+    ));
 
     // Every argument produced a value, so the input flows through unchanged and
     // the dispatcher applies the tail to it.
@@ -172,7 +180,6 @@ fn with_error_method(
 // the value. Every argument's shape is still computed so mistakes inside them
 // (unknown fields, mistyped paths) surface at validation time. No argument's
 // shape is constrained, since any value can be part of a message.
-#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn with_error_shape(
     context: &ShapeContext,
     method_name: &WithRange<String>,
@@ -311,10 +318,6 @@ mod tests {
         );
     }
 
-    /// A call with no arguments is malformed rather than merely absent, and a
-    /// malformed call produces no value, the same as any other method called
-    /// wrongly. The shape function reports it as well, so this should not
-    /// survive composition.
     /// The escape hatch for the short-circuit above, and the reason it is not a
     /// trap: `??` supplies a value for an argument that would otherwise produce
     /// none, so an author who *wants* the message even when a path is missing
@@ -351,6 +354,55 @@ mod tests {
         let none_only = selection!(r#"$->withError("code:", @.code ?! "<absent>")"#);
         assert_eq!(recorded(&none_only, &absent), vec!["code: <absent>"]);
         assert_eq!(recorded(&none_only, &null), vec!["code: null"]);
+    }
+
+    /// Every argument is evaluated even after one has already cost the
+    /// message, so an author who broke two of them is told about both rather
+    /// than fixing the first and rediscovering the second.
+    #[test]
+    fn with_error_should_report_every_argument_that_produced_no_value() {
+        let (value, errors) = selection!(r#"$->withError("missing:", @.nope, "and", @.also_nope)"#)
+            .apply_to(&json!({ "id": 1 }));
+
+        assert_eq!(value, None);
+        assert_eq!(
+            errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
+            vec![
+                "Property .nope not found in object",
+                concat!(
+                    r#"Method ->withError("missing:", @.nope, "and", @.also_nope) "#,
+                    "recorded no message because argument @.nope produced no value",
+                ),
+                "Property .also_nope not found in object",
+                concat!(
+                    r#"Method ->withError("missing:", @.nope, "and", @.also_nope) "#,
+                    "recorded no message because argument @.also_nope produced no value",
+                ),
+            ],
+        );
+    }
+
+    /// An argument can produce a value *and* report errors from inside it, so
+    /// "did anything go wrong" is not the same question as "can the message be
+    /// recorded". Here the subselection misses a field on one array element and
+    /// still yields a value, and the author's message is recorded alongside
+    /// that error rather than being discarded by it.
+    #[test]
+    fn with_error_should_record_a_message_whose_argument_also_reported_errors() {
+        let (value, errors) = selection!(r#"$->withError("rows:", @.rows { id }) { count }"#)
+            .apply_to(&json!({
+                "count": 2,
+                "rows": [{ "id": "a" }, { "name": "b" }],
+            }));
+
+        assert_eq!(value, Some(json!({ "count": 2 })));
+        assert_eq!(
+            errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
+            vec![
+                "Property .id not found in object",
+                r#"rows: [{"id":"a"},{}]"#,
+            ],
+        );
     }
 
     /// The method records and steps aside, so dropping a tap into the middle of
@@ -392,6 +444,10 @@ mod tests {
         );
     }
 
+    /// A call with no arguments is malformed rather than merely absent, and a
+    /// malformed call produces no value, the same as any other method called
+    /// wrongly. The shape function reports it as well, so this should not
+    /// survive composition.
     #[test]
     fn with_error_should_report_a_call_with_no_arguments() {
         assert_eq!(
