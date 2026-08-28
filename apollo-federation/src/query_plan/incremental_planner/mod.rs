@@ -202,7 +202,7 @@ fn run_bulb_and_finalize(
         return Err(crate::error::SingleFederationError::PlanningCancelled.into());
     }
 
-    let result = match result {
+    let mut result = match result {
         Some(r) => r,
         None => {
             if !parameters.disabled_subgraphs.is_empty() {
@@ -243,6 +243,8 @@ fn run_bulb_and_finalize(
             result.pending.len(),
         )));
     }
+
+    result.graph.merge_sibling_entities();
 
     let mut operation_compression = if parameters.config.generate_query_fragments {
         SubgraphOperationCompression::GenerateFragments
