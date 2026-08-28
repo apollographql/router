@@ -105,18 +105,42 @@ pub(crate) fn upgrade_configuration(
     }
 
     let mut config = config.clone();
+    let mut effective_descriptions: Vec<String> = Vec::new();
 
-    let mut effective_migrations = Vec::new();
     for migration in &migrations {
         let new_config = apply_migration(&config, migration)?;
 
         // If the config has been modified by the migration then let the user know
         if new_config != config {
-            effective_migrations.push(migration);
+            effective_descriptions.push(migration.description.clone());
         }
 
         // Get ready for the next migration
         config = new_config;
+    }
+
+    // Rust-side migrations for transformations that cannot be expressed as
+    // YAML actions (e.g. composite keys built from two dynamic map keys).
+    // These run after the YAML migrations so any preceding renames (e.g.
+    // `preview_connectors` → `connectors`) are already in place. Unlike the
+    // major-version-only YAML migrations, this is a within-2.x rename, so it
+    // must also run in `UpgradeMode::Minor` (the startup validation path) —
+    // not just `UpgradeMode::Major` (the `router config upgrade` CLI).
+    let (migrated_connectors_subgraphs, subgraphs_with_unpropagated_config) =
+        migrate_connectors_subgraphs_to_sources(&mut config);
+    if migrated_connectors_subgraphs {
+        effective_descriptions.push(
+            "Apollo Connectors `connectors.subgraphs` configuration has been replaced by `connectors.sources` keyed by `<subgraph>.<source>`".to_string(),
+        );
+    }
+    if !subgraphs_with_unpropagated_config.is_empty() {
+        effective_descriptions.push(format!(
+            "Apollo Connectors: `connectors.subgraphs.<subgraph>.$config` was only copied onto sources listed under that subgraph's `sources` map. If your schema declares additional `@source`s for {}, add `$config` to their `connectors.sources` entries manually",
+            subgraphs_with_unpropagated_config
+                .iter()
+                .map(|s| format!("`{s}`"))
+                .join(", ")
+        ));
     }
 
     // Custom migration: wrap headers operation lists under an `operations` key.
@@ -150,18 +174,110 @@ pub(crate) fn upgrade_configuration(
         config = migrated;
     }
 
-    if !effective_migrations.is_empty() && log_warnings {
-        let descriptions: Vec<String> = effective_migrations
-            .iter()
-            .enumerate()
-            .map(|(idx, m)| format!("  {}. {}", idx + 1, m.description))
-            .collect();
+    if !effective_descriptions.is_empty() && log_warnings {
         tracing::error!(
             "router configuration contains unsupported options and needs to be upgraded to run the router: \n\n{}\n\n",
-            descriptions.join("\n\n")
+            effective_descriptions
+                .iter()
+                .enumerate()
+                .map(|(idx, m)| format!("  {}. {}", idx + 1, m))
+                .join("\n\n")
         );
     }
     Ok(config)
+}
+
+/// Collapse `connectors.subgraphs.<sub>.sources.<src>` entries into
+/// `connectors.sources["<sub>.<src>"]`. Returns whether at least one field
+/// was actually migrated, plus the names of subgraphs whose `$config` may
+/// not have been fully propagated (see below) so the caller can warn.
+///
+/// Fields are merged in the same order the removed `apply_config` applied
+/// them: when a `connectors.sources` entry already exists for a composite
+/// key, the deprecated `override_url` / `max_requests_per_operation` values
+/// win over it when present (matching the old per-field `if let Some(..)`
+/// overwrites), and the subgraph-level `$config` always overwrites any
+/// source-level `$config` — including on an existing entry — because the
+/// deprecated branch ran last and unconditionally re-assigned
+/// `connector.config`.
+///
+/// The deprecated runtime applied a subgraph's `$config` to *every*
+/// connector under that subgraph, including ones for `@source`s not listed
+/// in `connectors.subgraphs.<sub>.sources` (or with no `@source` at all).
+/// This migration only sees the sources the deprecated config itself
+/// listed (or none, if the subgraph declares `$config` without `sources`),
+/// so it cannot fully replicate that behavior — any subgraph with a
+/// `$config` is returned so the caller can tell the user to check for other
+/// sources under that subgraph.
+fn migrate_connectors_subgraphs_to_sources(config: &mut Value) -> (bool, Vec<String>) {
+    let mut subgraphs_with_config = Vec::new();
+    let Some(connectors) = config.get_mut("connectors").and_then(Value::as_object_mut) else {
+        return (false, subgraphs_with_config);
+    };
+    let Some(Value::Object(subgraphs)) = connectors.remove("subgraphs") else {
+        return (false, subgraphs_with_config);
+    };
+
+    let sources_entry = connectors
+        .entry("sources".to_string())
+        .or_insert_with(|| Value::Object(Default::default()));
+    let Value::Object(sources) = sources_entry else {
+        // `sources` is present but not an object — leave it alone and put
+        // `subgraphs` back so the validation error surfaces the actual problem.
+        connectors.insert("subgraphs".to_string(), Value::Object(subgraphs));
+        return (false, subgraphs_with_config);
+    };
+
+    let mut migrated_any = false;
+    for (subgraph_name, subgraph_value) in subgraphs {
+        let Value::Object(mut subgraph_obj) = subgraph_value else {
+            continue;
+        };
+        let parent_config = subgraph_obj.remove("$config");
+        if parent_config.is_some() {
+            subgraphs_with_config.push(subgraph_name.clone());
+        }
+        let Some(Value::Object(subgraph_sources)) = subgraph_obj.remove("sources") else {
+            continue;
+        };
+        for (source_name, source_value) in subgraph_sources {
+            let composite_key = format!("{subgraph_name}.{source_name}");
+            let Value::Object(source_obj) = source_value else {
+                // Non-object entries can't be merged field-by-field, so only
+                // apply them when there's nothing to clobber.
+                if !sources.contains_key(&composite_key) {
+                    sources.insert(composite_key, source_value);
+                    migrated_any = true;
+                }
+                continue;
+            };
+
+            if let Some(Value::Object(existing_obj)) = sources.get_mut(&composite_key) {
+                let mut changed = false;
+                for field in ["override_url", "max_requests_per_operation"] {
+                    if let Some(value) = source_obj.get(field).filter(|v| !v.is_null()) {
+                        existing_obj.insert(field.to_string(), value.clone());
+                        changed = true;
+                    }
+                }
+                if let Some(parent_config) = &parent_config {
+                    existing_obj.insert("$config".to_string(), parent_config.clone());
+                    changed = true;
+                }
+                migrated_any |= changed;
+                continue;
+            }
+
+            let mut source_obj = source_obj;
+            if let Some(parent_config) = &parent_config {
+                source_obj.insert("$config".to_string(), parent_config.clone());
+            }
+            sources.insert(composite_key, Value::Object(source_obj));
+            migrated_any = true;
+        }
+    }
+
+    (migrated_any, subgraphs_with_config)
 }
 
 fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, ConfigurationError> {
@@ -427,6 +543,7 @@ mod test {
     use crate::configuration::upgrade::Migration;
     use crate::configuration::upgrade::apply_migration;
     use crate::configuration::upgrade::generate_upgrade_output;
+    use crate::configuration::upgrade::migrate_connectors_subgraphs_to_sources;
 
     fn source_doc() -> Value {
         json!( {
@@ -630,6 +747,164 @@ mod test {
             )
             .expect("expected successful migration")
         );
+    }
+
+    #[test]
+    fn connectors_subgraphs_collapses_into_sources() {
+        let mut config = json!({
+            "connectors": {
+                "subgraphs": {
+                    "sub_a": {
+                        "$config": { "api_key": "secret" },
+                        "sources": {
+                            "src_1": { "override_url": "http://one" },
+                            "src_2": { "override_url": "http://two", "max_requests_per_operation": 5 }
+                        }
+                    }
+                }
+            }
+        });
+        let (migrated, subgraphs_with_config) =
+            migrate_connectors_subgraphs_to_sources(&mut config);
+        assert!(migrated);
+        assert_eq!(subgraphs_with_config, vec!["sub_a".to_string()]);
+        insta::assert_json_snapshot!(config);
+    }
+
+    #[test]
+    fn connectors_subgraphs_merges_with_existing_sources_deprecated_fields_win() {
+        // Matches the deprecated runtime: the two shapes were applied
+        // sequentially with the deprecated block running second, so its
+        // per-field values (when present) overwrite the new-shape entry
+        // rather than being dropped on the floor. Fields the deprecated
+        // shape didn't set (e.g. `src_2` has no `max_requests_per_operation`
+        // in either shape) are left untouched.
+        let mut config = json!({
+            "connectors": {
+                "sources": {
+                    "sub_a.src_1": { "override_url": "http://new", "max_requests_per_operation": 3 },
+                    "sub_a.src_2": { "max_requests_per_operation": 7 }
+                },
+                "subgraphs": {
+                    "sub_a": {
+                        "sources": {
+                            "src_1": { "override_url": "http://old" },
+                            "src_2": { "override_url": "http://two" }
+                        }
+                    }
+                }
+            }
+        });
+        let (migrated, subgraphs_with_config) =
+            migrate_connectors_subgraphs_to_sources(&mut config);
+        assert!(migrated);
+        assert!(subgraphs_with_config.is_empty());
+        insta::assert_json_snapshot!(config);
+    }
+
+    #[test]
+    fn connectors_subgraphs_no_op_when_absent() {
+        let mut config = json!({
+            "connectors": {
+                "sources": { "sub_a.src_1": { "override_url": "http://one" } }
+            }
+        });
+        let (migrated, subgraphs_with_config) =
+            migrate_connectors_subgraphs_to_sources(&mut config);
+        assert!(!migrated);
+        assert!(subgraphs_with_config.is_empty());
+    }
+
+    #[test]
+    fn connectors_subgraphs_subgraph_config_overwrites_source_config() {
+        // Matches the deprecated runtime: when both subgraph-level and
+        // source-level `$config` are defined in the same connector, the
+        // subgraph-level value wins because the deprecated branch ran second
+        // and unconditionally re-assigned connector.config.
+        let mut config = json!({
+            "connectors": {
+                "subgraphs": {
+                    "sub_a": {
+                        "$config": { "key": "from-subgraph" },
+                        "sources": {
+                            "src_1": { "$config": { "key": "from-source" } }
+                        }
+                    }
+                }
+            }
+        });
+        let (migrated, subgraphs_with_config) =
+            migrate_connectors_subgraphs_to_sources(&mut config);
+        assert!(migrated);
+        assert_eq!(subgraphs_with_config, vec!["sub_a".to_string()]);
+        insta::assert_json_snapshot!(config);
+    }
+
+    #[test]
+    fn connectors_subgraphs_subgraph_config_overwrites_existing_source_config() {
+        // Same precedence rule as above, but the source-level `$config`
+        // lives on a pre-existing new-shape entry rather than a deprecated
+        // per-source block — the subgraph-level value must still win, even
+        // though the composite key already existed in `sources`.
+        let mut config = json!({
+            "connectors": {
+                "sources": {
+                    "sub_a.src_1": { "$config": { "key": "from-source" } }
+                },
+                "subgraphs": {
+                    "sub_a": {
+                        "$config": { "key": "from-subgraph" },
+                        "sources": {
+                            "src_1": {}
+                        }
+                    }
+                }
+            }
+        });
+        let (migrated, subgraphs_with_config) =
+            migrate_connectors_subgraphs_to_sources(&mut config);
+        assert!(migrated);
+        assert_eq!(subgraphs_with_config, vec!["sub_a".to_string()]);
+        insta::assert_json_snapshot!(config);
+    }
+
+    #[test]
+    fn connectors_subgraphs_empty_is_no_op() {
+        // An empty `subgraphs: {}` is removed from the config (so serde's
+        // deny_unknown_fields does not trip on it) but does not count as an
+        // effective migration — the function returns false so no log fires.
+        let mut config = json!({
+            "connectors": {
+                "subgraphs": {},
+                "sources": { "sub_a.src_1": { "override_url": "http://one" } }
+            }
+        });
+        let (migrated, subgraphs_with_config) =
+            migrate_connectors_subgraphs_to_sources(&mut config);
+        assert!(!migrated);
+        assert!(subgraphs_with_config.is_empty());
+        // empty `subgraphs:` is stripped so validation can proceed
+        assert!(config["connectors"].get("subgraphs").is_none());
+    }
+
+    #[test]
+    fn connectors_subgraphs_subgraph_without_sources_is_no_op_but_reports_config() {
+        // A subgraph entry that only has $config (no .sources map) cannot be
+        // expressed in the new shape — there's no source key to attach the
+        // $config to. The function returns false (nothing was migrated) but
+        // still reports the subgraph so the caller can warn that its
+        // `$config` was dropped entirely.
+        let mut config = json!({
+            "connectors": {
+                "subgraphs": {
+                    "sub_a": { "$config": { "key": "lost" } }
+                }
+            }
+        });
+        let (migrated, subgraphs_with_config) =
+            migrate_connectors_subgraphs_to_sources(&mut config);
+        assert!(!migrated);
+        assert_eq!(subgraphs_with_config, vec!["sub_a".to_string()]);
     }
 
     #[test]
