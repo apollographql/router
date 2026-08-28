@@ -45,8 +45,11 @@ pub(crate) struct RoutingChoice {
     /// anchoring the field can select the condition fields in place. Commit
     /// applies this verdict instead of re-deriving it. True when the edge
     /// has no conditions.
-    #[allow(dead_code)]
     pub(crate) requires_resolvable_in_place: bool,
+    /// A key hop back into the CURRENT subgraph (entity re-entry), created
+    /// so @requires conditions the fetch cannot select in place ride the
+    /// entity representation. Ranked above cross-subgraph hops.
+    pub(crate) self_entity_reentry: bool,
     /// The key conditions for this hop are not routable as ordinary
     /// pendings (e.g. circular keys, missing subgraph edges). Commit
     /// handles these via `commit_circular_key_conditions`, selecting the
@@ -93,6 +96,7 @@ impl RoutingChoice {
             key_conditions: None,
             conditions_locally_satisfiable: true,
             requires_resolvable_in_place: true,
+            self_entity_reentry: false,
             conditions_unroutable: false,
             intermediate_key_hops: Vec::new(),
         }
@@ -115,6 +119,7 @@ impl RoutingChoice {
             key_conditions: Some(key),
             conditions_locally_satisfiable: true,
             requires_resolvable_in_place,
+            self_entity_reentry: true,
             conditions_unroutable: false,
             intermediate_key_hops: Vec::new(),
         }
@@ -143,7 +148,6 @@ enum RoutingPreference {
     Provides,
     DirectLocal,
     /// Same-subgraph entity re-entry for in-place-unresolvable @requires.
-    #[allow(dead_code)]
     SelfRequiresHop,
     LocallySatisfiableKeyHop,
     RemoteKeyHop,
@@ -393,6 +397,7 @@ impl FieldRoutingSearchSpace {
                         conditions_locally_satisfiable: first_conditions_local,
                         requires_resolvable_in_place: self
                             .requires_conditions_resolvable_in_place(origin_node, found_edge_idx)?,
+                        self_entity_reentry: false,
                         conditions_unroutable: first_conditions_unroutable,
                         intermediate_key_hops: hops,
                     });
@@ -495,6 +500,7 @@ impl FieldRoutingSearchSpace {
                 conditions_locally_satisfiable: c.conditions_local,
                 requires_resolvable_in_place: self
                     .requires_conditions_resolvable_in_place(pending_node, c.found_edge_idx)?,
+                self_entity_reentry: false,
                 conditions_unroutable,
                 intermediate_key_hops: Vec::new(),
             });
@@ -693,6 +699,7 @@ impl FieldRoutingSearchSpace {
                         ..
                     } => RoutingPreference::Provides,
                     _ if opt.hop_kind == HopKind::Direct => RoutingPreference::DirectLocal,
+                    _ if opt.self_entity_reentry => RoutingPreference::SelfRequiresHop,
                     _ if opt.conditions_unroutable => RoutingPreference::CircularKeyHop,
                     _ if !opt.intermediate_key_hops.is_empty() => RoutingPreference::ChainedKeyHop,
                     _ if opt.conditions_locally_satisfiable => {
