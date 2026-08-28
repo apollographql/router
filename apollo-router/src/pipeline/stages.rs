@@ -25,6 +25,8 @@ use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
+use crate::plugins::headers::Headers;
+use crate::plugins::include_subgraph_errors::IncludeSubgraphErrors;
 use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
@@ -192,13 +194,17 @@ pub(crate) fn build_subgraph_service(
     plugins: &Arc<Plugins>,
     configuration: &Configuration,
 ) -> BufferedSubgraphService {
-    use crate::layers::ServiceBuilderExt as _;
-
     let subscription_config = subscription_plugin_config(plugins).map(Arc::new);
     let apq_enabled = configuration.apq.subgraph.get(name).enabled;
 
-    ServiceBuilder::new()
-        .buffered()
+    // Box *inside* the buffer, as [`build_connector_request_services`] does: it erases the
+    // stack's type without a second box on the way out of [`SubgraphServices::get`], which
+    // runs once per fetch node per request.
+    let service = ServiceBuilder::new()
+        .apply_required_plugin_layer(plugins, |p: &IncludeSubgraphErrors| {
+            p.tag_errors_with_subgraph_name_layer(Arc::from(name))
+        })
+        .apply_required_plugin_layer(plugins, |h: &Headers| h.subgraph_headers_layer(name))
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.subgraph_service(name, service)
         })
@@ -210,6 +216,9 @@ pub(crate) fn build_subgraph_service(
         .layer(SubgraphApqLayer::new(apq_enabled))
         .layer(content_negotiation::SubgraphContentNegotiationLayer::default())
         .service(SubgraphService::new(name, http_service))
+        .boxed_clone();
+
+    UnconstrainedBuffer::new(service, DEFAULT_BUFFER_SIZE)
 }
 
 /// Builds the full service stack for every subgraph, keyed by subgraph name.
@@ -240,10 +249,15 @@ fn build_connector_request_services(
         // required for correct LoadShed / RateLimit behaviour from traffic-shaping
         // plugins (mirrors the per-subgraph buffer in [`build_subgraph_service`]).
         let service = UnconstrainedBuffer::new(
-            plugins.iter().rev().fold(
-                ConnectorRequestService { http_client }.boxed_clone(),
-                |acc, (_, e)| e.connector_request_service(acc, source.clone()),
-            ),
+            ServiceBuilder::new()
+                .apply_required_plugin_layer(plugins, |h: &Headers| {
+                    h.connector_headers_layer(&source)
+                })
+                .rust_plugins(plugins.clone(), |plugin, service| {
+                    plugin.connector_request_service(service, source.clone())
+                })
+                .service(ConnectorRequestService { http_client }.boxed_clone())
+                .boxed_clone(),
             DEFAULT_BUFFER_SIZE,
         );
         map.insert(source, service);
@@ -438,6 +452,10 @@ fn build_supergraph_service(
     ServiceBuilder::new()
         .layer(content_negotiation::SupergraphContentNegotiationLayer::default())
         .layer(crate::compute_job::ComputeJobMetricsLayer::new())
+        .apply_required_plugin_layer(
+            &plugins,
+            IncludeSubgraphErrors::redact_subgraph_errors_layer,
+        )
         .rust_plugins(plugins, |plugin, service| {
             plugin.supergraph_service(service)
         })
@@ -469,6 +487,7 @@ pub(crate) fn build_router_service(
 
     ServiceBuilder::new()
         .layer(StaticPageLayer::new(configuration))
+        .apply_required_plugin_layer(&plugins, Headers::router_masking_layer)
         .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
         .layer(content_negotiation::RouterContentNegotiationLayer::default())
         .layer(DisplayRouterRequestLayer)
