@@ -1230,6 +1230,7 @@ fn y_pending(
             dependent,
             depth: 1,
         }),
+        provides_anchor: None,
     }
 }
 
