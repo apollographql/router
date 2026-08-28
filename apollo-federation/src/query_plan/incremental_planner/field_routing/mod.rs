@@ -18,6 +18,8 @@ pub(super) mod state;
 #[cfg(test)]
 mod test_support;
 
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -63,6 +65,21 @@ pub(crate) struct FieldRoutingSearchSpace {
     pub(crate) override_conditions: OverrideConditions,
     /// Subgraphs the caller disabled: enumeration never routes into them.
     pub(crate) disabled_subgraphs: apollo_compiler::collections::IndexSet<Arc<str>>,
+    /// In-flight guard for breaking the mutual recursion between
+    /// `conditions_routable` and key-hop enumeration. A (node, key) pair
+    /// present in this set means that key-hop enumeration for that
+    /// position is on the call stack; re-entering it would loop
+    /// forever, so the guard returns "no hops" (the fixpoint for
+    /// circular keys).
+    pub(super) key_hops_in_flight: RefCell<HashSet<(NodeIndex, RoutingCacheKey)>>,
+}
+
+/// Identity of the selection a key-hop enumeration serves; paired with the
+/// origin node in the in-flight cycle guard.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) enum RoutingCacheKey {
+    Field(Name),
+    InlineFragment(Option<Name>),
 }
 
 impl FieldRoutingSearchSpace {
