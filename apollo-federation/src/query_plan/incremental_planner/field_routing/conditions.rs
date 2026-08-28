@@ -1,46 +1,44 @@
-//! Condition satisfiability: can a set of @requires / @key fields be resolved
-//! at a given query graph node?
-//!
-//! Three flavors of check, each deeper than the last:
-//! - `can_satisfy_conditions`: pure schema lookup (field exists, not external).
-//! - `conditions_resolvable_at_node`: graph-based, path-sensitive variant.
-//! - `conditions_have_requires`: detects @requires on condition edges.
-
 use std::sync::Arc;
 
+use apollo_compiler::name;
 use petgraph::graph::NodeIndex;
 
-use super::FieldRoutingSearchSpace;
-use super::NodeSource;
 use crate::error::FederationError;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
-use crate::operation::TYPENAME_FIELD;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
+const TYPENAME_FIELD: apollo_compiler::Name = name!("__typename");
+
+use super::FieldRoutingSearchSpace;
+
 impl FieldRoutingSearchSpace {
-    /// Schema-based check: can every field in `conditions` be found in the
-    /// subgraph's schema at `type_pos`?
+    /// Schema-based check: the conditions are locally satisfiable if every
+    /// field in the selection set exists in the subgraph schema and is not
+    /// @external.
     pub(super) fn can_satisfy(
         &self,
-        conditions: &Arc<SelectionSet>,
-        type_pos: &CompositeTypeDefinitionPosition,
-        _subgraph: &Arc<str>,
-        schema: &ValidFederationSchema,
+        conditions: &SelectionSet,
+        source_type: &CompositeTypeDefinitionPosition,
+        source_schema: &ValidFederationSchema,
     ) -> bool {
-        can_satisfy_conditions(conditions, type_pos, schema)
+        can_satisfy_conditions(conditions, source_type, source_schema)
     }
 
     /// Graph-based check: can every field in `conditions` be resolved at
     /// `node` via outgoing edges? Recurses into composite sub-selections
-    /// to catch nested fields the subgraph cannot reach.
+    /// to catch nested fields the subgraph cannot reach. Path-sensitive
+    /// where the schema check is not: an @external field still has a real
+    /// edge on the provides-copy node created by an ancestor's @provides,
+    /// so conditions like a same-subgraph @requires can resolve in place
+    /// there.
     pub(super) fn conditions_resolvable_at_node(
         &self,
         node: NodeIndex,
-        conditions: &Arc<SelectionSet>,
+        conditions: &SelectionSet,
     ) -> Result<bool, FederationError> {
-        self.walk_conditions_graph(node, conditions.as_ref(), true)
+        self.walk_conditions_graph(node, conditions, true)
     }
 
     /// Walk condition fields via graph edges. When `fail_on_unreachable` is
@@ -113,13 +111,16 @@ impl FieldRoutingSearchSpace {
         self.walk_conditions_graph(node, conditions.as_ref(), false)
     }
 
-    /// Filter key conditions to the subset the source subgraph can resolve.
+    /// Filter a key selection set to only the fields the source subgraph can
+    /// resolve locally: each field must exist and not be @external. Returns
+    /// `None` when no field survives.
     pub(super) fn locally_satisfiable_subset(
         &self,
-        conditions: &Arc<SelectionSet>,
-        source: &NodeSource,
+        conditions: &SelectionSet,
+        source_type: &CompositeTypeDefinitionPosition,
+        source_schema: &ValidFederationSchema,
     ) -> Option<Arc<SelectionSet>> {
-        satisfiable_subset(conditions, &source.type_pos, &source.schema)
+        satisfiable_subset(conditions, source_type, source_schema)
     }
 }
 
