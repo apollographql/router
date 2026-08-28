@@ -2022,8 +2022,82 @@ fn inc_user_field_argument_conflict_with_requires_condition() {
     );
 }
 
-/// When the incoming entity representation already carries the fields needed by
-/// a key condition, the planner skips routing those conditions. Without this
+/// A field satisfied by an ancestor's @provides is preferred over hopping
+/// to another subgraph for the same field.
+#[test]
+fn inc_provides_prefers_local_resolution() {
+    let planner = planner!(
+        config = incremental_config(),
+        SubgraphA: r#"
+        type Query {
+            product: Product
+        }
+
+        type Product @key(fields: "id") {
+            id: ID!
+            details: Details @provides(fields: "price")
+        }
+
+        type Details @key(fields: "id") {
+            id: ID!
+            price: Float @external
+        }
+        "#,
+        SubgraphB: r#"
+        type Details @key(fields: "id") {
+            id: ID!
+            price: Float @shareable
+            description: String
+        }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        {
+            product {
+                details {
+                    price
+                    description
+                }
+            }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "SubgraphA") {
+          {
+            product {
+              details {
+                __typename
+                id
+                price
+              }
+            }
+          }
+        },
+        Flatten(path: "product.details") {
+          Fetch(service: "SubgraphB") {
+            {
+              ... on Details {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Details {
+                description
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+/// specifically rides the incoming inputs. Without the rides_representation
 /// check the planner would try to re-route `id` as a condition pending and
 /// create a circular ordering dependency.
 #[test]
