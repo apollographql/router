@@ -280,7 +280,7 @@ impl Selector for ConnectorSelector {
                 default,
                 redact,
             } => {
-                if let Ok(TransportResponse::Http(ref http_response)) = response.transport_result {
+                if let Ok(Some(TransportResponse::Http(ref http_response))) = response.transport_result {
                     let header_value = http_response
                         .inner
                         .headers
@@ -306,7 +306,7 @@ impl Selector for ConnectorSelector {
             ConnectorSelector::ConnectorResponseStatus {
                 connector_http_response_status: response_status,
             } => {
-                if let Ok(TransportResponse::Http(ref http_response)) = response.transport_result {
+                if let Ok(Some(TransportResponse::Http(ref http_response))) = response.transport_result {
                     let status = http_response.inner.status;
                     match response_status {
                         ResponseStatus::Code => Some(Value::I64(status.as_u16() as i64)),
@@ -321,7 +321,7 @@ impl Selector for ConnectorSelector {
             ConnectorSelector::ConnectorResponseBodySize {
                 connector_http_response_body_size,
             } if *connector_http_response_body_size => {
-                if let Ok(TransportResponse::Http(ref http_response)) = response.transport_result {
+                if let Ok(Some(TransportResponse::Http(ref http_response))) = response.transport_result {
                     http_response
                         .inner
                         .extensions
@@ -564,14 +564,14 @@ mod tests {
         Response {
             context: Context::new(),
             subgraph_name: String::new(),
-            transport_result: Ok(TransportResponse::Http(HttpResponse {
+            transport_result: Ok(Some(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
                     .body(body::empty())
                     .expect("expecting valid response")
                     .into_parts()
                     .0,
-            })),
+            }))),
             mapped_response: MappedResponse::Data {
                 data: serde_json::json!({})
                     .try_into()
@@ -586,14 +586,14 @@ mod tests {
         Response {
             context: Context::new(),
             subgraph_name: String::new(),
-            transport_result: Ok(TransportResponse::Http(HttpResponse {
+            transport_result: Ok(Some(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
                     .body(body::empty())
                     .expect("expecting valid response")
                     .into_parts()
                     .0,
-            })),
+            }))),
             mapped_response: MappedResponse::Error {
                 error: RuntimeError::new("Internal server errror", &response_key()),
                 key: response_key(),
@@ -610,7 +610,7 @@ mod tests {
         Response {
             context: Context::new(),
             subgraph_name,
-            transport_result: Ok(TransportResponse::Http(HttpResponse {
+            transport_result: Ok(Some(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(200)
                     .header(TEST_HEADER_NAME, TEST_HEADER_VALUE)
@@ -618,7 +618,7 @@ mod tests {
                     .expect("expecting valid response")
                     .into_parts()
                     .0,
-            })),
+            }))),
             mapped_response: MappedResponse::Data {
                 data: serde_json::json!({})
                     .try_into()

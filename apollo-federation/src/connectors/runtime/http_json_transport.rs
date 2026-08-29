@@ -56,8 +56,6 @@ pub enum TransportRequest {
 pub enum TransportResponse {
     /// A response from an HTTP transport
     Http(HttpResponse),
-    /// A response served from cache (no HTTP transport involved)
-    CacheHit,
     /// A mapping-only response (no HTTP transport involved)
     MappingOnly,
 }

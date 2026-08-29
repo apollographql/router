@@ -1513,9 +1513,8 @@ impl ConnectorRequestCacheService {
                 let cached_response = connector::request_service::Response {
                     context: request.context,
                     subgraph_name,
-                    transport_result: Ok(
-                        apollo_federation::connectors::runtime::http_json_transport::TransportResponse::CacheHit,
-                    ),
+                    // No transport happened — served from the response cache.
+                    transport_result: Ok(None),
                     mapped_response:
                         apollo_federation::connectors::runtime::responses::MappedResponse::Data {
                             data: entry.data,
@@ -1753,8 +1752,10 @@ fn connector_response_cache_control(
     response: &connector::request_service::Response,
     connector_ttl: Duration,
 ) -> Option<CacheControl> {
-    let Ok(apollo_federation::connectors::runtime::http_json_transport::TransportResponse::Http(
-        http_response,
+    let Ok(Some(
+        apollo_federation::connectors::runtime::http_json_transport::TransportResponse::Http(
+            http_response,
+        ),
     )) = &response.transport_result
     else {
         return None;

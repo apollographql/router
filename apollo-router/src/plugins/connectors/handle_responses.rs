@@ -105,9 +105,9 @@ where
         Ok(response) => {
             let (parts, body) = response.into_parts();
 
-            let result = Ok(TransportResponse::Http(HttpResponse {
+            let result = Ok(Some(TransportResponse::Http(HttpResponse {
                 inner: parts.clone(),
-            }));
+            })));
 
             let make_err = |message: String, code: &str| -> Box<RuntimeError> {
                 let mut err = RuntimeError::new(message, &response_key);
@@ -326,9 +326,9 @@ fn log_connectors_event(
             let response = connector::request_service::Response {
                 context: context.clone(),
                 subgraph_name: connector.id.subgraph_name.to_string(),
-                transport_result: Ok(TransportResponse::Http(HttpResponse {
+                transport_result: Ok(Some(TransportResponse::Http(HttpResponse {
                     inner: parts.clone(),
-                })),
+                }))),
                 mapped_response: MappedResponse::Data {
                     data: Value::Null,
                     key: response_key,
