@@ -20,6 +20,7 @@ use crate::operation::FieldSelection;
 use crate::operation::HasSelectionKey;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::query_graph::ContextCondition;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::graph_path::operation::OpPathElement;
@@ -28,11 +29,13 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 
 const CONDITION_DEPTH_LIMIT: u8 = 32;
 use super::NodeSource;
+use super::context;
 use super::requires::trailing_condition_fragments;
 use super::requires::unconditioned_input_path;
 use super::routing::HopKind;
 use super::routing::RoutingChoice;
 use super::selection_label;
+use super::state::ContextAnchor;
 use super::state::PendingSelection;
 use super::state::PlanState;
 
@@ -139,6 +142,9 @@ impl FieldRoutingSearchSpace {
         if let Some(requires_conditions) = &edge.conditions {
             target = self.apply_requires(state, &ctx, requires_conditions, target)?;
         }
+        if !edge.required_contexts.is_empty() {
+            target = self.apply_contexts(state, &ctx, &edge.required_contexts, target)?;
+        }
 
         // Condition selections carry an ordering dependent: their consuming
         // group must run after every group they commit into. A would-be
@@ -239,7 +245,7 @@ impl FieldRoutingSearchSpace {
 
         let merge_at = self.pending_merge_at(state, pending);
 
-        // The group the key edge enters: for a chained hop, the FIRST
+        // The group the key edge enters: for a chained hop, the first
         // intermediate, not the final target.
         let (first_subgraph, first_dest_node) = match choice.intermediate_key_hops.first() {
             Some(hop) => (&hop.target_subgraph, Some(hop.target_node)),
@@ -495,14 +501,11 @@ impl FieldRoutingSearchSpace {
         }
     }
 
-    /// The fetch group a direct (non-hop) choice lands in: fields may
-    /// create root groups on demand; inline fragments stay in the current
-    /// group.
     /// The fetch group a direct (non-hop) choice lands in: fields may create
     /// root groups on demand ([`Self::field_fetch_node`]); inline fragments
     /// stay in the current group. An @interfaceObject fake downcast
     /// additionally pushes a best-effort concrete-`__typename` pending:
-    /// execution needs each object's CONCRETE typename to test the condition,
+    /// execution needs each object's concrete typename to test the condition,
     /// which the io subgraph cannot supply
     /// ([`Self::push_interface_object_typename`]).
     fn direct_fetch_node(
@@ -527,7 +530,7 @@ impl FieldRoutingSearchSpace {
     }
 
     /// @interfaceObject subgraph can only report the interface's typename:
-    /// execution needs each object's CONCRETE `__typename` to test the
+    /// execution needs each object's concrete `__typename` to test the
     /// condition. Push a `__typename` pending at the current position and
     /// let the generic routing machinery satisfy it. The "not in this
     /// subgraph" constraint is already encoded in the query graph:
@@ -752,6 +755,31 @@ impl FieldRoutingSearchSpace {
         self.append_typename(state, fetch_node, &input_path, source);
     }
 
+    /// Handle @fromContext on the routed edge: resolve context values from
+    /// ancestors and pass them via entity inputs, possibly redirecting the
+    /// field into a context-isolating entity fetch.
+    pub(super) fn apply_contexts(
+        &self,
+        state: &mut PlanState,
+        ctx: &CommitCtx<'_>,
+        required_contexts: &[ContextCondition],
+        target: CommitTarget,
+    ) -> Result<CommitTarget, FederationError> {
+        let (fetch_node, op_path) = context::handle_from_context(
+            self,
+            state,
+            ctx,
+            target.fetch_node,
+            &target.op_path,
+            required_contexts,
+        )?;
+        Ok(CommitTarget {
+            fetch_node,
+            op_path,
+            ..target
+        })
+    }
+
     pub(super) fn push_condition_pendings(
         &self,
         state: &mut PlanState,
@@ -840,6 +868,44 @@ impl FieldRoutingSearchSpace {
             .0
             .or_else(|| pending.defer_ref.clone());
 
+        // Extend parent_types with the current target type for @fromContext
+        // ancestor resolution.
+        let target_node_data = self.query_graph.node_weight(target_qg_node)?;
+        let child_parent_types = {
+            let mut types = pending.parent_types.clone();
+            // From a FederatedRootType node the root type (e.g. Query) is not
+            // in parent_types yet (resolved per-field at commit time); inject
+            // it so @context on the root type is visible to @fromContext
+            // ancestor lookups.
+            let source_data = self.query_graph.node_weight(pending.query_graph_node)?;
+            if matches!(source_data.type_, QueryGraphNodeType::FederatedRootType(_))
+                && let Some(root_type) = state.graph.node(fetch_node).root_type().cloned()
+            {
+                types = types.pushed(root_type);
+            }
+            if let Ok(target_type) =
+                CompositeTypeDefinitionPosition::try_from(target_node_data.type_.clone())
+            {
+                types.pushed(target_type)
+            } else {
+                types
+            }
+        };
+        // Track the parent fetch for @fromContext across entity boundaries:
+        // children of an entity root may need to add context selections to
+        // the parent fetch that feeds the entity representation.
+        let child_context_anchor = if target.entity_root {
+            let entity_type =
+                CompositeTypeDefinitionPosition::try_from(target_node_data.type_.clone()).ok();
+            ContextAnchor {
+                fetch: Some(pending.fetch_node),
+                op_path: pending.op_path.clone(),
+                entity_type,
+            }
+        } else {
+            pending.context_anchor.clone()
+        };
+
         for sub_sel in sub_ss.selections.values().rev().cloned() {
             state.push_pending(
                 pending
@@ -848,7 +914,9 @@ impl FieldRoutingSearchSpace {
                     .with_op_path(target.op_path.clone())
                     .with_response_path(target.response_path.clone())
                     .with_provides_anchor(child_provides_anchor)
-                    .with_defer(child_defer_ref.clone()),
+                    .with_defer(child_defer_ref.clone())
+                    .with_parent_types(child_parent_types.clone())
+                    .with_context_anchor(child_context_anchor.clone()),
             );
         }
         Ok(())
@@ -861,7 +929,7 @@ impl FieldRoutingSearchSpace {
     /// edges visible. An interface-level @provides applies to every runtime
     /// type, but only the interface node was copied. Other fragments inherit
     /// the anchor; fields reset it (their children draw on the field's own
-    /// target node, which IS a copy whenever the field was provided); entity
+    /// target node, which is a copy whenever the field was provided); entity
     /// roots leave the position entirely.
     fn child_provides_anchor(
         &self,
