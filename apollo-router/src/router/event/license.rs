@@ -7,6 +7,8 @@ use derive_more::Display;
 use derive_more::From;
 use futures::prelude::*;
 
+use crate::registry::OciConfig;
+use crate::registry::create_oci_license_stream;
 use crate::router::Event;
 use crate::router::Event::NoMoreLicense;
 use crate::uplink::UplinkConfig;
@@ -51,6 +53,10 @@ pub enum LicenseSource {
     /// Apollo uplink.
     #[display("Registry")]
     Registry(UplinkConfig),
+
+    /// Apollo graph artifact OCI registry.
+    #[display("Registry")]
+    OCI(OciConfig),
 }
 
 impl Default for LicenseSource {
@@ -151,6 +157,30 @@ impl LicenseSource {
                         })
                     })
                     .boxed()
+            }
+            LicenseSource::OCI(oci_config) => {
+                tracing::debug!("using oci as license source");
+                match create_oci_license_stream(oci_config) {
+                    Ok(stream) => stream
+                        .filter_map(|res| {
+                            future::ready(match res {
+                                Ok(license) => Some(license),
+                                Err(e) => {
+                                    tracing::error!(code = APOLLO_ROUTER_LICENSE_INVALID, "{}", e);
+                                    None
+                                }
+                            })
+                        })
+                        .boxed(),
+                    Err(e) => {
+                        tracing::error!(
+                            code = APOLLO_ROUTER_LICENSE_INVALID,
+                            "failed to create OCI license stream: {}",
+                            e
+                        );
+                        stream::empty().boxed()
+                    }
+                }
             }
             LicenseSource::Env => {
                 // EXPERIMENTAL and not subject to semver.
