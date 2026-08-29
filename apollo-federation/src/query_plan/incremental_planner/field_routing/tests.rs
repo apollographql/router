@@ -1242,6 +1242,8 @@ fn y_pending(
         provides_anchor: None,
         best_effort: false,
         defer_ref: None,
+        context_anchor: Default::default(),
+        parent_types: SharedPath::new(),
     }
 }
 
@@ -1271,7 +1273,9 @@ fn cyclic_entity_group_reuse_mints_fresh_group() {
     let s2: Arc<str> = Arc::from("S2");
     // An existing (S2, []) entity group that already feeds b: reusing
     // it for a hop anchored at b would close a cycle.
-    let existing = state.graph.get_or_create_entity_group(&s2, vec![]);
+    let existing = state
+        .graph
+        .get_or_create_entity_group_with_defer(&s2, vec![], None);
     state.graph.add_dependency(existing, b, vec![]);
 
     let pending = Arc::new(y_pending(&space, b, None));
