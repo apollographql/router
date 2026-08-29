@@ -225,7 +225,7 @@ fn collect_deferred_blocks(
 
 /// Serialize a SelectionSet into a brace-wrapped (`{ ... }`) string for
 /// `DeferredDeferBlock.sub_selection`.
-pub(super) fn serialize_selection_set(selection_set: &SelectionSet) -> String {
+fn serialize_selection_set(selection_set: &SelectionSet) -> String {
     let mut parts: Vec<String> = Vec::new();
     for sel in selection_set.selections.values() {
         match sel {
