@@ -262,6 +262,7 @@ fn root_pending_selections(
             path_in_fetch: Default::default(),
             condition: None,
             provides_anchor: None,
+            best_effort: false,
         })
         .collect()
 }

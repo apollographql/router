@@ -54,6 +54,14 @@ pub(crate) struct PendingSelection {
     /// own edges carry the provenance (inside a copy layer) or no @provides
     /// is in scope.
     pub(crate) provides_anchor: Option<NodeIndex>,
+    /// Best-effort selection: dropping it (zero routing options, or a failed
+    /// commit) is tolerated silently instead of counting toward
+    /// `dropped_fields` and failing the plan. Inherited by forks, so
+    /// condition data pushed on a best-effort selection's behalf is equally
+    /// tolerant. The only producer is the @interfaceObject
+    /// concrete-`__typename` recovery, whose fused predecessor silently did
+    /// nothing when no candidate subgraph existed.
+    pub(crate) best_effort: bool,
 }
 
 impl PendingSelection {
@@ -68,6 +76,7 @@ impl PendingSelection {
             path_in_fetch: self.path_in_fetch.clone(),
             condition: self.condition,
             provides_anchor: self.provides_anchor,
+            best_effort: self.best_effort,
         }
     }
 
@@ -92,6 +101,13 @@ impl PendingSelection {
 
     pub(super) fn with_provides_anchor(mut self, provides_anchor: Option<NodeIndex>) -> Self {
         self.provides_anchor = provides_anchor;
+        self
+    }
+
+    /// Mark this selection best-effort: a drop is tolerated silently (see
+    /// [`Self::best_effort`]).
+    pub(super) fn into_best_effort(mut self) -> Self {
+        self.best_effort = true;
         self
     }
 
