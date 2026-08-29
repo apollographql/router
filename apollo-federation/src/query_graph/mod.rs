@@ -142,20 +142,20 @@ impl TryFrom<QueryGraphNodeType> for ObjectTypeDefinitionPosition {
 /// with the `@fromContext` to its (grand)parent types contain a matching selection.
 #[derive(Debug, PartialEq, Clone)]
 pub struct ContextCondition {
-    context: String,
-    subgraph_name: Arc<str>,
+    pub(crate) context: String,
+    pub(crate) subgraph_name: Arc<str>,
     // This is purposely left unparsed in query graphs, due to @fromContext selection sets being
     // duck-typed.
-    selection: String,
-    types_with_context_set: IndexSet<CompositeTypeDefinitionPosition>,
+    pub(crate) selection: String,
+    pub(crate) types_with_context_set: IndexSet<CompositeTypeDefinitionPosition>,
     // PORT_NOTE: This field was renamed because the JS name (`namedParameter`) left confusion to
     // how it was different from the argument name.
-    argument_name: Name,
+    pub(crate) argument_name: Name,
     // PORT_NOTE: This field was renamed because the JS name (`coordinate`) was too vague.
-    argument_coordinate: ObjectFieldArgumentDefinitionPosition,
+    pub(crate) argument_coordinate: ObjectFieldArgumentDefinitionPosition,
     // PORT_NOTE: This field was renamed from the JS name (`argType`) for consistency with the rest
     // of the naming in this struct.
-    argument_type: Node<Type>,
+    pub(crate) argument_type: Node<Type>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
