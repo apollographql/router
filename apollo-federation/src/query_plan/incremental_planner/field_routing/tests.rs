@@ -1163,6 +1163,7 @@ fn t_pending(
             depth: 1,
         }),
         provides_anchor: None,
+        best_effort: false,
     }
 }
 
