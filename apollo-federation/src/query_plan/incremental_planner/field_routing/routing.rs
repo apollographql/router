@@ -293,10 +293,11 @@ impl FieldRoutingSearchSpace {
         node: NodeIndex,
         edge_idx: EdgeIndex,
         target_subgraph: &Arc<str>,
+        force_hop: bool,
     ) -> Result<(), FederationError> {
         let in_place = self.requires_conditions_resolvable_in_place(node, edge_idx)?;
         let key = self.query_graph.get_locally_satisfiable_key(node)?;
-        if in_place {
+        if in_place && !(force_hop && key.is_some()) {
             options.push(self.direct_choice(edge_idx, target_subgraph.clone())?);
         }
         if let Some(key) = key {
@@ -761,7 +762,12 @@ impl FieldRoutingSearchSpace {
             let (_, target) = self.query_graph.edge_endpoints(edge_idx)?;
             let target_node = self.query_graph.node_weight(target)?;
             let edge = self.query_graph.edge_weight(edge_idx)?;
-            if edge.conditions.is_none() {
+            // @fromContext at a position the entity boundary does not already
+            // isolate needs a same-subgraph entity re-entry so the context
+            // value rides the representation.
+            let needs_isolation = !edge.required_contexts.is_empty()
+                && super::context::needs_context_isolation(pending, &edge.required_contexts);
+            if edge.conditions.is_none() && !needs_isolation {
                 options.push(self.direct_choice(edge_idx, target_node.source.clone())?);
             } else {
                 self.push_requires_strategy_options(
@@ -769,6 +775,7 @@ impl FieldRoutingSearchSpace {
                     pending.query_graph_node,
                     edge_idx,
                     &target_node.source,
+                    needs_isolation,
                 )?;
             }
         }
@@ -955,6 +962,8 @@ impl FieldRoutingSearchSpace {
             // Direct edge exists but its subtree dead-ends; a key hop at
             // this level may still reach it.
         }
+        // No provides anchor: only hop existence matters here, which the
+        // anchor never changes (it only refines `conditions_provided`).
         let key = RoutingCacheKey::Field(field_sel.field.name().clone());
         let hops = self.key_hops_guarded(node, key, |key_target| {
             self.edge_for_field(key_target, &field_sel.field)
