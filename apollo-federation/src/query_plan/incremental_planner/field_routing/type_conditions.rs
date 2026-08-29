@@ -102,7 +102,7 @@ impl FieldRoutingSearchSpace {
     /// Vacuous type condition: the current node's runtime types are a subset
     /// of the condition's (e.g. `...on Node` when every union member
     /// implements Node), so treat the fragment as pass-through, preserving
-    /// directives by pushing it onto the op_path.
+    /// non-routing directives by pushing the fragment onto the op_path.
     pub(super) fn try_vacuous_type_condition(
         &self,
         state: &mut PlanState,

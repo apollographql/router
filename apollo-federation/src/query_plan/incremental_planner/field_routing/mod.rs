@@ -13,6 +13,7 @@
 
 mod commit;
 mod conditions;
+mod context;
 mod requires;
 mod routing;
 pub(super) mod state;
@@ -50,9 +51,9 @@ use crate::query_plan::QueryPlanCost;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
-/// Cache key for routing options. Captures the selection identity at a QG node.
+/// Site key for routing options. Captures the selection identity at a QG node.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(super) enum RoutingCacheKey {
+pub(super) enum RoutingSiteKey {
     Field(Name),
     InlineFragment(Option<Name>),
 }
@@ -77,7 +78,7 @@ pub(crate) struct FieldRoutingSearchSpace {
     /// position is on the call stack; re-entering it would loop
     /// forever, so the guard returns "no hops" (the fixpoint for
     /// circular keys).
-    pub(super) key_hops_in_flight: RefCell<HashSet<(NodeIndex, RoutingCacheKey)>>,
+    pub(super) key_hops_in_flight: RefCell<HashSet<(NodeIndex, RoutingSiteKey)>>,
     pub(super) disabled_subgraphs: apollo_compiler::collections::IndexSet<Arc<str>>,
 }
 
@@ -363,15 +364,15 @@ struct ForcedTrail {
     frames: Vec<ForcedFrame>,
     /// Sites whose every routing option failed during this call. Consulted
     /// before committing so recurring instances fail fast.
-    doomed: HashSet<(NodeIndex, RoutingCacheKey)>,
+    doomed: HashSet<(NodeIndex, RoutingSiteKey)>,
 }
 
 /// Identity of a pending's routing position: the query graph node plus the
 /// selection's field or type-condition name.
-fn pending_site(pending: &PendingSelection) -> (NodeIndex, RoutingCacheKey) {
+fn pending_site(pending: &PendingSelection) -> (NodeIndex, RoutingSiteKey) {
     let key = match &pending.selection {
-        Selection::Field(f) => RoutingCacheKey::Field(f.field.name().clone()),
-        Selection::InlineFragment(f) => RoutingCacheKey::InlineFragment(
+        Selection::Field(f) => RoutingSiteKey::Field(f.field.name().clone()),
+        Selection::InlineFragment(f) => RoutingSiteKey::InlineFragment(
             f.inline_fragment
                 .type_condition_position
                 .as_ref()
