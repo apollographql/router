@@ -6414,6 +6414,7 @@ async fn connector_root_field_request_no_cache() {
         Some("no-cache"),
     );
     let response = service.oneshot(request).await.unwrap();
+    let first_context = response.context.clone();
     let body = connector_response_body(response).await;
     assert!(
         body.get("data").is_some(),
@@ -6421,7 +6422,8 @@ async fn connector_root_field_request_no_cache() {
     );
     let received_after_first = mock_server.received_requests().await.unwrap().len();
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // Wait for the fire-and-forget insert to land rather than sleeping a fixed interval.
+    let _storage_guard = wait_for_connector_cache_insert(&namespace, &first_context).await;
 
     // Second request WITHOUT no-cache: should be served from cache (first request stored it)
     let service = create_connector_cache_service(&uri, &namespace, None).await;
@@ -6503,6 +6505,7 @@ async fn connector_entity_request_no_cache() {
     let service = create_connector_cache_service(&uri, &namespace, None).await;
     let request = make_connector_cache_request("query { user(id: \"1\") { id name } }");
     let response = service.oneshot(request).await.unwrap();
+    let first_context = response.context.clone();
     let body = connector_response_body(response).await;
     assert!(
         body.get("data").is_some(),
@@ -6510,7 +6513,8 @@ async fn connector_entity_request_no_cache() {
     );
     let received_after_first = mock_server.received_requests().await.unwrap().len();
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // Wait for the fire-and-forget insert to land rather than sleeping a fixed interval.
+    let _storage_guard = wait_for_connector_cache_insert(&namespace, &first_context).await;
 
     // Second request with no-cache: should skip cache and hit backend
     let service = create_connector_cache_service(&uri, &namespace, None).await;
