@@ -254,7 +254,11 @@ impl FieldRoutingSearchSpace {
                 error = ?e,
                 "single-option commit failed, dropping",
             );
-            state.dropped_fields += 1;
+            // A failed best-effort commit stays a silent no-op: its loss
+            // must not fail the plan.
+            if !pending.best_effort {
+                state.dropped_fields += 1;
+            }
         }
     }
 }
