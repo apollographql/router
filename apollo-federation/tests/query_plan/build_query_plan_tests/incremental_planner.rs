@@ -1693,3 +1693,84 @@ fn inc_provides_prefers_local_resolution() {
     "###
     );
 }
+
+/// @interfaceObject fake downcast: the io subgraph has no `__typename` edge
+/// for the concrete type, so `push_interface_object_typename` pushes a
+/// best-effort `__typename` pending that routes via key hop to the subgraph
+/// owning the real interface. The concrete type condition is dropped from
+/// the io subgraph's operation.
+#[test]
+fn inc_interface_object_fake_downcast_fetches_typename() {
+    let planner = planner!(
+        config = incremental_config(),
+        SubgraphA: r#"
+        type Query {
+            items: [I]
+        }
+
+        interface I @key(fields: "id") {
+            id: ID!
+            name: String
+            desc: String
+        }
+
+        type X implements I @key(fields: "id") {
+            id: ID!
+            name: String
+            desc: String @external
+        }
+        "#,
+        SubgraphB: r#"
+        type Query {
+            stuff: [I]
+        }
+
+        type I @key(fields: "id") @interfaceObject {
+            id: ID!
+            desc: String
+        }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        {
+            stuff {
+                ... on X {
+                    desc
+                }
+            }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "SubgraphB") {
+          {
+            stuff {
+              __typename
+              desc
+              id
+            }
+          }
+        },
+        Flatten(path: "stuff.@") {
+          Fetch(service: "SubgraphA") {
+            {
+              ... on I {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on I {
+                __typename
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
