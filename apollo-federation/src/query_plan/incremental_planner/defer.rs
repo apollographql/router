@@ -171,12 +171,6 @@ fn collect_deferred_blocks(
                     .flatten();
 
                 if let Some(args) = defer_args {
-                    // Upstream normalization guarantees every @defer has a label
-                    // by the time we reach plan building.
-                    debug_assert!(
-                        args.label.is_some(),
-                        "unlabeled @defer should have been assigned a label during normalization"
-                    );
                     if let Some(ref label) = args.label {
                         // The type condition stays out of the query path:
                         // the chunk is delivered at the enclosing field's
@@ -226,7 +220,7 @@ fn collect_deferred_blocks(
 
 /// Serialize a SelectionSet into a brace-wrapped (`{ ... }`) string for
 /// `DeferredDeferBlock.sub_selection`.
-fn serialize_selection_set(selection_set: &SelectionSet) -> String {
+pub(super) fn serialize_selection_set(selection_set: &SelectionSet) -> String {
     let mut parts: Vec<String> = Vec::new();
     for sel in selection_set.selections.values() {
         match sel {
