@@ -473,6 +473,17 @@ impl FetchGraph {
         self.add_entity_group_with_defer(subgraph, merge_at, defer_ref)
     }
 
+    /// Get or create the entity fetch group for (subgraph, merge_at).
+    #[allow(dead_code)]
+    pub(crate) fn get_or_create_entity_group(
+        &mut self,
+        subgraph: &Arc<str>,
+        merge_at: Vec<FetchDataPathElement>,
+        defer_ref: Option<String>,
+    ) -> NodeIndex {
+        self.get_or_create_entity_group_with_defer(subgraph, merge_at, None)
+    }
+
     /// Whether a directed edge from `parent` to `child` exists.
     pub(crate) fn has_edge(&self, parent: NodeIndex, child: NodeIndex) -> bool {
         self.find_edge(parent, child).is_some()
