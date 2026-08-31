@@ -209,6 +209,19 @@ impl PendingSelection {
     }
 }
 
+impl std::fmt::Display for PlanState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "PlanState: {} pending, {} splits, {} drops, effort={}",
+            self.pending.len(),
+            self.splits,
+            self.dropped_fields,
+            self.effort,
+        )
+    }
+}
+
 /// Undo-log entry for one pending-stack mutation.
 #[derive(Clone)]
 enum PendingOp {

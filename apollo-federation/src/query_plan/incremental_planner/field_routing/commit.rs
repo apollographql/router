@@ -76,6 +76,13 @@ impl FieldRoutingSearchSpace {
     ) -> Result<(), FederationError> {
         use super::routing::RoutingTarget;
 
+        trace!(
+            selection = %selection_label(&pending.selection),
+            target = %choice.target_subgraph(),
+            hop_kind = ?choice.hop_kind,
+            "committing choice",
+        );
+
         if matches!(choice.target, RoutingTarget::TypeExplosion) {
             return if self.try_explode_interface_field(state, pending)? {
                 Ok(())
