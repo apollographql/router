@@ -31,6 +31,11 @@ pub(crate) const CACHE_METRIC: &str = "apollo.router.operations.entity.cache";
 pub(crate) const RESPONSE_CACHE_METRIC: &str = "apollo.router.response.cache";
 const ENTITY_TYPE: Key = Key::from_static_str("graphql.type.name");
 const CACHE_HIT: Key = Key::from_static_str("cache.hit");
+/// Connector source id ("subgraph_name.source_name") on connector cache hit/miss metrics. Emitted
+/// under the `subgraph.name` key so subgraph and connector cache series share one attribute, as
+/// documented in observability.mdx. (Honoring operator-configured attributes/selectors on the
+/// connector path — rather than always emitting this one — is tracked as follow-up work.)
+const CONNECTOR_SOURCE_NAME: Key = Key::from_static_str("subgraph.name");
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
@@ -275,6 +280,7 @@ impl ConnectorCacheInstruments {
                     &[
                         KeyValue::new(ENTITY_TYPE, entity_type.to_string()),
                         KeyValue::new(CACHE_HIT, true),
+                        KeyValue::new(CONNECTOR_SOURCE_NAME, self.source_name.clone()),
                     ],
                 );
             }
@@ -284,6 +290,7 @@ impl ConnectorCacheInstruments {
                     &[
                         KeyValue::new(ENTITY_TYPE, entity_type.to_string()),
                         KeyValue::new(CACHE_HIT, false),
+                        KeyValue::new(CONNECTOR_SOURCE_NAME, self.source_name.clone()),
                     ],
                 );
             }
@@ -343,7 +350,8 @@ mod tests {
                 "apollo.router.response.cache",
                 1.0,
                 "graphql.type.name" = "Query",
-                "cache.hit" = false
+                "cache.hit" = false,
+                "subgraph.name" = "connectors.api"
             );
 
             // Hit (fresh context, as in a second request)
@@ -365,7 +373,8 @@ mod tests {
                 "apollo.router.response.cache",
                 1.0,
                 "graphql.type.name" = "Query",
-                "cache.hit" = true
+                "cache.hit" = true,
+                "subgraph.name" = "connectors.api"
             );
         }
         .with_metrics()
@@ -399,13 +408,15 @@ mod tests {
                 "apollo.router.response.cache",
                 2.0,
                 "graphql.type.name" = "Product",
-                "cache.hit" = true
+                "cache.hit" = true,
+                "subgraph.name" = "connectors.api"
             );
             assert_counter!(
                 "apollo.router.response.cache",
                 1.0,
                 "graphql.type.name" = "Product",
-                "cache.hit" = false
+                "cache.hit" = false,
+                "subgraph.name" = "connectors.api"
             );
         }
         .with_metrics()
