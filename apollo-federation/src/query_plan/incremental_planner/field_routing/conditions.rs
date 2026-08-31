@@ -26,6 +26,29 @@ impl FieldRoutingSearchSpace {
         can_satisfy_conditions(conditions, source_type, source_schema)
     }
 
+    /// Cached wrapper around `can_satisfy`: keyed by (Arc pointer of
+    /// conditions, type name, subgraph name) so repeated checks for the
+    /// same condition set at the same position short-circuit.
+    pub(super) fn cached_can_satisfy(
+        &self,
+        conditions: &Arc<SelectionSet>,
+        type_pos: &CompositeTypeDefinitionPosition,
+        subgraph: &Arc<str>,
+        schema: &ValidFederationSchema,
+    ) -> bool {
+        let key = (
+            super::ConditionsKey::new(conditions),
+            type_pos.type_name().clone(),
+            subgraph.clone(),
+        );
+        if let Some(&cached) = self.caches.can_satisfy.borrow().get(&key) {
+            return cached;
+        }
+        let result = self.can_satisfy(conditions, type_pos, schema);
+        self.caches.can_satisfy.borrow_mut().insert(key, result);
+        result
+    }
+
     /// Graph-based check: can every field in `conditions` be resolved at
     /// `node` via outgoing edges? Recurses into composite sub-selections
     /// to catch nested fields the subgraph cannot reach. Path-sensitive
@@ -57,18 +80,24 @@ impl FieldRoutingSearchSpace {
                     if *field_sel.field.name() == TYPENAME_FIELD {
                         continue;
                     }
-                    let Some(edge_idx) = self.edge_for_field(node, &field_sel.field) else {
+                    let Some(edge_idx) = self
+                        .cached_query_graph
+                        .edge_for_field(node, &field_sel.field)
+                    else {
                         if fail_on_unreachable {
                             return Ok(false);
                         }
                         continue;
                     };
-                    let edge = self.query_graph.edge_weight(edge_idx)?;
+                    let edge = self.cached_query_graph.query_graph.edge_weight(edge_idx)?;
                     if edge.conditions.is_some() {
                         return Ok(!fail_on_unreachable);
                     }
                     if let Some(sub_sel) = field_sel.selection_set.as_ref() {
-                        let (_, target) = self.query_graph.edge_endpoints(edge_idx)?;
+                        let (_, target) = self
+                            .cached_query_graph
+                            .query_graph
+                            .edge_endpoints(edge_idx)?;
                         let sub_result =
                             self.walk_conditions_graph(target, sub_sel, fail_on_unreachable)?;
                         if sub_result != fail_on_unreachable {
@@ -78,9 +107,11 @@ impl FieldRoutingSearchSpace {
                 }
                 Selection::InlineFragment(frag_sel) => {
                     let target = self
+                        .cached_query_graph
                         .edge_for_inline_fragment(node, &frag_sel.inline_fragment)
                         .map(|edge_idx| {
-                            self.query_graph
+                            self.cached_query_graph
+                                .query_graph
                                 .edge_endpoints(edge_idx)
                                 .map(|(_, target)| target)
                         })
