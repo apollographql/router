@@ -92,15 +92,6 @@ pub(crate) struct PendingSelection {
     /// concrete-`__typename` recovery, where no subgraph may be able to
     /// supply the concrete typename.
     pub(crate) best_effort: bool,
-    /// Ancestor pending whose routing position offers alternatives when this
-    /// selection is stranded. The chain is set by `dispatch_sub_selections`
-    /// so `try_split_repush` can walk up to find a field that can be routed
-    /// to a different subgraph.
-    pub(crate) split_parent: Option<Arc<PendingSelection>>,
-    /// When set, `cached_routing_options` filters out options targeting this
-    /// subgraph, preventing the re-pushed remainder from looping back to the
-    /// subgraph that stranded it.
-    pub(crate) split_avoid: Option<Arc<str>>,
 }
 
 impl PendingSelection {
@@ -119,8 +110,6 @@ impl PendingSelection {
             parent_types: self.parent_types.clone(),
             context_anchor: self.context_anchor.clone(),
             best_effort: self.best_effort,
-            split_parent: self.split_parent.clone(),
-            split_avoid: self.split_avoid.clone(),
         }
     }
 
@@ -170,16 +159,6 @@ impl PendingSelection {
     /// [`Self::best_effort`]).
     pub(super) fn into_best_effort(mut self) -> Self {
         self.best_effort = true;
-        self
-    }
-
-    pub(super) fn with_split_parent(mut self, parent: Option<Arc<PendingSelection>>) -> Self {
-        self.split_parent = parent;
-        self
-    }
-
-    pub(super) fn with_split_avoid(mut self, avoid: Option<Arc<str>>) -> Self {
-        self.split_avoid = avoid;
         self
     }
 
@@ -253,13 +232,6 @@ pub(crate) struct PlanState {
     /// distinct conditions get distinct aliases. Append-only; not restored
     /// on rollback (aliases only need to be stable, not predictable).
     pub(crate) condition_alias_ids: BTreeMap<String, usize>,
-    /// Count of split re-pushes. Penalized in cost() at 1e15 (below the
-    /// 1e18 drop penalty, above structural cost). Saved/restored by
-    /// checkpoint/rollback.
-    pub(crate) splits: usize,
-    /// Off in first search pass. Enabled in retry after a split-free search
-    /// fails with drops. Constant for a search, so checkpoints ignore it.
-    pub(crate) split_repush_enabled: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -267,7 +239,6 @@ pub(crate) struct PlanCheckpoint {
     graph_cp: FetchGraphCheckpoint,
     pending_cp: usize,
     dropped_fields: usize,
-    splits: usize,
     type_explosions: usize,
 }
 
@@ -285,8 +256,6 @@ impl PlanState {
             type_explosions: 0,
             effort: 0,
             condition_alias_ids: BTreeMap::new(),
-            splits: 0,
-            split_repush_enabled: false,
         }
     }
 
@@ -334,7 +303,6 @@ impl PlanState {
             graph_cp: self.graph.checkpoint(),
             pending_cp: self.pending_undo.len(),
             dropped_fields: self.dropped_fields,
-            splits: self.splits,
             type_explosions: self.type_explosions,
         }
     }
@@ -357,7 +325,6 @@ impl PlanState {
             }
         }
         self.dropped_fields = cp.dropped_fields;
-        self.splits = cp.splits;
         self.type_explosions = cp.type_explosions;
     }
 }
