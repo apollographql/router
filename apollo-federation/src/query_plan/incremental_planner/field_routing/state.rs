@@ -30,8 +30,16 @@ pub(crate) struct ConditionScope {
 /// Anchor information for @fromContext across entity boundaries.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ContextAnchor {
+    /// The *parent* fetch feeding this selection's entity fetch, when the
+    /// selection lives inside one. When the ancestor with @context is at or
+    /// above the entity boundary, the context selection must be added here,
+    /// not to the entity fetch.
     pub(crate) fetch: Option<NodeIndex>,
+    /// Op path at the entity boundary in the parent fetch.
     pub(crate) op_path: SharedPath<Arc<OpPathElement>>,
+    /// Entity root type at the boundary. When the ancestor with @context
+    /// matches it, context data rides the entity representation without a
+    /// new hop.
     pub(crate) entity_type: Option<CompositeTypeDefinitionPosition>,
 }
 
