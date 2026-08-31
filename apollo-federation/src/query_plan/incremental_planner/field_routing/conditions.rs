@@ -27,6 +27,29 @@ impl FieldRoutingSearchSpace {
         can_satisfy_conditions(conditions, type_pos, schema)
     }
 
+    /// Cached wrapper around `can_satisfy`: keyed by (Arc pointer of
+    /// conditions, type name, subgraph name) so repeated checks for the
+    /// same condition set at the same position short-circuit.
+    pub(super) fn cached_can_satisfy(
+        &self,
+        conditions: &Arc<SelectionSet>,
+        type_pos: &CompositeTypeDefinitionPosition,
+        subgraph: &Arc<str>,
+        schema: &ValidFederationSchema,
+    ) -> bool {
+        let key = (
+            super::ConditionsKey::new(conditions),
+            type_pos.type_name().clone(),
+            subgraph.clone(),
+        );
+        if let Some(&cached) = self.caches.can_satisfy.borrow().get(&key) {
+            return cached;
+        }
+        let result = self.can_satisfy(conditions, type_pos, schema);
+        self.caches.can_satisfy.borrow_mut().insert(key, result);
+        result
+    }
+
     /// Graph-based check: can every field in `conditions` (recursively) be
     /// resolved at `node` via outgoing edges, with no @requires of its own?
     /// Fields recurse through their edge's tail node; condition-less inline
@@ -61,7 +84,10 @@ impl FieldRoutingSearchSpace {
                     if *field_sel.field.name() == TYPENAME_FIELD {
                         continue;
                     }
-                    let Some(edge_idx) = self.edge_for_field(node, &field_sel.field) else {
+                    let Some(edge_idx) = self
+                        .cached_query_graph
+                        .edge_for_field(node, &field_sel.field)
+                    else {
                         if fail_on_unreachable {
                             return Ok(false);
                         }
@@ -69,11 +95,11 @@ impl FieldRoutingSearchSpace {
                     };
                     // A field carrying @requires draws data from the entity
                     // representation; it cannot be selected in place.
-                    if self.query_graph.edge_weight(edge_idx)?.conditions.is_some() {
+                    if self.cached_query_graph.query_graph.edge_weight(edge_idx)?.conditions.is_some() {
                         return Ok(!fail_on_unreachable);
                     }
                     if let Some(sub) = &field_sel.selection_set {
-                        let (_, tail) = self.query_graph.edge_endpoints(edge_idx)?;
+                        let (_, tail) = self.cached_query_graph.query_graph.edge_endpoints(edge_idx)?;
                         let sub_result =
                             self.walk_conditions_graph(tail, sub, fail_on_unreachable)?;
                         if sub_result != fail_on_unreachable {
@@ -87,8 +113,8 @@ impl FieldRoutingSearchSpace {
                     // unresolvable for the resolvability check, walked here
                     // for requires detection (over-approximating safely).
                     let target = if frag_sel.inline_fragment.type_condition_position.is_some() {
-                        match self.edge_for_inline_fragment(node, &frag_sel.inline_fragment) {
-                            Some(edge) => self.query_graph.edge_endpoints(edge)?.1,
+                        match self.cached_query_graph.edge_for_inline_fragment(node, &frag_sel.inline_fragment) {
+                            Some(edge) => self.cached_query_graph.query_graph.edge_endpoints(edge)?.1,
                             None if fail_on_unreachable => return Ok(false),
                             None => node,
                         }

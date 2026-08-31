@@ -95,7 +95,7 @@ impl FieldRoutingSearchSpace {
             };
         }
 
-        let qg = &self.query_graph;
+        let qg = &self.cached_query_graph.query_graph;
         let (_, target_qg_node) = qg.edge_endpoints(choice.edge_index())?;
 
         // Reject unexpected edge transitions before any mutation. Later
@@ -160,7 +160,7 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         choice: &RoutingChoice,
     ) -> Result<(NodeIndex, EdgeIndex), FederationError> {
-        let qg = &self.query_graph;
+        let qg = &self.cached_query_graph.query_graph;
         trace!(
             target_subgraph = %choice.target_subgraph(),
             "committing root type resolution hop",
@@ -225,7 +225,7 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         choice: &RoutingChoice,
     ) -> Result<(NodeIndex, EdgeIndex), FederationError> {
-        let qg = &self.query_graph;
+        let qg = &self.cached_query_graph.query_graph;
         trace!(
             target_subgraph = %choice.target_subgraph(),
             selection = %selection_label(&pending.selection),
@@ -392,7 +392,7 @@ impl FieldRoutingSearchSpace {
         first_group: NodeIndex,
         merge_at: Vec<FetchDataPathElement>,
     ) -> Result<(NodeIndex, EdgeIndex), FederationError> {
-        let qg = &self.query_graph;
+        let qg = &self.cached_query_graph.query_graph;
         let mut prev_group = first_group;
         let mut last = None;
 
@@ -424,6 +424,7 @@ impl FieldRoutingSearchSpace {
             if let Some(key_conds) = exit_key {
                 let hop_schema = qg.schema_by_source(&hop_node_data.source)?.clone();
                 let hop_source = NodeSource {
+                    subgraph: hop_node_data.source.clone(),
                     type_pos: hop_type_pos.clone(),
                     schema: hop_schema,
                 };
@@ -583,7 +584,10 @@ impl FieldRoutingSearchSpace {
         match &pending.selection {
             Selection::Field(_) => self.field_fetch_node(state, pending, choice),
             Selection::InlineFragment(_) => {
-                let edge = self.query_graph.edge_weight(choice.edge_index())?;
+                let edge = self
+                    .cached_query_graph
+                    .query_graph
+                    .edge_weight(choice.edge_index())?;
                 if matches!(
                     edge.transition,
                     QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. }
@@ -634,7 +638,7 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         choice: &RoutingChoice,
     ) -> Result<NodeIndex, FederationError> {
-        let qg = &self.query_graph;
+        let qg = &self.cached_query_graph.query_graph;
         let current_node_data = qg.node_weight(pending.query_graph_node)?;
         if matches!(
             current_node_data.type_,
@@ -663,7 +667,7 @@ impl FieldRoutingSearchSpace {
         edge_index: EdgeIndex,
         selection: &Selection,
     ) -> Result<Option<Vec<FetchDataPathElement>>, FederationError> {
-        let qg = &self.query_graph;
+        let qg = &self.cached_query_graph.query_graph;
         let edge = qg.edge_weight(edge_index)?;
         match &edge.transition {
             QueryGraphEdgeTransition::FieldCollection {
@@ -708,7 +712,7 @@ impl FieldRoutingSearchSpace {
         fetch_node: NodeIndex,
         response_path_elements: Vec<FetchDataPathElement>,
     ) -> Result<CommitTarget, FederationError> {
-        let qg = &self.query_graph;
+        let qg = &self.cached_query_graph.query_graph;
         let op_path = match choice.hop_kind {
             // Hops restart the op path at the new group's root: empty for
             // root hops; for key hops, `... on <ConcreteType>` (entity
@@ -884,7 +888,10 @@ impl FieldRoutingSearchSpace {
         op_path: &SharedPath<Arc<OpPathElement>>,
     ) -> Result<(), FederationError> {
         if let Selection::Field(_) = &pending.selection {
-            let target_data = self.query_graph.node_weight(target_qg_node)?;
+            let target_data = self
+                .cached_query_graph
+                .query_graph
+                .node_weight(target_qg_node)?;
             if let Ok(target_pos) =
                 CompositeTypeDefinitionPosition::try_from(target_data.type_.clone())
                 && target_pos.is_abstract_type()
@@ -935,14 +942,20 @@ impl FieldRoutingSearchSpace {
 
         // Extend parent_types with the current target type for @fromContext
         // ancestor resolution.
-        let target_node_data = self.query_graph.node_weight(target_qg_node)?;
+        let target_node_data = self
+            .cached_query_graph
+            .query_graph
+            .node_weight(target_qg_node)?;
         let child_parent_types = {
             let mut types = pending.parent_types.clone();
             // From a FederatedRootType node the root type (e.g. Query) is not
             // in parent_types yet (resolved per-field at commit time); inject
             // it so @context on the root type is visible to @fromContext
             // ancestor lookups.
-            let source_data = self.query_graph.node_weight(pending.query_graph_node)?;
+            let source_data = self
+                .cached_query_graph
+                .query_graph
+                .node_weight(pending.query_graph_node)?;
             if matches!(source_data.type_, QueryGraphNodeType::FederatedRootType(_))
                 && let Some(root_type) = state.graph.node(fetch_node).root_type().cloned()
             {
@@ -1006,11 +1019,13 @@ impl FieldRoutingSearchSpace {
             return Ok(None);
         }
         let source_is_copy = self
+            .cached_query_graph
             .query_graph
             .node_weight(pending.query_graph_node)?
             .provide_id
             .is_some();
         let target_is_copy = self
+            .cached_query_graph
             .query_graph
             .node_weight(target_qg_node)?
             .provide_id
