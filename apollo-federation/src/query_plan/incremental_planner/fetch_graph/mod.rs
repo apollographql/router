@@ -479,7 +479,7 @@ impl FetchGraph {
         &mut self,
         subgraph: &Arc<str>,
         merge_at: Vec<FetchDataPathElement>,
-        defer_ref: Option<String>,
+        _defer_ref: Option<String>,
     ) -> NodeIndex {
         self.get_or_create_entity_group_with_defer(subgraph, merge_at, None)
     }
