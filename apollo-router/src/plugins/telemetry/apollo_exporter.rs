@@ -187,6 +187,7 @@ impl ApolloExporter {
         Sender::Apollo(tx)
     }
 
+    #[expect(clippy::result_large_err, reason = "error can return the input report")]
     pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
         // We may be sending traces but with no operation count
         if report.licensed_operation_count_by_type.is_empty() && report.traces_per_query.is_empty()
@@ -250,7 +251,7 @@ impl ApolloExporter {
         let mut msg = "default error message".to_string();
         let mut has_traces = false;
 
-        for (_, traces_and_stats) in proto_report.traces_per_query.iter_mut() {
+        for traces_and_stats in proto_report.traces_per_query.values_mut() {
             if !traces_and_stats.trace.is_empty() {
                 has_traces = true;
                 if self.strip_traces.load(Ordering::SeqCst) {
