@@ -40,6 +40,47 @@ pub enum TopLevelPlanNode {
     Condition(Box<ConditionNode>),
 }
 
+#[allow(dead_code)]
+impl QueryPlan {
+    pub fn cost(&self) -> QueryPlanCost {
+        match &self.node {
+            None => 0.0,
+            Some(top) => top.cost(),
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl TopLevelPlanNode {
+    pub fn cost(&self) -> QueryPlanCost {
+        match self {
+            Self::Fetch(_) => plan_node_cost_at_depth(self.as_plan_node_ref(), 0),
+            Self::Sequence(_) => plan_node_cost_at_depth(self.as_plan_node_ref(), 0),
+            Self::Parallel(_) => plan_node_cost_at_depth(self.as_plan_node_ref(), 0),
+            Self::Flatten(_) => plan_node_cost_at_depth(self.as_plan_node_ref(), 0),
+            Self::Defer(_) => plan_node_cost_at_depth(self.as_plan_node_ref(), 0),
+            Self::Condition(_) => plan_node_cost_at_depth(self.as_plan_node_ref(), 0),
+            Self::Subscription(s) => {
+                let primary_cost = 1000.0;
+                let rest = s.rest.as_ref().map_or(0.0, |n| n.cost_at_depth(1));
+                primary_cost + rest
+            }
+        }
+    }
+
+    fn as_plan_node_ref(&self) -> PlanNodeRef<'_> {
+        match self {
+            Self::Fetch(_) => PlanNodeRef::Fetch,
+            Self::Sequence(s) => PlanNodeRef::Sequence(&s.nodes),
+            Self::Parallel(p) => PlanNodeRef::Parallel(&p.nodes),
+            Self::Flatten(f) => PlanNodeRef::Flatten(&f.node),
+            Self::Defer(d) => PlanNodeRef::Defer(&d.primary),
+            Self::Condition(c) => PlanNodeRef::Condition(c),
+            Self::Subscription(_) => unreachable!("handled above"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SubscriptionNode {
     pub primary: Box<FetchNode>,
@@ -59,9 +100,32 @@ pub enum PlanNode {
     Condition(Box<ConditionNode>),
 }
 
+/// How a fetch communicates with its data source. Extensible for future
+/// non-GraphQL protocols (gRPC, SQL, etc.).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub enum FetchProtocol {
+    /// Standard GraphQL subgraph fetch.
+    #[default]
+    GraphQL,
+    /// Connector-based fetch (REST, etc.). The coordinate string identifies
+    /// the connector (e.g., "subgraph:Type.field[0]") for execution-layer
+    /// lookup.
+    Connector { coordinate: String },
+}
+
+impl FetchProtocol {
+    pub fn is_graphql(&self) -> bool {
+        matches!(self, FetchProtocol::GraphQL)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FetchNode {
     pub subgraph_name: Arc<str>,
+    /// Protocol used to execute this fetch. Defaults to GraphQL.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "FetchProtocol::is_graphql")]
+    pub protocol: FetchProtocol,
     /// Optional identifier for the fetch for defer support. All fetches of a given plan will be
     /// guaranteed to have a unique `id`.
     pub id: Option<u64>,
@@ -249,6 +313,7 @@ pub enum QueryPathElement {
     InlineFragment { type_condition: Name },
 }
 
+#[allow(dead_code)]
 impl PlanNode {
     /// Returns the kind of plan node this is as a human-readable string. Exact output not guaranteed.
     fn node_kind(&self) -> &'static str {
@@ -260,5 +325,63 @@ impl PlanNode {
             Self::Defer(_) => "Defer",
             Self::Condition(_) => "Condition",
         }
+    }
+
+    pub fn cost(&self) -> QueryPlanCost {
+        self.cost_at_depth(0)
+    }
+
+    fn cost_at_depth(&self, depth: usize) -> QueryPlanCost {
+        plan_node_cost_at_depth(self.as_ref(), depth)
+    }
+
+    fn as_ref(&self) -> PlanNodeRef<'_> {
+        match self {
+            Self::Fetch(_) => PlanNodeRef::Fetch,
+            Self::Sequence(s) => PlanNodeRef::Sequence(&s.nodes),
+            Self::Parallel(p) => PlanNodeRef::Parallel(&p.nodes),
+            Self::Flatten(f) => PlanNodeRef::Flatten(&f.node),
+            Self::Defer(d) => PlanNodeRef::Defer(&d.primary),
+            Self::Condition(c) => PlanNodeRef::Condition(c),
+        }
+    }
+}
+
+#[allow(dead_code)]
+enum PlanNodeRef<'a> {
+    Fetch,
+    Sequence(&'a [PlanNode]),
+    Parallel(&'a [PlanNode]),
+    Flatten(&'a PlanNode),
+    Defer(&'a PrimaryDeferBlock),
+    Condition(&'a ConditionNode),
+}
+
+#[allow(dead_code)]
+fn plan_node_cost_at_depth(node: PlanNodeRef<'_>, depth: usize) -> QueryPlanCost {
+    const FETCH_COST: QueryPlanCost = 1000.0;
+    const PIPELINING_COST: QueryPlanCost = 100.0;
+
+    match node {
+        PlanNodeRef::Fetch => FETCH_COST * (1.0f64).max(depth as f64 * PIPELINING_COST),
+        PlanNodeRef::Parallel(nodes) => nodes.iter().map(|n| n.cost_at_depth(depth)).sum(),
+        PlanNodeRef::Sequence(nodes) => nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| n.cost_at_depth(depth + i))
+            .sum(),
+        PlanNodeRef::Flatten(inner) => inner.cost_at_depth(depth),
+        PlanNodeRef::Condition(c) => {
+            let if_cost = c.if_clause.as_ref().map_or(0.0, |n| n.cost_at_depth(depth));
+            let else_cost = c
+                .else_clause
+                .as_ref()
+                .map_or(0.0, |n| n.cost_at_depth(depth));
+            if_cost.max(else_cost)
+        }
+        PlanNodeRef::Defer(primary) => primary
+            .node
+            .as_ref()
+            .map_or(0.0, |n| n.cost_at_depth(depth)),
     }
 }
