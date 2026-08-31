@@ -610,13 +610,6 @@ impl FetchGraph {
         &self.graph[node]
     }
 
-    /// Whether `node` refers to a live node (false for placeholders like
-    /// `NodeIndex::end()` on uncommitted federated-root pendings).
-    #[allow(dead_code)]
-    pub(crate) fn contains_node(&self, node: NodeIndex) -> bool {
-        self.graph.contains_node(node)
-    }
-
     /// The merge_at path for a node; empty for root groups.
     pub(crate) fn merge_at(&self, node: NodeIndex) -> &[FetchDataPathElement] {
         match &self.graph[node].kind {
@@ -967,53 +960,6 @@ pub(super) fn strip_merge_at_conditions(
             other => other.clone(),
         })
         .collect()
-}
-
-/// Structural containment of selection sets by response shape: every field
-/// of `needed` (by name; `__typename` skipped) appears in `have` with its
-/// sub-selections contained recursively; inline fragments match by type
-/// condition. Conservative — a miss only means the caller falls back to
-/// routing the conditions.
-#[allow(dead_code)]
-fn selection_contains(have: &SelectionSet, needed: &SelectionSet) -> bool {
-    use crate::operation::Selection;
-    needed
-        .selections
-        .values()
-        .all(|needed_sel| match needed_sel {
-            Selection::Field(needed_field) => {
-                if *needed_field.field.name() == crate::operation::TYPENAME_FIELD {
-                    return true;
-                }
-                have.selections.values().any(|have_sel| match have_sel {
-                    Selection::Field(have_field) => {
-                        have_field.field.name() == needed_field.field.name()
-                            && have_field.field.alias.is_none()
-                            && match (&needed_field.selection_set, &have_field.selection_set) {
-                                (Some(needed_sub), Some(have_sub)) => {
-                                    selection_contains(have_sub, needed_sub)
-                                }
-                                (None, _) => true,
-                                (Some(_), None) => false,
-                            }
-                    }
-                    Selection::InlineFragment(_) => false,
-                })
-            }
-            Selection::InlineFragment(needed_frag) => {
-                have.selections.values().any(|have_sel| match have_sel {
-                    Selection::InlineFragment(have_frag) => {
-                        have_frag.inline_fragment.type_condition_position
-                            == needed_frag.inline_fragment.type_condition_position
-                            && selection_contains(
-                                &have_frag.selection_set,
-                                &needed_frag.selection_set,
-                            )
-                    }
-                    Selection::Field(_) => false,
-                })
-            }
-        })
 }
 
 #[cfg(test)]
