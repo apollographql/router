@@ -149,6 +149,30 @@ impl Operation {
         coerce_executable_values(self.schema.schema(), &mut document);
         Ok(document.validate(self.schema.schema())?)
     }
+
+    /// Like `generate_fragments` but skips document validation, which is
+    /// redundant for structurally-constructed operations.
+    pub(crate) fn generate_fragments_unchecked(
+        self,
+    ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
+        let mut generator = FragmentGenerator::new(&self.selection_set);
+        let minified_selection = generator.minify(&self.selection_set)?;
+        let fragments = generator.into_inner();
+
+        let operation_type: executable::OperationType = self.root_kind.into();
+        let operation = executable::Operation {
+            operation_type,
+            name: self.name.clone(),
+            variables: self.variables.deref().clone(),
+            directives: self.directives.iter().cloned().collect(),
+            selection_set: minified_selection,
+        };
+        let mut document = executable::ExecutableDocument::new();
+        document.operations.insert(operation);
+        document.fragments = fragments;
+        coerce_executable_values(self.schema.schema(), &mut document);
+        Ok(Valid::assume_valid(document))
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
