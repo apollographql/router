@@ -230,7 +230,7 @@ impl FieldRoutingSearchSpace {
         // their conditions would recurse without progress, so they are
         // handled via locally_satisfiable_subset instead.
         if !key_locally_resolvable && let Some(key_conditions) = &choice.key_conditions {
-            if choice.conditions_circular {
+            if choice.conditions_unroutable {
                 self.commit_circular_key_conditions(
                     state,
                     pending,
