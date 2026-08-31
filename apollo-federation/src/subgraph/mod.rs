@@ -46,7 +46,10 @@ pub struct Subgraph {
 
 impl Subgraph {
     pub fn new(name: &str, url: &str, schema_str: &str) -> Result<Self, FederationError> {
-        let schema = Schema::parse(schema_str, name)?;
+        let schema = Schema::builder()
+            .validate_default_values(false)
+            .parse(schema_str, name)
+            .build()?;
         // TODO: federation-specific validation
         Ok(Self {
             name: name.to_string(),
@@ -62,6 +65,7 @@ impl Subgraph {
     ) -> Result<ValidSubgraph, FederationError> {
         let mut schema = Schema::builder()
             .adopt_orphan_extensions()
+            .validate_default_values(false)
             .parse(schema_str, name)
             .build()?;
 
@@ -623,7 +627,10 @@ pub mod test_utils {
 // Generates a diff string containing directives and types not included in initial schema string
 pub fn schema_diff_expanded_from_initial(schema_str: String) -> Result<String, FederationError> {
     // Parse schema string as Schema without validation.
-    let initial_schema = Schema::parse(schema_str, "")?;
+    let initial_schema = Schema::builder()
+        .validate_default_values(false)
+        .parse(schema_str, "")
+        .build()?;
 
     // Initialize and expand subgraph without validation
     let initial_subgraph =

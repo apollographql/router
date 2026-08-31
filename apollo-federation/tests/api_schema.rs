@@ -2355,7 +2355,6 @@ fn matches_graphql_js_directive_applications() {
         r#"
         type Query {
             a: Int @deprecated
-            b: Int @deprecated(reason: null)
             c: Int @deprecated(reason: "Reason")
             d: Int @deprecated(reason: "No longer supported")
         }
@@ -2366,15 +2365,31 @@ fn matches_graphql_js_directive_applications() {
     insta::assert_snapshot!(api_schema, @r###"
         type Query {
           a: Int @deprecated
-          b: Int
           c: Int @deprecated(reason: "Reason")
           d: Int @deprecated
         }
     "###);
 }
 
-// Note that federation will keep certain default value invalidities, and will not coerce
-// default values as graphql-js would (as this is not required by the spec).
+#[test]
+fn rejects_deprecated_with_null_reason() {
+    let err = inaccessible_to_api_schema(
+        r#"
+        type Query {
+            b: Int @deprecated(reason: null)
+        }
+        "#,
+    )
+    .expect_err("should reject null for String! argument");
+    assert!(
+        err.to_string().contains("null"),
+        "error should mention null: {err}"
+    );
+}
+
+// Federation keeps default value invalidities (e.g. empty objects for inputs with required
+// fields) and does not coerce default values as graphql-js would (not required by spec).
+// Default value validation is disabled in the compiler so federation can handle it.
 #[test]
 fn matches_federation_default_value_propagation() {
     let api_schema = inaccessible_to_api_schema(

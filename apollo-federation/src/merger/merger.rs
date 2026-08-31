@@ -212,7 +212,9 @@ impl Merger {
         };
         let fields_with_from_context = Self::get_fields_with_from_context_directive(&subgraphs);
         let fields_with_override = Self::get_fields_with_override_directive(&subgraphs);
-        let merged = FederationSchema::new(Schema::new())?;
+        let mut initial_schema = Schema::new();
+        initial_schema.validate_default_values = false;
+        let merged = FederationSchema::new(initial_schema)?;
         let join_directive_identities = HashSet::from([Identity::connect_identity()]);
 
         trace!(

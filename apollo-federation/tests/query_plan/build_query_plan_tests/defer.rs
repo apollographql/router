@@ -1,6 +1,4 @@
 use apollo_compiler::ExecutableDocument;
-use apollo_federation::error::FederationError;
-use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 fn config_with_defer() -> QueryPlannerConfig {
@@ -4085,19 +4083,6 @@ fn defer_deferred_depends_on_source_with_shared_merge_at_prefix() {
 }
 
 #[track_caller]
-fn assert_duplicate_defer_label<T: std::fmt::Debug>(
-    result: Result<T, FederationError>,
-    expected_label: &str,
-) {
-    match result {
-        Err(FederationError::SingleFederationError(
-            SingleFederationError::DuplicateDeferLabel { label },
-        )) if label == expected_label => {}
-        Err(e) => panic!("expected DuplicateDeferLabel({expected_label:?}), got: {e}"),
-        Ok(plan) => panic!("expected DuplicateDeferLabel({expected_label:?}), got plan: {plan:?}"),
-    }
-}
-
 /// Regression guard for a stack overflow in
 /// `FetchDependencyGraph::process_root_nodes`. An operation with two nested
 /// `@defer` inline fragments sharing the same `label` used to make the outer
@@ -4141,14 +4126,14 @@ fn defer_test_nested_duplicate_label_must_not_stack_overflow() {
         }
     "#;
 
+    // apollo-compiler v2 catches duplicate @defer labels at parse time.
     let api_schema = planner.api_schema();
-    let document =
+    let err =
         ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "operation.graphql")
-            .expect("operation parses+validates against the api schema");
-
-    assert_duplicate_defer_label(
-        planner.build_query_plan(&document, None, Default::default()),
-        "dup",
+            .expect_err("duplicate @defer labels should be rejected at parse time");
+    assert!(
+        err.to_string().contains("label"),
+        "error should mention label: {err}"
     );
 }
 
@@ -4192,13 +4177,13 @@ fn defer_test_sibling_duplicate_label_must_be_rejected() {
         }
     "#;
 
+    // apollo-compiler v2 catches duplicate @defer labels at parse time.
     let api_schema = planner.api_schema();
-    let document =
+    let err =
         ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "operation.graphql")
-            .expect("operation parses+validates against the api schema");
-
-    assert_duplicate_defer_label(
-        planner.build_query_plan(&document, None, Default::default()),
-        "dup",
+            .expect_err("duplicate @defer labels should be rejected at parse time");
+    assert!(
+        err.to_string().contains("label"),
+        "error should mention label: {err}"
     );
 }
