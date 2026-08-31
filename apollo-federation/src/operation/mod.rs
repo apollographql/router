@@ -2985,6 +2985,21 @@ impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
     }
 }
 
+impl Operation {
+    /// Build an executable document without validation. The caller is
+    /// responsible for ensuring correctness (e.g. structurally-constructed
+    /// operations from the query planner).
+    pub(crate) fn into_document_unchecked(
+        self,
+    ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
+        let operation = executable::Operation::try_from(&self)?;
+        let mut document = executable::ExecutableDocument::new();
+        document.operations.insert(operation);
+        coerce_executable_values(self.schema.schema(), &mut document);
+        Ok(Valid::assume_valid(document))
+    }
+}
+
 // Display implementations for the operation types.
 
 impl Display for Operation {

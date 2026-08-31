@@ -154,6 +154,12 @@ pub struct IncrementalPlannerConfig {
     /// Leave unset (the default) for fully deterministic, fuel-bounded
     /// planning.
     pub timeout: Option<Duration>,
+
+    /// Skip validation of generated subgraph operations. The planner
+    /// constructs operations structurally, so they are valid by
+    /// construction; validation is O(n) redundant work. Enabled by
+    /// default; disable for debugging malformed plans.
+    pub skip_subgraph_operation_validation: bool,
 }
 
 impl Default for IncrementalPlannerConfig {
@@ -163,6 +169,7 @@ impl Default for IncrementalPlannerConfig {
             beam_width: 16,
             fuel: 5_000,
             timeout: None,
+            skip_subgraph_operation_validation: true,
         }
     }
 }
@@ -1085,7 +1092,11 @@ impl SubgraphOperationCompression {
     pub(crate) fn compress(
         &mut self,
         operation: Operation,
+        skip_validation: bool,
     ) -> Result<Valid<ExecutableDocument>, FederationError> {
+        if skip_validation {
+            return self.compress_unchecked(operation);
+        }
         match self {
             Self::GenerateFragments => Ok(operation.generate_fragments()?),
             Self::Disabled => {
@@ -1100,6 +1111,16 @@ impl SubgraphOperationCompression {
                 })?;
                 Ok(operation_document)
             }
+        }
+    }
+
+    fn compress_unchecked(
+        &mut self,
+        operation: Operation,
+    ) -> Result<Valid<ExecutableDocument>, FederationError> {
+        match self {
+            Self::GenerateFragments => Ok(operation.generate_fragments_unchecked()?),
+            Self::Disabled => operation.into_document_unchecked(),
         }
     }
 }
