@@ -692,6 +692,7 @@ impl FieldRoutingSearchSpace {
         if !self.disabled_subgraphs.is_empty() {
             options.retain(|opt| !self.disabled_subgraphs.contains(opt.target_subgraph()));
         }
+        trace!(options = options.len(), "routing_options computed");
         Ok(options)
     }
 
