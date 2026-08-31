@@ -323,6 +323,10 @@ pub struct QueryPlanner {
     /// A set of the names of interface types for which at least one subgraph use an
     /// @interfaceObject to abstract that interface.
     interface_types_with_interface_objects: IndexSet<InterfaceTypeDefinitionPosition>,
+    /// Lookup table from (type, field) to connectors, built once at planner
+    /// construction so the incremental planner can route fields to connectors
+    /// without expanding them into virtual subgraphs.
+    connector_index: Arc<crate::connectors::index::ConnectorIndex>,
     /// A set of the names of interface or union types that have inconsistent "runtime types" across
     /// subgraphs.
     // PORT_NOTE: Named `inconsistentAbstractTypesRuntimes` in the JS codebase, which was slightly
@@ -423,6 +427,20 @@ impl QueryPlanner {
             .map(|position| position.type_name().clone())
             .collect::<IndexSet<_>>();
 
+        // Build the connector index from the subgraph schemas. Subgraphs
+        // without connector directives contribute nothing.
+        let mut connectors_by_subgraph = Vec::new();
+        for (subgraph_name, subgraph_schema) in query_graph.subgraph_schemas() {
+            let connectors =
+                crate::connectors::Connector::from_schema(subgraph_schema.schema(), subgraph_name)?;
+            if !connectors.is_empty() {
+                connectors_by_subgraph.push((subgraph_schema, connectors));
+            }
+        }
+        let connector_index = Arc::new(crate::connectors::index::ConnectorIndex::from_subgraphs(
+            connectors_by_subgraph,
+        ));
+
         Ok(Self {
             config,
             federated_query_graph: Arc::new(query_graph),
@@ -430,6 +448,7 @@ impl QueryPlanner {
             api_schema,
             interface_types_with_interface_objects,
             abstract_types_with_inconsistent_runtime_types,
+            connector_index,
         })
     }
 
@@ -545,6 +564,7 @@ impl QueryPlanner {
                 &self.federated_query_graph,
                 &IndexSet::from_iter(options.override_conditions),
             ),
+            connector_index: self.connector_index.clone(),
             check_for_cooperative_cancellation: options.check_for_cooperative_cancellation,
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),
             disabled_subgraphs: self
