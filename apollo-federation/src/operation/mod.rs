@@ -2961,7 +2961,8 @@ impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
 impl Operation {
     /// Build an executable document without validation. The caller is
     /// responsible for ensuring correctness (e.g. structurally-constructed
-    /// operations from the query planner).
+    /// operations from the query planner). Debug builds still validate to
+    /// catch construction bugs early.
     pub(crate) fn into_document_unchecked(
         self,
     ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
@@ -2969,6 +2970,10 @@ impl Operation {
         let mut document = executable::ExecutableDocument::new();
         document.operations.insert(operation);
         coerce_executable_values(self.schema.schema(), &mut document);
+        debug_assert!(
+            document.clone().validate(self.schema.schema()).is_ok(),
+            "into_document_unchecked produced invalid document",
+        );
         Ok(Valid::assume_valid(document))
     }
 }
