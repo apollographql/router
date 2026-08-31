@@ -678,15 +678,12 @@ impl FieldRoutingSearchSpace {
         if !self.disabled_subgraphs.is_empty() {
             options.retain(|opt| !self.disabled_subgraphs.contains(opt.target_subgraph()));
         }
-        // Zero options is not failure yet: the applicable fallback
-        // (fragment restructuring, or type explosion at an abstract field
-        // position) becomes the single forced choice, committed through the
-        // same backbone as every other option.
         if options.is_empty()
             && let Some(fallback) = self.fallback_option(pending)?
         {
             options.push(fallback);
         }
+        trace!(options = options.len(), "routing_options computed");
         Ok(options)
     }
 

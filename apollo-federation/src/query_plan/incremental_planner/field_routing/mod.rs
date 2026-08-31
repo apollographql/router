@@ -342,6 +342,11 @@ impl FieldRoutingSearchSpace {
                 }
             }
         }
+        trace!(
+            pending = state.pending.len(),
+            forced_backtracks = state.forced_backtracks,
+            "fast_forward done",
+        );
         Ok(())
     }
 
