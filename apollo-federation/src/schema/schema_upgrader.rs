@@ -5,7 +5,6 @@ use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use either::Either;
@@ -343,7 +342,6 @@ impl SchemaUpgrader {
             for (field_name, field) in &itf.fields {
                 let pos = interface_pos.field(field_name.clone());
                 let external_directive = field
-                    .node
                     .directives
                     .iter()
                     .find(|d| d.name == external_directive.name);
@@ -372,7 +370,7 @@ impl SchemaUpgrader {
         else {
             return;
         };
-        let mut to_delete: Vec<(ObjectTypeDefinitionPosition, Component<Directive>)> = vec![];
+        let mut to_delete: Vec<(ObjectTypeDefinitionPosition, Node<Directive>)> = vec![];
         let mut fields_on_external_type: Vec<ObjectFieldDefinitionPosition> = vec![];
         for (obj_name, ty) in &schema.schema().types {
             let ExtendedType::Object(_) = ty else {
@@ -819,7 +817,7 @@ impl SchemaUpgrader {
         for pos in &types_to_add_shareable {
             pos.insert_directive(
                 schema,
-                Component::new(Directive {
+                Node::new(Directive {
                     name: shareable_directive_name.clone(),
                     arguments: vec![],
                 }),

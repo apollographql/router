@@ -7,7 +7,6 @@ use apollo_compiler::Schema;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use itertools::Itertools;
 
@@ -99,7 +98,7 @@ pub(crate) trait NamespaceResolver {
 pub(super) fn resolve_type<'schema>(
     schema: &'schema Schema,
     ty: &Type,
-    field: &Component<FieldDefinition>,
+    field: &Node<FieldDefinition>,
 ) -> Result<&'schema ExtendedType, Message> {
     schema
         .types
@@ -121,7 +120,7 @@ fn resolve_path(
     path_selection: &SelectionTrie,
     node: &Node<Value>,
     field_type: &Type,
-    field: &Component<FieldDefinition>,
+    field: &Node<FieldDefinition>,
 ) -> Result<(), Message> {
     let parent_is_nullable = !field_type.is_non_null();
 
@@ -177,13 +176,13 @@ fn resolve_path(
 /// Resolves variables in the `$this` namespace
 pub(crate) struct ThisResolver<'a> {
     object_type: SchemaTypeRef<'a>,
-    field: &'a Component<FieldDefinition>,
+    field: &'a Node<FieldDefinition>,
 }
 
 impl<'a> ThisResolver<'a> {
     pub(crate) const fn new(
         object_type: SchemaTypeRef<'a>,
-        field: &'a Component<FieldDefinition>,
+        field: &'a Node<FieldDefinition>,
     ) -> Self {
         Self { object_type, field }
     }
@@ -225,11 +224,11 @@ impl NamespaceResolver for ThisResolver<'_> {
 
 /// Resolves variables in the `$args` namespace
 pub(crate) struct ArgsResolver<'a> {
-    field: &'a Component<FieldDefinition>,
+    field: &'a Node<FieldDefinition>,
 }
 
 impl<'a> ArgsResolver<'a> {
-    pub(crate) const fn new(field: &'a Component<FieldDefinition>) -> Self {
+    pub(crate) const fn new(field: &'a Node<FieldDefinition>) -> Self {
         Self { field }
     }
 }

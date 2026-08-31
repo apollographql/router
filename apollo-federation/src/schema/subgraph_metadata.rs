@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
@@ -34,7 +35,7 @@ pub(crate) struct SubgraphMetadata {
     external_metadata: ExternalMetadata,
     context_fields: IndexSet<FieldDefinitionPosition>,
     interface_constraint_fields: IndexSet<FieldDefinitionPosition>,
-    interface_object_types: IndexSet<apollo_compiler::Name>,
+    interface_object_types: IndexSet<Name>,
     key_fields: IndexSet<FieldDefinitionPosition>,
     provided_fields: IndexSet<FieldDefinitionPosition>,
     required_fields: IndexSet<FieldDefinitionPosition>,
@@ -125,11 +126,11 @@ impl SubgraphMetadata {
             || self.required_fields.contains(field)
     }
 
-    pub(crate) fn is_interface_object_type(&self, type_name: &apollo_compiler::Name) -> bool {
+    pub(crate) fn is_interface_object_type(&self, type_name: &Name) -> bool {
         self.interface_object_types.contains(type_name)
     }
 
-    pub(crate) fn interface_object_types(&self) -> &IndexSet<apollo_compiler::Name> {
+    pub(crate) fn interface_object_types(&self) -> &IndexSet<Name> {
         &self.interface_object_types
     }
 
@@ -152,8 +153,8 @@ impl SubgraphMetadata {
     /// This is necessary when root operation types are normalized (e.g., MyMutation -> Mutation).
     pub(crate) fn update_type_references(
         &mut self,
-        old_type_name: &apollo_compiler::Name,
-        new_type_name: &apollo_compiler::Name,
+        old_type_name: &Name,
+        new_type_name: &Name,
     ) {
         update_field_definition_positions(&mut self.context_fields, old_type_name, new_type_name);
         update_field_definition_positions(
@@ -352,7 +353,7 @@ impl SubgraphMetadata {
     fn collect_interface_object_types(
         schema: &FederationSchema,
         federation_spec_definition: &'static FederationSpecDefinition,
-    ) -> Result<IndexSet<apollo_compiler::Name>, FederationError> {
+    ) -> Result<IndexSet<Name>, FederationError> {
         let mut interface_object_types = IndexSet::default();
 
         let Some(interface_object_directive_name) = federation_spec_definition
@@ -426,7 +427,7 @@ impl ExternalMetadata {
                     .iter()
                     .map(|itf| {
                         FieldDefinitionPosition::Interface(InterfaceFieldDefinitionPosition {
-                            type_name: itf.name.clone(),
+                            type_name: Name::clone(&itf),
                             field_name: external_field.field_name().clone(),
                         })
                     })
@@ -497,13 +498,7 @@ impl ExternalMetadata {
             // PORT_NOTE: The JS codebase treats the "extend" GraphQL keyword as applying to
             // only the extension it's on, while it treats the "@extends" directive as applying
             // to all definitions/extensions in the subgraph. We accordingly do the same.
-            if has_extends_directive
-                || key_directive
-                    .schema_directive
-                    .origin
-                    .extension_id()
-                    .is_some()
-            {
+            if has_extends_directive || key_directive.schema_directive.extension_id().is_some() {
                 fake_external_fields.extend(
                     collect_target_fields_from_field_set(
                         unwrap_schema(schema),
@@ -590,8 +585,8 @@ impl ExternalMetadata {
     /// Update field coordinates in external metadata after a type has been renamed.
     pub(crate) fn update_type_references(
         &mut self,
-        old_type_name: &apollo_compiler::Name,
-        new_type_name: &apollo_compiler::Name,
+        old_type_name: &Name,
+        new_type_name: &Name,
     ) {
         update_field_definition_positions(&mut self.external_fields, old_type_name, new_type_name);
         update_field_definition_positions(
@@ -617,8 +612,8 @@ impl ExternalMetadata {
 /// old entries and insert new ones rather than mutating in place.
 fn update_field_definition_positions(
     fields: &mut IndexSet<FieldDefinitionPosition>,
-    old_type_name: &apollo_compiler::Name,
-    new_type_name: &apollo_compiler::Name,
+    old_type_name: &Name,
+    new_type_name: &Name,
 ) {
     let updated_fields: Vec<_> = fields
         .iter()

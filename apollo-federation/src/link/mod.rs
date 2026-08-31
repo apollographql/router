@@ -2,19 +2,17 @@ use std::fmt;
 use std::ops::Range;
 use std::sync::Arc;
 
+use crate::error::FederationError;
+use crate::link::link_spec_definition::CORE_VERSIONS;
+use crate::link::link_spec_definition::LINK_VERSIONS;
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::parser::LineColumn;
-use apollo_compiler::schema::Component;
-
-use crate::error::FederationError;
-use crate::link::link_spec_definition::CORE_VERSIONS;
-use crate::link::link_spec_definition::LINK_VERSIONS;
-use crate::link::spec::Identity;
-use crate::link::spec::Url;
 
 pub(crate) mod argument;
 pub(crate) mod authenticated_spec_definition;
@@ -201,7 +199,7 @@ impl Link {
     pub(crate) fn for_identity<'schema>(
         schema: &'schema Schema,
         identity: &Identity,
-    ) -> Option<(Self, &'schema Component<Directive>)> {
+    ) -> Option<(Self, &'schema Node<Directive>)> {
         schema
             .schema_definition
             .directives

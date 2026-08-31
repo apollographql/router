@@ -351,9 +351,9 @@ fn get_shape(
 
     if Shape::string([]).accepts(&input_shape) {
         handle_string_shape(method_name, &input_shape, &index_shape, context.source_id())
-    } else if input_shape.is_array() {
+    } else if Shape::closed_tuple([], []).accepts(&input_shape) {
         handle_array_shape(method_name, &input_shape, &index_shape, context.source_id())
-    } else if input_shape.is_object() {
+    } else if Shape::empty_object([]).accepts(&input_shape) {
         handle_object_shape(method_name, &input_shape, &index_shape, context.source_id())
     } else if input_shape.accepts(&Shape::unknown([])) {
         handle_unknown_shape(method_name, &index_shape, context.source_id())

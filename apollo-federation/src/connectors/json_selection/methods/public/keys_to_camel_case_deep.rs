@@ -309,7 +309,7 @@ mod shape_tests {
             Shape::unknown([]),
             Shape::unknown([]),
         );
-        assert!(result.has_own_errors());
+        assert!(result.own_errors().next().is_some());
     }
 
     #[test]
@@ -322,7 +322,7 @@ mod shape_tests {
     #[test]
     fn should_error_on_non_object_input() {
         let result = get_deep_shape(Shape::string([]));
-        assert!(result.has_own_errors());
+        assert!(result.own_errors().next().is_some());
     }
 
     #[test]

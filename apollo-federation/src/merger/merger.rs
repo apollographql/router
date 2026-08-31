@@ -20,9 +20,6 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use apollo_compiler::parser::LineColumn;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ComponentName;
-use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::schema::ExtendedType;
 use indexmap::IndexSet;
 use itertools::Itertools;
@@ -885,7 +882,7 @@ impl Merger {
                     }));
                 }
                 if let Err(error) = SchemaDefinitionPosition
-                    .insert_directive(&mut self.merged, Component::new(directive))
+                    .insert_directive(&mut self.merged, Node::new(directive))
                 {
                     Self::push_non_internal_errors(&mut self.error_reporter, error)?
                 };
@@ -1059,7 +1056,7 @@ impl Merger {
                             name: name.clone(),
                             arguments: Vec::new(),
                             repeatable: false,
-                            locations: Vec::new(),
+                            locations: IndexSet::default(),
                         }),
                     )?;
                 }
@@ -1241,7 +1238,7 @@ impl Merger {
                             graph_name.clone(),
                             implemented_itf,
                         )?;
-                        dest.insert_directive(&mut self.merged, Component::new(join_implements))?;
+                        dest.insert_directive(&mut self.merged, Node::new(join_implements))?;
                     }
                 }
                 ExtendedType::Interface(itf) => {
@@ -1252,7 +1249,7 @@ impl Merger {
                             graph_name.clone(),
                             implemented_itf,
                         )?;
-                        dest.insert_directive(&mut self.merged, Component::new(join_implements))?;
+                        dest.insert_directive(&mut self.merged, Node::new(join_implements))?;
                     }
                 }
                 _ => continue,
@@ -1261,10 +1258,7 @@ impl Merger {
         for implemented_itf in implemented {
             dest.insert_implements_interface(
                 &mut self.merged,
-                ComponentName {
-                    origin: ComponentOrigin::Definition,
-                    name: implemented_itf.name.clone(),
-                },
+                Name::clone(&implemented_itf).to_node(None),
             )?;
         }
         Ok(())
@@ -1355,7 +1349,7 @@ impl Merger {
             is_interface_field: bool,
             is_interface_object: bool,
             interface_object_abstracting_fields: Vec<ObjectFieldDefinitionPosition>,
-            override_directive: Option<Component<Directive>>,
+            override_directive: Option<Node<Directive>>,
         }
 
         // convert sources to a map so we don't have to keep scanning through the array to find a source
@@ -1653,7 +1647,7 @@ impl Merger {
         &self,
         source_idx: usize,
         field: &ObjectOrInterfaceFieldDefinitionPosition,
-    ) -> Result<Option<Component<Directive>>, FederationError> {
+    ) -> Result<Option<Node<Directive>>, FederationError> {
         let subgraph = &self.subgraphs[source_idx];
         let Some(override_directive_name) = subgraph.override_directive_name() else {
             return Ok(None);
@@ -1669,14 +1663,14 @@ impl Merger {
         };
 
         if let Some(directive) = directives.first() {
-            return Ok(Some(Component::new(directive.as_ref().clone())));
+            return Ok(Some(Node::new(directive.as_ref().clone())));
         }
         Ok(None)
     }
 
     fn get_override_from_argument(
         &self,
-        directive: &Component<Directive>,
+        directive: &Node<Directive>,
     ) -> Result<String, FederationError> {
         for arg in directive.arguments.iter() {
             if arg.name.as_str() == "from"
@@ -1690,7 +1684,7 @@ impl Merger {
 
     fn get_override_label_argument(
         &self,
-        directive: &Component<Directive>,
+        directive: &Node<Directive>,
     ) -> Result<Option<String>, FederationError> {
         for arg in directive.arguments.iter() {
             if arg.name.as_str() == "label"
@@ -1763,7 +1757,7 @@ impl Merger {
                     .name;
                 if dest.has_applied_directive(subgraph.schema(), shareable_directive_name) {
                     let field = dest.get(subgraph.schema().schema())?;
-                    fields_with_shareable.insert(*idx, Some(field.node.clone()));
+                    fields_with_shareable.insert(*idx, Some(field.clone()));
                 }
             }
         }
@@ -1934,7 +1928,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         "Setting supergraph root {} to type named {} (from subgraph {})",
                         root_kind, root_type, subgraph.name
                     );
-                    let root_type = ComponentName::from(root_type.name.clone());
+                    let root_type = Name::clone(&root_type).to_node(None);
                     dest.set_root_type(&mut self.merged, root_kind, root_type)?;
                     break;
                 }
@@ -2003,7 +1997,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         for (name, extended_type) in &self.merged.schema().types {
             if let ExtendedType::Object(object) = extended_type {
                 for intf in &object.implements_interfaces {
-                    if let Some(interface) = self.merged.schema().get_interface(&intf.name) {
+                    if let Some(interface) = self.merged.schema().get_interface(&intf) {
                         for (intf_field_name, intf_field) in &interface.fields {
                             let candidate_field = ObjectFieldDefinitionPosition {
                                 type_name: name.clone(),
@@ -2070,7 +2064,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                                     // Note it's possible that interface is abstracted away (as an interface object) in multiple
                                     // subgraphs, so we don't bother with the field definition in those subgraphs, but rather
                                     // just copy the merged definition from the interface.
-                                    let mut missing_obj_node = (*intf_field.node).clone();
+                                    let mut missing_obj_node = FieldDefinition::clone(&intf_field);
                                     // PORT NOTE: since we are copying complete field AST directly it will include all args information as well.
                                     // We only have to filter directives on field but we don't need any extra logic to filter arg directives as
                                     //   1) access control directives are not applicable on args
@@ -2103,7 +2097,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
 
         for (dest, ast_node) in fields_to_insert {
             trace!("Filling in missing interface object field {dest} with {ast_node}",);
-            dest.insert(&mut self.merged, Component::new(ast_node))?;
+            dest.insert(&mut self.merged, Node::new(ast_node))?;
             // Merge access control directives only if there are additional sources
             // (e.g. from @interfaceObject field propagation). Matches JS behavior
             // which checks `additionalSources.length > 0` before merging.

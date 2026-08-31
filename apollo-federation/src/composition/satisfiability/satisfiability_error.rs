@@ -287,7 +287,7 @@ fn build_witness_field(
     field_definition_position: &FieldDefinitionPosition,
 ) -> Result<executable::Field, FederationError> {
     let field_def = field_definition_position.get(schema.schema())?;
-    let result = executable::Field::new(field_def.name.clone(), field_def.node.clone());
+    let result = executable::Field::new(field_def.name.clone(), field_def.clone());
     let args = field_def
         .arguments
         .iter()

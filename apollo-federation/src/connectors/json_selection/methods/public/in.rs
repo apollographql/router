@@ -125,7 +125,7 @@ fn in_shape(
 
     let arg_shape = first_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
 
-    if !arg_shape.is_array() && !arg_shape.accepts(&Shape::unknown([])) {
+    if !Shape::closed_tuple([], []).accepts(&arg_shape) && !arg_shape.accepts(&Shape::unknown([])) {
         return Shape::error(
             format!(
                 "Method ->{} requires an array argument, but got: {arg_shape}",

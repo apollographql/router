@@ -9,7 +9,6 @@ use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
@@ -136,7 +135,7 @@ impl Merger {
             for interface in obj_or_itf.implemented_interfaces(&self.merged)? {
                 if subgraph
                     .schema()
-                    .try_get_type(&interface.name)
+                    .try_get_type(&interface)
                     .as_ref()
                     .is_some_and(|ty| subgraph.is_interface_object_type(ty))
                 {
@@ -184,7 +183,7 @@ impl Merger {
                 {
                     supergraph_field.insert(
                         &mut self.merged,
-                        Component::new(FieldDefinition {
+                        Node::new(FieldDefinition {
                             description: None,
                             name: supergraph_field.field_name().clone(),
                             arguments: vec![],
@@ -386,7 +385,7 @@ impl Merger {
             // Note that since the type is an interface in the supergraph, we can assume that
             // if it is an object type in the subgraph, then it is an @interfaceObject.
             let itf_as_obj = ObjectTypeDefinitionPosition {
-                type_name: itf.name.clone(),
+                type_name: Name::clone(&itf),
             };
             if subgraph
                 .is_interface_object_type(&TypeDefinitionPosition::Object(itf_as_obj.clone()))

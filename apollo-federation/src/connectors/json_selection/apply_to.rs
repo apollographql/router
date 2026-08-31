@@ -829,36 +829,31 @@ impl ApplyToInternal for WithRange<PathList> {
 
         match input_shape.case() {
             ShapeCase::One(shapes) => {
-                let distributed = Shape::one(
+                let result = Shape::one(
                     shapes.iter().map(|shape| {
                         self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                     }),
                     input_shape.locations().cloned(),
                 );
-                return pending_errors
-                    .into_iter()
-                    .fold(distributed, |acc, (msg, locs)| {
-                        Shape::error_with_partial(msg, acc, locs)
-                    });
+                // Reapply any pending errors to the result.
+                let result = pending_errors.into_iter().fold(result, |s, e| s.with_error(e));
+                return result;
             }
             ShapeCase::All(shapes) => {
-                let distributed = Shape::all(
+                let result = Shape::all(
                     shapes.iter().map(|shape| {
                         self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                     }),
                     input_shape.locations().cloned(),
                 );
-                return pending_errors
-                    .into_iter()
-                    .fold(distributed, |acc, (msg, locs)| {
-                        Shape::error_with_partial(msg, acc, locs)
-                    });
+                let result = pending_errors.into_iter().fold(result, |s, e| s.with_error(e));
+                return result;
             }
             _ => {}
         };
 
-        // Below, input_shape is neither ::One nor ::All; any pending_errors
-        // captured above will be reapplied at the bottom of this function.
+        // Given the base cases above, we can assume below that input_shape is
+        // neither ::One nor ::All.
 
         let mut extra_vars_opt: Option<Shape> = None;
         let (current_shape, tail_opt) = match self.as_ref() {
@@ -1065,7 +1060,7 @@ impl ApplyToInternal for WithRange<PathList> {
             }
         };
 
-        let tail_result = if let Some(tail) = tail_opt {
+        if let Some(tail) = tail_opt {
             // Recurses over extra_vars_opt, which is usually None, but could be
             // Some(object_shape) (when handling ArrowMethod::As), and might
             // sometimes be Some(error_shape) with an object partial shape.
@@ -1076,13 +1071,13 @@ impl ApplyToInternal for WithRange<PathList> {
                 input_shape: Shape,
                 dollar_shape: Shape,
             ) -> Shape {
+                // Extract any pending error messages from extra_vars_opt.
                 let pending_messages: Vec<String> = extra_vars_opt
                     .as_ref()
                     .map(|s| s.own_errors().map(|e| e.message.clone()).collect())
                     .unwrap_or_default();
-                let tail_location = tail.shape_location(context.source_id());
 
-                let inner_shape = match extra_vars_opt.as_ref().map(|s| s.case()) {
+                match extra_vars_opt.as_ref().map(|s| s.case()) {
                     Some(ShapeCase::Object { fields, .. }) => {
                         // TODO Refactor the internal ShapeContext
                         // representation to make this cloning
@@ -1092,32 +1087,29 @@ impl ApplyToInternal for WithRange<PathList> {
                                 .iter()
                                 .map(|(name, shape)| (name.clone(), shape.clone())),
                         );
-                        tail.compute_output_shape(&new_context, input_shape, dollar_shape)
+                        let inner_shape =
+                            tail.compute_output_shape(&new_context, input_shape, dollar_shape);
+                        pending_messages.into_iter().fold(inner_shape, |s, msg| {
+                            s.with_error(shape::Error { message: msg })
+                        })
                     }
 
-                    // A pure error (case == Unknown carrying error metadata) has
-                    // no partial structure to drive name installation; emit a
-                    // fresh error shape carrying the same messages.
+                    // When extra_vars_opt is Unknown with pending errors, the
+                    // errors came from what used to be a pure ShapeCase::Error
+                    // (no partial). Reapply the errors to the tail result.
                     Some(ShapeCase::Unknown) if !pending_messages.is_empty() => {
-                        let mut iter = pending_messages.into_iter();
-                        let first = iter.next().unwrap_or_default();
-                        return iter.fold(Shape::error(first, tail_location), |acc, msg| {
-                            acc.with_error(shape::Error { message: msg })
-                        });
+                        let inner_shape =
+                            tail.compute_output_shape(context, input_shape, dollar_shape);
+                        pending_messages.into_iter().fold(inner_shape, |s, msg| {
+                            s.with_error(shape::Error { message: msg })
+                        })
                     }
 
                     _ => tail.compute_output_shape(context, input_shape, dollar_shape),
-                };
-
-                // Reattach any error metadata that was sitting on
-                // extra_vars_opt, so the structural recursion's output still
-                // surfaces the original error messages.
-                pending_messages.into_iter().fold(inner_shape, |acc, msg| {
-                    Shape::error_with_partial(msg, acc, tail_location.clone())
-                })
+                }
             }
 
-            compute_tail_shape(
+            let tail_result = compute_tail_shape(
                 tail,
                 &extra_vars_opt,
                 context,
@@ -1125,19 +1117,13 @@ impl ApplyToInternal for WithRange<PathList> {
                 // compute_tail_shape function defined above.
                 current_shape,
                 dollar_shape,
-            )
+            );
+            // Reapply any pending errors from the original input shape.
+            pending_errors.into_iter().fold(tail_result, |s, e| s.with_error(e))
         } else {
-            current_shape
-        };
-
-        // Reapply any pending errors that were attached to the original
-        // input_shape, so callers see the same error metadata they would have
-        // seen when errors were a dedicated `ShapeCase::Error` variant.
-        pending_errors
-            .into_iter()
-            .fold(tail_result, |acc, (msg, locs)| {
-                Shape::error_with_partial(msg, acc, locs)
-            })
+            // Reapply any pending errors from the original input shape.
+            pending_errors.into_iter().fold(current_shape, |s, e| s.with_error(e))
+        }
     }
 }
 
@@ -3475,7 +3461,7 @@ mod tests {
 
         let computed_batch_id =
             selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
-        assert_eq!(computed_batch_id.pretty_print(), "[...Int]");
+        assert_eq!(computed_batch_id.pretty_print(), "List<Int>");
 
         let computed_first = selection!("$batch.id->first", spec)
             .compute_output_shape(&shape_context, root_shape.clone());
@@ -3577,7 +3563,7 @@ mod tests {
 
         let computed_batch_id =
             selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
-        assert_eq!(computed_batch_id.pretty_print(), "[...Int]");
+        assert_eq!(computed_batch_id.pretty_print(), "List<Int>");
 
         let computed_first = selection!("$batch.id->first", spec)
             .compute_output_shape(&shape_context, root_shape.clone());
@@ -3605,35 +3591,35 @@ mod tests {
             selection!("$batch.id->map(@)->echo(@)", spec)
                 .shape()
                 .pretty_print(),
-            "[...$batch.id.*]",
+            "List<$batch.id.*>",
         );
 
         assert_eq!(
             selection!("$batch.id->map(@)->echo([@])", spec)
                 .shape()
                 .pretty_print(),
-            "[[...$batch.id.*]]",
+            "[List<$batch.id.*>]",
         );
 
         assert_eq!(
             selection!("$batch.id->map([@])->echo(@)", spec)
                 .shape()
                 .pretty_print(),
-            "[...[$batch.id.*]]",
+            "List<[$batch.id.*]>",
         );
 
         assert_eq!(
             selection!("$batch.id->map([@])->echo([@])", spec)
                 .shape()
                 .pretty_print(),
-            "[[...[$batch.id.*]]]",
+            "[List<[$batch.id.*]>]",
         );
 
         assert_eq!(
             selection!("$batch.id->map([@])->echo([@])", spec)
                 .compute_output_shape(&shape_context, root_shape,)
                 .pretty_print(),
-            "[[...[Int]]]",
+            "[List<[Int]>]",
         );
     }
 
@@ -4154,7 +4140,7 @@ mod tests {
     x: $root.*.arrayOfArrays.*.x,
     y: $root.*.arrayOfArrays.*.y,
   },
-  friends: [...{ id: $root.*.friend_ids.* }],
+  friends: List<{ id: $root.*.friend_ids.* }>,
   id: $root.*.id,
   name: $root.*.name,
   xs: $root.*.arrayOfArrays.x,
@@ -6090,7 +6076,7 @@ mod tests {
         );
 
         // The question mark should be applied recursively to the partial shape within the error
-        assert!(result_shape.pretty_print().contains("(err "));
+        assert!(result_shape.pretty_print().contains("Error"));
         assert!(result_shape.pretty_print().contains("None"));
     }
 
@@ -6129,7 +6115,7 @@ mod tests {
                     shape_context.named_shapes()["$root"].clone()
                 )
                 .pretty_print(),
-            "Unknown (err \"Something went wrong\")",
+            "Error<\"Something went wrong\">",
         );
     }
 

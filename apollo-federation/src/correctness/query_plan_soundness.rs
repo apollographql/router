@@ -192,7 +192,7 @@ fn get_field_definition(
     let field_def_pos = parent_type_pos.field(field_name.clone())?;
     field_def_pos
         .get(schema.schema())
-        .map(|component| component.node.clone())
+        .map(|component| component.clone())
         .map_err(|err| err.into())
 }
 
