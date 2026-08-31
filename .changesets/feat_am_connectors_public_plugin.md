@@ -20,7 +20,7 @@ On the request:
 - `Request.transport_request` carries the underlying `http::Request`, so a plugin can read and rewrite the URI, method, headers and body.
 - `Request.supergraph_request()` returns the router request that produced this connector call, for reading.
 - `Request.context` is readable and writable for request-scoped state.
-- `Request::into_error_response(message, code)` fails a connector request without making it, for cases like circuit breaking on an upstream the plugin knows to be unhealthy.
+- `Request::into_error_response(message, code, extensions)` fails a connector request without making it, for cases like circuit breaking on an upstream the plugin knows to be unhealthy.
 
 On the response:
 

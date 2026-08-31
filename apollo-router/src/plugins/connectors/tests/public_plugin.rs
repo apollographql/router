@@ -179,7 +179,11 @@ async fn public_unstable_plugin_can_break_a_connector_request() {
                     // `service` is intentionally dropped: the upstream call is never made.
                     let _ = &service;
                     async move {
-                        Ok(request.into_error_response("upstream is unhealthy", "CIRCUIT_OPEN"))
+                        Ok(request.into_error_response(
+                            "upstream is unhealthy",
+                            "CIRCUIT_OPEN",
+                            [("k1", "v1"), ("code", "dummy"), ("k2", "v2")],
+                        ))
                     }
                 },
             ))
@@ -203,6 +207,8 @@ async fn public_unstable_plugin_can_break_a_connector_request() {
     assert_eq!(errors.len(), 1);
     assert_eq!(errors[0]["message"], "upstream is unhealthy");
     assert_eq!(errors[0]["extensions"]["code"], "CIRCUIT_OPEN");
+    assert_eq!(errors[0]["extensions"]["k1"], "v1");
+    assert_eq!(errors[0]["extensions"]["k2"], "v2");
 
     // The plugin broke the request before it was made, so the upstream saw nothing.
     assert!(

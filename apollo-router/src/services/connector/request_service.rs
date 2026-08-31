@@ -24,6 +24,8 @@ use indexmap::IndexMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -117,10 +119,11 @@ impl Request {
     /// the outbound call.
     ///
     /// This is the in-process equivalent of a coprocessor returning `Control::Break`
-    /// from the `ConnectorRequest` stage: the connector call is not made, and `message`
-    /// and `code` are reported to the client as a GraphQL error at this connector's
-    /// path. Use it to fail a connector request deliberately, for example to circuit
-    /// break on an upstream a plugin knows to be unhealthy.
+    /// from the `ConnectorRequest` stage: the connector call is not made, and `message`,
+    /// `code`, and `extensions` are reported to the client as a GraphQL error at this
+    /// connector's path (an entry for `code` in `extensions` is ignored). Use it to fail
+    /// a connector request deliberately, for example to circuit break on an upstream a
+    /// plugin knows to be unhealthy.
     ///
     /// The error's remaining fields are derived from the request and are not settable,
     /// for the same reason the coprocessor does not let a coprocessor set them: the
@@ -130,10 +133,17 @@ impl Request {
         self,
         message: impl Into<String>,
         code: impl Into<String>,
+        extensions: impl IntoIterator<Item = (impl Into<ByteString>, impl Into<Value>)>,
     ) -> Response {
         let message = message.into();
         let subgraph_name = self.connector.id.subgraph_name.to_string();
-        let error = RuntimeError::new(message.clone(), &self.key).with_code(code);
+        let mut error = RuntimeError::new(message.clone(), &self.key).with_code(code);
+        for (k, v) in extensions {
+            let k = k.into();
+            if k.as_str() != "code" {
+                error = error.extension(k, v);
+            }
+        }
 
         Response {
             context: self.context,
