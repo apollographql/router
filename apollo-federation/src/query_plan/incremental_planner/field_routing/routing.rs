@@ -1289,9 +1289,9 @@ impl FieldRoutingSearchSpace {
         count
     }
 
-    /// True when every descendant field is local, so the whole subtree
-    /// can be added in one shot.
-    #[allow(dead_code)]
+    /// True when the node has no reachable cross-subgraph edges: every
+    /// descendant field is local, so the entire subtree can be added in one
+    /// shot instead of field-by-field.
     pub(super) fn is_fully_local(
         &self,
         query_graph_node: NodeIndex,
@@ -1304,8 +1304,8 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Recursively check that every sub-selection has an edge at the given
-    /// node.
-    #[allow(dead_code)]
+    /// node and that no edge carries @fromContext conditions (which need
+    /// special plumbing the bulk-insert path skips).
     pub(super) fn all_sub_selections_available(
         &self,
         node: NodeIndex,
@@ -1323,6 +1323,10 @@ impl FieldRoutingSearchSpace {
                     {
                         None => return Ok(false),
                         Some(edge_idx) => {
+                            let edge = self.cached_query_graph.query_graph.edge_weight(edge_idx)?;
+                            if !edge.required_contexts.is_empty() {
+                                return Ok(false);
+                            }
                             if let Some(sub_ss) = field_sel.selection_set.as_ref() {
                                 let target = self
                                     .cached_query_graph
