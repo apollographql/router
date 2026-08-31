@@ -66,6 +66,31 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         choice: &RoutingChoice,
     ) -> Result<(), FederationError> {
+        use super::routing::RoutingTarget;
+
+        if matches!(choice.target, RoutingTarget::TypeExplosion) {
+            return if self.try_explode_interface_field(state, pending)? {
+                Ok(())
+            } else {
+                Err(FederationError::internal(
+                    "type explosion chosen but inapplicable at this position",
+                ))
+            };
+        }
+
+        if matches!(choice.target, RoutingTarget::RestructureFragment) {
+            return if self.try_pass_through_fragment(state, pending)?
+                || self.try_vacuous_type_condition(state, pending)?
+                || self.try_explode_abstract_type(state, pending)?
+            {
+                Ok(())
+            } else {
+                Err(FederationError::internal(
+                    "fragment restructure chosen but inapplicable at this position",
+                ))
+            };
+        }
+
         let qg = &self.query_graph;
         let (_, target_qg_node) = qg.edge_endpoints(choice.edge_index())?;
 
@@ -124,17 +149,6 @@ impl FieldRoutingSearchSpace {
         }
 
         self.dispatch_sub_selections(state, pending, target_qg_node, &target)
-    }
-
-    /// Record a dropped selection that could not be routed.
-    pub(super) fn drop_unresolvable(&self, state: &mut PlanState, pending: &PendingSelection) {
-        tracing::debug!(
-            selection = %selection_label(&pending.selection),
-            "dropping unresolvable selection",
-        );
-        if !pending.best_effort {
-            state.dropped_fields += 1;
-        }
     }
 
     /// Commit a root-type-resolution hop: creates a root-hop group in the
