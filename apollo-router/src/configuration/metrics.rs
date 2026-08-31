@@ -423,6 +423,8 @@ impl InstrumentData {
             "$.tracing.batch_processor.max_export_timeout",
             opt.tracing.batch_processor.max_queue_size,
             "$.tracing.batch_processor.max_queue_size",
+            opt.tracing.throttle,
+            "$.tracing.throttle",
             opt.metrics.otlp.batch_processor.scheduled_delay,
             "$.metrics.otlp.batch_processor.scheduled_delay",
             opt.metrics.otlp.batch_processor.max_export_timeout,
@@ -447,12 +449,12 @@ impl InstrumentData {
             "$[?(@.expose_sources_in_context == true)]",
             opt.max_requests_per_operation_per_source,
             "$[?(@.max_requests_per_operation_per_source)]",
-            opt.subgraph.config,
-            "$[?(@.subgraphs..['$config'])]",
+            opt.source.config,
+            "$[?(@.sources..['$config'])]",
             opt.source.override_url,
-            "$[?(@.subgraphs..sources..override_url)]",
+            "$[?(@.sources..override_url)]",
             opt.source.max_requests_per_operation,
-            "$[?(@.subgraphs..sources..max_requests_per_operation)]"
+            "$[?(@.sources..max_requests_per_operation)]"
         );
 
         populate_config_instrument!(
