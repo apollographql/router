@@ -257,11 +257,21 @@ pub fn bulb_search<S: BulbSearchSpace>(
         // candidate lands; until then the search runs unbudgeted.
         space.rollback(&mut initial, initial_cp.clone());
 
+        // Fuel is measured from the first complete candidate; until one
+        // lands the search runs unbudgeted and no fuel is consumed.
+        let fuel_consumed = progress
+            .first_complete_effort
+            .map(|armed_at| space.effort(&initial).saturating_sub(armed_at))
+            .unwrap_or(0);
+        let fuel_remaining = fuel.saturating_sub(fuel_consumed);
         trace!(
             max_disc,
             total_completions = progress.completions,
             alternatives_existed,
             progress.best_cost,
+            fuel_consumed,
+            fuel_remaining,
+            beam_width = b,
             "BULB probe iteration done",
         );
 
