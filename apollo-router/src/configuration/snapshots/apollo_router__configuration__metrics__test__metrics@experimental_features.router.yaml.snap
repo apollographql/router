@@ -21,6 +21,7 @@ expression: "& metrics.non_zero()"
           opt.tracing.batch_processor.max_export_timeout: false
           opt.tracing.batch_processor.max_queue_size: false
           opt.tracing.batch_processor.scheduled_delay: false
+          opt.tracing.throttle: false
 - name: apollo.router.config.experimental_cooperative_cancellation
   data:
     datapoints:

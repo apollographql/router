@@ -423,6 +423,8 @@ impl InstrumentData {
             "$.tracing.batch_processor.max_export_timeout",
             opt.tracing.batch_processor.max_queue_size,
             "$.tracing.batch_processor.max_queue_size",
+            opt.tracing.throttle,
+            "$.tracing.throttle",
             opt.metrics.otlp.batch_processor.scheduled_delay,
             "$.metrics.otlp.batch_processor.scheduled_delay",
             opt.metrics.otlp.batch_processor.max_export_timeout,
