@@ -47,6 +47,16 @@ emitted for each:
 
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10029>
 
+### Support `@oneOf` input type composition with consistency validation ([PR #10124](https://github.com/apollographql/router/pull/10124))
+
+Composition now validates the `@oneOf` directive on input object types across
+subgraphs. When multiple subgraphs define the same input type, they must all
+agree on whether `@oneOf` is applied. If some subgraphs mark the input as
+`@oneOf` and others do not, composition reports an `INPUT_OBJECT_ONE_OF_MISMATCH`
+error.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10124>
+
 ## 🐛 Fixes
 
 ### Fix `GROUP_SELECTION_IS_NOT_OBJECT` for union/interface fields in nested `@connect` selections ([PR #9990](https://github.com/apollographql/router/pull/9990))
