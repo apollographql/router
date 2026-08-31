@@ -695,6 +695,45 @@ impl FieldRoutingSearchSpace {
         Ok(options)
     }
 
+    /// Cached wrapper around `routing_options`: keyed by (node, selection
+    /// pointer, override conditions pointer) so repeated evaluations of the
+    /// same pending at the same position return the prior result immediately.
+    pub(super) fn cached_routing_options(
+        &self,
+        pending: &PendingSelection,
+    ) -> Result<Arc<Vec<RoutingChoice>>, FederationError> {
+        if pending.provides_anchor.is_some() {
+            return Ok(Arc::new(self.routing_options(pending)?));
+        }
+        let key = (
+            pending.query_graph_node,
+            super::SelectionArcKey::new(&pending.selection),
+            None::<super::ArcKey<std::collections::HashSet<apollo_compiler::Name>>>,
+        );
+        let unfiltered = if let Some(cached) = self.caches.routing_options.borrow().get(&key) {
+            cached.clone()
+        } else {
+            let result = Arc::new(self.routing_options(pending)?);
+            self.caches
+                .routing_options
+                .borrow_mut()
+                .insert(key, result.clone());
+            result
+        };
+        // The unfiltered result is cached; split_avoid filtering is
+        // per-pending and must not pollute the cache.
+        if let Some(ref avoid) = pending.split_avoid {
+            let filtered: Vec<RoutingChoice> = unfiltered
+                .iter()
+                .filter(|opt| opt.target_subgraph().as_ref() != avoid.as_ref())
+                .cloned()
+                .collect();
+            Ok(Arc::new(filtered))
+        } else {
+            Ok(unfiltered)
+        }
+    }
+
     /// Options at the FederatedRootType head node, which fans out to
     /// per-subgraph roots via SubgraphEnteringTransition edges.
     pub(super) fn federated_root_options(
