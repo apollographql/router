@@ -106,25 +106,17 @@ pub(crate) enum HopKind {
 }
 
 impl RoutingChoice {
-    /// Per-concrete-type explosion at an abstract position.
-    fn explode() -> Self {
+    /// Non-edge fallback choice (type explosion or fragment restructuring).
+    fn fallback(target: RoutingTarget) -> Self {
+        debug_assert!(
+            matches!(
+                target,
+                RoutingTarget::TypeExplosion | RoutingTarget::RestructureFragment
+            ),
+            "fallback() is only for non-edge routing targets"
+        );
         Self {
-            target: RoutingTarget::TypeExplosion,
-            hop_kind: HopKind::Direct,
-            key_conditions: None,
-            conditions_locally_satisfiable: true,
-            conditions_provided: false,
-            requires_resolvable_in_place: true,
-            self_entity_reentry: false,
-            conditions_unroutable: false,
-            intermediate_key_hops: Vec::new(),
-        }
-    }
-
-    /// Zero-option fragment restructuring.
-    fn restructure_fragment() -> Self {
-        Self {
-            target: RoutingTarget::RestructureFragment,
+            target,
             hop_kind: HopKind::Direct,
             key_conditions: None,
             conditions_locally_satisfiable: true,
@@ -221,6 +213,8 @@ enum RoutingPreference {
     /// the anchor already provides the full key, so every other hop is
     /// preferred.
     CircularKeyHop,
+    /// Non-edge fallback (TypeExplosion, RestructureFragment). Always last.
+    Fallback,
 }
 
 struct KeyHopCandidate {
@@ -850,10 +844,12 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
     ) -> Result<Option<RoutingChoice>, FederationError> {
         match &pending.selection {
-            Selection::InlineFragment(_) => Ok(Some(RoutingChoice::restructure_fragment())),
+            Selection::InlineFragment(_) => Ok(Some(RoutingChoice::fallback(
+                RoutingTarget::RestructureFragment,
+            ))),
             Selection::Field(_) => Ok(self
                 .node_type_is_abstract(pending.query_graph_node)?
-                .then(RoutingChoice::explode)),
+                .then(|| RoutingChoice::fallback(RoutingTarget::TypeExplosion))),
         }
     }
 
@@ -866,9 +862,17 @@ impl FieldRoutingSearchSpace {
         }
     }
 
+    /// Order options best-first: @provides beats a direct local edge beats a
+    /// key hop whose conditions are locally satisfiable beats a remote hop.
     pub(super) fn rank_options(&self, options: &mut [RoutingChoice]) {
         options.sort_by_key(|opt| {
-            let preference = if let Ok(edge) = self.query_graph.edge_weight(opt.edge_index()) {
+            let edge_index = match opt.target {
+                RoutingTarget::SubgraphEdge { edge_index, .. } => edge_index,
+                // Fallback variants (TypeExplosion, RestructureFragment) have no
+                // edge and always rank last.
+                _ => return (RoutingPreference::Fallback, 0),
+            };
+            let preference = if let Ok(edge) = self.query_graph.edge_weight(edge_index) {
                 match &edge.transition {
                     QueryGraphEdgeTransition::FieldCollection {
                         is_part_of_provides: true,
