@@ -89,7 +89,7 @@ fn to_string_shape(
     }
 
     // Check if input is an object or array shape
-    if Shape::empty_object([]).accepts(&input_shape) || Shape::tuple([], []).accepts(&input_shape) {
+    if input_shape.is_object() || input_shape.is_array() {
         return Shape::error_with_partial(
             format!(
                 "Method ->{} cannot convert arrays or objects to strings. Use ->jsonStringify or ->joinNotNull instead",
@@ -378,7 +378,7 @@ mod shape_tests {
     #[test]
     fn to_string_shape_should_error_for_object_input() {
         assert_eq!(
-            get_shape(vec![], Shape::empty_object([])),
+            get_shape(vec![], Shape::any_object([])),
             Shape::error_with_partial(
                 "Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify or ->joinNotNull instead"
                     .to_string(),
@@ -391,7 +391,7 @@ mod shape_tests {
     #[test]
     fn to_string_shape_should_error_for_array_input() {
         assert_eq!(
-            get_shape(vec![], Shape::tuple([], [])),
+            get_shape(vec![], Shape::any_array([])),
             Shape::error_with_partial(
                 "Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify or ->joinNotNull instead"
                     .to_string(),

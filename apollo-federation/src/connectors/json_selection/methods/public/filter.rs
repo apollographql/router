@@ -524,7 +524,7 @@ mod shape_tests {
             Shape::unknown([]),
         );
         assert!(
-            !matches!(after_first.case(), ShapeCase::Error(_)),
+            !after_first.has_own_errors(),
             "first ->filter unexpectedly errored: {}",
             after_first.pretty_print()
         );
@@ -534,7 +534,7 @@ mod shape_tests {
         // error.
         let after_second = get_shape(vec![parse_condition("@.locNumber->gt(0)")], after_first);
         assert!(
-            !matches!(after_second.case(), ShapeCase::Error(_)),
+            !after_second.has_own_errors(),
             "chained ->filter produced an error shape (regression): {}",
             after_second.pretty_print()
         );
