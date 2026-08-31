@@ -47,11 +47,11 @@ pub(crate) struct RoutingChoice {
     /// has no conditions.
     #[allow(dead_code)]
     pub(crate) requires_resolvable_in_place: bool,
-    /// The key conditions for this hop form a static cycle: routing them
-    /// as ordinary pendings would recurse without progress. Commit handles
-    /// these specially via `commit_circular_key_conditions`, selecting the
+    /// The key conditions for this hop are not routable as ordinary
+    /// pendings (e.g. circular keys, missing subgraph edges). Commit
+    /// handles these via `commit_circular_key_conditions`, selecting the
     /// locally satisfiable subset and failing if it doesn't cover the key.
-    pub(crate) conditions_circular: bool,
+    pub(crate) conditions_unroutable: bool,
     /// When the field is only reachable through a multi-hop key chain,
     /// this captures the intermediate hops in order. Commit creates a
     /// chained sequence of entity groups, one per intermediate, before
@@ -93,7 +93,7 @@ impl RoutingChoice {
             key_conditions: None,
             conditions_locally_satisfiable: true,
             requires_resolvable_in_place: true,
-            conditions_circular: false,
+            conditions_unroutable: false,
             intermediate_key_hops: Vec::new(),
         }
     }
@@ -115,7 +115,7 @@ impl RoutingChoice {
             key_conditions: Some(key),
             conditions_locally_satisfiable: true,
             requires_resolvable_in_place,
-            conditions_circular: false,
+            conditions_unroutable: false,
             intermediate_key_hops: Vec::new(),
         }
     }
@@ -283,7 +283,7 @@ impl FieldRoutingSearchSpace {
         // satisfiable chain (e.g. through a subgraph keyed on a field the
         // state does have) must still be offered; ranking already prefers
         // chains over circular hops.
-        if options.iter().all(|opt| opt.conditions_circular) {
+        if options.iter().all(|opt| opt.conditions_unroutable) {
             let single_hop_count = options.len();
             for (key_target, key_edge_idx) in need_chain {
                 let key_edge = self.query_graph.edge_weight(key_edge_idx)?;
@@ -327,9 +327,9 @@ impl FieldRoutingSearchSpace {
             (None, _, _) => true,
             _ => false,
         };
-        let mut first_conditions_circular = false;
+        let mut first_conditions_unroutable = false;
         if !first_conditions_local && let Some(conds) = &first_key_edge.conditions {
-            first_conditions_circular = !self.conditions_routable(origin_node, conds)?;
+            first_conditions_unroutable = !self.conditions_routable(origin_node, conds)?;
         }
 
         let first_intermediate_data = self.query_graph.node_weight(first_intermediate)?;
@@ -393,7 +393,7 @@ impl FieldRoutingSearchSpace {
                         conditions_locally_satisfiable: first_conditions_local,
                         requires_resolvable_in_place: self
                             .requires_conditions_resolvable_in_place(origin_node, found_edge_idx)?,
-                        conditions_circular: first_conditions_circular,
+                        conditions_unroutable: first_conditions_unroutable,
                         intermediate_key_hops: hops,
                     });
                 } else {
@@ -471,17 +471,17 @@ impl FieldRoutingSearchSpace {
             } else {
                 HopKind::KeyHop
             };
-            let mut conditions_circular = false;
+            let mut conditions_unroutable = false;
             if !c.is_root
                 && !c.conditions_local
                 && let Some(conds) = &c.key_conditions
             {
-                conditions_circular = !self.conditions_routable(pending_node, conds)?;
+                conditions_unroutable = !self.conditions_routable(pending_node, conds)?;
             }
             trace!(
                 target_subgraph = %c.target_subgraph,
                 conditions_local = c.conditions_local,
-                conditions_circular,
+                conditions_unroutable,
                 ?hop_kind,
                 "found edge via key hop",
             );
@@ -495,7 +495,7 @@ impl FieldRoutingSearchSpace {
                 conditions_locally_satisfiable: c.conditions_local,
                 requires_resolvable_in_place: self
                     .requires_conditions_resolvable_in_place(pending_node, c.found_edge_idx)?,
-                conditions_circular,
+                conditions_unroutable,
                 intermediate_key_hops: Vec::new(),
             });
         }
@@ -693,7 +693,7 @@ impl FieldRoutingSearchSpace {
                         ..
                     } => RoutingPreference::Provides,
                     _ if opt.hop_kind == HopKind::Direct => RoutingPreference::DirectLocal,
-                    _ if opt.conditions_circular => RoutingPreference::CircularKeyHop,
+                    _ if opt.conditions_unroutable => RoutingPreference::CircularKeyHop,
                     _ if !opt.intermediate_key_hops.is_empty() => RoutingPreference::ChainedKeyHop,
                     _ if opt.conditions_locally_satisfiable => {
                         RoutingPreference::LocallySatisfiableKeyHop
