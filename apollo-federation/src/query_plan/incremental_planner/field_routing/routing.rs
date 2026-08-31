@@ -710,18 +710,7 @@ impl FieldRoutingSearchSpace {
                 .insert(key, result.clone());
             result
         };
-        // The unfiltered result is cached; split_avoid filtering is
-        // per-pending and must not pollute the cache.
-        if let Some(ref avoid) = pending.split_avoid {
-            let filtered: Vec<RoutingChoice> = unfiltered
-                .iter()
-                .filter(|opt| opt.target_subgraph().as_ref() != avoid.as_ref())
-                .cloned()
-                .collect();
-            Ok(Arc::new(filtered))
-        } else {
-            Ok(unfiltered)
-        }
+        Ok(unfiltered)
     }
 
     /// Options at the FederatedRootType head node, which fans out to
