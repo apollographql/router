@@ -717,10 +717,7 @@ impl Executable {
                 }
                 (Some(_license), _, _, _) => LicenseSource::Env,
                 (_, _, Some(_apollo_key), Some(_apollo_graph_ref)) => {
-                    match opt.graph_artifact_reference {
-                        None => LicenseSource::Registry(opt.uplink_config()?),
-                        Some(_) => LicenseSource::OCI(opt.oci_config()?),
-                    }
+                    LicenseSource::OCI(opt.oci_config()?)
                 }
 
                 _ => LicenseSource::default(),
