@@ -10,8 +10,10 @@
 //! logic, and the BulbSearchSpace implementation build on this skeleton
 //! in later changes.
 
+pub(super) mod cached_query_graph;
 mod commit;
 mod conditions;
+pub(super) mod context;
 mod requires;
 mod routing;
 pub(super) mod state;
@@ -20,12 +22,12 @@ mod test_support;
 mod type_conditions;
 
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
+use cached_query_graph::CachedQueryGraph;
 use hashbrown::HashMap;
-use petgraph::graph::EdgeIndex;
+use hashbrown::HashSet;
 use petgraph::graph::NodeIndex;
 use routing::RoutingChoice;
 pub(crate) use state::PendingSelection;
@@ -43,49 +45,152 @@ use crate::operation::InlineFragment;
 use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionSet;
-use crate::query_graph::OverrideConditions;
-use crate::query_graph::QueryGraph;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::QueryPlanCost;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
+// ---------------------------------------------------------------------------
+// Cache key types
+// ---------------------------------------------------------------------------
+
+/// Cache key comparing/hashing by `Arc` pointer identity while owning the
+/// `Arc`: ownership keeps the allocation alive for the cache's lifetime, so
+/// the address can't be reused after a drop.
+pub(super) struct ArcKey<T>(Arc<T>);
+
+impl<T> ArcKey<T> {
+    pub(super) fn new(value: &Arc<T>) -> Self {
+        Self(value.clone())
+    }
+}
+
+impl<T> Clone for ArcKey<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<T> PartialEq for ArcKey<T> {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl<T> Eq for ArcKey<T> {}
+
+impl<T> std::hash::Hash for ArcKey<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        (Arc::as_ptr(&self.0) as usize).hash(state);
+    }
+}
+
+pub(super) type ConditionsKey = ArcKey<SelectionSet>;
+
+/// Pointer-identity key for a `Selection`, owning the inner Arc.
+#[allow(dead_code)]
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(super) enum SelectionArcKey {
+    Field(ArcKey<crate::operation::FieldSelection>),
+    InlineFragment(ArcKey<crate::operation::InlineFragmentSelection>),
+}
+
+#[allow(dead_code)]
+impl SelectionArcKey {
+    pub(super) fn new(selection: &Selection) -> Self {
+        match selection {
+            Selection::Field(field) => Self::Field(ArcKey::new(field)),
+            Selection::InlineFragment(frag) => Self::InlineFragment(ArcKey::new(frag)),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Planner caches
+// ---------------------------------------------------------------------------
+
+type RoutingOptionsCache = RefCell<
+    HashMap<
+        (
+            NodeIndex,
+            SelectionArcKey,
+            Option<ArcKey<std::collections::HashSet<Name>>>,
+        ),
+        Arc<Vec<RoutingChoice>>,
+    >,
+>;
+
+type KeyHopCache = RefCell<HashMap<(NodeIndex, RoutingSiteKey), Arc<Vec<RoutingChoice>>>>;
+type CanSatisfyCache = RefCell<HashMap<(ConditionsKey, Name, Arc<str>), bool>>;
+type ConditionsRoutableCache =
+    RefCell<HashMap<(NodeIndex, ArcKey<crate::operation::SelectionMap>), bool>>;
+
+/// Monotonically-growing caches for computations that depend on search-space
+/// state or that reference routing types. These live on
+/// FieldRoutingSearchSpace (not PlanState) so checkpoint/rollback never
+/// touches them.
+#[allow(dead_code)]
+pub(super) struct PlannerCaches {
+    pub(super) routing_options: RoutingOptionsCache,
+    key_hops: KeyHopCache,
+    pub(super) can_satisfy: CanSatisfyCache,
+    pub(super) conditions_routable: ConditionsRoutableCache,
+    pub(super) key_hops_in_flight: RefCell<HashSet<(NodeIndex, RoutingSiteKey)>>,
+    pub(super) guard_hits: std::cell::Cell<u64>,
+}
+
+impl PlannerCaches {
+    pub(crate) fn new() -> Self {
+        Self {
+            routing_options: RefCell::new(HashMap::new()),
+            key_hops: RefCell::new(HashMap::new()),
+            can_satisfy: RefCell::new(HashMap::new()),
+            conditions_routable: RefCell::new(HashMap::new()),
+            key_hops_in_flight: RefCell::new(HashSet::new()),
+            guard_hits: std::cell::Cell::new(0),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Search space
+// ---------------------------------------------------------------------------
+
 /// Type position and schema at a query graph node.
 pub(super) struct NodeSource {
+    pub(super) subgraph: Arc<str>,
     pub(super) type_pos: CompositeTypeDefinitionPosition,
     pub(super) schema: ValidFederationSchema,
 }
 
 /// Search space presenting field-level routing decisions as a BULB problem.
 pub(crate) struct FieldRoutingSearchSpace {
-    pub(crate) query_graph: Arc<QueryGraph>,
+    pub(crate) cached_query_graph: CachedQueryGraph,
     pub(crate) supergraph_schema: ValidFederationSchema,
-    pub(crate) override_conditions: OverrideConditions,
+    pub(super) caches: PlannerCaches,
     /// Subgraphs the caller disabled: enumeration never routes into them.
     pub(crate) disabled_subgraphs: apollo_compiler::collections::IndexSet<Arc<str>>,
-    /// In-flight guard for breaking the mutual recursion between
-    /// `conditions_routable` and key-hop enumeration. A (node, key) pair
-    /// present in this set means that key-hop enumeration for that
-    /// position is on the call stack; re-entering it would loop
-    /// forever, so the guard returns "no hops" (the fixpoint for
-    /// circular keys).
-    pub(super) key_hops_in_flight: RefCell<HashSet<(NodeIndex, RoutingCacheKey)>>,
 }
 
 /// Identity of the selection a key-hop enumeration serves; paired with the
 /// origin node in the in-flight cycle guard.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(super) enum RoutingCacheKey {
+pub(super) enum RoutingSiteKey {
     Field(Name),
     InlineFragment(Option<Name>),
 }
 
 impl FieldRoutingSearchSpace {
     pub(super) fn node_source(&self, node: NodeIndex) -> Result<NodeSource, FederationError> {
-        let data = self.query_graph.node_weight(node)?;
+        let data = self.cached_query_graph.query_graph.node_weight(node)?;
         Ok(NodeSource {
+            subgraph: data.source.clone(),
             type_pos: data.type_.clone().try_into()?,
-            schema: self.query_graph.schema_by_source(&data.source)?.clone(),
+            schema: self
+                .cached_query_graph
+                .query_graph
+                .schema_by_source(&data.source)?
+                .clone(),
         })
     }
 
@@ -141,25 +246,13 @@ impl FieldRoutingSearchSpace {
         conditions: &Arc<SelectionSet>,
         source: &NodeSource,
     ) -> Result<bool, FederationError> {
-        let satisfiable = self.can_satisfy(conditions, &source.type_pos, &source.schema)
-            || self.conditions_resolvable_at_node(node, conditions)?;
+        let satisfiable = self.cached_can_satisfy(
+            conditions,
+            &source.type_pos,
+            &source.subgraph,
+            &source.schema,
+        ) || self.conditions_resolvable_at_node(node, conditions)?;
         Ok(satisfiable && !self.conditions_have_requires(node, conditions)?)
-    }
-
-    /// Find the outgoing edge for a field at a query graph node.
-    pub(super) fn edge_for_field(&self, node: NodeIndex, field: &Field) -> Option<EdgeIndex> {
-        self.query_graph
-            .edge_for_field(node, field, &self.override_conditions)
-    }
-
-    /// Find the outgoing downcast edge for an inline fragment at a query
-    /// graph node.
-    pub(super) fn edge_for_inline_fragment(
-        &self,
-        node: NodeIndex,
-        fragment: &InlineFragment,
-    ) -> Option<EdgeIndex> {
-        self.query_graph.edge_for_inline_fragment(node, fragment)
     }
 
     /// Advance past deterministic decisions in-place: commit single-option
@@ -174,16 +267,12 @@ impl FieldRoutingSearchSpace {
     /// forced commits to recover through.
     fn fast_forward(&self, state: &mut PlanState) -> Result<(), FederationError> {
         let mut trail = ForcedTrail::default();
-        // Routing options are state-independent, so within this call they
-        // are memoized per pending instance: the lift scan below would
-        // otherwise re-enumerate every entry under the top once per lift.
-        let mut memo: OptionsMemo = HashMap::new();
         while let Some(top) = state.pending.last() {
             if !trail.doomed.is_empty() && trail.doomed.contains(&pending_site(top)) {
                 self.recover_doomed(state, &mut trail);
                 continue;
             }
-            let options = self.memoized_options(&mut memo, top)?;
+            let options: Arc<Vec<RoutingChoice>> = Arc::new(self.routing_options(top)?);
             match options.len() {
                 0 => {
                     trail.doomed.insert(pending_site(top));
@@ -198,9 +287,7 @@ impl FieldRoutingSearchSpace {
                     let mut lifted = false;
                     for index in (0..state.pending.len().saturating_sub(1)).rev() {
                         let entry = &state.pending[index];
-                        if entry.condition.is_some()
-                            || self.memoized_options(&mut memo, entry)?.len() <= 1
-                        {
+                        if entry.condition.is_some() || self.routing_options(entry)?.len() <= 1 {
                             state.lift_pending(index);
                             lifted = true;
                             break;
@@ -214,22 +301,6 @@ impl FieldRoutingSearchSpace {
             }
         }
         Ok(())
-    }
-
-    /// Look up (or compute and record) the routing options for a pending
-    /// instance within one `fast_forward` call.
-    fn memoized_options(
-        &self,
-        memo: &mut OptionsMemo,
-        pending: &Arc<PendingSelection>,
-    ) -> Result<Arc<Vec<RoutingChoice>>, FederationError> {
-        let key = Arc::as_ptr(pending);
-        if let Some((_, cached)) = memo.get(&key) {
-            return Ok(cached.clone());
-        }
-        let computed = Arc::new(self.routing_options(pending)?);
-        memo.insert(key, (pending.clone(), computed.clone()));
-        Ok(computed)
     }
 
     /// Pop a pending whose site is proven hopeless and recover: rewind an
@@ -332,11 +403,6 @@ impl FieldRoutingSearchSpace {
         false
     }
 }
-
-/// Per-call routing-options memo; the Arc in the value pins the pending so
-/// its address (the key) cannot be recycled while the memo lives.
-type OptionsMemo =
-    HashMap<*const PendingSelection, (Arc<PendingSelection>, Arc<Vec<RoutingChoice>>)>;
 
 /// Short human-readable label for a selection, for logging.
 pub(super) fn selection_label(selection: &Selection) -> String {
@@ -507,9 +573,8 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
         // so the probe (apply → cost → rollback) sees them as free;
         // the penalty ranks them above any structural cost but below
         // drops so BULB treats them as a last resort.
-        let cost = base
-            + candidate.type_explosions as f64 * 5e17
-            + candidate.dropped_fields as f64 * 1e18;
+        let cost =
+            base + candidate.type_explosions as f64 * 5e17 + candidate.dropped_fields as f64 * 1e18;
         trace!(cost, "candidate cost");
         cost
     }
