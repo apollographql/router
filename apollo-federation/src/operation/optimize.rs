@@ -131,29 +131,21 @@ impl Operation {
     pub(crate) fn generate_fragments(
         self,
     ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
-        let mut generator = FragmentGenerator::new(&self.selection_set);
-        let minified_selection = generator.minify(&self.selection_set)?;
-        let fragments = generator.into_inner();
-
-        let operation_type: executable::OperationType = self.root_kind.into();
-        let operation = executable::Operation {
-            operation_type,
-            name: self.name.clone(),
-            variables: self.variables.deref().clone(),
-            directives: self.directives.iter().cloned().collect(),
-            selection_set: minified_selection,
-        };
-        let mut document = executable::ExecutableDocument::new();
-        document.operations.insert(operation);
-        document.fragments = fragments;
-        coerce_executable_values(self.schema.schema(), &mut document);
-        Ok(document.validate(self.schema.schema())?)
+        self.generate_fragments_inner(true)
     }
 
     /// Like `generate_fragments` but skips document validation, which is
-    /// redundant for structurally-constructed operations.
+    /// redundant for structurally-constructed operations. Debug builds still
+    /// validate to catch construction bugs early.
     pub(crate) fn generate_fragments_unchecked(
         self,
+    ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
+        self.generate_fragments_inner(false)
+    }
+
+    fn generate_fragments_inner(
+        self,
+        validate: bool,
     ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
         let mut generator = FragmentGenerator::new(&self.selection_set);
         let minified_selection = generator.minify(&self.selection_set)?;
@@ -171,7 +163,15 @@ impl Operation {
         document.operations.insert(operation);
         document.fragments = fragments;
         coerce_executable_values(self.schema.schema(), &mut document);
-        Ok(Valid::assume_valid(document))
+        if validate {
+            Ok(document.validate(self.schema.schema())?)
+        } else {
+            debug_assert!(
+                document.clone().validate(self.schema.schema()).is_ok(),
+                "generate_fragments_unchecked produced invalid document",
+            );
+            Ok(Valid::assume_valid(document))
+        }
     }
 }
 
