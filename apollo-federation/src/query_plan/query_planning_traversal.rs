@@ -90,6 +90,10 @@ pub(crate) struct QueryPlanningParameters<'a> {
     pub(crate) override_conditions: OverrideConditions,
     pub(crate) check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
     pub(crate) disabled_subgraphs: IndexSet<Arc<str>>,
+    /// Labels assigned by defer normalization (e.g. `qp__N` for unlabeled
+    /// @defer blocks). The BULB planner threads these into DeferInfo so
+    /// plan generation can suppress synthesized labels from the output.
+    pub(crate) assigned_defer_labels: Arc<IndexSet<String>>,
 }
 
 impl QueryPlanningParameters<'_> {
@@ -1163,6 +1167,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             fetch_id_generator: self.parameters.fetch_id_generator.clone(),
             check_for_cooperative_cancellation: self.parameters.check_for_cooperative_cancellation,
             disabled_subgraphs: self.parameters.disabled_subgraphs.clone(),
+            assigned_defer_labels: self.parameters.assigned_defer_labels.clone(),
         };
         let best_plan_opt = QueryPlanningTraversal::new_inner(
             &parameters,

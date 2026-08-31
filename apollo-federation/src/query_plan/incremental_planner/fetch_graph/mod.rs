@@ -71,6 +71,10 @@ pub(crate) struct FetchNode {
     pub(crate) subgraph: Arc<str>,
     pub(crate) kind: FetchGroupKind,
     pub(crate) selection_builder: SelectionBuilder,
+    /// The @defer label this fetch belongs to; `None` for the primary
+    /// (non-deferred) response. Fetch nodes with a defer_ref are partitioned
+    /// into deferred blocks during plan generation.
+    pub(crate) defer_ref: Option<String>,
 }
 
 impl FetchNode {
@@ -79,6 +83,7 @@ impl FetchNode {
             subgraph,
             kind,
             selection_builder: SelectionBuilder::default(),
+            defer_ref: None,
         }
     }
 
@@ -110,7 +115,7 @@ enum FetchGraphOp {
     /// entry.
     AddNode {
         node_index: NodeIndex,
-        root_key: Option<Arc<str>>,
+        root_key: Option<(Arc<str>, Option<String>)>,
     },
     /// An edge was added. Undo: remove_edge.
     AddEdge(EdgeIndex),
@@ -124,10 +129,14 @@ enum FetchGraphOp {
     /// A node's depth was raised by an edge insertion. Undo: restore the
     /// previous depth and stage counts.
     RaiseDepth { node_index: NodeIndex, prev: u32 },
+    /// A node claimed the entity_groups slot for its key. Undo: remove the
+    /// entry. Always logged directly after the node's AddNode, so LIFO
+    /// undo clears the slot before removing the node.
+    RegisterEntityGroup { key: EntityGroupKey },
 }
 
-/// Index key for entity fetch group reuse.
-type EntityGroupKey = (Arc<str>, Vec<FetchDataPathElement>);
+/// Index key for entity fetch group reuse: (subgraph, merge_at, defer_ref).
+type EntityGroupKey = (Arc<str>, Vec<FetchDataPathElement>, Option<String>);
 
 /// Lightweight fetch graph for BULB search.
 ///
@@ -138,13 +147,14 @@ type EntityGroupKey = (Arc<str>, Vec<FetchDataPathElement>);
 #[derive(Clone, Debug)]
 pub(crate) struct FetchGraph {
     graph: StableDiGraph<FetchNode, FetchEdgeWeight>,
-    /// Root groups keyed by subgraph name.
-    root_groups: HashMap<Arc<str>, NodeIndex>,
-    /// First-created entity group per (subgraph, merge_at), so
-    /// `get_or_create_entity_group` (run on every key hop) is a lookup
-    /// instead of a node scan. Only the first node with a key claims the
-    /// slot (earliest-index-wins); undo is LIFO, so a later duplicate can
-    /// never outlive the slot owner. Stale after post-search sibling
+    /// Root groups keyed by (subgraph, defer_ref): a deferred root fetch is
+    /// a separate group from the primary root in the same subgraph.
+    root_groups: HashMap<(Arc<str>, Option<String>), NodeIndex>,
+    /// First-created entity group per (subgraph, merge_at, defer_ref), so
+    /// `get_or_create_entity_group_with_defer` (run on every key hop) is a
+    /// lookup instead of a node scan. Only the first node with a key claims
+    /// the slot (earliest-index-wins); undo is LIFO, so a later duplicate
+    /// can never outlive the slot owner. Stale after post-search sibling
     /// merging, which is fine since nothing creates groups after search.
     entity_groups: HashMap<EntityGroupKey, NodeIndex>,
     undo_log: Vec<FetchGraphOp>,
@@ -260,6 +270,9 @@ impl FetchGraph {
                     self.bump_stage_count(prev, 1);
                     self.depth[node_index.index()] = prev;
                 }
+                FetchGraphOp::RegisterEntityGroup { key } => {
+                    self.entity_groups.remove(&key);
+                }
             }
         }
     }
@@ -267,9 +280,17 @@ impl FetchGraph {
     /// Add a `FetchNode`, registering its depth and logging for rollback.
     /// With `root_key` set, also registers it as a root group. Entity nodes
     /// claim the `entity_groups` reuse slot for their key if free.
-    fn insert_node(&mut self, node: FetchNode, root_key: Option<Arc<str>>) -> NodeIndex {
+    fn insert_node(
+        &mut self,
+        node: FetchNode,
+        root_key: Option<(Arc<str>, Option<String>)>,
+    ) -> NodeIndex {
         let entity_key = match &node.kind {
-            FetchGroupKind::Entity { merge_at } => Some((node.subgraph.clone(), merge_at.clone())),
+            FetchGroupKind::Entity { merge_at } => Some((
+                node.subgraph.clone(),
+                merge_at.clone(),
+                node.defer_ref.clone(),
+            )),
             _ => None,
         };
         let id = self.graph.add_node(node);
@@ -281,42 +302,72 @@ impl FetchGraph {
             node_index: id,
             root_key,
         });
-        // Claim the entity_groups reuse slot if this is the first node for
-        // this (subgraph, merge_at) pair. The undo log entry for AddNode
-        // already handles removing the node; cleaning up the entity_groups
-        // slot is handled inline in rollback by checking whether the slot
-        // points to the removed node.
-        if let Some(key) = entity_key {
-            self.entity_groups.entry(key).or_insert(id);
+        if let Some(key) = entity_key
+            && !self.entity_groups.contains_key(&key)
+        {
+            self.entity_groups.insert(key.clone(), id);
+            self.undo_log
+                .push(FetchGraphOp::RegisterEntityGroup { key });
         }
         id
     }
 
-    /// Get or create the root fetch group for a subgraph.
+    /// Get or create the root fetch group for a subgraph (no defer scope).
     pub(crate) fn get_or_create_root_group(
         &mut self,
         subgraph: &Arc<str>,
         root_type: CompositeTypeDefinitionPosition,
     ) -> NodeIndex {
-        if let Some(&id) = self.root_groups.get(subgraph) {
+        self.get_or_create_root_group_with_defer(subgraph, root_type, None)
+    }
+
+    /// Get or create the root fetch group for a (subgraph, defer_ref) pair.
+    pub(crate) fn get_or_create_root_group_with_defer(
+        &mut self,
+        subgraph: &Arc<str>,
+        root_type: CompositeTypeDefinitionPosition,
+        defer_ref: Option<String>,
+    ) -> NodeIndex {
+        let root_key = (subgraph.clone(), defer_ref.clone());
+        if let Some(&id) = self.root_groups.get(&root_key) {
             return id;
         }
         self.insert_node(
-            FetchNode::new(subgraph.clone(), FetchGroupKind::Root { root_type }),
-            Some(subgraph.clone()),
+            FetchNode {
+                subgraph: subgraph.clone(),
+                kind: FetchGroupKind::Root { root_type },
+                selection_builder: SelectionBuilder::default(),
+                defer_ref,
+            },
+            Some(root_key),
         )
     }
 
-    /// Create a new entity fetch group.
+    /// Create a new entity fetch group with an explicit defer scope.
+    pub(crate) fn add_entity_group_with_defer(
+        &mut self,
+        subgraph: &Arc<str>,
+        merge_at: Vec<FetchDataPathElement>,
+        defer_ref: Option<String>,
+    ) -> NodeIndex {
+        self.insert_node(
+            FetchNode {
+                subgraph: subgraph.clone(),
+                kind: FetchGroupKind::Entity { merge_at },
+                selection_builder: SelectionBuilder::default(),
+                defer_ref,
+            },
+            None,
+        )
+    }
+
+    /// Create a new entity fetch group (no defer scope).
     pub(crate) fn add_entity_group(
         &mut self,
         subgraph: &Arc<str>,
         merge_at: Vec<FetchDataPathElement>,
     ) -> NodeIndex {
-        self.insert_node(
-            FetchNode::new(subgraph.clone(), FetchGroupKind::Entity { merge_at }),
-            None,
-        )
+        self.add_entity_group_with_defer(subgraph, merge_at, None)
     }
 
     pub(crate) fn add_root_hop_group(
@@ -337,21 +388,31 @@ impl FetchGraph {
         )
     }
 
+    /// Get or create the entity fetch group for (subgraph, merge_at, defer_ref).
+    pub(crate) fn get_or_create_entity_group_with_defer(
+        &mut self,
+        subgraph: &Arc<str>,
+        merge_at: Vec<FetchDataPathElement>,
+        defer_ref: Option<String>,
+    ) -> NodeIndex {
+        let key = (subgraph.clone(), merge_at, defer_ref);
+        if let Some(&id) = self.entity_groups.get(&key) {
+            if self.graph.contains_node(id) {
+                return id;
+            }
+            self.entity_groups.remove(&key);
+        }
+        self.add_entity_group_with_defer(subgraph, key.1, key.2)
+    }
+
     /// Get or create the entity fetch group for (subgraph, merge_at).
+    #[allow(dead_code)]
     pub(crate) fn get_or_create_entity_group(
         &mut self,
         subgraph: &Arc<str>,
         merge_at: Vec<FetchDataPathElement>,
     ) -> NodeIndex {
-        let key = (subgraph.clone(), merge_at);
-        if let Some(&id) = self.entity_groups.get(&key) {
-            if self.graph.contains_node(id) {
-                return id;
-            }
-            // Stale entry from a rolled-back node; remove and fall through.
-            self.entity_groups.remove(&key);
-        }
-        self.add_entity_group(subgraph, key.1)
+        self.get_or_create_entity_group_with_defer(subgraph, merge_at, None)
     }
 
     /// Whether a directed edge from `parent` to `child` exists.
@@ -725,10 +786,10 @@ mod tests {
         let sg: Arc<str> = Arc::from("sg");
         g.get_or_create_root_group(&sg, dummy_root_type());
         assert_eq!(g.node_count(), 1);
-        assert!(g.root_groups.contains_key(&sg));
+        assert!(g.root_groups.contains_key(&(sg.clone(), None)));
         g.rollback(cp);
         assert_eq!(g.node_count(), 0);
-        assert!(!g.root_groups.contains_key(&sg));
+        assert!(!g.root_groups.contains_key(&(sg.clone(), None)));
 
         // Re-creating after rollback should work.
         g.get_or_create_root_group(&sg, dummy_root_type());

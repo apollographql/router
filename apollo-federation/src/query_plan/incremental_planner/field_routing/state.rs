@@ -54,6 +54,9 @@ pub(crate) struct PendingSelection {
     /// own edges carry the provenance (inside a copy layer) or no @provides
     /// is in scope.
     pub(crate) provides_anchor: Option<NodeIndex>,
+    /// The @defer label this selection is inside, if any. Propagated to
+    /// fetch nodes so they can be partitioned into primary vs deferred.
+    pub(crate) defer_ref: Option<String>,
     /// Best-effort selection: dropping it (zero routing options, or a failed
     /// commit) is tolerated silently instead of counting toward
     /// `dropped_fields` and failing the plan. Inherited by forks, so
@@ -76,6 +79,7 @@ impl PendingSelection {
             path_in_fetch: self.path_in_fetch.clone(),
             condition: self.condition,
             provides_anchor: self.provides_anchor,
+            defer_ref: self.defer_ref.clone(),
             best_effort: self.best_effort,
         }
     }
@@ -101,6 +105,11 @@ impl PendingSelection {
 
     pub(super) fn with_provides_anchor(mut self, provides_anchor: Option<NodeIndex>) -> Self {
         self.provides_anchor = provides_anchor;
+        self
+    }
+
+    pub(super) fn with_defer(mut self, defer_ref: Option<String>) -> Self {
+        self.defer_ref = defer_ref;
         self
     }
 
