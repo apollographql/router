@@ -805,4 +805,38 @@ mod tests {
         let result = Schema::parse(schema, &Default::default());
         assert!(result.is_err());
     }
+
+    #[test]
+    fn validate_default_values_rejects_invalid_defaults() {
+        let schema = with_supergraph_boilerplate(
+            r#"
+            type Query {
+              field(arg: Input = {}): String
+            }
+            input Input {
+              required: String!
+            }
+            "#,
+        );
+
+        // Default config has validate_default_values = true
+        let result = Schema::parse(&schema, &Default::default());
+        assert!(
+            result.is_err(),
+            "invalid default should be rejected when validate_default_values is true"
+        );
+
+        // Opting out allows the invalid default through
+        let config: Configuration = serde_json::from_value(serde_json::json!({
+            "supergraph": {
+                "validate_default_values": false
+            }
+        }))
+        .unwrap();
+        let result = Schema::parse(&schema, &config);
+        assert!(
+            result.is_ok(),
+            "invalid default should be allowed when validate_default_values is false"
+        );
+    }
 }

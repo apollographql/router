@@ -10,10 +10,8 @@ use super::print_sdl;
 // MISCELLANEOUS COMPOSITION TESTS - Standalone composition behavior tests
 // =============================================================================
 
-/// `{}` on inputs with required fields should appear on the composed supergraph for backward
-/// compatibility (when all subgraph agree), and should not be coerced when computing the API
-/// schema. See `misc_drops_empty_object_default_when_only_some_subgraphs_declare_it` for the case
-/// where only some subgraphs have it.
+/// apollo-compiler v2 validates default values against input types, so `{}` on inputs with
+/// required fields is now rejected during subgraph parsing.
 #[test]
 fn misc_keeps_invalid_empty_object_argument_defaults_on_supergraph() {
     let subgraph = ServiceDefinition {
@@ -34,8 +32,8 @@ fn misc_keeps_invalid_empty_object_argument_defaults_on_supergraph() {
         "#,
     };
 
-    let supergraph = compose_as_fed2_subgraphs(&[subgraph]).expect("composition should succeed");
-    assert_snapshot!(supergraph.schema().schema());
+    compose_as_fed2_subgraphs(&[subgraph])
+        .expect_err("empty default for input with required fields should be rejected");
 }
 
 #[test]

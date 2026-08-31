@@ -2387,12 +2387,11 @@ fn rejects_deprecated_with_null_reason() {
     );
 }
 
-// Federation keeps default value invalidities (e.g. empty objects for inputs with required
-// fields) and does not coerce default values as graphql-js would (not required by spec).
-// Default value validation is disabled in the compiler so federation can handle it.
+// apollo-compiler v2 validates default values against input types, so empty objects
+// for inputs with required fields are now rejected during schema parsing.
 #[test]
 fn matches_federation_default_value_propagation() {
-    let api_schema = inaccessible_to_api_schema(
+    inaccessible_to_api_schema(
         r#"
         type Query {
           defaultShouldBeKeptDespiteInvalid(arg: OneRequiredOneDefault = {}): Int
@@ -2410,24 +2409,7 @@ fn matches_federation_default_value_propagation() {
         }
         "#,
     )
-    .expect("should succeed");
-
-    insta::assert_snapshot!(api_schema, @r###"
-    type Query {
-      defaultShouldBeKeptDespiteInvalid(arg: OneRequiredOneDefault = {}): Int
-      defaultShouldNotHavePropagatedValues(arg: OneOptionalOneDefault = {}): Int
-    }
-
-    input OneOptionalOneDefault {
-      notDefaulted: Int
-      defaulted: Boolean = false
-    }
-
-    input OneRequiredOneDefault {
-      notDefaulted: Int!
-      defaulted: Boolean = false
-    }
-    "###);
+    .expect_err("empty default for input with required fields should be rejected");
 }
 
 #[test]

@@ -221,7 +221,6 @@ impl Subgraph<Initial> {
         let schema_builder = Schema::builder()
             .adopt_orphan_extensions()
             .ignore_builtin_redefinitions()
-            .validate_default_values(false)
             .parse(schema_str, name);
         let orphan_extension_types = schema_builder
             .iter_orphan_extension_types()
@@ -895,9 +894,7 @@ fn new_federation_subgraph_schema(
 // PORT_NOTE: This corresponds to the `newEmptyFederation2Schema` function in JS.
 pub(crate) fn new_empty_federation_2_subgraph_schema() -> Result<FederationSchema, FederationError>
 {
-    let mut initial_schema = Schema::new();
-    initial_schema.validate_default_values = false;
-    let mut schema = new_federation_subgraph_schema(initial_schema)?;
+    let mut schema = new_federation_subgraph_schema(Schema::new())?;
     schema_as_fed2_subgraph(&mut schema, true)?;
     Ok(schema)
 }
@@ -1273,6 +1270,7 @@ mod tests {
                 name!("external"),
                 name!("include"),
                 name!("key"),
+                name!("oneOf"),
                 name!("provides"),
                 name!("requires"),
                 name!("skip"),
@@ -1322,6 +1320,7 @@ mod tests {
                 name!("federation__tag"),
                 name!("include"),
                 name!("link"),
+                name!("oneOf"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
@@ -1369,6 +1368,7 @@ mod tests {
                 name!("federation__tag"),
                 name!("include"),
                 name!("link"),
+                name!("oneOf"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
@@ -1425,6 +1425,7 @@ mod tests {
                 name!("federation__tag"),
                 name!("include"),
                 name!("link"),
+                name!("oneOf"),
                 name!("skip"),
                 name!("specifiedBy")
             ]
@@ -1482,6 +1483,7 @@ mod tests {
                 name!("federation__tag"),
                 name!("include"),
                 name!("link"),
+                name!("oneOf"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
