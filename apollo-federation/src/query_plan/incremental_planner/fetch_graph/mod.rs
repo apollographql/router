@@ -962,6 +962,58 @@ pub(super) fn strip_merge_at_conditions(
         .collect()
 }
 
+impl std::fmt::Display for FetchGraph {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "FetchGraph ({} nodes, {} edges):",
+            self.graph.node_count(),
+            self.graph.edge_count(),
+        )?;
+        for idx in self.graph.node_indices() {
+            let node = &self.graph[idx];
+            let kind_label = match &node.kind {
+                FetchGroupKind::Root { root_type } => {
+                    format!("root  {}  {}", node.subgraph, root_type)
+                }
+                FetchGroupKind::Entity { merge_at } => {
+                    let path: Vec<String> = merge_at.iter().map(|e| e.to_string()).collect();
+                    format!("entity  {}  merge_at={}", node.subgraph, path.join("/"))
+                }
+                FetchGroupKind::RootHop {
+                    root_type,
+                    merge_at,
+                } => {
+                    let path: Vec<String> = merge_at.iter().map(|e| e.to_string()).collect();
+                    format!(
+                        "root_hop  {}  {}  merge_at={}",
+                        node.subgraph,
+                        root_type,
+                        path.join("/")
+                    )
+                }
+            };
+            let sel_count = node.selection_builder.entries().len();
+            writeln!(
+                f,
+                "  [{}] {}  ({} selections)",
+                idx.index(),
+                kind_label,
+                sel_count
+            )?;
+            for edge in self.graph.edges_directed(idx, Direction::Incoming) {
+                writeln!(
+                    f,
+                    "    <- [{}] ({} inputs)",
+                    edge.source().index(),
+                    edge.weight().inputs.len(),
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
