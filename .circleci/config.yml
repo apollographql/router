@@ -11,20 +11,20 @@ orbs:
 executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
       MISE_ENV: ci
   amd_linux_helm: &amd_linux_helm_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
     resource_class: small
     environment:
       MISE_ENV: ci
   amd_linux_test: &amd_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
       - image: cimg/redis:7.4.11
       - image: openzipkin/zipkin:3.6.1
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.50.0
@@ -49,14 +49,14 @@ executors:
       CARGO_BUILD_JOBS: 4
   arm_linux_build: &arm_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 4
   arm_linux_test: &arm_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
@@ -881,7 +881,7 @@ jobs:
 
   publish_github_release:
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
     resource_class: small
     environment:
       <<: *common_job_environment
@@ -930,14 +930,28 @@ jobs:
             - run:
                 name: Publish to Crates.io
                 command: |
+                  set -euo pipefail
                   # Remove leading 'v' which is present on the Git tag; Cargo doesn't want that leading 'v'
                   VERSION_WITHOUT_LEADING_V="${VERSION#v}"
                   echo "Publishing apollo-federation@${VERSION_WITHOUT_LEADING_V} and apollo-router@${VERSION_WITHOUT_LEADING_V}"
-                  # Just do a dry-run for now on apollo-federation, since that's a leading
-                  # indicator that the publish is going to work.  We don't do the attempt for
-                  # router because it's dependent on apollo-federation, so it'll definitely fail.
-                  cargo publish -p apollo-federation@${VERSION_WITHOUT_LEADING_V}
-                  cargo publish -p apollo-router@${VERSION_WITHOUT_LEADING_V}
+
+                  # Idempotent: a prior run of this job may have already published one
+                  # crate and then failed on the other (e.g. a transient linker error).
+                  # Re-running must not error out trying to re-publish a version that's
+                  # already live -- crates.io versions are immutable, so that always
+                  # fails and blocks the rest of the job from ever making progress.
+                  publish_if_missing() {
+                    local crate="$1"
+                    local version="$2"
+                    if curl -sf -A "apollo-router-release-ci" "https://crates.io/api/v1/crates/${crate}/${version}" > /dev/null; then
+                      echo "${crate}@${version} is already published on crates.io -- skipping."
+                    else
+                      cargo publish -p "${crate}@${version}"
+                    fi
+                  }
+
+                  publish_if_missing apollo-federation "${VERSION_WITHOUT_LEADING_V}"
+                  publish_if_missing apollo-router "${VERSION_WITHOUT_LEADING_V}"
 
             - run:
                 name: Create GitHub Release

@@ -696,7 +696,7 @@ where
                                 stats.set_allocation_limit(memory_limit_bytes, Box::new(move |_bytes_allocated| {
                                     exceeded_memory_limit_setter.store(true, Ordering::Relaxed);
                                     abort_handle.abort();
-                                        log::warn!("memory limit exceeded planning query: {}", &query);
+                                        log::warn!("memory limit exceeded planning query: {}", query);
                                     }));
                                 task
                             } else {
@@ -791,7 +791,7 @@ where
                                 let memory_limit_bytes = memory_limit.as_u64() as usize;
                                 stats.set_allocation_limit(memory_limit_bytes, Box::new(move |_bytes_allocated| {
                                     notify_memory_limit_exceeded.notify_waiters();
-                                    log::warn!("memory limit exceeded planning query: {}", &query);
+                                    log::warn!("memory limit exceeded planning query: {}", query);
                                 }));
                                 tokio::task::spawn(planning_task).await
                             } else {
