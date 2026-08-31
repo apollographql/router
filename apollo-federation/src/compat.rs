@@ -35,7 +35,7 @@ use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 /// Return true if a directive application is "semantic", meaning it's observable in introspection.
 fn is_semantic_directive_application(directive: &Directive) -> bool {
     match directive.name.as_str() {
-        "specifiedBy" => true,
+        "specifiedBy" | "oneOf" => true,
         // graphql-js’ intropection returns `isDeprecated: false` for `@deprecated(reason: null)`,
         // which is arguably a bug. Do the same here for now.
         // TODO: remove this and allow `isDeprecated: true`, `deprecatedReason: null`
