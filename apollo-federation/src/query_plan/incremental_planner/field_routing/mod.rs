@@ -373,9 +373,7 @@ impl FieldRoutingSearchSpace {
     fn recover_doomed(&self, state: &mut PlanState, trail: &mut ForcedTrail) {
         let pending = state.pop_pending().unwrap();
         if pending.best_effort || !self.backtrack_forced(state, trail) {
-            if !self.try_split_repush(state, &pending) {
-                self.drop_unresolvable(state, &pending);
-            }
+            self.drop_unresolvable(state, &pending);
         }
     }
 
@@ -641,9 +639,7 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
                 error = ?e,
                 "commit_choice failed, dropping field",
             );
-            if !self.try_split_repush(candidate, &pending) {
-                candidate.dropped_fields += 1;
-            }
+            candidate.dropped_fields += 1;
         }
 
         trace!("partial plan after apply");
