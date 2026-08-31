@@ -8,6 +8,8 @@ use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use tracing::trace;
 
+use super::super::defer;
+use super::super::defer::strip_defer_directive;
 use super::super::fetch_graph::InputContribution;
 use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
@@ -248,6 +250,7 @@ impl FieldRoutingSearchSpace {
             state,
             first_subgraph,
             merge_at.clone(),
+            pending.defer_ref.clone(),
             pending.fetch_node,
             pending.ordering_dependent(),
         );
@@ -371,6 +374,7 @@ impl FieldRoutingSearchSpace {
                 state,
                 next_subgraph,
                 merge_at.clone(),
+                pending.defer_ref.clone(),
                 prev_group,
                 pending.ordering_dependent(),
             );
@@ -444,16 +448,21 @@ impl FieldRoutingSearchSpace {
         state: &mut PlanState,
         subgraph: &Arc<str>,
         merge_at: Vec<FetchDataPathElement>,
+        defer_ref: Option<String>,
         anchor_fetch: NodeIndex,
         ordering_dependent: Option<NodeIndex>,
     ) -> NodeIndex {
-        let group = state
-            .graph
-            .get_or_create_entity_group(subgraph, merge_at.clone());
+        let group = state.graph.get_or_create_entity_group_with_defer(
+            subgraph,
+            merge_at.clone(),
+            defer_ref.clone(),
+        );
         let conflicts_with_dependent = ordering_dependent
             .is_some_and(|dep| group == dep || state.graph.is_reachable(dep, group));
         if conflicts_with_dependent || state.graph.is_reachable(group, anchor_fetch) {
-            return state.graph.add_entity_group(subgraph, merge_at);
+            return state
+                .graph
+                .add_entity_group_with_defer(subgraph, merge_at, defer_ref);
         }
         group
     }
@@ -566,9 +575,11 @@ impl FieldRoutingSearchSpace {
             let subgraph_node = qg.node_weight(field_source)?;
             let root_type: CompositeTypeDefinitionPosition =
                 subgraph_node.type_.clone().try_into()?;
-            return Ok(state
-                .graph
-                .get_or_create_root_group(&subgraph_node.source, root_type));
+            return Ok(state.graph.get_or_create_root_group_with_defer(
+                &subgraph_node.source,
+                root_type,
+                pending.defer_ref.clone(),
+            ));
         }
 
         Ok(pending.fetch_node)
@@ -652,7 +663,7 @@ impl FieldRoutingSearchSpace {
                         Arc::new(OpPathElement::Field(field_sel.field.clone()))
                     }
                     Selection::InlineFragment(frag_sel) => Arc::new(OpPathElement::InlineFragment(
-                        frag_sel.inline_fragment.clone(),
+                        strip_defer_directive(&frag_sel.inline_fragment),
                     )),
                 };
                 base.pushed(op_element)
@@ -663,6 +674,7 @@ impl FieldRoutingSearchSpace {
                     .op_path
                     .pushed(Arc::new(OpPathElement::Field(field_sel.field.clone()))),
                 Selection::InlineFragment(frag_sel) => {
+                    let stripped = strip_defer_directive(&frag_sel.inline_fragment);
                     let edge = qg.edge_weight(choice.edge_index())?;
                     if matches!(
                         edge.transition,
@@ -670,11 +682,10 @@ impl FieldRoutingSearchSpace {
                     ) {
                         // @interfaceObject fake downcast: the concrete type
                         // doesn't exist in this subgraph.
-                        if frag_sel.inline_fragment.directives.is_empty() {
+                        if stripped.directives.is_empty() {
                             pending.op_path.clone()
                         } else {
-                            let updated =
-                                frag_sel.inline_fragment.with_updated_type_condition(None);
+                            let updated = stripped.with_updated_type_condition(None);
                             pending
                                 .op_path
                                 .pushed(Arc::new(OpPathElement::InlineFragment(updated)))
@@ -682,9 +693,7 @@ impl FieldRoutingSearchSpace {
                     } else {
                         pending
                             .op_path
-                            .pushed(Arc::new(OpPathElement::InlineFragment(
-                                frag_sel.inline_fragment.clone(),
-                            )))
+                            .pushed(Arc::new(OpPathElement::InlineFragment(stripped)))
                     }
                 }
             },
@@ -824,6 +833,13 @@ impl FieldRoutingSearchSpace {
         let child_provides_anchor =
             self.child_provides_anchor(pending, target_qg_node, target.entity_root)?;
 
+        // When the committed selection is an inline fragment carrying
+        // @defer, extract the label and propagate it to children so fetch
+        // nodes created downstream land in the deferred partition.
+        let child_defer_ref = defer::defer_context(&pending.selection)
+            .0
+            .or_else(|| pending.defer_ref.clone());
+
         for sub_sel in sub_ss.selections.values().rev().cloned() {
             state.push_pending(
                 pending
@@ -831,7 +847,8 @@ impl FieldRoutingSearchSpace {
                     .at(target_qg_node, fetch_node)
                     .with_op_path(target.op_path.clone())
                     .with_response_path(target.response_path.clone())
-                    .with_provides_anchor(child_provides_anchor),
+                    .with_provides_anchor(child_provides_anchor)
+                    .with_defer(child_defer_ref.clone()),
             );
         }
         Ok(())

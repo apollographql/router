@@ -512,12 +512,13 @@ impl QueryPlanner {
         } else {
             SubgraphOperationCompression::Disabled
         };
+        let assigned_defer_labels = Arc::new(assigned_defer_labels);
         let mut processor = FetchDependencyGraphToQueryPlanProcessor::new(
             normalized_operation.variables.clone(),
             normalized_operation.directives.clone(),
             operation_compression,
             operation.name.clone(),
-            assigned_defer_labels,
+            assigned_defer_labels.as_ref().clone(),
         );
         let mut parameters = QueryPlanningParameters {
             supergraph_schema: self.supergraph_schema.clone(),
@@ -550,6 +551,7 @@ impl QueryPlanner {
                     }
                 })
                 .collect(),
+            assigned_defer_labels: assigned_defer_labels.clone(),
         };
 
         let mut non_local_selection_state = options
