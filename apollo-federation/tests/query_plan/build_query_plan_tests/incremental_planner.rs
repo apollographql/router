@@ -1857,7 +1857,7 @@ fn inc_type_explosion_union_interface_interaction() {
 /// the condition, so the fragment is treated as pass-through rather than
 /// exploded. Here U = B | C and both implement I, so `... on I` is vacuous.
 #[test]
-fn inc_vacuous_type_condition_not_exploded() {
+fn inc_all_members_implement_interface_routes_directly() {
     let planner = planner!(
         config = incremental_config(),
         Subgraph1: r#"
