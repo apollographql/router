@@ -150,6 +150,10 @@ pub(crate) struct FetchNode {
     pub(crate) kind: FetchGroupKind,
     /// Accumulates the subgraph operation's selection set, with undo support.
     pub(crate) selection_builder: SelectionBuilder,
+    /// The @defer label this fetch belongs to; `None` for the primary
+    /// (non-deferred) response. Fetch nodes with a defer_ref are partitioned
+    /// into deferred blocks during plan generation.
+    pub(crate) defer_ref: Option<String>,
 }
 
 impl FetchNode {
@@ -158,6 +162,7 @@ impl FetchNode {
             subgraph,
             kind,
             selection_builder: SelectionBuilder::default(),
+            defer_ref: None,
         }
     }
 
@@ -206,34 +211,45 @@ enum FetchGraphOp {
 }
 
 /// Reuse-slot key for a fetch group, derived from the node itself by
-/// `group_key`. Root groups are shared per subgraph (one search plans one
-/// root kind, so the kind is not part of the key); entity and root-hop
-/// groups are shared per (subgraph, merge_at). One key type and one map
-/// keep registration, undo, and lookup on a single mechanism for all
-/// three kinds.
+/// `group_key`. Root groups are shared per (subgraph, defer_ref): a
+/// deferred root fetch is a separate group from the primary root in the
+/// same subgraph, and one search plans one root kind, so the kind is not
+/// part of the key. Entity and root-hop groups are shared per (subgraph,
+/// merge_at, defer_ref). One key type and one map keep registration,
+/// undo, and lookup on a single mechanism for all three kinds.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum GroupKey {
-    Root(Arc<str>),
-    Entity(Arc<str>, Vec<FetchDataPathElement>),
+    Root(Arc<str>, Option<String>),
+    Entity(Arc<str>, Vec<FetchDataPathElement>, Option<String>),
     RootHop(
         Arc<str>,
         SchemaRootDefinitionKind,
         Vec<FetchDataPathElement>,
+        Option<String>,
     ),
 }
 
 /// The reuse-slot key for a node.
 fn group_key(node: &FetchNode) -> GroupKey {
     match &node.kind {
-        FetchGroupKind::Root { .. } => GroupKey::Root(node.subgraph.clone()),
-        FetchGroupKind::Entity { merge_at } => {
-            GroupKey::Entity(node.subgraph.clone(), merge_at.clone())
+        FetchGroupKind::Root { .. } => {
+            GroupKey::Root(node.subgraph.clone(), node.defer_ref.clone())
         }
+        FetchGroupKind::Entity { merge_at } => GroupKey::Entity(
+            node.subgraph.clone(),
+            merge_at.clone(),
+            node.defer_ref.clone(),
+        ),
         FetchGroupKind::RootHop {
             root_kind,
             merge_at,
             ..
-        } => GroupKey::RootHop(node.subgraph.clone(), *root_kind, merge_at.clone()),
+        } => GroupKey::RootHop(
+            node.subgraph.clone(),
+            *root_kind,
+            merge_at.clone(),
+            node.defer_ref.clone(),
+        ),
     }
 }
 
@@ -326,31 +342,57 @@ impl FetchGraph {
         Some(id)
     }
 
-    /// Get or create the root fetch group for a subgraph.
+    /// Get or create the root fetch group for a subgraph (no defer scope).
     pub(crate) fn get_or_create_root_group(
         &mut self,
         subgraph: &Arc<str>,
         root_type: CompositeTypeDefinitionPosition,
     ) -> NodeIndex {
-        if let Some(id) = self.registered_group(&GroupKey::Root(subgraph.clone())) {
-            return id;
-        }
-        self.insert_node(FetchNode::new(
-            subgraph.clone(),
-            FetchGroupKind::Root { root_type },
-        ))
+        self.get_or_create_root_group_with_defer(subgraph, root_type, None)
     }
 
-    /// Create a new entity fetch group.
+    /// Get or create the root fetch group for a (subgraph, defer_ref) pair.
+    pub(crate) fn get_or_create_root_group_with_defer(
+        &mut self,
+        subgraph: &Arc<str>,
+        root_type: CompositeTypeDefinitionPosition,
+        defer_ref: Option<String>,
+    ) -> NodeIndex {
+        if let Some(id) =
+            self.registered_group(&GroupKey::Root(subgraph.clone(), defer_ref.clone()))
+        {
+            return id;
+        }
+        self.insert_node(FetchNode {
+            subgraph: subgraph.clone(),
+            kind: FetchGroupKind::Root { root_type },
+            selection_builder: SelectionBuilder::default(),
+            defer_ref,
+        })
+    }
+
+    /// Create a new entity fetch group with an explicit defer scope.
+    pub(crate) fn add_entity_group_with_defer(
+        &mut self,
+        subgraph: &Arc<str>,
+        merge_at: Vec<FetchDataPathElement>,
+        defer_ref: Option<String>,
+    ) -> NodeIndex {
+        self.insert_node(FetchNode {
+            subgraph: subgraph.clone(),
+            kind: FetchGroupKind::Entity { merge_at },
+            selection_builder: SelectionBuilder::default(),
+            defer_ref,
+        })
+    }
+
+    /// Create a new entity fetch group (no defer scope).
     pub(crate) fn add_entity_group(
         &mut self,
         subgraph: &Arc<str>,
         merge_at: Vec<FetchDataPathElement>,
     ) -> NodeIndex {
-        self.insert_node(FetchNode::new(
-            subgraph.clone(),
-            FetchGroupKind::Entity { merge_at },
-        ))
+        self.add_entity_group_with_defer(subgraph, merge_at, None)
     }
 
     pub(crate) fn add_root_hop_group(
@@ -378,24 +420,37 @@ impl FetchGraph {
         root_kind: SchemaRootDefinitionKind,
         merge_at: Vec<FetchDataPathElement>,
     ) -> NodeIndex {
-        let key = GroupKey::RootHop(subgraph.clone(), root_kind, merge_at.clone());
+        // Hop nodes are created without a defer scope, so the key's defer
+        // half is always None here.
+        let key = GroupKey::RootHop(subgraph.clone(), root_kind, merge_at.clone(), None);
         if let Some(id) = self.registered_group(&key) {
             return id;
         }
         self.add_root_hop_group(subgraph, root_type, root_kind, merge_at)
     }
 
+    /// Get or create the entity fetch group for (subgraph, merge_at, defer_ref).
+    pub(crate) fn get_or_create_entity_group_with_defer(
+        &mut self,
+        subgraph: &Arc<str>,
+        merge_at: Vec<FetchDataPathElement>,
+        defer_ref: Option<String>,
+    ) -> NodeIndex {
+        let key = GroupKey::Entity(subgraph.clone(), merge_at.clone(), defer_ref.clone());
+        if let Some(id) = self.registered_group(&key) {
+            return id;
+        }
+        self.add_entity_group_with_defer(subgraph, merge_at, defer_ref)
+    }
+
     /// Get or create the entity fetch group for (subgraph, merge_at).
+    #[allow(dead_code)]
     pub(crate) fn get_or_create_entity_group(
         &mut self,
         subgraph: &Arc<str>,
         merge_at: Vec<FetchDataPathElement>,
     ) -> NodeIndex {
-        let key = GroupKey::Entity(subgraph.clone(), merge_at.clone());
-        if let Some(id) = self.registered_group(&key) {
-            return id;
-        }
-        self.add_entity_group(subgraph, merge_at)
+        self.get_or_create_entity_group_with_defer(subgraph, merge_at, None)
     }
 
     /// Whether a directed edge from `parent` to `child` exists.
@@ -865,10 +920,10 @@ mod tests {
         let sg: Arc<str> = Arc::from("sg");
         g.get_or_create_root_group(&sg, dummy_root_type());
         assert_eq!(g.node_count(), 1);
-        assert!(g.groups.contains_key(&GroupKey::Root(sg.clone())));
+        assert!(g.groups.contains_key(&GroupKey::Root(sg.clone(), None)));
         g.rollback(cp);
         assert_eq!(g.node_count(), 0);
-        assert!(!g.groups.contains_key(&GroupKey::Root(sg.clone())));
+        assert!(!g.groups.contains_key(&GroupKey::Root(sg.clone(), None)));
 
         // Re-creating after rollback should work.
         g.get_or_create_root_group(&sg, dummy_root_type());
@@ -882,7 +937,7 @@ mod tests {
     fn rollback_of_duplicate_keyed_node_keeps_owner_registered() {
         let mut g = FetchGraph::new();
         let sg: Arc<str> = Arc::from("sg");
-        let key = GroupKey::Root(sg.clone());
+        let key = GroupKey::Root(sg.clone(), None);
         let owner = g.get_or_create_root_group(&sg, dummy_root_type());
 
         let cp = g.checkpoint();

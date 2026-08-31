@@ -247,7 +247,7 @@ impl FieldRoutingSearchSpace {
         // Every key is an entry key; the parent group outputs whatever
         // enters the first group of the chain (the target's own key when
         // there is no chain).
-        let key_info = choice.key();
+        let key_info = choice.key()?;
         let intermediate_hops = choice.intermediate_hops();
         let first_key: Option<&Arc<SelectionSet>> = intermediate_hops
             .first()
@@ -416,7 +416,7 @@ impl FieldRoutingSearchSpace {
                 None => (
                     qg.edge_endpoints(choice.edge_index().expect("edge-based choice"))?
                         .0,
-                    Some(&choice.key().key_conditions),
+                    Some(&choice.key()?.key_conditions),
                 ),
             };
             let next_subgraph = &qg.node_weight(next_dest_node)?.source;

@@ -62,6 +62,9 @@ pub(crate) struct PendingSelection {
     pub(crate) provides_anchor: Option<NodeIndex>,
     /// Cross-subgraph type-narrowing state (see [`TypeNarrowing`]).
     pub(crate) narrowing: TypeNarrowing,
+    /// The @defer label this selection is inside, if any. Propagated to
+    /// fetch nodes so they can be partitioned into primary vs deferred.
+    pub(crate) defer_ref: Option<String>,
     /// Best-effort selection: dropping it (zero routing options, or a failed
     /// commit) is tolerated silently instead of counting toward
     /// `dropped_fields` and failing the plan. Inherited by forks, so
@@ -110,6 +113,7 @@ impl PendingSelection {
             condition: self.condition,
             provides_anchor: self.provides_anchor,
             narrowing: self.narrowing.clone(),
+            defer_ref: self.defer_ref.clone(),
             best_effort: self.best_effort,
         }
     }
@@ -140,6 +144,11 @@ impl PendingSelection {
 
     pub(super) fn with_narrowing(mut self, narrowing: TypeNarrowing) -> Self {
         self.narrowing = narrowing;
+        self
+    }
+
+    pub(super) fn with_defer(mut self, defer_ref: Option<String>) -> Self {
+        self.defer_ref = defer_ref;
         self
     }
 
@@ -364,6 +373,7 @@ mod tests {
             provides_anchor: None,
             narrowing: Default::default(),
             best_effort: false,
+            defer_ref: None,
         };
         let ids = |state: &PlanState| -> Vec<usize> {
             state

@@ -1165,6 +1165,7 @@ fn t_pending(
         provides_anchor: None,
         narrowing: Default::default(),
         best_effort: false,
+        defer_ref: None,
     }
 }
 
