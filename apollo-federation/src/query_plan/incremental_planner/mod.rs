@@ -299,6 +299,8 @@ fn root_pending_selections(
             parent_types: Default::default(),
             context_anchor: Default::default(),
             best_effort: false,
+            split_parent: None,
+            split_avoid: None,
         })
         .collect()
 }
