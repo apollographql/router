@@ -1232,6 +1232,7 @@ fn y_pending(
         }),
         provides_anchor: None,
         best_effort: false,
+        defer_ref: None,
     }
 }
 

@@ -523,12 +523,13 @@ impl QueryPlanner {
         } else {
             SubgraphOperationCompression::Disabled
         };
+        let client_labels = Arc::new(client_labels);
         let mut processor = FetchDependencyGraphToQueryPlanProcessor::new(
             normalized_operation.variables.clone(),
             normalized_operation.directives.clone(),
             operation_compression,
             operation.name.clone(),
-            client_labels,
+            client_labels.as_ref().clone(),
         );
         let mut parameters = QueryPlanningParameters {
             supergraph_schema: self.supergraph_schema.clone(),
@@ -561,6 +562,7 @@ impl QueryPlanner {
                     }
                 })
                 .collect(),
+            client_labels: client_labels.clone(),
         };
 
         let mut non_local_selection_state = options
@@ -956,6 +958,7 @@ fn compute_plan_internal(
                 &field_selection,
                 root_kind,
                 &mut naming,
+                has_defers,
             )?;
             plans.push(bulb.plan);
         }
@@ -1008,6 +1011,7 @@ fn compute_plan_internal(
             &selection_set,
             root_kind,
             &mut naming,
+            has_defers,
         )?;
         (bulb.plan, vec![], None, bulb.cost)
     } else {
