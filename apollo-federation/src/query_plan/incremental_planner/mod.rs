@@ -41,6 +41,7 @@
 //! the plan builder.
 
 pub mod bulb_search;
+pub(crate) mod defer;
 pub(crate) mod fetch_graph;
 pub(crate) mod field_routing;
 pub mod shared_path;
@@ -78,7 +79,7 @@ pub(crate) fn build_bulb_plan(
     parameters: &QueryPlanningParameters,
     selection_set: &SelectionSet,
     root_kind: SchemaRootDefinitionKind,
-    _has_defers: bool,
+    has_defers: bool,
 ) -> Result<BulbPlan, FederationError> {
     debug!(
         selections = selection_set.selections.len(),
@@ -117,11 +118,22 @@ pub(crate) fn build_bulb_plan(
             let fetch_node = graph.get_or_create_root_group(&root_node_data.source, root_type);
             let pending = root_pending_selections(selection_set, root_qg_node, fetch_node);
             let initial = PlanState::with_graph(graph, pending);
-            run_bulb_and_finalize(&search_space, parameters, initial, root_kind)
+            run_bulb_and_finalize(
+                &search_space,
+                parameters,
+                selection_set,
+                initial,
+                root_kind,
+                has_defers,
+            )
         }
-        QueryGraphNodeType::FederatedRootType(_) => {
-            build_bulb_plan_from_federated_root(&search_space, parameters, selection_set, root_kind)
-        }
+        QueryGraphNodeType::FederatedRootType(_) => build_bulb_plan_from_federated_root(
+            &search_space,
+            parameters,
+            selection_set,
+            root_kind,
+            has_defers,
+        ),
     }
 }
 
@@ -133,6 +145,7 @@ fn build_bulb_plan_from_federated_root(
     parameters: &QueryPlanningParameters,
     selection_set: &SelectionSet,
     root_kind: SchemaRootDefinitionKind,
+    has_defers: bool,
 ) -> Result<BulbPlan, FederationError> {
     let root_qg_node = parameters.head;
 
@@ -140,7 +153,14 @@ fn build_bulb_plan_from_federated_root(
     // actual root fetch group from the chosen subgraph.
     let pending = root_pending_selections(selection_set, root_qg_node, NodeIndex::end());
     let initial = PlanState::new(pending);
-    run_bulb_and_finalize(search_space, parameters, initial, root_kind)
+    run_bulb_and_finalize(
+        search_space,
+        parameters,
+        selection_set,
+        initial,
+        root_kind,
+        has_defers,
+    )
 }
 
 /// Run BULB search on the initial state and finalize into a `BulbPlan`.
@@ -148,8 +168,10 @@ fn build_bulb_plan_from_federated_root(
 fn run_bulb_and_finalize(
     search_space: &FieldRoutingSearchSpace,
     parameters: &QueryPlanningParameters,
+    selection_set: &SelectionSet,
     initial: PlanState,
     root_kind: SchemaRootDefinitionKind,
+    has_defers: bool,
 ) -> Result<BulbPlan, FederationError> {
     let config = BulbConfig {
         beam_width: parameters.config.incremental_planner.beam_width,
@@ -215,6 +237,13 @@ fn run_bulb_and_finalize(
         SubgraphOperationCompression::Disabled
     };
 
+    // Build DeferInfo from the selection set actually being planned (already
+    // typename-restored): for mutations that is a single top-level field
+    // split from the operation, so each sequential step only sees its own
+    // defer blocks.
+    let defer_info = has_defers
+        .then(|| defer::build_defer_info(selection_set, parameters.assigned_defer_labels.clone()));
+
     let mut build_ctx = fetch_graph::plan_builder::PlanBuildContext {
         supergraph_schema: &parameters.supergraph_schema,
         query_graph: &parameters.federated_query_graph,
@@ -225,7 +254,9 @@ fn run_bulb_and_finalize(
         operation_compression: &mut operation_compression,
         operation_counter: 0,
     };
-    let (plan, cost) = result.graph.to_query_plan(&mut build_ctx)?;
+    let (plan, cost) = result
+        .graph
+        .to_query_plan_with_defer(&mut build_ctx, defer_info.as_ref())?;
 
     Ok(BulbPlan { plan, cost })
 }
@@ -248,6 +279,7 @@ fn root_pending_selections(
             op_path: Default::default(),
             path_in_fetch: Default::default(),
             condition: None,
+            defer_ref: None,
             provides_anchor: None,
             best_effort: false,
         })
