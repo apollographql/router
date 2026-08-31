@@ -16,6 +16,7 @@ mod conditions;
 mod requires;
 mod routing;
 pub(super) mod state;
+mod type_conditions;
 
 use std::cell::RefCell;
 use std::sync::Arc;

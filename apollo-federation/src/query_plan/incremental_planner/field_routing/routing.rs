@@ -27,6 +27,16 @@ pub(crate) enum RoutingTarget {
         edge_index: EdgeIndex,
         target_subgraph: Arc<str>,
     },
+    /// Per-concrete-type explosion at an abstract position: field on an
+    /// abstract type with no direct FieldCollection edge decomposes into
+    /// per-concrete-type inline fragments. Only ever a forced fallback.
+    TypeExplosion,
+    /// Restructure an inline fragment with no routing options instead of
+    /// dropping it: commit runs the pass-through / vacuous-condition /
+    /// abstract-explosion chain, pushing replacement pendings and adding no
+    /// graph state. Only ever offered as the single (forced) choice when
+    /// normal enumeration yields nothing, so it never competes for score.
+    RestructureFragment,
 }
 
 /// A routing choice for a field: either a subgraph edge or a key hop.
@@ -94,6 +104,36 @@ pub(crate) enum HopKind {
 }
 
 impl RoutingChoice {
+    /// Per-concrete-type explosion at an abstract position.
+    fn explode() -> Self {
+        Self {
+            target: RoutingTarget::TypeExplosion,
+            hop_kind: HopKind::Direct,
+            key_conditions: None,
+            conditions_locally_satisfiable: true,
+            conditions_provided: false,
+            requires_resolvable_in_place: true,
+            self_entity_reentry: false,
+            conditions_circular: false,
+            intermediate_key_hops: Vec::new(),
+        }
+    }
+
+    /// Zero-option fragment restructuring.
+    fn restructure_fragment() -> Self {
+        Self {
+            target: RoutingTarget::RestructureFragment,
+            hop_kind: HopKind::Direct,
+            key_conditions: None,
+            conditions_locally_satisfiable: true,
+            conditions_provided: false,
+            requires_resolvable_in_place: true,
+            self_entity_reentry: false,
+            conditions_circular: false,
+            intermediate_key_hops: Vec::new(),
+        }
+    }
+
     /// A direct edge in the current subgraph.
     fn direct(edge_index: EdgeIndex, target_subgraph: Arc<str>) -> Self {
         Self {
@@ -142,13 +182,26 @@ impl RoutingChoice {
             RoutingTarget::SubgraphEdge {
                 target_subgraph, ..
             } => target_subgraph,
+            RoutingTarget::TypeExplosion => {
+                static LABEL: std::sync::LazyLock<Arc<str>> =
+                    std::sync::LazyLock::new(|| Arc::from("<type-explosion>"));
+                &LABEL
+            }
+            RoutingTarget::RestructureFragment => {
+                static LABEL: std::sync::LazyLock<Arc<str>> =
+                    std::sync::LazyLock::new(|| Arc::from("<restructure>"));
+                &LABEL
+            }
         }
     }
 
-    /// Query graph edge index.
+    /// Query graph edge index. Panics on non-edge routing choices.
     pub(crate) fn edge_index(&self) -> EdgeIndex {
         match &self.target {
             RoutingTarget::SubgraphEdge { edge_index, .. } => *edge_index,
+            RoutingTarget::TypeExplosion | RoutingTarget::RestructureFragment => {
+                panic!("edge_index() called on a non-edge routing choice")
+            }
         }
     }
 }
@@ -579,6 +632,15 @@ impl FieldRoutingSearchSpace {
                 }
             };
             self.rank_options(&mut options);
+            // Zero options is not failure yet: the applicable fallback
+            // (fragment restructuring, or type explosion at an abstract field
+            // position) becomes the single forced choice, committed through the
+            // same backbone as every other option.
+            if options.is_empty()
+                && let Some(fallback) = self.fallback_option(pending)?
+            {
+                options.push(fallback);
+            }
             options
         };
         Ok(options)
@@ -746,6 +808,30 @@ impl FieldRoutingSearchSpace {
 
     /// Order options best-first: @provides beats a direct local edge beats a
     /// key hop whose conditions are locally satisfiable beats a remote hop.
+    /// Fallback when normal edge enumeration yields no options: fragment
+    /// restructuring for inline fragments, type explosion for fields on
+    /// abstract types.
+    fn fallback_option(
+        &self,
+        pending: &PendingSelection,
+    ) -> Result<Option<RoutingChoice>, FederationError> {
+        match &pending.selection {
+            Selection::InlineFragment(_) => Ok(Some(RoutingChoice::restructure_fragment())),
+            Selection::Field(_) => Ok(self
+                .node_type_is_abstract(pending.query_graph_node)?
+                .then(RoutingChoice::explode)),
+        }
+    }
+
+    fn node_type_is_abstract(&self, node: NodeIndex) -> Result<bool, FederationError> {
+        let node_data = self.query_graph.node_weight(node)?;
+        if let Ok(pos) = CompositeTypeDefinitionPosition::try_from(node_data.type_.clone()) {
+            Ok(pos.is_abstract_type())
+        } else {
+            Ok(false)
+        }
+    }
+
     pub(super) fn rank_options(&self, options: &mut [RoutingChoice]) {
         options.sort_by_key(|opt| {
             let preference = if let Ok(edge) = self.query_graph.edge_weight(opt.edge_index()) {

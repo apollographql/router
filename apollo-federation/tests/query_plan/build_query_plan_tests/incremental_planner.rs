@@ -1774,3 +1774,196 @@ fn inc_interface_object_fake_downcast_fetches_typename() {
     "###
     );
 }
+
+// ---------------------------------------------------------------------------
+// Type explosion: abstract type conditions decomposed into concrete fragments
+// ---------------------------------------------------------------------------
+
+/// Union member implements an interface in the supergraph but not in the
+/// subgraph that owns the root field. The planner must type-explode the
+/// interface condition into concrete-type fragments so no member is excluded.
+#[test]
+fn inc_type_explosion_union_interface_interaction() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+          type Query {
+            u: U
+          }
+
+          union U = A | B | C
+
+          interface I {
+            v: Int
+          }
+
+          type A {
+            v: Int @shareable
+          }
+
+          type B implements I {
+            v: Int
+          }
+
+          type C implements I {
+            v: Int
+          }
+        "#,
+        Subgraph2: r#"
+          interface I {
+            v: Int
+          }
+
+          type A implements I {
+            v: Int @shareable
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            u {
+              ... on I {
+                v
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          u {
+            __typename
+            ... on A {
+              v
+            }
+            ... on B {
+              v
+            }
+            ... on C {
+              v
+            }
+          }
+        }
+      },
+    }
+    "###
+    );
+}
+
+/// Vacuous type condition: all runtime types of the parent position satisfy
+/// the condition, so the fragment is treated as pass-through rather than
+/// exploded. Here U = B | C and both implement I, so `... on I` is vacuous.
+#[test]
+fn inc_vacuous_type_condition_not_exploded() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+          type Query {
+            u: U
+          }
+
+          union U = B | C
+
+          interface I {
+            v: Int
+          }
+
+          type A implements I {
+            v: Int @shareable
+          }
+
+          type B implements I {
+            v: Int
+          }
+
+          type C implements I {
+            v: Int
+          }
+        "#,
+        Subgraph2: r#"
+          union U = A
+
+          type A {
+            v: Int @shareable
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            u {
+              ... on I {
+                v
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          u {
+            __typename
+            ... on I {
+              __typename
+              v
+            }
+          }
+        }
+      },
+    }
+    "###
+    );
+}
+
+/// Condition-less inline fragment carrying @skip: the fragment has no type
+/// condition (so no query graph edge exists for it), but the @skip directive
+/// must be preserved as a condition on the children. The pass-through path
+/// pushes children with the directive on the op path.
+#[test]
+fn inc_conditionless_fragment_skip_preserved() {
+    let planner = planner!(
+        config = incremental_config(),
+        SubgraphA: r#"
+          type Query {
+            user: User
+          }
+
+          type User {
+            name: String
+            email: String
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          query ($hide: Boolean!) {
+            user {
+              ... @skip(if: $hide) {
+                name
+                email
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Fetch(service: "SubgraphA") {
+        {
+          user {
+            ... @skip(if: $hide) {
+              name
+              email
+            }
+          }
+        }
+      },
+    }
+    "###
+    );
+}
