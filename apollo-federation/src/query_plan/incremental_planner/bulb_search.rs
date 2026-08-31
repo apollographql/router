@@ -206,8 +206,8 @@ pub fn bulb_search<S: BulbSearchSpace>(
     check_cancellation: Option<&dyn Fn() -> ControlFlow<()>>,
 ) -> (S::Candidate, BulbStats) {
     let b = config.beam_width.max(1);
+    let fuel = config.fuel;
     let mut progress = BulbProgress {
-        fuel: config.fuel,
         deadline: config.timeout.map(|t| Instant::now() + t),
         check_cancellation,
         was_cancelled: false,
@@ -223,21 +223,8 @@ pub fn bulb_search<S: BulbSearchSpace>(
     let initial_cp = space.checkpoint(&initial);
 
     for max_disc in 0.. {
-        if progress.cancelled() {
-            debug!(
-                max_disc,
-                progress.completions, "BULB search cancelled by cooperative cancellation"
-            );
-            break;
-        }
-        if progress.out_of_time() {
-            timed_out = true;
-            debug!(
-                max_disc,
-                progress.completions, "BULB search hit wall-clock timeout"
-            );
-            break;
-        }
+        // Differs from the paper (B at every iteration): B=1 for the
+        // greedy pass avoids wide beam allocations on deep queries.
         let effective_b = if max_disc == 0 { 1 } else { b };
         trace!(
             max_disc,
@@ -254,7 +241,7 @@ pub fn bulb_search<S: BulbSearchSpace>(
         // granted beyond it.
         if max_disc == 0 {
             greedy_effort = space.effort(&initial);
-            progress.effort_budget = Some(greedy_effort.saturating_add(progress.fuel));
+            progress.effort_budget = Some(greedy_effort.saturating_add(fuel));
         }
 
         trace!(
@@ -267,6 +254,13 @@ pub fn bulb_search<S: BulbSearchSpace>(
 
         if progress.exhausted(space.effort(&initial)) {
             timed_out = progress.out_of_time();
+            if progress.was_cancelled {
+                debug!(max_disc, progress.completions, "BULB search cancelled");
+            } else if timed_out {
+                debug!(max_disc, progress.completions, "BULB search timed out");
+            } else {
+                debug!(max_disc, progress.completions, "BULB search exhausted fuel");
+            }
             break;
         }
         if !alternatives_existed {
@@ -290,7 +284,6 @@ pub fn bulb_search<S: BulbSearchSpace>(
 
 /// Mutable state shared across the iterative DFS.
 struct BulbProgress<'a, C> {
-    fuel: u64,
     deadline: Option<Instant>,
     check_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
     was_cancelled: bool,
@@ -328,108 +321,126 @@ impl<C> BulbProgress<'_, C> {
     }
 }
 
-/// Exploration phase within a single decision: alt slices first, then best.
-///
-/// The BULB algorithm partitions scored options into slices of `beam_width`.
-/// Slice 0 is the best (lowest-cost) options. At discrepancy level d > 0,
-/// alternative slices (1..N) are explored first with d-1 remaining
-/// discrepancies, then slice 0 is explored with the full d. This means
-/// the search revisits greedy mistakes before deepening them, following the
-/// paper's "backtrack alternatives before greedy" order.
-#[derive(Clone, Copy)]
-enum ExplorePhase {
-    AltSlice { slice_idx: usize, pos: usize },
-    BestSlice { pos: usize },
-    Done,
-}
-
 /// One level of the BULB DFS, stored on an explicit stack instead of the
 /// call stack so deeply nested queries don't overflow.
 ///
 /// Each frame represents a decision point. The search descends by pushing
 /// frames (one per decision encountered), and ascends by popping them when
 /// all options at that level have been explored or pruned.
+///
+/// Options are pre-sorted by cost and arranged in exploration order at
+/// construction time: alt slices (1..N) first, then the best slice (0).
+/// This follows the paper's "backtrack alternatives before greedy" order.
 struct BulbFrame<D, Ch, Cp> {
     decision: D,
     options: Vec<Ch>,
-    scored: Vec<(usize, f64)>,
+    /// (index into `options`, cost) in exploration order.
+    /// `order[..alt_end]` are alt-slice options whose children get `disc - 1`;
+    /// `order[alt_end..]` are best-slice options whose children get the full `disc`.
+    /// Within each section, entries are sorted by ascending cost.
+    order: Vec<(usize, f64)>,
+    alt_end: usize,
+    pos: usize,
     checkpoint: Cp,
     disc: usize,
-    bw: usize,
-    num_slices: usize,
-    phase: ExplorePhase,
     alternatives_existed: bool,
 }
 
 impl<D, Ch, Cp> BulbFrame<D, Ch, Cp> {
-    /// Discrepancy budget for child decisions: alt slices spend one
-    /// discrepancy to enter, so children get disc-1; the best slice
-    /// passes the full budget through.
-    fn child_disc(&self) -> usize {
-        match self.phase {
-            ExplorePhase::AltSlice { .. } => self.disc - 1,
-            _ => self.disc,
+    fn new(
+        decision: D,
+        options: Vec<Ch>,
+        scored: Vec<(usize, f64)>,
+        checkpoint: Cp,
+        disc: usize,
+        bw: usize,
+    ) -> Self {
+        let alternatives_existed = scored.len() > bw;
+        let best_end = bw.min(scored.len());
+
+        // Alt slices first (indices bw..end of scored), then best slice
+        // (indices 0..bw). When disc=0 or only one slice exists, skip
+        // alts entirely.
+        let (order, alt_end) = if disc > 0 && scored.len() > bw {
+            let alt_count = scored.len() - best_end;
+            let mut order = Vec::with_capacity(scored.len());
+            order.extend_from_slice(&scored[best_end..]);
+            order.extend_from_slice(&scored[..best_end]);
+            (order, alt_count)
+        } else {
+            (scored[..best_end].to_vec(), 0)
+        };
+
+        trace!(
+            beam_pool = ?order,
+            alt_end,
+            disc,
+            bw,
+            alternatives_existed,
+            "beam candidate pool finalized for this decision",
+        );
+
+        Self {
+            decision,
+            options,
+            order,
+            alt_end,
+            pos: 0,
+            checkpoint,
+            disc,
+            alternatives_existed,
         }
     }
 
-    /// Advance to the next option to explore at this decision, skipping
-    /// slices whose cheapest option already exceeds the incumbent best.
-    fn next_option(&mut self, best_cost: f64) -> Option<usize> {
-        loop {
-            match self.phase {
-                ExplorePhase::AltSlice { slice_idx, pos } => {
-                    if slice_idx >= self.num_slices {
-                        self.phase = ExplorePhase::BestSlice { pos: 0 };
-                        continue;
-                    }
-                    let start = slice_idx * self.bw;
-                    let end = (start + self.bw).min(self.scored.len());
-                    if self.scored[start].1 >= best_cost {
-                        self.phase = ExplorePhase::AltSlice {
-                            slice_idx: slice_idx + 1,
-                            pos: 0,
-                        };
-                        continue;
-                    }
-                    let abs_pos = start + pos;
-                    if abs_pos >= end {
-                        self.phase = ExplorePhase::AltSlice {
-                            slice_idx: slice_idx + 1,
-                            pos: 0,
-                        };
-                        continue;
-                    }
-                    let (opt_idx, _) = self.scored[abs_pos];
-                    self.phase = ExplorePhase::AltSlice {
-                        slice_idx,
-                        pos: pos + 1,
-                    };
-                    return Some(opt_idx);
-                }
-                ExplorePhase::BestSlice { pos } => {
-                    let slice_end = self.bw.min(self.scored.len());
-                    if pos >= slice_end {
-                        self.phase = ExplorePhase::Done;
-                        return None;
-                    }
-                    let (opt_idx, _) = self.scored[pos];
-                    self.phase = ExplorePhase::BestSlice { pos: pos + 1 };
-                    return Some(opt_idx);
-                }
-                ExplorePhase::Done => return None,
+    /// Advance to the next option to explore at this decision, returning
+    /// the option index and the discrepancy budget for child decisions.
+    /// Alt-slice options whose cost exceeds the incumbent are pruned (they
+    /// spend a discrepancy to enter, so skipping them saves fuel). The best
+    /// slice is never pruned — it is the greedy path and may be the only
+    /// route to a completion.
+    fn next_option(&mut self, best_cost: f64) -> Option<(usize, usize)> {
+        while self.pos < self.order.len() {
+            let (opt_idx, cost) = self.order[self.pos];
+            if self.pos < self.alt_end && cost >= best_cost {
+                // Alt section is sorted; skip to the best section.
+                self.pos = self.alt_end;
+                continue;
             }
+            let child_disc = if self.pos < self.alt_end {
+                self.disc - 1
+            } else {
+                self.disc
+            };
+            self.pos += 1;
+            return Some((opt_idx, child_disc));
         }
+        None
     }
 }
 
-/// Iterative DFS BULB probe with an explicit stack. At each node:
+/// Bubble a frame's `alternatives_existed` flag up to its parent frame
+/// (or to the probe-level result if no parent exists).
+fn propagate_alternatives<D, Ch, Cp>(
+    stack: &mut [BulbFrame<D, Ch, Cp>],
+    result_alts: &mut bool,
+    alts: bool,
+) {
+    if let Some(parent) = stack.last_mut() {
+        parent.alternatives_existed |= alts;
+    } else {
+        *result_alts |= alts;
+    }
+}
+
+/// Iterative DFS BULB probe. At each node:
 ///
 /// 1. Advance past deterministic decisions to the next choice point.
 /// 2. Score all options: apply -> cost -> rollback (no advance).
-/// 3. Sort by cost, slice into groups of `beam_width`.
+/// 3. Sort by cost, arrange into exploration order (alt slices first,
+///    then best slice).
 /// 4. Explore via DFS: disc=0 explores the best slice only; disc>0
 ///    explores alternative slices first (disc-1), then the best slice
-///    (full disc), following the paper's order: backtrack alternatives before greedy.
+///    (full disc).
 ///
 /// Returns whether any decision point had more than one slice (a genuine
 /// alternative to backtrack into).
@@ -441,140 +452,93 @@ fn bulb_probe<S: BulbSearchSpace>(
     progress: &mut BulbProgress<S::Candidate>,
 ) -> bool {
     let mut stack: Vec<BulbFrame<S::Decision, S::Choice, S::Checkpoint>> = Vec::new();
-    let mut next_disc = discrepancies;
+    let mut disc_budget = discrepancies;
     let mut result_alts = false;
 
     'search: loop {
         // Descend: advance to the next decision point, score options,
         // push a frame, apply the first option.
-        let entered = !progress.exhausted(space.effort(candidate))
-            && bulb_enter(
-                space,
-                candidate,
-                &mut next_disc,
-                beam_width,
-                progress,
-                &mut stack,
-                &mut result_alts,
-            );
+        let pushed = 'descend: {
+            if progress.exhausted(space.effort(candidate)) {
+                break 'descend false;
+            }
 
-        if entered {
+            match space.advance(candidate) {
+                AdvanceResult::Complete => {
+                    if !progress.cancelled() {
+                        record_completion(space, candidate, progress);
+                    }
+                    break 'descend false;
+                }
+                AdvanceResult::Decision(decision) => {
+                    progress.expansions += 1;
+                    let checkpoint = space.checkpoint(candidate);
+                    let options = space.options(&decision);
+
+                    let mut scored = score_options(
+                        space,
+                        candidate,
+                        &decision,
+                        &options,
+                        &checkpoint,
+                        progress.best.is_some(),
+                        progress.best_cost,
+                    );
+
+                    if progress.exhausted(space.effort(candidate)) || scored.is_empty() {
+                        break 'descend false;
+                    }
+
+                    scored.sort_by(|a, b| a.1.total_cmp(&b.1));
+                    let mut frame = BulbFrame::new(
+                        decision,
+                        options,
+                        scored,
+                        checkpoint,
+                        disc_budget,
+                        beam_width,
+                    );
+
+                    match frame.next_option(progress.best_cost) {
+                        Some((opt_idx, child_disc)) => {
+                            space.apply(candidate, &frame.decision, &frame.options[opt_idx]);
+                            disc_budget = child_disc;
+                            stack.push(frame);
+                            true
+                        }
+                        None => {
+                            propagate_alternatives(
+                                &mut stack,
+                                &mut result_alts,
+                                frame.alternatives_existed,
+                            );
+                            false
+                        }
+                    }
+                }
+            }
+        };
+
+        if pushed {
             continue 'search;
         }
 
         // Ascend: rollback to the frame's checkpoint, try the next option.
         // If no options remain, pop the frame and try the parent.
         loop {
-            if stack.is_empty() {
+            let Some(frame) = stack.last_mut() else {
                 return result_alts;
-            }
+            };
+            space.rollback(candidate, frame.checkpoint.clone());
+            if !progress.exhausted(space.effort(candidate))
+                && let Some((opt_idx, child_disc)) = frame.next_option(progress.best_cost)
             {
-                let frame = stack.last_mut().unwrap();
-                space.rollback(candidate, frame.checkpoint.clone());
-                if !progress.exhausted(space.effort(candidate))
-                    && let Some(opt_idx) = frame.next_option(progress.best_cost)
-                {
-                    next_disc = frame.child_disc();
-                    space.apply(candidate, &frame.decision, &frame.options[opt_idx]);
-                    continue 'search;
-                }
+                disc_budget = child_disc;
+                space.apply(candidate, &frame.decision, &frame.options[opt_idx]);
+                continue 'search;
             }
             let frame = stack.pop().unwrap();
-            if let Some(parent) = stack.last_mut() {
-                parent.alternatives_existed |= frame.alternatives_existed;
-            } else {
-                result_alts |= frame.alternatives_existed;
-            }
-        }
-    }
-}
-
-/// Advance the candidate past deterministic decisions, score options at the
-/// next choice point, and push a [`BulbFrame`] if exploration should descend.
-/// Returns `true` when a frame was pushed and the first option applied.
-#[allow(clippy::too_many_arguments)]
-fn bulb_enter<S: BulbSearchSpace>(
-    space: &S,
-    candidate: &mut S::Candidate,
-    next_disc: &mut usize,
-    beam_width: usize,
-    progress: &mut BulbProgress<S::Candidate>,
-    stack: &mut Vec<BulbFrame<S::Decision, S::Choice, S::Checkpoint>>,
-    result_alts: &mut bool,
-) -> bool {
-    match space.advance(candidate) {
-        AdvanceResult::Complete => {
-            if !progress.cancelled() {
-                record_completion(space, candidate, progress);
-            }
-            false
-        }
-        AdvanceResult::Decision(decision) => {
-            if progress.out_of_time() || progress.cancelled() {
-                return false;
-            }
-            progress.expansions += 1;
-            let checkpoint = space.checkpoint(candidate);
-            let options = space.options(&decision);
-
-            let mut scored = score_options(
-                space,
-                candidate,
-                &decision,
-                &options,
-                &checkpoint,
-                progress.best.is_some(),
-                progress.best_cost,
-            );
-
-            if progress.exhausted(space.effort(candidate)) || scored.is_empty() {
-                return false;
-            }
-
-            scored.sort_by(|a, b| a.1.total_cmp(&b.1));
-            let num_slices = scored.len().div_ceil(beam_width);
-            let alternatives_existed = scored.len() > beam_width;
-            trace!(
-                beam_pool_sorted = ?scored,
-                num_slices,
-                beam_width,
-                discrepancies = *next_disc,
-                "beam candidate pool finalized for this decision",
-            );
-
-            let phase = if *next_disc > 0 && num_slices > 1 {
-                ExplorePhase::AltSlice {
-                    slice_idx: 1,
-                    pos: 0,
-                }
-            } else {
-                ExplorePhase::BestSlice { pos: 0 }
-            };
-            let mut frame = BulbFrame {
-                decision,
-                options,
-                scored,
-                checkpoint,
-                disc: *next_disc,
-                bw: beam_width,
-                num_slices,
-                phase,
-                alternatives_existed,
-            };
-
-            if let Some(opt_idx) = frame.next_option(progress.best_cost) {
-                *next_disc = frame.child_disc();
-                space.apply(candidate, &frame.decision, &frame.options[opt_idx]);
-                stack.push(frame);
-                return true;
-            }
-
-            if let Some(parent) = stack.last_mut() {
-                parent.alternatives_existed |= alternatives_existed;
-            } else {
-                *result_alts |= alternatives_existed;
-            }
-            false
+            propagate_alternatives(&mut stack, &mut result_alts, frame.alternatives_existed);
         }
     }
 }
