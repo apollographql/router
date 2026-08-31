@@ -103,6 +103,7 @@ impl Schema {
             })?
             .to_schema()
             .map_err(|errors| SchemaError::Validate(errors.into()))?;
+        definitions.validate_default_values = config.supergraph.validate_default_values;
         coerce_and_validate_schema_values(&mut definitions)?;
         let definitions = definitions
             .validate()
