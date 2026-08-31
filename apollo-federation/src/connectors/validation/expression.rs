@@ -33,7 +33,7 @@ use crate::connectors::validation::graphql::subslice_location;
 use crate::connectors::variable::VariableReference;
 
 static REQUEST_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
-    Shape::record(
+    Shape::closed_record(
         [(
             "headers".to_string(),
             Shape::dict(Shape::list(Shape::string([]), []), []),
@@ -44,7 +44,7 @@ static REQUEST_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
 });
 
 static RESPONSE_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
-    Shape::record(
+    Shape::closed_record(
         [(
             "headers".to_string(),
             Shape::dict(Shape::list(Shape::string([]), []), []),
@@ -359,6 +359,17 @@ fn resolve_shape(
     expression: &Expression,
     resolving: &mut HashSet<String>,
 ) -> Result<Shape, Message> {
+    // Shape errors are stored as metadata on the shape itself rather than as a
+    // dedicated `ShapeCase::Error` variant. If any are present, surface the
+    // first message as a validation failure before attempting structural
+    // dispatch on the (possibly partial) case.
+    if let Some(error) = shape.own_errors().next() {
+        return Err(Message {
+            code: context.code,
+            message: error.message.clone(),
+            locations: transform_locations(shape.locations(), context, expression),
+        });
+    }
     match shape.case() {
         ShapeCase::One(shapes) => {
             let mut inners = Vec::new();
@@ -546,11 +557,6 @@ fn resolve_shape(
             }
             result
         }
-        ShapeCase::Error(shape::Error { message, .. }) => Err(Message {
-            code: context.code,
-            message: message.clone(),
-            locations: transform_locations(shape.locations(), context, expression),
-        }),
         ShapeCase::Array { prefix, tail } => {
             let prefix = prefix
                 .iter()
@@ -621,6 +627,9 @@ fn transform_locations<'a>(
 
 /// A simplified shape name for error messages
 fn short_shape_name(shape: &Shape) -> &'static str {
+    if shape.has_own_errors() {
+        return "error";
+    }
     match shape.case() {
         ShapeCase::Bool(_) => "boolean",
         ShapeCase::String(_) => "string",
@@ -634,7 +643,6 @@ fn short_shape_name(shape: &Shape) -> &'static str {
         ShapeCase::Name(_, _) => "named type",
         ShapeCase::Unknown => "unknown",
         ShapeCase::None => "none",
-        ShapeCase::Error(_) => "error",
     }
 }
 
