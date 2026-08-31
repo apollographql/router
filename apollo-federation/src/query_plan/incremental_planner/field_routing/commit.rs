@@ -8,6 +8,8 @@ use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use tracing::trace;
 
+use super::super::defer;
+use super::super::defer::strip_defer_directive;
 use super::super::fetch_graph::InputContribution;
 use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
@@ -64,9 +66,7 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         choice: &RoutingChoice,
     ) -> Result<(), FederationError> {
-        use super::routing::RoutingTarget;
-
-        if matches!(choice.target, RoutingTarget::TypeExplosion) {
+        if matches!(choice, RoutingChoice::TypeExplosion) {
             return if self.try_explode_interface_field(state, pending)? {
                 Ok(())
             } else {
@@ -76,7 +76,7 @@ impl FieldRoutingSearchSpace {
             };
         }
 
-        if matches!(choice.target, RoutingTarget::RestructureFragment) {
+        if matches!(choice, RoutingChoice::StripFragment) {
             return if self.try_pass_through_fragment(state, pending)?
                 || self.try_vacuous_type_condition(state, pending)?
                 || self.try_explode_abstract_type(state, pending)?
@@ -102,9 +102,9 @@ impl FieldRoutingSearchSpace {
             _ => {}
         }
 
-        let edge_index = choice
-            .edge_index()
-            .expect("edge-based routing choice must have an edge index");
+        let edge_index = choice.edge_index().ok_or_else(|| {
+            FederationError::internal("edge_index called on non-edge routing choice")
+        })?;
         let (_, target_qg_node) = qg.edge_endpoints(edge_index)?;
 
         // Reject unexpected edge transitions before any mutation. Later
@@ -141,7 +141,9 @@ impl FieldRoutingSearchSpace {
             choice,
             key_hop_edge,
         };
-        let edge = qg.edge_weight(choice.edge_index().expect("commit called on non-edge choice"))?;
+        let edge = qg.edge_weight(choice.edge_index().ok_or_else(|| {
+            FederationError::internal("edge_index called on non-edge routing choice")
+        })?)?;
         if let Some(requires_conditions) = &edge.conditions {
             target = self.apply_requires(state, &ctx, requires_conditions, target)?;
         }
@@ -178,8 +180,9 @@ impl FieldRoutingSearchSpace {
 
         let merge_at = self.pending_merge_at(state, pending);
 
-        let (field_source, _) =
-            qg.edge_endpoints(choice.edge_index().expect("edge-based choice"))?;
+        let (field_source, _) = qg.edge_endpoints(choice.edge_index().ok_or_else(|| {
+            FederationError::internal("edge_index called on non-edge routing choice")
+        })?)?;
         let field_source_node = qg.node_weight(field_source)?;
         let root_type: CompositeTypeDefinitionPosition =
             field_source_node.type_.clone().try_into()?;
@@ -246,7 +249,7 @@ impl FieldRoutingSearchSpace {
         // Every key is an entry key; the parent group outputs whatever
         // enters the first group of the chain (the target's own key when
         // there is no chain).
-        let key_info = choice.key();
+        let key_info = choice.key()?;
         let intermediate_hops = choice.intermediate_hops();
         let first_key: Option<&Arc<SelectionSet>> = intermediate_hops
             .first()
@@ -260,7 +263,7 @@ impl FieldRoutingSearchSpace {
         // `can_resolve_in_place` cannot see.
         let key_locally_resolvable = match first_key {
             Some(key_conditions) => {
-                choice.conditions_provided
+                matches!(choice, RoutingChoice::KeyHopWithProvidedKey { .. })
                     || self.can_resolve_in_place(
                         pending.query_graph_node,
                         key_conditions,
@@ -296,6 +299,7 @@ impl FieldRoutingSearchSpace {
             state,
             first_subgraph,
             merge_at.clone(),
+            pending.defer_ref.clone(),
             pending.fetch_node,
             pending.ordering_dependent(),
         );
@@ -304,8 +308,10 @@ impl FieldRoutingSearchSpace {
             let dest_node = match first_dest_node {
                 Some(node) => node,
                 None => {
-                    qg.edge_endpoints(choice.edge_index().expect("edge-based choice"))?
-                        .0
+                    qg.edge_endpoints(choice.edge_index().ok_or_else(|| {
+                        FederationError::internal("edge_index called on non-edge routing choice")
+                    })?)?
+                    .0
                 }
             };
             let dest_type: CompositeTypeDefinitionPosition =
@@ -428,9 +434,11 @@ impl FieldRoutingSearchSpace {
             let (next_dest_node, exit_key) = match intermediate_hops.get(i + 1) {
                 Some(next) => (next.target_node, next.entry_key.as_ref()),
                 None => (
-                    qg.edge_endpoints(choice.edge_index().expect("edge-based choice"))?
-                        .0,
-                    Some(&choice.key().key_conditions),
+                    qg.edge_endpoints(choice.edge_index().ok_or_else(|| {
+                        FederationError::internal("edge_index called on non-edge routing choice")
+                    })?)?
+                    .0,
+                    Some(&choice.key()?.key_conditions),
                 ),
             };
             let next_subgraph = &qg.node_weight(next_dest_node)?.source;
@@ -439,6 +447,7 @@ impl FieldRoutingSearchSpace {
                 state,
                 next_subgraph,
                 merge_at.clone(),
+                pending.defer_ref.clone(),
                 prev_group,
                 pending.ordering_dependent(),
             );
@@ -504,16 +513,21 @@ impl FieldRoutingSearchSpace {
         state: &mut PlanState,
         subgraph: &Arc<str>,
         merge_at: Vec<FetchDataPathElement>,
+        defer_ref: Option<String>,
         anchor_fetch: NodeIndex,
         ordering_dependent: Option<NodeIndex>,
     ) -> NodeIndex {
-        let group = state
-            .graph
-            .get_or_create_entity_group(subgraph, merge_at.clone());
+        let group = state.graph.get_or_create_entity_group_with_defer(
+            subgraph,
+            merge_at.clone(),
+            defer_ref.clone(),
+        );
         if Self::group_reusable(state, group, anchor_fetch, ordering_dependent) {
             return group;
         }
-        state.graph.add_entity_group(subgraph, merge_at)
+        state
+            .graph
+            .add_entity_group_with_defer(subgraph, merge_at, defer_ref)
     }
 
     /// Get or create the root hop group for (subgraph, root_kind, merge_at),
@@ -603,7 +617,12 @@ impl FieldRoutingSearchSpace {
         match &pending.selection {
             Selection::Field(_) => self.field_fetch_node(state, pending, choice),
             Selection::InlineFragment(_) => {
-                let edge = self.query_graph.edge_weight(choice.edge_index())?;
+                let edge_index = choice.edge_index().ok_or_else(|| {
+                    FederationError::internal(
+                        "direct_fetch_node called with a non-edge routing choice",
+                    )
+                })?;
+                let edge = self.query_graph.edge_weight(edge_index)?;
                 if matches!(
                     edge.transition,
                     QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. }
@@ -660,14 +679,17 @@ impl FieldRoutingSearchSpace {
             current_node_data.type_,
             QueryGraphNodeType::FederatedRootType(_)
         ) {
-            let (field_source, _) =
-                qg.edge_endpoints(choice.edge_index().expect("edge-based choice"))?;
+            let (field_source, _) = qg.edge_endpoints(choice.edge_index().ok_or_else(|| {
+                FederationError::internal("edge_index called on non-edge routing choice")
+            })?)?;
             let subgraph_node = qg.node_weight(field_source)?;
             let root_type: CompositeTypeDefinitionPosition =
                 subgraph_node.type_.clone().try_into()?;
-            return Ok(state
-                .graph
-                .get_or_create_root_group(&subgraph_node.source, root_type));
+            return Ok(state.graph.get_or_create_root_group_with_defer(
+                &subgraph_node.source,
+                root_type,
+                pending.defer_ref.clone(),
+            ));
         }
 
         Ok(pending.fetch_node)
@@ -736,18 +758,20 @@ impl FieldRoutingSearchSpace {
                     .op_path
                     .pushed(Arc::new(OpPathElement::Field(field_sel.field.clone()))),
                 Selection::InlineFragment(frag_sel) => {
-                    let edge = qg.edge_weight(choice.edge_index().expect("edge-based choice"))?;
+                    let stripped = strip_defer_directive(&frag_sel.inline_fragment);
+                    let edge = qg.edge_weight(choice.edge_index().ok_or_else(|| {
+                        FederationError::internal("edge_index called on non-edge routing choice")
+                    })?)?;
                     if matches!(
                         edge.transition,
                         QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. }
                     ) {
                         // @interfaceObject fake downcast: the concrete type
                         // doesn't exist in this subgraph.
-                        if frag_sel.inline_fragment.directives.is_empty() {
+                        if stripped.directives.is_empty() {
                             pending.op_path.clone()
                         } else {
-                            let updated =
-                                frag_sel.inline_fragment.with_updated_type_condition(None);
+                            let updated = stripped.with_updated_type_condition(None);
                             pending
                                 .op_path
                                 .pushed(Arc::new(OpPathElement::InlineFragment(updated)))
@@ -755,9 +779,7 @@ impl FieldRoutingSearchSpace {
                     } else {
                         pending
                             .op_path
-                            .pushed(Arc::new(OpPathElement::InlineFragment(
-                                frag_sel.inline_fragment.clone(),
-                            )))
+                            .pushed(Arc::new(OpPathElement::InlineFragment(stripped)))
                     }
                 }
             }
@@ -770,7 +792,9 @@ impl FieldRoutingSearchSpace {
                 SharedPath::new()
             } else {
                 let (field_source, _) =
-                    qg.edge_endpoints(choice.edge_index().expect("edge-based choice"))?;
+                    qg.edge_endpoints(choice.edge_index().ok_or_else(|| {
+                        FederationError::internal("edge_index called on non-edge routing choice")
+                    })?)?;
                 let dest = self.node_source(field_source)?;
                 let mut initial_path = self.entity_root_path(dest.type_pos.type_name())?;
                 for element in trailing_condition_fragments(&pending.op_path) {
@@ -783,7 +807,7 @@ impl FieldRoutingSearchSpace {
                     Arc::new(OpPathElement::Field(field_sel.field.clone()))
                 }
                 Selection::InlineFragment(frag_sel) => Arc::new(OpPathElement::InlineFragment(
-                    frag_sel.inline_fragment.clone(),
+                    strip_defer_directive(&frag_sel.inline_fragment),
                 )),
             };
             base.pushed(op_element)
@@ -807,7 +831,7 @@ impl FieldRoutingSearchSpace {
             fetch_node,
             op_path,
             response_path,
-            entity_root: choice.hop_kind != HopKind::Direct,
+            entity_root: !choice.is_direct(),
         })
     }
 
@@ -923,6 +947,13 @@ impl FieldRoutingSearchSpace {
         let child_provides_anchor =
             self.child_provides_anchor(pending, target_qg_node, target.entity_root)?;
 
+        // When the committed selection is an inline fragment carrying
+        // @defer, extract the label and propagate it to children so fetch
+        // nodes created downstream land in the deferred partition.
+        let child_defer_ref = defer::defer_context(&pending.selection)
+            .0
+            .or_else(|| pending.defer_ref.clone());
+
         for sub_sel in sub_ss.selections.values().rev().cloned() {
             state.push_pending(
                 pending
@@ -930,7 +961,8 @@ impl FieldRoutingSearchSpace {
                     .at(target_qg_node, fetch_node)
                     .with_op_path(target.op_path.clone())
                     .with_response_path(target.response_path.clone())
-                    .with_provides_anchor(child_provides_anchor),
+                    .with_provides_anchor(child_provides_anchor)
+                    .with_defer(child_defer_ref.clone()),
             );
         }
         Ok(())

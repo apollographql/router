@@ -145,10 +145,11 @@ impl RoutingChoice {
         self.edge().map(|e| e.edge_index)
     }
 
-    /// Key hop metadata. Panics on direct, root, or non-edge choices.
-    pub(crate) fn key(&self) -> &KeyHopInfo {
-        self.key_opt()
-            .expect("key() called on a non-key-hop routing choice")
+    /// Key hop metadata, or an internal error for non-key-hop choices.
+    pub(crate) fn key(&self) -> Result<&KeyHopInfo, FederationError> {
+        self.key_opt().ok_or_else(|| {
+            FederationError::internal("key() called on a non-key-hop routing choice")
+        })
     }
 
     /// Whether this is a direct resolution (no hop needed).
