@@ -864,6 +864,20 @@ impl FieldRoutingSearchSpace {
             return Ok(());
         };
 
+        // Bulk-insert: when the entire subtree is local to one subgraph
+        // and every sub-selection has a graph edge, record the whole thing
+        // in one shot instead of routing each child individually.
+        if self.is_fully_local(target_qg_node)?
+            && self.all_sub_selections_available(target_qg_node, sub_ss)?
+        {
+            state.graph.append_selection(
+                fetch_node,
+                &target.op_path,
+                Some(&Arc::new(sub_ss.clone())),
+            );
+            return Ok(());
+        }
+
         let child_provides_anchor =
             self.child_provides_anchor(pending, target_qg_node, target.entity_root)?;
 
