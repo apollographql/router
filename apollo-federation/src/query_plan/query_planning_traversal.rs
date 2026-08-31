@@ -88,6 +88,7 @@ pub(crate) struct QueryPlanningParameters<'a> {
     pub(crate) config: QueryPlannerConfig,
     pub(crate) statistics: &'a QueryPlanningStatistics,
     pub(crate) override_conditions: OverrideConditions,
+    pub(crate) connector_index: Arc<crate::connectors::index::ConnectorIndex>,
     pub(crate) check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
     pub(crate) disabled_subgraphs: IndexSet<Arc<str>>,
     /// Labels assigned by defer normalization (e.g. `qp__N` for unlabeled
@@ -1165,6 +1166,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             statistics: self.parameters.statistics,
             override_conditions: self.parameters.override_conditions.clone(),
             fetch_id_generator: self.parameters.fetch_id_generator.clone(),
+            connector_index: self.parameters.connector_index.clone(),
             check_for_cooperative_cancellation: self.parameters.check_for_cooperative_cancellation,
             disabled_subgraphs: self.parameters.disabled_subgraphs.clone(),
             assigned_defer_labels: self.parameters.assigned_defer_labels.clone(),
