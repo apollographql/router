@@ -555,7 +555,8 @@ where
     if let Some(control) = co_processor_output.control {
         let new_status = control.get_http_status()?;
         // Update the transport result status if it was successful
-        if let Ok(Some(TransportResponse::Http(ref mut http_response))) = response.transport_result {
+        if let Ok(Some(TransportResponse::Http(ref mut http_response))) = response.transport_result
+        {
             http_response.inner.status = new_status;
         }
     }

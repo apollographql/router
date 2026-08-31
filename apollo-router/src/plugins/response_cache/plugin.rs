@@ -3608,7 +3608,8 @@ mod tests {
         // An omitted `subgraph:` block (e.g. a connectors-only config) must NOT implicitly enable
         // subgraph-side caching/behavior. The field-level `default_disabled_subgraph` yields
         // `enabled: Some(false)` for the absent case.
-        let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({})).unwrap();
+        let config: super::Config =
+            serde_json_bytes::from_value(serde_json_bytes::json!({})).unwrap();
         assert_eq!(config.subgraph.all.enabled, Some(false));
     }
 

@@ -280,7 +280,9 @@ impl Selector for ConnectorSelector {
                 default,
                 redact,
             } => {
-                if let Ok(Some(TransportResponse::Http(ref http_response))) = response.transport_result {
+                if let Ok(Some(TransportResponse::Http(ref http_response))) =
+                    response.transport_result
+                {
                     let header_value = http_response
                         .inner
                         .headers
@@ -306,7 +308,9 @@ impl Selector for ConnectorSelector {
             ConnectorSelector::ConnectorResponseStatus {
                 connector_http_response_status: response_status,
             } => {
-                if let Ok(Some(TransportResponse::Http(ref http_response))) = response.transport_result {
+                if let Ok(Some(TransportResponse::Http(ref http_response))) =
+                    response.transport_result
+                {
                     let status = http_response.inner.status;
                     match response_status {
                         ResponseStatus::Code => Some(Value::I64(status.as_u16() as i64)),
@@ -321,7 +325,9 @@ impl Selector for ConnectorSelector {
             ConnectorSelector::ConnectorResponseBodySize {
                 connector_http_response_body_size,
             } if *connector_http_response_body_size => {
-                if let Ok(Some(TransportResponse::Http(ref http_response))) = response.transport_result {
+                if let Ok(Some(TransportResponse::Http(ref http_response))) =
+                    response.transport_result
+                {
                     http_response
                         .inner
                         .extensions
