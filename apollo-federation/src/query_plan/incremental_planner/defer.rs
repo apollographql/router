@@ -170,6 +170,12 @@ fn collect_deferred_blocks(
                     .flatten();
 
                 if let Some(args) = defer_args {
+                    // Upstream normalization guarantees every @defer has a label
+                    // by the time we reach plan building.
+                    debug_assert!(
+                        args.label.is_some(),
+                        "unlabeled @defer should have been assigned a label during normalization"
+                    );
                     if let Some(ref label) = args.label {
                         // The type condition stays out of the query path:
                         // the chunk is delivered at the enclosing field's
