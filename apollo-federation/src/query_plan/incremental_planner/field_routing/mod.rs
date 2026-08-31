@@ -2,15 +2,17 @@
 //!
 //! The planner walks the operation selection-by-selection ("pendings"),
 //! consulting the query graph for where each field can be resolved:
+//! - [`cached_query_graph`]: memoizing wrapper for immutable QueryGraph lookups.
 //! - [`state`]: mutable search state (pending stack, checkpoints).
 //! - [`routing`]: enumerating and ranking options for a selection.
 //! - [`commit`]: applying a chosen option to the fetch graph.
 //! - [`conditions`]: condition satisfiability for @requires / @key.
 //! - [`requires`]: hop-edge inputs and condition paths.
 //!
-//! This file holds the search-space type and the
+//! This file holds the search-space type, its caches, and the
 //! [`BulbSearchSpace`] implementation.
 
+pub(super) mod cached_query_graph;
 mod commit;
 mod conditions;
 mod context;
@@ -23,10 +25,10 @@ use std::cell::RefCell;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
+use cached_query_graph::CachedQueryGraph;
+use hashbrown::HashMap;
 use hashbrown::HashSet;
-use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
-use petgraph::visit::EdgeRef;
 use routing::RoutingChoice;
 use routing::RoutingTarget;
 pub(crate) use state::PendingSelection;
@@ -44,19 +46,120 @@ use crate::operation::InlineFragment;
 use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionSet;
-use crate::query_graph::OverrideConditions;
-use crate::query_graph::QueryGraph;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::QueryPlanCost;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
-/// Site key for routing options. Captures the selection identity at a QG node.
+/// Site key for routing dedup and the doomed-site set.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) enum RoutingSiteKey {
     Field(Name),
     InlineFragment(Option<Name>),
 }
+
+// ---------------------------------------------------------------------------
+// Cache key types
+// ---------------------------------------------------------------------------
+
+/// Cache key comparing/hashing by `Arc` pointer identity while owning the
+/// `Arc`: ownership keeps the allocation alive for the cache's lifetime, so
+/// the address can't be reused after a drop.
+pub(super) struct ArcKey<T>(Arc<T>);
+
+impl<T> ArcKey<T> {
+    pub(super) fn new(value: &Arc<T>) -> Self {
+        Self(value.clone())
+    }
+}
+
+impl<T> Clone for ArcKey<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<T> PartialEq for ArcKey<T> {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl<T> Eq for ArcKey<T> {}
+
+impl<T> std::hash::Hash for ArcKey<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        (Arc::as_ptr(&self.0) as usize).hash(state);
+    }
+}
+
+pub(super) type ConditionsKey = ArcKey<SelectionSet>;
+
+/// Pointer-identity key for a `Selection`, owning the inner Arc.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(super) enum SelectionArcKey {
+    Field(ArcKey<crate::operation::FieldSelection>),
+    InlineFragment(ArcKey<crate::operation::InlineFragmentSelection>),
+}
+
+impl SelectionArcKey {
+    pub(super) fn new(selection: &Selection) -> Self {
+        match selection {
+            Selection::Field(field) => Self::Field(ArcKey::new(field)),
+            Selection::InlineFragment(frag) => Self::InlineFragment(ArcKey::new(frag)),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Planner caches
+// ---------------------------------------------------------------------------
+
+type RoutingOptionsCache = RefCell<
+    HashMap<
+        (
+            NodeIndex,
+            SelectionArcKey,
+            Option<ArcKey<std::collections::HashSet<Name>>>,
+        ),
+        Arc<Vec<RoutingChoice>>,
+    >,
+>;
+
+type KeyHopCache = RefCell<HashMap<(NodeIndex, RoutingSiteKey), Arc<Vec<RoutingChoice>>>>;
+type CanSatisfyCache = RefCell<HashMap<(ConditionsKey, Name, Arc<str>), bool>>;
+type ConditionsRoutableCache =
+    RefCell<HashMap<(NodeIndex, ArcKey<crate::operation::SelectionMap>), bool>>;
+
+/// Monotonically-growing caches for computations that depend on search-space
+/// state or that reference routing types. These live on
+/// FieldRoutingSearchSpace (not PlanState) so checkpoint/rollback never
+/// touches them.
+pub(super) struct PlannerCaches {
+    pub(super) routing_options: RoutingOptionsCache,
+    key_hops: KeyHopCache,
+    pub(super) can_satisfy: CanSatisfyCache,
+    pub(super) conditions_routable: ConditionsRoutableCache,
+    pub(super) key_hops_in_flight: RefCell<HashSet<(NodeIndex, RoutingSiteKey)>>,
+    pub(super) guard_hits: std::cell::Cell<u64>,
+}
+
+impl PlannerCaches {
+    pub(crate) fn new() -> Self {
+        Self {
+            routing_options: RefCell::new(HashMap::new()),
+            key_hops: RefCell::new(HashMap::new()),
+            can_satisfy: RefCell::new(HashMap::new()),
+            conditions_routable: RefCell::new(HashMap::new()),
+            key_hops_in_flight: RefCell::new(HashSet::new()),
+            guard_hits: std::cell::Cell::new(0),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Search space
+// ---------------------------------------------------------------------------
 
 /// Subgraph, type position, and schema at a query graph node.
 pub(super) struct NodeSource {
@@ -67,28 +170,23 @@ pub(super) struct NodeSource {
 
 /// Search space presenting field-level routing decisions as a BULB problem.
 pub(crate) struct FieldRoutingSearchSpace {
-    pub(crate) query_graph: Arc<QueryGraph>,
+    pub(crate) cached_query_graph: CachedQueryGraph,
     pub(crate) supergraph_schema: ValidFederationSchema,
-    pub(crate) override_conditions: OverrideConditions,
-    #[allow(dead_code)]
-    pub(crate) inconsistent_abstract_types: Arc<apollo_compiler::collections::IndexSet<Name>>,
-    /// In-flight guard for breaking the mutual recursion between
-    /// `conditions_routable` and `key_hop_options`. A (node, key) pair
-    /// present in this set means that key-hop enumeration for that
-    /// position is on the call stack; re-entering it would loop
-    /// forever, so the guard returns "no hops" (the fixpoint for
-    /// circular keys).
-    pub(super) key_hops_in_flight: RefCell<HashSet<(NodeIndex, RoutingSiteKey)>>,
+    pub(super) caches: PlannerCaches,
     pub(super) disabled_subgraphs: apollo_compiler::collections::IndexSet<Arc<str>>,
 }
 
 impl FieldRoutingSearchSpace {
     pub(super) fn node_source(&self, node: NodeIndex) -> Result<NodeSource, FederationError> {
-        let data = self.query_graph.node_weight(node)?;
+        let data = self.cached_query_graph.query_graph.node_weight(node)?;
         Ok(NodeSource {
             subgraph: data.source.clone(),
             type_pos: data.type_.clone().try_into()?,
-            schema: self.query_graph.schema_by_source(&data.source)?.clone(),
+            schema: self
+                .cached_query_graph
+                .query_graph
+                .schema_by_source(&data.source)?
+                .clone(),
         })
     }
 
@@ -111,10 +209,7 @@ impl FieldRoutingSearchSpace {
             .append_selection(fetch_node, &base_path.pushed(typename), None);
     }
 
-    /// Op path at which selections enter an entity fetch group: entity
-    /// fetches start from the `_Entity` union, so everything nests under a
-    /// `... on <ConcreteType>` condition rebased onto the supergraph schema
-    /// (which OpPaths reference).
+    /// Op path at which selections enter an entity fetch group.
     pub(super) fn entity_root_path(
         &self,
         type_name: &Name,
@@ -132,18 +227,13 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Can condition fields simply be selected in the fetch at `node`?
-    /// True when the subgraph resolves every field itself and none carries
-    /// @requires (which draws on an entity representation and needs its own
-    /// fetch). The graph-based check complements the schema-based one:
-    /// @external fields may still resolve at `node` when it is a
-    /// provides-copy created by an ancestor's @provides.
     pub(super) fn can_resolve_in_place(
         &self,
         node: NodeIndex,
         conditions: &Arc<SelectionSet>,
         source: &NodeSource,
     ) -> Result<bool, FederationError> {
-        let satisfiable = self.can_satisfy(
+        let satisfiable = self.cached_can_satisfy(
             conditions,
             &source.type_pos,
             &source.schema,
@@ -151,78 +241,32 @@ impl FieldRoutingSearchSpace {
         Ok(satisfiable && !self.conditions_have_requires(node, conditions)?)
     }
 
-    /// Outgoing edge indices from a query graph node, sorted and filtered.
-    pub(super) fn out_edge_indices(&self, node: NodeIndex) -> Vec<EdgeIndex> {
-        self.query_graph
-            .out_edges(node)
-            .into_iter()
-            .map(|edge_ref| edge_ref.id())
-            .collect()
-    }
-
-    /// Find the outgoing edge for a field at a query graph node.
-    pub(super) fn edge_for_field(&self, node: NodeIndex, field: &Field) -> Option<EdgeIndex> {
-        self.query_graph
-            .edge_for_field(node, field, &self.override_conditions)
-    }
-
-    /// Find the outgoing downcast edge for an inline fragment at a query
-    /// graph node.
-    pub(super) fn edge_for_inline_fragment(
-        &self,
-        node: NodeIndex,
-        fragment: &InlineFragment,
-    ) -> Option<EdgeIndex> {
-        self.query_graph.edge_for_inline_fragment(node, fragment)
-    }
-
     /// Advance through everything that is not a genuine decision: commit
     /// single-option selections and condition pendings greedily, handle
     /// zero-option selections via drops, and lift forced entries above open
     /// decisions so their fetch groups inform scoring. Stops at the first
     /// multi-option ordinary selection.
-    ///
-    /// Forced commits keep a trail of frames so a drop deeper in the chain
-    /// can rewind to an ancestor with untried options (see
-    /// `backtrack_forced`): a circular-key hop failing its commit is
-    /// often avoidable only by routing an ancestor condition differently,
-    /// and no BULB decision frame exists between forced commits to recover
-    /// through. The trail is scoped to this call.
     fn fast_forward(&self, state: &mut PlanState) -> Result<(), FederationError> {
         let mut trail = ForcedTrail::default();
         while let Some(top) = state.pending.last() {
-            // A site already proven hopeless in this call fails fast:
-            // ancestor alternatives can re-push the same doomed selection,
-            // and re-proving the dead end from scratch each time would spend
-            // the whole backtracking budget without ever ascending to the
-            // frame whose alternative actually routes around it.
             if !trail.doomed.is_empty() && trail.doomed.contains(&pending_site(top)) {
                 self.recover_doomed(state, &mut trail);
                 continue;
             }
-            let options = Arc::new(self.routing_options(top)?);
+            let options = self.cached_routing_options(top)?;
             match options.len() {
                 0 => {
                     trail.doomed.insert(pending_site(top));
                     self.recover_doomed(state, &mut trail);
                 }
-                // A single option is no decision. Condition selections
-                // (@requires / @key data) never become decision points even
-                // with several options: which subgraph serves them has no
-                // plan-shape tradeoff worth beam-searching, and exploring
-                // them per probe explodes the search.
                 1 => self.commit_forced(state, options, &mut trail),
                 _ if top.condition.is_some() => self.commit_forced(state, options, &mut trail),
                 _ => {
-                    // A BULB decision point. Before stopping, commit any
-                    // forced pendings deeper in the stack (single-option,
-                    // no-option, or condition selections) so their fetch
-                    // groups inform this decision's scoring.
                     let mut lifted = false;
                     for index in (0..state.pending.len().saturating_sub(1)).rev() {
                         let entry = &state.pending[index];
                         if entry.condition.is_some()
-                            || Arc::new(self.routing_options(entry)?).len() <= 1
+                            || self.cached_routing_options(entry)?.len() <= 1
                         {
                             state.lift_pending(index);
                             lifted = true;
@@ -239,9 +283,7 @@ impl FieldRoutingSearchSpace {
         Ok(())
     }
 
-    /// Pop a pending whose site is proven hopeless and recover: rewind an
-    /// ancestor forced commit if one has untried options (see
-    /// `backtrack_forced`), otherwise drop the selection.
+    /// Pop a pending whose site is proven hopeless and recover.
     fn recover_doomed(&self, state: &mut PlanState, trail: &mut ForcedTrail) {
         let pending = state.pop_pending().unwrap();
         if pending.best_effort || !self.backtrack_forced(state, trail) {
@@ -250,12 +292,6 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Pop the top pending selection and commit its best-ranked option.
-    ///
-    /// A failed commit rolls the whole state back to just after the pop:
-    /// `commit_choice` pushes pendings mid-flight, and a graph-only rollback
-    /// would leak entries whose `ordering_dependent` names a node index the
-    /// rollback freed. A failure first tries the pending's own lower-ranked
-    /// options and then ancestor frames via `backtrack_forced`.
     fn commit_forced(
         &self,
         state: &mut PlanState,
@@ -287,16 +323,12 @@ impl FieldRoutingSearchSpace {
         } else if failed {
             trail.doomed.insert(pending_site(&pending));
         }
-        // A failed best-effort commit stays a silent no-op: its loss must
-        // neither burn backtracking budget nor fail the plan.
         if failed && !best_effort && !self.backtrack_forced(state, trail) {
             state.dropped_fields += 1;
         }
     }
 
-    /// Rewind the forced-commit trail after a drop and try alternatives,
-    /// deepest frame first, each option in rank order. Returns `true` when
-    /// the state was rewound, `false` when nothing was attempted.
+    /// Rewind the forced-commit trail after a drop and try alternatives.
     fn backtrack_forced(&self, state: &mut PlanState, trail: &mut ForcedTrail) -> bool {
         let mut parked: Option<(Arc<PendingSelection>, RoutingChoice)> = None;
         loop {
@@ -333,8 +365,6 @@ impl FieldRoutingSearchSpace {
                 Err(_) => state.rollback(checkpoint),
             }
         }
-        // Give-up after rewinding: re-drive the greedy choice so the
-        // caller's loop can continue from a committed state.
         if let Some((pending, choice)) = parked {
             if self.commit_choice(state, &pending, &choice).is_err() {
                 state.dropped_fields += 1;
@@ -345,16 +375,11 @@ impl FieldRoutingSearchSpace {
     }
 }
 
-/// One multi-option forced commit on the fast-forward path, kept so a later
-/// drop can rewind to it and try the next-ranked option. Frames are always
-/// condition pendings, the class whose greedy routing can strand a
-/// descendant on a circular key.
+/// One multi-option forced commit on the fast-forward path.
 struct ForcedFrame {
     pending: Arc<PendingSelection>,
     options: Arc<Vec<RoutingChoice>>,
-    /// Next untried option index; `options[0]` was the greedy choice.
     next_option: usize,
-    /// State just after popping `pending`, before any commit.
     checkpoint: PlanCheckpoint,
 }
 
@@ -362,13 +387,10 @@ struct ForcedFrame {
 #[derive(Default)]
 struct ForcedTrail {
     frames: Vec<ForcedFrame>,
-    /// Sites whose every routing option failed during this call. Consulted
-    /// before committing so recurring instances fail fast.
     doomed: HashSet<(NodeIndex, RoutingSiteKey)>,
 }
 
-/// Identity of a pending's routing position: the query graph node plus the
-/// selection's field or type-condition name.
+/// Identity of a pending's routing position.
 fn pending_site(pending: &PendingSelection) -> (NodeIndex, RoutingSiteKey) {
     let key = match &pending.selection {
         Selection::Field(f) => RoutingSiteKey::Field(f.field.name().clone()),
@@ -382,7 +404,6 @@ fn pending_site(pending: &PendingSelection) -> (NodeIndex, RoutingSiteKey) {
     (pending.query_graph_node, key)
 }
 
-/// Upper bound on forced-commit backtracking attempts per candidate.
 const FORCED_BACKTRACK_CAP: u64 = 256;
 
 /// Short human-readable label for a selection, for logging.
@@ -397,18 +418,13 @@ pub(super) fn selection_label(selection: &Selection) -> String {
 
 impl BulbSearchSpace for FieldRoutingSearchSpace {
     type Candidate = PlanState;
-    /// `Arc` so advance() hands out the stack top in O(1).
     type Decision = Arc<PendingSelection>;
     type Choice = RoutingChoice;
     type Checkpoint = PlanCheckpoint;
 
-    /// Advance past all single-option fields (fast-forward) in place.
-    /// Returns the first multi-option decision point, or Complete.
     fn advance(&self, candidate: &mut PlanState) -> AdvanceResult<Arc<PendingSelection>> {
         if let Err(e) = self.fast_forward(candidate) {
             debug!(error = %e, "fast_forward error, completing candidate early");
-            // Count every unplanned selection as dropped so cost() keeps
-            // this failed candidate below any genuinely complete plan.
             candidate.dropped_fields += candidate.pending.len().max(1);
             while candidate.pop_pending().is_some() {}
             return AdvanceResult::Complete;
@@ -419,23 +435,16 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
         }
     }
 
-    /// Enumerate routing options for a decision.
     fn options(&self, decision: &Arc<PendingSelection>) -> Vec<RoutingChoice> {
         self.routing_options(decision).unwrap_or_default()
     }
 
-    /// Apply a routing choice to the candidate in place. Pops the decision,
-    /// commits the choice, and fast-forwards past any resulting single-option
-    /// children.
     fn apply(
         &self,
         candidate: &mut PlanState,
         _decision: &Arc<PendingSelection>,
         choice: &RoutingChoice,
     ) {
-        // A choice is a unit of effort even when the commit pushes no
-        // children (leaf fields); otherwise flat operations register no
-        // effort and the search's fuel budget never binds.
         candidate.effort += 1;
         if matches!(
             choice.target,
@@ -454,8 +463,6 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
             "applying routing choice",
         );
 
-        // Full-state checkpoint: a failed commit_choice may have pushed
-        // pendings that must not leak.
         let cp = candidate.checkpoint();
         if let Err(e) = self.commit_choice(candidate, &pending, choice) {
             candidate.rollback(cp);
@@ -479,7 +486,6 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
         candidate.rollback(cp);
     }
 
-    /// Full deep clone, used only for saving the best complete candidate.
     fn snapshot(&self, candidate: &PlanState) -> PlanState {
         candidate.clone()
     }
@@ -492,9 +498,6 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
         candidate.effort
     }
 
-    /// Heuristic cost, lower is better. Drop penalties are large but finite
-    /// (f64::MAX would prune the state entirely and leave the greedy pass
-    /// with no completion when all successors have drops).
     fn cost(&self, candidate: &PlanState) -> QueryPlanCost {
         let base = candidate.graph.cost();
         // Dropped fields are hard failures (requested data omitted),
