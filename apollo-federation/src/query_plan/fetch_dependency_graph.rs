@@ -3007,6 +3007,7 @@ impl FetchDependencyGraphNode {
         }
         let node = super::PlanNode::Fetch(Box::new(super::FetchNode {
             subgraph_name: self.subgraph_name.clone(),
+            protocol: Default::default(),
             id: self.id.get().copied(),
             variable_usages,
             requires: input_nodes
