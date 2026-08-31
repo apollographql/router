@@ -2973,7 +2973,7 @@ impl FetchDependencyGraphNode {
                 &operation_name,
             )?
         };
-        let operation_document = operation_compression.compress(operation)?;
+        let operation_document = operation_compression.compress(operation, false)?;
 
         // this function removes unnecessary pieces of the query plan requires selection set.
         // PORT NOTE: this function was called trimSelectioNodes in the JS implementation
