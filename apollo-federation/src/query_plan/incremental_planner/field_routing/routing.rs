@@ -533,6 +533,7 @@ impl FieldRoutingSearchSpace {
                 target_subgraph = %c.target_subgraph,
                 conditions_local = c.conditions_local,
                 conditions_provided,
+                conditions_unroutable,
                 ?hop_kind,
                 "found edge via key hop",
             );
