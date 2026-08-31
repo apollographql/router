@@ -140,7 +140,7 @@ jsonwebtoken = { version = "10.0.0", features = ["rust_crypto"] }
 libc = "0.2.155"
 linkme = "0.3.30"
 lru = "0.18.0"
-mediatype = "0.21.0"
+mediatype = "0.23.0"
 mockall = "0.15.0"
 mime = "0.3.17"
 multer = "3.1.0"
