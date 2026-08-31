@@ -5,6 +5,7 @@ use std::sync::Arc;
 use petgraph::graph::NodeIndex;
 
 use super::FieldRoutingSearchSpace;
+use super::cached_query_graph::CachedQueryGraph;
 use crate::composition::compose;
 use crate::query_graph::build_federated_query_graph;
 use crate::schema::ValidFederationSchema;
@@ -41,12 +42,16 @@ fn space_for(schema: ValidFederationSchema, api: ValidFederationSchema) -> Field
     let query_graph =
         build_federated_query_graph(schema.clone(), api, None, None).expect("query graph");
     FieldRoutingSearchSpace {
-        query_graph: Arc::new(query_graph),
+        cached_query_graph: CachedQueryGraph::new(
+            Arc::new(query_graph),
+            Default::default(),
+            Default::default(),
+        ),
         supergraph_schema: schema,
         override_conditions: Default::default(),
         inconsistent_abstract_types: Default::default(),
+        caches: super::PlannerCaches::new(),
         disabled_subgraphs: Default::default(),
-        key_hops_in_flight: Default::default(),
     }
 }
 
@@ -57,11 +62,13 @@ pub(super) fn node_for(
     type_name: &str,
 ) -> NodeIndex {
     space
+        .cached_query_graph
         .query_graph
         .graph()
         .node_indices()
         .find(|&idx| {
             let node = space
+                .cached_query_graph
                 .query_graph
                 .node_weight(idx)
                 .expect("node weight exists");
