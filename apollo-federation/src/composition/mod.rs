@@ -9,6 +9,7 @@ use crate::error::CompositionError;
 use crate::merger::merge::Merger;
 pub use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
 use crate::schema::validators::connectors::validate_override_on_connector;
+use crate::schema::validators::one_of::validate_one_of_consistency;
 use crate::schema::validators::root_fields::validate_consistent_root_fields;
 use crate::subgraph::SubgraphError;
 use crate::subgraph::typestate::Expanded;
@@ -153,6 +154,7 @@ pub fn expand_subgraphs(
 #[instrument(skip(subgraphs))]
 pub fn pre_merge_validations(subgraphs: &[Subgraph<Validated>]) -> Result<(), CompositionFailure> {
     validate_consistent_root_fields(subgraphs).map_err(CompositionFailure::from_errors)?;
+    validate_one_of_consistency(subgraphs).map_err(CompositionFailure::from_errors)?;
     // TODO: (FED-713) Implement any pre-merge validations that require knowledge of all subgraphs.
     Ok(())
 }

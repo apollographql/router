@@ -26,8 +26,6 @@ impl Merger {
         sources: &Sources<Node<InputObjectType>>,
         dest: &InputObjectTypeDefinitionPosition,
     ) -> Result<(), FederationError> {
-        self.validate_one_of_consistency(sources, dest);
-
         // Like for other inputs, we add all the fields found in any subgraphs initially as a simple mean to have a complete list of
         // field to iterate over, but we will remove those that are not in all subgraphs.
         let added = self.add_input_fields_shallow(sources, dest)?;
@@ -277,40 +275,5 @@ impl Merger {
 
         self.merge_default_value(sources, dest_field)?;
         Ok(())
-    }
-
-    fn validate_one_of_consistency(
-        &mut self,
-        sources: &Sources<Node<InputObjectType>>,
-        dest: &InputObjectTypeDefinitionPosition,
-    ) {
-        let mut with_one_of: Vec<String> = Vec::new();
-        let mut without_one_of: Vec<String> = Vec::new();
-
-        for (idx, source) in sources {
-            let Some(source) = source else {
-                continue;
-            };
-            let has_one_of = source.directives.has("oneOf");
-            let subgraph_name = self.names[*idx].to_string();
-            if has_one_of {
-                with_one_of.push(subgraph_name);
-            } else {
-                without_one_of.push(subgraph_name);
-            }
-        }
-
-        if !with_one_of.is_empty() && !without_one_of.is_empty() {
-            let with_str = human_readable_subgraph_names(with_one_of.iter());
-            let without_str = human_readable_subgraph_names(without_one_of.iter());
-            self.error_reporter
-                .add_error(CompositionError::InputObjectOneOfMismatch {
-                    message: format!(
-                        "Input object type \"{}\" is marked with @oneOf in {} but not in {}",
-                        dest.type_name, with_str, without_str,
-                    ),
-                    locations: self.source_locations(sources),
-                });
-        }
     }
 }
