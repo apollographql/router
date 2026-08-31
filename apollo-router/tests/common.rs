@@ -419,6 +419,8 @@ pub struct IntegrationTest {
     log: String,
     subgraph_context: Arc<Mutex<Option<SpanContext>>>,
     logs: Vec<String>,
+    /// Exit status of the router process, or `None` until the router has exited.
+    exit_status: Option<std::process::ExitStatus>,
     port_replacements: HashMap<String, u16>,
     jwt: Option<String>,
     env: Option<HashMap<String, OsString>>,
@@ -981,6 +983,7 @@ impl IntegrationTest {
             log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
             subgraph_context,
             logs: vec![],
+            exit_status: None,
             port_replacements: HashMap::new(),
             jwt,
             env,
@@ -2072,7 +2075,8 @@ impl IntegrationTest {
         let now = Instant::now();
         while now.elapsed() < deadline {
             match router.try_wait() {
-                Ok(Some(_)) => {
+                Ok(Some(status)) => {
+                    self.exit_status = Some(status);
                     self.router = None;
                     return;
                 }
@@ -2083,6 +2087,24 @@ impl IntegrationTest {
 
         self.dump_stack_traces().await;
         panic!("unable to shutdown router, this probably means a hang and should be investigated");
+    }
+
+    /// Asserts the router process exited successfully.
+    ///
+    /// `assert_shutdown` only waits for the process to be reaped and deliberately ignores the
+    /// exit code, so a router that panics on its way out still looks like a clean shutdown to
+    /// it. Call this after `graceful_shutdown()` when a test cares that SIGTERM produced an
+    /// orderly exit rather than just an exit.
+    #[allow(dead_code)]
+    pub fn assert_clean_exit(&self) {
+        let status = self
+            .exit_status
+            .expect("router has not been shut down yet - call graceful_shutdown() first");
+        assert!(
+            status.success(),
+            "router exited with {status}, expected a clean exit. Log dump below:\n\n{logs}",
+            logs = self.logs.join("\n")
+        );
     }
 
     #[allow(dead_code)]

@@ -449,12 +449,12 @@ impl InstrumentData {
             "$[?(@.expose_sources_in_context == true)]",
             opt.max_requests_per_operation_per_source,
             "$[?(@.max_requests_per_operation_per_source)]",
-            opt.subgraph.config,
-            "$[?(@.subgraphs..['$config'])]",
+            opt.source.config,
+            "$[?(@.sources..['$config'])]",
             opt.source.override_url,
-            "$[?(@.subgraphs..sources..override_url)]",
+            "$[?(@.sources..override_url)]",
             opt.source.max_requests_per_operation,
-            "$[?(@.subgraphs..sources..max_requests_per_operation)]"
+            "$[?(@.sources..max_requests_per_operation)]"
         );
 
         populate_config_instrument!(

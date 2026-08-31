@@ -27,6 +27,7 @@
 //! entire subscriber stack, which would require restarting the application.
 
 use std::io::IsTerminal;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -39,7 +40,9 @@ use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_sdk::trace::IdGenerator;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::trace::Tracer;
+use parking_lot::Mutex;
 use tower::BoxError;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
@@ -81,6 +84,20 @@ static FMT_LAYER_HANDLE: OnceCell<
     Handle<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>,
 > = OnceCell::new();
 
+/// The tracer provider installed by the most recent activation.
+///
+/// Nothing else in the process can shut this provider down. `SdkTracer` holds a *strong*
+/// `SdkTracerProvider`, and [`OPENTELEMETRY_TRACER_HANDLE`] — a process-lifetime static — holds a
+/// tracer via `ReloadTracer`. So `global::set_tracer_provider` only ever drops one of several
+/// clones and never triggers the provider's own `Drop` -> `shutdown()`. The consequences are that
+/// spans buffered in its batch processors are silently lost at exit, and that those processors'
+/// background workers are still polling Tokio timers when the runtime is torn down, which panics.
+///
+/// Keeping an explicit handle here lets shutdown call
+/// [`shutdown_installed_tracer_provider`] instead of relying on drop order.
+static INSTALLED_TRACER_PROVIDER: LazyLock<Mutex<Option<SdkTracerProvider>>> =
+    LazyLock::new(Default::default);
+
 pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
     let hot_tracer = ReloadTracer::new(
         opentelemetry_sdk::trace::SdkTracerProvider::default()
@@ -100,9 +117,8 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
     // Stash the reload handles so that we can hot reload later
     OPENTELEMETRY_TRACER_HANDLE
         .get_or_try_init(move || {
-            // manually filter salsa logs because some of them run at the INFO level https://github.com/salsa-rs/salsa/issues/425
             // filter opentelemetry internal logs to warn level (OTel 0.31 emits INFO logs for provider setup)
-            let log_level = format!("{log_level},salsa=error,opentelemetry=warn");
+            let log_level = format!("{log_level},opentelemetry=warn");
             tracing::debug!("Running the router with log level set to {log_level}");
             // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
             // the tracing registry is only created once
@@ -138,6 +154,51 @@ pub(in crate::plugins::telemetry) fn reload_fmt(
 
 pub(crate) fn apollo_opentelemetry_initialized() -> bool {
     OPENTELEMETRY_TRACER_HANDLE.get().is_some()
+}
+
+/// Records the tracer provider that has just been installed globally, returning the one it
+/// replaced. The caller owns the returned provider and must hand it to
+/// [`shutdown_tracer_provider`] from a blocking context.
+///
+/// See [`INSTALLED_TRACER_PROVIDER`] for why this bookkeeping is needed.
+pub(in crate::plugins::telemetry) fn set_installed_tracer_provider(
+    provider: SdkTracerProvider,
+) -> Option<SdkTracerProvider> {
+    INSTALLED_TRACER_PROVIDER.lock().replace(provider)
+}
+
+/// Shuts down the tracer provider installed by the last activation, flushing whatever its batch
+/// processors have buffered.
+///
+/// Must be called from a blocking thread, and while the Tokio runtime is still alive: shutdown
+/// blocks until each span processor has flushed, and those processors need the runtime to make
+/// progress.
+pub(crate) fn shutdown_installed_tracer_provider() {
+    // Take the provider out before shutting it down: shutdown can emit logs and metrics, which
+    // must not re-enter this lock.
+    let provider = INSTALLED_TRACER_PROVIDER.lock().take();
+    shutdown_tracer_provider(provider);
+}
+
+/// Shuts `provider` down, if there is one, and reports failures.
+///
+/// Calling `shutdown()` rather than dropping the provider guarantees its span processors
+/// are flushed and stopped. `SdkTracerProvider` is refcounted, so its `Drop` reaches the
+/// processors only when the *last* clone goes away, and clones outlive every point at which the
+/// router is done with a provider: the `SdkTracer` in [`OPENTELEMETRY_TRACER_HANDLE`] holds one
+/// for the whole process lifetime, and every span still in flight at a reload holds one of the
+/// provider it started under. `shutdown()` ignores the refcount and reaches the processors
+/// regardless.
+///
+/// Must be called from a blocking thread while the Tokio runtime is still alive: shutting a batch
+/// processor down blocks until it has flushed, and it needs the runtime to make progress.
+pub(in crate::plugins::telemetry) fn shutdown_tracer_provider(provider: Option<SdkTracerProvider>) {
+    let Some(provider) = provider else {
+        return;
+    };
+    if let Err(error) = provider.shutdown() {
+        tracing::error!(%error, "Failed to shut down OTel tracer provider cleanly");
+    }
 }
 
 // When propagating trace headers to a subgraph or coprocessor, we need a valid trace id and span id
@@ -188,5 +249,63 @@ where
         let otel_span = d.current_cx.span();
         let sc = otel_span.span_context();
         sc.is_valid().then(|| sc.trace_id().to_bytes().into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use opentelemetry::trace::Span as _;
+    use opentelemetry::trace::Tracer as _;
+
+    use super::*;
+    use crate::plugins::telemetry::reload::testing::ShutdownProbe;
+
+    /// The provider a batch processor belongs to used to be shut down only by dropping its last
+    /// clone — which never happened, because `ReloadTracer` holds a `SdkTracer` (and therefore a
+    /// strong `SdkTracerProvider`) for the whole process lifetime. Spans buffered at exit were
+    /// lost, and the processors' background workers outlived the Tokio runtime and panicked.
+    #[test]
+    fn tracer_provider_is_shut_down_while_a_tracer_still_holds_it() {
+        let probe = ShutdownProbe::default();
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(probe.clone())
+            .build();
+
+        // Stands in for the tracer stashed in OPENTELEMETRY_TRACER_HANDLE: a strong clone that
+        // outlives every attempt to shut the provider down by dropping it.
+        let stale_tracer =
+            provider.tracer_with_scope(InstrumentationScope::builder("test").build());
+
+        // Sanity check that the probe reports the state we are about to assert a change in, and
+        // that merely handing the provider over does not shut it down.
+        let provider = Some(provider);
+        assert!(!probe.was_shut_down());
+
+        shutdown_tracer_provider(provider);
+
+        assert!(
+            probe.was_shut_down(),
+            "shutdown must reach the span processors even though `stale_tracer` still holds a \
+             strong clone of the provider"
+        );
+        // A tracer left pointing at the shut-down provider must stop recording rather than hand
+        // spans to processors that are no longer running.
+        assert!(!stale_tracer.start("after-shutdown").is_recording());
+    }
+
+    #[test]
+    fn shutting_down_the_tracer_provider_twice_does_not_panic() {
+        let probe = ShutdownProbe::default();
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(probe.clone())
+            .build();
+
+        shutdown_tracer_provider(Some(provider.clone()));
+        assert!(probe.was_shut_down());
+
+        shutdown_tracer_provider(Some(provider));
+        // And the no-provider-installed case, which is what a second
+        // `shutdown_installed_tracer_provider` call sees.
+        shutdown_tracer_provider(None);
     }
 }

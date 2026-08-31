@@ -332,6 +332,8 @@ impl SubgraphServices {
     /// Retrieves the pre-built subgraph service stack for `name`, or `None` if no subgraph
     /// is registered under that name.
     pub(crate) fn get(&self, name: &str) -> Option<subgraph::BoxCloneService> {
+        // Note: we have to box our cloned service to erase the type of the Buffer. The stack
+        // inside the buffer is already boxed, so this is the only box on the way out.
         self.services.get(name).map(|svc| svc.clone().boxed_clone())
     }
 }

@@ -2988,15 +2988,6 @@ expression: "&schema"
           "default": {},
           "description": "Map of subgraph_name.connector_source_name to source configuration",
           "type": "object"
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/SubgraphConnectorConfiguration"
-          },
-          "default": {},
-          "deprecated": true,
-          "description": "A map of subgraph name to connectors config for that subgraph",
-          "type": "object"
         }
       },
       "type": "object"
@@ -10282,27 +10273,6 @@ expression: "&schema"
           "type": "object"
         }
       ]
-    },
-    "SubgraphConnectorConfiguration": {
-      "additionalProperties": false,
-      "description": "Configuration for a connector subgraph",
-      "properties": {
-        "$config": {
-          "additionalProperties": true,
-          "default": {},
-          "description": "Other values that can be used by connectors via `{$config.<key>}`",
-          "type": "object"
-        },
-        "sources": {
-          "additionalProperties": {
-            "$ref": "#/definitions/SourceConfiguration"
-          },
-          "default": {},
-          "description": "A map of `@source(name:)` to configuration for that source",
-          "type": "object"
-        }
-      },
-      "type": "object"
     },
     "SubgraphDeduplicationConfigConfiguration": {
       "description": "Configuration options pertaining to the subgraph server component.",
