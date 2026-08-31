@@ -942,16 +942,6 @@ impl FieldRoutingSearchSpace {
             self.push_split_duplicate(state, pending, sub_ss, &split_children)?;
         }
 
-        // Fields propagate the split_parent chain so try_split_repush can
-        // walk up to find an ancestor with alternative routing options.
-        // Fragments are transparent: they pass through their parent's anchor.
-        let child_split_parent: Option<Arc<PendingSelection>> =
-            if matches!(pending.selection, Selection::Field(_)) {
-                Some(Arc::new(pending.clone()))
-            } else {
-                pending.split_parent.clone()
-            };
-
         for sub_sel in sub_ss.selections.values().rev().cloned() {
             state.push_pending(
                 pending
@@ -962,8 +952,7 @@ impl FieldRoutingSearchSpace {
                     .with_provides_anchor(child_provides_anchor)
                     .with_defer(child_defer_ref.clone())
                     .with_parent_types(child_parent_types.clone())
-                    .with_context_anchor(child_context_anchor.clone())
-                    .with_split_parent(child_split_parent.clone()),
+                    .with_context_anchor(child_context_anchor.clone()),
             );
         }
         Ok(())
