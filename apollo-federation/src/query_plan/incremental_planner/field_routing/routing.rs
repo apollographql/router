@@ -58,7 +58,8 @@ pub(crate) struct RoutingChoice {
     /// position descended from via downcasts
     /// ([`PendingSelection::provides_anchor`]). When true, commit appends
     /// the conditions to the parent fetch (the subgraph echoes provided
-    /// fields) instead of pushing them as pendings.
+    /// fields) instead of pushing them as pendings. Exact, path-level
+    /// provenance — never a type-level guess.
     pub(crate) conditions_provided: bool,
     /// When the routed edge carries @requires conditions: whether the fetch
     /// anchoring the field can select the condition fields in place. Commit
