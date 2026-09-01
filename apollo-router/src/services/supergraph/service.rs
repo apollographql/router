@@ -3,7 +3,6 @@
 use std::sync::Arc;
 use std::task::Poll;
 
-use futures::TryFutureExt;
 use futures::future::BoxFuture;
 use futures::future::ready;
 use futures::stream::StreamExt;
@@ -125,36 +124,18 @@ impl Service<SupergraphRequest> for SupergraphService {
 
         let schema = self.schema.clone();
 
-        let context_cloned = req.context.clone();
-        let fut = service_call(
+        // Any error escaping `service_call` is an unhandled internal failure: every
+        // client-actionable error is already returned as an `Ok` response in there. Propagate
+        // it as an `Err` so plugins and coprocessors never have to handle internal errors;
+        // `internal_server_error` in the axum factory turns it into an opaque 500 for the
+        // client and logs the detail for operators.
+        Box::pin(service_call(
             planning,
             self.execution_service.clone(),
             schema,
             req,
             self.strict_variable_validation,
-        )
-        .or_else(|error: BoxError| async move {
-            // Any error reaching this catch-all is an unhandled internal failure: every
-            // client-actionable error is already returned as an `Ok` response upstream in
-            // `service_call`. Log the detail for operators, but do not put it in the response
-            // as it could leak internal information (e.g. query planner internals) to the
-            // caller. This mirrors `internal_server_error` in the axum factory.
-            tracing::error!(code = "INTERNAL_SERVER_ERROR", err = %error);
-            let errors = vec![
-                crate::error::Error::builder()
-                    .message("internal server error")
-                    .extension_code("INTERNAL_SERVER_ERROR")
-                    .build(),
-            ];
-
-            Ok(SupergraphResponse::infallible_builder()
-                .errors(errors)
-                .status_code(StatusCode::INTERNAL_SERVER_ERROR)
-                .context(context_cloned)
-                .build())
-        });
-
-        Box::pin(fut)
+        ))
     }
 }
 

@@ -782,4 +782,66 @@ mod tests {
 
         drop(call_fut);
     }
+
+    /// A supergraph whose `Book.ui` field carries `@requires(fields: "cover { themable }")` while
+    /// the client requests `cover(size: "large")`. Planning `ui` produces an internal federation
+    /// error (`operation must not provide conflicting field arguments for the same name 'cover'`).
+    /// See RH-1367.
+    const REQUIRES_INCLUDE_CONFLICT_SCHEMA: &str =
+        include_str!("../testdata/requires_include_conflict_supergraph.graphql");
+
+    const REQUIRES_INCLUDE_CONFLICT_QUERY: &str = "query Test($enabled: Boolean = false) { \
+         queryAllBooks { cover(size: \"large\") { themable } ui @include(if: $enabled) } }";
+
+    /// An unhandled internal error (here, an internal query planner failure) must not have its
+    /// detail echoed back to the caller: the raw message exposes subgraph/supergraph internals the
+    /// client has no visibility into and cannot act on, so returning it is an
+    /// information-disclosure risk. Such errors propagate as `Err` through the whole service
+    /// pipeline and are only turned into a response by `internal_server_error` above: the caller
+    /// gets a generic message with the status and code preserved, while the detail is logged
+    /// server-side so operators keep it. See RH-1367.
+    #[tokio::test]
+    async fn internal_query_planner_error_is_redacted_from_client_response() {
+        let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+
+        let service = crate::TestHarness::builder()
+            .schema(REQUIRES_INCLUDE_CONFLICT_SCHEMA)
+            .build_http_service()
+            .await
+            .unwrap();
+
+        let request = http::Request::builder()
+            .method("POST")
+            .uri("/")
+            .header(ACCEPT, "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .body(router::body::from_bytes(
+                serde_json::to_vec(&json!({ "query": REQUIRES_INCLUDE_CONFLICT_QUERY })).unwrap(),
+            ))
+            .unwrap();
+
+        let response = service.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let body: serde_json::Value = serde_json::from_slice(
+            &router::body::into_bytes(response.into_body())
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let error = &body["errors"][0];
+        assert_eq!(error["message"], "internal server error");
+        assert_eq!(error["extensions"]["code"], "INTERNAL_SERVER_ERROR");
+
+        // The raw planner detail must not appear anywhere in the client-facing response, but it
+        // must still be logged server-side.
+        let serialized = serde_json::to_string(&body).unwrap();
+        assert!(
+            !serialized.contains("conflicting field arguments"),
+            "internal error detail leaked to the client: {serialized}"
+        );
+        assert!(crate::test_harness::tracing_test::logs_contain(
+            "conflicting field arguments"
+        ));
+    }
 }
