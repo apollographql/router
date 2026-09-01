@@ -226,10 +226,6 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) batching: Batching,
 
-    /// Type conditioned fetching configuration.
-    #[serde(default)]
-    pub(crate) experimental_type_conditioned_fetching: bool,
-
     /// When enabled for specific subgraphs, orphan errors (those without a valid
     /// `_entities` path) are assigned to the nearest non-array ancestor in the
     /// response path, preventing them from being duplicated across every array
@@ -270,7 +266,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: limits::Config,
             experimental_chaos: chaos::Config,
             batching: Batching,
-            experimental_type_conditioned_fetching: bool,
             experimental_hoist_orphan_errors: SubgraphConfiguration<HoistOrphanErrors>,
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
@@ -303,7 +298,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             persisted_queries: ad_hoc.persisted_queries,
             limits: ad_hoc.limits,
             experimental_chaos: ad_hoc.experimental_chaos,
-            experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
             experimental_hoist_orphan_errors: ad_hoc.experimental_hoist_orphan_errors,
             plugins: ad_hoc.plugins,
             apollo_plugins: ad_hoc.apollo_plugins,
@@ -344,7 +338,6 @@ impl Configuration {
         operation_limits: Option<limits::Config>,
         chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
-        experimental_type_conditioned_fetching: Option<bool>,
         experimental_hoist_orphan_errors: Option<SubgraphConfiguration<HoistOrphanErrors>>,
         batching: Option<Batching>,
         server: Option<Server>,
@@ -374,8 +367,6 @@ impl Configuration {
             tls: tls.unwrap_or_default(),
             uplink,
             batching: batching.unwrap_or_default(),
-            experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
-                .unwrap_or_default(),
             experimental_hoist_orphan_errors: experimental_hoist_orphan_errors.unwrap_or_default(),
             notify,
         };
@@ -450,7 +441,6 @@ impl Configuration {
             incremental_delivery: QueryPlanIncrementalDeliveryConfig {
                 enable_defer: self.supergraph.defer_support,
             },
-            type_conditioned_fetching: self.experimental_type_conditioned_fetching,
             debug: QueryPlannerDebugConfig {
                 max_evaluated_plans,
                 paths_limit: self.supergraph.query_planning.experimental_paths_limit,
@@ -486,7 +476,6 @@ impl Configuration {
         chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
-        experimental_type_conditioned_fetching: Option<bool>,
         server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
@@ -511,8 +500,6 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
-            experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
-                .unwrap_or_default(),
             experimental_hoist_orphan_errors: Default::default(),
             batching: batching.unwrap_or_default(),
             raw_yaml: None,

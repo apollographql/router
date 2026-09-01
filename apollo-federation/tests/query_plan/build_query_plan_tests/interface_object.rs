@@ -2,7 +2,6 @@ use std::ops::Deref;
 
 use apollo_federation::query_plan::FetchDataPathElement;
 use apollo_federation::query_plan::FetchDataRewrite;
-use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 use crate::query_plan::build_query_plan_support::find_fetch_nodes_for_subgraph;
 
@@ -961,10 +960,6 @@ fn test_interface_object_advance_with_non_collecting_and_type_preserving_transit
 #[test]
 fn test_type_conditioned_fetching_with_interface_object_does_not_crash() {
     let planner = planner!(
-        config = QueryPlannerConfig {
-          type_conditioned_fetching: true,
-          ..Default::default()
-        },
         S1: r#"
           type I @interfaceObject @key(fields: "id") {
             id: ID!

@@ -459,31 +459,6 @@ async fn query_planner_redis_update_defer() {
     .await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn query_planner_redis_update_type_conditional_fetching() {
-    // If this test fails and the cache key format changed you'll need to update
-    // the key here.  Look at the top of the file for instructions on getting
-    // the new cache key.
-    //
-    // You first need to follow the process and update the key in
-    // `test_redis_query_plan_config_update`, and then update the key in this
-    // test.
-    //
-    // This test requires graphos license, so make sure you have
-    // "TEST_APOLLO_KEY" and "TEST_APOLLO_GRAPH_REF" env vars set, otherwise the
-    // test just passes locally.
-    test_redis_query_plan_config_update(
-        include_str!(
-            "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
-        ),
-        &format!(
-            "plan:router:{}:14ece7260081620bb49f1f4934cf48510e5f16c3171181768bb46a5609d7dfb7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:bdc09980aa6ef28a67f5aeb8759763d8ac5a4fc43afa8c5a89f58cc998c48db3",
-            env!("CARGO_PKG_VERSION")
-        ),
-    )
-    .await;
-}
-
 async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key: &str) {
     if !graph_os_enabled() {
         return;

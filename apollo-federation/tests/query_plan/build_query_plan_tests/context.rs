@@ -710,62 +710,104 @@ fn set_context_test_with_type_conditions_for_union() {
           }
         }
         "#,
-        @r###"
-           QueryPlan {
-             Sequence {
-               Fetch(service: "Subgraph1") {
-                 {
-                   t {
-                     __typename
-                     ... on A {
-                       __typename
-                       prop
-                       u {
-                         __typename
-                         id
-                         b
-                       }
-                     }
-                     ... on B {
-                       __typename
-                       prop
-                       u {
-                         __typename
-                         id
-                         b
-                       }
-                     }
-                   }
-                 }
-               },
-               Flatten(path: "t.u") {
-                 Fetch(service: "Subgraph1") {
-                   {
-                     ... on U {
-                       __typename
-                       id
-                     }
-                   } =>
-                   {
-                     ... on U {
-                       field(a: $contextualArgument_1_0)
-                     }
-                   }
-                 },
-               },
-             },
-           }
-           "###
+        @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            t {
+              __typename
+              ... on A {
+                __typename
+                prop
+                u {
+                  __typename
+                  id
+                  b
+                }
+              }
+              ... on B {
+                __typename
+                prop
+                u {
+                  __typename
+                  id
+                  b
+                }
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "t|[B].u") {
+            Fetch(service: "Subgraph1") {
+              {
+                ... on U {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on U {
+                  field(a: $contextualArgument_1_0)
+                }
+              }
+            },
+          },
+          Flatten(path: "t|[A].u") {
+            Fetch(service: "Subgraph1") {
+              {
+                ... on U {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on U {
+                  field(a: $contextualArgument_1_0)
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "#
     );
 
-    node_assert!(
-        plan,
-        1,
-        "contextualArgument_1_0",
-        ["..", "... on A", "prop"],
-        "contextualArgument_1_0",
-        ["..", "... on B", "prop"]
-    );
+    // Type conditioned fetching is always enabled, so the two type conditions on the union are
+    // planned as separate, parallel, type-conditioned Flatten branches rather than a single
+    // Flatten carrying both types' context rewrites.
+    let Some(TopLevelPlanNode::Sequence(seq)) = plan.node else {
+        panic!("failed to get sequence node");
+    };
+    let Some(PlanNode::Parallel(parallel)) = seq.nodes.get(1) else {
+        panic!("failed to get parallel node");
+    };
+
+    let assert_context_rewrite = |flatten_index: usize, type_name: &str| {
+        let Some(PlanNode::Flatten(flatten)) = parallel.nodes.get(flatten_index) else {
+            panic!("failed to get flatten node");
+        };
+        let PlanNode::Fetch(fetch) = &*flatten.node else {
+            panic!("failed to get fetch node");
+        };
+        assert_eq!(fetch.context_rewrites.len(), 1);
+        let FetchDataRewrite::KeyRenamer(renamer) = &*fetch.context_rewrites[0] else {
+            panic!("Expected KeyRenamer");
+        };
+        assert_eq!(renamer.rename_key_to.as_str(), "contextualArgument_1_0");
+        assert_eq!(
+            renamer.path,
+            ["..", &format!("... on {type_name}"), "prop"]
+                .into_iter()
+                .map(parse_fetch_data_path_element)
+                .collect::<Vec<_>>()
+        );
+    };
+
+    assert_context_rewrite(0, "B");
+    assert_context_rewrite(1, "A");
 }
 
 #[test]

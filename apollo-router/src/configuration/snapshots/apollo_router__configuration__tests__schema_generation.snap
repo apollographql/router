@@ -13117,11 +13117,6 @@ expression: "&schema"
       },
       "description": "When enabled for specific subgraphs, orphan errors (those without a valid\n`_entities` path) are assigned to the nearest non-array ancestor in the\nresponse path, preventing them from being duplicated across every array\nelement."
     },
-    "experimental_type_conditioned_fetching": {
-      "default": false,
-      "description": "Type conditioned fetching configuration.",
-      "type": "boolean"
-    },
     "fleet_detector": {
       "$ref": "#/definitions/Conf2"
     },

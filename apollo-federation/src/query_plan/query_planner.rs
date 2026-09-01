@@ -86,14 +86,6 @@ pub struct QueryPlannerConfig {
     /// in this sub-set are provided without guarantees of stability (they may be dangerous) or
     /// continued support (they may be removed without warning).
     pub debug: QueryPlannerDebugConfig,
-
-    /// Enables type conditioned fetching.
-    /// This flag is a workaround, which may yield significant
-    /// performance degradation when computing query plans,
-    /// and increase query plan size.
-    ///
-    /// If you aren't aware of this flag, you probably don't need it.
-    pub type_conditioned_fetching: bool,
 }
 
 #[allow(clippy::derivable_impls)] // it's derivable right now, but we might change the defaults
@@ -104,7 +96,6 @@ impl Default for QueryPlannerConfig {
             subgraph_graphql_validation: false,
             incremental_delivery: Default::default(),
             debug: Default::default(),
-            type_conditioned_fetching: false,
         }
     }
 }
@@ -668,7 +659,6 @@ fn compute_root_serial_dependency_graph_for_mutation(
                 federated_query_graph,
                 &mut fetch_dependency_graph,
                 &prev_path,
-                parameters.config.type_conditioned_fetching,
                 &|| parameters.check_cancellation(),
             )?;
         } else {
@@ -707,7 +697,6 @@ pub(crate) fn compute_root_fetch_groups(
     federated_query_graph: &QueryGraph,
     dependency_graph: &mut FetchDependencyGraph,
     path: &OpPathTree,
-    type_conditioned_fetching_enabled: bool,
     check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<(), FederationError> {
     // The root of the pathTree is one of the "fake" root of the subgraphs graph,
@@ -753,7 +742,6 @@ pub(crate) fn compute_root_fetch_groups(
             fetch_dependency_node,
             FetchDependencyGraphNodePath::new(
                 dependency_graph.supergraph_schema.clone(),
-                type_conditioned_fetching_enabled,
                 supergraph_root_type,
             )?,
             Default::default(),
@@ -1204,7 +1192,7 @@ type User
         let plan = planner
             .build_query_plan(&document, None, Default::default())
             .unwrap();
-        insta::assert_snapshot!(plan, @r###"
+        insta::assert_snapshot!(plan, @r#"
         QueryPlan {
           Sequence {
             Fetch(service: "reviews") {
@@ -1250,24 +1238,41 @@ type User
                 }
               },
             },
-            Flatten(path: "bestRatedProducts.@.vendor") {
-              Fetch(service: "accounts") {
-                {
-                  ... on User {
-                    __typename
-                    id
+            Parallel {
+              Flatten(path: "bestRatedProducts.@|[Movie].vendor") {
+                Fetch(service: "accounts") {
+                  {
+                    ... on User {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on User {
+                      name
+                    }
                   }
-                } =>
-                {
-                  ... on User {
-                    name
+                },
+              },
+              Flatten(path: "bestRatedProducts.@|[Book].vendor") {
+                Fetch(service: "accounts") {
+                  {
+                    ... on User {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on User {
+                      name
+                    }
                   }
-                }
+                },
               },
             },
           },
         }
-        "###);
+        "#);
     }
 
     #[test]

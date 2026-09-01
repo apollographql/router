@@ -1,0 +1,8 @@
+description: experimental_type_conditioned_fetching has been removed. Type conditioned fetching is now always enabled.
+actions:
+  - type: log
+    level: warn
+    path: experimental_type_conditioned_fetching
+    log: "experimental_type_conditioned_fetching has been removed. Type conditioned fetching is now always enabled. Remove this key from your config."
+  - type: delete
+    path: experimental_type_conditioned_fetching

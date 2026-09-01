@@ -776,11 +776,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 *root,
                 &single_choice_branches,
             )?;
-            self.updated_dependency_graph(
-                &mut initial_dependency_graph,
-                &initial_tree,
-                self.parameters.config.type_conditioned_fetching,
-            )?;
+            self.updated_dependency_graph(&mut initial_dependency_graph, &initial_tree)?;
             snapshot!(
                 "FetchDependencyGraph",
                 initial_dependency_graph.to_dot(),
@@ -1058,7 +1054,6 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         &self,
         dependency_graph: &mut FetchDependencyGraph,
         path_tree: &OpPathTree,
-        type_conditioned_fetching_enabled: bool,
     ) -> Result<(), FederationError> {
         let is_root_path_tree = matches!(
             path_tree.graph.node_weight(path_tree.node)?.type_,
@@ -1070,7 +1065,6 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 &self.parameters.federated_query_graph,
                 dependency_graph,
                 path_tree,
-                type_conditioned_fetching_enabled,
                 &|| self.parameters.check_cancellation(),
             )?;
         } else {
@@ -1104,7 +1098,6 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 fetch_dependency_node,
                 FetchDependencyGraphNodePath::new(
                     dependency_graph.supergraph_schema.clone(),
-                    self.parameters.config.type_conditioned_fetching,
                     supergraph_root_type,
                 )?,
                 Default::default(),
@@ -1197,15 +1190,11 @@ impl<'a: 'b, 'b> PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTravers
         tree: Arc<OpPathTree>,
     ) -> Result<PlanInfo, FederationError> {
         let mut updated_graph = plan_info.fetch_dependency_graph.clone();
-        self.updated_dependency_graph(
-            &mut updated_graph,
-            &tree,
-            self.parameters.config.type_conditioned_fetching,
-        )
-        .map(|_| PlanInfo {
-            fetch_dependency_graph: updated_graph,
-            path_tree: plan_info.path_tree.merge(&tree),
-        })
+        self.updated_dependency_graph(&mut updated_graph, &tree)
+            .map(|_| PlanInfo {
+                fetch_dependency_graph: updated_graph,
+                path_tree: plan_info.path_tree.merge(&tree),
+            })
     }
 
     fn compute_plan_cost(

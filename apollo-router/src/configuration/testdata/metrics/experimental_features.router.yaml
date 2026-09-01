@@ -1,5 +1,3 @@
-experimental_type_conditioned_fetching: true
-
 experimental_hoist_orphan_errors:
   all:
     enabled: true

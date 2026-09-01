@@ -17,7 +17,6 @@ import Csrf from '../../../shared/config/csrf.mdx';
 import DemandCtrl from '../../../shared/config/demand_control.mdx';
 import ExperimentalChaos from '../../../shared/config/experimental_chaos.mdx';
 import ExperimentalHoistOrphan from '../../../shared/config/experimental_hoist_orphan_errors.mdx';
-import ExperimentalType from '../../../shared/config/experimental_type_conditioned_fetching.mdx';
 import FleetDetector from '../../../shared/config/fleet_detector.mdx';
 import ForbidMut from '../../../shared/config/forbid_mutations.mdx';
 import Headers from '../../../shared/config/headers.mdx';
@@ -190,10 +189,6 @@ Per-subgraph settings override `all`.
 Although the `experimental_hoist_orphan_errors` option can reduce the number of propagated errors, the option doesn't limit the total number of errors. If a subgraph returns a large number of errors, the router still processes all of them. For subgraphs that are likely to produce an unbounded number of errors, consider additional mitigation strategies at the subgraph level.
 
 </Note>
-
----
-
-<ExperimentalType />
 
 ---
 

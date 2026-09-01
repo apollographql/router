@@ -34,7 +34,6 @@ macro_rules! snap
 
 fn get_configuration() -> serde_json::Value {
     json! {{
-        "experimental_type_conditioned_fetching": true,
         // will make debugging easier
         "plugins": {
             "experimental.expose_query_plan": true

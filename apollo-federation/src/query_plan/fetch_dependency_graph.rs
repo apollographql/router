@@ -351,7 +351,6 @@ pub(crate) struct FetchDependencyGraphNodePath {
     pub(crate) full_path: Arc<OpPath>,
     path_in_node: Arc<OpPath>,
     response_path: Vec<FetchDataPathElement>,
-    type_conditioned_fetching_enabled: bool,
     possible_types: IndexSet<Name>,
     possible_types_after_last_field: IndexSet<Name>,
 }
@@ -543,21 +542,16 @@ impl ProcessingState {
 impl FetchDependencyGraphNodePath {
     pub(crate) fn new(
         schema: ValidFederationSchema,
-        type_conditioned_fetching_enabled: bool,
         root_type: CompositeTypeDefinitionPosition,
     ) -> Result<Self, FederationError> {
-        let root_possible_types: IndexSet<Name> = if type_conditioned_fetching_enabled {
-            schema.possible_runtime_types(root_type)?
-        } else {
-            Default::default()
-        }
-        .into_iter()
-        .map(|pos| Ok::<_, PositionLookupError>(pos.get(schema.schema())?.name.clone()))
-        .process_results(|c| c.sorted().collect())?;
+        let root_possible_types: IndexSet<Name> = schema
+            .possible_runtime_types(root_type)?
+            .into_iter()
+            .map(|pos| Ok::<_, PositionLookupError>(pos.get(schema.schema())?.name.clone()))
+            .process_results(|c| c.sorted().collect())?;
 
         Ok(Self {
             schema,
-            type_conditioned_fetching_enabled,
             full_path: Default::default(),
             path_in_node: Default::default(),
             response_path: Default::default(),
@@ -571,7 +565,6 @@ impl FetchDependencyGraphNodePath {
             full_path: self.full_path.clone(),
             path_in_node: new_context,
             response_path: self.response_path.clone(),
-            type_conditioned_fetching_enabled: self.type_conditioned_fetching_enabled,
             possible_types: self.possible_types.clone(),
             possible_types_after_last_field: self.possible_types_after_last_field.clone(),
         }
@@ -594,7 +587,6 @@ impl FetchDependencyGraphNodePath {
             response_path,
             full_path: Arc::new(self.full_path.with_pushed(element.clone())),
             path_in_node: Arc::new(self.path_in_node.with_pushed(element)),
-            type_conditioned_fetching_enabled: self.type_conditioned_fetching_enabled,
             possible_types: new_possible_types,
             possible_types_after_last_field,
         })
@@ -604,10 +596,6 @@ impl FetchDependencyGraphNodePath {
         &self,
         element: &OpPathElement,
     ) -> Result<IndexSet<Name>, FederationError> {
-        if !self.type_conditioned_fetching_enabled {
-            return Ok(Default::default());
-        }
-
         let res = match element {
             OpPathElement::InlineFragment(f) => match &f.type_condition_position {
                 None => self.possible_types.clone(),
@@ -5492,7 +5480,6 @@ fn path_for_parent(
         response_path: path.response_path.clone(),
         possible_types: path.possible_types.clone(),
         possible_types_after_last_field: path.possible_types_after_last_field.clone(),
-        type_conditioned_fetching_enabled: path.type_conditioned_fetching_enabled,
     })
 }
 
@@ -5501,7 +5488,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn type_condition_fetching_disabled() {
+    fn type_condition_fetching() {
         let schema = apollo_compiler::Schema::parse_and_validate(
             r#"
                 type Query {
@@ -5551,69 +5538,7 @@ mod tests {
             .try_into()
             .unwrap();
 
-        let path = FetchDependencyGraphNodePath::new(valid_schema, false, query_root).unwrap();
-
-        let path = path.add(Arc::new(foo)).unwrap();
-        let path = path.add(Arc::new(frag)).unwrap();
-        let path = path.add(Arc::new(bar)).unwrap();
-        let path = path.add(Arc::new(frag2)).unwrap();
-        let path = path.add(Arc::new(baz)).unwrap();
-
-        assert_eq!(".foo.bar.baz", &to_string(&path.response_path));
-    }
-
-    #[test]
-    fn type_condition_fetching_enabled() {
-        let schema = apollo_compiler::Schema::parse_and_validate(
-            r#"
-                type Query {
-                    foo: Foo
-                }
-                interface Foo {
-                    bar: Bar
-                }
-                interface Bar {
-                    baz: String
-                }
-                type Foo_1 implements Foo {
-                    bar: Bar_1
-                    a: Int
-                }
-                type Foo_2 implements Foo {
-                    bar: Bar_2
-                    b: Int
-                }
-                type Bar_1 implements Bar {
-                    baz: String
-                    a: Int
-                }
-                type Bar_2 implements Bar {
-                    baz: String
-                    b: Int
-                }
-                type Bar_3 implements Bar {
-                    baz: String
-                }
-            "#,
-            "schema.graphql",
-        )
-        .unwrap();
-
-        let valid_schema = ValidFederationSchema::new(schema).unwrap();
-
-        let foo = object_field_element(&valid_schema, name!("Query"), name!("foo"));
-        let frag = inline_fragment_element(&valid_schema, name!("Foo"), Some(name!("Foo_1")));
-        let bar = object_field_element(&valid_schema, name!("Foo_1"), name!("bar"));
-        let frag2 = inline_fragment_element(&valid_schema, name!("Bar"), Some(name!("Bar_1")));
-        let baz = object_field_element(&valid_schema, name!("Bar_1"), name!("baz"));
-
-        let query_root = valid_schema
-            .get_type(&name!("Query"))
-            .unwrap()
-            .try_into()
-            .unwrap();
-
-        let path = FetchDependencyGraphNodePath::new(valid_schema, true, query_root).unwrap();
+        let path = FetchDependencyGraphNodePath::new(valid_schema, query_root).unwrap();
 
         let path = path.add(Arc::new(foo)).unwrap();
         let path = path.add(Arc::new(frag)).unwrap();

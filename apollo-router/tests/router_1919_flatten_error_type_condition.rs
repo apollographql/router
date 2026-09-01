@@ -107,7 +107,6 @@ fn setup() -> TestHarness<'static> {
     TestHarness::builder()
         .try_log_level("info")
         .configuration_json(json! {{
-            "experimental_type_conditioned_fetching": true,
             "include_subgraph_errors": {
                 "all": true
             }

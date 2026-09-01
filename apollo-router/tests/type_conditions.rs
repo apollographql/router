@@ -49,11 +49,6 @@ async fn test_type_conditions_enabled_list_of_list_of_list() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_type_conditions_disabled() {
-    _test_type_conditions_disabled().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn test_type_conditions_enabled_shouldnt_make_article_fetch() {
     _test_type_conditions_enabled_shouldnt_make_article_fetch().await;
 }
@@ -61,7 +56,6 @@ async fn test_type_conditions_enabled_shouldnt_make_article_fetch() {
 async fn _test_type_conditions_enabled() -> Response {
     let harness = setup_from_mocks(
         json! {{
-            "experimental_type_conditioned_fetching": true,
             // will make debugging easier
             "plugins": {
                 "experimental.expose_query_plan": true
@@ -109,7 +103,6 @@ async fn _test_type_conditions_enabled() -> Response {
 async fn _test_type_conditions_enabled_generate_query_fragments() -> Response {
     let harness = setup_from_mocks(
         json! {{
-            "experimental_type_conditioned_fetching": true,
             // will make debugging easier
             "plugins": {
                 "experimental.expose_query_plan": true
@@ -157,7 +150,6 @@ async fn _test_type_conditions_enabled_generate_query_fragments() -> Response {
 async fn _test_type_conditions_enabled_list_of_list() -> Response {
     let harness = setup_from_mocks(
         json! {{
-            "experimental_type_conditioned_fetching": true,
             // will make debugging easier
             "plugins": {
                 "experimental.expose_query_plan": true
@@ -206,7 +198,6 @@ async fn _test_type_conditions_enabled_list_of_list() -> Response {
 async fn _test_type_conditions_enabled_list_of_list_of_list() -> Response {
     let harness = setup_from_mocks(
         json! {{
-            "experimental_type_conditioned_fetching": true,
             // will make debugging easier
             "plugins": {
                 "experimental.expose_query_plan": true
@@ -251,57 +242,9 @@ async fn _test_type_conditions_enabled_list_of_list_of_list() -> Response {
     response
 }
 
-async fn _test_type_conditions_disabled() -> Response {
-    let harness = setup_from_mocks(
-        json! {{
-            "experimental_type_conditioned_fetching": false,
-            // will make debugging easier
-            "plugins": {
-                "experimental.expose_query_plan": true
-            },
-            "include_subgraph_errors": {
-                "all": true
-            }
-        }},
-        &[
-            (
-                "searchSubgraph",
-                include_str!("fixtures/type_conditions/search.json"),
-            ),
-            (
-                "artworkSubgraph",
-                include_str!("fixtures/type_conditions/artwork_disabled.json"),
-            ),
-        ],
-    );
-    let supergraph_service = harness.build_supergraph().await.unwrap();
-    let mut variables = JsonMap::new();
-    variables.insert("movieResultParam", "movieResultDisabled".into());
-    variables.insert("articleResultParam", "articleResultDisabled".into());
-    let request = supergraph::Request::fake_builder()
-        .query(QUERY.to_string())
-        .header("Apollo-Expose-Query-Plan", "true")
-        .build()
-        .expect("expecting valid request");
-
-    let response = supergraph_service
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap();
-
-    let response = normalize_response_extensions(response);
-
-    insta::assert_json_snapshot!(response);
-    response
-}
-
 async fn _test_type_conditions_enabled_shouldnt_make_article_fetch() -> Response {
     let harness = setup_from_mocks(
         json! {{
-            "experimental_type_conditioned_fetching": true,
             // will make debugging easier
             "plugins": {
                 "experimental.expose_query_plan": true

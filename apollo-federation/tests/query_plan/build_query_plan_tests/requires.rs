@@ -2196,7 +2196,7 @@ fn handles_requires_when_key_conditions_are_fetched_below_the_entity() {
             }
           }
         },
-        Flatten(path: "unionField.subEntity") {
+        Flatten(path: "unionField|[Entity].subEntity") {
           Fetch(service: "Subgraph2") {
             {
               ... on SubEntity {
@@ -2235,7 +2235,7 @@ fn handles_requires_when_key_conditions_are_fetched_below_the_entity() {
             }
           },
         },
-        Flatten(path: "unionField.requiredSubEntity") {
+        Flatten(path: "unionField|[Entity].requiredSubEntity") {
           Fetch(service: "Subgraph2") {
             {
               ... on SubEntity {

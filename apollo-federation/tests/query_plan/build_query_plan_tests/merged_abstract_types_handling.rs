@@ -822,36 +822,48 @@ fn handles_types_with_no_common_supertype_at_the_same_merge_at() {
           }
         }
       "#,
-        @r###"
-      QueryPlan {
-        Sequence {
-          Fetch(service: "Subgraph1") {
-            {
-              t {
-                __typename
-                ... on T1 {
-                  sub {
-                    __typename
-                    id
-                  }
-                }
-                ... on T2 {
-                  sub {
-                    __typename
-                    id
-                  }
-                }
-              }
-            }
-          },
-          Flatten(path: "t.sub") {
-            Fetch(service: "Subgraph2") {
-              {
-                ... on Foo {
+        @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            t {
+              __typename
+              ... on T1 {
+                sub {
                   __typename
                   id
                 }
+              }
+              ... on T2 {
+                sub {
+                  __typename
+                  id
+                }
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "t|[T2].sub") {
+            Fetch(service: "Subgraph2") {
+              {
                 ... on Bar {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Bar {
+                  y
+                }
+              }
+            },
+          },
+          Flatten(path: "t|[T1].sub") {
+            Fetch(service: "Subgraph2") {
+              {
+                ... on Foo {
                   __typename
                   id
                 }
@@ -860,15 +872,13 @@ fn handles_types_with_no_common_supertype_at_the_same_merge_at() {
                 ... on Foo {
                   y
                 }
-                ... on Bar {
-                  y
-                }
               }
             },
           },
         },
-      }
-    "###
+      },
+    }
+    "#
     );
 }
 

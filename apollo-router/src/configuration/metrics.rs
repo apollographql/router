@@ -463,11 +463,6 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_type_conditioned_fetching,
-            "$.experimental_type_conditioned_fetching[?(@==true)]"
-        );
-
-        populate_config_instrument!(
             apollo.router.config.experimental_hoist_orphan_errors,
             "$.experimental_hoist_orphan_errors[?(@.all.enabled==true || @.subgraphs..enabled==true)]"
         );

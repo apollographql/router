@@ -106,7 +106,6 @@ pub(crate) fn plan_response_shape_with_schema(schema_str: &str, op_str: &str) ->
     // Initialization
     let config = query_planner::QueryPlannerConfig {
         generate_query_fragments: false,
-        type_conditioned_fetching: false,
         incremental_delivery: query_planner::QueryPlanIncrementalDeliveryConfig {
             enable_defer: true,
         },
