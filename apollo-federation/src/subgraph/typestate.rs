@@ -951,6 +951,12 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
     trace!("new_federation_subgraph_schema: collect_links_metadata");
     schema.collect_links_metadata()?;
 
+    // The link spec's @link directive should always live on the base schema definition
+    // (not an extension) so it serializes as `schema @link(...) { ... }`. When the input
+    // only has `extend schema @link(...) @link(...)`, the parser gives every directive an
+    // ExtensionId. Promote the link-spec @link to the base definition here.
+    promote_link_spec_directive(schema.schema_mut());
+
     // Now we fill in the missing definitions
     trace!("expand_links: on_directive_definition_and_schema_parsed");
     FederationBlueprint::on_directive_definition_and_schema_parsed(&mut schema)?;
@@ -1006,6 +1012,27 @@ pub(crate) fn has_federation_spec_link(schema: &Schema) -> bool {
         .directives
         .iter()
         .any(|d| is_fed_spec_link_directive(schema, d))
+}
+
+/// If the `@link(url: "https://specs.apollo.dev/link/...")` directive on the schema definition
+/// has an ExtensionId (because it came from `extend schema`), replace it with a copy that has
+/// no ExtensionId so it serializes on the base `schema { ... }` definition.
+fn promote_link_spec_directive(schema: &mut Schema) {
+    let link_identity_prefix = Identity::link_identity().to_string();
+    let idx = schema.schema_definition.directives.iter().position(|d| {
+        d.name == LINK_DIRECTIVE_NAME_IN_SPEC
+            && d.extension_id().is_some()
+            && d.arguments
+                .iter()
+                .find(|a| a.name == LINK_DIRECTIVE_URL_ARGUMENT_NAME.as_str())
+                .and_then(|a| a.value.as_str())
+                .is_some_and(|url| url.starts_with(&link_identity_prefix))
+    });
+    if let Some(idx) = idx {
+        let directive = &schema.schema_definition.directives[idx];
+        let promoted = directive.same_location((**directive).clone());
+        schema.schema_definition.make_mut().directives[idx] = promoted;
+    }
 }
 
 fn is_fed_spec_link_directive(schema: &Schema, directive: &Directive) -> bool {
