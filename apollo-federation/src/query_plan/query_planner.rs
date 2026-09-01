@@ -59,7 +59,7 @@ use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::utils::logging::snapshot;
 
-#[derive(Debug, Clone, Hash, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct QueryPlannerConfig {
     /// If enabled, the query planner will attempt to extract common subselections into named
     /// fragments. This can significantly reduce the size of the query sent to subgraphs.
@@ -110,6 +110,21 @@ impl Default for QueryPlannerConfig {
             debug: Default::default(),
             type_conditioned_fetching: false,
             incremental_planner: Default::default(),
+        }
+    }
+}
+
+impl std::hash::Hash for QueryPlannerConfig {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.generate_query_fragments.hash(state);
+        self.subgraph_graphql_validation.hash(state);
+        self.incremental_delivery.hash(state);
+        self.debug.hash(state);
+        self.type_conditioned_fetching.hash(state);
+        // Only include incremental_planner in the hash when enabled,
+        // so the cache key for the existing planner stays unchanged.
+        if self.incremental_planner.enabled {
+            self.incremental_planner.hash(state);
         }
     }
 }
