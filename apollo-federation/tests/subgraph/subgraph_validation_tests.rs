@@ -1115,6 +1115,67 @@ type Query {
 }
 "#;
 
+    // When both the link and federation specs are explicitly linked in the input,
+    // the compiler keeps both @link directives together on the extend schema.
+    const EXPECTED_FULL_SCHEMA_BOTH_LINKED: &str = r#"schema {
+  query: Query
+}
+
+extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+
+directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
+
+directive @federation__tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+directive @federation__extends on OBJECT | INTERFACE
+
+directive @federation__shareable on OBJECT | FIELD_DEFINITION
+
+directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+directive @federation__override(from: String!) on FIELD_DEFINITION
+
+type T @key(fields: "k") {
+  k: ID!
+}
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+scalar federation__FieldSet
+
+scalar _Any
+
+type _Service {
+  sdl: String
+}
+
+union _Entity = T
+
+type Query {
+  _entities(representations: [_Any!]!): [_Entity]!
+  _service: _Service!
+}
+"#;
+
     #[test]
     fn expands_everything_if_only_the_federation_spec_is_linked() {
         let subgraph = build_and_validate(
@@ -1153,10 +1214,13 @@ type Query {
 
         assert_eq!(
             subgraph.schema_string(),
-            EXPECTED_FULL_SCHEMA,
+            EXPECTED_FULL_SCHEMA_BOTH_LINKED,
             "{}",
-            TextDiff::from_lines(EXPECTED_FULL_SCHEMA, subgraph.schema_string().as_str())
-                .unified_diff()
+            TextDiff::from_lines(
+                EXPECTED_FULL_SCHEMA_BOTH_LINKED,
+                subgraph.schema_string().as_str()
+            )
+            .unified_diff()
         );
     }
 
