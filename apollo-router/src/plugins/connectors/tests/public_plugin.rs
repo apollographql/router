@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -214,5 +215,374 @@ async fn public_unstable_plugin_can_break_a_connector_request() {
     assert!(
         mock_server.received_requests().await.unwrap().is_empty(),
         "the connector request should never have reached the upstream"
+    );
+}
+
+/// Asserts that a plugin can read and rewrite a *successful* connector
+/// [`request_service::Response`] through its public accessors:
+/// [`Response::data`]/[`Response::set_data`] (the hit branch), the false-return
+/// no-op branch of [`Response::set_error_message`]/[`Response::set_error_code`],
+/// the newly-public `transport_result` field (read *and* written), and the
+/// `context` read-write path shared between [`request_service::Request`] and
+/// [`request_service::Response`].
+///
+/// [`Response::data`]: request_service::Response::data
+/// [`Response::set_data`]: request_service::Response::set_data
+/// [`Response::set_error_message`]: request_service::Response::set_error_message
+/// [`Response::set_error_code`]: request_service::Response::set_error_code
+#[tokio::test]
+async fn public_unstable_plugin_can_wrap_a_connector_response_with_data() {
+    let mock_server = MockServer::start().await;
+    mock_api::user_1().mount(&mock_server).await;
+
+    /// What the plugin observed on the response side, read out after the
+    /// router has finished — the wrapped service runs inside a buffered
+    /// worker task, so assertions belong out here rather than inline.
+    #[derive(Debug, Default)]
+    struct Observed {
+        /// Read back from `Response::context`: proves it's the same shared
+        /// context that `Request::context` was written to, on the request side.
+        context_value_written_on_request: Option<String>,
+        /// Written directly into `Response::context`, then read back immediately.
+        context_value_written_on_response: Option<String>,
+        /// The status recorded on the (`Ok`) `Response::transport_result`, before
+        /// the plugin rewrites it.
+        transport_status_before: Option<u16>,
+        /// `transport_result`'s status and a header the plugin adds to it,
+        /// read back immediately after the rewrite.
+        transport_status_after: Option<u16>,
+        transport_header_after: Option<String>,
+        data_before: Option<serde_json_bytes::Value>,
+        error_before_is_some: bool,
+        set_error_message_result: bool,
+        set_error_code_result: bool,
+        error_after_noop_setters_is_some: bool,
+        set_data_result: bool,
+        data_after: Option<serde_json_bytes::Value>,
+    }
+
+    #[derive(Clone)]
+    struct ResponseWrappingPlugin {
+        observed: Arc<Mutex<Observed>>,
+    }
+
+    #[async_trait::async_trait]
+    impl PluginUnstable for ResponseWrappingPlugin {
+        type Config = Conf;
+
+        async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+            unreachable!("added via TestHarness::extra_unstable_plugin")
+        }
+
+        fn connector_request_service(
+            &self,
+            service: request_service::BoxService,
+            _source_name: String,
+        ) -> request_service::BoxService {
+            let observed = self.observed.clone();
+            BoxService::new(
+                service
+                    .map_request(|request: request_service::Request| {
+                        request
+                            .context
+                            .insert("from-request", String::from("hello-from-request"))
+                            .unwrap();
+                        request
+                    })
+                    .map_response(move |mut response: request_service::Response| {
+                        let mut observed = observed.lock().unwrap();
+
+                        observed.context_value_written_on_request =
+                            response.context.get::<_, String>("from-request").unwrap();
+                        response
+                            .context
+                            .insert("from-response", String::from("hello-from-response"))
+                            .unwrap();
+                        observed.context_value_written_on_response =
+                            response.context.get::<_, String>("from-response").unwrap();
+
+                        observed.transport_status_before = match &response.transport_result {
+                            Ok(TransportResponse::Http(http_response)) => {
+                                Some(http_response.inner.status.as_u16())
+                            }
+                            _ => None,
+                        };
+
+                        // `transport_result` is writable: rewrite the status and
+                        // add a header to the raw transport outcome.
+                        if let Ok(TransportResponse::Http(http_response)) =
+                            &mut response.transport_result
+                        {
+                            http_response.inner.status = http::StatusCode::IM_A_TEAPOT;
+                            http_response.inner.headers.insert(
+                                http::HeaderName::from_static("x-rewritten-by-plugin"),
+                                http::HeaderValue::from_static("yes"),
+                            );
+                        }
+                        if let Ok(TransportResponse::Http(http_response)) =
+                            &response.transport_result
+                        {
+                            observed.transport_status_after =
+                                Some(http_response.inner.status.as_u16());
+                            observed.transport_header_after = http_response
+                                .inner
+                                .headers
+                                .get("x-rewritten-by-plugin")
+                                .and_then(|v| v.to_str().ok())
+                                .map(str::to_string);
+                        }
+
+                        observed.data_before = response.data().cloned();
+                        observed.error_before_is_some = response.error().is_some();
+
+                        // No-op branches: a success can't be turned into a
+                        // failure through the error setters.
+                        observed.set_error_message_result =
+                            response.set_error_message("should not apply");
+                        observed.set_error_code_result =
+                            response.set_error_code("SHOULD_NOT_APPLY");
+                        observed.error_after_noop_setters_is_some = response.error().is_some();
+
+                        // Hit branch: `set_data` replaces the mapped data.
+                        observed.set_data_result = response.set_data(serde_json_bytes::json!({
+                            "id": 1,
+                            "name": "Rewritten By Plugin",
+                            "username": "Bret",
+                        }));
+                        observed.data_after = response.data().cloned();
+
+                        drop(observed);
+                        response
+                    }),
+            )
+        }
+
+        fn unstable_method(&self) {}
+    }
+
+    let observed = Arc::new(Mutex::new(Observed::default()));
+    let plugin = ResponseWrappingPlugin {
+        observed: observed.clone(),
+    };
+
+    let response = execute_with_unstable_plugin(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { me { id name username } }",
+        plugin,
+    )
+    .await;
+
+    // The rewrite made through `set_data` reached the client.
+    assert_eq!(
+        response,
+        serde_json::json!({
+            "data": { "me": { "id": 1, "name": "Rewritten By Plugin", "username": "Bret" } }
+        })
+    );
+
+    let observed = std::mem::take(&mut *observed.lock().unwrap());
+
+    // `Request::context` and `Response::context` are the same shared context.
+    assert_eq!(
+        observed.context_value_written_on_request,
+        Some("hello-from-request".to_string())
+    );
+    // `Response::context` is itself readable and writable.
+    assert_eq!(
+        observed.context_value_written_on_response,
+        Some("hello-from-response".to_string())
+    );
+
+    // `Response::transport_result` reports the raw transport outcome...
+    assert_eq!(observed.transport_status_before, Some(200));
+    // ...and is itself writable: the rewritten status and header stuck.
+    assert_eq!(observed.transport_status_after, Some(418));
+    assert_eq!(observed.transport_header_after, Some("yes".to_string()));
+
+    // Hit branches: this is a data response.
+    assert!(observed.data_before.is_some());
+    assert!(!observed.error_before_is_some);
+
+    // No-op branches: the error setters can't turn a success into a failure.
+    assert!(!observed.set_error_message_result);
+    assert!(!observed.set_error_code_result);
+    assert!(!observed.error_after_noop_setters_is_some);
+
+    // Hit branch: `set_data` actually applied.
+    assert!(observed.set_data_result);
+    assert_eq!(
+        observed.data_after,
+        Some(serde_json_bytes::json!({
+            "id": 1,
+            "name": "Rewritten By Plugin",
+            "username": "Bret",
+        }))
+    );
+}
+
+/// Asserts that a plugin can read and rewrite a *failed* connector
+/// [`request_service::Response`] through its public accessors: the false-return
+/// no-op branch of [`Response::set_data`], the hit branch of
+/// [`Response::error`]/[`Response::set_error_message`]/[`Response::set_error_code`],
+/// and `transport_result` (read *and* written) for a call whose transport
+/// succeeded (a real HTTP 404) even though the mapped response is an error.
+/// Also asserts the documented independence of the two: rewriting
+/// `transport_result`'s status does not change the `http.status` already baked
+/// into the client-visible error's extensions, since the mapped response is not
+/// recomputed from it.
+///
+/// [`Response::set_data`]: request_service::Response::set_data
+/// [`Response::error`]: request_service::Response::error
+/// [`Response::set_error_message`]: request_service::Response::set_error_message
+/// [`Response::set_error_code`]: request_service::Response::set_error_code
+#[tokio::test]
+async fn public_unstable_plugin_can_wrap_a_connector_response_with_error() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/1"))
+        .respond_with(
+            ResponseTemplate::new(404).set_body_json(serde_json::json!({"error": "not found"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    #[derive(Debug, Default)]
+    struct Observed {
+        transport_status_before: Option<u16>,
+        transport_status_after: Option<u16>,
+        data_before_is_some: bool,
+        error_before: Option<(String, String)>,
+        set_data_result: bool,
+        data_after_noop_is_some: bool,
+        set_error_message_result: bool,
+        set_error_code_result: bool,
+        error_after: Option<(String, String)>,
+    }
+
+    #[derive(Clone)]
+    struct ResponseWrappingPlugin {
+        observed: Arc<Mutex<Observed>>,
+    }
+
+    #[async_trait::async_trait]
+    impl PluginUnstable for ResponseWrappingPlugin {
+        type Config = Conf;
+
+        async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+            unreachable!("added via TestHarness::extra_unstable_plugin")
+        }
+
+        fn connector_request_service(
+            &self,
+            service: request_service::BoxService,
+            _source_name: String,
+        ) -> request_service::BoxService {
+            let observed = self.observed.clone();
+            BoxService::new(
+                service.map_response(move |mut response: request_service::Response| {
+                    let mut observed = observed.lock().unwrap();
+
+                    observed.transport_status_before = match &response.transport_result {
+                        Ok(TransportResponse::Http(http_response)) => {
+                            Some(http_response.inner.status.as_u16())
+                        }
+                        _ => None,
+                    };
+
+                    // `transport_result` is writable here too. This does *not*
+                    // change the client-visible error, which was already mapped
+                    // from the original (404) status.
+                    if let Ok(TransportResponse::Http(http_response)) =
+                        &mut response.transport_result
+                    {
+                        http_response.inner.status = http::StatusCode::IM_A_TEAPOT;
+                    }
+                    observed.transport_status_after = match &response.transport_result {
+                        Ok(TransportResponse::Http(http_response)) => {
+                            Some(http_response.inner.status.as_u16())
+                        }
+                        _ => None,
+                    };
+
+                    observed.data_before_is_some = response.data().is_some();
+                    observed.error_before = response
+                        .error()
+                        .map(|error| (error.message.clone(), error.code().to_string()));
+
+                    // No-op branch: a failure can't be turned into data here.
+                    observed.set_data_result =
+                        response.set_data(serde_json_bytes::json!({ "nope": true }));
+                    observed.data_after_noop_is_some = response.data().is_some();
+
+                    // Hit branches: rewrite the error returned to the client.
+                    observed.set_error_message_result =
+                        response.set_error_message("rewritten by plugin");
+                    observed.set_error_code_result = response.set_error_code("REWRITTEN_CODE");
+                    observed.error_after = response
+                        .error()
+                        .map(|error| (error.message.clone(), error.code().to_string()));
+
+                    drop(observed);
+                    response
+                }),
+            )
+        }
+
+        fn unstable_method(&self) {}
+    }
+
+    let observed = Arc::new(Mutex::new(Observed::default()));
+    let plugin = ResponseWrappingPlugin {
+        observed: observed.clone(),
+    };
+
+    let response = execute_with_unstable_plugin(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { me { id name username } }",
+        plugin,
+    )
+    .await;
+
+    // The plugin's rewrite of the error reached the client.
+    let errors = response
+        .get("errors")
+        .and_then(|e| e.as_array())
+        .expect("expected the failed connector request to produce an error");
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0]["message"], "rewritten by plugin");
+    assert_eq!(errors[0]["extensions"]["code"], "REWRITTEN_CODE");
+    // The client-visible error still reports the *original* transport status:
+    // rewriting `transport_result` after the fact doesn't reach it, because the
+    // mapped response was already built from the real 404.
+    assert_eq!(errors[0]["extensions"]["http"]["status"], 404);
+
+    let observed = std::mem::take(&mut *observed.lock().unwrap());
+
+    // The transport itself succeeded (a real HTTP 404 came back); only the
+    // *mapped* response is an error.
+    assert_eq!(observed.transport_status_before, Some(404));
+    // `transport_result` is writable: the rewritten status stuck...
+    assert_eq!(observed.transport_status_after, Some(418));
+    // ...independently of the mapped response asserted above.
+
+    // Hit branches: this is an error response.
+    assert!(!observed.data_before_is_some);
+    assert!(observed.error_before.is_some());
+
+    // No-op branch: `set_data` can't turn a failure into a success.
+    assert!(!observed.set_data_result);
+    assert!(!observed.data_after_noop_is_some);
+
+    // Hit branches: the error setters actually applied.
+    assert!(observed.set_error_message_result);
+    assert!(observed.set_error_code_result);
+    assert_eq!(
+        observed.error_after,
+        Some((
+            "rewritten by plugin".to_string(),
+            "REWRITTEN_CODE".to_string()
+        ))
     );
 }

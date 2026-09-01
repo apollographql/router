@@ -135,26 +135,14 @@ impl Request {
         code: impl Into<String>,
         extensions: impl IntoIterator<Item = (impl Into<ByteString>, impl Into<Value>)>,
     ) -> Response {
-        let message = message.into();
-        let subgraph_name = self.connector.id.subgraph_name.to_string();
-        let mut error = RuntimeError::new(message.clone(), &self.key).with_code(code);
-        for (k, v) in extensions {
-            let k = k.into();
-            if k.as_str() != "code" {
-                error = error.extension(k, v);
-            }
-        }
-
-        Response {
-            context: self.context,
-            subgraph_name,
-            transport_result: Err(Error::TransportFailure(message)),
-            mapped_response: MappedResponse::Error {
-                error,
-                key: self.key,
-                problems: Vec::new(),
-            },
-        }
+        Response::error_from_request(
+            self.context,
+            self.connector,
+            self.key,
+            message,
+            code,
+            extensions,
+        )
     }
 }
 
@@ -276,6 +264,37 @@ impl Response {
             subgraph_name,
             transport_result: Err(error),
             mapped_response,
+        }
+    }
+
+    pub(crate) fn error_from_request(
+        request_context: Context,
+        request_connector: Arc<Connector>,
+        request_key: ResponseKey,
+        message: impl Into<String>,
+        code: impl Into<String>,
+        extensions: impl IntoIterator<Item = (impl Into<ByteString>, impl Into<Value>)>,
+    ) -> Self {
+        let message = message.into();
+        let subgraph_name = request_connector.id.subgraph_name.to_string();
+        let mut error = RuntimeError::new(message.clone(), &request_key).with_code(code);
+        error.subgraph_name = Some(subgraph_name.clone());
+        for (k, v) in extensions {
+            let k = k.into();
+            if k.as_str() != "code" {
+                error = error.extension(k, v);
+            }
+        }
+
+        Response {
+            context: request_context,
+            subgraph_name,
+            transport_result: Err(Error::TransportFailure(message)),
+            mapped_response: MappedResponse::Error {
+                error,
+                key: request_key,
+                problems: Vec::new(),
+            },
         }
     }
 
