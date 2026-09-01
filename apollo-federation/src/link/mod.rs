@@ -2,17 +2,18 @@ use std::fmt;
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::error::FederationError;
-use crate::link::link_spec_definition::CORE_VERSIONS;
-use crate::link::link_spec_definition::LINK_VERSIONS;
-use crate::link::spec::Identity;
-use crate::link::spec::Url;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::parser::LineColumn;
+
+use crate::error::FederationError;
+use crate::link::link_spec_definition::CORE_VERSIONS;
+use crate::link::link_spec_definition::LINK_VERSIONS;
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
 
 pub(crate) mod argument;
 pub(crate) mod authenticated_spec_definition;
