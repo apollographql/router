@@ -3469,7 +3469,7 @@ mod tests {
 
         let computed_batch_id =
             selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
-        assert_eq!(computed_batch_id.pretty_print(), "List<Int>");
+        assert_eq!(computed_batch_id.pretty_print(), "[...Int]");
 
         let computed_first = selection!("$batch.id->first", spec)
             .compute_output_shape(&shape_context, root_shape.clone());
@@ -3571,7 +3571,7 @@ mod tests {
 
         let computed_batch_id =
             selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
-        assert_eq!(computed_batch_id.pretty_print(), "List<Int>");
+        assert_eq!(computed_batch_id.pretty_print(), "[...Int]");
 
         let computed_first = selection!("$batch.id->first", spec)
             .compute_output_shape(&shape_context, root_shape.clone());
@@ -3599,35 +3599,35 @@ mod tests {
             selection!("$batch.id->map(@)->echo(@)", spec)
                 .shape()
                 .pretty_print(),
-            "List<$batch.id.*>",
+            "[...$batch.id.*]",
         );
 
         assert_eq!(
             selection!("$batch.id->map(@)->echo([@])", spec)
                 .shape()
                 .pretty_print(),
-            "[List<$batch.id.*>]",
+            "[[...$batch.id.*]]",
         );
 
         assert_eq!(
             selection!("$batch.id->map([@])->echo(@)", spec)
                 .shape()
                 .pretty_print(),
-            "List<[$batch.id.*]>",
+            "[...[$batch.id.*]]",
         );
 
         assert_eq!(
             selection!("$batch.id->map([@])->echo([@])", spec)
                 .shape()
                 .pretty_print(),
-            "[List<[$batch.id.*]>]",
+            "[[...[$batch.id.*]]]",
         );
 
         assert_eq!(
             selection!("$batch.id->map([@])->echo([@])", spec)
                 .compute_output_shape(&shape_context, root_shape,)
                 .pretty_print(),
-            "[List<[Int]>]",
+            "[[...[Int]]]",
         );
     }
 
@@ -4113,7 +4113,7 @@ mod tests {
             .pretty_print(),
             // This output shape is wrong if $root.friend_ids turns out to be an
             // array, and it's tricky to see how to transform the shape to what
-            // it would have been if we knew that, where friends: List<{ id:
+            // it would have been if we knew that, where friends: [...{ id:
             // $root.friend_ids.* }> (note the * meaning any array index),
             // because who's to say it's not the id field that should become the
             // List, rather than the friends field?
@@ -4148,7 +4148,7 @@ mod tests {
     x: $root.*.arrayOfArrays.*.x,
     y: $root.*.arrayOfArrays.*.y,
   },
-  friends: List<{ id: $root.*.friend_ids.* }>,
+  friends: [...{ id: $root.*.friend_ids.* }],
   id: $root.*.id,
   name: $root.*.name,
   xs: $root.*.arrayOfArrays.x,
@@ -6084,7 +6084,7 @@ mod tests {
         );
 
         // The question mark should be applied recursively to the partial shape within the error
-        assert!(result_shape.pretty_print().contains("Error"));
+        assert!(result_shape.pretty_print().contains("err"));
         assert!(result_shape.pretty_print().contains("None"));
     }
 
@@ -6123,7 +6123,7 @@ mod tests {
                     shape_context.named_shapes()["$root"].clone()
                 )
                 .pretty_print(),
-            "Error<\"Something went wrong\">",
+            "Unknown (err \"Something went wrong\")",
         );
     }
 
