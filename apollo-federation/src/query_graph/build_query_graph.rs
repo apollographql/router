@@ -460,7 +460,7 @@ impl SchemaQueryGraphBuilder {
         root: SchemaRootDefinitionPosition,
     ) -> Result<(), FederationError> {
         let root_type_name = root.get(self.base.query_graph.schema()?.schema())?;
-        let pos = match self.base.query_graph.schema()?.get_type(&root_type_name)? {
+        let pos = match self.base.query_graph.schema()?.get_type(root_type_name)? {
             TypeDefinitionPosition::Object(pos) => pos,
             _ => {
                 return Err(SingleFederationError::Internal {

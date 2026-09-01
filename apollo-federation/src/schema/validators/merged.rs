@@ -54,7 +54,7 @@ pub(crate) fn validate_merged_schema(
             }
         };
         for interface_name in interface_names {
-            let interface_pos = InterfaceTypeDefinitionPosition::new(Name::clone(&interface_name));
+            let interface_pos = InterfaceTypeDefinitionPosition::new(Name::clone(interface_name));
             for interface_field_pos in interface_pos.fields(supergraph_schema.schema())? {
                 let field_pos = type_pos.field(interface_field_pos.field_name.clone());
                 if field_pos.get(supergraph_schema.schema()).is_err() {

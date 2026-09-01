@@ -151,11 +151,7 @@ impl SubgraphMetadata {
 
     /// Update field coordinates in metadata after a type has been renamed.
     /// This is necessary when root operation types are normalized (e.g., MyMutation -> Mutation).
-    pub(crate) fn update_type_references(
-        &mut self,
-        old_type_name: &Name,
-        new_type_name: &Name,
-    ) {
+    pub(crate) fn update_type_references(&mut self, old_type_name: &Name, new_type_name: &Name) {
         update_field_definition_positions(&mut self.context_fields, old_type_name, new_type_name);
         update_field_definition_positions(
             &mut self.interface_constraint_fields,
@@ -427,7 +423,7 @@ impl ExternalMetadata {
                     .iter()
                     .map(|itf| {
                         FieldDefinitionPosition::Interface(InterfaceFieldDefinitionPosition {
-                            type_name: Name::clone(&itf),
+                            type_name: Name::clone(itf),
                             field_name: external_field.field_name().clone(),
                         })
                     })
@@ -583,11 +579,7 @@ impl ExternalMetadata {
     }
 
     /// Update field coordinates in external metadata after a type has been renamed.
-    pub(crate) fn update_type_references(
-        &mut self,
-        old_type_name: &Name,
-        new_type_name: &Name,
-    ) {
+    pub(crate) fn update_type_references(&mut self, old_type_name: &Name, new_type_name: &Name) {
         update_field_definition_positions(&mut self.external_fields, old_type_name, new_type_name);
         update_field_definition_positions(
             &mut self.fake_external_fields,

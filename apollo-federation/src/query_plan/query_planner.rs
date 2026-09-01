@@ -337,7 +337,7 @@ impl QueryPlanner {
                             .try_get(subgraph.schema())?
                             .members
                             .iter()
-                            .map(|member| ObjectTypeDefinitionPosition::new(Name::clone(&member)))
+                            .map(|member| ObjectTypeDefinitionPosition::new(Name::clone(member)))
                             .collect(),
                     ),
                     _ => None,

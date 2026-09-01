@@ -231,10 +231,7 @@ pub(super) fn extract(
                     .map(|t| matches!(t, TypeDefinitionPosition::Object(_)))
                     .unwrap_or_default()
                 {
-                    obj_pos.insert_directive(
-                        &mut subgraph.schema,
-                        Node::new(directive.clone()).into(),
-                    )?;
+                    obj_pos.insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
                 }
             }
         }

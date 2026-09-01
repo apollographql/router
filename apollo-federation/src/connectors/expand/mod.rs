@@ -391,16 +391,14 @@ mod helpers {
                 .schema()
                 .schema_definition
                 .query
-                .as_ref()
-                .map(|m| Name::clone(m))
-                .unwrap_or(name!("Query"));
+                .clone()
+                .unwrap_or_else(|| name!("Query").into());
             let mutation_alias = self
                 .original_schema
                 .schema()
                 .schema_definition
                 .mutation
-                .as_ref()
-                .map(|m| Name::clone(m));
+                .clone();
 
             let element = connector
                 .id
@@ -1038,16 +1036,14 @@ mod helpers {
                 .schema()
                 .schema_definition
                 .query
-                .as_ref()
-                .map(|m| Name::clone(m))
-                .unwrap_or(name!("Query"));
+                .clone()
+                .unwrap_or_else(|| name!("Query").into());
             let mutation_alias = self
                 .original_schema
                 .schema()
                 .schema_definition
                 .mutation
-                .as_ref()
-                .map(|m| Name::clone(m));
+                .clone();
 
             let element = connector
                 .id

@@ -126,7 +126,9 @@ fn contains_shape(
     let arg_shape = first_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
 
     // Ensure input is an array
-    if !Shape::closed_tuple([], []).accepts(&input_shape) && !input_shape.accepts(&Shape::unknown([])) {
+    if !Shape::closed_tuple([], []).accepts(&input_shape)
+        && !input_shape.accepts(&Shape::unknown([]))
+    {
         return Shape::error(
             format!(
                 "Method ->{} requires an array input, but got: {input_shape}",

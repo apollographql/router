@@ -1928,7 +1928,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         "Setting supergraph root {} to type named {} (from subgraph {})",
                         root_kind, root_type, subgraph.name
                     );
-                    let root_type = Name::clone(&root_type).to_node(None);
+                    let root_type = Name::clone(root_type).to_node(None);
                     dest.set_root_type(&mut self.merged, root_kind, root_type)?;
                     break;
                 }
@@ -1997,7 +1997,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         for (name, extended_type) in &self.merged.schema().types {
             if let ExtendedType::Object(object) = extended_type {
                 for intf in &object.implements_interfaces {
-                    if let Some(interface) = self.merged.schema().get_interface(&intf) {
+                    if let Some(interface) = self.merged.schema().get_interface(intf) {
                         for (intf_field_name, intf_field) in &interface.fields {
                             let candidate_field = ObjectFieldDefinitionPosition {
                                 type_name: name.clone(),
@@ -2064,7 +2064,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                                     // Note it's possible that interface is abstracted away (as an interface object) in multiple
                                     // subgraphs, so we don't bother with the field definition in those subgraphs, but rather
                                     // just copy the merged definition from the interface.
-                                    let mut missing_obj_node = FieldDefinition::clone(&intf_field);
+                                    let mut missing_obj_node = FieldDefinition::clone(intf_field);
                                     // PORT NOTE: since we are copying complete field AST directly it will include all args information as well.
                                     // We only have to filter directives on field but we don't need any extra logic to filter arg directives as
                                     //   1) access control directives are not applicable on args

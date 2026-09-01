@@ -481,12 +481,12 @@ fn validate_field_value(
                             ExtendedType::Interface(intf) => intf
                                 .implements_interfaces
                                 .iter()
-                                .map(|i| Name::clone(&i))
+                                .map(|i| Name::clone(i))
                                 .collect(),
                             ExtendedType::Object(obj) => obj
                                 .implements_interfaces
                                 .iter()
-                                .map(|i| Name::clone(&i))
+                                .map(|i| Name::clone(i))
                                 .collect(),
                             _ => vec![],
                         };
@@ -648,7 +648,7 @@ impl FromContextValidator for DenyOnInterfaceImplementation {
             let field = position.parent().field_name;
             for implemented in &obj.implements_interfaces {
                 let itf = InterfaceTypeDefinitionPosition {
-                    type_name: Name::clone(&implemented),
+                    type_name: Name::clone(implemented),
                 };
                 let field = itf.fields(schema.schema())?.find(|f| f.field_name == field);
                 if let Some(field) = field {

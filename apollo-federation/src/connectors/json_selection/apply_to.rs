@@ -836,7 +836,9 @@ impl ApplyToInternal for WithRange<PathList> {
                     input_shape.locations().cloned(),
                 );
                 // Reapply any pending errors to the result.
-                let result = pending_errors.into_iter().fold(result, |s, e| s.with_error(e));
+                let result = pending_errors
+                    .into_iter()
+                    .fold(result, |s, e| s.with_error(e));
                 return result;
             }
             ShapeCase::All(shapes) => {
@@ -846,7 +848,9 @@ impl ApplyToInternal for WithRange<PathList> {
                     }),
                     input_shape.locations().cloned(),
                 );
-                let result = pending_errors.into_iter().fold(result, |s, e| s.with_error(e));
+                let result = pending_errors
+                    .into_iter()
+                    .fold(result, |s, e| s.with_error(e));
                 return result;
             }
             _ => {}
@@ -1119,10 +1123,14 @@ impl ApplyToInternal for WithRange<PathList> {
                 dollar_shape,
             );
             // Reapply any pending errors from the original input shape.
-            pending_errors.into_iter().fold(tail_result, |s, e| s.with_error(e))
+            pending_errors
+                .into_iter()
+                .fold(tail_result, |s, e| s.with_error(e))
         } else {
             // Reapply any pending errors from the original input shape.
-            pending_errors.into_iter().fold(current_shape, |s, e| s.with_error(e))
+            pending_errors
+                .into_iter()
+                .fold(current_shape, |s, e| s.with_error(e))
         }
     }
 }

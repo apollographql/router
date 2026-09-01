@@ -52,7 +52,7 @@ impl ValidationContext {
                     }
                     CompositeTypeDefinitionPosition::Union(union_type) => {
                         let union_def = union_type.get(supergraph_schema.schema())?;
-                        type_names.extend(union_def.members.iter().map(|m| Name::clone(&m)));
+                        type_names.extend(union_def.members.iter().map(|m| Name::clone(m)));
                     }
                     _ => {}
                 };

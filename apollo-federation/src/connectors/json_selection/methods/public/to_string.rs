@@ -89,7 +89,9 @@ fn to_string_shape(
     }
 
     // Check if input is an object or array shape
-    if Shape::empty_object([]).accepts(&input_shape) || Shape::closed_tuple([], []).accepts(&input_shape) {
+    if Shape::empty_object([]).accepts(&input_shape)
+        || Shape::closed_tuple([], []).accepts(&input_shape)
+    {
         return Shape::error_with_partial(
             format!(
                 "Method ->{} cannot convert arrays or objects to strings. Use ->jsonStringify or ->joinNotNull instead",
