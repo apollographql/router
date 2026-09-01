@@ -18,6 +18,7 @@ use petgraph::visit::NodeIndexable;
 use super::FETCH_COST;
 use super::FetchGraph;
 use super::FetchGroupKind;
+use super::PIPELINING_COST;
 use crate::error::FederationError;
 use crate::operation::DirectiveList;
 use crate::operation::SelectionMap;
@@ -137,7 +138,7 @@ impl FetchGraph {
         let total_cost: QueryPlanCost = cost_sequence
             .iter()
             .enumerate()
-            .map(|(i, &stage)| stage * (1.0f64).max(i as f64 * 100.0))
+            .map(|(i, &stage)| stage * (1.0f64).max(i as f64 * PIPELINING_COST))
             .sum();
 
         let plan = match sequence.len() {
@@ -216,7 +217,9 @@ impl FetchGraph {
 
         // 3. Materialize entity inputs from incoming edges.
         let (requires_selection, input_rewrites) = if is_entity {
-            self.materialize_entity_inputs(ctx, node_idx, &parent_type, handled_conditions)?
+            let (sel, rewrites) =
+                self.materialize_entity_inputs(ctx, node_idx, &parent_type, handled_conditions)?;
+            (Some(sel), rewrites)
         } else {
             (None, Vec::new())
         };
@@ -365,7 +368,7 @@ impl FetchGraph {
         node_idx: NodeIndex,
         parent_type: &CompositeTypeDefinitionPosition,
         handled_conditions: &Conditions,
-    ) -> Result<(Option<SelectionSet>, Vec<Arc<FetchDataRewrite>>), FederationError> {
+    ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
         let mut per_type: IndexMap<CompositeTypeDefinitionPosition, SelectionSet> =
             IndexMap::default();
         let mut rewrites: Vec<Arc<FetchDataRewrite>> = Vec::new();
@@ -421,7 +424,7 @@ impl FetchGraph {
             type_position: parent_type.clone(),
             selections: Arc::new(merged_selections),
         };
-        Ok((Some(result), rewrites))
+        Ok((result, rewrites))
     }
 
     /// Filter the operation's variable definitions to those actually
