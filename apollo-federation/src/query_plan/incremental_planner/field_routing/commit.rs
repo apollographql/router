@@ -13,7 +13,6 @@ use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
 use crate::error::FederationError;
-use crate::operation::Field;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraphEdgeTransition;
@@ -679,29 +678,4 @@ impl FieldRoutingSearchSpace {
         }
         Ok(())
     }
-}
-
-/// The response path elements a field contributes: its response key, plus
-/// an index wildcard per level of list nesting.
-pub(super) fn field_response_elements(
-    field: &Field,
-) -> Result<Vec<FetchDataPathElement>, FederationError> {
-    let mut elements = vec![FetchDataPathElement::Key(
-        field.response_name().clone(),
-        Default::default(),
-    )];
-    let mut ty = &field.field_position.get(field.schema.schema())?.ty;
-    loop {
-        match ty {
-            apollo_compiler::ast::Type::Named(_) | apollo_compiler::ast::Type::NonNullNamed(_) => {
-                break;
-            }
-            apollo_compiler::ast::Type::List(inner)
-            | apollo_compiler::ast::Type::NonNullList(inner) => {
-                elements.push(FetchDataPathElement::AnyIndex(Default::default()));
-                ty = inner;
-            }
-        }
-    }
-    Ok(elements)
 }
