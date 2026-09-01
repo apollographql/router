@@ -1,6 +1,5 @@
 ---
 source: apollo-router/tests/integration/demand_control.rs
-assertion_line: 389
 expression: parse_result_for_snapshot(response).await
 ---
 {

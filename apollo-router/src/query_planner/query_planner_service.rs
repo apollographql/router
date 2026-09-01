@@ -737,9 +737,7 @@ mod tests {
         let config = Arc::new(Configuration::default());
         let schema = Arc::new(Schema::parse(SUBSCRIPTION_SCHEMA, &config).unwrap());
 
-        let mut service = QueryPlannerService::for_test(schema.clone(), config.clone()).unwrap();
-
-        // subscription with @defer cannot be query planned
+        // apollo-compiler v2 rejects @defer in subscriptions at parse time
         let query = r#"
             subscription {
                 userWasCreated {
@@ -747,35 +745,12 @@ mod tests {
                 }
             }
         "#;
-        let document = Query::parse_document(query, None, &schema, &config).unwrap();
-
-        let result = service
-            .ready()
-            .await
-            .unwrap()
-            .call(
-                QueryPlannerRequest::builder()
-                    .query(query)
-                    .and_operation_name(document.operation.name.as_deref())
-                    .document(document)
-                    .compute_job_type(ComputeJobType::QueryPlanning)
-                    .metadata(CacheKeyMetadata::default())
-                    .plan_options(PlanOptions::default())
-                    .build(),
-            )
-            .await;
-
-        let err = match result {
-            Ok(response) => panic!("expected error, got {:?}", response.content),
-            Err(MaybeBackPressureError::TemporaryError(err)) => {
-                panic!("expected permanent error, got {err:?}")
-            }
-            Err(MaybeBackPressureError::PermanentError(err)) => err,
-        };
-
-        assert_eq!(
-            "Federation error: @defer is not supported on subscriptions",
-            err.to_string()
+        let err = Query::parse_document(query, None, &schema, &config)
+            .expect_err("@defer in subscription should be rejected at parse time");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Defer") || msg.contains("defer"),
+            "error should mention defer: {msg}"
         );
     }
 

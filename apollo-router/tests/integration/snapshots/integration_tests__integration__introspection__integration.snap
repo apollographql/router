@@ -1,5 +1,6 @@
 ---
 source: apollo-router/tests/integration/introspection.rs
+assertion_line: 392
 expression: "response.json::<serde_json::Value>().await.unwrap()"
 ---
 {
@@ -206,9 +207,13 @@ expression: "response.json::<serde_json::Value>().await.unwrap()"
                   "name": "includeDeprecated",
                   "description": null,
                   "type": {
-                    "kind": "SCALAR",
-                    "name": "Boolean",
-                    "ofType": null
+                    "kind": "NON_NULL",
+                    "name": null,
+                    "ofType": {
+                      "kind": "SCALAR",
+                      "name": "Boolean",
+                      "ofType": null
+                    }
                   },
                   "defaultValue": "false",
                   "isDeprecated": false,
@@ -286,9 +291,13 @@ expression: "response.json::<serde_json::Value>().await.unwrap()"
                   "name": "includeDeprecated",
                   "description": null,
                   "type": {
-                    "kind": "SCALAR",
-                    "name": "Boolean",
-                    "ofType": null
+                    "kind": "NON_NULL",
+                    "name": null,
+                    "ofType": {
+                      "kind": "SCALAR",
+                      "name": "Boolean",
+                      "ofType": null
+                    }
                   },
                   "defaultValue": "false",
                   "isDeprecated": false,
@@ -324,9 +333,13 @@ expression: "response.json::<serde_json::Value>().await.unwrap()"
                   "name": "includeDeprecated",
                   "description": null,
                   "type": {
-                    "kind": "SCALAR",
-                    "name": "Boolean",
-                    "ofType": null
+                    "kind": "NON_NULL",
+                    "name": null,
+                    "ofType": {
+                      "kind": "SCALAR",
+                      "name": "Boolean",
+                      "ofType": null
+                    }
                   },
                   "defaultValue": "false",
                   "isDeprecated": false,
@@ -379,6 +392,19 @@ expression: "response.json::<serde_json::Value>().await.unwrap()"
               },
               "isDeprecated": false,
               "deprecationReason": null
+            },
+            {
+              "name": "isOneOf",
+              "description": null,
+              "args": [],
+              "nonDeprecatedArgs": [],
+              "type": {
+                "kind": "SCALAR",
+                "name": "Boolean",
+                "ofType": null
+              },
+              "isDeprecated": false,
+              "deprecationReason": null
             }
           ],
           "nonDeprecatedFields": [
@@ -411,6 +437,9 @@ expression: "response.json::<serde_json::Value>().await.unwrap()"
             },
             {
               "name": "specifiedByURL"
+            },
+            {
+              "name": "isOneOf"
             }
           ],
           "inputFields": null,
@@ -550,9 +579,13 @@ expression: "response.json::<serde_json::Value>().await.unwrap()"
                   "name": "includeDeprecated",
                   "description": null,
                   "type": {
-                    "kind": "SCALAR",
-                    "name": "Boolean",
-                    "ofType": null
+                    "kind": "NON_NULL",
+                    "name": null,
+                    "ofType": {
+                      "kind": "SCALAR",
+                      "name": "Boolean",
+                      "ofType": null
+                    }
                   },
                   "defaultValue": "false",
                   "isDeprecated": false,
@@ -937,9 +970,13 @@ expression: "response.json::<serde_json::Value>().await.unwrap()"
                   "name": "includeDeprecated",
                   "description": null,
                   "type": {
-                    "kind": "SCALAR",
-                    "name": "Boolean",
-                    "ofType": null
+                    "kind": "NON_NULL",
+                    "name": null,
+                    "ofType": {
+                      "kind": "SCALAR",
+                      "name": "Boolean",
+                      "ofType": null
+                    }
                   },
                   "defaultValue": "false",
                   "isDeprecated": false,
@@ -1346,8 +1383,8 @@ expression: "response.json::<serde_json::Value>().await.unwrap()"
                 "name": "U",
                 "ofType": null
               },
-              "isDeprecated": false,
-              "deprecationReason": null
+              "isDeprecated": true,
+              "deprecationReason": "No longer supported"
             }
           ],
           "nonDeprecatedFields": [
@@ -1356,9 +1393,6 @@ expression: "response.json::<serde_json::Value>().await.unwrap()"
             },
             {
               "name": "url"
-            },
-            {
-              "name": "union"
             }
           ],
           "inputFields": null,
@@ -1435,8 +1469,8 @@ expression: "response.json::<serde_json::Value>().await.unwrap()"
                 }
               },
               "defaultValue": "0",
-              "isDeprecated": false,
-              "deprecationReason": null
+              "isDeprecated": true,
+              "deprecationReason": "No longer supported"
             },
             {
               "name": "b",
@@ -1451,11 +1485,7 @@ expression: "response.json::<serde_json::Value>().await.unwrap()"
               "deprecationReason": "No longer supported"
             }
           ],
-          "nonDeprecatedInputFields": [
-            {
-              "name": "a"
-            }
-          ],
+          "nonDeprecatedInputFields": [],
           "interfaces": null,
           "enumValues": null,
           "nonDeprecatedEnumValues": null,
@@ -1635,9 +1665,13 @@ expression: "response.json::<serde_json::Value>().await.unwrap()"
               "name": "reason",
               "description": "Explains why this element was deprecated, usually also including a suggestion for how to access supported similar data. Formatted using the Markdown syntax, as specified by [CommonMark](https://commonmark.org/).",
               "type": {
-                "kind": "SCALAR",
-                "name": "String",
-                "ofType": null
+                "kind": "NON_NULL",
+                "name": null,
+                "ofType": {
+                  "kind": "SCALAR",
+                  "name": "String",
+                  "ofType": null
+                }
               },
               "defaultValue": "\"No longer supported\"",
               "isDeprecated": false,
@@ -1649,6 +1683,15 @@ expression: "response.json::<serde_json::Value>().await.unwrap()"
               "name": "reason"
             }
           ]
+        },
+        {
+          "name": "oneOf",
+          "description": "Indicates an Input Object is a OneOf Input Object.",
+          "locations": [
+            "INPUT_OBJECT"
+          ],
+          "args": [],
+          "nonDeprecatedArgs": []
         },
         {
           "name": "specifiedBy",

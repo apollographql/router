@@ -101,7 +101,7 @@ expression: cache_keys
           {
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         ]

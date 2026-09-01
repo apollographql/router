@@ -85,19 +85,19 @@ fn federated_ships_required() -> TestSetupParameters {
                     ],
                 },
                 "entities": [
-                    {"__typename": "Ship", "id": 1, "owner": {"addresses": [{"zipCode": 18263}]}, "registrationFee": 129.2},
-                    {"__typename": "Ship", "id": 2, "owner": {"addresses": [{"zipCode": 61027}]}, "registrationFee": 14.0},
-                    {"__typename": "Ship", "id": 3, "owner": {"addresses": [{"zipCode": 86204}]}, "registrationFee": 97.15},
-                    {"__typename": "Ship", "id": 1, "owner": null, "registrationFee": null},
-                    {"__typename": "Ship", "id": 2, "owner": null, "registrationFee": null},
-                    {"__typename": "Ship", "id": 3, "owner": null, "registrationFee": null},
+                    {"__typename": "Ship", "id": "1", "owner": {"addresses": [{"zipCode": 18263}]}, "registrationFee": 129.2},
+                    {"__typename": "Ship", "id": "2", "owner": {"addresses": [{"zipCode": 61027}]}, "registrationFee": 14.0},
+                    {"__typename": "Ship", "id": "3", "owner": {"addresses": [{"zipCode": 86204}]}, "registrationFee": 97.15},
+                    {"__typename": "Ship", "id": "1", "owner": null, "registrationFee": null},
+                    {"__typename": "Ship", "id": "2", "owner": null, "registrationFee": null},
+                    {"__typename": "Ship", "id": "3", "owner": null, "registrationFee": null},
                 ]
             },
             "users": {
                 "entities": [
-                    {"__typename": "User", "licenseNumber": 10, "addresses": [{"zipCode": 18263}]},
-                    {"__typename": "User", "licenseNumber": 11, "addresses": [{"zipCode": 61027}]},
-                    {"__typename": "User", "licenseNumber": 12, "addresses": [{"zipCode": 86204}]},
+                    {"__typename": "User", "licenseNumber": "10", "addresses": [{"zipCode": 18263}]},
+                    {"__typename": "User", "licenseNumber": "11", "addresses": [{"zipCode": 61027}]},
+                    {"__typename": "User", "licenseNumber": "12", "addresses": [{"zipCode": 86204}]},
                 ],
             }
         }),
@@ -134,9 +134,9 @@ fn federated_ships_fragment() -> TestSetupParameters {
                     ]
                 },
                 "entities": [
-                    {"__typename": "User", "name": "User100", "licenseNumber": 100},
-                    {"__typename": "User", "name": "User110", "licenseNumber": 110},
-                    {"__typename": "User", "name": "User120", "licenseNumber": 120},
+                    {"__typename": "User", "name": "User100", "licenseNumber": "100"},
+                    {"__typename": "User", "name": "User110", "licenseNumber": "110"},
+                    {"__typename": "User", "name": "User120", "licenseNumber": "120"},
                 ],
             }
         }),
