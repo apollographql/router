@@ -829,35 +829,36 @@ impl ApplyToInternal for WithRange<PathList> {
 
         match input_shape.case() {
             ShapeCase::One(shapes) => {
-                let result = Shape::one(
+                let distributed = Shape::one(
                     shapes.iter().map(|shape| {
                         self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                     }),
                     input_shape.locations().cloned(),
                 );
-                // Reapply any pending errors to the result.
-                let result = pending_errors
+                return pending_errors
                     .into_iter()
-                    .fold(result, |s, e| s.with_error(e));
-                return result;
+                    .fold(distributed, |acc, (msg, locs)| {
+                        Shape::error_with_partial(msg, acc, locs)
+                    });
             }
             ShapeCase::All(shapes) => {
-                let result = Shape::all(
+                let distributed = Shape::all(
                     shapes.iter().map(|shape| {
                         self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                     }),
                     input_shape.locations().cloned(),
                 );
-                let result = pending_errors
+                return pending_errors
                     .into_iter()
-                    .fold(result, |s, e| s.with_error(e));
-                return result;
+                    .fold(distributed, |acc, (msg, locs)| {
+                        Shape::error_with_partial(msg, acc, locs)
+                    });
             }
             _ => {}
         };
 
-        // Given the base cases above, we can assume below that input_shape is
-        // neither ::One nor ::All.
+        // Below, input_shape is neither ::One nor ::All; any pending_errors
+        // captured above will be reapplied at the bottom of this function.
 
         let mut extra_vars_opt: Option<Shape> = None;
         let (current_shape, tail_opt) = match self.as_ref() {
@@ -1064,7 +1065,7 @@ impl ApplyToInternal for WithRange<PathList> {
             }
         };
 
-        if let Some(tail) = tail_opt {
+        let tail_result = if let Some(tail) = tail_opt {
             // Recurses over extra_vars_opt, which is usually None, but could be
             // Some(object_shape) (when handling ArrowMethod::As), and might
             // sometimes be Some(error_shape) with an object partial shape.
@@ -1075,13 +1076,13 @@ impl ApplyToInternal for WithRange<PathList> {
                 input_shape: Shape,
                 dollar_shape: Shape,
             ) -> Shape {
-                // Extract any pending error messages from extra_vars_opt.
                 let pending_messages: Vec<String> = extra_vars_opt
                     .as_ref()
                     .map(|s| s.own_errors().map(|e| e.message.clone()).collect())
                     .unwrap_or_default();
+                let tail_location = tail.shape_location(context.source_id());
 
-                match extra_vars_opt.as_ref().map(|s| s.case()) {
+                let inner_shape = match extra_vars_opt.as_ref().map(|s| s.case()) {
                     Some(ShapeCase::Object { fields, .. }) => {
                         // TODO Refactor the internal ShapeContext
                         // representation to make this cloning
@@ -1091,29 +1092,32 @@ impl ApplyToInternal for WithRange<PathList> {
                                 .iter()
                                 .map(|(name, shape)| (name.clone(), shape.clone())),
                         );
-                        let inner_shape =
-                            tail.compute_output_shape(&new_context, input_shape, dollar_shape);
-                        pending_messages.into_iter().fold(inner_shape, |s, msg| {
-                            s.with_error(shape::Error { message: msg })
-                        })
+                        tail.compute_output_shape(&new_context, input_shape, dollar_shape)
                     }
 
-                    // When extra_vars_opt is Unknown with pending errors, the
-                    // errors came from what used to be a pure ShapeCase::Error
-                    // (no partial). Reapply the errors to the tail result.
+                    // A pure error (case == Unknown carrying error metadata) has
+                    // no partial structure to drive name installation; emit a
+                    // fresh error shape carrying the same messages.
                     Some(ShapeCase::Unknown) if !pending_messages.is_empty() => {
-                        let inner_shape =
-                            tail.compute_output_shape(context, input_shape, dollar_shape);
-                        pending_messages.into_iter().fold(inner_shape, |s, msg| {
-                            s.with_error(shape::Error { message: msg })
-                        })
+                        let mut iter = pending_messages.into_iter();
+                        let first = iter.next().unwrap_or_default();
+                        return iter.fold(Shape::error(first, tail_location), |acc, msg| {
+                            acc.with_error(shape::Error { message: msg })
+                        });
                     }
 
                     _ => tail.compute_output_shape(context, input_shape, dollar_shape),
-                }
+                };
+
+                // Reattach any error metadata that was sitting on
+                // extra_vars_opt, so the structural recursion's output still
+                // surfaces the original error messages.
+                pending_messages.into_iter().fold(inner_shape, |acc, msg| {
+                    Shape::error_with_partial(msg, acc, tail_location.clone())
+                })
             }
 
-            let tail_result = compute_tail_shape(
+            compute_tail_shape(
                 tail,
                 &extra_vars_opt,
                 context,
@@ -1121,17 +1125,19 @@ impl ApplyToInternal for WithRange<PathList> {
                 // compute_tail_shape function defined above.
                 current_shape,
                 dollar_shape,
-            );
-            // Reapply any pending errors from the original input shape.
-            pending_errors
-                .into_iter()
-                .fold(tail_result, |s, e| s.with_error(e))
+            )
         } else {
-            // Reapply any pending errors from the original input shape.
-            pending_errors
-                .into_iter()
-                .fold(current_shape, |s, e| s.with_error(e))
-        }
+            current_shape
+        };
+
+        // Reapply any pending errors that were attached to the original
+        // input_shape, so callers see the same error metadata they would have
+        // seen when errors were a dedicated `ShapeCase::Error` variant.
+        pending_errors
+            .into_iter()
+            .fold(tail_result, |acc, (msg, locs)| {
+                Shape::error_with_partial(msg, acc, locs)
+            })
     }
 }
 
@@ -4114,7 +4120,7 @@ mod tests {
             // This output shape is wrong if $root.friend_ids turns out to be an
             // array, and it's tricky to see how to transform the shape to what
             // it would have been if we knew that, where friends: [...{ id:
-            // $root.friend_ids.* }> (note the * meaning any array index),
+            // $root.friend_ids.* }] (note the * meaning any array index),
             // because who's to say it's not the id field that should become the
             // List, rather than the friends field?
             r#"{
@@ -6084,7 +6090,7 @@ mod tests {
         );
 
         // The question mark should be applied recursively to the partial shape within the error
-        assert!(result_shape.pretty_print().contains("err"));
+        assert!(result_shape.pretty_print().contains("(err "));
         assert!(result_shape.pretty_print().contains("None"));
     }
 
