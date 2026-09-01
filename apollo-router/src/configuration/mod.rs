@@ -747,7 +747,6 @@ pub(crate) struct Supergraph {
 
     /// Validate that default values of input fields and arguments match their declared types.
     /// Default: true
-    #[serde(default = "default_validate_default_values")]
     pub(crate) validate_default_values: bool,
 }
 
