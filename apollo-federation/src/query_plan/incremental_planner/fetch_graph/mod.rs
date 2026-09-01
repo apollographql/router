@@ -68,6 +68,14 @@ pub(crate) struct FetchNode {
 }
 
 impl FetchNode {
+    pub(crate) fn new(subgraph: Arc<str>, kind: FetchGroupKind) -> Self {
+        Self {
+            subgraph,
+            kind,
+            selection_builder: SelectionBuilder::default(),
+        }
+    }
+
     /// Get the root type if this is a root fetch group.
     pub(crate) fn root_type(&self) -> Option<&CompositeTypeDefinitionPosition> {
         match &self.kind {
@@ -287,11 +295,7 @@ impl FetchGraph {
             return id;
         }
         self.insert_node(
-            FetchNode {
-                subgraph: subgraph.clone(),
-                kind: FetchGroupKind::Root { root_type },
-                selection_builder: SelectionBuilder::default(),
-            },
+            FetchNode::new(subgraph.clone(), FetchGroupKind::Root { root_type }),
             Some(subgraph.clone()),
         )
     }
@@ -303,11 +307,7 @@ impl FetchGraph {
         merge_at: Vec<FetchDataPathElement>,
     ) -> NodeIndex {
         self.insert_node(
-            FetchNode {
-                subgraph: subgraph.clone(),
-                kind: FetchGroupKind::Entity { merge_at },
-                selection_builder: SelectionBuilder::default(),
-            },
+            FetchNode::new(subgraph.clone(), FetchGroupKind::Entity { merge_at }),
             None,
         )
     }
@@ -319,14 +319,13 @@ impl FetchGraph {
         merge_at: Vec<FetchDataPathElement>,
     ) -> NodeIndex {
         self.insert_node(
-            FetchNode {
-                subgraph: subgraph.clone(),
-                kind: FetchGroupKind::RootHop {
+            FetchNode::new(
+                subgraph.clone(),
+                FetchGroupKind::RootHop {
                     root_type,
                     merge_at,
                 },
-                selection_builder: SelectionBuilder::default(),
-            },
+            ),
             None,
         )
     }
