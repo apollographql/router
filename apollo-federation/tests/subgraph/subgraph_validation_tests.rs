@@ -1056,11 +1056,11 @@ mod link_handling_tests {
     // There are a few whitespace differences between this and the JS version, but the more important difference is that
     // the links are added as a new extension instead of being attached to the top-level schema definition. We may need
     // to revisit that later if we're doing strict comparisons of SDLs between versions.
-    const EXPECTED_FULL_SCHEMA: &str = r#"schema @link(url: "https://specs.apollo.dev/link/v1.0") {
+    const EXPECTED_FULL_SCHEMA: &str = r#"schema {
   query: Query
 }
 
-extend schema @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 

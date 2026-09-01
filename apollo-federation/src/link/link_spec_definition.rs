@@ -30,6 +30,7 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
+use crate::schema::SchemaElement;
 use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
@@ -586,10 +587,16 @@ impl LinkSpecDefinition {
             }));
         }
 
+        let directive = Node::new(Directive { name, arguments });
+        let directive = match SchemaDefinitionPosition
+            .get(schema.schema())
+            .origin_to_use()
+        {
+            Some(ext_id) => directive.with_extension_id(ext_id),
+            None => directive,
+        };
         SchemaDefinitionPosition.insert_directive_at(
-            schema,
-            Node::new(Directive { name, arguments }),
-            0, // @link to link spec should be first
+            schema, directive, 0, // @link to link spec should be first
         )?;
         Ok(())
     }
