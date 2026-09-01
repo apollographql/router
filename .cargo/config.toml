@@ -1,3 +1,11 @@
+[build]
+# TSH-23556 (Capital One) repro: `valuable` support in `tracing` is gated
+# behind this unstable cfg flag. Must be set identically on BOTH the
+# v2.15 and v2.16 build sides — if it's missing, `valuable` silently falls
+# back to Debug on both, which would make the bug look like it reproduces
+# everywhere and give a false result.
+rustflags = ["--cfg", "tracing_unstable"]
+
 [alias]
 xtask = "run --locked --package xtask --manifest-path xtask/Cargo.toml --"
 fed = "run -p apollo-federation-cli --"

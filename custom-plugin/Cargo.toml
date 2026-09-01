@@ -1,0 +1,23 @@
+[package]
+name = "custom-plugin"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+schemars = { version = "0.8", features = ["url"] }
+serde = "1"
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tower = { version = "0.5", features = ["full"] }
+tracing = { version = "0.1.40", features = ["valuable"] }
+
+# TSH-23556 (Capital One) repro: reproduces the `field::valuable` structured
+# log regression. `tracing-serde` version must match apollo-router's pin
+# (0.2.0) so Cargo unifies the "valuable" feature across the whole build.
+valuable = { version = "0.1.1", features = ["derive"] }
+tracing-serde = { version = "0.2.0", features = ["valuable"] }
+
+# 👇 Local dependency to Router APIs
+apollo-router = { path = "../apollo-router" }
