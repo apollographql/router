@@ -416,7 +416,9 @@ async fn plan_query(
         )
         .instrument(tracing::info_span!(
             QUERY_PLANNING_SPAN_NAME,
-            "otel.kind" = "INTERNAL"
+            "otel.kind" = "INTERNAL",
+            "query_planning.fuel_limit" = tracing::field::Empty,
+            "query_planning.beam_width" = tracing::field::Empty,
         ))
         .await?;
 
