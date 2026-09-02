@@ -140,6 +140,34 @@ impl From<proteus::parser::Error> for ConfigurationError {
     }
 }
 
+/// Configuration for the incremental (BULB) query planner. When enabled it
+/// replaces the exhaustive traversal-based planner, planning field-by-field
+/// with a greedy pass plus bounded backtracking.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct IncrementalPlanner {
+    /// Use the incremental planner instead of the exhaustive planner.
+    pub(crate) enabled: bool,
+
+    /// Beam width: how many candidate plans advance together per decision
+    /// depth during search. Defaults to 16.
+    pub(crate) beam_width: usize,
+
+    /// Absolute cap on additional planning effort beyond the initial greedy
+    /// pass, measured in uniform units of planning work. Defaults to 5000.
+    pub(crate) fuel: u64,
+}
+
+impl Default for IncrementalPlanner {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            beam_width: 16,
+            fuel: 5_000,
+        }
+    }
+}
+
 /// The configuration for the router.
 ///
 /// Can be created through `serde::Deserialize` from various formats,
@@ -230,6 +258,16 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_type_conditioned_fetching: bool,
 
+    /// Configuration for the incremental query planner.
+    #[serde(default)]
+    pub(crate) incremental_planner: IncrementalPlanner,
+
+    /// When enabled, the incremental planner handles connectors natively via
+    /// `FetchProtocol::Connector` instead of expanding them into virtual
+    /// subgraphs. Skips the O(N) schema expansion at startup.
+    #[serde(default)]
+    pub(crate) native_connectors: bool,
+
     /// When enabled for specific subgraphs, orphan errors (those without a valid
     /// `_entities` path) are assigned to the nearest non-array ancestor in the
     /// response path, preventing them from being duplicated across every array
@@ -271,6 +309,8 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: chaos::Config,
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
+            native_connectors: bool,
+            incremental_planner: IncrementalPlanner,
             experimental_hoist_orphan_errors: SubgraphConfiguration<HoistOrphanErrors>,
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
@@ -304,6 +344,8 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: ad_hoc.limits,
             experimental_chaos: ad_hoc.experimental_chaos,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
+            native_connectors: ad_hoc.native_connectors,
+            incremental_planner: ad_hoc.incremental_planner,
             experimental_hoist_orphan_errors: ad_hoc.experimental_hoist_orphan_errors,
             plugins: ad_hoc.plugins,
             apollo_plugins: ad_hoc.apollo_plugins,
@@ -376,6 +418,8 @@ impl Configuration {
             batching: batching.unwrap_or_default(),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
+            native_connectors: false,
+            incremental_planner: Default::default(),
             experimental_hoist_orphan_errors: experimental_hoist_orphan_errors.unwrap_or_default(),
             notify,
         };
@@ -444,6 +488,22 @@ impl Configuration {
             .and_then(NonZeroU32::new)
             .unwrap_or(NonZeroU32::new(10_000).expect("it is not zero"));
 
+        // The BULB planner's wall-clock limit is deliberately not a fixed
+        // number: an unbounded search is fully deterministic (fuel-bounded),
+        // so we only cap it when the router is already enforcing a query
+        // planning deadline.
+        let cooperative_cancellation = &self
+            .supergraph
+            .query_planning
+            .experimental_cooperative_cancellation;
+        let bulb_timeout = (cooperative_cancellation.is_enabled()
+            && matches!(
+                cooperative_cancellation.mode(),
+                crate::configuration::mode::Mode::Enforce
+            ))
+        .then(|| cooperative_cancellation.timeout())
+        .flatten();
+
         QueryPlannerConfig {
             subgraph_graphql_validation: false,
             generate_query_fragments: self.supergraph.generate_query_fragments,
@@ -451,11 +511,18 @@ impl Configuration {
                 enable_defer: self.supergraph.defer_support,
             },
             type_conditioned_fetching: self.experimental_type_conditioned_fetching,
+            incremental_planner:
+                apollo_federation::query_plan::query_planner::IncrementalPlannerConfig {
+                    enabled: self.incremental_planner.enabled || self.native_connectors,
+                    beam_width: self.incremental_planner.beam_width,
+                    fuel: self.incremental_planner.fuel,
+                    timeout: bulb_timeout,
+                    ..Default::default()
+                },
             debug: QueryPlannerDebugConfig {
                 max_evaluated_plans,
                 paths_limit: self.supergraph.query_planning.experimental_paths_limit,
             },
-            incremental_planner: Default::default(),
         }
     }
 }
@@ -514,6 +581,8 @@ impl Configuration {
             uplink,
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
+            native_connectors: false,
+            incremental_planner: Default::default(),
             experimental_hoist_orphan_errors: Default::default(),
             batching: batching.unwrap_or_default(),
             raw_yaml: None,
