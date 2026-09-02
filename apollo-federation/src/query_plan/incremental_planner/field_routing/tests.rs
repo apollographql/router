@@ -1161,3 +1161,228 @@ fn all_subgraphs_disabled_root_typename_fails_planning() {
         result.map(|p| p.to_string()).unwrap_or_default(),
     );
 }
+
+fn interface_object_schema() -> String {
+    wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+interface I
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id", isInterfaceObject: true)
+{
+  id: ID!
+  name: String @join__field(graph: A)
+  desc: String @join__field(graph: B)
+}
+
+type X implements I
+  @join__implements(graph: A, interface: "I")
+  @join__type(graph: A, key: "id")
+{
+  id: ID!
+  name: String
+  desc: String @join__field
+}
+
+type Y implements I
+  @join__implements(graph: A, interface: "I")
+  @join__type(graph: A, key: "id")
+{
+  id: ID!
+  name: String
+  desc: String @join__field
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  items: [I] @join__field(graph: A)
+  stuff: [I] @join__field(graph: B)
+}
+"#,
+    )
+}
+
+/// @interfaceObject fake downcast (`... on X` on the io node in B, where X
+/// does not exist): the concrete-type condition is dropped from B's
+/// operation, and `push_interface_object_typename` pushes a best-effort
+/// `__typename` pending that routes generically -- the io node has no
+/// `__typename` edge, so its only options are key hops to subgraphs where I
+/// is the REAL interface (here A) -- so execution learns each object's
+/// concrete `__typename` to test the condition.
+/// Targets commit.rs push_interface_object_typename + the fake-downcast
+/// op-path arm of target_paths, and routing.rs fragment_options' fake
+/// downcast enumeration.
+#[test]
+fn interface_object_fake_downcast_fetches_concrete_typename() {
+    let plan_str = plan_query(
+        &interface_object_schema(),
+        "{ stuff { ... on X { desc } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "b") {
+          {
+            stuff {
+              __typename
+              desc
+              id
+            }
+          }
+        },
+        Flatten(path: "stuff.@") {
+          Fetch(service: "a") {
+            {
+              ... on I {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on I {
+                __typename
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// Entering through A (real interface), a concrete-type downcast whose field
+/// only exists on the @interfaceObject copy in B key-hops into B.
+#[test]
+fn interface_object_key_hop_from_concrete_type() {
+    let plan_str = plan_query(
+        &interface_object_schema(),
+        "{ items { ... on X { desc } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            items {
+              __typename
+              ... on X {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "items.@") {
+          Fetch(service: "b") {
+            {
+              ... on X {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on I {
+                desc
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// A root field defined in two subgraphs is a federated-root decision point:
+/// options are ranked by how many of the field's children each subgraph can
+/// resolve locally, so the query plans as one fetch to A (which has f1 AND
+/// f2) rather than A+B. The extra `onlyA` sibling forces the lift-forced-
+/// pendings path in fast_forward (a single-option entry below an open
+/// decision is committed first).
+/// Targets routing.rs federated_root_options ranking +
+/// count_local_sub_selections and field_routing/mod.rs fast_forward lift.
+#[test]
+fn shareable_root_field_prefers_subgraph_with_more_local_children() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type T
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  f1: String
+  f2: String @join__field(graph: A)
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  shared: T
+  onlyA: Int @join__field(graph: A)
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ shared { f1 f2 } onlyA }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "a") {
+        {
+          onlyA
+          shared {
+            f1
+            f2
+          }
+        }
+      },
+    }
+    "###);
+}
+
+/// @interfaceObject fake downcast where the fragment carries a runtime
+/// condition (@include): the concrete-type condition is dropped from the io
+/// subgraph's operation but the directive must survive as a condition-only
+/// fragment.
+/// Targets commit.rs target_paths' fake-downcast directive-preserving arm.
+#[test]
+fn interface_object_fake_downcast_preserves_include_condition() {
+    let plan_str = plan_query(
+        &interface_object_schema(),
+        "query($v: Boolean!) { stuff { ... on X @include(if: $v) { desc } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "b") {
+          {
+            stuff {
+              __typename
+              ... @include(if: $v) {
+                desc
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "stuff.@") {
+          Fetch(service: "a") {
+            {
+              ... on I {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on I {
+                __typename
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
