@@ -13,4 +13,4 @@ logs a warning and removes the key, so startup no longer fails on it.
 -experimental_type_conditioned_fetching: true
 ```
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/####
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/10130
