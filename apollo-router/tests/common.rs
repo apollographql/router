@@ -87,6 +87,12 @@ pub(crate) fn redact_cache_debug_query_hash(key: &str) -> String {
         .into_owned()
 }
 
+/// Isolate tests from each other by adding a random redis key prefix
+#[allow(dead_code)] // used by integration/response_cache and integration/redis test binaries
+pub(crate) fn namespace() -> String {
+    Uuid::new_v4().simple().to_string()
+}
+
 /// Default test license JWT served by `mock_license_uplink()` and
 /// validated by the spawned router against `TEST_JWKS_ENDPOINT` (via
 /// `APOLLO_TEST_INTERNAL_UPLINK_JWKS`, set in `IntegrationTest::start()`).

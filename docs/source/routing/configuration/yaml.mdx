@@ -15,7 +15,6 @@ import Coproc from '../../../shared/config/coprocessor.mdx';
 import Cors from '../../../shared/config/cors.mdx';
 import Csrf from '../../../shared/config/csrf.mdx';
 import DemandCtrl from '../../../shared/config/demand_control.mdx';
-import ExperimentalChaos from '../../../shared/config/experimental_chaos.mdx';
 import ExperimentalHoistOrphan from '../../../shared/config/experimental_hoist_orphan_errors.mdx';
 import ExperimentalType from '../../../shared/config/experimental_type_conditioned_fetching.mdx';
 import FleetDetector from '../../../shared/config/fleet_detector.mdx';
@@ -24,7 +23,6 @@ import Headers from '../../../shared/config/headers.mdx';
 import HealthChk from '../../../shared/config/health_check.mdx';
 import Homepage from '../../../shared/config/homepage.mdx';
 import IncludeSubErr from '../../../shared/config/include_subgraph_errors.mdx';
-import LicenseEnf from '../../../shared/config/license_enforcement.mdx';
 import Limits from '../../../shared/config/limits.mdx';
 import OverrideSubUrl from '../../../shared/config/override_subgraph_url.mdx';
 import PersistedQueries from '../../../shared/config/persisted_queries.mdx';
@@ -132,10 +130,6 @@ Learn more in [CSRF prevention in the router](/router/configuration/csrf).
 With demand control, the router analyzes the cost of operations and rejects requests with operations that exceed customizable cost limits.
 
 Learn more in [Demand Control](/router/executing-operations/demand-control) 
-
----
-
-<ExperimentalChaos />
 
 ---
 
@@ -252,10 +246,6 @@ The router can serve a landing page to browsers that visit its endpoint path (`s
 ---
 
 <IncludeSubErr /> 
-
----
-
-<LicenseEnf /> 
 
 ---
 
