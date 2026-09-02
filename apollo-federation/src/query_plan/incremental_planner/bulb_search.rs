@@ -129,13 +129,26 @@ pub trait BulbSearchSpace {
     /// Heuristic cost of a (possibly partial) candidate. Lower is better.
     fn cost(&self, candidate: &Self::Candidate) -> f64;
 
+    /// Whether a completed candidate satisfies the full request. Only
+    /// complete candidates are recorded as results; incomplete completions
+    /// (dead ends that gave up on part of the request) still update the
+    /// incumbent cost bound for pruning. Spaces must cost every incomplete
+    /// candidate above every complete one, so an incomplete completion can
+    /// never out-prune a reachable complete plan. The default (always true)
+    /// suits spaces where every completion satisfies the request.
+    fn is_complete(&self, candidate: &Self::Candidate) -> bool {
+        let _ = candidate;
+        true
+    }
+
     /// Monotonic total work spent on this candidate across the whole
-    /// search, including rolled-back work; the budget is the greedy pass's
-    /// effort plus `fuel`. The default (always 0) disables effort budgeting
-    /// so do not combine it with `timeout: None` unless the space is finite:
-    /// there is deliberately no "no-improvement" stop (an iteration can end
-    /// completion-free while deeper discrepancy levels still hold
-    /// improvements), so only `!alternatives_existed` would end the loop.
+    /// search, including rolled-back work; the budget is the effort at the
+    /// first complete candidate plus `fuel`. The default (always 0) disables
+    /// effort budgeting — do NOT combine it with `timeout: None` unless the
+    /// space is finite: there is deliberately no "no-improvement" stop (an
+    /// iteration can end completion-free while deeper discrepancy levels
+    /// still hold improvements), so only `!alternatives_existed` would end
+    /// the loop.
     fn effort(&self, candidate: &Self::Candidate) -> u64 {
         let _ = candidate;
         0
@@ -147,10 +160,12 @@ pub struct BulbConfig {
     /// B: children explored per decision. B=1 is greedy. The greedy pass
     /// (discrepancy=0) always uses B=1; later iterations use this value.
     pub beam_width: usize,
-    /// Cap on search effort beyond the greedy pass, in effort units (see
-    /// [`BulbSearchSpace::effort`]). The greedy pass always runs to
-    /// completion; `fuel: 0` is pure greedy. When exhausted, the search
-    /// returns the best complete candidate found so far.
+    /// Cap on search effort beyond the first complete candidate, in effort
+    /// units (see [`BulbSearchSpace::effort`]). The search runs unbudgeted
+    /// until a candidate satisfying [`BulbSearchSpace::is_complete`] is
+    /// recorded; `fuel: 0` stops at the first complete candidate. When
+    /// exhausted, the search returns the best complete candidate found so
+    /// far.
     pub fuel: u64,
     /// Optional wall-clock limit, after which the best solution so far is
     /// returned, making the result machine-load dependent. Leave `None`
@@ -177,9 +192,10 @@ pub struct BulbStats {
     pub expansions: usize,
     /// Total effort spent (see [`BulbSearchSpace::effort`]).
     pub effort: u64,
-    /// Effort spent during the greedy pass; `effort - greedy_effort` is the
-    /// fuel consumed.
-    pub greedy_effort: u64,
+    /// Effort already spent when the first complete candidate was recorded;
+    /// fuel consumption is measured from this point. `None` when no
+    /// complete candidate was ever found.
+    pub first_complete_effort: Option<u64>,
     /// Terminated by the wall-clock timeout.
     pub timed_out: bool,
     /// Terminated by cooperative cancellation.
@@ -213,12 +229,14 @@ pub fn bulb_search<S: BulbSearchSpace>(
         was_cancelled: false,
         completions: 0,
         expansions: 0,
+        fuel,
         effort_budget: None,
+        first_complete_effort: None,
+        deepest_stack: 0,
         best: None,
         best_cost: f64::MAX,
     };
     let mut timed_out = false;
-    let mut greedy_effort = 0u64;
 
     let initial_cp = space.checkpoint(&initial);
 
@@ -234,15 +252,10 @@ pub fn bulb_search<S: BulbSearchSpace>(
         let alternatives_existed =
             bulb_probe(space, &mut initial, max_disc, effective_b, &mut progress);
 
-        // Restore to initial state for the next iteration.
+        // Restore to initial state for the next iteration. The effort
+        // budget is armed by `record_completion` when the first complete
+        // candidate lands; until then the search runs unbudgeted.
         space.rollback(&mut initial, initial_cp.clone());
-
-        // The greedy pass always runs to completion; fuel is the budget
-        // granted beyond it.
-        if max_disc == 0 {
-            greedy_effort = space.effort(&initial);
-            progress.effort_budget = Some(greedy_effort.saturating_add(fuel));
-        }
 
         trace!(
             max_disc,
@@ -266,6 +279,15 @@ pub fn bulb_search<S: BulbSearchSpace>(
         if !alternatives_existed {
             break;
         }
+        // A path with d decision points can absorb at most d discrepancies
+        // (one alternative slice each), so once the budget covers the
+        // deepest stack seen, every combination has been explored. Without
+        // this, a space with alternatives but no complete candidate would
+        // iterate forever: the effort budget stays unarmed until a complete
+        // candidate lands.
+        if max_disc >= progress.deepest_stack {
+            break;
+        }
     }
 
     let result = progress.best.unwrap_or_else(|| space.snapshot(&initial));
@@ -275,7 +297,7 @@ pub fn bulb_search<S: BulbSearchSpace>(
             evaluated_plans: progress.completions,
             expansions: progress.expansions,
             effort: space.effort(&initial),
-            greedy_effort,
+            first_complete_effort: progress.first_complete_effort,
             timed_out,
             cancelled: progress.was_cancelled,
         },
@@ -289,9 +311,26 @@ struct BulbProgress<'a, C> {
     was_cancelled: bool,
     completions: usize,
     expansions: usize,
-    /// Greedy effort plus fuel. None while the greedy pass is running.
+    fuel: u64,
+    /// Cap on the candidate's monotonic effort counter (see
+    /// [`BulbSearchSpace::effort`]): the effort at the first complete
+    /// candidate plus `fuel`. `None` until the first complete candidate is
+    /// recorded — fuel bounds optimization beyond a complete plan, never
+    /// the search for one.
     effort_budget: Option<u64>,
+    /// Effort at the moment the first complete candidate was recorded.
+    first_complete_effort: Option<u64>,
+    /// Deepest decision stack seen across all probe iterations. A path
+    /// with d decision points can absorb at most d discrepancies, so once
+    /// `max_disc` reaches this depth every discrepancy combination has been
+    /// explored and further iterations are no-ops.
+    deepest_stack: usize,
+    /// Best complete candidate found so far — never an incomplete one.
     best: Option<C>,
+    /// Incumbent prune bound: cheapest completion cost seen, complete or
+    /// not. Incomplete completions cost above all complete ones (see
+    /// [`BulbSearchSpace::is_complete`]), so this bound never prunes a path
+    /// to a better complete plan.
     best_cost: f64,
 }
 
@@ -504,6 +543,7 @@ fn bulb_probe<S: BulbSearchSpace>(
                             space.apply(candidate, &frame.decision, &frame.options[opt_idx]);
                             disc_budget = child_disc;
                             stack.push(frame);
+                            progress.deepest_stack = progress.deepest_stack.max(stack.len());
                             true
                         }
                         None => {
@@ -579,7 +619,9 @@ fn score_options<S: BulbSearchSpace>(
     scored
 }
 
-/// Record a completed candidate, updating the incumbent best if improved.
+/// Record a completed candidate. Any completion tightens the incumbent
+/// prune bound, but only complete candidates (no abandoned work) are saved
+/// as results, and the first one arms the fuel budget.
 fn record_completion<S: BulbSearchSpace>(
     space: &S,
     candidate: &S::Candidate,
@@ -587,17 +629,28 @@ fn record_completion<S: BulbSearchSpace>(
 ) {
     let cost = space.cost(candidate);
     progress.completions += 1;
+    let complete = space.is_complete(candidate);
     let improved = cost < progress.best_cost;
     debug!(
         completion = progress.completions,
         cost,
         prev_best = progress.best_cost,
         improved,
+        complete,
         "candidate completed",
     );
     if improved {
         progress.best_cost = cost;
-        progress.best = Some(space.snapshot(candidate));
+    }
+    if complete {
+        if progress.first_complete_effort.is_none() {
+            let effort = space.effort(candidate);
+            progress.first_complete_effort = Some(effort);
+            progress.effort_budget = Some(effort.saturating_add(progress.fuel));
+        }
+        if improved {
+            progress.best = Some(space.snapshot(candidate));
+        }
     }
 }
 
