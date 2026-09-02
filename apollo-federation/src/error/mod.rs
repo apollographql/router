@@ -289,11 +289,6 @@ pub enum CompositionError {
         message: String,
         locations: Locations,
     },
-    #[error("{message}")]
-    InputObjectOneOfMismatch {
-        message: String,
-        locations: Locations,
-    },
 }
 
 impl CompositionError {
@@ -362,7 +357,6 @@ impl CompositionError {
             Self::ArgumentDefaultMismatch { .. } => ErrorCode::FieldArgumentDefaultMismatch,
             Self::InputFieldDefaultMismatch { .. } => ErrorCode::InputFieldDefaultMismatch,
             Self::InterfaceFieldNoImplem { .. } => ErrorCode::InterfaceFieldNoImplem,
-            Self::InputObjectOneOfMismatch { .. } => ErrorCode::InputObjectOneOfMismatch,
         }
     }
 
@@ -492,12 +486,6 @@ impl CompositionError {
                 message: format!("{message}{appendix}"),
                 locations,
             },
-            Self::InputObjectOneOfMismatch { message, locations } => {
-                Self::InputObjectOneOfMismatch {
-                    message: format!("{message}{appendix}"),
-                    locations,
-                }
-            }
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }
             | Self::MergeError { .. }
@@ -530,8 +518,7 @@ impl CompositionError {
             | Self::InvalidFieldSharing { locations, .. }
             | Self::MergeError { locations, .. }
             | Self::ArgumentDefaultMismatch { locations, .. }
-            | Self::InputFieldDefaultMismatch { locations, .. }
-            | Self::InputObjectOneOfMismatch { locations, .. } => locations.extend(new_locations),
+            | Self::InputFieldDefaultMismatch { locations, .. } => locations.extend(new_locations),
             // Remaining errors do not have an obvious way to appending locations, so we do nothing
             _ => {}
         }
@@ -551,8 +538,7 @@ impl CompositionError {
             | Self::MergeError { locations, .. }
             | Self::ArgumentDefaultMismatch { locations, .. }
             | Self::InputFieldDefaultMismatch { locations, .. }
-            | Self::InterfaceFieldNoImplem { locations, .. }
-            | Self::InputObjectOneOfMismatch { locations, .. } => locations,
+            | Self::InterfaceFieldNoImplem { locations, .. } => locations,
             _ => &[],
         }
     }
@@ -2590,14 +2576,6 @@ static MISSING_TRANSITIVE_AUTH_REQUIREMENTS: LazyLock<ErrorCodeDefinition> = Laz
         )
 });
 
-static INPUT_OBJECT_ONE_OF_MISMATCH: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
-    ErrorCodeDefinition::new(
-        "INPUT_OBJECT_ONE_OF_MISMATCH".to_owned(),
-        "An input object type has the @oneOf directive in some subgraphs but not all subgraphs that define the type.".to_owned(),
-        None,
-    )
-});
-
 #[derive(Debug, PartialEq, strum_macros::EnumIter)]
 pub enum ErrorCode {
     ErrorCodeMissing,
@@ -2707,7 +2685,6 @@ pub enum ErrorCode {
     QueryRootMissing,
     AuthRequirementsAppliedOnInterface,
     MissingTransitiveAuthRequirements,
-    InputObjectOneOfMismatch,
 }
 
 impl ErrorCode {
@@ -2844,7 +2821,6 @@ impl ErrorCode {
                 &AUTH_REQUIREMENTS_APPLIED_ON_INTERFACE
             }
             ErrorCode::MissingTransitiveAuthRequirements => &MISSING_TRANSITIVE_AUTH_REQUIREMENTS,
-            ErrorCode::InputObjectOneOfMismatch => &INPUT_OBJECT_ONE_OF_MISMATCH,
         }
     }
 }

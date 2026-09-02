@@ -30,7 +30,6 @@ pub(crate) mod interface_object;
 pub(crate) mod key;
 pub(crate) mod list_size;
 pub(crate) mod merged;
-pub(crate) mod one_of;
 pub(crate) mod provides;
 pub(crate) mod requires;
 pub(crate) mod root_fields;
