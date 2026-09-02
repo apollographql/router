@@ -262,16 +262,30 @@ where
     }
 }
 
+/// Whether mapping problems (e.g. a recorded `->withError` message) on an
+/// otherwise-successful connector response should be added to the
+/// client-facing `errors` array, rather than staying limited to the
+/// connectors debugger and telemetry. Populated from `connectors.expose_mapping_problems`
+/// in the router's YAML config; see [`crate::plugins::connectors::plugin::Connectors`].
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct ExposeMappingProblems(pub(crate) bool);
+
 pub(crate) fn aggregate_responses(
     responses: Vec<MappedResponse>,
-    _context: Context,
+    context: Context,
 ) -> Result<Response, HandleResponseError> {
+    let expose_mapping_problems = context
+        .extensions()
+        .with_lock(|lock| lock.get::<ExposeMappingProblems>().copied())
+        .unwrap_or_default()
+        .0;
+
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
     let count = responses.len();
 
     for mapped in responses {
-        mapped.add_to_data(&mut data, &mut errors, count)?;
+        mapped.add_to_data(&mut data, &mut errors, count, expose_mapping_problems)?;
     }
 
     let data = if data.is_empty() {
@@ -405,6 +419,7 @@ mod tests {
 
     use crate::Context;
     use crate::graphql;
+    use crate::plugins::connectors::handle_responses::ExposeMappingProblems;
     use crate::plugins::connectors::handle_responses::process_response;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
@@ -427,6 +442,130 @@ mod tests {
         assert_eq!(
             errors.iter().map(|error| error.message()).collect_vec(),
             vec!["unrecognized type code"],
+        );
+    }
+
+    /// A message `->withError` records on an otherwise-successful mapping
+    /// stays off the wire by default (matching every other mapping problem),
+    /// and reaches the client's `errors` array — without turning the field
+    /// into a failure — once `connectors.expose_mapping_problems` opts in.
+    /// Asserted against the actual `graphql::Response` body, the same shape
+    /// a client receives, not against the internal `Vec<Problem>`.
+    #[tokio::test]
+    async fn with_error_message_reaches_client_only_when_expose_mapping_problems_is_set() {
+        // `ResponseKey::RootField::selection` — not `Connector::selection` — is
+        // the one `handle_raw_response` actually applies to the raw body (it's
+        // the per-request, alias/query-shape-narrowed copy); both are set here
+        // so the fixture matches what a real connector request builds.
+        const SELECTION: &str = "id->withError('Item 6 test: unrecognized id')";
+
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(me),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse(SELECTION).unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            output_type: None,
+            label: "test label".into(),
+        });
+
+        let response_key = || ResponseKey::RootField {
+            name: "idCheck".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse(SELECTION).unwrap()),
+        };
+        let response = || {
+            http::Response::builder()
+                .body(router::body::from_bytes(r#"{"id":"1"}"#))
+                .unwrap()
+        };
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        // Off by default: the value still resolves, but the recorded message
+        // does not reach the client.
+        let default_context = Context::new();
+        let mapped = process_response(
+            Ok(response()),
+            response_key(),
+            connector.clone(),
+            &default_context,
+            (None, Default::default()),
+            None,
+            supergraph_request.clone(),
+            Default::default(),
+        )
+        .await
+        .mapped_response;
+        let res = super::aggregate_responses(vec![mapped], default_context).unwrap();
+        let body = res.response.body();
+        assert_eq!(body.data, Some(json!({ "idCheck": "1" })));
+        assert!(
+            body.errors.is_empty(),
+            "mapping problems must stay off the wire by default, got: {:?}",
+            body.errors
+        );
+
+        // Opted in: the same recorded message now rides alongside the same,
+        // still-resolved value.
+        let enabled_context = Context::new();
+        enabled_context
+            .extensions()
+            .with_lock(|lock| lock.insert(ExposeMappingProblems(true)));
+        let mapped = process_response(
+            Ok(response()),
+            response_key(),
+            connector,
+            &enabled_context,
+            (None, Default::default()),
+            None,
+            supergraph_request,
+            Default::default(),
+        )
+        .await
+        .mapped_response;
+        let res = super::aggregate_responses(vec![mapped], enabled_context).unwrap();
+        let body = res.response.body();
+        assert_eq!(
+            body.data,
+            Some(json!({ "idCheck": "1" })),
+            "->withError must not turn into a field failure just because it's now client-visible"
+        );
+        assert_eq!(body.errors.len(), 1);
+        assert_eq!(body.errors[0].message, "Item 6 test: unrecognized id");
+        assert_eq!(
+            body.errors[0].path.as_ref().map(|p| p.to_string()),
+            Some("/idCheck".to_string())
+        );
+        assert_eq!(
+            body.errors[0]
+                .extensions
+                .get("code")
+                .and_then(|v| v.as_str()),
+            Some("CONNECTOR_MAPPING_PROBLEM")
         );
     }
 

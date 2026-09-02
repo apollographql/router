@@ -464,6 +464,8 @@ impl InstrumentData {
             "$[?(@.debug_extensions == true)]",
             opt.expose_sources_in_context,
             "$[?(@.expose_sources_in_context == true)]",
+            opt.expose_mapping_problems,
+            "$[?(@.expose_mapping_problems == true)]",
             opt.max_requests_per_operation_per_source,
             "$[?(@.max_requests_per_operation_per_source)]",
             opt.subgraph.config,

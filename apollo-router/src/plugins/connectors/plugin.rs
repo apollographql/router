@@ -17,6 +17,7 @@ use crate::layers::ServiceExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::connectors::configuration::ConnectorsConfig;
+use crate::plugins::connectors::handle_responses::ExposeMappingProblems;
 use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::services::connector_service::ConnectorSourceRef;
 use crate::services::execution;
@@ -35,6 +36,7 @@ struct Connectors {
     debug_extensions: bool,
     max_requests: Option<usize>,
     expose_sources_in_context: bool,
+    expose_mapping_problems: bool,
 }
 
 #[async_trait::async_trait]
@@ -79,12 +81,14 @@ impl Plugin for Connectors {
             debug_extensions,
             max_requests,
             expose_sources_in_context: init.config.expose_sources_in_context,
+            expose_mapping_problems: init.config.expose_mapping_problems,
         })
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let conf_enabled = self.debug_extensions;
         let max_requests = self.max_requests;
+        let expose_mapping_problems = self.expose_mapping_problems;
         service
             .map_future_with_request_data(
                 move |req: &supergraph::Request| {
@@ -99,6 +103,9 @@ impl Plugin for Connectors {
                         lock.insert::<Arc<RequestLimits>>(Arc::new(RequestLimits::new(
                             max_requests,
                         )));
+                        lock.insert::<ExposeMappingProblems>(ExposeMappingProblems(
+                            expose_mapping_problems,
+                        ));
                         if is_debug_enabled {
                             lock.insert::<Arc<Mutex<ConnectorContext>>>(Arc::new(Mutex::new(
                                 ConnectorContext::default(),

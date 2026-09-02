@@ -33,6 +33,13 @@ pub(crate) struct ConnectorsConfig {
     #[serde(default)]
     pub(crate) debug_extensions: bool,
 
+    /// When enabled, mapping problems recorded on an otherwise-successful connector
+    /// response (for example, a message recorded by `->withError`) are added to the
+    /// client-facing `errors` array alongside the data, instead of staying limited to
+    /// the connectors debugger and telemetry.
+    #[serde(default)]
+    pub(crate) expose_mapping_problems: bool,
+
     /// The maximum number of requests for a connector source
     #[serde(default)]
     pub(crate) max_requests_per_operation_per_source: Option<usize>,

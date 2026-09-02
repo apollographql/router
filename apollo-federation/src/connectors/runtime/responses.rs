@@ -532,6 +532,7 @@ impl MappedResponse {
         data: &mut Map<ByteString, Value>,
         errors: &mut Vec<RuntimeError>,
         count: usize,
+        expose_mapping_problems: bool,
     ) -> Result<(), HandleResponseError> {
         match self {
             Self::Error { error, key, .. } => {
@@ -553,100 +554,120 @@ impl MappedResponse {
                 errors.push(error);
             }
             Self::Data {
-                data: value, key, ..
-            } => match key {
-                ResponseKey::RootField { ref name, .. } => {
-                    data.insert(name.clone(), value);
+                data: value,
+                key,
+                problems,
+            } => {
+                // Computed from `&key` before the `match key` below takes
+                // ownership of it (the `BatchEntity` arm moves fields out of
+                // it). Off by default: most mapping problems (a mistyped
+                // field, a `->match` with no arm taken) were never authored
+                // as a message for clients, so promoting them unconditionally
+                // would put text into `errors` that no one asked to expose.
+                // `->withError` is the one case where a mapping author did
+                // ask, which is why this is opt-in rather than automatic.
+                if expose_mapping_problems {
+                    errors.extend(problems.into_iter().map(|problem| {
+                        RuntimeError::new(problem.message, &key)
+                            .with_code("CONNECTOR_MAPPING_PROBLEM")
+                            .extension("count", Value::Number((problem.count as u64).into()))
+                    }));
                 }
-                ResponseKey::Entity { index, .. } => {
-                    let entities = data
-                        .entry(ENTITIES)
-                        .or_insert(Value::Array(Vec::with_capacity(count)));
-                    entities
-                        .as_array_mut()
-                        .ok_or_else(|| {
-                            HandleResponseError::MergeError("_entities is not an array".into())
-                        })?
-                        .insert(index, value);
-                }
-                ResponseKey::EntityField {
-                    index,
-                    ref field_name,
-                    ref typename,
-                    ..
-                } => {
-                    let entities = data
-                        .entry(ENTITIES)
-                        .or_insert(Value::Array(Vec::with_capacity(count)))
-                        .as_array_mut()
-                        .ok_or_else(|| {
-                            HandleResponseError::MergeError("_entities is not an array".into())
-                        })?;
+                match key {
+                    ResponseKey::RootField { ref name, .. } => {
+                        data.insert(name.clone(), value);
+                    }
+                    ResponseKey::Entity { index, .. } => {
+                        let entities = data
+                            .entry(ENTITIES)
+                            .or_insert(Value::Array(Vec::with_capacity(count)));
+                        entities
+                            .as_array_mut()
+                            .ok_or_else(|| {
+                                HandleResponseError::MergeError("_entities is not an array".into())
+                            })?
+                            .insert(index, value);
+                    }
+                    ResponseKey::EntityField {
+                        index,
+                        ref field_name,
+                        ref typename,
+                        ..
+                    } => {
+                        let entities = data
+                            .entry(ENTITIES)
+                            .or_insert(Value::Array(Vec::with_capacity(count)))
+                            .as_array_mut()
+                            .ok_or_else(|| {
+                                HandleResponseError::MergeError("_entities is not an array".into())
+                            })?;
 
-                    match entities.get_mut(index) {
-                        Some(Value::Object(entity)) => {
-                            entity.insert(field_name.clone(), value);
-                        }
-                        _ => {
-                            let mut entity = Map::new();
-                            if let Some(typename) = typename {
-                                entity.insert(TYPENAME, Value::String(typename.as_str().into()));
+                        match entities.get_mut(index) {
+                            Some(Value::Object(entity)) => {
+                                entity.insert(field_name.clone(), value);
                             }
-                            entity.insert(field_name.clone(), value);
-                            entities.insert(index, Value::Object(entity));
-                        }
-                    };
+                            _ => {
+                                let mut entity = Map::new();
+                                if let Some(typename) = typename {
+                                    entity
+                                        .insert(TYPENAME, Value::String(typename.as_str().into()));
+                                }
+                                entity.insert(field_name.clone(), value);
+                                entities.insert(index, Value::Object(entity));
+                            }
+                        };
+                    }
+                    ResponseKey::BatchEntity {
+                        selection,
+                        keys,
+                        inputs,
+                    } => {
+                        let Value::Array(values) = value else {
+                            return Err(HandleResponseError::MergeError(
+                                "Response for a batch request does not map to an array".into(),
+                            ));
+                        };
+
+                        let spec = selection.spec();
+                        let key_selection = JSONSelection::parse_with_spec(
+                            &keys.serialize().no_indent().to_string(),
+                            spec,
+                        )
+                        .map_err(|e| HandleResponseError::MergeError(e.to_string()))?;
+
+                        // Convert representations into keys for use in the map
+                        let key_values = inputs.batch.iter().map(|v| {
+                            key_selection
+                                .apply_to(&Value::Object(v.clone()))
+                                .0
+                                .unwrap_or(Value::Null)
+                        });
+
+                        // Create a map of keys to entities
+                        let mut map = values
+                            .into_iter()
+                            .filter_map(|v| key_selection.apply_to(&v).0.map(|key| (key, v)))
+                            .collect::<HashMap<_, _>>();
+
+                        // Make a list of entities that matches the representations list
+                        let new_entities = key_values
+                            .map(|key| map.remove(&key).unwrap_or(Value::Null))
+                            .collect_vec();
+
+                        // Because we may have multiple batch entities requests, we should add to ENTITIES as the requests come in so it is additive
+                        let entities = data
+                            .entry(ENTITIES)
+                            .or_insert(Value::Array(Vec::with_capacity(count)));
+
+                        entities
+                            .as_array_mut()
+                            .ok_or_else(|| {
+                                HandleResponseError::MergeError("_entities is not an array".into())
+                            })?
+                            .extend(new_entities);
+                    }
                 }
-                ResponseKey::BatchEntity {
-                    selection,
-                    keys,
-                    inputs,
-                } => {
-                    let Value::Array(values) = value else {
-                        return Err(HandleResponseError::MergeError(
-                            "Response for a batch request does not map to an array".into(),
-                        ));
-                    };
-
-                    let spec = selection.spec();
-                    let key_selection = JSONSelection::parse_with_spec(
-                        &keys.serialize().no_indent().to_string(),
-                        spec,
-                    )
-                    .map_err(|e| HandleResponseError::MergeError(e.to_string()))?;
-
-                    // Convert representations into keys for use in the map
-                    let key_values = inputs.batch.iter().map(|v| {
-                        key_selection
-                            .apply_to(&Value::Object(v.clone()))
-                            .0
-                            .unwrap_or(Value::Null)
-                    });
-
-                    // Create a map of keys to entities
-                    let mut map = values
-                        .into_iter()
-                        .filter_map(|v| key_selection.apply_to(&v).0.map(|key| (key, v)))
-                        .collect::<HashMap<_, _>>();
-
-                    // Make a list of entities that matches the representations list
-                    let new_entities = key_values
-                        .map(|key| map.remove(&key).unwrap_or(Value::Null))
-                        .collect_vec();
-
-                    // Because we may have multiple batch entities requests, we should add to ENTITIES as the requests come in so it is additive
-                    let entities = data
-                        .entry(ENTITIES)
-                        .or_insert(Value::Array(Vec::with_capacity(count)));
-
-                    entities
-                        .as_array_mut()
-                        .ok_or_else(|| {
-                            HandleResponseError::MergeError("_entities is not an array".into())
-                        })?
-                        .extend(new_entities);
-                }
-            },
+            }
         }
 
         Ok(())
@@ -858,13 +879,17 @@ mod tests {
     use serde_json_bytes::Value;
     use serde_json_bytes::json;
 
+    use serde_json_bytes::Map;
+
     use super::MappedResponse;
     use super::deserialize_response;
     use super::is_success;
     use crate::connectors::ConnectSpec;
     use crate::connectors::JSONSelection;
+    use crate::connectors::ProblemLocation;
     use crate::connectors::runtime::inputs::RequestInputs;
     use crate::connectors::runtime::key::ResponseKey;
+    use crate::connectors::runtime::mapping::Problem;
 
     fn make_parts(status: u16) -> Parts {
         http::Response::builder()
@@ -873,6 +898,67 @@ mod tests {
             .unwrap()
             .into_parts()
             .0
+    }
+
+    fn recorded_problem(message: &str, path: &str) -> Problem {
+        Problem {
+            message: message.to_string(),
+            path: path.to_string(),
+            count: 1,
+            location: ProblemLocation::Selection,
+        }
+    }
+
+    /// `->withError` (and every other mapping problem) records into `Problem`s
+    /// on a successful `MappedResponse::Data`, but until a caller opts in,
+    /// `add_to_data` must keep dropping them the way it always has: the debug
+    /// extension and telemetry are still the only consumers by default.
+    #[test]
+    fn add_to_data_drops_problems_by_default() {
+        let mapped = MappedResponse::Data {
+            data: json!("1"),
+            key: root_field_key("idCheck"),
+            problems: vec![recorded_problem("unrecognized id", "idCheck")],
+        };
+
+        let mut data = Map::new();
+        let mut errors = Vec::new();
+        mapped
+            .add_to_data(&mut data, &mut errors, 1, false)
+            .unwrap();
+
+        assert_eq!(data.get("idCheck"), Some(&json!("1")));
+        assert!(
+            errors.is_empty(),
+            "mapping problems must stay off the wire unless explicitly enabled"
+        );
+    }
+
+    /// When a caller opts in, a recorded problem rides alongside the value it
+    /// annotates rather than replacing it: `data` is untouched (this is not a
+    /// field failure) and `errors` gains one entry per problem, addressed at
+    /// the field the connector populated.
+    #[test]
+    fn add_to_data_surfaces_problems_as_errors_when_enabled() {
+        let mapped = MappedResponse::Data {
+            data: json!("1"),
+            key: root_field_key("idCheck"),
+            problems: vec![recorded_problem("Item 6 test: unrecognized id", "idCheck")],
+        };
+
+        let mut data = Map::new();
+        let mut errors = Vec::new();
+        mapped.add_to_data(&mut data, &mut errors, 1, true).unwrap();
+
+        assert_eq!(
+            data.get("idCheck"),
+            Some(&json!("1")),
+            "->withError must not turn into a field failure just because it's now client-visible"
+        );
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].message, "Item 6 test: unrecognized id");
+        assert_eq!(errors[0].path, "idCheck");
+        assert_eq!(errors[0].code(), "CONNECTOR_MAPPING_PROBLEM");
     }
 
     // Regression test for CNN-1022: when isSuccess evaluates to a non-boolean,

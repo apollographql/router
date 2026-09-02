@@ -2976,6 +2976,11 @@ expression: "&schema"
           "description": "Enables connector debugging information on response extensions if the feature is enabled",
           "type": "boolean"
         },
+        "expose_mapping_problems": {
+          "default": false,
+          "description": "When enabled, mapping problems recorded on an otherwise-successful connector\nresponse (for example, a message recorded by `->withError`) are added to the\nclient-facing `errors` array alongside the data, instead of staying limited to\nthe connectors debugger and telemetry.",
+          "type": "boolean"
+        },
         "expose_sources_in_context": {
           "default": false,
           "description": "When enabled, adds an entry to the context for use in coprocessors\n\n```json\n{\n  \"context\": {\n    \"entries\": {\n      \"apollo_connectors::sources_in_query_plan\": [\n        { \"subgraph_name\": \"subgraph\", \"source_name\": \"source\" }\n      ]\n    }\n  }\n}\n```",

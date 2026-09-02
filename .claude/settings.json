@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs -I{} grep -l \"withError\" /Users/davidwalter/dev/router/.changesets/{})"
+    ]
+  }
+}
