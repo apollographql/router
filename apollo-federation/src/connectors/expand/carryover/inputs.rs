@@ -237,48 +237,6 @@ fn replace_join_enum(
     new_directives
 }
 
-fn replace_join_enum_ast(
-    directives: &DirectiveList,
-    directive_name: &Name,
-    replaced_subgraph_names: &MultiMap<Name, Name>,
-) -> DirectiveList {
-    let mut new_directives = DirectiveList::new();
-    for d in directives.iter() {
-        if &d.name == directive_name {
-            let Some(graph_arg) = d
-                .arguments
-                .iter()
-                .find(|a| a.name == name!(graph))
-                .and_then(|a| a.value.as_enum())
-            else {
-                continue;
-            };
-
-            let Some(replacements) = replaced_subgraph_names.get_vec(graph_arg) else {
-                new_directives.push(d.clone());
-                continue;
-            };
-
-            for replacement in replacements {
-                let mut new_directive = d.clone();
-                let new_directive = new_directive.make_mut();
-                if let Some(a) = new_directive
-                    .arguments
-                    .iter_mut()
-                    .find(|a| a.name == name!(graph))
-                {
-                    let a = a.make_mut();
-                    a.value = Value::Enum(replacement.clone()).into();
-                };
-                new_directives.push(new_directive.clone());
-            }
-        } else {
-            new_directives.push(d.clone());
-        }
-    }
-    new_directives
-}
-
 fn strip_invalid_join_directives_from_input_type(
     node: &InputObjectType,
     replaced_subgraph_names: &MultiMap<Name, Name>,
@@ -293,7 +251,7 @@ fn strip_invalid_join_directives_from_input_type(
 
     for (_, field) in node.fields.iter_mut() {
         let field = field.make_mut();
-        field.directives = replace_join_enum_ast(
+        field.directives = replace_join_enum(
             &field.directives,
             &name!(join__field),
             replaced_subgraph_names,
@@ -317,7 +275,7 @@ fn strip_invalid_join_directives_from_enum(
 
     for (_, value) in node.values.iter_mut() {
         let value = value.make_mut();
-        value.directives = replace_join_enum_ast(
+        value.directives = replace_join_enum(
             &value.directives,
             &name!(join__enumValue),
             replaced_subgraph_names,
