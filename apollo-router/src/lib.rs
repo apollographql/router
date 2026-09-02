@@ -108,6 +108,7 @@ pub mod _private {
     pub use crate::plugin::PLUGINS;
     pub use crate::plugin::PluginFactory;
     // For tests
+    #[cfg(any(test, feature = "mock_subgraphs_testing"))]
     pub use crate::plugins::mock_subgraphs::testing_subgraph_call as mock_subgraphs_subgraph_call;
     pub use crate::router_factory::create_test_service_factory_from_yaml;
     pub use crate::services::APOLLO_GRAPH_REF;
