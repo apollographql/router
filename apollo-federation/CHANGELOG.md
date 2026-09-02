@@ -18,65 +18,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 📚 Documentation
 -->
 
-# [2.16.2](https://crates.io/crates/apollo-federation/2.16.2) - 2026-08-13
+# [2.16.x](unreleased) - Unreleased
 
 ## 🐛 Fixes
-
-<<<<<<< HEAD
-=======
-### Fix `GROUP_SELECTION_IS_NOT_OBJECT` for union/interface fields in nested `@connect` selections ([PR #9990](https://github.com/apollographql/router/pull/9990))
-
-Connectors validation rejected `->match` results assigned to union- or
-interface-typed fields nested inside another object (e.g. `Stop.location:
-StopLocation` where `StopLocation` is a union). The top-level validation path
-already expanded abstract types to their concrete members, but the recursive
-`walk_selection_with_shape` did not, causing a spurious
-`GROUP_SELECTION_IS_NOT_OBJECT` error. The recursive path now mirrors the
-top-level expansion for both union and interface types.
-
-By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9990>
-
-### Upgrading federation 1 subgraphs no longer clones subgraph metadata once per type ([PR #9946](https://github.com/apollographql/router/pull/9946))
-
-Composition constructs a schema upgrader as soon as **one** input subgraph is a
-federation 1 schema. The upgrader indexes the object and interface types of every
-subgraph in the composition — including the federation 2 subgraphs it will never
-upgrade, because the upgrade rules have to look at what those subgraphs define —
-and each index entry carried a full clone of the defining subgraph's
-`SubgraphMetadata`. The index therefore cost the sum, over all subgraphs, of (that
-subgraph's type count) × (that subgraph's own metadata size), and the great majority
-of it was spent on behalf of subgraphs that are passed through untouched.
-
-The index now records only where each type is defined. The schema and the metadata a
-lookup needs are read from the subgraph the entry names, which the upgrader already
-holds, so exactly one metadata value exists per subgraph instead of one per (type,
-subgraph) pair. Composition output is unchanged.
-
-On a generated fixture of 40 federation 2 subgraphs, each declaring 120 entity types
-and 12 interfaces, beside a single 120-byte federation 1 subgraph, peak
-requested-live heap across composition drops from 1.35 GB to 0.14 GB — a 9.3×
-reduction. Composing those same 40 federation 2 subgraphs on their own — no
-federation 1 subgraph, so no upgrader is built — peaks at 0.14 GB, which is the
-measure of what the one small subgraph used to cost: it added 1.21 GB of peak heap
-before this change, and adds 0.15 MB after it. The effect grows with the size and
-number of the federation 2 subgraphs, since they are what the index was being built
-over.
-
-By [@martijnwalraven](https://github.com/martijnwalraven) in <https://github.com/apollographql/router/pull/9946>
-
-### Reject `@external` fields on nested `@key` paths with cross-subgraph `@requires` ([PR #9832](https://github.com/apollographql/router/pull/9832))
-
-When a subgraph declared a nested `@key` (e.g., `@key(fields: "id u { x }")`) where
-fields along the key path were marked `@external`, and also had a `@requires` that
-pulled data from a different subgraph, the query planner would fail at planning time
-with an internal error. Composition passed without errors, so there was no warning
-until the query failed at runtime.
-
-Composition now catches this as a `SATISFIABILITY_ERROR`. To fix affected schemas,
-replace `@external` with `@shareable` on key-path fields, which is the intended
-Federation 2 pattern.
-
-By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9832>
 
 ### Deduplicate equivalent paths during satisfiability validation ([PR #10134](https://github.com/apollographql/router/pull/10134))
 
@@ -95,7 +39,8 @@ By [@tninesling](https://github.com/tninesling) in <https://github.com/apollogra
 
 # [2.16.2](https://crates.io/crates/apollo-federation/2.16.2) - 2026-08-13
 
->>>>>>> 4a2424f (perf(composition): dedup subgraph path options by tail equivalence (#10134))
+## 🐛 Fixes
+
 ### Propagate directives from `@interfaceObject` fields to `@external` implementations ([PR #9831](https://github.com/apollographql/router/pull/9831))
 
 When an implementation re-declares a field as `@external` (e.g. to reference it in `@requires`), the field's only resolvable definition lives on the abstracting `@interfaceObject`. Directives like `@tag` applied there were not being propagated to the implementation's copy in the supergraph.
