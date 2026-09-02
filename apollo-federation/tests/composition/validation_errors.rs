@@ -774,38 +774,37 @@ mod other_validation_errors_tests {
             &result,
             &[(
                 "MAX_VALIDATION_SUBGRAPH_PATHS_EXCEEDED",
-                "Maximum number of validation subgraph paths exceeded: 11",
+                "Maximum number of validation subgraph paths exceeded: 12",
             )],
         );
     }
 
-    /// Entities resolvable across many subgraphs cause multiplicative path growth.
-    /// Without dedup, a chain like User -> Post -> User re-entering through N subgraphs
-    /// produces O(N^depth) paths. With dedup, paths sharing the same tail node,
-    /// contexts, and runtime types are collapsed to one exemplar per equivalence
-    /// class, keeping the count proportional to distinct tails instead.
+    /// Interface hierarchies with `@interfaceObject` and multiple implementations can
+    /// produce duplicate advancement options that share the same (tail node,
+    /// subgraph-entry source, contexts, runtime types). The tail-dedup optimization
+    /// collapses these, preventing path growth proportional to the number of
+    /// implementations.
+    ///
+    /// Without dedup the cumulative path count for this schema reaches 28, exceeding
+    /// the cap of 20 set below. With dedup the count stays at 18. The cap is chosen
+    /// in the gap so the test fails if dedup is removed.
     #[test]
     fn dedup_collapses_duplicate_tail_paths_across_subgraphs() {
-        // Three subgraphs each resolve User and Post, creating 3^depth path
-        // multiplication on cyclic references. The cap is set low enough that
-        // without dedup this would exceed it.
+        // Subgraph A defines an entity interface via @interfaceObject. Subgraph B
+        // provides the concrete interface plus five implementations, each with a
+        // self-referential `related` field. Validating this field forces paths
+        // through each implementation to hop back to subgraph A, producing
+        // duplicate options that dedup collapses.
         let subgraph_a = ServiceDefinition {
             name: "A",
             type_defs: r#"
                 type Query {
-                    users: [User]
+                    things: [Thing]
                 }
 
-                type User @key(fields: "id") {
+                type Thing @interfaceObject @key(fields: "id") {
                     id: ID!
-                    name: String
-                    posts: [Post] @shareable
-                }
-
-                type Post @key(fields: "id") {
-                    id: ID!
-                    title: String @shareable
-                    author: User @shareable
+                    label: String
                 }
             "#,
         };
@@ -813,48 +812,48 @@ mod other_validation_errors_tests {
         let subgraph_b = ServiceDefinition {
             name: "B",
             type_defs: r#"
-                type User @key(fields: "id") {
+                interface Thing @key(fields: "id") {
                     id: ID!
-                    posts: [Post] @shareable
+                    related: Thing
                 }
 
-                type Post @key(fields: "id") {
+                type Alpha implements Thing @key(fields: "id") {
                     id: ID!
-                    title: String @shareable
-                    author: User @shareable
+                    related: Thing
+                }
+
+                type Bravo implements Thing @key(fields: "id") {
+                    id: ID!
+                    related: Thing
+                }
+
+                type Charlie implements Thing @key(fields: "id") {
+                    id: ID!
+                    related: Thing
+                }
+
+                type Delta implements Thing @key(fields: "id") {
+                    id: ID!
+                    related: Thing
+                }
+
+                type Echo implements Thing @key(fields: "id") {
+                    id: ID!
+                    related: Thing
                 }
             "#,
         };
 
-        let subgraph_c = ServiceDefinition {
-            name: "C",
-            type_defs: r#"
-                type User @key(fields: "id") {
-                    id: ID!
-                    posts: [Post] @shareable
-                }
-
-                type Post @key(fields: "id") {
-                    id: ID!
-                    title: String @shareable
-                    author: User @shareable
-                }
-            "#,
-        };
-
-        // With a cap of 50, the 3-subgraph cycle User->Post->User would exceed
-        // the cap without dedup (each re-entry multiplies by 3). With dedup,
-        // only distinct tail nodes survive each transition.
         let result = compose_as_fed2_subgraphs_with_options(
-            &[subgraph_a, subgraph_b, subgraph_c],
+            &[subgraph_a, subgraph_b],
             CompositionOptions {
-                max_validation_subgraph_paths: Some(50),
+                max_validation_subgraph_paths: Some(20),
             },
         );
         assert!(
             result.is_ok(),
-            "Expected composition to succeed with tail-dedup keeping path count under cap, \
-             but got: {result:?}"
+            "Expected composition to succeed with tail-dedup collapsing \
+             duplicate paths from interface implementations, but got: {result:?}"
         );
     }
 }
