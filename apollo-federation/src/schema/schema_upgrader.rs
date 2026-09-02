@@ -1006,24 +1006,22 @@ pub fn upgrade_subgraphs_if_necessary(
     // Upgrade subgraphs (if necessary)
     let upgraded = inner_upgrade_subgraphs_if_necessary(subgraphs)?;
 
-    // Validate subgraphs (if either upgraded or normalized)
+    // Apply fed3 compatibility transformations and validate
     let validated: Vec<Subgraph<Validated>> = upgraded
         .into_iter()
-        .filter_map(|subgraph| match subgraph {
-            Either::Left(s) => {
-                // This subgraph was not upgraded nor normalized in this function, which implies
-                // this subgraph is originally Fed v2. Since Fed v2 schemas are already fully
-                // validated in the `expand_links` method, it's safe to transition to the
-                // `Validated` state.
-                Some(s.assume_validated())
-            }
-            Either::Right(s) => match s.validate() {
+        .filter_map(|subgraph| {
+            let mut upgraded = match subgraph {
+                Either::Left(s) => s.assume_upgraded(),
+                Either::Right(s) => s,
+            };
+            upgraded.apply_fed3_upgrade();
+            match upgraded.validate() {
                 Ok(s) => Some(s),
                 Err(e) => {
                     errors.extend(e.to_composition_errors());
                     None
                 }
-            },
+            }
         })
         .collect();
 

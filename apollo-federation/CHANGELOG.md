@@ -18,7 +18,23 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 📚 Documentation
 -->
 
-# [2.16.x](unreleased) - Unreleased
+# [2.18.x](unreleased) - Unreleased
+
+## 🚀 Features
+
+### Add federation 3 compatibility shim for GraphQL 2025 spec `@deprecated` changes ([PR #10029](https://github.com/apollographql/router/pull/10029))
+
+Composition now automatically upgrades federation 2 subgraph schemas for
+compatibility with the GraphQL September 2025 spec (federation 3). Two
+transformations are applied during the upgrade phase, with composition hints
+emitted for each:
+
+- `@deprecated(reason: null)` has its `reason` argument stripped, leaving a
+  bare `@deprecated`, because `reason` became non-nullable in the 2025 spec.
+- `@deprecated` on an implementing field whose interface field is not
+  deprecated is removed, as this is disallowed by the 2025 spec.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10029>
 
 ## 🐛 Fixes
 
