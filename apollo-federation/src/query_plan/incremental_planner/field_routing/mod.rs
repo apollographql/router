@@ -463,6 +463,10 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
         candidate.clone()
     }
 
+    fn is_complete(&self, candidate: &PlanState) -> bool {
+        candidate.dropped_fields == 0 && candidate.pending.is_empty()
+    }
+
     fn effort(&self, candidate: &PlanState) -> u64 {
         candidate.effort
     }
