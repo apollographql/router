@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -6332,6 +6331,32 @@ expression: "&schema"
           "default": {},
           "description": "Overrides global configuration on a per-subgraph basis",
           "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "IncrementalPlanner": {
+      "additionalProperties": false,
+      "description": "Configuration for the incremental (BULB) query planner. When enabled it\nreplaces the exhaustive traversal-based planner, planning field-by-field\nwith a greedy pass plus bounded backtracking.",
+      "properties": {
+        "beam_width": {
+          "default": 16,
+          "description": "Beam width: how many candidate plans advance together per decision\ndepth during search. Defaults to 16.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Use the incremental planner instead of the exhaustive planner.",
+          "type": "boolean"
+        },
+        "fuel": {
+          "default": 5000,
+          "description": "Absolute cap on additional planning effort beyond the initial greedy\npass, measured in uniform units of planning work. Defaults to 5000.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "type": "object"
@@ -13149,11 +13174,29 @@ expression: "&schema"
     "include_subgraph_errors": {
       "$ref": "#/definitions/IncludeSubgraphErrorsConfig"
     },
+    "incremental_planner": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/IncrementalPlanner"
+        }
+      ],
+      "default": {
+        "beam_width": 16,
+        "enabled": false,
+        "fuel": 5000
+      },
+      "description": "Configuration for the incremental query planner."
+    },
     "license_enforcement": {
       "$ref": "#/definitions/LicenseEnforcementConfig"
     },
     "limits": {
       "$ref": "#/definitions/LimitsConfig"
+    },
+    "native_connectors": {
+      "default": false,
+      "description": "When enabled, the incremental planner handles connectors natively via\n`FetchProtocol::Connector` instead of expanding them into virtual\nsubgraphs. Skips the O(N) schema expansion at startup.",
+      "type": "boolean"
     },
     "override_subgraph_url": {
       "$ref": "#/definitions/Conf3"
