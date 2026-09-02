@@ -185,12 +185,30 @@ fn run_bulb_and_finalize(
         "starting BULB search",
     );
 
-    let (mut result, stats) = bulb_search(
+    let (mut result, mut stats) = bulb_search(
         search_space,
-        initial,
-        config,
+        initial.clone(),
+        config.clone(),
         parameters.check_for_cooperative_cancellation,
     );
+
+    if (result.dropped_fields > 0 || !result.pending.is_empty())
+        && !stats.timed_out
+        && !stats.cancelled
+    {
+        let mut split_initial = initial;
+        split_initial.split_repush_enabled = true;
+        let (split_result, split_stats) = bulb_search(
+            search_space,
+            split_initial,
+            config,
+            parameters.check_for_cooperative_cancellation,
+        );
+        if split_result.dropped_fields == 0 && split_result.pending.is_empty() {
+            result = split_result;
+            stats = split_stats;
+        }
+    }
 
     debug!(
         pending_remaining = result.pending.len(),
@@ -285,6 +303,8 @@ fn root_pending_selections(
             parent_types: Default::default(),
             context_anchor: Default::default(),
             best_effort: false,
+            split_parent: None,
+            split_avoid: None,
         })
         .collect()
 }
