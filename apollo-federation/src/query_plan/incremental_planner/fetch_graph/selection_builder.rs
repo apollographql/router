@@ -208,4 +208,73 @@ mod tests {
         assert!(street_key.ends_with("/address/street"));
         assert_eq!(street_sig, "street");
     }
+
+    #[test]
+    fn save_head_restore_head_undoes_insertions() {
+        let mut builder = SelectionBuilder::default();
+        let empty = SharedPath::new();
+        builder.insert(&empty, None);
+        let cp = builder.save_head();
+        builder.insert(&empty, None);
+        builder.insert(&empty, None);
+        assert_eq!(builder.entries.len(), 3);
+        builder.restore_head(cp);
+        assert_eq!(builder.entries.len(), 1);
+    }
+
+    #[test]
+    fn merge_from_absorbs_other_entries() {
+        let mut builder = SelectionBuilder::default();
+        let empty = SharedPath::new();
+        builder.insert(&empty, None);
+
+        let mut other = SelectionBuilder::default();
+        other.insert(&empty, None);
+        other.insert(&empty, None);
+
+        builder.merge_from(&other);
+        assert_eq!(builder.entries.len(), 3);
+        assert_eq!(other.entries.len(), 2);
+    }
+
+    #[test]
+    fn entry_accessors_return_stored_values() {
+        let mut builder = SelectionBuilder::default();
+        let empty = SharedPath::new();
+        builder.insert(&empty, None);
+        let entry = &builder.entries()[0];
+        assert!(entry.path().iter().next().is_none());
+        assert!(entry.selections().is_none());
+    }
+
+    #[test]
+    fn field_signatures_empty_builder_returns_empty() {
+        let builder = SelectionBuilder::default();
+        assert!(builder.field_signatures().is_empty());
+    }
+
+    #[test]
+    fn field_signatures_leaf_entry_without_selections() {
+        let schema = apollo_compiler::schema::Schema::parse_and_validate(
+            r#"type Query { name: String }"#,
+            "schema.graphql",
+        )
+        .expect("valid schema");
+        let schema =
+            crate::schema::ValidFederationSchema::new(schema).expect("valid federation schema");
+        let op = crate::operation::Operation::parse(schema, r#"{ name }"#, "query.graphql")
+            .expect("valid operation");
+
+        let Some(Selection::Field(name_sel)) = op.selection_set.selections.values().next() else {
+            panic!("expected the `name` field selection");
+        };
+
+        let mut builder = SelectionBuilder::default();
+        let path = SharedPath::new().pushed(Arc::new(OpPathElement::Field(name_sel.field.clone())));
+        builder.insert(&path, None);
+
+        let signatures = builder.field_signatures();
+        assert_eq!(signatures.len(), 1);
+        assert!(signatures.contains_key("/name"));
+    }
 }

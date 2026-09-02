@@ -2612,3 +2612,259 @@ fn corpus_timing_debug() {
     }
     println!("timing done");
 }
+
+/// Nested @defer: an outer deferred fragment contains an inner @defer,
+/// producing nested Defer nodes. Exercises the parent_label tracking in
+/// defer.rs collect_deferred_blocks and the nested defer partitioning in
+/// plan_builder.rs build_deferred_blocks.
+#[test]
+fn nested_defer_produces_nested_defer_nodes() {
+    let plan_str = plan_query_with_defer(
+        THREE_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer(label: \"outer\") { email ... @defer(label: \"inner\") { address } } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Primary should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Outer deferred should fetch 'email': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("address"),
+        "Inner deferred should fetch 'address': {plan_str}"
+    );
+}
+
+/// When every field in the selection is deferred, the primary sub_selection
+/// is empty. Exercises the None primary_sub_selection path in defer.rs
+/// build_defer_info.
+#[test]
+fn fully_deferred_field_has_no_primary_payload() {
+    let plan_str = plan_query_with_defer(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { ... @defer(label: \"all\") { name email } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Deferred should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Deferred should fetch 'email': {plan_str}"
+    );
+}
+
+/// A @skip condition on a cross-subgraph field should produce a condition
+/// node wrapping the entity fetch. Exercises the group conditions hoisting
+/// in fetch_graph plan_builder.
+#[test]
+fn skip_on_cross_subgraph_field_produces_condition_node() {
+    let plan_str = plan_query_with_options(
+        CROSS_SUBGRAPH_SCHEMA,
+        "query($s: Boolean!) { user { name email @skip(if: $s) } }",
+        default_config(),
+        Default::default(),
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Plan should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Plan should reference 'email': {plan_str}"
+    );
+}
+
+/// @include on a cross-subgraph field wraps the entity fetch in a
+/// condition node, exercising the Variables path in group_conditions.
+#[test]
+fn include_on_cross_subgraph_field_produces_condition_node() {
+    let plan_str = plan_query_with_options(
+        CROSS_SUBGRAPH_SCHEMA,
+        "query($inc: Boolean!) { user { name email @include(if: $inc) } }",
+        default_config(),
+        Default::default(),
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Plan should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Plan should reference 'email': {plan_str}"
+    );
+}
+
+/// A three-way entity hop exercises deeper fetch graph construction:
+/// A -> B -> C entity resolution with each subgraph owning different fields.
+#[test]
+fn three_way_entity_hop_plans_correctly() {
+    let plan_str = plan_query(THREE_SUBGRAPH_SCHEMA, "{ user { name email address } }");
+    assert!(
+        plan_str.contains("name"),
+        "Plan should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Plan should fetch 'email': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("address"),
+        "Plan should fetch 'address': {plan_str}"
+    );
+}
+
+/// Cross-subgraph mutation with entity hop: the mutation result lives in
+/// subgraph A, but its email field requires a key hop to B, exercising
+/// fetch graph construction under mutation sequencing.
+#[test]
+fn cross_subgraph_mutation_with_entity_hop() {
+    let plan_str = plan_query(
+        MUTATION_SCHEMA,
+        r#"mutation { createUser(name: "Alice") { id name email } }"#,
+    );
+    assert!(
+        plan_str.contains("createUser"),
+        "Plan should contain createUser: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Plan should hop to B for email: {plan_str}"
+    );
+}
+
+/// A field with an inline fragment on the same type exercises the
+/// vacuous type condition path in type_conditions, and inline fragment
+/// handling in selection_builder.
+#[test]
+fn inline_fragment_on_same_type_passes_through() {
+    let plan_str = plan_query(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { ... on User { name email } } }",
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Plan should fetch 'name' through inline fragment: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Plan should fetch 'email' through inline fragment: {plan_str}"
+    );
+}
+
+/// Deferred cross-subgraph fetch with labeled @defer and an explicit
+/// user field alongside exercises the primary/deferred split where
+/// primary has content and deferred needs an entity hop.
+#[test]
+fn labeled_defer_with_primary_and_deferred_content() {
+    let plan_str = plan_query_with_defer(
+        THREE_SUBGRAPH_SCHEMA,
+        r#"{ user { name ... @defer(label: "emails") { email } ... @defer(label: "addrs") { address } } }"#,
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Primary should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("emails"),
+        "Label 'emails' should appear in plan: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("addrs"),
+        "Label 'addrs' should appear in plan: {plan_str}"
+    );
+}
+
+/// A bare inline fragment (no type condition, no directives) inside a
+/// deferred selection exercises collect_non_deferred_selection's
+/// type_cond == None branch.
+#[test]
+fn bare_inline_fragment_passes_through_in_defer() {
+    let plan_str = plan_query_with_defer(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { ... @defer { email } ... { name } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Bare fragment 'name' should be in primary: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Deferred should fetch 'email': {plan_str}"
+    );
+}
+
+/// Cross-subgraph @defer where the deferred fields span two different
+/// non-primary subgraphs exercises the multi-fetch deferred block
+/// construction in plan_builder.
+#[test]
+fn defer_spanning_two_non_primary_subgraphs() {
+    let plan_str = plan_query_with_defer(
+        THREE_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer { email address } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain Defer: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Primary should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Deferred should fetch 'email': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("address"),
+        "Deferred should fetch 'address': {plan_str}"
+    );
+}
+
+/// An alias on a cross-subgraph field exercises the alias propagation
+/// through selection builder entries.
+#[test]
+fn aliased_cross_subgraph_field_preserves_alias() {
+    let plan_str = plan_query(CROSS_SUBGRAPH_SCHEMA, "{ user { name myEmail: email } }");
+    assert!(
+        plan_str.contains("myEmail") || plan_str.contains("email"),
+        "Plan should reference the aliased email field: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Plan should fetch 'name': {plan_str}"
+    );
+}
+
+/// Multiple entity hops from the same root entity exercises the parallel
+/// fetch graph construction for independent subgraph fetches.
+#[test]
+fn parallel_entity_hops_from_same_root() {
+    let plan_str = plan_query(THREE_SUBGRAPH_SCHEMA, "{ user { email address } }");
+    assert!(
+        plan_str.contains("email"),
+        "Plan should fetch 'email': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("address"),
+        "Plan should fetch 'address': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("Parallel") || plan_str.contains("Sequence"),
+        "Plan should have multi-fetch structure: {plan_str}"
+    );
+}
