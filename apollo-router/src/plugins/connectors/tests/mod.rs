@@ -2357,3 +2357,351 @@ async fn execute(
 
     serde_json::from_slice(&response).unwrap()
 }
+
+mod native_connectors {
+    use super::*;
+
+    async fn execute_native(schema: &str, uri: &str, query: &str) -> serde_json::Value {
+        let connector_uri = format!("{uri}/");
+
+        let mut factory = PipelineFactory;
+
+        let config: Configuration = serde_json_bytes::from_value(json!({
+            "native_connectors": true,
+            "include_subgraph_errors": { "all": true },
+            "connectors": {
+                "sources": {
+                    "connectors.json": {
+                        "override_url": connector_uri
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        let router_creator = factory
+            .create_pipeline(
+                false,
+                Arc::new(config.clone()),
+                Arc::new(crate::spec::Schema::parse(schema, &config).unwrap()),
+                None,
+                None,
+                Arc::new(LicenseState::default()),
+            )
+            .await
+            .unwrap();
+        let service = router_creator.create();
+
+        let request: Request = supergraph::Request::fake_builder()
+            .query(query)
+            .build()
+            .unwrap()
+            .try_into()
+            .unwrap();
+
+        let response = service
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap();
+
+        serde_json::from_slice(&response).unwrap()
+    }
+
+    #[tokio::test]
+    async fn root_connector_field_returns_data() {
+        let mock_server = MockServer::start().await;
+        mock_api::users().mount(&mock_server).await;
+
+        let response = execute_native(
+            STEEL_THREAD_SCHEMA,
+            &mock_server.uri(),
+            "query { users { id name } }",
+        )
+        .await;
+
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "users": [
+              {
+                "id": 1,
+                "name": "Leanne Graham"
+              },
+              {
+                "id": 2,
+                "name": "Ervin Howell"
+              }
+            ]
+          }
+        }
+        "###);
+
+        req_asserts::matches(
+            &mock_server.received_requests().await.unwrap(),
+            vec![Matcher::new().method("GET").path("/users")],
+        );
+    }
+
+    #[tokio::test]
+    async fn connector_with_args_in_url_template() {
+        let mock_server = MockServer::start().await;
+        mock_api::user_1().mount(&mock_server).await;
+
+        let response = execute_native(
+            STEEL_THREAD_SCHEMA,
+            &mock_server.uri(),
+            r#"query { user(id: "1") { id name username } }"#,
+        )
+        .await;
+
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "user": {
+              "id": 1,
+              "name": "Leanne Graham",
+              "username": "Bret"
+            }
+          }
+        }
+        "###);
+
+        req_asserts::matches(
+            &mock_server.received_requests().await.unwrap(),
+            vec![Matcher::new().method("GET").path("/users/1")],
+        );
+    }
+
+    #[tokio::test]
+    async fn schema_has_no_synthetic_subgraphs() {
+        let connector_uri = "http://unused/";
+
+        let config: Configuration = serde_json_bytes::from_value(json!({
+            "native_connectors": true,
+            "connectors": {
+                "sources": {
+                    "connectors.json": {
+                        "override_url": connector_uri
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        let schema = crate::spec::Schema::parse(STEEL_THREAD_SCHEMA, &config).unwrap();
+
+        // With native connectors, the schema should only contain the real
+        // subgraphs ("connectors" and "graphql"), not synthetic ones like
+        // "connectors_Query_users_0".
+        let subgraph_names: Vec<_> = schema.subgraphs().map(|(name, _)| name.clone()).collect();
+        assert_eq!(
+            subgraph_names.len(),
+            2,
+            "expected 2 real subgraphs, got: {subgraph_names:?}"
+        );
+        assert!(subgraph_names.contains(&"connectors".to_string()));
+        assert!(subgraph_names.contains(&"graphql".to_string()));
+    }
+
+    fn generate_connector_supergraph(n_connectors: usize) -> String {
+        let mut lines = Vec::new();
+        lines.push(r#"schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION)
+  @join__directive(graphs: [CONNECTORS], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]})
+  @join__directive(graphs: [CONNECTORS], name: "source", args: {name: "json", http: {baseURL: "https://api.example.com/"}})
+{
+  query: Query
+}
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+input join__ContextArgument { name: String! type: String! context: String! selection: join__FieldValue! }
+scalar join__DirectiveArguments
+scalar join__FieldSet
+scalar join__FieldValue
+
+enum join__Graph {
+  CONNECTORS @join__graph(name: "connectors", url: "none")
+}
+
+scalar link__Import
+enum link__Purpose { SECURITY EXECUTION }
+"#.to_string());
+
+        lines.push("type Query\n  @join__type(graph: CONNECTORS)\n{".to_string());
+        for i in 0..n_connectors {
+            lines.push(format!(
+                r#"  resource{i}: Resource{i} @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {{source: "json", http: {{GET: "/resources/{i}"}}, selection: "id name value"}})"#
+            ));
+        }
+        lines.push("}".to_string());
+
+        for i in 0..n_connectors {
+            lines.push(format!(
+                "type Resource{i}\n  @join__type(graph: CONNECTORS)\n{{\n  id: ID!\n  name: String\n  value: Int\n}}"
+            ));
+        }
+
+        lines.join("\n")
+    }
+
+    #[cfg(target_os = "macos")]
+    fn resident_memory_bytes() -> u64 {
+        use std::mem::MaybeUninit;
+        unsafe {
+            let mut info = MaybeUninit::<libc::mach_task_basic_info_data_t>::uninit();
+            let mut count = (std::mem::size_of::<libc::mach_task_basic_info_data_t>()
+                / std::mem::size_of::<libc::natural_t>()) as u32;
+            // libc's binding is deprecated in favor of the mach2 crate, but a
+            // test-only memory probe does not justify a new dependency.
+            #[allow(deprecated)]
+            let kr = libc::task_info(
+                libc::mach_task_self(),
+                libc::MACH_TASK_BASIC_INFO,
+                info.as_mut_ptr() as *mut _,
+                &mut count,
+            );
+            if kr == libc::KERN_SUCCESS {
+                info.assume_init().resident_size
+            } else {
+                0
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn resident_memory_bytes() -> u64 {
+        0
+    }
+
+    #[test]
+    #[ignore] // Depends on local supergraph file; run with CONSTELLATION_SUPERGRAPH=<path>
+    fn bench_constellation_supergraph() {
+        let path = std::env::var("CONSTELLATION_SUPERGRAPH")
+            .expect("set CONSTELLATION_SUPERGRAPH=<path> to run this benchmark");
+        let schema_str = std::fs::read_to_string(path).expect("failed to read supergraph file");
+        let schema_size_kb = schema_str.len() / 1024;
+
+        eprintln!("=== Constellation supergraph ({schema_size_kb}KB) ===\n");
+
+        for (mode, native) in [("Expansion", false), ("Native", true)] {
+            let config: Configuration = if native {
+                serde_json_bytes::from_value(json!({
+                    "native_connectors": true,
+                }))
+                .unwrap()
+            } else {
+                serde_json_bytes::from_value(json!({})).unwrap()
+            };
+
+            let mem_before = resident_memory_bytes();
+            let start = std::time::Instant::now();
+            let result = crate::spec::Schema::parse(&schema_str, &config);
+            let elapsed = start.elapsed();
+            let mem_after = resident_memory_bytes();
+
+            let schema = result.expect("parse failed");
+            let mem_delta_mb = mem_after.saturating_sub(mem_before) as f64 / (1024.0 * 1024.0);
+            let subgraphs = schema.subgraphs().count();
+            let connectors = schema
+                .connectors
+                .as_ref()
+                .map(|c| c.by_service_name.len())
+                .unwrap_or(0);
+
+            eprintln!(
+                "{mode:<10} time={elapsed:>8.1?}  subgraphs={subgraphs:<5}  \
+                 connectors={connectors}  mem_delta={mem_delta_mb:.1}MB"
+            );
+
+            // Drop before next iteration for cleaner measurement
+            drop(schema);
+        }
+    }
+
+    #[test]
+    #[ignore] // Runs both expansion and native paths at n=100,500,1000; ~10s total
+    fn schema_parse_scales_with_many_connectors() {
+        // Measures schema parse time for both expansion and native paths.
+        // The expansion path creates O(N) virtual subgraphs and re-merges
+        // them, which is the source of the startup memory/time regression
+        // with hundreds of connectors.
+        for n in [100, 500, 1000] {
+            let schema_str = generate_connector_supergraph(n);
+            let schema_size_kb = schema_str.len() / 1024;
+
+            // --- Expansion path (old) ---
+            let expansion_config: Configuration = serde_json_bytes::from_value(json!({
+                "connectors": {
+                    "sources": {
+                        "connectors.json": {
+                            "override_url": "http://unused/"
+                        }
+                    }
+                }
+            }))
+            .unwrap();
+
+            let start = std::time::Instant::now();
+            let expansion_result = crate::spec::Schema::parse(&schema_str, &expansion_config);
+            let expansion_time = start.elapsed();
+
+            // --- Native path (new) ---
+            let native_config: Configuration = serde_json_bytes::from_value(json!({
+                "native_connectors": true,
+                "connectors": {
+                    "sources": {
+                        "connectors.json": {
+                            "override_url": "http://unused/"
+                        }
+                    }
+                }
+            }))
+            .unwrap();
+
+            let start = std::time::Instant::now();
+            let native_result = crate::spec::Schema::parse(&schema_str, &native_config);
+            let native_time = start.elapsed();
+
+            eprintln!(
+                "n={n:>4}  schema={schema_size_kb:>4}KB  \
+                 expansion={expansion_time:>8.1?}  \
+                 native={native_time:>8.1?}  \
+                 speedup={speedup:.1}x",
+                speedup = expansion_time.as_secs_f64() / native_time.as_secs_f64(),
+            );
+
+            assert!(expansion_result.is_ok(), "expansion parse failed at n={n}");
+            assert!(native_result.is_ok(), "native parse failed at n={n}");
+
+            // Native path should have only the real subgraph, no synthetics
+            let native_schema = native_result.unwrap();
+            let subgraph_count = native_schema.subgraphs().count();
+            assert_eq!(
+                subgraph_count, 1,
+                "native path should have 1 subgraph, got {subgraph_count}"
+            );
+
+            // Expansion path replaces the original subgraph with N synthetic ones
+            let expansion_schema = expansion_result.unwrap();
+            let expansion_subgraph_count = expansion_schema.subgraphs().count();
+            assert!(
+                expansion_subgraph_count >= n,
+                "expansion should have >=N subgraphs, got {expansion_subgraph_count}"
+            );
+        }
+    }
+}
