@@ -288,9 +288,10 @@ mod tests {
     use crate::supergraph::Supergraph;
 
     fn compose_supergraph(sdl: &str) -> (Supergraph<crate::supergraph::Satisfiable>, Vec<String>) {
-        let subgraph = Subgraph::parse("test", "http://localhost", sdl).unwrap();
-        let result =
-            crate::composition::compose(vec![subgraph], CompositionOptions::default()).unwrap();
+        let subgraph =
+            Subgraph::parse("test", "http://localhost", sdl).expect("should parse test subgraph");
+        let result = crate::composition::compose(vec![subgraph], CompositionOptions::default())
+            .expect("should compose test supergraph");
         let hints: Vec<_> = result
             .hints()
             .iter()
@@ -314,15 +315,20 @@ mod tests {
 
         let schema = supergraph.schema().schema();
         let c = coord!(Query.field);
-        let field = schema.type_field(&c.ty, &c.attribute).unwrap();
+        let field = schema
+            .type_field(&c.ty, &c.attribute)
+            .expect("Query.field should exist in schema");
         assert!(
             field.directives.has("deprecated"),
             "Field should still have @deprecated (only reason: null stripped)"
         );
-        let deprecated = field.directives.get("deprecated").unwrap();
+        let deprecated = field
+            .directives
+            .get("deprecated")
+            .expect("@deprecated directive should exist on Query.field");
         assert!(
             deprecated.specified_argument_by_name("reason").is_none(),
-            "reason argument should have been stripped"
+            "@deprecated(reason:) argument should have been stripped"
         );
     }
 
@@ -342,11 +348,16 @@ mod tests {
 
         let schema = supergraph.schema().schema();
         let c = coord!(Query.field);
-        let field = schema.type_field(&c.ty, &c.attribute).unwrap();
-        let deprecated = field.directives.get("deprecated").unwrap();
+        let field = schema
+            .type_field(&c.ty, &c.attribute)
+            .expect("Query.field should exist in schema");
+        let deprecated = field
+            .directives
+            .get("deprecated")
+            .expect("@deprecated directive should exist on Query.field");
         assert!(
             deprecated.specified_argument_by_name("reason").is_some(),
-            "reason argument should be preserved for valid reasons"
+            "@deprecated(reason:) argument should be preserved for valid reasons"
         );
     }
 
@@ -379,7 +390,9 @@ mod tests {
 
         let schema = supergraph.schema().schema();
         let c = coord!(User.name);
-        let field = schema.type_field(&c.ty, &c.attribute).unwrap();
+        let field = schema
+            .type_field(&c.ty, &c.attribute)
+            .expect("User.name should exist in schema");
         assert!(
             !field.directives.has("deprecated"),
             "@deprecated should have been stripped from User.name"
@@ -415,7 +428,9 @@ mod tests {
 
         let schema = supergraph.schema().schema();
         let c = coord!(User.name);
-        let field = schema.type_field(&c.ty, &c.attribute).unwrap();
+        let field = schema
+            .type_field(&c.ty, &c.attribute)
+            .expect("User.name should exist in schema");
         assert!(
             field.directives.has("deprecated"),
             "@deprecated should be preserved when interface field is also deprecated"
@@ -441,17 +456,26 @@ mod tests {
         );
 
         let schema = supergraph.schema().schema();
-        let status = schema.types.get("Status").unwrap();
+        let status = schema
+            .types
+            .get("Status")
+            .expect("Status type should exist in schema");
         if let apollo_compiler::schema::ExtendedType::Enum(e) = status {
-            let inactive = e.values.get("INACTIVE").unwrap();
+            let inactive = e
+                .values
+                .get("INACTIVE")
+                .expect("Status.INACTIVE should exist in schema");
             assert!(
                 inactive.directives.has("deprecated"),
                 "Enum value should still have @deprecated"
             );
-            let deprecated = inactive.directives.get("deprecated").unwrap();
+            let deprecated = inactive
+                .directives
+                .get("deprecated")
+                .expect("@deprecated directive should exist on Status.INACTIVE");
             assert!(
                 deprecated.specified_argument_by_name("reason").is_none(),
-                "reason argument should have been stripped from enum value"
+                "@deprecated(reason:) argument should have been stripped from enum value"
             );
         } else {
             panic!("Status should be an enum type");
@@ -477,17 +501,26 @@ mod tests {
         );
 
         let schema = supergraph.schema().schema();
-        let filter = schema.types.get("Filter").unwrap();
+        let filter = schema
+            .types
+            .get("Filter")
+            .expect("Filter type should exist in schema");
         if let apollo_compiler::schema::ExtendedType::InputObject(input) = filter {
-            let field = input.fields.get("legacyId").unwrap();
+            let field = input
+                .fields
+                .get("legacyId")
+                .expect("Filter.legacyId should exist in schema");
             assert!(
                 field.directives.has("deprecated"),
                 "Input field should still have @deprecated"
             );
-            let deprecated = field.directives.get("deprecated").unwrap();
+            let deprecated = field
+                .directives
+                .get("deprecated")
+                .expect("@deprecated directive should exist on Filter.legacyId");
             assert!(
                 deprecated.specified_argument_by_name("reason").is_none(),
-                "reason argument should have been stripped from input field"
+                "@deprecated(reason:) argument should have been stripped from input field"
             );
         } else {
             panic!("Filter should be an input object type");
@@ -509,16 +542,25 @@ mod tests {
 
         let schema = supergraph.schema().schema();
         let c = coord!(Query.search);
-        let field = schema.type_field(&c.ty, &c.attribute).unwrap();
-        let arg = field.arguments.iter().find(|a| a.name == "limit").unwrap();
+        let field = schema
+            .type_field(&c.ty, &c.attribute)
+            .expect("Query.search should exist in schema");
+        let arg = field
+            .arguments
+            .iter()
+            .find(|a| a.name == "limit")
+            .expect("Query.search(limit:) argument should exist");
         assert!(
             arg.directives.has("deprecated"),
-            "Argument should still have @deprecated"
+            "Query.search(limit:) should still have @deprecated"
         );
-        let deprecated = arg.directives.get("deprecated").unwrap();
+        let deprecated = arg
+            .directives
+            .get("deprecated")
+            .expect("@deprecated directive should exist on Query.search(limit:)");
         assert!(
             deprecated.specified_argument_by_name("reason").is_none(),
-            "reason argument should have been stripped from argument"
+            "@deprecated(reason:) argument should have been stripped"
         );
     }
 
@@ -541,7 +583,7 @@ mod tests {
                 }
             "#,
         )
-        .unwrap();
+        .expect("should parse s1 subgraph");
         let s2 = Subgraph::parse(
             "s2",
             "http://s2",
@@ -559,9 +601,9 @@ mod tests {
                 }
             "#,
         )
-        .unwrap();
-        let result =
-            crate::composition::compose(vec![s1, s2], CompositionOptions::default()).unwrap();
+        .expect("should parse s2 subgraph");
+        let result = crate::composition::compose(vec![s1, s2], CompositionOptions::default())
+            .expect("should compose test supergraph");
         let hint_codes: Vec<_> = result
             .hints()
             .iter()
