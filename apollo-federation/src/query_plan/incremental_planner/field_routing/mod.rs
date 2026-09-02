@@ -15,6 +15,7 @@
 pub(super) mod cached_query_graph;
 mod commit;
 mod conditions;
+mod connect;
 mod context;
 mod requires;
 mod routing;
@@ -188,6 +189,7 @@ pub(super) struct NodeSource {
 pub(crate) struct FieldRoutingSearchSpace {
     pub(crate) cached_query_graph: CachedQueryGraph,
     pub(crate) supergraph_schema: ValidFederationSchema,
+    pub(super) connector_index: Arc<crate::connectors::index::ConnectorIndex>,
     pub(super) caches: PlannerCaches,
     pub(super) disabled_subgraphs: apollo_compiler::collections::IndexSet<Arc<str>>,
 }
