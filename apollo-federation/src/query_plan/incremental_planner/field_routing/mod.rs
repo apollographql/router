@@ -329,9 +329,17 @@ impl FieldRoutingSearchSpace {
     /// forced commits to recover through.
     fn fast_forward(&self, state: &mut PlanState) -> Result<(), FederationError> {
         let mut trail = ForcedTrail::default();
+        let splits_at_entry = state.splits;
         while let Some(top) = state.pending.last() {
             if !trail.doomed.is_empty() && trail.doomed.contains(&pending_site(top)) {
-                self.recover_doomed(state, &mut trail);
+                if state.splits > splits_at_entry {
+                    let pending = state.pop_pending().unwrap();
+                    if !self.try_split_repush(state, &pending) {
+                        self.drop_unresolvable(state, &pending);
+                    }
+                } else {
+                    self.recover_doomed(state, &mut trail);
+                }
                 continue;
             }
             let options: Arc<Vec<RoutingChoice>> = Arc::new(self.routing_options(top)?);
@@ -367,12 +375,15 @@ impl FieldRoutingSearchSpace {
 
     /// Pop a pending whose site is proven hopeless and recover: rewind an
     /// ancestor forced commit if one has untried options (see
-    /// [`Self::backtrack_forced`]), then drop the selection. A
+    /// [`Self::backtrack_forced`]), then try a split re-push (see
+    /// [`Self::try_split_repush`]), otherwise drop the selection. A
     /// best-effort pending is dropped outright, its loss is tolerated by
     /// design and must not burn backtracking budget.
     fn recover_doomed(&self, state: &mut PlanState, trail: &mut ForcedTrail) {
         let pending = state.pop_pending().unwrap();
-        if pending.best_effort || !self.backtrack_forced(state, trail) {
+        if (pending.best_effort || !self.backtrack_forced(state, trail))
+            && !self.try_split_repush(state, &pending)
+        {
             self.drop_unresolvable(state, &pending);
         }
     }
@@ -417,17 +428,25 @@ impl FieldRoutingSearchSpace {
         } else if failed {
             trail.doomed.insert(pending_site(&pending));
         }
-        if failed && !best_effort && !self.backtrack_forced(state, trail) {
-            if !self.try_split_repush(state, &pending) {
-                state.dropped_fields += 1;
-            }
+        if failed
+            && !best_effort
+            && !self.backtrack_forced(state, trail)
+            && !self.try_split_repush(state, &pending)
+        {
+            state.dropped_fields += 1;
         }
     }
 
     /// Rewind the forced-commit trail after a drop and try alternatives,
-    /// deepest frame first. Returns `true` when the state was rewound to a
-    /// committed alternative. Returns `false` when nothing was attempted
-    /// (empty trail or budget spent).
+    /// deepest frame first, each option in rank order. Returns `true` when
+    /// the state was rewound (an alternative committed, or the greedy choice
+    /// was re-driven after exhausting alternatives). Returns `false` only when
+    /// nothing was attempted (empty trail or budget spent), leaving the
+    /// state untouched so the caller can drop the doomed pending as before.
+    ///
+    /// Bounded by [`FORCED_BACKTRACK_CAP`] attempts per candidate (monotonic
+    /// across rollbacks, like `effort`): the greedy pass has no effort
+    /// budget, so a genuinely unplannable operation must not retry forever.
     fn backtrack_forced(&self, state: &mut PlanState, trail: &mut ForcedTrail) -> bool {
         let mut parked: Option<(Arc<PendingSelection>, RoutingChoice)> = None;
         loop {
@@ -468,7 +487,10 @@ impl FieldRoutingSearchSpace {
         // committed state; descendants that drop again find the budget
         // spent and fall through to plain drops.
         if let Some((pending, choice)) = parked {
-            if self.commit_choice(state, &pending, &choice).is_err() {
+            if self.commit_choice(state, &pending, &choice).is_err()
+                && !pending.best_effort
+                && !self.try_split_repush(state, &pending)
+            {
                 state.dropped_fields += 1;
             }
             return true;
@@ -639,7 +661,9 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
                 error = ?e,
                 "commit_choice failed, dropping field",
             );
-            candidate.dropped_fields += 1;
+            if !self.try_split_repush(candidate, &pending) && !pending.best_effort {
+                candidate.dropped_fields += 1;
+            }
         }
 
         trace!("partial plan after apply");
