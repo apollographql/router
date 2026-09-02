@@ -473,13 +473,13 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.plans_limit,
-            "$.supergraph.query_planning.plans_limit"
+            apollo.router.config.experimental_plans_limit,
+            "$.supergraph.query_planning.experimental_plans_limit"
         );
 
         populate_config_instrument!(
-            apollo.router.config.paths_limit,
-            "$.supergraph.query_planning.paths_limit"
+            apollo.router.config.experimental_paths_limit,
+            "$.supergraph.query_planning.experimental_paths_limit"
         );
 
         populate_config_instrument!(

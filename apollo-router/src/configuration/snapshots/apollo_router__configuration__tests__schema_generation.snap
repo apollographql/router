@@ -8172,7 +8172,7 @@ expression: "&schema"
           },
           "description": "Configures cooperative cancellation of query planning\n\nSee [`CooperativeCancellation`] for more details."
         },
-        "paths_limit": {
+        "experimental_paths_limit": {
           "default": null,
           "description": "Before creating query plans, for each path of fields in the query we compute all the\npossible options to traverse that path via the subgraphs. Multiple options can arise because\nfields in the path can be provided by multiple subgraphs, and abstract types (i.e. unions\nand interfaces) returned by fields sometimes require the query planner to traverse through\neach constituent object type. The number of options generated in this computation can grow\nlarge if the schema or query are sufficiently complex, and that will increase the time spent\nplanning.\n\nThis config allows specifying a per-path limit to the number of options considered. If any\npath's options exceeds this limit, query planning will abort and the operation will fail.\n\nThe default value is None, which specifies no limit.",
           "format": "uint32",
@@ -8182,7 +8182,7 @@ expression: "&schema"
             "null"
           ]
         },
-        "plans_limit": {
+        "experimental_plans_limit": {
           "default": null,
           "description": "Sets a limit to the number of generated query plans.\nThe planning process generates many different query plans as it\nexplores the graph, and the list can grow large. By using this\nlimit, we prevent that growth and still get a valid query plan,\nbut it may not be the optimal one.\n\nThe default limit is set to 10000, but it may change in the future",
           "format": "uint32",
@@ -11638,8 +11638,8 @@ expression: "&schema"
               "mode": "measure",
               "timeout": null
             },
-            "paths_limit": null,
-            "plans_limit": null,
+            "experimental_paths_limit": null,
+            "experimental_plans_limit": null,
             "warmed_up_queries": null
           },
           "description": "Query planning options"
@@ -13236,8 +13236,8 @@ expression: "&schema"
             "mode": "measure",
             "timeout": null
           },
-          "paths_limit": null,
-          "plans_limit": null,
+          "experimental_paths_limit": null,
+          "experimental_plans_limit": null,
           "warmed_up_queries": null
         },
         "redact_query_validation_errors": false,

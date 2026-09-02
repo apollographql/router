@@ -66,7 +66,7 @@ async fn does_not_exceed_max_evaluated_plans() {
                     enabled: true
             supergraph:
               query_planning:
-                plans_limit: 4
+                experimental_plans_limit: 4
         "#,
         )
         .supergraph("tests/integration/fixtures/query_planner_max_evaluated_plans.graphql")

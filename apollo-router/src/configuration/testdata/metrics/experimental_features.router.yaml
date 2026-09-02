@@ -18,8 +18,8 @@ traffic_shaping:
 supergraph:
   log_on_broken_pipe: true
   query_planning:
-    plans_limit: 10
-    paths_limit: 10
+    experimental_plans_limit: 10
+    experimental_paths_limit: 10
     experimental_cooperative_cancellation:
       enabled: true
 

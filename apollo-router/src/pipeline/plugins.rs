@@ -170,6 +170,7 @@ pub(crate) async fn create_plugins(
     registrar.add_optional("rhai").await;
     registrar.add_optional("coprocessor").await;
     registrar.add_optional("response_cache").await;
+    registrar.add_optional("expose_query_plan").await;
     registrar.add_user_plugins(user_plugins_config, extra).await;
 
     // Because this plugin intercepts subgraph requests

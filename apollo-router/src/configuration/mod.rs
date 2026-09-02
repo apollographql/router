@@ -428,8 +428,8 @@ impl Configuration {
         let max_evaluated_plans = self
             .supergraph
             .query_planning
-            .plans_limit
-            // Fails if plans_limit is zero; use our default.
+            .experimental_plans_limit
+            // Fails if experimental_plans_limit is zero; use our default.
             .and_then(NonZeroU32::new)
             .unwrap_or(NonZeroU32::new(10_000).expect("it is not zero"));
 
@@ -442,7 +442,7 @@ impl Configuration {
             type_conditioned_fetching: self.experimental_type_conditioned_fetching,
             debug: QueryPlannerDebugConfig {
                 max_evaluated_plans,
-                paths_limit: self.supergraph.query_planning.paths_limit,
+                paths_limit: self.supergraph.query_planning.experimental_paths_limit,
             },
         }
     }
@@ -936,7 +936,7 @@ pub(crate) struct QueryPlanning {
     /// but it may not be the optimal one.
     ///
     /// The default limit is set to 10000, but it may change in the future
-    pub(crate) plans_limit: Option<u32>,
+    pub(crate) experimental_plans_limit: Option<u32>,
 
     /// Before creating query plans, for each path of fields in the query we compute all the
     /// possible options to traverse that path via the subgraphs. Multiple options can arise because
@@ -950,7 +950,7 @@ pub(crate) struct QueryPlanning {
     /// path's options exceeds this limit, query planning will abort and the operation will fail.
     ///
     /// The default value is None, which specifies no limit.
-    pub(crate) paths_limit: Option<u32>,
+    pub(crate) experimental_paths_limit: Option<u32>,
 
     /// Configures cooperative cancellation of query planning
     ///
@@ -965,15 +965,15 @@ impl QueryPlanning {
     pub(crate) fn new(
         cache: Option<QueryPlanCache>,
         warmed_up_queries: Option<usize>,
-        plans_limit: Option<u32>,
-        paths_limit: Option<u32>,
+        experimental_plans_limit: Option<u32>,
+        experimental_paths_limit: Option<u32>,
         experimental_cooperative_cancellation: Option<CooperativeCancellation>,
     ) -> Self {
         Self {
             cache: cache.unwrap_or_default(),
             warmed_up_queries,
-            plans_limit,
-            paths_limit,
+            experimental_plans_limit,
+            experimental_paths_limit,
             experimental_cooperative_cancellation: experimental_cooperative_cancellation
                 .unwrap_or_default(),
         }

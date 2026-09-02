@@ -7,8 +7,6 @@ your router configuration:
 | --- | --- |
 | `telemetry.exporters.tracing.experimental_response_trace_id` | `telemetry.exporters.tracing.response_trace_id` |
 | `supergraph.experimental_log_on_broken_pipe` | `supergraph.log_on_broken_pipe` |
-| `supergraph.query_planning.experimental_plans_limit` | `supergraph.query_planning.plans_limit` |
-| `supergraph.query_planning.experimental_paths_limit` | `supergraph.query_planning.paths_limit` |
 | `traffic_shaping.all.experimental_http2` | `traffic_shaping.all.http2` |
 | `traffic_shaping.subgraphs.<name>.experimental_http2` | `traffic_shaping.subgraphs.<name>.http2` |
 | `coprocessor.client.experimental_http2` | `coprocessor.client.http2` |

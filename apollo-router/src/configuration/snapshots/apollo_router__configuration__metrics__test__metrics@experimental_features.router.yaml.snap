@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/metrics.rs
-assertion_line: 704
 expression: "& metrics.non_zero()"
 ---
 - name: apollo.router.config.apollo_telemetry_options
@@ -53,6 +52,16 @@ expression: "& metrics.non_zero()"
     datapoints:
       - value: 1
         attributes: {}
+- name: apollo.router.config.experimental_paths_limit
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_plans_limit
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
 - name: apollo.router.config.experimental_prewarm_query_plan_cache
   data:
     datapoints:
@@ -93,11 +102,6 @@ expression: "& metrics.non_zero()"
     datapoints:
       - value: 1
         attributes: {}
-- name: apollo.router.config.paths_limit
-  data:
-    datapoints:
-      - value: 1
-        attributes: {}
 - name: apollo.router.config.persisted_queries
   data:
     datapoints:
@@ -106,11 +110,6 @@ expression: "& metrics.non_zero()"
           opt.log_unknown: false
           opt.safelist.enabled: false
           opt.safelist.require_id: false
-- name: apollo.router.config.plans_limit
-  data:
-    datapoints:
-      - value: 1
-        attributes: {}
 - name: apollo.router.config.response_trace_id
   data:
     datapoints:
