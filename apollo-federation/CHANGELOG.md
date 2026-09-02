@@ -53,6 +53,15 @@ carried integers, which may affect response caching.
 
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10119>
 
+## 🚀 Features
+
+### Support `@oneOf` input object composition ([PR #10124](https://github.com/apollographql/router/pull/10124))
+
+The `@oneOf` directive on input object types is now preserved during
+composition. If any subgraph marks an input type with `@oneOf`, the
+supergraph will include `@oneOf` on that type. Subgraphs are not
+required to agree on whether `@oneOf` is present.
+
 ## 🛠 Maintenance
 
 ### Align `@deprecated` directive handling with GraphQL 2025 spec ([PR #10119](https://github.com/apollographql/router/pull/10119))
