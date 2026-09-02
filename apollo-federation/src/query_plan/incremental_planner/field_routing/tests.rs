@@ -2367,3 +2367,90 @@ type Query
     );
     let _ = try_plan_query(&failing_schema, "{ entity { f } }");
 }
+
+/// Build the pieces `build_bulb_plan` needs directly, so tests can plan from
+/// heads the public planner never uses (it always enters at the federated
+/// root).
+fn bulb_test_parameters(
+    schema: &str,
+) -> (
+    Supergraph,
+    std::sync::Arc<crate::query_graph::QueryGraph>,
+    crate::query_plan::query_planner::QueryPlanningStatistics,
+) {
+    let supergraph = Supergraph::new(schema).expect("supergraph parse");
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
+        .expect("api schema");
+    let query_graph = std::sync::Arc::new(
+        crate::query_graph::build_federated_query_graph(
+            supergraph.schema.clone(),
+            api_schema,
+            Some(true),
+            Some(true),
+        )
+        .expect("query graph"),
+    );
+    let statistics = Default::default();
+    (supergraph, query_graph, statistics)
+}
+
+/// Planning from a concrete subgraph root type (a SchemaType head) seeds the
+/// root fetch group up front instead of fanning out from the federated root.
+/// The public planner always enters at the federated root, so this drives
+/// build_bulb_plan directly with the subgraph's own Query node as head.
+#[test]
+fn bulb_plan_from_concrete_subgraph_root_head() {
+    use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
+    use crate::schema::position::SchemaRootDefinitionKind;
+
+    let (supergraph, query_graph, statistics) = bulb_test_parameters(SINGLE_SUBGRAPH_SCHEMA);
+    let head = *query_graph
+        .root_kinds_to_nodes_by_source("a")
+        .expect("subgraph root kinds")
+        .get(&SchemaRootDefinitionKind::Query)
+        .expect("subgraph query root");
+
+    let operation = crate::operation::Operation::parse(
+        supergraph.schema.clone(),
+        "{ user { name email } }",
+        "test.graphql",
+    )
+    .expect("operation parse");
+    let selection_set = operation.selection_set.clone();
+    let parameters = QueryPlanningParameters {
+        supergraph_schema: supergraph.schema.clone(),
+        federated_query_graph: query_graph.clone(),
+        operation: std::sync::Arc::new(operation),
+        fetch_id_generator: std::sync::Arc::new(
+            crate::query_plan::fetch_dependency_graph::FetchIdGenerator::new(),
+        ),
+        head,
+        head_must_be_root: true,
+        abstract_types_with_inconsistent_runtime_types: Default::default(),
+        config: default_config(),
+        statistics: &statistics,
+        override_conditions: crate::query_graph::OverrideConditions::new(
+            &query_graph,
+            &Default::default(),
+        ),
+        connector_index: Default::default(),
+        check_for_cooperative_cancellation: None,
+        disabled_subgraphs: Default::default(),
+        assigned_defer_labels: Default::default(),
+    };
+
+    let bulb = super::super::build_bulb_plan(
+        &parameters,
+        &selection_set,
+        SchemaRootDefinitionKind::Query,
+        false,
+    )
+    .expect("bulb plan");
+    let plan = bulb.plan.expect("plan node");
+    let plan_str = format!("{plan}");
+    assert!(
+        plan_str.contains("name") && plan_str.contains("email"),
+        "Plan from subgraph root head should fetch both fields: {plan_str}"
+    );
+}
