@@ -702,10 +702,16 @@ pub(crate) fn create_oci_license_stream(
     }
 }
 
-/// Poll the registry for license updates. Each tick re-probes the graph artifact manifest (the
-/// entitlement identifier is discovered from its annotations and is stable, but a graph
-/// republished onto a newer manifest scheme can gain the annotation), then probes the entitlement
-/// artifact's `latest` tag and fetches the JWT when its digest moves.
+/// How many poll ticks to wait between re-reading the graph artifact manifest while it carries no
+/// entitlement identifier annotation, so a republished graph eventually gains its license without
+/// the license loop competing with the schema loop's polling of the same manifest.
+const UNLICENSED_REDISCOVERY_TICKS: u32 = 10;
+
+/// Poll the registry for license updates. The entitlement identifier is discovered from the graph
+/// artifact manifest once (it is minted once per account and never changes), after which only the
+/// entitlement artifact's `latest` tag is probed; the graph manifest is re-read on a slow cadence
+/// only while it carried no annotation. The schema stream remains the sole steady-state poller of
+/// the graph manifest.
 pub(crate) fn stream_license_from_oci(
     oci_config: OciConfig,
 ) -> impl Stream<Item = Result<OciLicenseJwt, OciError>> {
@@ -724,8 +730,8 @@ pub(crate) fn stream_license_from_oci(
         // None until the graph manifest has been read at least once; Some(None) when the manifest
         // was read and carries no annotation.
         let mut entitlement_id: Option<Option<String>> = None;
-        let mut last_graph_digest: Option<String> = None;
         let mut last_entitlement_digest: Option<String> = None;
+        let mut ticks_until_rediscovery: u32 = 0;
         let mut polling_time = oci_config.poll_interval;
 
         loop {
@@ -734,45 +740,47 @@ pub(crate) fn stream_license_from_oci(
                 ..Default::default()
             });
 
-            // Step 1: (re)discover the entitlement identifier when the graph manifest changes.
-            match fetch_reference_manifest_digest(&oci_config, &graph_reference).await {
-                Ok(graph_digest) => {
-                    if last_graph_digest.as_deref() != Some(graph_digest.as_str()) {
-                        match fetch_entitlement_id(&mut client, &auth, &graph_reference).await {
-                            Ok(discovered) => {
-                                if discovered.is_none() {
-                                    tracing::info!(
-                                        "graph artifact manifest has no entitlement identifier annotation; the router runs unlicensed until the graph is republished"
-                                    );
-                                    // The unlicensed state is explicit, not an error, and any
-                                    // previously fetched entitlement no longer applies.
-                                    if entitlement_id != Some(None)
-                                        && sender.send(Ok(None)).await.is_err()
-                                    {
-                                        break;
-                                    }
-                                    last_entitlement_digest = None;
-                                }
-                                entitlement_id = Some(discovered);
-                                last_graph_digest = Some(graph_digest);
-                            }
-                            Err(err) => {
-                                if let Some(retry_after) = parse_rate_limit_error(&err) {
-                                    polling_time = retry_after.max(Duration::from_secs(10));
-                                }
-                                if sender.send(Err(err)).await.is_err() {
-                                    break;
-                                }
-                            }
-                        }
+            // Step 1: discover the entitlement identifier. Runs until the first successful read;
+            // after that only while the manifest had no annotation, every
+            // UNLICENSED_REDISCOVERY_TICKS polls.
+            let needs_discovery = match &entitlement_id {
+                None => true,
+                Some(None) => {
+                    if ticks_until_rediscovery == 0 {
+                        true
+                    } else {
+                        ticks_until_rediscovery -= 1;
+                        false
                     }
                 }
-                Err(err) => {
-                    if let Some(retry_after) = parse_rate_limit_error(&err) {
-                        polling_time = retry_after.max(Duration::from_secs(10));
+                Some(Some(_)) => false,
+            };
+            if needs_discovery {
+                ticks_until_rediscovery = UNLICENSED_REDISCOVERY_TICKS;
+                match fetch_entitlement_id(&mut client, &auth, &graph_reference).await {
+                    Ok(discovered) => {
+                        if discovered.is_none() {
+                            tracing::info!(
+                                "graph artifact manifest has no entitlement identifier annotation; the router runs unlicensed until the graph is republished"
+                            );
+                            // The unlicensed state is explicit, not an error; announce it once.
+                            if entitlement_id != Some(None) && sender.send(Ok(None)).await.is_err()
+                            {
+                                break;
+                            }
+                            last_entitlement_digest = None;
+                        }
+                        entitlement_id = Some(discovered);
                     }
-                    if sender.send(Err(err)).await.is_err() {
-                        break;
+                    Err(err) => {
+                        if let Some(retry_after) = parse_rate_limit_error(&err) {
+                            polling_time = retry_after.max(Duration::from_secs(10));
+                        }
+                        // Retry discovery on the next tick rather than after the slow cadence.
+                        entitlement_id = None;
+                        if sender.send(Err(err)).await.is_err() {
+                            break;
+                        }
                     }
                 }
             }
