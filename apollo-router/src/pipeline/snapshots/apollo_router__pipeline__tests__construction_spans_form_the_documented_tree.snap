@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/pipeline/tests.rs
-assertion_line: 314
 expression: "layer.render(&[\"prepare_pipeline\", \"activate\", \"apply_pipeline\"])"
 ---
 prepare_pipeline
@@ -8,7 +7,6 @@ prepare_pipeline
   plugins
     plugin: apollo.include_subgraph_errors
     plugin: apollo.headers
-    plugin: apollo.license_enforcement
     plugin: apollo.health_check
     plugin: apollo.traffic_shaping
     plugin: apollo.limits
