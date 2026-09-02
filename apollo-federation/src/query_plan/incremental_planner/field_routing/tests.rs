@@ -2454,3 +2454,161 @@ fn bulb_plan_from_concrete_subgraph_root_head() {
         "Plan from subgraph root head should fetch both fields: {plan_str}"
     );
 }
+
+const CONNECTOR_ROOT_FIELD_SCHEMA: &str = include_str!("../fixtures/connector_root_field.graphql");
+
+#[test]
+fn connector_root_field_produces_fetch_with_connector_protocol() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_ROOT_FIELD_SCHEMA,
+        "{ products { id name price } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Fetch(service: "connectors") {
+        {
+          products {
+            id
+            name
+            price
+          }
+        }
+      },
+    }
+    "#);
+}
+
+const CONNECTOR_MIXED_SCHEMA: &str = include_str!("../fixtures/connector_mixed.graphql");
+
+#[test]
+fn mixed_connector_and_subgraph_produces_correct_plan() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_MIXED_SCHEMA,
+        "{ users { id name } topProducts { id title } }",
+    );
+    assert!(
+        plan_str.contains("connectors"),
+        "Plan should target 'connectors' subgraph: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("graphql"),
+        "Plan should target 'graphql' subgraph: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("users"),
+        "Plan should fetch 'users': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("topProducts"),
+        "Plan should fetch 'topProducts': {plan_str}"
+    );
+}
+
+/// Ad-hoc corpus repro driver: set CORPUS_SCHEMA and CORPUS_OP to file
+/// paths, get the BULB plan and correctness verdict printed.
+#[test_log::test]
+fn corpus_repro_debug() {
+    let Ok(schema_path) = std::env::var("CORPUS_SCHEMA") else {
+        return;
+    };
+    let op_path = std::env::var("CORPUS_OP").unwrap();
+    let schema_str = std::fs::read_to_string(schema_path).unwrap();
+    let op_str = std::fs::read_to_string(op_path).unwrap();
+    let defaults = IncrementalPlannerConfig::default();
+    let config = QueryPlannerConfig {
+        incremental_planner: IncrementalPlannerConfig {
+            enabled: true,
+            fuel: std::env::var("BULB_FUEL")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(defaults.fuel),
+            beam_width: std::env::var("BULB_BEAM")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(defaults.beam_width),
+            ..defaults
+        },
+        ..Default::default()
+    };
+    let supergraph = Supergraph::new_with_router_specs(&schema_str).unwrap();
+    let planner = QueryPlanner::new(&supergraph, config).unwrap();
+    let api_schema = planner.api_schema();
+    let op = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        &op_str,
+        "op.graphql",
+    )
+    .unwrap();
+    let plan = planner
+        .build_query_plan(&op, None, Default::default())
+        .unwrap();
+    println!("PLAN:\n{plan}");
+    let subgraphs_by_name = supergraph
+        .extract_subgraphs()
+        .unwrap()
+        .into_iter()
+        .map(|(name, subgraph)| (name, subgraph.schema))
+        .collect();
+    let result = crate::correctness::check_plan(
+        api_schema,
+        planner.supergraph_schema(),
+        &subgraphs_by_name,
+        &op,
+        &plan,
+    );
+    println!("CHECK: {:?}", result.err().map(|e| e.to_string()));
+}
+
+/// Ad-hoc corpus timing driver: CORPUS_SCHEMA + CORPUS_OPS_DIR, plans every
+/// operation (no correctness check) and prints ones slower than
+/// CORPUS_SLOW_MS (default 1000).
+#[test]
+fn corpus_timing_debug() {
+    let Ok(schema_path) = std::env::var("CORPUS_SCHEMA") else {
+        return;
+    };
+    let Ok(ops_dir) = std::env::var("CORPUS_OPS_DIR") else {
+        return;
+    };
+    let slow_ms: u128 = std::env::var("CORPUS_SLOW_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1000);
+    let schema_str = std::fs::read_to_string(schema_path).unwrap();
+    let config = QueryPlannerConfig {
+        incremental_planner: IncrementalPlannerConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let supergraph = Supergraph::new_with_router_specs(&schema_str).unwrap();
+    let planner = QueryPlanner::new(&supergraph, config).unwrap();
+    let api_schema = planner.api_schema();
+    let mut entries: Vec<_> = std::fs::read_dir(&ops_dir)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "graphql"))
+        .collect();
+    entries.sort();
+    for (i, path) in entries.iter().enumerate() {
+        let op_str = std::fs::read_to_string(path).unwrap();
+        let Ok(op) = apollo_compiler::ExecutableDocument::parse_and_validate(
+            api_schema.schema(),
+            &op_str,
+            "op.graphql",
+        ) else {
+            continue;
+        };
+        let started = std::time::Instant::now();
+        let _ = planner.build_query_plan(&op, None, Default::default());
+        let ms = started.elapsed().as_millis();
+        if ms >= slow_ms {
+            println!("SLOW {ms}ms {}", path.display());
+        }
+        if i % 2000 == 0 {
+            println!("progress {i}/{}", entries.len());
+        }
+    }
+    println!("timing done");
+}
