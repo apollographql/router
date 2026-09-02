@@ -490,3 +490,6 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
         cost
     }
 }
+
+#[cfg(test)]
+mod tests;
