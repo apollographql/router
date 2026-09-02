@@ -1663,3 +1663,28 @@ fn key_hop_requires_under_include_fragment_uses_alias() {
         "Gated condition must be aliased, not shared: {plan_str}"
     );
 }
+
+/// Statically constant @skip(if: true) should eliminate the fragment entirely;
+/// a type condition on the root Query type is vacuous and passes through.
+/// Targets type_conditions.rs try_pass_through_fragment's Boolean(false)
+/// arm and try_vacuous_type_condition's federated-root arm.
+#[test]
+fn constant_skip_and_root_type_condition_fragments() {
+    let skipped = plan_query(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { name ... @skip(if: true) { email } } }",
+    );
+    assert!(
+        !skipped.contains("email"),
+        "Statically skipped fragment must not be fetched: {skipped}"
+    );
+
+    let rooted = plan_query(
+        CROSS_SUBGRAPH_SCHEMA,
+        "query($v: Boolean!) { ... on Query @skip(if: $v) { user { name } } }",
+    );
+    assert!(
+        rooted.contains("name"),
+        "Root type condition should pass through: {rooted}"
+    );
+}

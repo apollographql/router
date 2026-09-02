@@ -78,6 +78,7 @@ pub(crate) struct FieldRoutingSearchSpace {
     /// forever, so the guard returns "no hops" (the fixpoint for
     /// circular keys).
     pub(super) key_hops_in_flight: RefCell<HashSet<(NodeIndex, RoutingCacheKey)>>,
+    pub(super) disabled_subgraphs: apollo_compiler::collections::IndexSet<Arc<str>>,
 }
 
 impl FieldRoutingSearchSpace {
