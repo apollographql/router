@@ -4,9 +4,6 @@ experimental_hoist_orphan_errors:
   all:
     enabled: true
 
-experimental_chaos:
-  force_schema_reload: 10s
-
 experimental_mock_subgraphs:
   test_subgraph:
     query:

@@ -51,8 +51,6 @@ use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::configuration::mode::Mode;
 use crate::graphql;
 use crate::plugin::plugins;
-use crate::plugins::chaos;
-use crate::plugins::chaos::Config;
 use crate::plugins::healthcheck::Config as HealthCheck;
 #[cfg(test)]
 use crate::plugins::healthcheck::test_listen;
@@ -199,11 +197,6 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) limits: limits::Config,
 
-    /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
-    /// You probably don’t want this in production!
-    #[serde(default)]
-    pub(crate) experimental_chaos: Config,
-
     /// Plugin configuration
     #[serde(default)]
     pub(crate) plugins: UserPlugins,
@@ -268,7 +261,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apq: Apq,
             persisted_queries: PersistedQueries,
             limits: limits::Config,
-            experimental_chaos: chaos::Config,
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
             experimental_hoist_orphan_errors: SubgraphConfiguration<HoistOrphanErrors>,
@@ -302,7 +294,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apq: ad_hoc.apq,
             persisted_queries: ad_hoc.persisted_queries,
             limits: ad_hoc.limits,
-            experimental_chaos: ad_hoc.experimental_chaos,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
             experimental_hoist_orphan_errors: ad_hoc.experimental_hoist_orphan_errors,
             plugins: ad_hoc.plugins,
@@ -342,7 +333,6 @@ impl Configuration {
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
-        chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
         experimental_hoist_orphan_errors: Option<SubgraphConfiguration<HoistOrphanErrors>>,
@@ -364,7 +354,6 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
-            experimental_chaos: chaos.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -483,7 +472,6 @@ impl Configuration {
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
-        chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
@@ -499,7 +487,6 @@ impl Configuration {
             homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
-            experimental_chaos: chaos.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
