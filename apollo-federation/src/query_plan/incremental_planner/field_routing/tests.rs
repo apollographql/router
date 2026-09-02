@@ -522,6 +522,621 @@ fn cancellation_at_any_check_point_aborts_planning() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// @requires tests
+// ---------------------------------------------------------------------------
+
+/// Like `plan_query` but returns the planner's Result, for tests that
+/// assert planning fails (e.g. circular @requires).
+fn try_plan_query(schema: &str, query: &str) -> Result<String, crate::error::FederationError> {
+    let supergraph = Supergraph::new(schema).expect("supergraph parse");
+    let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        query,
+        "test.graphql",
+    )
+    .expect("query parse");
+    planner
+        .build_query_plan(&document, None, Default::default())
+        .map(|plan| format!("{plan}"))
+}
+
+const CIRCULAR_REQUIRES_SCHEMA: &str = include_str!("../fixtures/circular_requires.graphql");
+
+/// Circular @requires (B: f requires g, C: g requires f) must terminate
+/// with a planning error -- not recurse until stack overflow, and not
+/// silently return an incomplete plan.
+#[test_log::test]
+fn circular_requires_errors_instead_of_recursing() {
+    let result = try_plan_query(CIRCULAR_REQUIRES_SCHEMA, "{ entity { f } }");
+    assert!(
+        result.is_err(),
+        "Circular @requires should fail planning, got:\n{}",
+        result.as_deref().unwrap_or("<err>"),
+    );
+}
+
+const REQUIRES_SCHEMA: &str = include_str!("../fixtures/requires.graphql");
+
+#[test]
+fn requires_fields_added_to_fetch() {
+    let plan_str = plan_query(REQUIRES_SCHEMA, "{ product { shippingCost } }");
+    assert!(
+        plan_str.contains("weight"),
+        "Plan should fetch 'weight' for @requires: {plan_str}"
+    );
+}
+
+const REQUIRES_LOCAL_UNSATISFIABLE_SCHEMA: &str =
+    include_str!("../fixtures/requires_local_unsatisfiable.graphql");
+
+/// @requires on a field whose subgraph declares the required fields as
+/// @external: the query enters through B (which owns `shippingCost`
+/// requiring `weight`), but `weight` is only resolvable in A. The field
+/// must move into a second B fetch whose entity representation carries
+/// `weight` fetched from A -- B's root fetch must NOT select the
+/// @external `weight` itself.
+#[test_log::test]
+fn requires_unresolvable_locally_hops_through_owning_subgraph() {
+    let plan_str = plan_query(
+        REQUIRES_LOCAL_UNSATISFIABLE_SCHEMA,
+        "{ product { shippingCost } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "b") {
+              {
+                product {
+                  __typename
+                  id
+                }
+              }
+            },
+            Flatten(path: "product") {
+              Fetch(service: "a") {
+                {
+                  ... on Product {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Product {
+                    __require_0_weight: weight
+                  }
+                }
+              },
+            },
+            Flatten(path: "product") {
+              Fetch(service: "b") {
+                {
+                  ... on Product {
+                    __typename
+                    id
+                    __require_0_weight: weight
+                  }
+                } =>
+                {
+                  ... on Product {
+                    shippingCost
+                  }
+                }
+              },
+            },
+          },
+        }
+        "###);
+}
+
+const REQUIRES_THROUGH_LOCAL_FIELD_SCHEMA: &str =
+    include_str!("../fixtures/requires_through_local_field.graphql");
+
+/// @requires whose field set walks through a *locally resolvable* field
+/// (`a`) into nested selections owned by other subgraphs (`s.status` in
+/// s1, `j.m` in s2). The planner must resolve the local prefix in place
+/// and hop from A's key edges for the nested parts, at the merge path of
+/// C's `a` -- not from C's (nonexistent) key edges, and not at some other
+/// A's path.
+#[test_log::test]
+fn requires_through_local_field_resolves_nested_parts() {
+    let plan_str = plan_query(REQUIRES_THROUGH_LOCAL_FIELD_SCHEMA, "{ a { c { elig } } }");
+    // All three requires leaves must be fetched somewhere.
+    for needle in ["status", "j {", "elig"] {
+        assert!(
+            plan_str.contains(needle),
+            "Plan should fetch {needle:?}: {plan_str}"
+        );
+    }
+    // The nested hops must merge at C's `a` (aliased as a @requires
+    // condition), i.e. path a.c.__require_0_a -- not at the top-level `a`.
+    assert!(
+        plan_str.contains("a.c.__require_0_a"),
+        "Nested requires parts should merge under a.c.__require_0_a: {plan_str}"
+    );
+}
+
+const OVERRIDE_SCHEMA: &str = include_str!("../fixtures/override.graphql");
+
+#[test]
+fn static_override_routes_field_to_overriding_subgraph() {
+    let plan_str = plan_query(OVERRIDE_SCHEMA, "{ user { name nickname } }");
+    assert!(
+        plan_str.contains("name"),
+        "Plan should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("nickname"),
+        "Plan should fetch 'nickname': {plan_str}"
+    );
+    assert!(
+        !plan_str.contains("Flatten"),
+        "Static override should not require entity fetch: {plan_str}"
+    );
+}
+
+const ROUTING_CHOICE_ITERATIVE_SCHEMA: &str =
+    include_str!("../fixtures/routing_choice_iterative.graphql");
+
+/// Demonstrates BULB backtracking actually correcting a greedy mistake,
+/// not just picking correctly the first time. `profile` is a key hop
+/// from A to either B or C, and both hops score identically at the
+/// one-step scoring pass (same fetch shape), so the greedy tiebreak
+/// (declaration order) commits to B. Only once `profile` lands on B do
+/// we discover `detail` isn't there and needs a second hop to C -- a cost
+/// the one-step score for the `profile` decision couldn't see.
+///
+/// With fuel=1 (greedy pass only, discrepancies never explored), BULB
+/// returns that suboptimal 3-fetch plan (A -> B -> C). With enough fuel
+/// to run a discrepancy iteration, it explores the C branch to
+/// completion, finds the cheaper 2-fetch plan (A -> C), and replaces the
+/// greedy result -- the same "record_completion only if improved"
+/// mechanism the toy `discrepancy_finds_better_alternative_slice` test
+/// exercises, but on a real routing decision.
+#[test_log::test]
+fn greedy_tiebreak_mistake_is_corrected_by_backtracking() {
+    let document_str = "{ user { profile { detail } } }";
+
+    let greedy_config = QueryPlannerConfig {
+        incremental_planner: IncrementalPlannerConfig {
+            fuel: 0,
+            ..default_config().incremental_planner
+        },
+        ..default_config()
+    };
+    let greedy_plan_str = plan_query_with_options(
+        ROUTING_CHOICE_ITERATIVE_SCHEMA,
+        document_str,
+        greedy_config,
+        Default::default(),
+    );
+    insta::assert_snapshot!(greedy_plan_str, @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "a") {
+              {
+                user {
+                  __typename
+                  id
+                }
+              }
+            },
+            Flatten(path: "user") {
+              Fetch(service: "b") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    profile {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "user.profile") {
+              Fetch(service: "c") {
+                {
+                  ... on Profile {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Profile {
+                    detail
+                  }
+                }
+              },
+            },
+          },
+        }
+        "###);
+
+    let backtracking_plan_str = plan_query(ROUTING_CHOICE_ITERATIVE_SCHEMA, document_str);
+    insta::assert_snapshot!(backtracking_plan_str, @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "a") {
+              {
+                user {
+                  __typename
+                  id
+                }
+              }
+            },
+            Flatten(path: "user") {
+              Fetch(service: "c") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    profile {
+                      detail
+                    }
+                  }
+                }
+              },
+            },
+          },
+        }
+        "###);
+}
+
+const PROGRESSIVE_OVERRIDE_SCHEMA: &str = include_str!("../fixtures/progressive_override.graphql");
+
+#[test]
+fn progressive_override_routes_to_overrider_when_label_active() {
+    let plan_str = plan_query_with_options(
+        PROGRESSIVE_OVERRIDE_SCHEMA,
+        "{ user { name nickname } }",
+        default_config(),
+        QueryPlanOptions {
+            override_conditions: vec!["test".to_string()],
+            ..Default::default()
+        },
+    );
+    assert!(
+        plan_str.contains("nickname"),
+        "Plan should fetch 'nickname': {plan_str}"
+    );
+    assert!(
+        !plan_str.contains("Flatten"),
+        "Active override should not require entity fetch: {plan_str}"
+    );
+}
+
+#[test]
+fn progressive_override_routes_to_original_when_label_inactive() {
+    let plan_str = plan_query(PROGRESSIVE_OVERRIDE_SCHEMA, "{ user { name nickname } }");
+    assert!(
+        plan_str.contains("nickname"),
+        "Plan should fetch 'nickname': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("Flatten"),
+        "Inactive override should require entity fetch to B: {plan_str}"
+    );
+}
+
+// Regression: when a field's @requires has multiple external parts resolved
+// through different subgraphs, and one external part's intermediate has its
+// own @requires, the nested @requires resolution can append selections to
+// the wrong entity group. The `last_node` variable drifts as each external
+// part resolves, but the query_graph_node and source_schema stay pinned to
+// the original intermediate -- so the fast-path check validates against the
+// wrong subgraph and appends to whatever entity group `last_node` reached.
+#[test_log::test]
+fn requires_with_multiple_external_parts_and_nested_requires() {
+    let schema = include_str!("../fixtures/requires_external_misroute.graphql");
+    let query = "{ itemById(id: \"1\") { preview } }";
+
+    // The bug is non-deterministic (HashMap iteration order determines
+    // which intermediate subgraph is tried first), so run multiple times.
+    for _ in 0..50 {
+        let plan_str = plan_query(schema, query);
+        assert!(
+            plan_str.contains("preview"),
+            "Plan should fetch 'preview': {plan_str}"
+        );
+    }
+}
+
+/// Without a wall-clock timeout (the default), planning is bounded by
+/// fuel alone and must be fully deterministic: the same query against the
+/// same schema yields a byte-identical plan on every run, including
+/// across fresh planner instances (fresh caches, fresh allocations).
+#[test]
+fn planning_without_timeout_is_deterministic() {
+    let schema = include_str!("../fixtures/requires_external_misroute.graphql");
+    let query = "{ itemById(id: \"1\") { preview } }";
+
+    let reference = plan_query(schema, query);
+    for i in 1..20 {
+        let plan_str = plan_query(schema, query);
+        assert_eq!(
+            plan_str, reference,
+            "Plan differed from reference on run {i}",
+        );
+    }
+}
+
+const REQUIRES_KEY_HOP_SCHEMA_TYPES: &str = r#"
+type Product
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: C, key: "id")
+{
+  id: ID!
+  weight: Float @join__field(graph: B) @join__field(graph: C, external: true)
+  shippingEstimate: Float @join__field(graph: C, requires: "weight")
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__type(graph: C)
+{
+  product: Product @join__field(graph: A)
+}
+"#;
+
+fn requires_key_hop_schema() -> String {
+    wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")
+  C @join__graph(name: "c", url: "http://c")"#,
+        REQUIRES_KEY_HOP_SCHEMA_TYPES,
+    )
+}
+
+/// @requires whose condition field the user operation ALSO selects at the
+/// same position, with the user selection still pending when the requiring
+/// field commits: the condition reuses the user selection's response key
+/// (no `__require` alias) and its fetch chain.
+/// Targets requires.rs shareable_condition_fields' on-stack arm.
+#[test]
+fn requires_condition_deduped_with_pending_user_selection() {
+    let plan_str = plan_query(
+        &requires_key_hop_schema(),
+        "{ product { shippingEstimate weight } }",
+    );
+    assert!(
+        !plan_str.contains("__require"),
+        "Condition should dedupe with the user's weight selection: {plan_str}"
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            product {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "product") {
+          Fetch(service: "b") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                weight
+              }
+            }
+          },
+        },
+        Flatten(path: "product") {
+          Fetch(service: "c") {
+            {
+              ... on Product {
+                __typename
+                id
+                weight
+              }
+            } =>
+            {
+              ... on Product {
+                shippingEstimate
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// Same dedupe when the user selection was already committed (weight is
+/// popped and routed into its entity group before shippingEstimate commits).
+/// Targets requires.rs shareable_condition_fields' committed/sibling-entity
+/// scan.
+#[test]
+fn requires_condition_deduped_with_committed_user_selection() {
+    let plan_str = plan_query(
+        &requires_key_hop_schema(),
+        "{ product { weight shippingEstimate } }",
+    );
+    assert!(
+        !plan_str.contains("__require"),
+        "Condition should dedupe with the user's weight selection: {plan_str}"
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            product {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "product") {
+          Fetch(service: "b") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                weight
+              }
+            }
+          },
+        },
+        Flatten(path: "product") {
+          Fetch(service: "c") {
+            {
+              ... on Product {
+                __typename
+                id
+                weight
+              }
+            } =>
+            {
+              ... on Product {
+                shippingEstimate
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// @requires on a field of a keyless entity-less type: the conditions are
+/// @external locally (no in-place strategy) and the type has no locally
+/// satisfiable key for a self key hop, so enumeration yields no @requires
+/// strategy. The selection is dropped and planning errors instead of
+/// returning a partial plan.
+/// Targets routing.rs push_requires_strategy_options producing zero options.
+#[test]
+fn requires_without_reentry_key_fails_planning() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type E
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B)
+{
+  id: ID! @join__field(graph: A)
+  f: String @join__field(graph: B, requires: "g")
+  g: String @join__field(graph: A) @join__field(graph: B, external: true)
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  entity: E @join__field(graph: B)
+}
+"#,
+    );
+    let result = try_plan_query(&schema, "{ entity { f } }");
+    assert!(
+        result.is_err(),
+        "@requires without a re-entry key should fail planning, got:\n{}",
+        result.as_deref().unwrap_or("<err>"),
+    );
+}
+
+#[test]
+fn requires_with_fragment_wrapped_field_set() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")
+  C @join__graph(name: "c", url: "http://c")"#,
+        r#"
+type Product
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: C, key: "id")
+{
+  id: ID!
+  weight: Float @join__field(graph: B) @join__field(graph: C, external: true)
+  shippingEstimate: Float @join__field(graph: C, requires: "... on Product { weight }")
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__type(graph: C)
+{
+  product: Product @join__field(graph: A)
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ product { shippingEstimate } }");
+    assert!(
+        plan_str.contains("weight"),
+        "Plan should fetch the fragment-wrapped required field: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("shippingEstimate"),
+        "Plan should fetch shippingEstimate: {plan_str}"
+    );
+}
+
+/// Two sibling fields sharing the same locally-resolvable @requires: the
+/// second commit checks its conditions against the edge's existing condition
+/// input (same field, same arguments -- no conflict) and rides the same
+/// entity representation.
+/// Targets requires.rs has_conflicting_requires_inputs' comparison loops.
+#[test]
+fn sibling_fields_with_identical_requires_share_representation() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  C @join__graph(name: "c", url: "http://c")"#,
+        r#"
+type Product
+  @join__type(graph: A, key: "id")
+  @join__type(graph: C, key: "id")
+{
+  id: ID!
+  weight: Float @join__field(graph: A) @join__field(graph: C, external: true)
+  sa: Float @join__field(graph: C, requires: "weight")
+  sb: Float @join__field(graph: C, requires: "weight")
+}
+
+type Query
+  @join__type(graph: A)
+{
+  product: Product @join__field(graph: A)
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ product { sa sb } }");
+    assert!(
+        plan_str.contains("sa") && plan_str.contains("sb"),
+        "Plan should fetch both requiring fields: {plan_str}"
+    );
+    assert_eq!(
+        plan_str.matches("weight").count(),
+        2,
+        "weight selected once in A and once in the representation: {plan_str}"
+    );
+}
+
 #[test]
 fn all_subgraphs_disabled_root_typename_fails_planning() {
     let supergraph = Supergraph::new(SINGLE_SUBGRAPH_SCHEMA).expect("supergraph parse");
