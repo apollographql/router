@@ -103,6 +103,7 @@ pub(crate) fn build_bulb_plan(
             parameters.override_conditions.clone(),
         ),
         supergraph_schema: supergraph_schema.clone(),
+        connector_index: parameters.connector_index.clone(),
         caches: field_routing::PlannerCaches::new(),
         disabled_subgraphs: parameters.disabled_subgraphs.clone(),
     };

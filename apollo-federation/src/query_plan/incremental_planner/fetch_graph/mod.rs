@@ -84,6 +84,9 @@ pub(crate) struct FetchNode {
     pub(crate) context_rewrites: Vec<FetchDataKeyRenamer>,
     /// @fromContext variable definitions added to the subgraph operation.
     pub(crate) context_variables: Vec<(Name, Node<apollo_compiler::ast::Type>)>,
+    /// When set, this fetch is backed by a connector rather than a GraphQL
+    /// subgraph endpoint. Plan builder maps this to `FetchProtocol::Connector`.
+    pub(crate) connector: Option<Arc<crate::connectors::Connector>>,
 }
 
 impl FetchNode {
@@ -95,6 +98,7 @@ impl FetchNode {
             defer_ref: None,
             context_rewrites: Vec::new(),
             context_variables: Vec::new(),
+            connector: None,
         }
     }
 
@@ -366,6 +370,7 @@ impl FetchGraph {
                 defer_ref,
                 context_rewrites: Vec::new(),
                 context_variables: Vec::new(),
+                connector: None,
             },
             Some(root_key),
         )
@@ -386,6 +391,7 @@ impl FetchGraph {
                 defer_ref,
                 context_rewrites: Vec::new(),
                 context_variables: Vec::new(),
+                connector: None,
             },
             None,
         )
@@ -414,6 +420,51 @@ impl FetchGraph {
                     merge_at,
                 },
             ),
+            None,
+        )
+    }
+
+    /// Create a root fetch group backed by a connector.
+    pub(crate) fn add_connector_root_group(
+        &mut self,
+        subgraph: &Arc<str>,
+        root_type: CompositeTypeDefinitionPosition,
+        connector: Arc<crate::connectors::Connector>,
+        defer_ref: Option<String>,
+    ) -> NodeIndex {
+        self.insert_node(
+            FetchNode {
+                subgraph: subgraph.clone(),
+                kind: FetchGroupKind::Root { root_type },
+                selection_builder: SelectionBuilder::default(),
+                defer_ref,
+                context_rewrites: Vec::new(),
+                context_variables: Vec::new(),
+                connector: Some(connector),
+            },
+            None,
+        )
+    }
+
+    /// Create an entity fetch group backed by a connector. Never reused —
+    /// each connector entity resolution is its own node.
+    pub(crate) fn add_connector_entity_group(
+        &mut self,
+        subgraph: &Arc<str>,
+        merge_at: Vec<FetchDataPathElement>,
+        connector: Arc<crate::connectors::Connector>,
+        defer_ref: Option<String>,
+    ) -> NodeIndex {
+        self.insert_node(
+            FetchNode {
+                subgraph: subgraph.clone(),
+                kind: FetchGroupKind::Entity { merge_at },
+                selection_builder: SelectionBuilder::default(),
+                defer_ref,
+                context_rewrites: Vec::new(),
+                context_variables: Vec::new(),
+                connector: Some(connector),
+            },
             None,
         )
     }
