@@ -930,3 +930,150 @@ fn inc_cooperative_cancellation_stops_planning() {
         result.map(|p| p.to_string()).unwrap_or_default(),
     );
 }
+
+/// When a parent field is routable to multiple subgraphs, the greedy pass
+/// (beam=1) picks the best-ranked option — which may lack the needed child
+/// field. Because the child type has no @key, entity resolution cannot
+/// bridge the gap, so the greedy pass drops the selection. Subsequent BULB
+/// iterations (beam > 1) explore the alternative parent routing that
+/// reaches the correct subgraph.
+#[test]
+fn inc_fuel_needed_for_keyless_child_behind_wrong_ranked_hop() {
+    let planner = planner!(
+        config = incremental_config(),
+        SubgraphA: r#"
+        type Query {
+            parent: Parent
+        }
+
+        type Parent @key(fields: "id") {
+            id: ID!
+            child: Child @shareable
+        }
+
+        type Child {
+            value: Int
+        }
+        "#,
+        SubgraphB: r#"
+        type Parent @key(fields: "id") {
+            id: ID!
+            child: Child @shareable
+        }
+
+        type Child {
+            leaf: String
+        }
+        "#,
+    );
+
+    assert_plan!(
+        &planner,
+        r#"
+        {
+            parent {
+                child {
+                    leaf
+                }
+            }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "SubgraphA") {
+          {
+            parent {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "parent") {
+          Fetch(service: "SubgraphB") {
+            {
+              ... on Parent {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Parent {
+                child {
+                  leaf
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// Same topology as above but with fuel=0. Fuel only starts burning once a
+/// complete plan exists, so even fuel=0 must keep searching past the
+/// incomplete greedy result and find the key-hop alternative.
+#[test]
+fn inc_fuel_zero_still_finds_complete_plan_for_keyless_child() {
+    let planner = planner!(
+        config = {
+            QueryPlannerConfig {
+                incremental_planner: IncrementalPlannerConfig {
+                    enabled: true,
+                    fuel: 0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        },
+        SubgraphA: r#"
+        type Query {
+            parent: Parent
+        }
+
+        type Parent @key(fields: "id") {
+            id: ID!
+            child: Child @shareable
+        }
+
+        type Child {
+            value: Int
+        }
+        "#,
+        SubgraphB: r#"
+        type Parent @key(fields: "id") {
+            id: ID!
+            child: Child @shareable
+        }
+
+        type Child {
+            leaf: String
+        }
+        "#,
+    );
+
+    let api_schema = planner.api_schema();
+    let doc = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        r#"{ parent { child { leaf } } }"#,
+        "op.graphql",
+    )
+    .expect("valid operation");
+
+    let plan = planner
+        .build_query_plan(&doc, None, Default::default())
+        .expect(
+            "fuel=0 must still find a complete plan; fuel bounds optimization, not completeness",
+        );
+    let plan_str = plan.to_string();
+    assert!(
+        plan_str.contains("leaf"),
+        "plan must fetch the stranded child field: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("SubgraphB"),
+        "plan must route through the key hop to reach `leaf`: {plan_str}"
+    );
+}
