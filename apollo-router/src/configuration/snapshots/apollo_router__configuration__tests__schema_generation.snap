@@ -1948,29 +1948,6 @@ expression: "&schema"
       "description": "Subgraph URL mappings"
     },
     "Config": {
-      "additionalProperties": false,
-      "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don't want this in production!\n\n## How Chaos Reloading Works\n\nThe chaos system automatically captures and replays the last known schema and configuration\nevents to force hot reloads even when the underlying content hasn't actually changed. This\nis particularly useful for memory leak detection during hot reload scenarios.\nIf configured, it will activate upon the first config event that is encountered.\n\n### Schema Reloading (`force_schema_reload`)\nWhen enabled, the router will periodically replay the last schema event with a timestamp\ncomment injected into the SDL (e.g., `# Chaos reload timestamp: 1234567890`). This ensures\nthe schema is seen as \"different\" and triggers a full hot reload, even though the functional\nschema content is identical.\n\n### Configuration Reloading (`force_config_reload`)\nWhen enabled, the router will periodically replay the last configuration event. The\nconfiguration is cloned and re-emitted, which triggers the router's configuration change\ndetection and reload logic.\n\n### Example Usage\n```yaml\nexperimental_chaos:\n  force_schema_reload: \"30s\"    # Trigger schema reload every 30 seconds\n  force_config_reload: \"2m\"     # Trigger config reload every 2 minutes\n```",
-      "properties": {
-        "force_config_reload": {
-          "default": null,
-          "description": "Force a hot reload of the configuration at regular intervals by replaying the last\nconfiguration event. This triggers the router's configuration change detection even\nwhen the configuration content hasn't actually changed.\n\nThe system automatically captures the last configuration event and replays it to\nforce configuration reload processing.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "force_schema_reload": {
-          "default": null,
-          "description": "Force a hot reload of the schema at regular intervals by injecting a timestamp comment\ninto the SDL. This ensures schema reloads occur even when the functional schema content\nhasn't changed, which is useful for testing memory leaks during schema hot reloads.\n\nThe system automatically captures the last schema event and replays it with a timestamp\ncomment added to make it appear \"different\" to the reload detection logic.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "type": "object"
-    },
-    "Config2": {
       "description": "This is a broken plugin for testing purposes only.",
       "properties": {
         "enabled": {
@@ -1983,7 +1960,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config3": {
+    "Config2": {
       "description": "Restricted plugin (for testing purposes only)",
       "properties": {
         "enabled": {
@@ -1996,11 +1973,11 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config4": {
+    "Config3": {
       "description": "The enhanced client-awareness plugin has no configuration.",
       "type": "object"
     },
-    "Config5": {
+    "Config4": {
       "additionalProperties": false,
       "description": "Configuration for the diagnostics plugin\n\n**Platform Requirements**: This plugin is supported on all platforms.\nHeap dump functionality is only available on Linux platforms due to\njemalloc requirements. Other diagnostic features work across platforms.",
       "properties": {
@@ -2026,11 +2003,11 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config6": {
+    "Config5": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
-    "Config7": {
+    "Config6": {
       "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
@@ -2096,7 +2073,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config8": {
+    "Config7": {
       "additionalProperties": false,
       "description": "Redis cache configuration",
       "properties": {
@@ -7771,7 +7748,7 @@ expression: "&schema"
           "$ref": "#/definitions/MyTestPluginConfig"
         },
         "experimental.broken": {
-          "$ref": "#/definitions/Config2"
+          "$ref": "#/definitions/Config"
         },
         "experimental.expose_query_plan": {
           "$ref": "#/definitions/ExposeQueryPlanConfig"
@@ -7780,7 +7757,7 @@ expression: "&schema"
           "$ref": "#/definitions/RecordConfig"
         },
         "experimental.restricted": {
-          "$ref": "#/definitions/Config3"
+          "$ref": "#/definitions/Config2"
         },
         "test.always_fails_to_start": {
           "$ref": "#/definitions/Conf"
@@ -10080,7 +10057,7 @@ expression: "&schema"
         "redis": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Config8"
+              "$ref": "#/definitions/Config7"
             },
             {
               "type": "null"
@@ -12981,7 +12958,7 @@ expression: "&schema"
       "type": "object"
     },
     "^response_cache$": {
-      "$ref": "#/definitions/Config7"
+      "$ref": "#/definitions/Config6"
     }
   },
   "properties": {
@@ -13081,22 +13058,10 @@ expression: "&schema"
       "$ref": "#/definitions/DemandControlConfig"
     },
     "enhanced_client_awareness": {
-      "$ref": "#/definitions/Config4"
-    },
-    "experimental_chaos": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/Config"
-        }
-      ],
-      "default": {
-        "force_config_reload": null,
-        "force_schema_reload": null
-      },
-      "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don’t want this in production!"
+      "$ref": "#/definitions/Config3"
     },
     "experimental_diagnostics": {
-      "$ref": "#/definitions/Config5"
+      "$ref": "#/definitions/Config4"
     },
     "experimental_hoist_orphan_errors": {
       "allOf": [
@@ -13185,7 +13150,7 @@ expression: "&schema"
       "$ref": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config6"
+      "$ref": "#/definitions/Config5"
     },
     "reload": {
       "allOf": [
