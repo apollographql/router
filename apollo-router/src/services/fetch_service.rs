@@ -91,24 +91,40 @@ impl FetchService {
     ) -> <FetchService as tower::Service<Request>>::Future {
         let FetchRequest {
             ref context,
-            fetch_node: FetchNode {
-                ref service_name, ..
-            },
+            fetch_node:
+                FetchNode {
+                    ref service_name,
+                    ref protocol,
+                    ..
+                },
             ..
         } = request;
         let service_name = service_name.clone();
         let fetch_time_offset = context.created_at.elapsed().as_nanos() as i64;
         let hoist_orphan_errors = self.hoist_orphan_errors.get(&service_name).enabled;
 
-        if let Some(connector) = self
-            .connector_services
-            .connectors_by_service_name
-            .get(service_name.as_ref())
-        {
+        // Check the protocol field first (native connector support from the
+        // incremental planner: fetches carry the connector's directive
+        // coordinate). Fall through to the synthetic service-name lookup for
+        // the expansion-based planner path.
+        let connector = match protocol {
+            apollo_federation::query_plan::FetchProtocol::Connector { coordinate } => self
+                .connector_services
+                .connectors_by_service_name
+                .values()
+                .find(|c| c.id.coordinate() == *coordinate),
+            apollo_federation::query_plan::FetchProtocol::GraphQL => self
+                .connector_services
+                .connectors_by_service_name
+                .get(service_name.as_ref()),
+        };
+
+        if let Some(connector) = connector {
             Self::fetch_with_connector_service(
                 self.schema.clone(),
                 self.connector_services.clone(),
                 connector.id.subgraph_name.clone(),
+                connector.clone(),
                 request,
                 hoist_orphan_errors,
             )
@@ -139,6 +155,7 @@ impl FetchService {
         schema: Arc<Schema>,
         connector_services: Arc<ConnectorServices>,
         subgraph_name: String,
+        connector: apollo_federation::connectors::Connector,
         request: FetchRequest,
         hoist_orphan_errors: bool,
     ) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
@@ -155,20 +172,20 @@ impl FetchService {
         let operation = fetch_node.operation.as_parsed().cloned();
 
         Box::pin(async move {
-            let connector = schema
-                .connectors
-                .as_ref()
-                .and_then(|c| c.by_service_name.get(&fetch_node.service_name))
-                .ok_or("no connector found for service")?;
-
             let keys = connector.resolvable_key(schema.supergraph_schema())?;
+            // Downstream connector services are registered under the
+            // connector's synthetic name; with native connector planning the
+            // fetch's service_name is the REAL subgraph name, so route by
+            // the connector identity rather than the fetch node.
+            let connector_service_name: Arc<str> =
+                Arc::from(connector.id.synthetic_name().as_str());
 
             let (_parts, response) = match connector_services
-                .get(&fetch_node.service_name)
+                .get(&connector_service_name)
                 .expect("we already checked that the connector exists for this service name; qed")
                 .oneshot(
                     ConnectRequest::builder()
-                        .service_name(fetch_node.service_name.clone())
+                        .service_name(connector_service_name)
                         .context(context)
                         .operation(operation?.clone())
                         .supergraph_request(supergraph_request)
