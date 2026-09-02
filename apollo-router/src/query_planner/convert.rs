@@ -60,7 +60,7 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
     fn from(value: &'_ Box<next::FetchNode>) -> Self {
         let next::FetchNode {
             subgraph_name,
-            protocol: _,
+            protocol,
             id,
             variable_usages,
             requires,
@@ -73,6 +73,7 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
         } = &**value;
         Self::Fetch(super::fetch::FetchNode {
             service_name: subgraph_name.clone(),
+            protocol: protocol.clone(),
             requires: requires.clone(),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
             operation: operation_document.clone(),
