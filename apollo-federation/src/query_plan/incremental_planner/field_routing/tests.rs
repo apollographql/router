@@ -2273,3 +2273,97 @@ type Query
     }
     "###);
 }
+
+struct EnableAllSubscriber;
+
+impl tracing::Subscriber for EnableAllSubscriber {
+    fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+        metadata.fields().field("routing").is_none()
+    }
+    fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+    fn event(&self, _: &tracing::Event<'_>) {}
+    fn enter(&self, _: &tracing::span::Id) {}
+    fn exit(&self, _: &tracing::span::Id) {}
+}
+
+/// Re-run a representative set of plans with every tracing callsite enabled:
+/// the structured-logging annotations (trace!/debug! bodies and the Display
+/// helpers they call) are part of the planner's code and must not panic or
+/// change planning results.
+#[test]
+fn tracing_instrumentation_is_exercised_and_harmless() {
+    let quiet = plan_query(
+        &requires_key_hop_schema(),
+        "{ product { shippingEstimate } }",
+    );
+
+    let _guard = tracing::subscriber::set_default(EnableAllSubscriber);
+
+    let traced = plan_query(
+        &requires_key_hop_schema(),
+        "{ product { shippingEstimate } }",
+    );
+    assert_eq!(quiet, traced, "tracing must not change planning results");
+
+    let _ = plan_query(
+        &interface_object_schema(),
+        "{ stuff { ... on X { desc } } }",
+    );
+    let _ = plan_query(
+        &interface_object_schema(),
+        "{ items { ... on X { desc } } }",
+    );
+    let _ = plan_query(SINGLE_SUBGRAPH_SCHEMA, "{ user { name email } }");
+    let _ = plan_query_with_defer(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer { email } } }",
+    );
+    let _ = plan_query(
+        &entity_inconsistent_union_schema(),
+        "{ top { e { search { ... on X { x } ... on Y { y } } } } }",
+    );
+    let _ = plan_query(&nested_entity_hop_schema(), "{ p { details { extra } } }");
+    let greedy_config = QueryPlannerConfig {
+        incremental_planner: IncrementalPlannerConfig {
+            fuel: 0,
+            ..default_config().incremental_planner
+        },
+        ..default_config()
+    };
+    let dead_end_schema = include_str!("../fixtures/shareable_dead_end.graphql");
+    let supergraph = Supergraph::new(dead_end_schema).expect("supergraph parse");
+    let planner = QueryPlanner::new(&supergraph, greedy_config).expect("planner creation");
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "{ user { profile { detail } } }",
+        "test.graphql",
+    )
+    .expect("query parse");
+    let _ = planner.build_query_plan(&document, None, Default::default());
+    let failing_schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type E
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B)
+{
+  id: ID! @join__field(graph: A)
+  f: String @join__field(graph: B, requires: "g")
+  g: String @join__field(graph: A) @join__field(graph: B, external: true)
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  entity: E @join__field(graph: B)
+}
+"#,
+    );
+    let _ = try_plan_query(&failing_schema, "{ entity { f } }");
+}
