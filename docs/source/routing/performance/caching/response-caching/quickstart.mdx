@@ -74,7 +74,7 @@ response_cache:
   connector:
     all:
       enabled: true
-      ttl: 10m # Required: fallback TTL when responses don't include Cache-Control headers
+      ttl: 10m # Fallback TTL when responses don't include Cache-Control headers (optional; defaults to 24h)
       redis:
         urls: ["redis://localhost:6379"]
       invalidation:
@@ -115,7 +115,7 @@ telemetry:
             # You can add more custom attributes using subgraph selectors
 ```
 
-The `apollo.router.response.cache` metric tracks cache hits and misses for both subgraph and connector requests.
+The `apollo.router.response.cache` metric tracks cache hits and misses for both subgraph and connector requests. Custom attributes and selectors, like `supergraph.operation.name` above, apply only to subgraph requests — connector requests always report a fixed set of attributes: `graphql.type.name`, `cache.hit`, and `subgraph.name` (the connector source name).
 
 You can use this metric to create a dashboard similar to the following example:
 

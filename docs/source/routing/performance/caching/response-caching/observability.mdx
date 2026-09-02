@@ -30,6 +30,12 @@ telemetry:
 
 The `apollo.router.response.cache` instrument tracks cache hits and misses for both subgraph and connector requests. For connector sources, the source name appears in the `subgraph_name.source_name` format.
 
+<Note>
+
+Custom attributes and selectors, like `supergraph.operation.name` in the example above, apply only to subgraph requests. Connector requests always report a fixed set of attributes: `graphql.type.name`, `cache.hit`, and `subgraph.name` (the connector source name).
+
+</Note>
+
 You can use custom instruments to create metrics for the subgraph service. The following example creates a custom instrument to generate a histogram that measures the subgraph request duration when there's at least one cache hit for the "inventory" subgraph:
 
 ```yaml title="router.yaml"
@@ -150,7 +156,7 @@ Available attributes on `response_cache.store`:
 
 ## Logs
 
-The router supports a [`response_cache` selector](/router/configuration/telemetry/instrumentation/selectors#subgraph) in telemetry for the subgraph and connector services. The selector returns either the number of cache hits or misses by an entity for a request or the cache status (`hit`|`partial_hit`|`miss`) for a request.
+The router supports a [`response_cache` selector](/router/configuration/telemetry/instrumentation/selectors#subgraph) in telemetry for the subgraph service. The selector returns either the number of cache hits or misses by an entity for a request or the cache status (`hit`|`partial_hit`|`miss`) for a request.
 
 For example, display a log containing all subgraph response data that's not cached:
 

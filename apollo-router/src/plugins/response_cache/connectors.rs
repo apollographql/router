@@ -37,14 +37,18 @@ use super::plugin::CACHE_TAG_DIRECTIVE_NAME;
 use super::plugin::CacheHitMiss;
 use super::plugin::CacheSubgraph;
 use super::plugin::ENTITIES;
+use super::plugin::EntityCacheMiss;
 use super::plugin::IntermediateResult;
 use super::plugin::PrivateQueryKey;
 use super::plugin::REPRESENTATIONS;
 use super::plugin::StorageInterface;
 use super::plugin::Ttl;
 use super::plugin::assemble_response_from_errors;
+use super::plugin::build_entity_debug_entry;
+use super::plugin::build_entity_store_document;
 use super::plugin::get_invalidation_entity_keys_from_schema;
 use super::plugin::hash_private_id;
+use super::plugin::reindex_entity_errors;
 use super::plugin::update_cache_control;
 use super::storage;
 use super::storage::CacheEntry;
@@ -56,8 +60,6 @@ use crate::context::OPERATION_KIND;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
-use crate::json_ext::Path;
-use crate::json_ext::PathElement;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::connectors::query_plans::get_connectors;
 use crate::plugins::response_cache::cache_key::ConnectorCacheKeyEntity;
@@ -77,7 +79,7 @@ use crate::services::connect;
 use crate::services::connector;
 use crate::spec::TYPENAME;
 
-/// Per connector source configuration for response caching
+/// Configuration for connector response caching: global defaults plus per-source overrides
 #[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct ConnectorCacheConfiguration {
@@ -353,9 +355,8 @@ impl ConnectorCacheService {
                 let cache_key_context = CacheKeyContext {
                     key: "-".to_string(),
                     invalidation_keys: vec![],
-                    // TODO: connector debugger tag/CDN flags are undecided (pending router-team decision)
                     has_tags: false,
-                    cdn_invalidation_enabled: false,
+                    cdn_invalidation_enabled: connector_cdn_invalidation_enabled(),
                     indexes: self.connectors_config.effective_indexes(&source_name),
                     kind,
                     hashed_private_id: None,
@@ -679,8 +680,7 @@ impl ConnectorCacheService {
                 key: metadata.cache_key,
                 cache_tags: metadata.cache_tags,
                 typename,
-                // TODO: connector CDN cache-tag population is undecided (pending router-team decision)
-                cdn_invalidation_tags: Vec::new(),
+                cdn_invalidation_tags: connector_cdn_invalidation_tags(),
                 entity_key: metadata.entity_key,
                 cache_entry: entry,
             });
@@ -722,9 +722,8 @@ impl ConnectorCacheService {
                             .iter()
                             .filter_map(|t| t.user_value().map(String::from))
                             .collect(),
-                        // TODO: connector debugger tag/CDN flags are undecided (pending router-team decision)
                         has_tags: false,
-                        cdn_invalidation_enabled: false,
+                        cdn_invalidation_enabled: connector_cdn_invalidation_enabled(),
                         indexes,
                         kind: CacheEntryKind::Entity {
                             typename: ir.typename.clone(),
@@ -996,26 +995,10 @@ impl ConnectorCacheService {
                         // Check for per-entity errors (matching the subgraph pattern in
                         // insert_entities_in_result). Entities with errors should not be cached
                         // to avoid persisting error data until TTL expires.
-                        let mut has_errors = false;
-                        for error in errors.iter().filter(|e| {
-                            e.path
-                                .as_ref()
-                                .map(|path| {
-                                    path.starts_with(&Path(vec![
-                                        PathElement::Key(ENTITIES.to_string(), None),
-                                        PathElement::Index(entity_idx),
-                                    ]))
-                                })
-                                .unwrap_or(false)
-                        }) {
-                            // Update the entity index to match the merged position
-                            let mut e = error.clone();
-                            if let Some(path) = e.path.as_mut() {
-                                path.0[1] = PathElement::Index(new_entity_idx);
-                            }
-                            new_errors.push(e);
-                            has_errors = true;
-                        }
+                        let reindexed_errors =
+                            reindex_entity_errors(&errors, entity_idx, new_entity_idx);
+                        let has_errors = !reindexed_errors.is_empty();
+                        new_errors.extend(reindexed_errors);
 
                         // Append private_id to cache key if response was discovered
                         // to be private mid-flight (matching subgraph pattern)
@@ -1031,6 +1014,7 @@ impl ConnectorCacheService {
                             .iter()
                             .filter_map(|t| t.user_value().map(String::from))
                             .collect();
+                        let has_tags = !user_tags.is_empty();
 
                         // Never cache a null entity value. On the connector `$batch` path an item
                         // the upstream omitted is padded to `Value::Null` (match-by-id), with no
@@ -1039,54 +1023,49 @@ impl ConnectorCacheService {
                         // this only skips genuinely-unresolved entities; they re-fetch next time.
                         let is_null_entity = value.is_null();
 
+                        // Prepend the whole-source (`Subgraph`) tag at store time, gated on
+                        // the connector's resolved invalidation indexes (mirrors dev's
+                        // subgraph store path).
+                        let mut doc_cache_tags = cache_tags;
+                        if indexes.is_enabled(IndexMode::Subgraph) {
+                            doc_cache_tags.insert(0, CacheTag::Subgraph);
+                        }
+
+                        let miss = EntityCacheMiss {
+                            key,
+                            value: &value,
+                            cache_tags: doc_cache_tags,
+                            cdn_invalidation_tags: connector_cdn_invalidation_tags(),
+                            typename,
+                            entity_key,
+                            invalidation_keys: user_tags,
+                            has_tags,
+                        };
+
                         if !has_errors
                             && !is_null_entity
                             && !unstorable_private_response
                             && response_cache_control.should_store()
                         {
-                            // Prepend the whole-source (`Subgraph`) tag at store time, gated on
-                            // the connector's resolved invalidation indexes (mirrors dev's
-                            // subgraph store path).
-                            let mut doc_cache_tags = cache_tags;
-                            if indexes.is_enabled(IndexMode::Subgraph) {
-                                doc_cache_tags.insert(0, CacheTag::Subgraph);
-                            }
-                            to_insert.push(Document {
-                                control: response_cache_control.clone(),
-                                data: value.clone(),
-                                key: key.clone(),
-                                cache_tags: doc_cache_tags,
-                                expire: ttl,
-                                // TODO: connector CDN cache-tag population is undecided (pending router-team decision)
-                                cdn_invalidation_tags: Vec::new(),
-                                scope: CacheScope::Connector,
-                            });
+                            to_insert.push(build_entity_store_document(
+                                &miss,
+                                CacheScope::Connector,
+                                ttl,
+                                &response_cache_control,
+                            ));
                         }
 
                         if debug && let Some(ref debug_req) = debug_request {
-                            debug_ctx_entries.push(
-                                CacheKeyContext {
-                                    key,
-                                    hashed_private_id: private_id.clone(),
-                                    invalidation_keys: user_tags,
-                                    // TODO: connector debugger tag/CDN flags are undecided (pending router-team decision)
-                                    has_tags: false,
-                                    cdn_invalidation_enabled: false,
-                                    indexes,
-                                    kind: CacheEntryKind::Entity {
-                                        typename,
-                                        entity_key: entity_key.unwrap_or_default(),
-                                    },
-                                    subgraph_name: source_name.to_string(),
-                                    subgraph_request: debug_req.clone(),
-                                    source: CacheKeySource::Connector,
-                                    cache_control: response_cache_control.clone(),
-                                    data: serde_json_bytes::json!({"data": value.clone()}),
-                                    warnings: Vec::new(),
-                                    should_store: false,
-                                }
-                                .update_metadata(),
-                            );
+                            debug_ctx_entries.push(build_entity_debug_entry(
+                                &miss,
+                                private_id.clone(),
+                                source_name,
+                                CacheKeySource::Connector,
+                                &response_cache_control,
+                                indexes,
+                                connector_cdn_invalidation_enabled(),
+                                debug_req.clone(),
+                            ));
                         }
 
                         new_entities.push(value);
@@ -1339,9 +1318,8 @@ impl ConnectorRequestCacheService {
                 let cache_key_context = CacheKeyContext {
                     key: "-".to_string(),
                     invalidation_keys: vec![],
-                    // TODO: connector debugger tag/CDN flags are undecided (pending router-team decision)
                     has_tags: false,
-                    cdn_invalidation_enabled: false,
+                    cdn_invalidation_enabled: connector_cdn_invalidation_enabled(),
                     indexes,
                     kind: CacheEntryKind::RootFields {
                         root_fields: vec![root_field_name],
@@ -1482,6 +1460,10 @@ impl ConnectorRequestCacheService {
                 if self.debug
                     && let Some(debug_req) = debug_request
                 {
+                    let has_tags = entry
+                        .invalidation_labels
+                        .as_ref()
+                        .is_some_and(|labels| !labels.tags.is_empty());
                     let cache_key_context = CacheKeyContext {
                         key: cache_key.clone(),
                         hashed_private_id: private_id,
@@ -1490,9 +1472,8 @@ impl ConnectorRequestCacheService {
                             .as_ref()
                             .map(|labels| labels.user_facing_only())
                             .unwrap_or_default(),
-                        // TODO: connector debugger tag/CDN flags are undecided (pending router-team decision)
-                        has_tags: false,
-                        cdn_invalidation_enabled: false,
+                        has_tags,
+                        cdn_invalidation_enabled: connector_cdn_invalidation_enabled(),
                         indexes: self.indexes,
                         kind: CacheEntryKind::RootFields {
                             root_fields: vec![root_field_name.clone()],
@@ -1616,16 +1597,17 @@ impl ConnectorRequestCacheService {
                         }
 
                         if debug && let Some(debug_req) = debug_request {
+                            let invalidation_keys: Vec<String> = cache_tags
+                                .iter()
+                                .filter_map(|t| t.user_value().map(String::from))
+                                .collect();
+                            let has_tags = !invalidation_keys.is_empty();
                             let cache_key_context = CacheKeyContext {
                                 key: cache_key.clone(),
                                 hashed_private_id: private_id,
-                                invalidation_keys: cache_tags
-                                    .iter()
-                                    .filter_map(|t| t.user_value().map(String::from))
-                                    .collect(),
-                                // TODO: connector debugger tag/CDN flags are undecided (pending router-team decision)
-                                has_tags: false,
-                                cdn_invalidation_enabled: false,
+                                invalidation_keys,
+                                has_tags,
+                                cdn_invalidation_enabled: connector_cdn_invalidation_enabled(),
                                 indexes,
                                 kind: CacheEntryKind::RootFields {
                                     root_fields: vec![root_field_name.clone()],
@@ -1654,8 +1636,7 @@ impl ConnectorRequestCacheService {
                             control: cache_control,
                             cache_tags,
                             expire: ttl,
-                            // TODO: connector CDN cache-tag population is undecided (pending router-team decision)
-                            cdn_invalidation_tags: Vec::new(),
+                            cdn_invalidation_tags: connector_cdn_invalidation_tags(),
                             scope: CacheScope::Connector,
                         };
 
@@ -1713,6 +1694,21 @@ impl ConnectorRequestCacheService {
 /// TTL across the batch), which is the intended semantics.
 #[derive(Default)]
 struct ConnectorCacheControls(HashMap<String, CacheControl>);
+
+/// Whether connector cache entries participate in CDN `Cache-Tag` invalidation. Unlike the
+/// subgraph path (`self.cdn_invalidation_enabled`, driven by config), connectors have no config
+/// surface for this yet — whether and how they should is a pending router-team decision.
+/// Centralized here so resolving that decision only requires updating this one function instead
+/// of every call site that builds a `CacheKeyContext` or `Document` for a connector entry.
+const fn connector_cdn_invalidation_enabled() -> bool {
+    false
+}
+
+/// CDN invalidation tags to attach to a connector cache entry. Always empty for the same reason
+/// as [`connector_cdn_invalidation_enabled`]: connectors don't yet populate a CDN tag set.
+fn connector_cdn_invalidation_tags() -> Vec<String> {
+    Vec::new()
+}
 
 fn record_connector_cache_control(
     context: &Context,

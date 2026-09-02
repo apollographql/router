@@ -3281,6 +3281,108 @@ fn filter_representations(
     Ok((new_representations, result, cache_control))
 }
 
+/// Reindexes the GraphQL errors belonging to the entity at `entity_idx` (its position in the
+/// original response) onto `new_entity_idx` (its position after cache hits are spliced back in).
+/// Shared by the subgraph (`insert_entities_in_result`) and connector
+/// (`ConnectorRequestCacheService::merge_cached_entities` in `connectors.rs`) entity-merge loops,
+/// which both need to do this identically.
+pub(super) fn reindex_entity_errors(
+    errors: &[Error],
+    entity_idx: usize,
+    new_entity_idx: usize,
+) -> Vec<Error> {
+    errors
+        .iter()
+        .filter(|e| {
+            e.path
+                .as_ref()
+                .map(|path| {
+                    path.starts_with(&Path(vec![
+                        PathElement::Key(ENTITIES.to_string(), None),
+                        PathElement::Index(entity_idx),
+                    ]))
+                })
+                .unwrap_or(false)
+        })
+        .cloned()
+        .map(|mut e| {
+            if let Some(path) = e.path.as_mut() {
+                path.0[1] = PathElement::Index(new_entity_idx);
+            }
+            e
+        })
+        .collect()
+}
+
+/// Fields needed to build a cache-store `Document`, and — in debug mode — the matching
+/// `CacheKeyContext`, for one entity that missed the cache. Shared between the subgraph
+/// (`insert_entities_in_result`) and connector (`ConnectorRequestCacheService::merge_cached_entities`
+/// in `connectors.rs`) entity-merge loops so a future change to this shape lands once instead of
+/// needing parallel edits to both copies. Each caller keeps its own logic for *computing*
+/// `cache_tags`/`cdn_invalidation_tags`/`invalidation_keys`/`has_tags` (subgraph derives them from
+/// `apolloEntityCacheTags` surrogate keys; connectors from schema `@cacheTag` directives) — this
+/// only unifies what happens with the result.
+pub(super) struct EntityCacheMiss<'a> {
+    pub(super) key: String,
+    pub(super) value: &'a Value,
+    pub(super) cache_tags: Vec<CacheTag>,
+    pub(super) cdn_invalidation_tags: Vec<String>,
+    pub(super) typename: String,
+    pub(super) entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
+    pub(super) invalidation_keys: Vec<String>,
+    pub(super) has_tags: bool,
+}
+
+pub(super) fn build_entity_store_document(
+    miss: &EntityCacheMiss<'_>,
+    scope: CacheScope,
+    expire: Duration,
+    cache_control: &CacheControl,
+) -> Document {
+    Document {
+        control: cache_control.clone(),
+        data: miss.value.clone(),
+        key: miss.key.clone(),
+        cache_tags: miss.cache_tags.clone(),
+        cdn_invalidation_tags: miss.cdn_invalidation_tags.clone(),
+        expire,
+        scope,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn build_entity_debug_entry(
+    miss: &EntityCacheMiss<'_>,
+    hashed_private_id: Option<String>,
+    subgraph_name: &str,
+    source: CacheKeySource,
+    cache_control: &CacheControl,
+    indexes: InvalidationIndexes,
+    cdn_invalidation_enabled: bool,
+    subgraph_request: graphql::Request,
+) -> CacheKeyContext {
+    CacheKeyContext {
+        key: miss.key.clone(),
+        hashed_private_id,
+        invalidation_keys: miss.invalidation_keys.clone(),
+        has_tags: miss.has_tags,
+        cdn_invalidation_enabled,
+        kind: CacheEntryKind::Entity {
+            typename: miss.typename.clone(),
+            entity_key: miss.entity_key.clone().unwrap_or_default(),
+        },
+        subgraph_name: subgraph_name.to_string(),
+        subgraph_request,
+        source,
+        cache_control: cache_control.clone(),
+        data: serde_json_bytes::json!({"data": miss.value.clone()}),
+        warnings: Vec::new(),
+        should_store: false,
+        indexes,
+    }
+    .update_metadata()
+}
+
 // fill in the entities for the response
 #[allow(clippy::too_many_arguments)]
 async fn insert_entities_in_result(
@@ -3351,27 +3453,9 @@ async fn insert_entities_in_result(
                     key = format!("{key}:{id}");
                 }
 
-                let mut has_errors = false;
-                for error in errors.iter().filter(|e| {
-                    e.path
-                        .as_ref()
-                        .map(|path| {
-                            path.starts_with(&Path(vec![
-                                PathElement::Key(ENTITIES.to_string(), None),
-                                PathElement::Index(entity_idx),
-                            ]))
-                        })
-                        .unwrap_or(false)
-                }) {
-                    // update the entity index, because it does not match with the original one
-                    let mut e = error.clone();
-                    if let Some(path) = e.path.as_mut() {
-                        path.0[1] = PathElement::Index(new_entity_idx);
-                    }
-
-                    new_errors.push(e);
-                    has_errors = true;
-                }
+                let reindexed_errors = reindex_entity_errors(errors, entity_idx, new_entity_idx);
+                let has_errors = !reindexed_errors.is_empty();
+                new_errors.extend(reindexed_errors);
 
                 // Per-entity cache tags from the subgraph's `apolloEntityCacheTags` extension.
                 if indexes.tracks_invalidation_labels(cdn_invalidation_enabled)
@@ -3409,49 +3493,44 @@ async fn insert_entities_in_result(
                     cache_tags.insert(0, CacheTag::Subgraph);
                 }
 
+                let has_tags = !cdn_invalidation_tags.is_empty();
+                let invalidation_keys = InvalidationLabels {
+                    tags: cdn_invalidation_tags.iter().cloned().collect(),
+                    types: HashSet::from([(subgraph_name.to_string(), typename.clone())]),
+                    subgraphs: HashSet::from([subgraph_name.to_string()]),
+                }
+                .user_facing_only();
+                let miss = EntityCacheMiss {
+                    key,
+                    value: &value,
+                    cache_tags,
+                    cdn_invalidation_tags,
+                    typename,
+                    entity_key,
+                    invalidation_keys,
+                    has_tags,
+                };
+
                 // Only in debug mode
                 if let Some(subgraph_request) = &subgraph_request {
-                    debug_ctx_entries.push(
-                        CacheKeyContext {
-                            key: key.clone(),
-                            hashed_private_id: private_id_for_dbg.clone(),
-                            invalidation_keys: InvalidationLabels {
-                                tags: cdn_invalidation_tags.iter().cloned().collect(),
-                                types: HashSet::from([(
-                                    subgraph_name.to_string(),
-                                    typename.clone(),
-                                )]),
-                                subgraphs: HashSet::from([subgraph_name.to_string()]),
-                            }
-                            .user_facing_only(),
-                            has_tags: !cdn_invalidation_tags.is_empty(),
-                            cdn_invalidation_enabled,
-                            kind: CacheEntryKind::Entity {
-                                typename: typename.clone(),
-                                entity_key: entity_key.clone().unwrap_or_default(),
-                            },
-                            subgraph_name: subgraph_name.to_string(),
-                            subgraph_request: subgraph_request.clone(),
-                            source: CacheKeySource::Subgraph,
-                            cache_control: cache_control.clone(),
-                            data: serde_json_bytes::json!({"data": value.clone()}),
-                            warnings: Vec::new(),
-                            should_store: false,
-                            indexes: *indexes,
-                        }
-                        .update_metadata(),
-                    );
+                    debug_ctx_entries.push(build_entity_debug_entry(
+                        &miss,
+                        private_id_for_dbg.clone(),
+                        subgraph_name,
+                        CacheKeySource::Subgraph,
+                        &cache_control,
+                        *indexes,
+                        cdn_invalidation_enabled,
+                        subgraph_request.clone(),
+                    ));
                 }
                 if !has_errors && cache_control.should_store() && should_cache_private {
-                    to_insert.push(Document {
-                        control: cache_control.clone(),
-                        data: value.clone(),
-                        key,
-                        cache_tags,
-                        cdn_invalidation_tags,
-                        expire: ttl,
-                        scope: CacheScope::Subgraph,
-                    });
+                    to_insert.push(build_entity_store_document(
+                        &miss,
+                        CacheScope::Subgraph,
+                        ttl,
+                        &cache_control,
+                    ));
                 }
 
                 new_entities.push(value);

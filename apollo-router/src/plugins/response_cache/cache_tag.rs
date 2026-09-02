@@ -65,14 +65,6 @@ impl CacheTag {
         }
     }
 
-    /// `true` when this entry is internal to the router (not surfaced to operators in debug
-    /// output or invalidation request results). [`CacheTag::Subgraph`] and [`CacheTag::Type`]
-    /// are internal; [`CacheTag::Tag`] is user-facing.
-    #[allow(dead_code)]
-    pub(crate) fn is_internal(&self) -> bool {
-        matches!(self, CacheTag::Subgraph | CacheTag::Type(_))
-    }
-
     /// The user-facing string representation of this tag, used by the cache debugger to show
     /// which `@cacheTag` or extension-supplied tags a cached entry was indexed under. Returns
     /// `None` for internal entries.

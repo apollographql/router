@@ -124,8 +124,9 @@ You can customize the response cache key with the `apollo::response_cache::key` 
 
 You can apply customizations at multiple scales using different fields in `apollo::response_cache::key`:
 
-- An `all` field, which affects all subgraph requests
+- An `all` field, which affects all subgraph and connector requests
 - A `subgraphs` field, which contains an object with per-subgraph customization
+- A `connectors` field, which contains an object with per-connector-source customization, keyed by `subgraph_name.source_name`
 - A field for each operation name, which affects only a specific operation
 
 Data within these customizations are _not_ merged. The router chooses data in order of precedence: operation name, subgraph, then `all`. To set common data, you must also add it to the more specific sections.
@@ -141,6 +142,11 @@ Example:
   },
   "subgraphs": {
     "my_subgraph": {
+      "locale": "be"
+    }
+  },
+  "connectors": {
+    "my_subgraph.my_source": {
       "locale": "be"
     }
   }
@@ -299,30 +305,9 @@ or, if configured with multiple URLs:
 
 <Note>
 
-Nest this `tls` configuration under `response_cache.subgraph.all`.
+Nest this `tls` configuration under `response_cache.subgraph.all` for subgraphs or `response_cache.connector.all` for Apollo Connectors — both use the same Redis configuration type, TLS included.
 
 </Note>
-
-```yaml title="router.yaml"
-# Enable response caching globally
-response_cache:
-  enabled: true
-  subgraph:
-    all:
-      enabled: true
-      # Configure Redis globally
-      redis:
-        urls: ["rediss://redis.example.com:6379"]
-        #highlight-start
-        username: root
-        password: ${env.REDIS_PASSWORD}
-        tls:
-          certificate_authorities: ${file./path/to/ca.crt}
-          client_authentication:
-            certificate_chain: ${file./path/to/certificate_chain.pem}
-            key: ${file./path/to/key.pem}
-        #highlight-end
-```
 
 ### Timeout configuration
 

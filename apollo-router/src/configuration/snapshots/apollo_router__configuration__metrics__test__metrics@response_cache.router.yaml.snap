@@ -8,6 +8,8 @@ expression: "& metrics.non_zero()"
       - value: 1
         attributes:
           opt.connector.enabled: true
+          opt.connector.invalidation.enabled: false
+          opt.connector.ttl: true
           opt.debug: true
           opt.enabled: true
           opt.subgraph.enabled: true

@@ -1426,10 +1426,10 @@ mod tests {
             Ok(())
         }
 
-        // Regression for the cross-scope deletion lane (Finding F3): a subgraph document and a
-        // connector document sharing the same scope NAME (e.g. a subgraph literally named like a
-        // connector source id `graph.api`) must live in disjoint index namespaces, so invalidating
-        // one scope never deletes the other's entries — in BOTH directions.
+        // Regression test: a subgraph document and a connector document sharing the same scope
+        // NAME (e.g. a subgraph literally named like a connector source id `graph.api`) must live
+        // in disjoint index namespaces, so invalidating one scope never deletes the other's
+        // entries — in BOTH directions.
         #[tokio::test]
         #[rstest::rstest]
         async fn invalidation_scopes_are_disjoint(

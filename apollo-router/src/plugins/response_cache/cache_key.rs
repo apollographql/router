@@ -654,9 +654,12 @@ mod tests {
     }
 
     #[test]
-    fn hash_connector_additional_data_empty_key_inputs_matches_null() {
-        // An empty referenced-inputs object hashes the same as `Null`, so connectors that
-        // reference no context/headers keep byte-identical keys (no needless partitioning).
+    fn hash_connector_additional_data_is_deterministic_for_empty_or_null_inputs() {
+        // `key_inputs` is `Value::Null` or an empty object depending on the caller
+        // (`connector_key_inputs` never produces `Null` in production, but callers reaching this
+        // function directly might pass either). Neither shape needs to hash the same as the
+        // other — only that each hashes stably across calls, so identical requests keep getting
+        // identical cache keys.
         let context = Context::new();
         let vars = serde_json_bytes::json!({"key": "value"});
         let empty = serde_json_bytes::json!({ "context": {}, "headers": {} });
