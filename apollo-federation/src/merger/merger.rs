@@ -120,12 +120,11 @@ static NON_MERGED_CORE_FEATURES: LazyLock<[Identity; 4]> = LazyLock::new(|| {
 
 /// In JS, this is encoded indirectly in `isGraphQLBuiltInDirective`. Regardless of whether
 /// the end user redefined these directives, we consider them built-in for merging.
-static BUILT_IN_DIRECTIVES: [&str; 7] = [
+static BUILT_IN_DIRECTIVES: [&str; 6] = [
     "skip",
     "include",
     "deprecated",
     "specifiedBy",
-    "oneOf",
     "defer",
     "stream",
 ];
