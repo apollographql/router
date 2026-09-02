@@ -280,9 +280,21 @@ impl FieldRoutingSearchSpace {
     /// must stay LIFO-consistent across advance() boundaries.
     fn fast_forward(&self, state: &mut PlanState) -> Result<(), FederationError> {
         let mut trail = ForcedTrail::default();
+        let splits_at_entry = state.splits;
         while let Some(top) = state.pending.last() {
             if !trail.doomed.is_empty() && trail.doomed.contains(&pending_site(top)) {
-                self.recover_doomed(state, &mut trail);
+                // Once a split re-push has committed in this call, doomed
+                // recurrences must not re-run ancestor-frame backtracking:
+                // its rewinds would undo the committed split and exhaust
+                // unrelated frames, dooming sites that were never hopeless.
+                if state.splits > splits_at_entry {
+                    let pending = state.pop_pending().unwrap();
+                    if !self.try_split_repush(state, &pending) {
+                        self.drop_unresolvable(state, &pending);
+                    }
+                } else {
+                    self.recover_doomed(state, &mut trail);
+                }
                 continue;
             }
             let options = self.cached_routing_options(top)?;
@@ -335,12 +347,15 @@ impl FieldRoutingSearchSpace {
 
     /// Pop a pending whose site is proven hopeless and recover: rewind an
     /// ancestor forced commit if one has untried options (see
-    /// [`Self::backtrack_forced`]), then drop the selection. A
+    /// [`Self::backtrack_forced`]), then try a split re-push (see
+    /// [`Self::try_split_repush`]), otherwise drop the selection. A
     /// best-effort pending is dropped outright — its loss is tolerated by
     /// design and must not burn backtracking budget.
     fn recover_doomed(&self, state: &mut PlanState, trail: &mut ForcedTrail) {
         let pending = state.pop_pending().unwrap();
-        if pending.best_effort || !self.backtrack_forced(state, trail) {
+        if (pending.best_effort || !self.backtrack_forced(state, trail))
+            && !self.try_split_repush(state, &pending)
+        {
             self.drop_unresolvable(state, &pending);
         }
     }
@@ -389,7 +404,11 @@ impl FieldRoutingSearchSpace {
         }
         // A failed best-effort commit stays a silent no-op, as before:
         // its loss must neither burn backtracking budget nor fail the plan.
-        if failed && !best_effort && !self.backtrack_forced(state, trail) {
+        if failed
+            && !best_effort
+            && !self.backtrack_forced(state, trail)
+            && !self.try_split_repush(state, &pending)
+        {
             state.dropped_fields += 1;
         }
     }
@@ -452,13 +471,116 @@ impl FieldRoutingSearchSpace {
         // caller's loop re-descend; descendants that drop again will find
         // the budget spent and fall through to plain drops.
         if let Some((pending, choice)) = parked {
-            if self.commit_choice(state, &pending, &choice).is_err() {
+            if self.commit_choice(state, &pending, &choice).is_err()
+                && !pending.best_effort
+                && !self.try_split_repush(state, &pending)
+            {
                 state.dropped_fields += 1;
             }
             return true;
         }
         false
     }
+
+    /// Last-resort recovery before dropping a stranded selection: re-push a
+    /// wrapped remainder at an ancestor field that has alternative routing
+    /// targets, so the remainder can reach another subgraph through a key
+    /// hop the stranded position lacks (keyless subtrees split across
+    /// subgraphs). Returns true when a re-push was committed.
+    fn try_split_repush(&self, state: &mut PlanState, pending: &PendingSelection) -> bool {
+        if !state.split_repush_enabled || pending.best_effort {
+            return false;
+        }
+        let Ok(source) = self.node_source(pending.query_graph_node) else {
+            return false;
+        };
+        let avoid = source.subgraph;
+        let mut remainder: Vec<Selection> = vec![pending.selection.clone()];
+        let mut link = pending.split_parent.clone();
+        while let Some(anchor) = link {
+            let Some(template) = anchor.selection.selection_set() else {
+                return false;
+            };
+            // At an abstract position the remainder is widened to the
+            // ancestor's whole sub-selection: the target subgraph may have
+            // implementers this one lacks, and a partial re-fetch would
+            // leave the op's other fields uncovered for them.
+            let wrapped = if template.type_position.is_abstract_type() {
+                anchor.selection.clone()
+            } else {
+                let Some(wrapped) = wrap_in_parent(&anchor.selection, &remainder) else {
+                    return false;
+                };
+                wrapped
+            };
+            if matches!(anchor.selection, Selection::Field(_)) && anchor.condition.is_none() {
+                let mut candidate = anchor
+                    .fork(wrapped.clone())
+                    .with_split_avoid(Some(avoid.clone()));
+                candidate.condition = pending.condition;
+                let has_alternative = self
+                    .cached_routing_options(&candidate)
+                    .is_ok_and(|options| !options.is_empty());
+                if has_alternative {
+                    let Some(anchor_ss) = anchor.selection.selection_set() else {
+                        return false;
+                    };
+                    let Some(remainder_ss) = wrapped.selection_set() else {
+                        return false;
+                    };
+                    // Strict-shrink guard: an equal remainder means the
+                    // descent covered nothing, so re-pushing would recurse.
+                    if routing::selection_leaf_count(remainder_ss)
+                        >= routing::selection_leaf_count(anchor_ss)
+                    {
+                        return false;
+                    }
+                    debug!(
+                        selection = %selection_label(&pending.selection),
+                        anchor = %selection_label(&anchor.selection),
+                        avoid = %avoid,
+                        "re-pushing stranded remainder at ancestor with alternatives",
+                    );
+                    state.splits += 1;
+                    state.push_pending(candidate);
+                    return true;
+                }
+            }
+            remainder = vec![wrapped];
+            link = anchor.split_parent.clone();
+        }
+        false
+    }
+}
+
+fn wrap_in_parent(parent: &Selection, children: &[Selection]) -> Option<Selection> {
+    let template = parent.selection_set()?;
+    let mut map = crate::operation::SelectionMap::new();
+    for child in children {
+        let child = child
+            .rebase_on(&template.type_position, &template.schema)
+            .ok()?;
+        map.insert(child);
+    }
+    let wrapped_ss = SelectionSet {
+        schema: template.schema.clone(),
+        type_position: template.type_position.clone(),
+        selections: Arc::new(map),
+    };
+    Some(match parent {
+        Selection::Field(field_sel) => {
+            Selection::Field(Arc::new(crate::operation::FieldSelection {
+                field: field_sel.field.clone(),
+                selection_set: Some(wrapped_ss),
+            }))
+        }
+        Selection::InlineFragment(frag_sel) => {
+            Selection::InlineFragment(Arc::new(crate::operation::InlineFragmentSelection {
+                inline_fragment: frag_sel.inline_fragment.clone(),
+                selection_set: wrapped_ss,
+            }))
+        }
+    })
 }
 
 /// One multi-option forced commit on the fast-forward path, kept so a later
@@ -596,7 +718,9 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
                 error = ?e,
                 "commit_choice failed, dropping field",
             );
-            candidate.dropped_fields += 1;
+            if !self.try_split_repush(candidate, &pending) && !pending.best_effort {
+                candidate.dropped_fields += 1;
+            }
         }
 
         trace!("partial plan after apply");

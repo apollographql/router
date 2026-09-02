@@ -712,6 +712,14 @@ impl FieldRoutingSearchSpace {
                 .insert(key, result.clone());
             result
         };
+        if let Some(avoid) = &pending.split_avoid {
+            let options = unfiltered
+                .iter()
+                .filter(|choice| choice.target_subgraph() != avoid)
+                .cloned()
+                .collect::<Vec<_>>();
+            return Ok(Arc::new(options));
+        }
         Ok(unfiltered)
     }
 
