@@ -116,7 +116,7 @@ docker run -p 4000:4000 \
   ghcr.io/apollographql/apollo-runtime:<runtime-image-version>
 ```
 
-The Router uses the schema from the specified graph artifact instead of Apollo Uplink. The Router still fetches entitlements and persisted queries from Uplink. Learn more in the [Router CLI Configuration Reference](/graphos/routing/configuration/cli#--graph-artifact-reference).
+The Router uses the schema from the specified graph artifact instead of Apollo Uplink. The Router also fetches its entitlement from the same registry when the graph artifact manifest carries an entitlement identifier; persisted queries still come from Uplink. Learn more in the [Router CLI Configuration Reference](/graphos/routing/configuration/cli#--graph-artifact-reference).
 
 ## Running a specific Router and MCP version
 

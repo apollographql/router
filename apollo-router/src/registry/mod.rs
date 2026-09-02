@@ -118,6 +118,8 @@ pub(crate) struct OciContent {
 pub(crate) enum OciError {
     #[error("oci layer does not have a title")]
     LayerMissingTitle,
+    #[error("oci manifest has no entitlement layer")]
+    EntitlementLayerMissing,
     #[error("oci distribution error: {0}")]
     Distribution(OciDistributionError),
     #[error("oci parsing error: {0}")]
@@ -130,6 +132,16 @@ const APOLLO_REGISTRY_ENDING: &str = "apollographql.com";
 const APOLLO_REGISTRY_USERNAME: &str = "apollo-registry";
 const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
 const APOLLO_MANIFEST_LAUNCH_ID_ANNOTATION: &str = "com.apollograph.launch.id";
+/// Annotation on the graph artifact manifest carrying the account's opaque entitlement
+/// identifier. Absent on manifests built before entitlement-over-OCI shipped; the router then
+/// runs unlicensed until the graph is republished.
+const APOLLO_MANIFEST_ENTITLEMENT_ID_ANNOTATION: &str = "com.apollograph.graph.entitlement.id";
+/// Media type of the layer carrying the signed entitlement JWT inside the entitlement artifact.
+const APOLLO_ENTITLEMENT_MEDIA_TYPE: &str = "application/vnd.apollographql.entitlement.v1+jwt";
+/// Repository namespace for entitlement artifacts: `<registry>/entitlements/<identifier>`.
+const ENTITLEMENTS_REPO_PATH: &str = "entitlements";
+/// Entitlement artifacts are always fetched via the moving `latest` tag.
+const ENTITLEMENT_TAG: &str = "latest";
 
 impl From<oci_client::ParseError> for OciError {
     fn from(value: oci_client::ParseError) -> Self {
@@ -373,7 +385,16 @@ impl OciConfig {
 /// Fetch the manifest digest (without fetching the full manifest) to detect changes
 pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<String, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
-    let auth = build_auth(&reference, &oci_config.apollo_key);
+    fetch_reference_manifest_digest(oci_config, &reference).await
+}
+
+/// Fetch the manifest digest for an arbitrary reference in the same registry, authenticated with
+/// the graph API key from the config. Lets the entitlement poll reuse the schema path's probe.
+async fn fetch_reference_manifest_digest(
+    oci_config: &OciConfig,
+    reference: &Reference,
+) -> Result<String, OciError> {
+    let auth = build_auth(reference, &oci_config.apollo_key);
     let protocol = oci_config.client_protocol();
 
     let client = Client::new(ClientConfig {
@@ -382,7 +403,7 @@ pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<
     });
     let before_request = Instant::now();
     let registry = reference.registry().to_string();
-    let result = client.fetch_manifest_digest(&reference, &auth).await;
+    let result = client.fetch_manifest_digest(reference, &auth).await;
     let status = if result.is_ok() { "success" } else { "failure" };
     let duration = before_request.elapsed().as_secs_f64();
 
@@ -548,6 +569,276 @@ pub(crate) fn stream_from_oci(
                             "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
                         );
                         break;
+                    }
+                }
+            }
+
+            tokio::time::sleep(polling_time).await;
+            polling_time = oci_config.poll_interval;
+        }
+    };
+    drop(tokio::task::spawn(task.with_current_subscriber()));
+
+    ReceiverStream::new(receiver).boxed()
+}
+
+/// The entitlement JWT fetched for the graph, or `None` when the graph artifact manifest carries
+/// no entitlement identifier annotation (a manifest built before entitlement-over-OCI shipped);
+/// the router then runs unlicensed until the graph is republished.
+type OciLicenseJwt = Option<String>;
+
+/// Type alias for OCI license stream
+type OciLicenseStream = Pin<Box<dyn Stream<Item = Result<OciLicenseJwt, OciError>> + Send>>;
+
+/// Build the reference for the account's entitlement artifact: the same registry the graph
+/// artifact came from, repository `entitlements/<identifier>`, tag `latest`.
+fn entitlement_reference(
+    graph_reference: &Reference,
+    entitlement_id: &str,
+) -> Result<Reference, OciError> {
+    format!(
+        "{}/{}/{}:{}",
+        graph_reference.registry(),
+        ENTITLEMENTS_REPO_PATH,
+        entitlement_id,
+        ENTITLEMENT_TAG
+    )
+    .parse::<Reference>()
+    .map_err(OciError::from)
+}
+
+/// Read the entitlement identifier off the graph artifact manifest annotations. `Ok(None)` means
+/// the manifest predates the annotation.
+async fn fetch_entitlement_id(
+    client: &mut Client,
+    auth: &RegistryAuth,
+    graph_reference: &Reference,
+) -> Result<Option<String>, OciError> {
+    let (manifest, _) = fetch_oci_manifest(client, auth, graph_reference, None).await?;
+    Ok(manifest
+        .annotations
+        .as_ref()
+        .and_then(|annotations| annotations.get(APOLLO_MANIFEST_ENTITLEMENT_ID_ANNOTATION))
+        .cloned())
+}
+
+/// Fetch the signed entitlement JWT: the entitlement artifact's manifest, then its JWT layer.
+async fn fetch_entitlement_jwt(
+    client: &mut Client,
+    auth: &RegistryAuth,
+    entitlement_ref: &Reference,
+) -> Result<String, OciError> {
+    let (manifest, _) = fetch_oci_manifest(client, auth, entitlement_ref, None).await?;
+    let jwt_layer = manifest
+        .layers
+        .iter()
+        .find(|layer| layer.media_type == APOLLO_ENTITLEMENT_MEDIA_TYPE)
+        .ok_or(OciError::EntitlementLayerMissing)?
+        .clone();
+    let jwt = fetch_oci_blob(client, entitlement_ref, &jwt_layer).await?;
+    Ok(String::from_utf8(jwt)?)
+}
+
+/// One-shot license fetch: discover the identifier from the graph artifact manifest, then fetch
+/// the entitlement JWT with the same graph API key.
+pub(crate) async fn fetch_oci_license(oci_config: &OciConfig) -> Result<OciLicenseJwt, OciError> {
+    let graph_reference: Reference = oci_config.reference.as_str().parse()?;
+    let auth = build_auth(&graph_reference, &oci_config.apollo_key);
+    let mut client = Client::new(ClientConfig {
+        protocol: oci_config.client_protocol(),
+        ..Default::default()
+    });
+
+    let Some(entitlement_id) = fetch_entitlement_id(&mut client, &auth, &graph_reference).await?
+    else {
+        tracing::info!(
+            "graph artifact manifest has no entitlement identifier annotation; the router runs unlicensed until the graph is republished"
+        );
+        return Ok(None);
+    };
+    let entitlement_ref = entitlement_reference(&graph_reference, &entitlement_id)?;
+    let jwt = fetch_entitlement_jwt(&mut client, &auth, &entitlement_ref).await?;
+    Ok(Some(jwt))
+}
+
+/// A 404-shaped registry error. For entitlements this is expected during rollout (the account is
+/// not backfilled yet, or the key lacks access; the proxy deliberately serves both as 404), so it
+/// is a quiet retry, never a revocation signal: revocation always arrives as a newer JWT.
+fn is_not_found(error: &OciError) -> bool {
+    match error {
+        OciError::Distribution(OciDistributionError::ImageManifestNotFoundError(_)) => true,
+        OciError::Distribution(OciDistributionError::ServerError { code, .. }) => *code == 404,
+        OciError::Distribution(OciDistributionError::RegistryError { envelope, .. }) => {
+            envelope.errors.iter().any(|error| {
+                matches!(
+                    error.code,
+                    OciErrorCode::ManifestUnknown | OciErrorCode::NotFound
+                )
+            })
+        }
+        _ => false,
+    }
+}
+
+/// Create a license stream from OCI config, gated the same way the schema stream is.
+pub(crate) fn create_oci_license_stream(
+    oci_config: OciConfig,
+) -> Result<OciLicenseStream, anyhow::Error> {
+    let (_, ref_type) = validate_oci_reference(&oci_config.reference)?;
+
+    match (ref_type, oci_config.hot_reload) {
+        (OciReferenceType::Tag, true) => Ok(Box::pin(stream_license_from_oci(oci_config))),
+        (OciReferenceType::Tag, false) => Err(anyhow::anyhow!(
+            "Tag references without --hot-reload are not yet supported."
+        )),
+        (OciReferenceType::Digest, true) => Err(anyhow::anyhow!(
+            "Digest references are immutable so --hot-reload flag is not allowed."
+        )),
+        (OciReferenceType::Digest, false) => {
+            let oci_config_clone = oci_config.clone();
+            let stream = stream::once(async move { fetch_oci_license(&oci_config_clone).await });
+            Ok(Box::pin(stream))
+        }
+    }
+}
+
+/// Poll the registry for license updates. Each tick re-probes the graph artifact manifest (the
+/// entitlement identifier is discovered from its annotations and is stable, but a graph
+/// republished onto a newer manifest scheme can gain the annotation), then probes the entitlement
+/// artifact's `latest` tag and fetches the JWT when its digest moves.
+pub(crate) fn stream_license_from_oci(
+    oci_config: OciConfig,
+) -> impl Stream<Item = Result<OciLicenseJwt, OciError>> {
+    let (sender, receiver) = channel(2);
+
+    let task = async move {
+        let graph_reference: Reference = match oci_config.reference.as_str().parse() {
+            Ok(reference) => reference,
+            Err(err) => {
+                let _ = sender.send(Err(OciError::from(err))).await;
+                return;
+            }
+        };
+        let auth = build_auth(&graph_reference, &oci_config.apollo_key);
+
+        // None until the graph manifest has been read at least once; Some(None) when the manifest
+        // was read and carries no annotation.
+        let mut entitlement_id: Option<Option<String>> = None;
+        let mut last_graph_digest: Option<String> = None;
+        let mut last_entitlement_digest: Option<String> = None;
+        let mut polling_time = oci_config.poll_interval;
+
+        loop {
+            let mut client = Client::new(ClientConfig {
+                protocol: oci_config.client_protocol(),
+                ..Default::default()
+            });
+
+            // Step 1: (re)discover the entitlement identifier when the graph manifest changes.
+            match fetch_reference_manifest_digest(&oci_config, &graph_reference).await {
+                Ok(graph_digest) => {
+                    if last_graph_digest.as_deref() != Some(graph_digest.as_str()) {
+                        match fetch_entitlement_id(&mut client, &auth, &graph_reference).await {
+                            Ok(discovered) => {
+                                if discovered.is_none() {
+                                    tracing::info!(
+                                        "graph artifact manifest has no entitlement identifier annotation; the router runs unlicensed until the graph is republished"
+                                    );
+                                    // The unlicensed state is explicit, not an error, and any
+                                    // previously fetched entitlement no longer applies.
+                                    if entitlement_id != Some(None)
+                                        && sender.send(Ok(None)).await.is_err()
+                                    {
+                                        break;
+                                    }
+                                    last_entitlement_digest = None;
+                                }
+                                entitlement_id = Some(discovered);
+                                last_graph_digest = Some(graph_digest);
+                            }
+                            Err(err) => {
+                                if let Some(retry_after) = parse_rate_limit_error(&err) {
+                                    polling_time = retry_after.max(Duration::from_secs(10));
+                                }
+                                if sender.send(Err(err)).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    if let Some(retry_after) = parse_rate_limit_error(&err) {
+                        polling_time = retry_after.max(Duration::from_secs(10));
+                    }
+                    if sender.send(Err(err)).await.is_err() {
+                        break;
+                    }
+                }
+            }
+
+            // Step 2: poll the entitlement artifact's `latest` tag and fetch the JWT on movement.
+            if let Some(Some(id)) = &entitlement_id {
+                match entitlement_reference(&graph_reference, id) {
+                    Ok(entitlement_ref) => {
+                        match fetch_reference_manifest_digest(&oci_config, &entitlement_ref).await {
+                            Ok(current_digest) => {
+                                if last_entitlement_digest.as_deref()
+                                    == Some(current_digest.as_str())
+                                {
+                                    tracing::debug!(
+                                        "entitlement manifest digest unchanged, skipping license fetch"
+                                    );
+                                } else {
+                                    match fetch_entitlement_jwt(
+                                        &mut client,
+                                        &auth,
+                                        &entitlement_ref,
+                                    )
+                                    .await
+                                    {
+                                        Ok(jwt) => {
+                                            if sender.send(Ok(Some(jwt))).await.is_err() {
+                                                break;
+                                            }
+                                            // Only advance on success so a failed fetch retries.
+                                            last_entitlement_digest = Some(current_digest);
+                                        }
+                                        Err(err) => {
+                                            if let Some(retry_after) = parse_rate_limit_error(&err)
+                                            {
+                                                polling_time =
+                                                    retry_after.max(Duration::from_secs(10));
+                                            }
+                                            if sender.send(Err(err)).await.is_err() {
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Err(err) if is_not_found(&err) => {
+                                // Expected during rollout (not yet backfilled, or no access; the
+                                // proxy serves both as 404). Never a revocation signal, so the
+                                // current license state is left untouched and the poll retries.
+                                tracing::debug!(
+                                    "entitlement artifact not available yet (404); retrying on the next poll"
+                                );
+                            }
+                            Err(err) => {
+                                if let Some(retry_after) = parse_rate_limit_error(&err) {
+                                    polling_time = retry_after.max(Duration::from_secs(10));
+                                }
+                                if sender.send(Err(err)).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        if sender.send(Err(err)).await.is_err() {
+                            break;
+                        }
                     }
                 }
             }
@@ -832,6 +1123,236 @@ mod tests {
         format!("{}/{graph_id}:{reference}", mock_server.address())
             .parse::<Reference>()
             .expect("url must be valid")
+    }
+
+    const TEST_ENTITLEMENT_ID: &str = "0a1b2c3d4e5f";
+    const TEST_JWT: &str = "header.payload.signature";
+
+    fn entitlement_annotations() -> BTreeMap<String, String> {
+        let mut annotations = generate_manifest_annotations(Some("launch-1"));
+        annotations.insert(
+            APOLLO_MANIFEST_ENTITLEMENT_ID_ANNOTATION.to_string(),
+            TEST_ENTITLEMENT_ID.to_string(),
+        );
+        annotations
+    }
+
+    /// Mounts HEAD/GET manifest and GET blob mocks for `entitlements/<id>:latest`, returning the
+    /// number of blob fetches via the counter.
+    async fn setup_entitlement_mocks(mock_server: &MockServer, jwt: &str) -> Arc<AtomicUsize> {
+        let jwt_layer = ImageLayer {
+            data: jwt.as_bytes().to_vec(),
+            media_type: APOLLO_ENTITLEMENT_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let blob_digest = jwt_layer.sha256_digest();
+        let oci_manifest = OciManifest::Image(OciImageManifest {
+            schema_version: 2,
+            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+            config: Default::default(),
+            layers: vec![OciDescriptor {
+                media_type: jwt_layer.media_type.clone(),
+                digest: blob_digest.clone(),
+                size: jwt_layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+            }],
+            subject: None,
+            artifact_type: None,
+            annotations: None,
+        });
+        let manifest_digest = calculate_manifest_digest(&oci_manifest);
+        let manifest_path = format!(
+            "/v2/{ENTITLEMENTS_REPO_PATH}/{TEST_ENTITLEMENT_ID}/manifests/{ENTITLEMENT_TAG}"
+        );
+
+        Mock::given(method("HEAD"))
+            .and(path(manifest_path.clone()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", manifest_digest.clone())
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
+            )
+            .mount(mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(manifest_path))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", manifest_digest)
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                    .set_body_bytes(serde_json::to_vec(&oci_manifest).unwrap()),
+            )
+            .mount(mock_server)
+            .await;
+
+        let blob_fetches = Arc::new(AtomicUsize::new(0));
+        let counter = blob_fetches.clone();
+        let blob_data = jwt_layer.data.clone();
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/v2/{ENTITLEMENTS_REPO_PATH}/{TEST_ENTITLEMENT_ID}/blobs/{blob_digest}"
+            )))
+            .respond_with(move |_: &Request| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                ResponseTemplate::new(200)
+                    .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                    .set_body_bytes(blob_data.clone())
+            })
+            .mount(mock_server)
+            .await;
+        blob_fetches
+    }
+
+    #[test]
+    fn test_entitlement_reference() {
+        let graph_reference: Reference = "registry.apollographql.com/my-graph:current"
+            .parse()
+            .unwrap();
+        let reference = entitlement_reference(&graph_reference, TEST_ENTITLEMENT_ID).unwrap();
+        assert_eq!(reference.registry(), "registry.apollographql.com");
+        assert_eq!(
+            reference.repository(),
+            format!("{ENTITLEMENTS_REPO_PATH}/{TEST_ENTITLEMENT_ID}")
+        );
+        assert_eq!(reference.tag(), Some(ENTITLEMENT_TAG));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_license_from_oci_success() {
+        let mock_server = MockServer::start().await;
+        let schema_layer = ImageLayer {
+            data: b"type Query { hello: String }".to_vec(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let graph_reference = setup_mocks(
+            &mock_server,
+            vec![schema_layer],
+            Some(entitlement_annotations()),
+        )
+        .await;
+        setup_entitlement_mocks(&mock_server, TEST_JWT).await;
+
+        let oci_config = mock_oci_config_with_reference(graph_reference.to_string());
+        let mut stream = Box::pin(stream_license_from_oci(oci_config));
+
+        let jwt = stream
+            .next()
+            .await
+            .expect("stream should yield an item")
+            .expect("item should not be an error");
+        assert_eq!(jwt, Some(TEST_JWT.to_string()));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_license_from_oci_missing_annotation_is_unlicensed() {
+        let mock_server = MockServer::start().await;
+        let schema_layer = ImageLayer {
+            data: b"type Query { hello: String }".to_vec(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        // Annotations carry a launch ID but no entitlement identifier.
+        let graph_reference = setup_mocks(
+            &mock_server,
+            vec![schema_layer],
+            Some(generate_manifest_annotations(Some("launch-1"))),
+        )
+        .await;
+
+        let oci_config = mock_oci_config_with_reference(graph_reference.to_string());
+        let mut stream = Box::pin(stream_license_from_oci(oci_config));
+
+        let jwt = stream
+            .next()
+            .await
+            .expect("stream should yield an item")
+            .expect("item should not be an error");
+        assert_eq!(
+            jwt, None,
+            "missing annotation must yield the unlicensed marker"
+        );
+
+        // The unlicensed marker is emitted once, not on every poll.
+        let second = timeout(Duration::from_millis(200), stream.next()).await;
+        assert!(second.is_err(), "no further items while nothing changes");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_license_from_oci_entitlement_not_found_is_quiet() {
+        let mock_server = MockServer::start().await;
+        let schema_layer = ImageLayer {
+            data: b"type Query { hello: String }".to_vec(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        // Annotation present, but no entitlement artifact mocks mounted: the registry answers 404,
+        // which is expected during rollout and must produce neither a license nor an error item.
+        let graph_reference = setup_mocks(
+            &mock_server,
+            vec![schema_layer],
+            Some(entitlement_annotations()),
+        )
+        .await;
+
+        let oci_config = mock_oci_config_with_reference(graph_reference.to_string());
+        let mut stream = Box::pin(stream_license_from_oci(oci_config));
+
+        let item = timeout(Duration::from_millis(300), stream.next()).await;
+        assert!(
+            item.is_err(),
+            "a 404 for the entitlement artifact must not emit items, got {item:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_license_from_oci_digest_unchanged_no_refetch() {
+        let mock_server = MockServer::start().await;
+        let schema_layer = ImageLayer {
+            data: b"type Query { hello: String }".to_vec(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let graph_reference = setup_mocks(
+            &mock_server,
+            vec![schema_layer],
+            Some(entitlement_annotations()),
+        )
+        .await;
+        let blob_fetches = setup_entitlement_mocks(&mock_server, TEST_JWT).await;
+
+        let oci_config = mock_oci_config_with_reference(graph_reference.to_string());
+        let mut stream = Box::pin(stream_license_from_oci(oci_config));
+
+        let first = stream.next().await.unwrap().unwrap();
+        assert_eq!(first, Some(TEST_JWT.to_string()));
+
+        // Let several polls elapse; the unchanged digest must not trigger blob refetches.
+        let second = timeout(Duration::from_millis(300), stream.next()).await;
+        assert!(
+            second.is_err(),
+            "no further items while the digest is unchanged"
+        );
+        assert_eq!(1, blob_fetches.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_create_oci_license_stream_tag_without_hot_reload_errors() {
+        let mut oci_config =
+            mock_oci_config_with_reference("registry.example.com/graph:latest".to_string());
+        oci_config.hot_reload = false;
+        assert!(create_oci_license_stream(oci_config).is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_create_oci_license_stream_digest_with_hot_reload_errors() {
+        let mut oci_config = mock_oci_config_with_reference(
+            "registry.example.com/graph@sha256:0123456789012345678901234567890123456789012345678901234567890123"
+                .to_string(),
+        );
+        oci_config.hot_reload = true;
+        assert!(create_oci_license_stream(oci_config).is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]
