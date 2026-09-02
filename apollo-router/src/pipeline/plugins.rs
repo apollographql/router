@@ -147,7 +147,6 @@ pub(crate) async fn create_plugins(
             }
         }
     }
-    registrar.add_mandatory("license_enforcement").await;
     registrar.add_mandatory("health_check").await;
     registrar.add_mandatory("traffic_shaping").await;
     registrar.add_mandatory("limits").await;

@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -6981,10 +6980,6 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "LicenseEnforcementConfig": {
-      "description": "The license enforcement plugin has no configuration.",
-      "type": "object"
-    },
     "LimitsConfig": {
       "additionalProperties": false,
       "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
@@ -13113,9 +13108,6 @@ expression: "&schema"
     },
     "include_subgraph_errors": {
       "$ref": "#/definitions/IncludeSubgraphErrorsConfig"
-    },
-    "license_enforcement": {
-      "$ref": "#/definitions/LicenseEnforcementConfig"
     },
     "limits": {
       "$ref": "#/definitions/LimitsConfig"
