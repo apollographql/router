@@ -639,15 +639,13 @@ impl HasMutableDirectives for InputObjectFieldDefinitionPosition {
 
 /// A trait that exposes the list of applied directives on a given schema position.
 pub(crate) trait HasAppliedDirectives {
-    type AppliedDirective: AsRef<Directive>;
-
-    fn filter_directives<'dir, T: AsRef<Directive>>(
-        directives: impl IntoIterator<Item = &'dir T>,
+    fn filter_directives<'dir>(
+        directives: impl IntoIterator<Item = &'dir Node<Directive>>,
         name: &Name,
-    ) -> Vec<&'dir T> {
+    ) -> Vec<&'dir Node<Directive>> {
         directives
             .into_iter()
-            .filter(|directive| &directive.as_ref().name == name)
+            .filter(|directive| &directive.name == name)
             .collect()
     }
 
@@ -655,12 +653,10 @@ pub(crate) trait HasAppliedDirectives {
         &self,
         schema: &'schema FederationSchema,
         directive_name: &Name,
-    ) -> Vec<&'schema Self::AppliedDirective>;
+    ) -> Vec<&'schema Node<Directive>>;
 }
 
 impl HasAppliedDirectives for SchemaDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -672,8 +668,6 @@ impl HasAppliedDirectives for SchemaDefinitionPosition {
 }
 
 impl HasAppliedDirectives for TypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -703,8 +697,6 @@ impl HasAppliedDirectives for TypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for CompositeTypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -725,8 +717,6 @@ impl HasAppliedDirectives for CompositeTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for FieldDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -745,8 +735,6 @@ impl HasAppliedDirectives for FieldDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ObjectOrInterfaceFieldDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -760,8 +748,6 @@ impl HasAppliedDirectives for ObjectOrInterfaceFieldDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ObjectOrInterfaceTypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -779,8 +765,6 @@ impl HasAppliedDirectives for ObjectOrInterfaceTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ScalarTypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -793,8 +777,6 @@ impl HasAppliedDirectives for ScalarTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ObjectTypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -807,8 +789,6 @@ impl HasAppliedDirectives for ObjectTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ObjectFieldDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -821,8 +801,6 @@ impl HasAppliedDirectives for ObjectFieldDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ObjectFieldArgumentDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -835,8 +813,6 @@ impl HasAppliedDirectives for ObjectFieldArgumentDefinitionPosition {
 }
 
 impl HasAppliedDirectives for InterfaceTypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -849,8 +825,6 @@ impl HasAppliedDirectives for InterfaceTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for InterfaceFieldDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -863,7 +837,6 @@ impl HasAppliedDirectives for InterfaceFieldDefinitionPosition {
 }
 
 impl HasAppliedDirectives for InterfaceFieldArgumentDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -876,7 +849,6 @@ impl HasAppliedDirectives for InterfaceFieldArgumentDefinitionPosition {
 }
 
 impl HasAppliedDirectives for UnionTypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -889,7 +861,6 @@ impl HasAppliedDirectives for UnionTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for EnumTypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -902,7 +873,6 @@ impl HasAppliedDirectives for EnumTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for EnumValueDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -915,7 +885,6 @@ impl HasAppliedDirectives for EnumValueDefinitionPosition {
 }
 
 impl HasAppliedDirectives for InputObjectTypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -928,7 +897,6 @@ impl HasAppliedDirectives for InputObjectTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for InputObjectFieldDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -941,7 +909,6 @@ impl HasAppliedDirectives for InputObjectFieldDefinitionPosition {
 }
 
 impl HasAppliedDirectives for DirectiveArgumentDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -954,7 +921,6 @@ impl HasAppliedDirectives for DirectiveArgumentDefinitionPosition {
 }
 
 impl HasAppliedDirectives for DirectiveTargetPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
