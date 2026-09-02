@@ -1667,7 +1667,7 @@ async fn test_coprocessor_metrics_logged_on_success() -> Result<(), BoxError> {
     assert_eq!(response.status(), 200);
 
     // Specifically checking for 1 result in the "<= 5 sec" bucket here
-    router.assert_metrics_contains(r#"apollo_router_operations_coprocessor_duration_bucket{coprocessor_stage="RouterRequest",otel_scope_name="apollo/router",le="5"} 1"#, None).await;
+    router.assert_metrics_contains(r#"apollo_router_operations_coprocessor_duration_seconds_bucket{coprocessor_stage="RouterRequest",otel_scope_name="apollo/router",le="5"} 1"#, None).await;
 
     router.graceful_shutdown().await;
 
@@ -1711,7 +1711,7 @@ async fn test_coprocessor_metrics_logged_on_timeout() -> Result<(), BoxError> {
     assert_eq!(response.status(), 504);
 
     // Specifically checking for 1 result in the "<= 5 sec" bucket here
-    router.assert_metrics_contains(r#"apollo_router_operations_coprocessor_duration_bucket{coprocessor_stage="RouterRequest",otel_scope_name="apollo/router",le="5"} 1"#, None).await;
+    router.assert_metrics_contains(r#"apollo_router_operations_coprocessor_duration_seconds_bucket{coprocessor_stage="RouterRequest",otel_scope_name="apollo/router",le="5"} 1"#, None).await;
 
     router.graceful_shutdown().await;
 
