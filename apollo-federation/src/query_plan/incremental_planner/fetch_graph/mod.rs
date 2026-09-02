@@ -2,7 +2,6 @@
 //! entity inputs riding those edges, built incrementally during BULB
 //! search with checkpoint / undo-log rollback.
 
-#[allow(dead_code)]
 pub(crate) mod plan_builder;
 pub(crate) mod selection_builder;
 
