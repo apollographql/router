@@ -32,6 +32,7 @@ use crate::cache::storage::KeyType;
 use crate::cache::storage::ValueType;
 use crate::metrics::FutureMetricsExt;
 use crate::plugins::response_cache::cache_control::CacheControl;
+use crate::plugins::response_cache::cache_tag::CacheScope;
 use crate::plugins::response_cache::invalidation_labels::InvalidationLabels;
 use crate::plugins::response_cache::metrics::record_maintenance_commands;
 use crate::plugins::response_cache::metrics::record_maintenance_duration;
@@ -317,14 +318,15 @@ impl CacheStorage for Storage {
             .map(|document| document.cdn_invalidation_tags.clone())
             .collect();
 
-        // phase 1: render every document's tag list to its Redis ZSET keys.
+        // phase 1: render every document's tag list to its Redis ZSET keys, scoped per document
+        // so connector entries land in a namespace disjoint from subgraph entries.
         let redis_keys_per_doc: Vec<Vec<String>> = batch_docs
             .iter()
             .map(|document| {
                 document
                     .cache_tags
                     .iter()
-                    .map(|tag| tag.to_redis_key(subgraph_name))
+                    .map(|tag| tag.to_redis_key(document.scope, subgraph_name))
                     .collect()
             })
             .collect();
@@ -474,23 +476,30 @@ impl CacheStorage for Storage {
         Ok(entries)
     }
 
-    async fn internal_invalidate_by_subgraph(&self, subgraph_name: &str) -> StorageResult<u64> {
-        self.invalidate_keys(vec![format!("subgraph-{subgraph_name}")])
+    async fn internal_invalidate_by_subgraph(
+        &self,
+        scope: CacheScope,
+        subgraph_name: &str,
+    ) -> StorageResult<u64> {
+        let scope = scope.word();
+        self.invalidate_keys(vec![format!("{scope}-{subgraph_name}")])
             .await
     }
 
     async fn internal_invalidate(
         &self,
+        scope: CacheScope,
         invalidation_keys: Vec<String>,
         subgraph_names: Vec<String>,
     ) -> StorageResult<HashMap<String, u64>> {
         let mut join_set = JoinSet::default();
         let num_subgraphs = subgraph_names.len();
+        let scope = scope.word();
 
         for subgraph_name in subgraph_names {
             let keys: Vec<String> = invalidation_keys
                 .iter()
-                .map(|invalidation_key| format!("subgraph-{subgraph_name}:key-{invalidation_key}"))
+                .map(|invalidation_key| format!("{scope}-{subgraph_name}:key-{invalidation_key}"))
                 .collect();
             let storage = self.clone();
             join_set.spawn(async move { (subgraph_name, storage.invalidate_keys(keys).await) });
@@ -649,6 +658,7 @@ mod tests {
     use super::now;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::response_cache::ErrorCode;
+    use crate::plugins::response_cache::cache_tag::CacheScope;
     use crate::plugins::response_cache::cache_tag::CacheTag;
     use crate::plugins::response_cache::storage::CacheStorage;
     use crate::plugins::response_cache::storage::Document;
@@ -670,13 +680,15 @@ mod tests {
         document
             .cache_tags
             .iter()
-            .map(|t| t.to_redis_key(subgraph_name))
+            .map(|t| t.to_redis_key(document.scope, subgraph_name))
             .collect()
     }
 
     /// Test helper: render the Redis ZSET keys an explicit cache-tag list indexes under.
     fn render_tag_keys(tags: &[CacheTag], subgraph_name: &str) -> Vec<String> {
-        tags.iter().map(|t| t.to_redis_key(subgraph_name)).collect()
+        tags.iter()
+            .map(|t| t.to_redis_key(CacheScope::Subgraph, subgraph_name))
+            .collect()
     }
 
     fn common_document() -> Document {
@@ -687,6 +699,7 @@ mod tests {
             cache_tags: vec![CacheTag::Subgraph, CacheTag::Tag("invalidate".to_string())],
             cdn_invalidation_tags: vec!["invalidate".to_string()],
             expire: Duration::from_secs(60),
+            scope: CacheScope::Subgraph,
         }
     }
 
@@ -1361,6 +1374,7 @@ mod tests {
         use super::common_document;
         use super::redis_config;
         use super::*;
+        use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
         use crate::plugins::response_cache::storage::CacheStorage;
         use crate::plugins::response_cache::storage::Document;
         use crate::plugins::response_cache::storage::redis::Storage;
@@ -1394,16 +1408,128 @@ mod tests {
             storage.insert(document3.clone(), "S2").await?;
 
             // invalidate just subgraph1
-            let num_invalidated = storage.invalidate_by_subgraph("S1", "subgraph").await?;
+            let num_invalidated = storage
+                .invalidate_by_subgraph(CacheScope::Subgraph, "S1", "subgraph")
+                .await?;
             assert_eq!(num_invalidated, 1);
             assert!(!storage.exists("key1").await?);
             assert!(storage.exists("key2").await?);
 
             // invalidate subgraph2
-            let num_invalidated = storage.invalidate_by_subgraph("S2", "subgraph").await?;
+            let num_invalidated = storage
+                .invalidate_by_subgraph(CacheScope::Subgraph, "S2", "subgraph")
+                .await?;
             assert_eq!(num_invalidated, 2);
             assert!(!storage.exists("key2").await?);
             assert!(!storage.exists("key3").await?);
+
+            Ok(())
+        }
+
+        // Regression test: a subgraph document and a connector document sharing the same scope
+        // NAME (e.g. a subgraph literally named like a connector source id `graph.api`) must live
+        // in disjoint index namespaces, so invalidating one scope never deletes the other's
+        // entries — in BOTH directions.
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn invalidation_scopes_are_disjoint(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
+            storage.truncate_namespace().await?;
+
+            let name = "graph.api";
+            let subgraph_doc = Document {
+                key: "subgraph-doc".to_string(),
+                scope: CacheScope::Subgraph,
+                ..common_document()
+            };
+            let connector_doc = Document {
+                key: "connector-doc".to_string(),
+                scope: CacheScope::Connector,
+                ..common_document()
+            };
+            storage.insert(subgraph_doc, name).await?;
+            storage.insert(connector_doc, name).await?;
+
+            // A subgraph-kind invalidation for `graph.api` must delete ONLY the subgraph doc.
+            let n = storage
+                .invalidate_by_subgraph(CacheScope::Subgraph, name, "subgraph")
+                .await?;
+            assert_eq!(
+                n, 1,
+                "subgraph invalidation should delete exactly its own doc"
+            );
+            assert!(!storage.exists("subgraph-doc").await?);
+            assert!(
+                storage.exists("connector-doc").await?,
+                "connector doc must survive a subgraph-kind invalidation (F3 fix)"
+            );
+
+            // A connector-kind invalidation for `graph.api` must delete ONLY the connector doc.
+            let n = storage
+                .invalidate_by_subgraph(CacheScope::Connector, name, "connector")
+                .await?;
+            assert_eq!(
+                n, 1,
+                "connector invalidation should delete exactly its own doc"
+            );
+            assert!(!storage.exists("connector-doc").await?);
+
+            Ok(())
+        }
+
+        // The type-index namespace must also be scope-disjoint (the `:key-` internal segment uses
+        // the scope word), so a `kind:type` subgraph request cannot resolve a connector's type
+        // index and vice versa.
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn type_invalidation_scopes_are_disjoint(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
+            storage.truncate_namespace().await?;
+
+            let name = "graph.api";
+            let subgraph_doc = Document {
+                key: "subgraph-user".to_string(),
+                cache_tags: vec![CacheTag::Type("User".to_string())],
+                scope: CacheScope::Subgraph,
+                ..common_document()
+            };
+            let connector_doc = Document {
+                key: "connector-user".to_string(),
+                cache_tags: vec![CacheTag::Type("User".to_string())],
+                scope: CacheScope::Connector,
+                ..common_document()
+            };
+            storage.insert(subgraph_doc, name).await?;
+            storage.insert(connector_doc, name).await?;
+
+            // Subgraph type invalidation renders the subgraph-scoped internal type key.
+            let subgraph_type_key = CacheTag::Type("User".to_string())
+                .to_redis_key(CacheScope::Subgraph, name)
+                .strip_prefix(&format!(
+                    "version:{RESPONSE_CACHE_VERSION}:cache-tag:subgraph-{name}:key-"
+                ))
+                .unwrap()
+                .to_string();
+            let counts = storage
+                .invalidate(
+                    CacheScope::Subgraph,
+                    vec![subgraph_type_key],
+                    vec![name.to_string()],
+                    "type",
+                )
+                .await?;
+            assert_eq!(counts.get(name), Some(&1));
+            assert!(!storage.exists("subgraph-user").await?);
+            assert!(
+                storage.exists("connector-user").await?,
+                "connector type entry must survive a subgraph type invalidation (F3 fix)"
+            );
 
             Ok(())
         }
@@ -1443,7 +1569,12 @@ mod tests {
 
             // invalidate(A, S2) will invalidate key2, NOT key1 or key3
             let invalidated = storage
-                .invalidate(vec!["A".to_string()], vec!["S2".to_string()], "cache_tag")
+                .invalidate(
+                    CacheScope::Subgraph,
+                    vec!["A".to_string()],
+                    vec!["S2".to_string()],
+                    "cache_tag",
+                )
                 .await?;
             assert_eq!(invalidated.len(), 1);
             assert_eq!(*invalidated.get("S2").unwrap(), 1);
@@ -1465,11 +1596,18 @@ mod tests {
 
             storage.insert(common_document(), "S1").await?;
 
-            let invalidated = storage.invalidate_by_subgraph("S2", "subgraph").await?;
+            let invalidated = storage
+                .invalidate_by_subgraph(CacheScope::Subgraph, "S2", "subgraph")
+                .await?;
             assert_eq!(invalidated, 0);
 
             let invalidated = storage
-                .invalidate(vec!["key".to_string()], vec!["S2".to_string()], "cache_tag")
+                .invalidate(
+                    CacheScope::Subgraph,
+                    vec!["key".to_string()],
+                    vec!["S2".to_string()],
+                    "cache_tag",
+                )
                 .await?;
             assert_eq!(invalidated.len(), 1);
             assert_eq!(*invalidated.get("S2").unwrap(), 0);
@@ -1489,7 +1627,12 @@ mod tests {
             storage.insert(common_document(), "S1").await?;
 
             let invalidated = storage
-                .invalidate(vec!["key".to_string()], vec!["S1".to_string()], "cache_tag")
+                .invalidate(
+                    CacheScope::Subgraph,
+                    vec!["key".to_string()],
+                    vec!["S1".to_string()],
+                    "cache_tag",
+                )
                 .await?;
             assert_eq!(invalidated.len(), 1);
             assert_eq!(*invalidated.get("S1").unwrap(), 0);
@@ -1512,14 +1655,18 @@ mod tests {
             storage.insert(document, "S1").await?;
             assert!(storage.exists(&document_key).await?);
 
-            let invalidated = storage.invalidate_by_subgraph("S1", "subgraph").await?;
+            let invalidated = storage
+                .invalidate_by_subgraph(CacheScope::Subgraph, "S1", "subgraph")
+                .await?;
             assert_eq!(invalidated, 1);
 
             assert!(!storage.exists(&document_key).await?);
 
             // re-invalidate - storage still shouldn't have the key in it, and it shouldn't
             // encounter an error
-            let invalidated = storage.invalidate_by_subgraph("S1", "subgraph").await?;
+            let invalidated = storage
+                .invalidate_by_subgraph(CacheScope::Subgraph, "S1", "subgraph")
+                .await?;
             assert_eq!(invalidated, 0);
             assert!(!storage.exists(&document_key).await?);
 

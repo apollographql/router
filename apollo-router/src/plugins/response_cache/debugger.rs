@@ -87,6 +87,8 @@ pub(crate) enum CacheKeySource {
     Subgraph,
     /// Data fetched from cache
     Cache,
+    /// Data fetched from connector
+    Connector,
 }
 
 /// Debug info for the CDN `Cache-Tag` header, once per response — the piece the per-entry

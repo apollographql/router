@@ -1,6 +1,7 @@
 pub(crate) mod cache_control;
 pub(crate) mod cache_key;
 pub(crate) mod cache_tag;
+pub(crate) mod connectors;
 pub(crate) mod debugger;
 pub(crate) mod invalidation;
 pub(crate) mod invalidation_endpoint;

@@ -928,7 +928,7 @@ connector:
                 let connector_response = Response {
                     context: context.clone(),
                     subgraph_name: String::new(),
-                    transport_result: Ok(TransportResponse::Http(HttpResponse {
+                    transport_result: Ok(Some(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
                             .header("x-log-response", HeaderValue::from_static("log"))
@@ -936,7 +936,7 @@ connector:
                             .expect("expecting valid response")
                             .into_parts()
                             .0,
-                    })),
+                    }))),
                     mapped_response: MappedResponse::Data {
                         data: serde_json::json!({})
                             .try_into()
@@ -1365,7 +1365,7 @@ subgraph:
                 let connector_response = Response {
                     context: context.clone(),
                     subgraph_name: String::new(),
-                    transport_result: Ok(TransportResponse::Http(HttpResponse {
+                    transport_result: Ok(Some(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
                             .header("x-log-response", HeaderValue::from_static("log"))
@@ -1373,7 +1373,7 @@ subgraph:
                             .expect("expecting valid response")
                             .into_parts()
                             .0,
-                    })),
+                    }))),
                     mapped_response: MappedResponse::Data {
                         data: serde_json::json!({})
                             .try_into()

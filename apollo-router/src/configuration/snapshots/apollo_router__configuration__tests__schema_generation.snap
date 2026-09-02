@@ -2095,6 +2095,14 @@ expression: "&schema"
           },
           "description": "Propagation of aggregated response_cache cache tags to the supergraph response.\nOff by default; opt in to surface cache tags to a CDN for tag-based purging. See\n`CdnInvalidationConfig` for the individual fields."
         },
+        "connector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorCacheConfiguration"
+            }
+          ],
+          "description": "Configure response caching per connector source"
+        },
         "debug": {
           "default": false,
           "description": "Enable debug mode for the debugger",
@@ -2134,12 +2142,19 @@ expression: "&schema"
               "$ref": "#/definitions/SubgraphSubgraphConfiguration2"
             }
           ],
+          "default": {
+            "all": {
+              "enabled": false,
+              "invalidation": null,
+              "private_id": null,
+              "redis": null,
+              "ttl": null
+            },
+            "subgraphs": {}
+          },
           "description": "Configure invalidation per subgraph"
         }
       },
-      "required": [
-        "subgraph"
-      ],
       "type": "object"
     },
     "Config9": {
@@ -2258,6 +2273,95 @@ expression: "&schema"
       "required": [
         "urls"
       ],
+      "type": "object"
+    },
+    "ConnectorCacheConfiguration": {
+      "additionalProperties": false,
+      "description": "Per connector source configuration for response caching",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorCacheSource"
+            }
+          ],
+          "default": {
+            "enabled": null,
+            "invalidation": null,
+            "private_id": null,
+            "redis": null,
+            "ttl": null
+          },
+          "description": "Options applying to all connector sources"
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/ConnectorCacheSource"
+          },
+          "default": {},
+          "description": "Map of subgraph_name.connector_source_name to configuration",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorCacheSource": {
+      "additionalProperties": false,
+      "description": "Per connector source configuration for response caching",
+      "properties": {
+        "enabled": {
+          "default": null,
+          "description": "Activates caching for this connector source, overrides the global configuration",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "invalidation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SubgraphInvalidationConfig2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Invalidation configuration"
+        },
+        "private_id": {
+          "default": null,
+          "description": "Context key used to separate cache sections per user",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "redis": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Config9"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Redis configuration"
+        },
+        "ttl": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Ttl2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Expiration for all keys for this connector source, unless overridden by the `Cache-Control` header in connector responses"
+        }
+      },
       "type": "object"
     },
     "ConnectorConnectorLimitsConfiguration": {

@@ -29,6 +29,7 @@ use tower::BoxError;
 use tower::ServiceExt;
 
 use crate::Context;
+use crate::batching::BatchQuery;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
@@ -83,6 +84,14 @@ pub struct Request {
     pub(crate) operation: Option<Arc<Valid<ExecutableDocument>>>,
 }
 
+impl Request {
+    pub(crate) fn is_part_of_batch(&self) -> bool {
+        self.context
+            .extensions()
+            .with_lock(|lock| lock.contains_key::<BatchQuery>())
+    }
+}
+
 /// Response type for a connector
 #[derive(Debug)]
 pub struct Response {
@@ -94,8 +103,10 @@ pub struct Response {
     /// connector calls don't race when resolving per-subgraph response rules.
     pub(crate) subgraph_name: String,
 
-    /// The result of the transport request
-    pub(crate) transport_result: Result<TransportResponse, Error>,
+    /// The result of the transport request. `Ok(None)` means no transport happened at all —
+    /// the response was served from the router's response cache — keeping that router-side
+    /// concept out of the federation `TransportResponse` enum.
+    pub(crate) transport_result: Result<Option<TransportResponse>, Error>,
 
     /// The mapped response, including any mapping problems encountered when processing the response
     pub(crate) mapped_response: MappedResponse,
@@ -151,7 +162,7 @@ impl Response {
         Self {
             context,
             subgraph_name: String::new(),
-            transport_result: Ok(http_response.into()),
+            transport_result: Ok(Some(http_response.into())),
             mapped_response,
         }
     }
@@ -272,7 +283,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                     Ok(Response {
                         context: request.context,
                         subgraph_name: original_subgraph_name,
-                        transport_result: Ok(TransportResponse::MappingOnly),
+                        transport_result: Ok(Some(TransportResponse::MappingOnly)),
                         mapped_response: mapped,
                     })
                 }

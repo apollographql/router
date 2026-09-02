@@ -17,6 +17,8 @@ use tower::Service;
 use tracing::Span;
 use tracing_futures::Instrument;
 
+use super::cache_tag::CacheScope;
+use super::connectors::ConnectorCacheConfiguration;
 use super::invalidation::Invalidation;
 use super::plugin::Subgraph;
 use crate::ListenAddr;
@@ -156,16 +158,19 @@ pub(crate) struct InvalidationEndpointConfig {
 #[derive(Clone)]
 pub(crate) struct InvalidationService {
     config: Arc<SubgraphConfiguration<Subgraph>>,
+    connector_config: Arc<ConnectorCacheConfiguration>,
     invalidation: Invalidation,
 }
 
 impl InvalidationService {
     pub(crate) fn new(
         config: Arc<SubgraphConfiguration<Subgraph>>,
+        connector_config: Arc<ConnectorCacheConfiguration>,
         invalidation: Invalidation,
     ) -> Self {
         Self {
             config,
+            connector_config,
             invalidation,
         }
     }
@@ -185,6 +190,7 @@ impl Service<router::Request> for InvalidationService {
             HeaderValue::from_static("application/json");
         let invalidation = self.invalidation.clone();
         let config = self.config.clone();
+        let connector_config = self.connector_config.clone();
         Box::pin(
             async move {
                 let (parts, body) = req.router_request.into_parts();
@@ -235,12 +241,42 @@ impl Service<router::Request> for InvalidationService {
                                         .collect::<Vec<&'static str>>()
                                         .join(", "),
                                 );
-                                let shared_key_is_valid = body
-                                    .iter()
-                                    .flat_map(|b| b.subgraph_names())
-                                    .all(|subgraph_name| {
-                                        validate_shared_key(&config, shared_key, &subgraph_name)
-                                    });
+                                let shared_key_is_valid = body.iter().all(|req| {
+                                    if req.is_connector() {
+                                        validate_connector_shared_key(
+                                            &connector_config,
+                                            shared_key,
+                                            req,
+                                        )
+                                    } else {
+                                        // Authorize against only the config for the scope the
+                                        // caller addressed. A `cache_tag` request that named
+                                        // `sources` (connector scope) requires the connector
+                                        // shared key; every other request in this branch
+                                        // (subgraph/type kinds, and cache_tag over `subgraphs`)
+                                        // requires the subgraph shared key. This keeps a connector
+                                        // credential from purging subgraph cache tags — and vice
+                                        // versa — instead of accepting either key for `cache_tag`.
+                                        let use_connector_key = matches!(
+                                            req,
+                                            InvalidationRequest::CacheTag {
+                                                scope: CacheScope::Connector,
+                                                ..
+                                            }
+                                        );
+                                        req.subgraph_names().iter().all(|name| {
+                                            if use_connector_key {
+                                                validate_connector_shared_key_by_source(
+                                                    &connector_config,
+                                                    shared_key,
+                                                    name,
+                                                )
+                                            } else {
+                                                validate_shared_key(&config, shared_key, name)
+                                            }
+                                        })
+                                    }
+                                });
                                 if !shared_key_is_valid {
                                     Span::current()
                                         .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
@@ -264,9 +300,11 @@ impl Service<router::Request> for InvalidationService {
                                 // index_modes. Allows customers to opt out of maintaining
                                 // by-subgraph and by-type indexes when they only invalidate by
                                 // cache tag, and surfaces misconfiguration to callers fast.
-                                if let Some(rejection) =
-                                    find_disabled_mode_rejection(&config, &body)
-                                {
+                                if let Some(rejection) = find_disabled_mode_rejection(
+                                    &config,
+                                    &connector_config,
+                                    &body,
+                                ) {
                                     let (subgraph, kind) = rejection;
                                     Span::current()
                                         .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
@@ -372,6 +410,52 @@ impl Service<router::Request> for InvalidationService {
     }
 }
 
+fn validate_connector_shared_key(
+    config: &ConnectorCacheConfiguration,
+    shared_key: &str,
+    request: &InvalidationRequest,
+) -> bool {
+    let source_name = match request {
+        InvalidationRequest::ConnectorSource { source }
+        | InvalidationRequest::ConnectorType { source, .. } => source,
+        _ => return false,
+    };
+
+    config
+        .all
+        .invalidation
+        .as_ref()
+        .map(|i| i.shared_key == shared_key)
+        .unwrap_or_default()
+        || config
+            .sources
+            .get(source_name)
+            .and_then(|s| s.invalidation.as_ref())
+            .map(|i| i.shared_key == shared_key)
+            .unwrap_or_default()
+}
+
+/// Validate shared key for a connector source by name.
+/// Used for CacheTag requests where the `subgraphs` field may contain connector source names.
+fn validate_connector_shared_key_by_source(
+    config: &ConnectorCacheConfiguration,
+    shared_key: &str,
+    source_name: &str,
+) -> bool {
+    config
+        .all
+        .invalidation
+        .as_ref()
+        .map(|i| i.shared_key == shared_key)
+        .unwrap_or_default()
+        || config
+            .sources
+            .get(source_name)
+            .and_then(|s| s.invalidation.as_ref())
+            .map(|i| i.shared_key == shared_key)
+            .unwrap_or_default()
+}
+
 fn validate_shared_key(
     config: &SubgraphConfiguration<Subgraph>,
     shared_key: &str,
@@ -424,27 +508,77 @@ pub(crate) fn effective_invalidation_indexes(
 }
 
 /// Scan the parsed invalidation request batch for any item whose `kind` is not enabled for its
-/// target subgraph. Returns `Some((subgraph_name, kind))` for the first offending pair so the
+/// target scope. Returns `Some((scope_name, kind))` for the first offending pair so the
 /// caller can render a precise 400 response, or `None` when every request is permitted.
 ///
-/// Subgraph names are visited in sorted order so the error message is deterministic across
-/// repeated calls, which matters for `CacheTag` requests whose `subgraphs` field is an unordered
+/// Connector-targeted requests resolve their indexes from the connector configuration;
+/// subgraph-targeted ones from the subgraph configuration. `cache_tag` names may belong to
+/// either scope (`sources` is folded into `subgraphs` at parse time), so a name is only
+/// rejected when **both** configurations disable the cache-tag index for it.
+///
+/// Names are visited in sorted order so the error message is deterministic across repeated
+/// calls, which matters for `CacheTag` requests whose `subgraphs` field is an unordered
 /// `HashSet<String>`.
 fn find_disabled_mode_rejection(
     config: &SubgraphConfiguration<Subgraph>,
+    connector_config: &ConnectorCacheConfiguration,
     body: &[InvalidationRequest],
 ) -> Option<(String, &'static str)> {
     for request in body {
         let kind_str = request.kind();
-        let Some(mode) = invalidation_kind_to_index_mode(kind_str) else {
-            continue;
-        };
-        let mut subgraphs = request.subgraph_names();
-        subgraphs.sort();
-        for subgraph in subgraphs {
-            let indexes = effective_invalidation_indexes(config, &subgraph);
-            if !indexes.is_enabled(mode) {
-                return Some((subgraph, kind_str));
+        match request {
+            InvalidationRequest::ConnectorSource { source } => {
+                if !connector_config
+                    .effective_indexes(source)
+                    .is_enabled(IndexMode::Subgraph)
+                {
+                    return Some((source.clone(), kind_str));
+                }
+            }
+            InvalidationRequest::ConnectorType { source, .. } => {
+                if !connector_config
+                    .effective_indexes(source)
+                    .is_enabled(IndexMode::Type)
+                {
+                    return Some((source.clone(), kind_str));
+                }
+            }
+            InvalidationRequest::CacheTag { .. } => {
+                let mut names = request.subgraph_names();
+                names.sort();
+                for name in names {
+                    let subgraph_enabled = effective_invalidation_indexes(config, &name)
+                        .is_enabled(IndexMode::CacheTag);
+                    // The connector side only vouches for a name when it actually has an
+                    // invalidation config that could apply to it; an entirely unconfigured
+                    // connector block must not un-reject subgraph-targeted requests.
+                    let connector_has_invalidation_config = connector_config
+                        .sources
+                        .get(&name)
+                        .map(|s| s.invalidation.is_some())
+                        .unwrap_or(false)
+                        || connector_config.all.invalidation.is_some();
+                    let connector_enabled = connector_has_invalidation_config
+                        && connector_config
+                            .effective_indexes(&name)
+                            .is_enabled(IndexMode::CacheTag);
+                    if !subgraph_enabled && !connector_enabled {
+                        return Some((name, kind_str));
+                    }
+                }
+            }
+            InvalidationRequest::Subgraph { .. } | InvalidationRequest::Type { .. } => {
+                let Some(mode) = invalidation_kind_to_index_mode(kind_str) else {
+                    continue;
+                };
+                let mut subgraphs = request.subgraph_names();
+                subgraphs.sort();
+                for subgraph in subgraphs {
+                    let indexes = effective_invalidation_indexes(config, &subgraph);
+                    if !indexes.is_enabled(mode) {
+                        return Some((subgraph, kind_str));
+                    }
+                }
             }
         }
     }
@@ -456,6 +590,7 @@ mod indexes_tests {
     use std::collections::HashMap;
 
     use super::*;
+    use crate::plugins::response_cache::connectors::ConnectorCacheSource;
     use crate::plugins::response_cache::plugin::Subgraph;
 
     /// Test helper: build an `InvalidationIndexes` from a list of modes that should be enabled.
@@ -629,7 +764,10 @@ indexes:
         let body = vec![InvalidationRequest::Subgraph {
             subgraph: "users".to_string(),
         }];
-        assert_eq!(find_disabled_mode_rejection(&cfg, &body), None);
+        assert_eq!(
+            find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body),
+            None
+        );
     }
 
     #[test]
@@ -639,7 +777,7 @@ indexes:
             subgraph: "users".to_string(),
         }];
         assert_eq!(
-            find_disabled_mode_rejection(&cfg, &body),
+            find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body),
             Some(("users".to_string(), "subgraph"))
         );
     }
@@ -652,7 +790,7 @@ indexes:
             r#type: "User".to_string(),
         }];
         assert_eq!(
-            find_disabled_mode_rejection(&cfg, &body),
+            find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body),
             Some(("users".to_string(), "type"))
         );
     }
@@ -666,10 +804,12 @@ indexes:
         let mut subgraphs = std::collections::HashSet::new();
         subgraphs.insert("users".to_string());
         let body = vec![InvalidationRequest::CacheTag {
+            scope: CacheScope::Subgraph,
             subgraphs,
             cache_tag: "homepage".to_string(),
         }];
-        let rejection = find_disabled_mode_rejection(&cfg, &body);
+        let rejection =
+            find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body);
         assert_eq!(rejection, Some(("users".to_string(), "cache_tag")));
     }
 
@@ -685,7 +825,7 @@ indexes:
             subgraph: "payments".to_string(),
         }];
         assert_eq!(
-            find_disabled_mode_rejection(&cfg, &body),
+            find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body),
             Some(("payments".to_string(), "subgraph"))
         );
     }
@@ -706,12 +846,124 @@ indexes:
         subgraphs.insert("users".to_string());
         subgraphs.insert("orders".to_string());
         let body = vec![InvalidationRequest::CacheTag {
+            scope: CacheScope::Subgraph,
             subgraphs,
             cache_tag: "homepage".to_string(),
         }];
         // The disabled subgraph is "users"; should be returned reliably.
-        let rejection = find_disabled_mode_rejection(&cfg, &body);
+        let rejection =
+            find_disabled_mode_rejection(&cfg, &ConnectorCacheConfiguration::default(), &body);
         assert_eq!(rejection, Some(("users".to_string(), "cache_tag")));
+    }
+
+    #[test]
+    fn find_disabled_mode_rejection_flags_connector_kind_when_disabled() {
+        let cfg = subgraph_config(None, None);
+        let connector_cfg = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: "k".to_string(),
+                    indexes: indexes_with(&[IndexMode::Type, IndexMode::CacheTag]),
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        };
+        let body = vec![InvalidationRequest::ConnectorSource {
+            source: "graph.api".to_string(),
+        }];
+        assert_eq!(
+            find_disabled_mode_rejection(&cfg, &connector_cfg, &body),
+            Some(("graph.api".to_string(), "connector"))
+        );
+    }
+
+    #[test]
+    fn find_disabled_mode_rejection_flags_connector_type_when_disabled() {
+        let cfg = subgraph_config(None, None);
+        let connector_cfg = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: "k".to_string(),
+                    indexes: indexes_with(&[IndexMode::Subgraph, IndexMode::CacheTag]),
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        };
+        let body = vec![InvalidationRequest::ConnectorType {
+            source: "graph.api".to_string(),
+            r#type: "User".to_string(),
+        }];
+        assert_eq!(
+            find_disabled_mode_rejection(&cfg, &connector_cfg, &body),
+            Some(("graph.api".to_string(), "type"))
+        );
+    }
+
+    #[test]
+    fn find_disabled_mode_rejection_connector_requests_ignore_subgraph_indexes() {
+        // The subgraph block disables everything, but connector-targeted requests must resolve
+        // their indexes from the connector configuration (default: all enabled).
+        let cfg = subgraph_config(Some(indexes_with(&[])), None);
+        let connector_cfg = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: "k".to_string(),
+                    indexes: InvalidationIndexes::default(),
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        };
+        let body = vec![
+            InvalidationRequest::ConnectorSource {
+                source: "graph.api".to_string(),
+            },
+            InvalidationRequest::ConnectorType {
+                source: "graph.api".to_string(),
+                r#type: "User".to_string(),
+            },
+        ];
+        assert_eq!(
+            find_disabled_mode_rejection(&cfg, &connector_cfg, &body),
+            None
+        );
+    }
+
+    #[test]
+    fn find_disabled_mode_rejection_cache_tag_allowed_by_connector_config() {
+        // Subgraph side disables cache_tag for the name, but the connector side has an
+        // invalidation config with cache_tag enabled — the request must be permitted.
+        let cfg = subgraph_config(
+            Some(indexes_with(&[IndexMode::Subgraph, IndexMode::Type])),
+            None,
+        );
+        let connector_cfg = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: "k".to_string(),
+                    indexes: InvalidationIndexes::default(),
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        };
+        let mut subgraphs = std::collections::HashSet::new();
+        subgraphs.insert("graph.api".to_string());
+        let body = vec![InvalidationRequest::CacheTag {
+            scope: CacheScope::Subgraph,
+            subgraphs,
+            cache_tag: "tag-1".to_string(),
+        }];
+        assert_eq!(
+            find_disabled_mode_rejection(&cfg, &connector_cfg, &body),
+            None
+        );
     }
 }
 
@@ -726,6 +978,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::plugins::response_cache::connectors::ConnectorCacheSource;
     use crate::plugins::response_cache::plugin::StorageInterface;
     use crate::plugins::response_cache::storage::redis::Config;
     use crate::plugins::response_cache::storage::redis::Storage;
@@ -757,7 +1010,11 @@ mod tests {
             },
             subgraphs: HashMap::new(),
         });
-        let service = InvalidationService::new(config, invalidation);
+        let service = InvalidationService::new(
+            config,
+            Arc::new(ConnectorCacheConfiguration::default()),
+            invalidation,
+        );
         let req = router::Request::fake_builder()
             .method(http::Method::POST)
             .header(AUTHORIZATION, "testttt")
@@ -825,7 +1082,11 @@ mod tests {
             .collect(),
         });
         // Trying to invalidation with shared_key on subgraph test for a subgraph foo
-        let service = InvalidationService::new(config, invalidation);
+        let service = InvalidationService::new(
+            config,
+            Arc::new(ConnectorCacheConfiguration::default()),
+            invalidation,
+        );
         let req = router::Request::fake_builder()
             .method(http::Method::POST)
             .header(AUTHORIZATION, "test_test")
@@ -903,7 +1164,11 @@ mod tests {
             .collect(),
         });
         // Trying to invalidation with shared_key on subgraph test for a subgraph foo
-        let service = InvalidationService::new(config, invalidation);
+        let service = InvalidationService::new(
+            config,
+            Arc::new(ConnectorCacheConfiguration::default()),
+            invalidation,
+        );
         let req = router::Request::fake_builder()
             .method(http::Method::POST)
             .header(AUTHORIZATION, "test_test")
@@ -986,7 +1251,11 @@ mod tests {
             .collect(),
         });
         // Trying to invalidation with shared_key on subgraph test for a subgraph foo
-        let service = InvalidationService::new(config, invalidation);
+        let service = InvalidationService::new(
+            config,
+            Arc::new(ConnectorCacheConfiguration::default()),
+            invalidation,
+        );
         let req = router::Request::fake_builder()
             .method(http::Method::POST)
             .header(AUTHORIZATION, "test")
@@ -1038,7 +1307,11 @@ mod tests {
             subgraphs: HashMap::new(),
         });
         // Trying to invalidation with shared_key on subgraph test for a subgraph foo
-        let service = InvalidationService::new(config, invalidation);
+        let service = InvalidationService::new(
+            config,
+            Arc::new(ConnectorCacheConfiguration::default()),
+            invalidation,
+        );
         let req = router::Request::fake_builder()
             .method(http::Method::POST)
             .header(AUTHORIZATION, "test")
@@ -1067,5 +1340,277 @@ mod tests {
             response_body_str
                 .contains("failed to deserialize the request body into JSON: unknown field")
         );
+    }
+
+    #[test]
+    fn validate_connector_shared_key_all_config() {
+        let config = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: "my_secret".to_string(),
+                    indexes: InvalidationIndexes::default(),
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        };
+        let req = InvalidationRequest::ConnectorSource {
+            source: "any_source".to_string(),
+        };
+        assert!(validate_connector_shared_key(&config, "my_secret", &req));
+    }
+
+    #[test]
+    fn validate_connector_shared_key_source_specific() {
+        let config = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource::default(),
+            sources: [(
+                "mysubgraph.my_api".to_string(),
+                ConnectorCacheSource {
+                    invalidation: Some(SubgraphInvalidationConfig {
+                        enabled: true,
+                        shared_key: "source_secret".to_string(),
+                        indexes: InvalidationIndexes::default(),
+                    }),
+                    ..Default::default()
+                },
+            )]
+            .into_iter()
+            .collect(),
+        };
+        let req = InvalidationRequest::ConnectorSource {
+            source: "mysubgraph.my_api".to_string(),
+        };
+        assert!(validate_connector_shared_key(
+            &config,
+            "source_secret",
+            &req
+        ));
+    }
+
+    #[test]
+    fn validate_connector_shared_key_mismatch() {
+        let config = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: "correct_key".to_string(),
+                    indexes: InvalidationIndexes::default(),
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        };
+        let req = InvalidationRequest::ConnectorSource {
+            source: "any_source".to_string(),
+        };
+        assert!(!validate_connector_shared_key(&config, "wrong_key", &req));
+    }
+
+    #[test]
+    fn validate_connector_shared_key_non_connector() {
+        let config = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: "my_secret".to_string(),
+                    indexes: InvalidationIndexes::default(),
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        };
+        let req = InvalidationRequest::Subgraph {
+            subgraph: "test".to_string(),
+        };
+        assert!(!validate_connector_shared_key(&config, "my_secret", &req));
+    }
+
+    #[test]
+    fn validate_connector_shared_key_by_source_all() {
+        let config = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: "all_key".to_string(),
+                    indexes: InvalidationIndexes::default(),
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        };
+        assert!(validate_connector_shared_key_by_source(
+            &config,
+            "all_key",
+            "unknown_source"
+        ));
+    }
+
+    #[test]
+    fn validate_connector_shared_key_by_source_specific() {
+        let config = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource::default(),
+            sources: [(
+                "mysubgraph.my_api".to_string(),
+                ConnectorCacheSource {
+                    invalidation: Some(SubgraphInvalidationConfig {
+                        enabled: true,
+                        shared_key: "source_key".to_string(),
+                        indexes: InvalidationIndexes::default(),
+                    }),
+                    ..Default::default()
+                },
+            )]
+            .into_iter()
+            .collect(),
+        };
+        assert!(validate_connector_shared_key_by_source(
+            &config,
+            "source_key",
+            "mysubgraph.my_api"
+        ));
+    }
+
+    #[test]
+    fn validate_connector_shared_key_by_source_no_config() {
+        let config = ConnectorCacheConfiguration::default();
+        assert!(!validate_connector_shared_key_by_source(
+            &config,
+            "any_key",
+            "any_source"
+        ));
+    }
+
+    /// Build an `InvalidationService` with distinct subgraph and connector shared keys, backed by
+    /// a throwaway Redis namespace.
+    async fn service_with_split_keys(namespace: &str) -> InvalidationService {
+        let (_drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false, namespace), drop_rx)
+            .await
+            .unwrap();
+        let storage = Arc::new(StorageInterface::from(storage));
+        let invalidation = Invalidation::new(storage.clone()).await.unwrap();
+
+        let config = Arc::new(SubgraphConfiguration {
+            all: Subgraph {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: String::from("subgraph-key"),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            subgraphs: HashMap::new(),
+        });
+        let connector_config = Arc::new(ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: String::from("connector-key"),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        });
+        InvalidationService::new(config, connector_config, invalidation)
+    }
+
+    /// The connector shared key must NOT authorize subgraph-targeted invalidation kinds.
+    #[tokio::test]
+    async fn connector_shared_key_does_not_authorize_subgraph_kinds() {
+        let service =
+            service_with_split_keys("connector_shared_key_does_not_authorize_subgraph_kinds").await;
+        for body_json in [
+            serde_json::json!([{"kind": "subgraph", "subgraph": "accounts"}]),
+            serde_json::json!([{"kind": "type", "subgraph": "accounts", "type": "User"}]),
+        ] {
+            let req = router::Request::fake_builder()
+                .method(http::Method::POST)
+                .header(AUTHORIZATION, "connector-key")
+                .body(body::from_bytes(serde_json::to_vec(&body_json).unwrap()))
+                .build()
+                .unwrap();
+            let res = service.clone().oneshot(req).await.unwrap();
+            assert_eq!(
+                res.response.status(),
+                StatusCode::UNAUTHORIZED,
+                "connector key must not authorize {body_json}"
+            );
+        }
+    }
+
+    /// The subgraph shared key must NOT authorize connector-targeted invalidation kinds.
+    #[tokio::test]
+    async fn subgraph_shared_key_does_not_authorize_connector_kinds() {
+        let service =
+            service_with_split_keys("subgraph_shared_key_does_not_authorize_connector_kinds").await;
+        for body_json in [
+            serde_json::json!([{"kind": "connector", "source": "graph.api"}]),
+            serde_json::json!([{"kind": "type", "source": "graph.api", "type": "User"}]),
+        ] {
+            let req = router::Request::fake_builder()
+                .method(http::Method::POST)
+                .header(AUTHORIZATION, "subgraph-key")
+                .body(body::from_bytes(serde_json::to_vec(&body_json).unwrap()))
+                .build()
+                .unwrap();
+            let res = service.clone().oneshot(req).await.unwrap();
+            assert_eq!(
+                res.response.status(),
+                StatusCode::UNAUTHORIZED,
+                "subgraph key must not authorize {body_json}"
+            );
+        }
+    }
+
+    /// `cache_tag` authorization is scope-specific: a request that names `sources` (connector
+    /// scope) is authorized only by the connector key; one that names `subgraphs` (subgraph scope)
+    /// only by the subgraph key. Neither key may cross into the other scope's tags — in
+    /// particular a connector credential must not purge subgraph cache tags (the vulnerability
+    /// this replaces the old accept-either-key behavior to close).
+    #[tokio::test]
+    async fn cache_tag_shared_key_is_scope_specific() {
+        let service = service_with_split_keys("cache_tag_shared_key_is_scope_specific").await;
+
+        // (request body, key that must be accepted, cross-scope key that must be rejected)
+        let cases = [
+            (
+                serde_json::json!([{"kind": "cache_tag", "sources": ["graph.api"], "cache_tag": "tag-1"}]),
+                "connector-key",
+                "subgraph-key",
+            ),
+            (
+                serde_json::json!([{"kind": "cache_tag", "subgraphs": ["accounts"], "cache_tag": "tag-1"}]),
+                "subgraph-key",
+                "connector-key",
+            ),
+        ];
+
+        for (body_json, matching_key, wrong_key) in cases {
+            let build = |key: &str| {
+                router::Request::fake_builder()
+                    .method(http::Method::POST)
+                    .header(AUTHORIZATION, key)
+                    .body(body::from_bytes(serde_json::to_vec(&body_json).unwrap()))
+                    .build()
+                    .unwrap()
+            };
+
+            let res = service.clone().oneshot(build(matching_key)).await.unwrap();
+            assert_eq!(
+                res.response.status(),
+                StatusCode::ACCEPTED,
+                "{matching_key} should authorize {body_json}"
+            );
+
+            let res = service.clone().oneshot(build(wrong_key)).await.unwrap();
+            assert_eq!(
+                res.response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{wrong_key} must not authorize {body_json}"
+            );
+        }
     }
 }

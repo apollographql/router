@@ -630,6 +630,14 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
         service
     }
 
+    /// This service handles connector execution (wrapping individual connector requests)
+    fn connector_service(
+        &self,
+        service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService {
+        service
+    }
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
@@ -747,6 +755,12 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
         source_name: String,
     ) -> crate::services::connector::request_service::BoxService;
 
+    /// This service handles connector execution (wrapping individual connector requests)
+    fn connector_service(
+        &self,
+        service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService;
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
 
@@ -802,6 +816,13 @@ where
         source_name: String,
     ) -> crate::services::connector::request_service::BoxService {
         self.connector_request_service(service, source_name)
+    }
+
+    fn connector_service(
+        &self,
+        service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService {
+        self.connector_service(service)
     }
 
     fn name(&self) -> &'static str {
