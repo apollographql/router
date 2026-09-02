@@ -278,7 +278,7 @@ pub(super) fn handle_from_context(
         // subgraph may declare them as @external.
         let append_subgraph = state.graph.node(append_fetch_node).subgraph.clone();
         let append_schema = search_space
-            .query_graph
+            .cached_query_graph.query_graph
             .schema_by_source(&append_subgraph)?;
         let append_type: CompositeTypeDefinitionPosition = append_schema
             .get_type(ancestor_type.type_name())?
@@ -494,7 +494,7 @@ fn ancestor_anchor(
     ancestor_idx: usize,
     ancestor_op_path: &SharedPath<Arc<OpPathElement>>,
 ) -> Option<super::PendingSelection> {
-    let graph = search_space.query_graph.graph();
+    let graph = search_space.cached_query_graph.query_graph.graph();
     let node = graph.node_indices().find(|&idx| {
         let data = &graph[idx];
         data.source == *subgraph

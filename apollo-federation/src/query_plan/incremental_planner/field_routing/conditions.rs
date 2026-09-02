@@ -6,6 +6,8 @@
 //! - `conditions_resolvable_at_node`: graph-based, path-sensitive variant.
 //! - `conditions_have_requires`: detects @requires on condition edges.
 
+use std::sync::Arc;
+
 use petgraph::graph::NodeIndex;
 
 use super::FieldRoutingSearchSpace;
