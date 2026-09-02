@@ -2100,3 +2100,89 @@ fn entity_shareable_field_filters_inconsistent_union_members() {
     }
     "###);
 }
+
+/// Deep keyless split: the strand sits two keyless levels below the field
+/// with routing alternatives, where the one-level lookahead in
+/// `split_for_other_subgraph` cannot see it. Committing `conn` to A strands
+/// `Inner.b` (Inner and Conn are keyless, so no hop can recover it); the
+/// drop-time recovery re-pushes `conn { inner { b } }` at the entity anchor,
+/// avoiding A, so it key-hops to B and the responses merge at the same path.
+/// Targets mod.rs try_split_repush / wrap_in_parent / split_avoid filtering.
+#[test]
+fn deep_keyless_split_repushes_remainder_at_entity_anchor() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type E
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+{
+  id: ID!
+  conn: Conn
+  onlyA: String @join__field(graph: A)
+}
+
+type Conn
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  inner: Inner
+}
+
+type Inner
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  a: String @join__field(graph: A)
+  b: String @join__field(graph: B)
+}
+
+type Query
+  @join__type(graph: A)
+{
+  e: E
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ e { onlyA conn { inner { a b } } } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            e {
+              __typename
+              id
+              onlyA
+              conn {
+                inner {
+                  a
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "e") {
+          Fetch(service: "b") {
+            {
+              ... on E {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on E {
+                conn {
+                  inner {
+                    b
+                  }
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
