@@ -47,6 +47,15 @@ emitted for each:
 
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10029>
 
+### Support `@oneOf` input object composition ([PR #10124](https://github.com/apollographql/router/pull/10124))
+
+The `@oneOf` directive on input object types is now preserved during
+composition. If any subgraph marks an input type with `@oneOf`, the
+supergraph will include `@oneOf` on that type. Subgraphs are not
+required to agree on whether `@oneOf` is present.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10124>
+
 ## 🐛 Fixes
 
 ### Fix `GROUP_SELECTION_IS_NOT_OBJECT` for union/interface fields in nested `@connect` selections ([PR #9990](https://github.com/apollographql/router/pull/9990))
