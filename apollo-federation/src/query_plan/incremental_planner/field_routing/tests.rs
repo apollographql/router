@@ -1827,3 +1827,124 @@ fn context_from_context_produces_valid_plan() {
         "Plan should include context variable argument: {plan_str}"
     );
 }
+
+const CONTEXT_BOUNDARY_SCHEMA: &str = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/context/v0.1", import: ["@context"], for: SECURITY)
+{
+  query: Query
+}
+
+directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar context__ContextFieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar join__DirectiveArguments
+
+scalar join__FieldSet
+
+scalar join__FieldValue
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+enum join__Graph {
+  S1 @join__graph(name: "s1", url: "http://s1")
+  S2 @join__graph(name: "s2", url: "http://s2")
+}
+
+type Query
+  @join__type(graph: S1)
+  @join__type(graph: S2)
+{
+  t: T! @join__field(graph: S1)
+}
+
+type T
+  @join__type(graph: S1, key: "id")
+  @join__type(graph: S2, key: "id")
+  @context(name: "s2__ctx")
+{
+  id: ID!
+  prop: String! @join__field(graph: S1) @join__field(graph: S2)
+  child: T @join__field(graph: S2)
+  field: Int! @join__field(graph: S2, contextArguments: [{context: "s2__ctx", name: "a", type: "String", selection: " { prop }"}])
+}
+"#;
+
+/// @fromContext consumed inside an entity fetch whose entity root type IS
+/// the @context ancestor: the context value rides the entity representation
+/// (no extra isolation hop), the context selection lands on the fetch
+/// feeding the entity fetch, and the rewrite path has no Parent elements.
+#[test]
+fn context_value_rides_entity_representation_at_boundary() {
+    let plan_str =
+        plan_query_with_router_specs(CONTEXT_BOUNDARY_SCHEMA, "{ t { child { field } } }");
+    assert!(
+        plan_str.contains("contextualArgument"),
+        "Plan should pass the context variable: {plan_str}"
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "s1") {
+          {
+            t {
+              __typename
+              id
+              prop
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "s2") {
+            {
+              ... on T {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on T {
+                child {
+                  field(a: $contextualArgument_2_0)
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
