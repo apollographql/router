@@ -201,6 +201,16 @@ impl ValidationState {
     ) -> Result<ValidationResult, FederationError> {
         let mut new_subgraph_paths: Vec<SubgraphPathInfo> = Default::default();
         let mut dead_ends: Vec<UnadvanceableClosures> = Default::default();
+        // Two options with the same tail node, contexts, and possible runtime types advance
+        // identically from here on, so keeping more than one exemplar only multiplies work on
+        // every subsequent transition. This is the same abstraction the visit-skipping memo in
+        // `can_skip_visit_for_subgraph_paths` relies on, tightened with runtime types since they
+        // affect downcast advancement.
+        let mut seen_options: IndexSet<(
+            petgraph::graph::NodeIndex,
+            SubgraphPathContexts,
+            BTreeSet<Name>,
+        )> = Default::default();
 
         for SubgraphPathInfo { path, contexts } in subgraph_path_infos.iter_mut() {
             let options = path.advance_with_transition(
@@ -246,10 +256,24 @@ impl ValidationState {
                 }
                 Arc::new(contexts)
             };
-            new_subgraph_paths.extend(options.into_iter().map(|option| SubgraphPathInfo {
-                path: option,
-                contexts: new_contexts.clone(),
-            }));
+            for option in options {
+                let key = (
+                    option.path.tail(),
+                    new_contexts.clone(),
+                    option
+                        .path
+                        .runtime_types_of_tail()
+                        .iter()
+                        .map(|type_pos| type_pos.type_name.clone())
+                        .collect::<BTreeSet<_>>(),
+                );
+                if seen_options.insert(key) {
+                    new_subgraph_paths.push(SubgraphPathInfo {
+                        path: option,
+                        contexts: new_contexts.clone(),
+                    });
+                }
+            }
         }
 
         if new_subgraph_paths.is_empty() {

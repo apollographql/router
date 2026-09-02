@@ -774,8 +774,87 @@ mod other_validation_errors_tests {
             &result,
             &[(
                 "MAX_VALIDATION_SUBGRAPH_PATHS_EXCEEDED",
-                "Maximum number of validation subgraph paths exceeded: 12",
+                "Maximum number of validation subgraph paths exceeded: 11",
             )],
+        );
+    }
+
+    /// Entities resolvable across many subgraphs cause multiplicative path growth.
+    /// Without dedup, a chain like User -> Post -> User re-entering through N subgraphs
+    /// produces O(N^depth) paths. With dedup, paths sharing the same tail node,
+    /// contexts, and runtime types are collapsed to one exemplar per equivalence
+    /// class, keeping the count proportional to distinct tails instead.
+    #[test]
+    fn dedup_collapses_duplicate_tail_paths_across_subgraphs() {
+        // Three subgraphs each resolve User and Post, creating 3^depth path
+        // multiplication on cyclic references. The cap is set low enough that
+        // without dedup this would exceed it.
+        let subgraph_a = ServiceDefinition {
+            name: "A",
+            type_defs: r#"
+                type Query {
+                    users: [User]
+                }
+
+                type User @key(fields: "id") {
+                    id: ID!
+                    name: String
+                    posts: [Post] @shareable
+                }
+
+                type Post @key(fields: "id") {
+                    id: ID!
+                    title: String @shareable
+                    author: User @shareable
+                }
+            "#,
+        };
+
+        let subgraph_b = ServiceDefinition {
+            name: "B",
+            type_defs: r#"
+                type User @key(fields: "id") {
+                    id: ID!
+                    posts: [Post] @shareable
+                }
+
+                type Post @key(fields: "id") {
+                    id: ID!
+                    title: String @shareable
+                    author: User @shareable
+                }
+            "#,
+        };
+
+        let subgraph_c = ServiceDefinition {
+            name: "C",
+            type_defs: r#"
+                type User @key(fields: "id") {
+                    id: ID!
+                    posts: [Post] @shareable
+                }
+
+                type Post @key(fields: "id") {
+                    id: ID!
+                    title: String @shareable
+                    author: User @shareable
+                }
+            "#,
+        };
+
+        // With a cap of 50, the 3-subgraph cycle User->Post->User would exceed
+        // the cap without dedup (each re-entry multiplies by 3). With dedup,
+        // only distinct tail nodes survive each transition.
+        let result = compose_as_fed2_subgraphs_with_options(
+            &[subgraph_a, subgraph_b, subgraph_c],
+            CompositionOptions {
+                max_validation_subgraph_paths: Some(50),
+            },
+        );
+        assert!(
+            result.is_ok(),
+            "Expected composition to succeed with tail-dedup keeping path count under cap, \
+             but got: {result:?}"
         );
     }
 }
