@@ -1,6 +1,7 @@
 use crate::Supergraph;
 use crate::query_plan::TopLevelPlanNode;
 use crate::query_plan::query_planner::IncrementalPlannerConfig;
+use crate::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
 use crate::query_plan::query_planner::QueryPlanOptions;
 use crate::query_plan::query_planner::QueryPlanner;
 use crate::query_plan::query_planner::QueryPlannerConfig;
@@ -39,6 +40,14 @@ fn plan_query_with_options(
         .build_query_plan(&document, None, plan_options)
         .expect("query plan");
     format!("{plan}")
+}
+
+fn plan_query_with_defer(schema: &str, query: &str) -> String {
+    let config = QueryPlannerConfig {
+        incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
+        ..default_config()
+    };
+    plan_query_with_options(schema, query, config, Default::default())
 }
 
 const SINGLE_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/single_subgraph.graphql");
@@ -1686,5 +1695,98 @@ fn constant_skip_and_root_type_condition_fragments() {
     assert!(
         rooted.contains("name"),
         "Root type condition should pass through: {rooted}"
+    );
+}
+
+/// Cross-subgraph @defer: the deferred fragment's fields live in a different
+/// subgraph from the primary, producing a Defer node with a key-hop fetch
+/// in the deferred block.
+#[test]
+fn defer_produces_defer_node() {
+    let plan_str = plan_query_with_defer(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer { email } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Primary should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Deferred should fetch 'email': {plan_str}"
+    );
+}
+
+/// Labels synthesized by defer normalization for unlabeled @defer
+/// (`qp__N`) are internal bookkeeping and must not leak into the plan;
+/// user-written labels must be preserved.
+#[test]
+fn synthesized_defer_labels_do_not_leak_into_plan() {
+    let plan_str = plan_query_with_defer(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer { email } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        !plan_str.contains("qp__"),
+        "Synthesized defer label must not appear in the plan: {plan_str}"
+    );
+
+    let labeled_plan_str = plan_query_with_defer(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer(label: \"mine\") { email } } }",
+    );
+    assert!(
+        labeled_plan_str.contains("mine"),
+        "User-written defer label must be preserved: {labeled_plan_str}"
+    );
+}
+
+/// Same-subgraph @defer still produces a Defer node so the executor can
+/// send a multipart response even when no cross-subgraph fetch is needed.
+#[test]
+fn defer_same_subgraph_produces_defer_node() {
+    let plan_str = plan_query_with_defer(
+        SINGLE_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer { email } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node even for same-subgraph @defer: {plan_str}"
+    );
+}
+
+const THREE_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/three_subgraph.graphql");
+
+/// Multiple @defer siblings at the same level produce distinct deferred
+/// blocks inside a single Defer node.
+#[test]
+fn defer_sibling_blocks_produces_multiple_deferred() {
+    let plan_str = plan_query_with_defer(
+        THREE_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer { email } ... @defer { address } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Primary should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "A deferred block should fetch 'email': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("address"),
+        "A deferred block should fetch 'address': {plan_str}"
     );
 }
