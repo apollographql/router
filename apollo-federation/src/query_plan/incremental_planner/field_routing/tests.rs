@@ -50,6 +50,21 @@ fn plan_query_with_defer(schema: &str, query: &str) -> String {
     plan_query_with_options(schema, query, config, Default::default())
 }
 
+fn plan_query_with_router_specs(schema: &str, query: &str) -> String {
+    let supergraph = Supergraph::new_with_router_specs(schema).expect("supergraph parse");
+    let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        query,
+        "test.graphql",
+    )
+    .expect("query parse");
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("query plan");
+    format!("{plan}")
+}
+
 const SINGLE_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/single_subgraph.graphql");
 
 #[test]
@@ -1788,5 +1803,27 @@ fn defer_sibling_blocks_produces_multiple_deferred() {
     assert!(
         plan_str.contains("address"),
         "A deferred block should fetch 'address': {plan_str}"
+    );
+}
+
+const CONTEXT_SCHEMA: &str = include_str!("../fixtures/context.graphql");
+
+/// @fromContext field: the plan must fetch the context-providing field
+/// (`prop`) from the parent and thread it via a contextualArgument to
+/// the subgraph that resolves the @fromContext-bearing field.
+#[test]
+fn context_from_context_produces_valid_plan() {
+    let plan_str = plan_query_with_router_specs(CONTEXT_SCHEMA, "{ t { u { field } } }");
+    assert!(
+        plan_str.contains("field"),
+        "Plan should fetch 'field': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("prop"),
+        "Plan should fetch 'prop' as context value: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("contextualArgument"),
+        "Plan should include context variable argument: {plan_str}"
     );
 }
