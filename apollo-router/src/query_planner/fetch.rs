@@ -104,6 +104,13 @@ pub(crate) struct FetchNode {
     /// The name of the service or subgraph that the fetch is querying.
     pub(crate) service_name: Arc<str>,
 
+    /// How to execute this fetch. `GraphQL` for standard subgraph fetches,
+    /// `Connector` for connector-based fetches carrying the directive
+    /// coordinate of the connector to execute.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "apollo_federation::query_plan::FetchProtocol::is_graphql")]
+    pub(crate) protocol: apollo_federation::query_plan::FetchProtocol,
+
     /// The data that is required for the subgraph fetch.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     #[serde(default)]
@@ -582,6 +589,7 @@ mod tests {
     fn make_fetch_node(requires: Vec<requires_selection::Selection>) -> FetchNode {
         FetchNode {
             service_name: "test".into(),
+            protocol: Default::default(),
             requires,
             variable_usages: vec![],
             operation: SerializableDocument::from_string("{ me }"),
