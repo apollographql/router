@@ -104,6 +104,7 @@ pub(crate) fn build_bulb_plan(
             .abstract_types_with_inconsistent_runtime_types
             .clone(),
         key_hops_in_flight: Default::default(),
+        disabled_subgraphs: parameters.disabled_subgraphs.clone(),
     };
 
     let root_qg_node = parameters.head;
