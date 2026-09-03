@@ -536,11 +536,9 @@ mod shape_tests {
             get_shape(
                 vec![WithRange::new(LitExpr::String("a".to_string()), None)],
                 Shape::string([])
-            ),
-            Shape::error(
-                "Method ->in requires an array argument, but got: \"a\"".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->in requires an array argument, but got: \"a\"")"#,
         );
     }
 
@@ -553,24 +551,17 @@ mod shape_tests {
                     None
                 )],
                 Shape::int([])
-            ),
-            Shape::error_with_partial(
-                "Method ->in can only compare values of the same type. Got Int == \"a\"."
-                    .to_string(),
-                Shape::bool_value(false, [get_location()]),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"false (err "Method ->in can only compare values of the same type. Got Int == \"a\".")"#,
         );
     }
 
     #[test]
     fn in_shape_should_error_on_no_args() {
         assert_eq!(
-            get_shape(vec![], Shape::string([])),
-            Shape::error(
-                "Method ->in requires one argument".to_string(),
-                [get_location()]
-            )
+            get_shape(vec![], Shape::string([])).pretty_print(),
+            r#"Unknown (err "Method ->in requires one argument")"#,
         );
     }
 
@@ -595,11 +586,9 @@ mod shape_tests {
                     )
                 ],
                 Shape::int([])
-            ),
-            Shape::error(
-                "Method ->in requires only one argument, but 2 were provided".to_string(),
-                []
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->in requires only one argument, but 2 were provided")"#,
         );
     }
 
@@ -613,11 +602,9 @@ mod shape_tests {
                 None,
                 Shape::string([]),
                 Shape::none(),
-            ),
-            Shape::error(
-                "Method ->in requires one argument".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->in requires one argument")"#,
         );
     }
 

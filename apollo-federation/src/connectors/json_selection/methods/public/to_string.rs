@@ -352,11 +352,9 @@ mod shape_tests {
             get_shape(
                 vec![WithRange::new(LitExpr::String("arg".to_string()), None)],
                 Shape::int([])
-            ),
-            Shape::error(
-                "Method ->toString does not accept any arguments, but 1 were provided".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->toString does not accept any arguments, but 1 were provided")"#,
         );
     }
 
@@ -378,26 +376,16 @@ mod shape_tests {
     #[test]
     fn to_string_shape_should_error_for_object_input() {
         assert_eq!(
-            get_shape(vec![], Shape::any_object([])),
-            Shape::error_with_partial(
-                "Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify or ->joinNotNull instead"
-                    .to_string(),
-                Shape::none(),
-                [get_location()]
-            )
+            get_shape(vec![], Shape::any_object([])).pretty_print(),
+            r#"None (err "Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify or ->joinNotNull instead")"#,
         );
     }
 
     #[test]
     fn to_string_shape_should_error_for_array_input() {
         assert_eq!(
-            get_shape(vec![], Shape::any_array([])),
-            Shape::error_with_partial(
-                "Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify or ->joinNotNull instead"
-                    .to_string(),
-                Shape::none(),
-                [get_location()]
-            )
+            get_shape(vec![], Shape::any_array([])).pretty_print(),
+            r#"None (err "Method ->toString cannot convert arrays or objects to strings. Use ->jsonStringify or ->joinNotNull instead")"#,
         );
     }
 }
