@@ -391,11 +391,38 @@ fn apply_output_rewrite(
     }
 }
 
+/// Apply KeyRenamer input rewrites to the state before checking requires.
+/// Aliased condition fields (e.g. `__require_0_inner` -> `inner`) need to
+/// be renamed back to their original names before the requires check.
+fn apply_input_key_renames(
+    schema: &ValidFederationSchema,
+    state: &ResponseShape,
+    input_rewrites: &[Arc<FetchDataRewrite>],
+) -> Result<ResponseShape, String> {
+    let mut result = state.clone();
+    for rewrite in input_rewrites {
+        if let FetchDataRewrite::KeyRenamer(renamer) = rewrite.as_ref() {
+            result = rename_at_path(
+                schema,
+                &result,
+                Default::default(),
+                &renamer.path,
+                renamer.rename_key_to.clone(),
+            )
+            .map_err(|e| format!("apply_input_key_renames: {e}\nrewrite: {renamer:?}"))?;
+        }
+    }
+    Ok(result)
+}
+
 fn check_input_rewrite(rewrite: &FetchDataRewrite) -> Result<(), String> {
     match rewrite {
-        FetchDataRewrite::KeyRenamer(rename) => Err(format!(
-            "check_input_rewrite: unexpected key renamer: {rename:?}"
-        )),
+        FetchDataRewrite::KeyRenamer(_) => {
+            // KeyRenamer input rewrites are created for aliased condition fields
+            // (e.g. `__require_0_inner` -> `inner`). These are already handled
+            // by `apply_input_key_renames` before `check_requires`.
+            Ok(())
+        }
         FetchDataRewrite::ValueSetter(_) => {
             // This case is only created in `compute_input_rewrites_on_key_fetch`. It overwrites
             // the existing `__typename` response value. But, it won't affect the response shape
@@ -437,10 +464,11 @@ fn interpret_fetch_node(
                 "Subgraph schema not found for {subgraph_name}:\n{fetch}"
             ));
         };
+        let state_for_requires = apply_input_key_renames(schema, state, &fetch.input_rewrites)?;
         check_requires(
             context,
             subgraph_schema,
-            state,
+            &state_for_requires,
             &boolean_clause,
             &response_shapes,
             &fetch.requires,

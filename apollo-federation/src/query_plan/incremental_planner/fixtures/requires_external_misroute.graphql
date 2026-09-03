@@ -1,0 +1,87 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {
+  ALPHA @join__graph(name: "alpha", url: "http://alpha")
+  BETA @join__graph(name: "beta", url: "http://beta")
+  GAMMA @join__graph(name: "gamma", url: "http://gamma")
+  DELTA @join__graph(name: "delta", url: "http://delta")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: ALPHA)
+  @join__type(graph: BETA)
+  @join__type(graph: GAMMA)
+  @join__type(graph: DELTA)
+{
+  itemById(id: ID!): Item @join__field(graph: ALPHA)
+}
+
+# Item exists in all 4 subgraphs.
+#
+# ALPHA: owns givenUrl, collection field. Entry point.
+# BETA: owns syndicatedTitle field. Entity.
+# GAMMA: owns corpusTitle field, requires resolvedUrl. Entity.
+# DELTA: owns resolvedUrl. Has preview with @requires that pulls from
+#        syndicatedTitle (external, lives in BETA),
+#        collection (external, lives in ALPHA),
+#        and corpusTitle (external, lives in GAMMA — which itself @requires resolvedUrl).
+#
+# When routing preview from DELTA, the planner goes multi-hop through DELTA
+# (partition into local vs external), resolving each external part through a
+# different subgraph. The last_node variable in resolve_conditions_with_externals
+# drifts to entity groups of different subgraphs. When the third external part
+# (corpusTitle) resolves through GAMMA and GAMMA's @requires("resolvedUrl") is
+# resolved via resolve_requires_for_condition_fields, the fast path checks
+# DELTA's schema (resolvedUrl is non-external there) and appends resolvedUrl
+# to whatever last_node points to — which is now a BETA or ALPHA entity group
+# that does NOT have resolvedUrl.
+type Item
+  @join__type(graph: ALPHA, key: "id")
+  @join__type(graph: BETA, key: "id")
+  @join__type(graph: GAMMA, key: "id")
+  @join__type(graph: DELTA, key: "id")
+{
+  id: ID!
+    @join__field(graph: ALPHA)
+    @join__field(graph: BETA)
+    @join__field(graph: GAMMA)
+    @join__field(graph: DELTA)
+  resolvedUrl: String
+    @join__field(graph: GAMMA, external: true)
+    @join__field(graph: DELTA)
+  corpusTitle: String
+    @join__field(graph: GAMMA, requires: "resolvedUrl")
+    @join__field(graph: DELTA, external: true)
+  syndicatedTitle: String
+    @join__field(graph: BETA)
+    @join__field(graph: DELTA, external: true)
+  collection: String
+    @join__field(graph: ALPHA)
+    @join__field(graph: DELTA, external: true)
+  preview: String
+    @join__field(graph: DELTA, requires: "syndicatedTitle collection corpusTitle")
+}
