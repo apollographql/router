@@ -460,6 +460,12 @@ impl ProcessingState {
     // structure as `create_state_for_children_of_processed_node`, because it needs access to the
     // graph.
 
+    /// Merge two sibling views produced from the same underlying dependency graph.
+    ///
+    /// This is not a general-purpose merge for arbitrary independently-constructed states. Its
+    /// caller merges the results of processing nodes from one ready batch, so when both sides
+    /// mention the same descendant, their remaining-parent lists are views of the same true
+    /// parent set with different already-processed siblings removed.
     pub(crate) fn merge_with(self, other: ProcessingState) -> ProcessingState {
         let mut next = self.next;
         for g in other.next {
@@ -5498,6 +5504,9 @@ fn path_for_parent(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
+
     use super::*;
 
     #[test]
@@ -5726,10 +5735,38 @@ mod tests {
         )
     }
 
+    fn make_recursive_test_dep_graph() -> FetchDependencyGraph {
+        let sdl = TEST_SUPERGRAPH_SDL.replacen(
+            "  v2: Int @join__field(graph: SUBGRAPH2)",
+            "  v2: Int @join__field(graph: SUBGRAPH2)\n  child: T @join__field(graph: SUBGRAPH2)",
+            1,
+        );
+        let supergraph = Supergraph::new(&sdl).unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let federated_query_graph = Arc::new(
+            build_federated_query_graph(supergraph.schema.clone(), api_schema, None, None).unwrap(),
+        );
+        FetchDependencyGraph::new(
+            supergraph.schema.clone(),
+            federated_query_graph,
+            None,
+            Arc::new(FetchIdGenerator::new()),
+        )
+    }
+
     fn add_test_node(
         graph: &mut FetchDependencyGraph,
         subgraph_name: &str,
         defer_ref: Option<&str>,
+    ) -> NodeIndex {
+        add_test_node_at(graph, subgraph_name, defer_ref, None)
+    }
+
+    fn add_test_node_at(
+        graph: &mut FetchDependencyGraph,
+        subgraph_name: &str,
+        defer_ref: Option<&str>,
+        merge_at: Option<Vec<FetchDataPathElement>>,
     ) -> NodeIndex {
         let sg: Arc<str> = Arc::from(subgraph_name);
         let subgraph_schema = graph
@@ -5748,7 +5785,7 @@ mod tests {
                 parent_type,
                 false,
                 SchemaRootDefinitionKind::Query,
-                None,
+                merge_at,
                 defer_ref.map(String::from),
             )
             .unwrap()
@@ -5856,8 +5893,7 @@ mod tests {
     }
 
     // =========================================================================================
-    // Sentinel 1 (proptest-graph-notes.md, "Graph PR 1"): FetchDependencyGraph mutation and
-    // reduction model.
+    // FetchDependencyGraph mutation and reduction model.
     //
     // `DagCommand` drives a `FetchDependencyGraph` through its own private mutation methods
     // (`new_node`, `add_parent`, `remove_node`, `retain_nodes`, `reduce`,
@@ -5868,9 +5904,8 @@ mod tests {
     // `reduced_defer_edges` ledger — from the model's own state and compares it to production.
     //
     // Node identity is the production `NodeIndex` itself (`StableDiGraph` reuses freed indices,
-    // so a node's `NodeIndex` is not proof of insertion order). A separate monotonic `rank` is
-    // assigned at creation and used only to orient generated edges low-rank -> high-rank, which
-    // guarantees every generated trace stays acyclic without ever needing to reject a command.
+    // so a node's `NodeIndex` is not proof of insertion order). Generated parent/child directions
+    // are retained as chosen; only a command that would introduce a cycle becomes a no-op.
     // =========================================================================================
 
     use proptest::prelude::*;
@@ -5882,8 +5917,8 @@ mod tests {
     /// Only the two subgraphs the shared test fixture (`TEST_SUPERGRAPH_SDL`) defines.
     const DAG_TEST_SUBGRAPHS: [&str; 2] = ["Subgraph1", "Subgraph2"];
 
-    /// Deliberate adversarial shapes from proptest-graph-notes.md's "Required adversarial
-    /// shapes" list (the topology-relevant subset; the rest — mergeable siblings, nested
+    /// Deliberate adversarial shapes for reduction and stable-index bookkeeping (the
+    /// topology-relevant subset; mergeable siblings, nested
     /// `@requires`, interface/union restrictions, list-of-list paths — need selection/input
     /// payloads that are out of scope for this topology-only harness). Each shape is applied as
     /// an atomic unit using freshly-created nodes, so it composes with arbitrary surrounding
@@ -5929,6 +5964,9 @@ mod tests {
             subgraph: u8,
             defer_group: Option<u8>,
         },
+        AddRoot {
+            subgraph: u8,
+        },
         AddParent {
             parent: u16,
             child: u16,
@@ -5937,7 +5975,7 @@ mod tests {
             node: u16,
         },
         RetainByMask {
-            mask: u32,
+            mask: [u64; 4],
         },
         Reduce,
         ReduceFrom {
@@ -5951,6 +5989,19 @@ mod tests {
             subgraph_seed: u8,
             defer_seed: u8,
             victim: u16,
+        },
+        /// Build, reduce, and immediately merge a fresh sibling subgraph. Later trace commands
+        /// can then mutate/reduce/remove the survivor and its remapped defer ledger entries.
+        MergeSiblingShape {
+            survivor_selection: u8,
+            merged_selection: u8,
+            defer_seed: u8,
+        },
+        /// Same composition sentinel for the child/target-remap direction.
+        MergeChildShape {
+            survivor_selection: u8,
+            merged_selection: u8,
+            defer_seed: u8,
         },
     }
 
@@ -5968,15 +6019,16 @@ mod tests {
                     subgraph,
                     defer_group
                 }),
+            2 => any::<u8>().prop_map(|subgraph| DagCommand::AddRoot { subgraph }),
             4 => (any::<u16>(), any::<u16>())
                 .prop_map(|(parent, child)| DagCommand::AddParent { parent, child }),
             1 => any::<u16>().prop_map(|node| DagCommand::RemoveNode { node }),
-            1 => any::<u32>().prop_map(|mask| DagCommand::RetainByMask { mask }),
+            1 => any::<[u64; 4]>().prop_map(|mask| DagCommand::RetainByMask { mask }),
             2 => Just(DagCommand::Reduce),
             1 => any::<u16>().prop_map(|node| DagCommand::ReduceFrom { node }),
             // Weighted so that, combined with the usual 0..40 trace length, the overwhelming
-            // majority of generated traces contain at least one deliberate adversarial shape —
-            // comfortably above the notes' "at least half" floor — while `AddNode`/`AddParent`
+            // majority of generated traces contain at least one deliberate adversarial shape,
+            // while `AddNode`/`AddParent`
             // above still generate general, unstructured valid DAGs the rest of the time.
             6 => (dag_shape_strategy(), any::<u8>(), any::<u8>(), any::<u16>()).prop_map(
                 |(shape, subgraph_seed, defer_seed, victim)| DagCommand::Shape {
@@ -5984,6 +6036,24 @@ mod tests {
                     subgraph_seed,
                     defer_seed,
                     victim,
+                }
+            ),
+            2 => (1u8..8, 1u8..8, any::<u8>()).prop_map(
+                |(survivor_selection, merged_selection, defer_seed)| {
+                    DagCommand::MergeSiblingShape {
+                        survivor_selection,
+                        merged_selection,
+                        defer_seed,
+                    }
+                }
+            ),
+            2 => (1u8..8, 1u8..8, any::<u8>()).prop_map(
+                |(survivor_selection, merged_selection, defer_seed)| {
+                    DagCommand::MergeChildShape {
+                        survivor_selection,
+                        merged_selection,
+                        defer_seed,
+                    }
                 }
             ),
         ]
@@ -5999,14 +6069,13 @@ mod tests {
     #[derive(Default)]
     struct DagModel {
         live: IndexSet<NodeIndex>,
-        rank: IndexMap<NodeIndex, u64>,
         defer_group: IndexMap<NodeIndex, Option<u8>>,
         edges: IndexSet<(NodeIndex, NodeIndex)>,
         /// Mirrors `FetchDependencyGraph::reduced_defer_edges`. Compared as a multiset: per the
         /// sprint decision log, internal duplicates are not (yet) known to be a contract
         /// violation, only the externally-collected dependency set is.
         ledger: Vec<(NodeIndex, NodeIndex)>,
-        next_rank: u64,
+        roots: IndexMap<u8, NodeIndex>,
         is_reduced: bool,
     }
 
@@ -6017,7 +6086,7 @@ mod tests {
             nodes
         }
 
-        /// Choice-by-modulo selection of a currently-live node (see proptest-graph-notes.md).
+        /// Choice-by-modulo selection of a currently-live node.
         fn pick(&self, choice: u16) -> Option<NodeIndex> {
             let sorted = self.sorted_live();
             if sorted.is_empty() {
@@ -6025,6 +6094,15 @@ mod tests {
             } else {
                 Some(sorted[choice as usize % sorted.len()])
             }
+        }
+
+        fn pick_non_root(&self, choice: u16) -> Option<NodeIndex> {
+            let nodes: Vec<_> = self
+                .sorted_live()
+                .into_iter()
+                .filter(|node| !self.roots.values().any(|root| root == node))
+                .collect();
+            (!nodes.is_empty()).then(|| nodes[choice as usize % nodes.len()])
         }
 
         fn children(&self, node: NodeIndex) -> impl Iterator<Item = NodeIndex> + '_ {
@@ -6051,6 +6129,17 @@ mod tests {
                 }
             }
             visited
+        }
+
+        fn reachability_pairs(&self) -> IndexSet<(NodeIndex, NodeIndex)> {
+            self.sorted_live()
+                .into_iter()
+                .flat_map(|source| {
+                    self.descendants(source)
+                        .into_iter()
+                        .map(move |target| (source, target))
+                })
+                .collect()
         }
 
         /// Whether `target` remains reachable from `source` using every edge except `excluded`.
@@ -6120,10 +6209,47 @@ mod tests {
         /// Mirrors the lockstep cleanup in `remove_node`/`retain_nodes`.
         fn drop_node(&mut self, node: NodeIndex) {
             self.live.shift_remove(&node);
-            self.rank.shift_remove(&node);
             self.defer_group.shift_remove(&node);
             self.edges.retain(|&(s, t)| s != node && t != node);
             self.ledger.retain(|&(s, t)| s != node && t != node);
+        }
+
+        fn reduce(&mut self) {
+            if self.is_reduced {
+                return;
+            }
+            let reachability_before = self.reachability_pairs();
+            let removed = self.globally_redundant_edges();
+            self.record_ledger(&removed);
+            for edge in &removed {
+                self.edges.shift_remove(edge);
+            }
+            assert_eq!(self.reachability_pairs(), reachability_before);
+            self.is_reduced = true;
+        }
+
+        fn merge_into(&mut self, survivor: NodeIndex, merged: NodeIndex, merge_parents: bool) {
+            let old_edges = self.edges.clone();
+            self.edges
+                .retain(|&(source, target)| source != merged && target != merged);
+            for (source, target) in old_edges {
+                if source == merged && target != survivor {
+                    self.edges.insert((survivor, target));
+                }
+                if merge_parents && target == merged && source != survivor {
+                    self.edges.insert((source, survivor));
+                }
+            }
+            for entry in &mut self.ledger {
+                if entry.0 == merged {
+                    entry.0 = survivor;
+                }
+                if entry.1 == merged {
+                    entry.1 = survivor;
+                }
+            }
+            self.drop_node(merged);
+            self.is_reduced = false;
         }
     }
 
@@ -6144,10 +6270,47 @@ mod tests {
                 let defer_ref = defer_group.map(|g| format!("d{g}"));
                 let node = add_test_node(graph, subgraph_name, defer_ref.as_deref());
                 model.live.insert(node);
-                model.rank.insert(node, model.next_rank);
-                model.next_rank += 1;
                 model.defer_group.insert(node, defer_group);
                 // `new_node` unconditionally calls `on_modification`.
+                model.is_reduced = false;
+            }
+            DagCommand::AddRoot { subgraph } => {
+                let subgraph = subgraph as usize % DAG_TEST_SUBGRAPHS.len();
+                let subgraph_name: Arc<str> = Arc::from(DAG_TEST_SUBGRAPHS[subgraph]);
+                let schema = graph
+                    .federated_query_graph
+                    .schema_by_source(&subgraph_name)
+                    .unwrap();
+                let query_type_name = schema
+                    .schema()
+                    .schema_definition
+                    .query
+                    .as_ref()
+                    .unwrap()
+                    .name
+                    .clone();
+                let parent_type = schema
+                    .get_type(&query_type_name)
+                    .unwrap()
+                    .try_into()
+                    .unwrap();
+                let node = graph
+                    .get_or_create_root_node(
+                        &subgraph_name,
+                        SchemaRootDefinitionKind::Query,
+                        parent_type,
+                    )
+                    .unwrap();
+                if let Some(existing) = model.roots.get(&(subgraph as u8)) {
+                    assert_eq!(
+                        node, *existing,
+                        "get_or_create_root_node was not idempotent"
+                    );
+                    return;
+                }
+                model.roots.insert(subgraph as u8, node);
+                model.live.insert(node);
+                model.defer_group.insert(node, None);
                 model.is_reduced = false;
             }
             DagCommand::AddParent { parent, child } => {
@@ -6159,30 +6322,28 @@ mod tests {
                     // there is no valid interpretation other than skipping (a no-op trace entry).
                     return;
                 }
-                // Only ever add low-rank -> high-rank edges, so the trace can never build a
-                // cycle even after `StableDiGraph` reuses a freed `NodeIndex`.
-                let (lo, hi) = if model.rank[&a] < model.rank[&b] {
-                    (a, b)
-                } else {
-                    (b, a)
-                };
-                if model.edges.contains(&(lo, hi)) {
+                // Node creation order is semantically irrelevant. Keep the generated direction
+                // and reject only relations that would actually form a cycle in the model.
+                if model.edges.contains(&(a, b)) || model.descendants(b).contains(&a) {
                     // `add_parent` early-returns via `contains_edge` without calling
-                    // `on_modification`.
+                    // `on_modification`, or its cycle precondition forbids the relation.
                     return;
                 }
                 graph.add_parent(
-                    hi,
+                    b,
                     ParentRelation {
-                        parent_node_id: lo,
+                        parent_node_id: a,
                         path_in_parent: None,
                     },
                 );
-                model.edges.insert((lo, hi));
+                model.edges.insert((a, b));
                 model.is_reduced = false;
             }
             DagCommand::RemoveNode { node } => {
-                let Some(node) = model.pick(node) else {
+                // Production optimization never removes registered roots: `remove_empty_nodes`
+                // explicitly exempts them and merge paths reject top-level nodes. Keep the trace
+                // within that contract while still removing arbitrary non-root nodes.
+                let Some(node) = model.pick_non_root(node) else {
                     return;
                 };
                 graph.remove_node(node);
@@ -6195,12 +6356,16 @@ mod tests {
                 if sorted.is_empty() {
                     return;
                 }
-                // Bit `i` of `mask` decides whether to keep the `i`-th live node in index order;
-                // beyond the mask's 32 bits, default to keeping (never shift by >= 32).
+                // Bit `i` of `mask` decides whether to keep the `i`-th live node in index order.
+                // Four words cover 256 nodes, more than this bounded trace can create.
                 let keep: IndexSet<NodeIndex> = sorted
                     .iter()
                     .enumerate()
-                    .filter(|&(i, _)| i >= 32 || (mask >> i) & 1 == 1)
+                    .filter(|&(i, node)| {
+                        model.roots.values().any(|root| *root == *node)
+                            || i >= mask.len() * u64::BITS as usize
+                            || (mask[i / u64::BITS as usize] >> (i % u64::BITS as usize)) & 1 == 1
+                    })
                     .map(|(_, &n)| n)
                     .collect();
                 graph.retain_nodes(|n| keep.contains(n));
@@ -6219,11 +6384,17 @@ mod tests {
                     graph.reduce(); // exercises the early-return; no state change expected.
                     return;
                 }
+                let reachability_before = model.reachability_pairs();
                 let removed = model.globally_redundant_edges();
                 model.record_ledger(&removed);
                 for edge in &removed {
                     model.edges.shift_remove(edge);
                 }
+                assert_eq!(
+                    model.reachability_pairs(),
+                    reachability_before,
+                    "reference reduction changed reachability"
+                );
                 graph.reduce();
                 model.is_reduced = true;
             }
@@ -6231,12 +6402,18 @@ mod tests {
                 let Some(node) = model.pick(node) else {
                     return;
                 };
+                let reachability_before = model.reachability_pairs();
                 let removed = model.locally_redundant_edges_from(node);
                 model.record_ledger(&removed);
                 graph.remove_redundant_edges(node);
                 for edge in &removed {
                     model.edges.shift_remove(edge);
                 }
+                assert_eq!(
+                    model.reachability_pairs(),
+                    reachability_before,
+                    "reference local reduction changed reachability"
+                );
                 if !removed.is_empty() {
                     // `remove_redundant_edges` only calls `on_modification` when it actually
                     // removed an edge.
@@ -6249,6 +6426,28 @@ mod tests {
                 defer_seed,
                 victim,
             } => apply_dag_shape(graph, model, shape, subgraph_seed, defer_seed, victim),
+            DagCommand::MergeSiblingShape {
+                survivor_selection,
+                merged_selection,
+                defer_seed,
+            } => apply_dag_merge_sibling_shape(
+                graph,
+                model,
+                survivor_selection,
+                merged_selection,
+                defer_seed,
+            ),
+            DagCommand::MergeChildShape {
+                survivor_selection,
+                merged_selection,
+                defer_seed,
+            } => apply_dag_merge_child_shape(
+                graph,
+                model,
+                survivor_selection,
+                merged_selection,
+                defer_seed,
+            ),
         }
     }
 
@@ -6274,8 +6473,6 @@ mod tests {
             let defer_ref = defer_group.map(|g| format!("d{g}"));
             let node = add_test_node(graph, subgraph_for(i), defer_ref.as_deref());
             model.live.insert(node);
-            model.rank.insert(node, model.next_rank);
-            model.next_rank += 1;
             model.defer_group.insert(node, defer_group);
             node
         };
@@ -6365,7 +6562,7 @@ mod tests {
                 connect(graph, model, a, c);
             }
             DagShape::StableIndexHole => {
-                let Some(victim_node) = model.pick(victim) else {
+                let Some(victim_node) = model.pick_non_root(victim) else {
                     return;
                 };
                 graph.remove_node(victim_node);
@@ -6379,6 +6576,255 @@ mod tests {
         // `on_modification` in production (the early-return branch of `StableIndexHole`, which
         // makes no production call at all, returns before reaching this line).
         model.is_reduced = false;
+    }
+
+    fn dag_model_register(model: &mut DagModel, node: NodeIndex, defer_group: Option<u8>) {
+        model.live.insert(node);
+        model.defer_group.insert(node, defer_group);
+        model.is_reduced = false;
+    }
+
+    fn dag_model_connect(
+        graph: &mut FetchDependencyGraph,
+        model: &mut DagModel,
+        parent: NodeIndex,
+        child: NodeIndex,
+    ) {
+        dag_add_parent_with_path(graph, parent, child, OpPath::default());
+        model.edges.insert((parent, child));
+        model.is_reduced = false;
+    }
+
+    fn apply_dag_merge_sibling_shape(
+        graph: &mut FetchDependencyGraph,
+        model: &mut DagModel,
+        survivor_selection: u8,
+        merged_selection: u8,
+        defer_seed: u8,
+    ) {
+        let defer_group = defer_seed % 4;
+        let defer_label = format!("d{defer_group}");
+        let parent = add_test_node(graph, "Subgraph1", None);
+        let survivor = add_merge_test_node(graph, survivor_selection, 0, None);
+        let merged = add_merge_test_node(graph, merged_selection, 0, None);
+        let middle = add_test_node(graph, "Subgraph1", None);
+        let overlap_bit = 1 << merged_selection.trailing_zeros();
+        let deferred = add_merge_test_node(graph, 1, overlap_bit, Some(&defer_label));
+        for node in [parent, survivor, merged, middle] {
+            dag_model_register(model, node, None);
+        }
+        dag_model_register(model, deferred, Some(defer_group));
+
+        dag_model_connect(graph, model, parent, survivor);
+        dag_model_connect(graph, model, parent, merged);
+        dag_model_connect(graph, model, merged, middle);
+        dag_model_connect(graph, model, middle, deferred);
+        dag_model_connect(graph, model, merged, deferred);
+
+        model.reduce();
+        graph.reduce();
+        assert!(model.ledger.contains(&(merged, deferred)));
+        assert!(graph.reduced_defer_edges.contains(&(merged, deferred)));
+        assert!(graph.can_merge_sibling_in(survivor, merged).unwrap());
+        graph.merge_sibling_in(survivor, merged).unwrap();
+        model.merge_into(survivor, merged, false);
+
+        assert_eq!(
+            dag_selection_mask(&graph.graph[survivor].selection_set.selection_set),
+            survivor_selection | merged_selection,
+        );
+    }
+
+    fn apply_dag_merge_child_shape(
+        graph: &mut FetchDependencyGraph,
+        model: &mut DagModel,
+        survivor_selection: u8,
+        merged_selection: u8,
+        defer_seed: u8,
+    ) {
+        let defer_group = defer_seed % 4;
+        let defer_label = format!("d{defer_group}");
+        let source = add_test_node(graph, "Subgraph2", None);
+        dag_add_selection_mask(graph, source, survivor_selection);
+        let survivor = add_merge_test_node(graph, survivor_selection, 0b111, Some(&defer_label));
+        let merged = add_merge_test_node(graph, merged_selection, 0b001, Some(&defer_label));
+        let tail = add_test_node(graph, "Subgraph1", Some(&defer_label));
+        dag_model_register(model, source, None);
+        for node in [survivor, merged, tail] {
+            dag_model_register(model, node, Some(defer_group));
+        }
+
+        dag_model_connect(graph, model, source, survivor);
+        dag_model_connect(graph, model, survivor, merged);
+        dag_model_connect(graph, model, source, merged);
+        dag_model_connect(graph, model, merged, tail);
+
+        model.reduce();
+        graph.reduce();
+        assert!(model.ledger.contains(&(source, merged)));
+        assert!(graph.reduced_defer_edges.contains(&(source, merged)));
+        assert!(graph.can_merge_child_in(survivor, merged).unwrap());
+        graph.merge_child_in(survivor, merged).unwrap();
+        model.merge_into(survivor, merged, false);
+
+        assert_eq!(
+            dag_selection_mask(&graph.graph[survivor].selection_set.selection_set),
+            survivor_selection | merged_selection,
+        );
+    }
+
+    /// Keep the same ledger entries and payloads alive through *multiple* source and target
+    /// merges. This tests primitive contracts, not a claim that planning emits this whole DAG.
+    /// Sources are siblings; deferred targets form a chain. Every source has a reduced shortcut
+    /// to every target. Source merges union inputs; child merges have identical input sets.
+    fn check_repeated_defer_merge_history(
+        source_masks: &[u8],
+        target_masks: &[u8],
+        choices: &[(bool, u8, bool)],
+        reuse_removed_slots: bool,
+    ) -> Result<(), TestCaseError> {
+        let mut graph = make_test_dep_graph();
+        let mut model = DagModel::default();
+        let mut payloads = IndexMap::<NodeIndex, (u8, u8, bool)>::default();
+        let root = add_test_node(&mut graph, "Subgraph1", None);
+        let middle = add_test_node(&mut graph, "Subgraph1", None);
+        for node in [root, middle] {
+            dag_model_register(&mut model, node, None);
+            payloads.insert(node, (0, 0, false));
+        }
+        let mut sources = Vec::new();
+        for &mask in source_masks {
+            let node = add_merge_test_node(&mut graph, mask, 0, None);
+            dag_model_register(&mut model, node, None);
+            payloads.insert(node, (mask, 0, false));
+            dag_model_connect(&mut graph, &mut model, root, node);
+            dag_model_connect(&mut graph, &mut model, node, middle);
+            sources.push(node);
+        }
+        let target_inputs = source_masks.iter().fold(0, |union, mask| union | mask);
+        let mut targets = Vec::new();
+        for (index, &mask) in target_masks.iter().enumerate() {
+            let node = add_merge_test_node(&mut graph, mask, target_inputs, Some("d0"));
+            let preserve = index % 2 == 0;
+            Arc::make_mut(graph.graph.node_weight_mut(node).unwrap()).must_preserve_selection_set =
+                preserve;
+            dag_model_register(&mut model, node, Some(0));
+            payloads.insert(node, (mask, target_inputs, preserve));
+            dag_model_connect(
+                &mut graph,
+                &mut model,
+                targets.last().copied().unwrap_or(middle),
+                node,
+            );
+            for &source in &sources {
+                dag_model_connect(&mut graph, &mut model, source, node);
+            }
+            targets.push(node);
+        }
+        graph.reduce();
+        model.reduce();
+        prop_assert_eq!(model.ledger.len(), source_masks.len() * target_masks.len());
+
+        // Execute enough genuine merges to collapse both groups. Choices select the interleaving
+        // and survivor, not whether a meaningful command happens. The deterministic witness below
+        // guarantees that the same entries are remapped at least twice at *both* endpoints.
+        for step in 0..source_masks.len() + target_masks.len() - 2 {
+            let (prefer_source, choice, reduce_after) = choices[step % choices.len()];
+            let merge_source = sources.len() > 1 && (prefer_source || targets.len() == 1);
+            let (survivor, merged) = if merge_source {
+                let index = choice as usize % sources.len();
+                let survivor = sources[index];
+                let merged = sources[(index + 1) % sources.len()];
+                prop_assert!(graph.can_merge_sibling_in(survivor, merged).unwrap());
+                graph.merge_sibling_in(survivor, merged).unwrap();
+                sources.retain(|node| *node != merged);
+                (survivor, merged)
+            } else {
+                let index = choice as usize % (targets.len() - 1);
+                let survivor = targets[index];
+                let merged = targets.remove(index + 1);
+                prop_assert!(graph.can_merge_child_in(survivor, merged).unwrap());
+                prop_assert_eq!(payloads[&survivor].1, payloads[&merged].1);
+                graph.merge_child_in(survivor, merged).unwrap();
+                (survivor, merged)
+            };
+            model.merge_into(survivor, merged, false);
+            let removed = payloads.shift_remove(&merged).unwrap();
+            let retained = payloads.get_mut(&survivor).unwrap();
+            retained.0 |= removed.0;
+            retained.1 |= removed.1;
+            retained.2 |= removed.2;
+
+            if reuse_removed_slots {
+                // Reuse the just-freed stable slot: a stale ledger endpoint must not silently
+                // attach to this unrelated node when an index becomes live again.
+                let replacement = add_test_node(&mut graph, "Subgraph1", None);
+                prop_assert_eq!(replacement, merged);
+                dag_model_register(&mut model, replacement, None);
+                payloads.insert(replacement, (0, 0, false));
+            }
+            if reduce_after {
+                graph.reduce();
+                model.reduce();
+            }
+            audit_dag_matches_model(&graph, &model)?;
+            for (&node, &(selected, inputs, preserve)) in &payloads {
+                prop_assert_eq!(
+                    dag_selection_mask(&graph.graph[node].selection_set.selection_set),
+                    selected
+                );
+                prop_assert_eq!(dag_input_mask(&graph.graph[node]), inputs);
+                prop_assert_eq!(graph.graph[node].must_preserve_selection_set, preserve);
+
+                let expected_labels: BTreeSet<_> = model
+                    .ledger
+                    .iter()
+                    .filter(|&&(source, target)| {
+                        source == node
+                            && model.defer_group[&source] != model.defer_group[&target]
+                            && selected & payloads[&target].1 != 0
+                    })
+                    .filter_map(|&(_, target)| {
+                        model.defer_group[&target].map(|group| format!("d{group}"))
+                    })
+                    .collect();
+                let mut dependencies = Vec::new();
+                graph
+                    .collect_reduced_defer_dependencies(node, &mut dependencies)
+                    .unwrap();
+                let actual_labels: BTreeSet<_> = dependencies
+                    .iter()
+                    .map(|(label, _)| label.clone())
+                    .collect();
+                prop_assert_eq!(
+                    actual_labels,
+                    expected_labels,
+                    "collected dependencies changed after merge {}",
+                    step
+                );
+                for (_, id) in dependencies {
+                    prop_assert_eq!(id, graph.graph[node].id.get().unwrap().to_string());
+                }
+            }
+        }
+        prop_assert_eq!((sources.len(), targets.len()), (1, 1));
+        Ok(())
+    }
+
+    #[test]
+    fn reduced_defer_dependencies_survive_repeated_remaps_of_both_endpoints() {
+        check_repeated_defer_merge_history(
+            &[FIELD_ID, FIELD_V1, FIELD_V2],
+            &[FIELD_ID, FIELD_V1, FIELD_V2],
+            &[
+                (true, 0, false),
+                (false, 1, true),
+                (true, 0, true),
+                (false, 0, false),
+            ],
+            true,
+        )
+        .unwrap();
     }
 
     /// Recompute every audited fact from `model`'s own state and compare it to `graph`.
@@ -6415,12 +6861,48 @@ mod tests {
         model_edges.sort_unstable();
         prop_assert_eq!(production_edges, model_edges, "edge sets diverged");
 
-        // 4. `is_reduced`/`is_optimized` match the model's invalidation state. This harness never
+        // 4. Reachability agrees pair-by-pair with a fresh model DFS. Keeping this explicit makes
+        // reduction's core semantic contract visible even though exact direct-edge equality is a
+        // stronger structural assertion for this particular model.
+        for source in model.sorted_live() {
+            let model_descendants = model.descendants(source);
+            for target in model.sorted_live() {
+                if source == target {
+                    continue;
+                }
+                prop_assert_eq!(
+                    petgraph::algo::has_path_connecting(&graph.graph, source, target, None),
+                    model_descendants.contains(&target),
+                    "reachability diverged for {} -> {}",
+                    source.index(),
+                    target.index(),
+                );
+            }
+        }
+
+        // 5. The root registry matches the independently tracked set exactly; every entry is live
+        // and belongs to its registration subgraph.
+        let expected_roots: IndexMap<Arc<str>, NodeIndex> = model
+            .roots
+            .iter()
+            .map(|(subgraph, node)| (Arc::from(DAG_TEST_SUBGRAPHS[*subgraph as usize]), *node))
+            .collect();
+        prop_assert_eq!(&graph.root_nodes_by_subgraph, &expected_roots);
+        for (subgraph, node_id) in &graph.root_nodes_by_subgraph {
+            let Some(node) = graph.graph.node_weight(*node_id) else {
+                return Err(TestCaseError::fail(format!(
+                    "root {node_id:?} registered for {subgraph} is not live"
+                )));
+            };
+            prop_assert_eq!(&node.subgraph_name, subgraph);
+        }
+
+        // 6. `is_reduced`/`is_optimized` match the model's invalidation state. This harness never
         // calls `reduce_and_optimize`, so `is_optimized` should never become true.
         prop_assert_eq!(graph.is_reduced, model.is_reduced, "is_reduced diverged");
         prop_assert!(!graph.is_optimized, "is_optimized unexpectedly set");
 
-        // 5. If reduced, every retained edge must be indispensable.
+        // 7. If reduced, every retained edge must be indispensable.
         if model.is_reduced {
             let redundant = model.globally_redundant_edges();
             prop_assert!(
@@ -6429,7 +6911,7 @@ mod tests {
             );
         }
 
-        // 6. `reduced_defer_edges` ledger, compared as a multiset.
+        // 8. `reduced_defer_edges` ledger, compared as a multiset.
         let mut production_ledger: Vec<(usize, usize)> = graph
             .reduced_defer_edges
             .iter()
@@ -6448,7 +6930,7 @@ mod tests {
             "reduced_defer_edges ledger diverged"
         );
 
-        // 7. Every ledger entry refers to a live node.
+        // 9. Every ledger entry refers to a live node.
         for &(s, t) in &graph.reduced_defer_edges {
             prop_assert!(model.live.contains(&s), "ledger source {s:?} is not live");
             prop_assert!(model.live.contains(&t), "ledger target {t:?} is not live");
@@ -6458,12 +6940,11 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(256))]
+        #![proptest_config(ProptestConfig::with_cases(1024))]
 
         /// The core sentinel: after every command in a generated trace, the production graph's
         /// topology, `is_reduced`/`is_optimized` flags, and `reduced_defer_edges` ledger must
-        /// match a naive reference model recomputed from scratch. See "Sentinel 1" in
-        /// proptest-graph-notes.md.
+        /// match a naive reference model recomputed from scratch.
         #[test]
         fn fetch_dependency_graph_trace_matches_naive_model(commands in dag_command_trace_strategy()) {
             let mut graph = make_test_dep_graph();
@@ -6472,6 +6953,16 @@ mod tests {
                 apply_dag_command(&mut graph, &mut model, command);
                 audit_dag_matches_model(&graph, &model)?;
             }
+        }
+
+        #[test]
+        fn repeated_payload_merges_conserve_remapped_defer_dependencies(
+            sources in prop::collection::vec(1u8..8, 3..7),
+            targets in prop::collection::vec(1u8..8, 3..7),
+            choices in prop::collection::vec((any::<bool>(), 0u8..6, any::<bool>()), 1..13),
+            reuse_removed_slots in any::<bool>(),
+        ) {
+            check_repeated_defer_merge_history(&sources, &targets, &choices, reuse_removed_slots)?;
         }
 
         /// Focused dense-index property: `to_toposorted_adjacency_list`'s rank mapping must round
@@ -6713,7 +7204,7 @@ mod tests {
     }
 
     // =========================================================================================
-    // ProcessingState sub-property (proptest-graph-notes.md, Sentinel 1 / "Graph PR 2").
+    // ProcessingState model properties.
     //
     // `ProcessingState` is a separate exact state machine over the same generated DAG. Two kinds
     // of property here:
@@ -6764,6 +7255,38 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    /// Recompute the traversal frontier from graph facts only. A node is ready when all of its
+    /// parents have been processed. A not-yet-ready node is tracked as unhandled only after at
+    /// least one direct parent has been processed; deeper undiscovered nodes do not belong to the
+    /// current frontier yet.
+    fn naive_processing_state_snapshot(
+        model: &DagModel,
+        processed: &IndexSet<NodeIndex>,
+    ) -> (Vec<usize>, Vec<(usize, Vec<usize>)>) {
+        let mut next = Vec::new();
+        let mut unhandled = Vec::new();
+        for node in model.sorted_live() {
+            if processed.contains(&node) {
+                continue;
+            }
+            let parents: Vec<NodeIndex> = model.parents(node).collect();
+            let mut remaining: Vec<usize> = parents
+                .iter()
+                .filter(|parent| !processed.contains(*parent))
+                .map(|parent| parent.index())
+                .collect();
+            if remaining.is_empty() {
+                next.push(node.index());
+            } else if parents.iter().any(|parent| processed.contains(parent)) {
+                remaining.sort_unstable();
+                unhandled.push((node.index(), remaining));
+            }
+        }
+        next.sort_unstable();
+        unhandled.sort_unstable();
+        (next, unhandled)
     }
 
     proptest! {
@@ -6829,6 +7352,81 @@ mod tests {
             for (_, parents) in &actual_unhandled {
                 prop_assert!(!parents.is_empty(), "unhandled entry with no remaining parents");
             }
+        }
+
+        /// Drive `create_state_for_children_of_processed_node`, `merge_with`, and
+        /// `update_for_processed_nodes` together through every ready wave of an arbitrary
+        /// generated DAG. After every wave, compare the complete frontier to a fresh full-graph
+        /// scan rather than to any of the production state transitions.
+        #[test]
+        fn processing_state_full_traversal_matches_naive_frontier_recomputation(
+            commands in dag_command_trace_strategy(),
+            order_seed in any::<u64>(),
+        ) {
+            let mut graph = make_test_dep_graph();
+            let mut model = DagModel::default();
+            for command in &commands {
+                apply_dag_command(&mut graph, &mut model, command);
+            }
+
+            let mut processed = IndexSet::default();
+            let roots: Vec<NodeIndex> = model
+                .sorted_live()
+                .into_iter()
+                .filter(|node| model.parents(*node).next().is_none())
+                .collect();
+            let mut state = ProcessingState::of_ready_nodes(roots);
+            prop_assert_eq!(
+                processing_state_snapshot(&state),
+                naive_processing_state_snapshot(&model, &processed),
+                "initial root frontier diverged"
+            );
+
+            let mut wave = 0usize;
+            while !state.next.is_empty() {
+                let mut batch = state.next.clone();
+                // Exercise arbitrary-looking sibling orders rather than only cyclic rotations of
+                // index order. SplitMix-style mixing is deterministic and shrinks with one seed.
+                batch.sort_by_key(|node| {
+                    let mut key = order_seed
+                        ^ (node.index() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                        ^ (wave as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+                    key = (key ^ (key >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+                    key = (key ^ (key >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+                    key ^ (key >> 31)
+                });
+
+                let mut next_state = ProcessingState {
+                    next: Vec::new(),
+                    unhandled: state.unhandled,
+                };
+                for node in &batch {
+                    let child_state = graph.create_state_for_children_of_processed_node(
+                        *node,
+                        graph.children_of(*node).collect::<Vec<_>>(),
+                    );
+                    next_state = next_state.merge_with(child_state);
+                }
+                next_state = next_state.update_for_processed_nodes(&batch);
+                processed.extend(batch);
+
+                prop_assert_eq!(
+                    processing_state_snapshot(&next_state),
+                    naive_processing_state_snapshot(&model, &processed),
+                    "frontier diverged after wave {}; processed={:?}",
+                    wave,
+                    processed.iter().map(|node| node.index()).collect::<Vec<_>>()
+                );
+                state = next_state;
+                wave += 1;
+                prop_assert!(
+                    wave <= model.live.len(),
+                    "processing failed to make progress through an acyclic graph"
+                );
+            }
+
+            prop_assert_eq!(processed.len(), model.live.len());
+            prop_assert!(state.unhandled.is_empty());
         }
 
         /// `merge_with` is commutative, associative, and idempotent as a *set* operation (vector
@@ -7001,7 +7599,7 @@ mod tests {
     fn dag_shared_full_parent_sets_strategy() -> impl Strategy<Value = Vec<Vec<usize>>> {
         prop::collection::vec(
             (
-                prop::collection::vec(0..PS_SIBLINGS.len(), 0..PS_SIBLINGS.len()),
+                0u8..(1u8 << PS_SIBLINGS.len()),
                 prop::collection::vec(0..PS_BACKGROUND_PARENT_UNIVERSE, 0..3),
             ),
             PS_CANDIDATE_UNIVERSE,
@@ -7009,9 +7607,14 @@ mod tests {
         .prop_map(|per_candidate| {
             per_candidate
                 .into_iter()
-                .map(|(sibling_idxs, background)| {
-                    let mut parents: Vec<usize> =
-                        sibling_idxs.into_iter().map(|i| PS_SIBLINGS[i]).collect();
+                .map(|(sibling_mask, background)| {
+                    let mut parents: Vec<usize> = PS_SIBLINGS
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, sibling)| {
+                            (sibling_mask & (1 << i) != 0).then_some(*sibling)
+                        })
+                        .collect();
                     parents.extend(background.into_iter().map(|b| PS_BACKGROUND_OFFSET + b));
                     parents.sort_unstable();
                     parents.dedup();
@@ -7056,14 +7659,12 @@ mod tests {
     }
 
     // =========================================================================================
-    // Defer dependency extension (proptest-graph-notes.md, Sentinel 1 / "Graph PR 2"): real
-    // top-level field tokens, `merge_at = None`, no aliases, no fragments — the first payload
-    // stage the notes describe.
+    // Defer dependency model using real top-level field selections.
     //
     // The rule under test, from `collect_reduced_defer_dependencies`'s own doc comment: a removed
     // cross-defer edge source -> target must be recovered as a defer dependency iff the source's
     // selection shares a field (other than `__typename`) with one of the target's `_entities`
-    // input selections. This builds the canonical three-node shape from the notes
+    // input selections. This builds the canonical three-node shape
     // (`A(primary) -> B(primary) -> C(deferred)`, plus a redundant `A -> C` shortcut, reduced via
     // the real `reduce()` — not hand-pushed into the ledger) with real field selections on `A`
     // and real `_entities` inputs on `C`, and compares the recovered dependency against a direct
@@ -7072,7 +7673,7 @@ mod tests {
 
     /// Which of the shared test fixture's three real `T` fields (`id`, `v1`, `v2` — see
     /// `TEST_SUPERGRAPH_SDL`), plus `__typename`, a selection includes. This is the fixed field
-    /// universe the notes recommend materializing tokens from. `__typename` is kept separate
+    /// universe used by this model. `__typename` is kept separate
     /// because the production rule explicitly excludes it from intersection.
     #[derive(Debug, Clone, Copy)]
     struct DagFieldSelection {
@@ -7118,6 +7719,45 @@ mod tests {
     /// `has_field_intersection`'s `SelectionMap`/inline-fragment-aware traversal.
     fn dag_field_selections_intersect(a: DagFieldSelection, b: DagFieldSelection) -> bool {
         (a.id && b.id) || (a.v1 && b.v1) || (a.v2 && b.v2)
+    }
+
+    fn dag_defer_structured_selection_text(
+        selection: DagFieldSelection,
+        alias_fields: bool,
+        directive_seed: u8,
+        wrapper_codes: &[u8],
+    ) -> String {
+        let fields = [
+            ("id", selection.id),
+            ("v1", selection.v1),
+            ("v2", selection.v2),
+            ("__typename", selection.typename),
+        ]
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, (field, selected))| {
+            selected.then(|| {
+                let alias = alias_fields
+                    .then(|| format!("alias_{index}: "))
+                    .unwrap_or_default();
+                let directive =
+                    match directive_seed.wrapping_add((index as u8).wrapping_mul(17)) % 3 {
+                        0 => "",
+                        1 => " @include(if: true)",
+                        2 => " @skip(if: false)",
+                        _ => unreachable!("modulo three"),
+                    };
+                format!("{alias}{field}{directive}")
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+        wrapper_codes
+            .iter()
+            .fold(fields, |inner, code| match code % 2 {
+                0 => format!("... on T {{ {inner} }}"),
+                _ => format!("... @include(if: true) {{ {inner} }}"),
+            })
     }
 
     proptest! {
@@ -7199,6 +7839,84 @@ mod tests {
                 );
             }
         }
+
+        /// Repeat the field-intersection model through identical layers of typed and
+        /// directive-only fragments, aliases, and constant directives. These are the branches
+        /// handled recursively by `has_field_intersection`; using the same structural decoration
+        /// on both sides leaves the independent oracle as ordinary underlying-field overlap.
+        #[test]
+        fn collect_reduced_defer_dependencies_matches_structured_field_intersection(
+            source_selection in dag_field_selection_strategy(),
+            target_selection in dag_field_selection_strategy(),
+            alias_fields in any::<bool>(),
+            directive_seed in any::<u8>(),
+            wrappers in prop::collection::vec(any::<u8>(), 0..4),
+        ) {
+            let mut graph = make_test_dep_graph();
+            let source = add_test_node(&mut graph, "Subgraph2", None);
+            let middle = add_test_node(&mut graph, "Subgraph1", None);
+            let target = add_test_node(&mut graph, "Subgraph2", Some("structured-defer"));
+
+            let source_schema = graph
+                .federated_query_graph
+                .schema_by_source("Subgraph2")
+                .unwrap()
+                .clone();
+            let source_text = dag_defer_structured_selection_text(
+                source_selection,
+                alias_fields,
+                directive_seed,
+                &wrappers,
+            );
+            let source_fields = SelectionSet::parse(
+                source_schema.clone(),
+                source_schema.get_type(&name!("T")).unwrap().try_into().unwrap(),
+                &source_text,
+            )
+            .unwrap();
+            Arc::make_mut(graph.graph.node_weight_mut(source).unwrap())
+                .selection_set_mut()
+                .add_selections(&Arc::new(source_fields))
+                .unwrap();
+
+            let target_text = dag_defer_structured_selection_text(
+                target_selection,
+                alias_fields,
+                directive_seed,
+                &wrappers,
+            );
+            let target_fields = SelectionSet::parse(
+                graph.supergraph_schema.clone(),
+                graph
+                    .supergraph_schema
+                    .get_type(&name!("T"))
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+                &target_text,
+            )
+            .unwrap();
+            Arc::make_mut(graph.graph.node_weight_mut(target).unwrap())
+                .add_inputs(&target_fields, iter::empty())
+                .unwrap();
+
+            add_test_edge(&mut graph, source, middle);
+            add_test_edge(&mut graph, middle, target);
+            add_test_edge(&mut graph, source, target);
+            graph.reduce();
+
+            let mut dependencies = Vec::new();
+            graph
+                .collect_reduced_defer_dependencies(source, &mut dependencies)
+                .unwrap();
+            prop_assert_eq!(
+                !dependencies.is_empty(),
+                dag_field_selections_intersect(source_selection, target_selection),
+                "structured overlap disagreed: source=`{}`, target=`{}`",
+                source_text,
+                target_text,
+            );
+        }
     }
 
     /// `__typename` alone must never be enough to recover a dependency, even though it's a valid,
@@ -7241,5 +7959,2895 @@ mod tests {
             .collect_reduced_defer_dependencies(a, &mut deps)
             .unwrap();
         assert!(deps.is_empty(), "expected no dependency, got {deps:?}");
+    }
+
+    // =========================================================================================
+    // Merge conservation with a real reduced-defer ledger.
+    //
+    // These are deliberately not tests of `remap_reduced_defer_edges` in isolation. Each shape
+    // first runs the production transitive reduction to create a valid ledger entry, then runs a
+    // production merge and audits every externally meaningful fact that can move with the merged
+    // node: selections, inputs, child edges and their paths, reachability, derived-state caches,
+    // and the defer dependency recovered from the remapped ledger.
+    //
+    // The two shapes cover the two independently reachable remap directions:
+    //
+    // * sibling/source remap: B(primary) -> D(deferred) is reduced, then sibling B is merged into
+    //   A, so the ledger must change B -> D into A -> D;
+    // * child/target remap: P(primary) -> B(deferred) is reduced through P -> A -> B, then child B
+    //   is merged into A, so the ledger must change P -> B into P -> A.
+    // =========================================================================================
+
+    const DAG_PAYLOAD_FIELDS: [&str; 3] = ["id", "v1", "v2"];
+    const FIELD_ID: u8 = 0b001;
+    const FIELD_V1: u8 = 0b010;
+    const FIELD_V2: u8 = 0b100;
+
+    fn dag_plain_selection_text(mask: u8) -> String {
+        DAG_PAYLOAD_FIELDS
+            .iter()
+            .enumerate()
+            .filter_map(|(index, field)| (mask & (1 << index) != 0).then_some(*field))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn dag_add_selection_mask(graph: &mut FetchDependencyGraph, node_id: NodeIndex, mask: u8) {
+        if mask == 0 {
+            return;
+        }
+        let node = graph.graph.node_weight(node_id).unwrap();
+        let schema = node.selection_set.selection_set.schema.clone();
+        let type_name = node
+            .selection_set
+            .selection_set
+            .type_position
+            .type_name()
+            .clone();
+        let selection =
+            parse_field_set(&schema, type_name, &dag_plain_selection_text(mask), true).unwrap();
+        Arc::make_mut(graph.graph.node_weight_mut(node_id).unwrap())
+            .selection_set_mut()
+            .add_selections(&Arc::new(selection))
+            .unwrap();
+    }
+
+    fn dag_add_input_mask(graph: &mut FetchDependencyGraph, node_id: NodeIndex, mask: u8) {
+        if mask == 0 {
+            return;
+        }
+        let selection = parse_field_set(
+            &graph.supergraph_schema,
+            name!("T"),
+            &dag_plain_selection_text(mask),
+            true,
+        )
+        .unwrap();
+        Arc::make_mut(graph.graph.node_weight_mut(node_id).unwrap())
+            .add_inputs(&selection, iter::empty())
+            .unwrap();
+    }
+
+    fn add_merge_test_node(
+        graph: &mut FetchDependencyGraph,
+        selection_mask: u8,
+        input_mask: u8,
+        defer_ref: Option<&str>,
+    ) -> NodeIndex {
+        add_merge_test_node_at(
+            graph,
+            selection_mask,
+            input_mask,
+            defer_ref,
+            Some(Vec::new()),
+        )
+    }
+
+    fn add_merge_test_node_at(
+        graph: &mut FetchDependencyGraph,
+        selection_mask: u8,
+        input_mask: u8,
+        defer_ref: Option<&str>,
+        merge_at: Option<Vec<FetchDataPathElement>>,
+    ) -> NodeIndex {
+        let subgraph_name: Arc<str> = Arc::from("Subgraph2");
+        let subgraph_schema = graph
+            .federated_query_graph
+            .schema_by_source(&subgraph_name)
+            .unwrap()
+            .clone();
+        let parent_type = subgraph_schema
+            .get_type(&name!("T"))
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let node_id = graph
+            .new_node(
+                subgraph_name,
+                parent_type,
+                true,
+                SchemaRootDefinitionKind::Query,
+                merge_at,
+                defer_ref.map(String::from),
+            )
+            .unwrap();
+        dag_add_selection_mask(graph, node_id, selection_mask);
+        dag_add_input_mask(graph, node_id, input_mask);
+        node_id
+    }
+
+    fn add_test_root(graph: &mut FetchDependencyGraph, subgraph_name: &str) -> NodeIndex {
+        let source: Arc<str> = Arc::from(subgraph_name);
+        let schema = graph
+            .federated_query_graph
+            .schema_by_source(&source)
+            .unwrap();
+        let query_name = schema
+            .schema()
+            .schema_definition
+            .query
+            .as_ref()
+            .unwrap()
+            .name
+            .clone();
+        let parent_type = schema.get_type(&query_name).unwrap().try_into().unwrap();
+        graph
+            .get_or_create_root_node(&source, SchemaRootDefinitionKind::Query, parent_type)
+            .unwrap()
+    }
+
+    // Small, text-based fixtures shared by the focused repros and generated entity-fetch tests.
+    // These helpers only construct production objects; they contain no property-test oracle.
+    fn add_entity_test_root(graph: &mut FetchDependencyGraph, selected: &str) -> NodeIndex {
+        let root = add_test_root(graph, "Subgraph1");
+        let before = &graph.graph[root].selection_set.selection_set;
+        let selection = SelectionSet::parse(
+            before.schema.clone(),
+            before.type_position.clone(),
+            selected,
+        )
+        .unwrap();
+        Arc::make_mut(graph.graph.node_weight_mut(root).unwrap())
+            .selection_set_mut()
+            .add_selections(&Arc::new(selection))
+            .unwrap();
+        root
+    }
+
+    fn add_entity_test_fetch(
+        graph: &mut FetchDependencyGraph,
+        source: &str,
+        response_name: &str,
+        selected: &str,
+        required: &str,
+    ) -> NodeIndex {
+        let source: Arc<str> = Arc::from(source);
+        let node = graph
+            .new_key_node(
+                &source,
+                vec![FetchDataPathElement::Key(
+                    Name::new(response_name).unwrap(),
+                    None,
+                )],
+                None,
+            )
+            .unwrap();
+        let schema = graph
+            .federated_query_graph
+            .schema_by_source(&source)
+            .unwrap()
+            .clone();
+        let selection = SelectionSet::parse(
+            schema.clone(),
+            schema
+                .get_type(&name!("_Entity"))
+                .unwrap()
+                .try_into()
+                .unwrap(),
+            &format!("... on T {{ {selected} }}"),
+        )
+        .unwrap();
+        let inputs = parse_field_set(&graph.supergraph_schema, name!("T"), required, true).unwrap();
+        // Match normal key-fetch construction, including the type-condition wrapper. A bare T
+        // field set is accepted by add_inputs, but bypasses the optimizer's usual input shape.
+        let inputs = wrap_input_selections(
+            &graph.supergraph_schema,
+            &inputs.type_position.clone(),
+            inputs,
+            &OpGraphPathContext::default(),
+        );
+        let mutable = Arc::make_mut(graph.graph.node_weight_mut(node).unwrap());
+        mutable
+            .selection_set_mut()
+            .add_selections(&Arc::new(selection))
+            .unwrap();
+        mutable.add_inputs(&inputs, iter::empty()).unwrap();
+        node
+    }
+
+    fn entity_test_root_path(graph: &FetchDependencyGraph, response_name: &str) -> OpPath {
+        let schema = graph
+            .federated_query_graph
+            .schema_by_source("Subgraph1")
+            .unwrap();
+        let OpPathElement::Field(mut field) =
+            object_field_element(schema, name!("Query"), name!("t"))
+        else {
+            unreachable!()
+        };
+        if response_name != "t" {
+            field.alias = Some(Name::new(response_name).unwrap());
+        }
+        OpPath(vec![Arc::new(OpPathElement::Field(field))])
+    }
+
+    fn dag_selection_mask(selection_set: &SelectionSet) -> u8 {
+        fn visit(selection_set: &SelectionSet, mask: &mut u8) {
+            for selection in selection_set.selections.values() {
+                match selection {
+                    Selection::Field(field) => {
+                        if let Some(index) = DAG_PAYLOAD_FIELDS
+                            .iter()
+                            .position(|name| *name == field.field.name().as_str())
+                        {
+                            *mask |= 1 << index;
+                        }
+                        if let Some(subselection) = &field.selection_set {
+                            visit(subselection, mask);
+                        }
+                    }
+                    Selection::InlineFragment(fragment) => visit(&fragment.selection_set, mask),
+                }
+            }
+        }
+
+        let mut mask = 0;
+        visit(selection_set, &mut mask);
+        mask
+    }
+
+    fn dag_input_mask(node: &FetchDependencyGraphNode) -> u8 {
+        node.inputs
+            .iter()
+            .flat_map(|inputs| inputs.selection_sets_per_parent_type.values())
+            .fold(0, |mask, selection| mask | dag_selection_mask(selection))
+    }
+
+    // The whole-optimizer domain uses real entity fetches, two subgraphs and two response
+    // locations. Every root actually supplies its representations. Markers track ownership;
+    // the auditor separately compares complete selections so marker survival cannot hide loss.
+    #[derive(Clone, Debug)]
+    struct OptimizerNodeSpec {
+        subgraph: u8,
+        merge_at: u8,
+        selection_mask: u8,
+        input_subset: u8,
+        parent: usize,
+        extra_parent_mask: u16,
+        must_preserve: bool,
+    }
+
+    fn optimizer_dag_strategy() -> impl Strategy<Value = Vec<OptimizerNodeSpec>> {
+        (2usize..9).prop_flat_map(|count| {
+            (0..count)
+                .map(|token| {
+                    (
+                        0u8..2,
+                        0u8..2,
+                        1u8..8,
+                        0u8..8,
+                        0usize..=token,
+                        0u16..(1 << (token + 1)),
+                        any::<bool>(),
+                    )
+                        .prop_map(
+                            |(
+                                subgraph,
+                                merge_at,
+                                selection_mask,
+                                input_subset,
+                                parent,
+                                extra_parent_mask,
+                                must_preserve,
+                            )| {
+                                OptimizerNodeSpec {
+                                    subgraph,
+                                    merge_at,
+                                    selection_mask,
+                                    input_subset,
+                                    parent,
+                                    extra_parent_mask,
+                                    must_preserve,
+                                }
+                            },
+                        )
+                })
+                .collect::<Vec<_>>()
+        })
+    }
+
+    fn optimizer_response_name(location: u8) -> &'static str {
+        match location {
+            0 => "t",
+            1 => "other",
+            _ => panic!("unknown generated response location"),
+        }
+    }
+
+    fn optimizer_merge_at(location: u8) -> Option<Vec<FetchDataPathElement>> {
+        Some(vec![FetchDataPathElement::Key(
+            Name::new(optimizer_response_name(location)).unwrap(),
+            None,
+        )])
+    }
+
+    const OPTIMIZER_ROOT_SELECTION: &str = "t { __typename id } other: t { __typename id }";
+
+    fn make_optimizer_dep_graph() -> FetchDependencyGraph {
+        // Omit per-field restrictions so both keyed subgraphs can collect the three scalar
+        // fields. The focused repros continue using the original, unmodified schema fixture.
+        let sdl = TEST_SUPERGRAPH_SDL
+            .replace("v1: Int @join__field(graph: SUBGRAPH2)", "v1: Int")
+            .replace("v2: Int @join__field(graph: SUBGRAPH2)", "v2: Int");
+        let supergraph = Supergraph::new(&sdl).unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let query_graph = Arc::new(
+            build_federated_query_graph(supergraph.schema.clone(), api_schema, None, None).unwrap(),
+        );
+        FetchDependencyGraph::new(
+            supergraph.schema,
+            query_graph,
+            None,
+            Arc::new(FetchIdGenerator::new()),
+        )
+    }
+
+    fn add_optimizer_token_node(
+        graph: &mut FetchDependencyGraph,
+        token: usize,
+        spec: &OptimizerNodeSpec,
+        input_mask: u8,
+    ) -> NodeIndex {
+        let node = add_entity_test_fetch(
+            graph,
+            DAG_TEST_SUBGRAPHS[spec.subgraph as usize],
+            optimizer_response_name(spec.merge_at),
+            &format!(
+                "optimizer_token_{token}: __typename {}",
+                dag_plain_selection_text(spec.selection_mask)
+            ),
+            &format!("__typename {}", dag_plain_selection_text(input_mask)),
+        );
+        Arc::make_mut(graph.graph.node_weight_mut(node).unwrap()).must_preserve_selection_set =
+            spec.must_preserve;
+        node
+    }
+
+    /// Conceptual node 0 is the root; token i is node i + 1. Parent indices and masks are
+    /// generated within their meaningful bounds, so shrinking does not retain irrelevant bits
+    /// or change an arbitrary large integer's modulo interpretation.
+    fn optimizer_conceptual_edges(specs: &[OptimizerNodeSpec]) -> Vec<(usize, usize)> {
+        let mut edges = BTreeSet::new();
+        for (token, spec) in specs.iter().enumerate() {
+            let child = token + 1;
+            assert!(spec.parent < child);
+            edges.insert((spec.parent, child));
+            for parent in 0..child {
+                if spec.extra_parent_mask & (1 << parent) != 0 {
+                    edges.insert((parent, child));
+                }
+            }
+        }
+        edges.into_iter().collect()
+    }
+
+    /// Representation keys are supplied at both root response locations. Other inputs are a
+    /// generated subset of fields selected by strict ancestors at the *same* location.
+    fn optimizer_input_masks(specs: &[OptimizerNodeSpec], edges: &[(usize, usize)]) -> Vec<u8> {
+        let reachable = optimizer_reference_reachability(specs.len(), edges);
+        specs
+            .iter()
+            .enumerate()
+            .map(|(token, spec)| {
+                let available =
+                    specs
+                        .iter()
+                        .enumerate()
+                        .fold(FIELD_ID, |mask, (ancestor, provider)| {
+                            if reachable[ancestor + 1][token + 1]
+                                && provider.merge_at == spec.merge_at
+                            {
+                                mask | provider.selection_mask
+                            } else {
+                                mask
+                            }
+                        });
+                FIELD_ID | (available & spec.input_subset)
+            })
+            .collect()
+    }
+
+    fn build_optimizer_dag(
+        specs: &[OptimizerNodeSpec],
+        reverse_edge_insertion: bool,
+    ) -> (
+        FetchDependencyGraph,
+        NodeIndex,
+        Vec<(usize, usize)>,
+        Vec<u8>,
+    ) {
+        let mut graph = make_optimizer_dep_graph();
+        let root = add_entity_test_root(&mut graph, OPTIMIZER_ROOT_SELECTION);
+        let edges = optimizer_conceptual_edges(specs);
+        let input_masks = optimizer_input_masks(specs, &edges);
+        let nodes: Vec<_> = specs
+            .iter()
+            .enumerate()
+            .map(|(token, spec)| {
+                add_optimizer_token_node(&mut graph, token, spec, input_masks[token])
+            })
+            .collect();
+        let mut insertion_order = edges.clone();
+        if reverse_edge_insertion {
+            insertion_order.reverse();
+        }
+        for (parent, child) in insertion_order {
+            let parent_node = if parent == 0 { root } else { nodes[parent - 1] };
+            let path = if parent == 0 {
+                Some(Arc::new(entity_test_root_path(
+                    &graph,
+                    optimizer_response_name(specs[child - 1].merge_at),
+                )))
+            } else if specs[parent - 1].merge_at == specs[child - 1].merge_at {
+                Some(Arc::new(OpPath::default()))
+            } else {
+                // An ordering constraint between different response locations does not imply
+                // that either fetch contains the other's selection.
+                None
+            };
+            graph.add_parent(
+                nodes[child - 1],
+                ParentRelation {
+                    parent_node_id: parent_node,
+                    path_in_parent: path,
+                },
+            );
+        }
+        (graph, root, edges, input_masks)
+    }
+
+    fn optimizer_reference_reachability(
+        node_count: usize,
+        edges: &[(usize, usize)],
+    ) -> Vec<Vec<bool>> {
+        let mut children = vec![Vec::new(); node_count + 1];
+        for &(parent, child) in edges {
+            children[parent].push(child);
+        }
+        (0..=node_count)
+            .map(|start| {
+                let mut reachable = vec![false; node_count + 1];
+                let mut stack = children[start].clone();
+                while let Some(node) = stack.pop() {
+                    if !reachable[node] {
+                        reachable[node] = true;
+                        stack.extend(children[node].iter().copied());
+                    }
+                }
+                reachable
+            })
+            .collect()
+    }
+
+    fn optimizer_tokens(selection_set: &SelectionSet) -> BTreeSet<usize> {
+        fn visit(selection_set: &SelectionSet, tokens: &mut BTreeSet<usize>) {
+            for selection in selection_set.selections.values() {
+                match selection {
+                    Selection::Field(field) => {
+                        if let Some(token) = field
+                            .field
+                            .response_name()
+                            .as_str()
+                            .strip_prefix("optimizer_token_")
+                            .and_then(|suffix| suffix.parse().ok())
+                        {
+                            assert!(
+                                tokens.insert(token),
+                                "optimizer token was duplicated in a node"
+                            );
+                        }
+                        if let Some(selection_set) = &field.selection_set {
+                            visit(selection_set, tokens);
+                        }
+                    }
+                    Selection::InlineFragment(fragment) => {
+                        visit(&fragment.selection_set, tokens);
+                    }
+                }
+            }
+        }
+
+        let mut tokens = BTreeSet::new();
+        visit(selection_set, &mut tokens);
+        tokens
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct OptimizerSemanticSnapshot {
+        token_groups: Vec<Vec<usize>>,
+        reachability: Vec<(Vec<usize>, Vec<usize>)>,
+    }
+
+    /// Inputs may keep a redundant ... on T wrapper that the test parser removes. Compare
+    /// scalar fields after checking that every wrapper is neutral on T. Do not flatten unknown
+    /// type conditions, aliases, directives or nested response paths into the same field bag.
+    fn optimizer_flat_input_fields(
+        selection: &SelectionSet,
+    ) -> Result<BTreeSet<String>, TestCaseError> {
+        prop_assert_eq!(selection.type_position.type_name().as_str(), "T");
+        let mut fields = BTreeSet::new();
+        for selection in selection.selections.values() {
+            match selection {
+                Selection::Field(field) => {
+                    prop_assert!(field.selection_set.is_none());
+                    prop_assert!(field.field.alias.is_none());
+                    prop_assert!(
+                        field.field.arguments.is_empty() && field.field.directives.is_empty()
+                    );
+                    fields.insert(field.field.name().to_string());
+                }
+                Selection::InlineFragment(fragment) => {
+                    prop_assert!(fragment.inline_fragment.directives.is_empty());
+                    let casted_type = fragment.inline_fragment.casted_type();
+                    prop_assert_eq!(casted_type.type_name().as_str(), "T");
+                    fields.extend(optimizer_flat_input_fields(&fragment.selection_set)?);
+                }
+            }
+        }
+        Ok(fields)
+    }
+
+    fn audit_optimized_dag(
+        graph: &FetchDependencyGraph,
+        root: NodeIndex,
+        specs: &[OptimizerNodeSpec],
+        original_input_masks: &[u8],
+    ) -> Result<OptimizerSemanticSnapshot, TestCaseError> {
+        prop_assert!(graph.is_reduced && graph.is_optimized);
+        audit_optimizer_payloads(graph, root, specs, original_input_masks)
+    }
+
+    /// Check independently of the optimizer's flags, so the same oracle can validate generated
+    /// inputs and can be tested against deliberate corruptions without running an optimizer.
+    fn audit_optimizer_payloads(
+        graph: &FetchDependencyGraph,
+        root: NodeIndex,
+        specs: &[OptimizerNodeSpec],
+        original_input_masks: &[u8],
+    ) -> Result<OptimizerSemanticSnapshot, TestCaseError> {
+        prop_assert_eq!(original_input_masks.len(), specs.len());
+        prop_assert!(
+            petgraph::algo::toposort(&graph.graph, None).is_ok(),
+            "optimizer introduced a cycle"
+        );
+        prop_assert!(graph.reduced_defer_edges.is_empty());
+        prop_assert_eq!(
+            &graph.root_nodes_by_subgraph,
+            &IndexMap::from_iter([(Arc::from("Subgraph1"), root)])
+        );
+        let root_node = graph
+            .graph
+            .node_weight(root)
+            .ok_or_else(|| TestCaseError::fail("optimizer removed the root"))?;
+        let expected_root = SelectionSet::parse(
+            root_node.selection_set.selection_set.schema.clone(),
+            ObjectTypeDefinitionPosition::new(name!("Query")).into(),
+            OPTIMIZER_ROOT_SELECTION,
+        )
+        .unwrap();
+        prop_assert_eq!(
+            root_node.selection_set.selection_set.as_ref(),
+            &expected_root
+        );
+
+        for edge in graph.graph.edge_references() {
+            let Some(path) = &edge.weight().path else {
+                continue;
+            };
+            let fields: Vec<_> = path
+                .0
+                .iter()
+                .filter_map(|element| match element.as_ref() {
+                    OpPathElement::Field(field) => Some(field.response_name().clone()),
+                    OpPathElement::InlineFragment(_) => None,
+                })
+                .collect();
+            if edge.source() == root {
+                let expected_location: Vec<_> = fields
+                    .into_iter()
+                    .map(|name| FetchDataPathElement::Key(name, None))
+                    .collect();
+                prop_assert_eq!(
+                    &graph.graph[edge.target()].merge_at,
+                    &Some(expected_location),
+                    "root-relative path disagrees with child response location"
+                );
+            } else {
+                prop_assert!(
+                    fields.is_empty(),
+                    "flat entity fetches have no nested field path"
+                );
+                prop_assert_eq!(
+                    &graph.graph[edge.source()].merge_at,
+                    &graph.graph[edge.target()].merge_at,
+                    "a known relative path cannot identify two distinct root response locations"
+                );
+            }
+        }
+
+        let mut carriers = vec![Vec::new(); specs.len()];
+        let mut groups = BTreeMap::<Vec<usize>, NodeIndex>::new();
+        for node in graph.graph.node_indices() {
+            let tokens = optimizer_tokens(&graph.graph[node].selection_set.selection_set)
+                .into_iter()
+                .collect::<Vec<_>>();
+            if tokens.is_empty() {
+                prop_assert_eq!(node, root, "unaccounted non-root fetch");
+                continue;
+            }
+            for &token in &tokens {
+                if token >= specs.len() {
+                    return Err(TestCaseError::fail(format!(
+                        "unknown optimizer token {token} in node {node:?}"
+                    )));
+                }
+                carriers[token].push(node);
+            }
+
+            let first = &specs[tokens[0]];
+            prop_assert!(
+                tokens
+                    .iter()
+                    .all(|&token| specs[token].merge_at == first.merge_at
+                        && specs[token].subgraph == first.subgraph),
+                "optimizer merged tokens from different subgraph/merge locations: {tokens:?}"
+            );
+            prop_assert_eq!(
+                &graph.graph[node].merge_at,
+                &optimizer_merge_at(first.merge_at),
+                "wrong actual response location for tokens {:?}",
+                tokens
+            );
+            prop_assert_eq!(
+                graph.graph[node].subgraph_name.as_ref(),
+                DAG_TEST_SUBGRAPHS[first.subgraph as usize]
+            );
+
+            // Reconstruct the expected field set literally from the specs, without calling a
+            // production merge or flattening fields across paths/type conditions. This checks
+            // ordinary fields as well as markers, including their placement under ... on T.
+            let selected = tokens
+                .iter()
+                .fold(0, |mask, token| mask | specs[*token].selection_mask);
+            let markers = tokens
+                .iter()
+                .map(|token| format!("optimizer_token_{token}: __typename"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let schema = graph
+                .federated_query_graph
+                .schema_by_source(DAG_TEST_SUBGRAPHS[first.subgraph as usize])
+                .unwrap()
+                .clone();
+            let expected_selection = SelectionSet::parse(
+                schema.clone(),
+                schema
+                    .get_type(&name!("_Entity"))
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+                &format!(
+                    "... on T {{ {markers} {} }}",
+                    dag_plain_selection_text(selected)
+                ),
+            )
+            .unwrap();
+            prop_assert_eq!(
+                graph.graph[node].selection_set.selection_set.as_ref(),
+                &expected_selection,
+                "selected work changed for token group {:?}",
+                tokens
+            );
+            let expected_inputs = tokens
+                .iter()
+                .fold(0, |mask, token| mask | original_input_masks[*token]);
+            prop_assert_eq!(
+                dag_input_mask(&graph.graph[node]),
+                expected_inputs,
+                "optimizer lost input payload for token group {:?}",
+                tokens,
+            );
+            let expected_input_selection = SelectionSet::parse(
+                graph.supergraph_schema.clone(),
+                ObjectTypeDefinitionPosition::new(name!("T")).into(),
+                &format!(
+                    "... on T {{ __typename {} }}",
+                    dag_plain_selection_text(expected_inputs)
+                ),
+            )
+            .unwrap();
+            let inputs = graph.graph[node]
+                .inputs
+                .as_ref()
+                .ok_or_else(|| TestCaseError::fail("entity fetch lost representation inputs"))?;
+            prop_assert_eq!(inputs.selection_sets_per_parent_type.len(), 1);
+            prop_assert_eq!(
+                optimizer_flat_input_fields(
+                    inputs
+                        .selection_sets_per_parent_type
+                        .values()
+                        .next()
+                        .unwrap()
+                )?,
+                optimizer_flat_input_fields(&expected_input_selection)?,
+                "representation changed for token group {:?}",
+                tokens
+            );
+            prop_assert_eq!(
+                graph.graph[node].must_preserve_selection_set,
+                tokens.iter().any(|token| specs[*token].must_preserve),
+                "optimizer lost must-preserve state for token group {:?}",
+                tokens,
+            );
+            prop_assert!(groups.insert(tokens, node).is_none());
+        }
+
+        for (token, token_carriers) in carriers.iter().enumerate() {
+            prop_assert_eq!(
+                token_carriers.len(),
+                1,
+                "selection provenance token {} had carriers {:?}",
+                token,
+                token_carriers,
+            );
+            prop_assert!(petgraph::algo::has_path_connecting(
+                &graph.graph,
+                root,
+                token_carriers[0],
+                None,
+            ));
+        }
+
+        let token_groups = groups.keys().cloned().collect::<Vec<_>>();
+        let mut reachability = Vec::new();
+        for (source_tokens, source) in &groups {
+            for (target_tokens, target) in &groups {
+                if source != target
+                    && petgraph::algo::has_path_connecting(&graph.graph, *source, *target, None)
+                {
+                    reachability.push((source_tokens.clone(), target_tokens.clone()));
+                }
+            }
+        }
+        reachability.sort();
+
+        Ok(OptimizerSemanticSnapshot {
+            token_groups,
+            reachability,
+        })
+    }
+
+    fn audit_generated_optimizer_input_availability(
+        specs: &[OptimizerNodeSpec],
+        edges: &[(usize, usize)],
+        input_masks: &[u8],
+    ) -> Result<(), TestCaseError> {
+        const ROOT_INPUT_MASK: u8 = 0b001;
+        let reachability = optimizer_reference_reachability(specs.len(), edges);
+        for token in 0..specs.len() {
+            let available = (0..specs.len()).fold(ROOT_INPUT_MASK, |mask, ancestor| {
+                if reachability[ancestor + 1][token + 1]
+                    && specs[ancestor].merge_at == specs[token].merge_at
+                {
+                    mask | specs[ancestor].selection_mask
+                } else {
+                    mask
+                }
+            });
+            prop_assert_eq!(
+                input_masks[token] & !available,
+                0,
+                "generated token {} required unavailable input",
+                token,
+            );
+        }
+        Ok(())
+    }
+
+    /// Fields available at a response location, not a global bag of all field names. This
+    /// deliberately handles just the generated flat T selections at t / other: t.
+    fn optimizer_fields_at(
+        node: &FetchDependencyGraphNode,
+        location: &[FetchDataPathElement],
+    ) -> u8 {
+        if node.merge_at.as_deref() == Some(location) {
+            return dag_selection_mask(&node.selection_set.selection_set);
+        }
+        if node.merge_at.is_some() {
+            return 0;
+        }
+        let [FetchDataPathElement::Key(response_name, None)] = location else {
+            return 0;
+        };
+        node.selection_set
+            .selection_set
+            .selections
+            .values()
+            .fold(0, |mask, selection| {
+                let Selection::Field(field) = selection else {
+                    return mask;
+                };
+                if field.field.response_name() == response_name {
+                    mask | field
+                        .selection_set
+                        .as_ref()
+                        .map_or(0, |selection| dag_selection_mask(selection))
+                } else {
+                    mask
+                }
+            })
+    }
+
+    /// Slow reverse DFS from raw edges; no optimizer reachability cache, marker assumption, or
+    /// implicit root supply. Only strict ancestors can make a representation field available.
+    fn optimizer_strict_ancestors(
+        graph: &FetchDependencyGraph,
+        node: NodeIndex,
+    ) -> BTreeSet<NodeIndex> {
+        let mut ancestors = BTreeSet::new();
+        let mut pending: Vec<_> = graph
+            .graph
+            .edges_directed(node, petgraph::Direction::Incoming)
+            .map(|edge| edge.source())
+            .collect();
+        while let Some(parent) = pending.pop() {
+            if ancestors.insert(parent) {
+                pending.extend(
+                    graph
+                        .graph
+                        .edges_directed(parent, petgraph::Direction::Incoming)
+                        .map(|edge| edge.source()),
+                );
+            }
+        }
+        ancestors
+    }
+
+    fn audit_optimized_input_availability(
+        graph: &FetchDependencyGraph,
+    ) -> Result<(), TestCaseError> {
+        for node in graph.graph.node_indices() {
+            let Some(location) = &graph.graph[node].merge_at else {
+                continue;
+            };
+            let ancestors = optimizer_strict_ancestors(graph, node);
+            prop_assert!(!ancestors.contains(&node), "cyclic input dependency");
+            let available = ancestors.iter().fold(0, |mask, ancestor| {
+                mask | optimizer_fields_at(&graph.graph[*ancestor], location)
+            });
+            let required = dag_input_mask(&graph.graph[node]);
+            prop_assert_eq!(
+                required & !available,
+                0,
+                "fetch {:?} at {:?} requires unavailable fields: required {:03b}, available {:03b}",
+                node,
+                location,
+                required,
+                available
+            );
+        }
+        Ok(())
+    }
+
+    fn optimizer_auditor_fixture() -> (
+        FetchDependencyGraph,
+        NodeIndex,
+        Vec<OptimizerNodeSpec>,
+        Vec<u8>,
+    ) {
+        let specs = vec![
+            OptimizerNodeSpec {
+                subgraph: 0,
+                merge_at: 0,
+                selection_mask: FIELD_V1,
+                input_subset: 0,
+                parent: 0,
+                extra_parent_mask: 0,
+                must_preserve: false,
+            },
+            OptimizerNodeSpec {
+                subgraph: 1,
+                merge_at: 1,
+                selection_mask: FIELD_V2,
+                input_subset: 0,
+                parent: 0,
+                extra_parent_mask: 0,
+                must_preserve: true,
+            },
+        ];
+        let (graph, root, _, inputs) = build_optimizer_dag(&specs, false);
+        audit_optimizer_payloads(&graph, root, &specs, &inputs).unwrap();
+        audit_optimized_input_availability(&graph).unwrap();
+        (graph, root, specs, inputs)
+    }
+
+    #[test]
+    fn optimizer_payload_auditor_rejects_lost_field_even_when_marker_survives() {
+        let (mut graph, root, specs, inputs) = optimizer_auditor_fixture();
+        let victim = graph
+            .graph
+            .node_indices()
+            .find(|node| {
+                optimizer_tokens(&graph.graph[*node].selection_set.selection_set).contains(&0)
+            })
+            .unwrap();
+        let before = graph.graph[victim].selection_set.selection_set.clone();
+        let removed = SelectionSet::parse(
+            before.schema.clone(),
+            before.type_position.clone(),
+            "... on T { v1 }",
+        )
+        .unwrap();
+        Arc::make_mut(graph.graph.node_weight_mut(victim).unwrap())
+            .selection_set_mut()
+            .selection_set = Arc::new(before.minus(&removed).unwrap());
+        assert_eq!(
+            optimizer_tokens(&graph.graph[victim].selection_set.selection_set),
+            BTreeSet::from([0])
+        );
+        assert_eq!(
+            dag_selection_mask(&graph.graph[victim].selection_set.selection_set),
+            0
+        );
+        let error = audit_optimizer_payloads(&graph, root, &specs, &inputs).unwrap_err();
+        assert!(
+            error.to_string().contains("selected work changed"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn optimizer_payload_auditor_rejects_corrupt_location_inputs_flags_and_paths() {
+        // Check each corruption independently on an initially accepted fixture. None relies on
+        // production optimization failing first or on flags set by the implementation.
+        for corruption in [
+            "location",
+            "inputs",
+            "must_preserve",
+            "source",
+            "relative_path",
+        ] {
+            let (mut graph, root, specs, inputs) = optimizer_auditor_fixture();
+            let victim = graph
+                .graph
+                .node_indices()
+                .find(|node| {
+                    optimizer_tokens(&graph.graph[*node].selection_set.selection_set).contains(&0)
+                })
+                .unwrap();
+            match corruption {
+                "location" => {
+                    Arc::make_mut(graph.graph.node_weight_mut(victim).unwrap()).merge_at =
+                        optimizer_merge_at(1)
+                }
+                "inputs" => dag_add_input_mask(&mut graph, victim, FIELD_V2),
+                "must_preserve" => {
+                    Arc::make_mut(graph.graph.node_weight_mut(victim).unwrap())
+                        .must_preserve_selection_set = true
+                }
+                "source" => {
+                    Arc::make_mut(graph.graph.node_weight_mut(victim).unwrap()).subgraph_name =
+                        Arc::from("Subgraph2")
+                }
+                "relative_path" => {
+                    let edge = graph.graph.find_edge(root, victim).unwrap();
+                    Arc::make_mut(graph.graph.edge_weight_mut(edge).unwrap()).path =
+                        Some(Arc::new(OpPath::default()));
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                audit_optimizer_payloads(&graph, root, &specs, &inputs).is_err(),
+                "auditor accepted corrupt {corruption}"
+            );
+        }
+    }
+
+    #[test]
+    fn optimizer_availability_auditor_rejects_lost_ordering_even_when_consumer_stays_reachable() {
+        let mut graph = make_test_dep_graph();
+        let root = add_entity_test_root(&mut graph, "t { __typename id }");
+        let provider = add_entity_test_fetch(&mut graph, "Subgraph2", "t", "v2", "__typename id");
+        let consumer =
+            add_entity_test_fetch(&mut graph, "Subgraph2", "t", "v1", "__typename id v2");
+        let root_path = entity_test_root_path(&graph, "t");
+        dag_add_parent_with_path(&mut graph, root, provider, root_path.clone());
+        dag_add_parent_with_path(&mut graph, root, consumer, root_path);
+        dag_add_parent_with_path(&mut graph, provider, consumer, OpPath::default());
+        audit_optimized_input_availability(&graph).unwrap();
+
+        let edge = graph.graph.find_edge(provider, consumer).unwrap();
+        graph.graph.remove_edge(edge); // Intentional corruption of the oracle's input.
+        assert!(petgraph::algo::has_path_connecting(
+            &graph.graph,
+            root,
+            consumer,
+            None
+        ));
+        assert!(audit_optimized_input_availability(&graph).is_err());
+    }
+
+    #[test]
+    fn optimizer_availability_auditor_does_not_borrow_fields_from_another_response_location() {
+        let mut graph = make_test_dep_graph();
+        let root = add_entity_test_root(&mut graph, OPTIMIZER_ROOT_SELECTION);
+        let provider =
+            add_entity_test_fetch(&mut graph, "Subgraph2", "other", "v2", "__typename id");
+        let consumer =
+            add_entity_test_fetch(&mut graph, "Subgraph2", "t", "v1", "__typename id v2");
+        let path = entity_test_root_path(&graph, "other");
+        dag_add_parent_with_path(&mut graph, root, provider, path);
+        graph.add_parent(
+            consumer,
+            ParentRelation {
+                parent_node_id: provider,
+                path_in_parent: None,
+            },
+        );
+        // The graph is connected, and v2 exists on an ancestor, but at other rather than t.
+        assert!(audit_optimized_input_availability(&graph).is_err());
+    }
+
+    fn dag_test_fragment_path(graph: &FetchDependencyGraph, nested: bool) -> OpPath {
+        if !nested {
+            return OpPath::default();
+        }
+        let schema = graph
+            .federated_query_graph
+            .schema_by_source("Subgraph2")
+            .unwrap();
+        OpPath(vec![Arc::new(inline_fragment_element(
+            schema,
+            name!("T"),
+            Some(name!("T")),
+        ))])
+    }
+
+    fn dag_recursive_child_path(graph: &FetchDependencyGraph, depth: usize) -> OpPath {
+        let schema = graph
+            .federated_query_graph
+            .schema_by_source("Subgraph2")
+            .unwrap();
+        let field_position: FieldDefinitionPosition = schema
+            .get_type(&name!("T"))
+            .unwrap()
+            .try_into()
+            .map(|position: ObjectTypeDefinitionPosition| position.field(name!("child")).into())
+            .unwrap();
+        OpPath(
+            (0..depth)
+                .map(|_| {
+                    Arc::new(OpPathElement::Field(Field::from_position(
+                        schema,
+                        field_position.clone(),
+                    )))
+                })
+                .collect(),
+        )
+    }
+
+    fn dag_selection_nested_at_child_path(mask: u8, depth: usize) -> String {
+        let mut nested = dag_plain_selection_text(mask);
+        for _ in 0..depth {
+            nested = format!("child {{ {nested} }}");
+        }
+        nested
+    }
+
+    fn dag_merge_at_child_path(depth: usize, index_mask: u8) -> Vec<FetchDataPathElement> {
+        let mut path = Vec::new();
+        for level in 0..depth {
+            path.push(FetchDataPathElement::Key(name!("child"), None));
+            if index_mask & (1 << level) != 0 {
+                path.push(FetchDataPathElement::AnyIndex(None));
+            }
+        }
+        path
+    }
+
+    fn dag_add_parent_with_path(
+        graph: &mut FetchDependencyGraph,
+        parent: NodeIndex,
+        child: NodeIndex,
+        path: OpPath,
+    ) {
+        graph.add_parent(
+            child,
+            ParentRelation {
+                parent_node_id: parent,
+                path_in_parent: Some(Arc::new(path)),
+            },
+        );
+    }
+
+    fn dag_assert_ledger_is_live(graph: &FetchDependencyGraph) -> Result<(), TestCaseError> {
+        for &(source, target) in &graph.reduced_defer_edges {
+            prop_assert!(
+                graph.graph.node_weight(source).is_some(),
+                "ledger source {source:?} was removed"
+            );
+            prop_assert!(
+                graph.graph.node_weight(target).is_some(),
+                "ledger target {target:?} was removed"
+            );
+        }
+        Ok(())
+    }
+
+    fn child_merge_candidate(
+        child_defer: Option<&str>,
+    ) -> (FetchDependencyGraph, NodeIndex, NodeIndex) {
+        let mut graph = make_test_dep_graph();
+        let parent = add_merge_test_node(&mut graph, 0b001, 0b001, None);
+        let child = add_merge_test_node(&mut graph, 0b010, 0b001, child_defer);
+        dag_add_parent_with_path(&mut graph, parent, child, OpPath::default());
+        (graph, parent, child)
+    }
+
+    /// Exhaust every independent rejection gate in `can_merge_child_in`. This is deliberately a
+    /// finite table rather than random sampling: if a future refactor drops one case, every run
+    /// still proves that the optimizer refuses the unsafe shape.
+    #[test]
+    fn can_merge_child_in_rejects_every_unsafe_relation() {
+        let (graph, parent, child) = child_merge_candidate(None);
+        assert!(graph.can_merge_child_in(parent, child).unwrap());
+
+        let mut graph = make_test_dep_graph();
+        let parent = add_merge_test_node(&mut graph, 1, 1, None);
+        let child = add_merge_test_node(&mut graph, 2, 1, None);
+        add_test_edge(&mut graph, parent, child);
+        assert!(
+            !graph.can_merge_child_in(parent, child).unwrap(),
+            "missing path"
+        );
+
+        let (graph, parent, child) = child_merge_candidate(Some("deferred"));
+        assert!(
+            !graph.can_merge_child_in(parent, child).unwrap(),
+            "different defer"
+        );
+
+        let mut graph = make_test_dep_graph();
+        let parent = add_merge_test_node(&mut graph, 1, 1, None);
+        let child = add_test_node(&mut graph, "Subgraph1", None);
+        dag_add_parent_with_path(&mut graph, parent, child, OpPath::default());
+        assert!(
+            !graph.can_merge_child_in(parent, child).unwrap(),
+            "different subgraph"
+        );
+
+        let (mut graph, parent, child) = child_merge_candidate(None);
+        let independent_parent = add_test_node(&mut graph, "Subgraph1", None);
+        dag_add_parent_with_path(&mut graph, independent_parent, child, OpPath::default());
+        assert!(
+            !graph.can_merge_child_in(parent, child).unwrap(),
+            "an independent parent dependency would be lost"
+        );
+
+        let (mut graph, parent, child) = child_merge_candidate(None);
+        let ancestor = add_test_node(&mut graph, "Subgraph1", None);
+        dag_add_parent_with_path(&mut graph, ancestor, parent, OpPath::default());
+        dag_add_parent_with_path(&mut graph, ancestor, child, OpPath::default());
+        assert!(
+            graph.can_merge_child_in(parent, child).unwrap(),
+            "an already-transitive extra parent is safe"
+        );
+    }
+
+    fn sibling_merge_candidate_with(
+        right_defer: Option<&str>,
+        right_merge_at: Option<Vec<FetchDataPathElement>>,
+    ) -> (FetchDependencyGraph, NodeIndex, NodeIndex, NodeIndex) {
+        let mut graph = make_test_dep_graph();
+        let common_parent = add_test_node(&mut graph, "Subgraph1", None);
+        let left = add_merge_test_node(&mut graph, 1, 1, None);
+        let right = add_merge_test_node_at(&mut graph, 2, 1, right_defer, right_merge_at);
+        dag_add_parent_with_path(&mut graph, common_parent, left, OpPath::default());
+        dag_add_parent_with_path(&mut graph, common_parent, right, OpPath::default());
+        (graph, common_parent, left, right)
+    }
+
+    fn sibling_merge_candidate() -> (FetchDependencyGraph, NodeIndex, NodeIndex, NodeIndex) {
+        sibling_merge_candidate_with(None, Some(Vec::new()))
+    }
+
+    #[test]
+    fn can_merge_sibling_in_rejects_every_mismatched_identity() {
+        let (graph, _, left, right) = sibling_merge_candidate();
+        assert!(graph.can_merge_sibling_in(left, right).unwrap());
+
+        let (mut graph, _, left, right) = sibling_merge_candidate();
+        let extra_parent = add_test_node(&mut graph, "Subgraph1", None);
+        dag_add_parent_with_path(&mut graph, extra_parent, right, OpPath::default());
+        assert!(
+            !graph.can_merge_sibling_in(left, right).unwrap(),
+            "multiple parents"
+        );
+
+        let (graph, _, left, right) = sibling_merge_candidate_with(
+            None,
+            Some(vec![FetchDataPathElement::Key(name!("other"), None)]),
+        );
+        assert!(
+            !graph.can_merge_sibling_in(left, right).unwrap(),
+            "different merge_at"
+        );
+
+        let (graph, _, left, right) =
+            sibling_merge_candidate_with(Some("deferred"), Some(Vec::new()));
+        assert!(
+            !graph.can_merge_sibling_in(left, right).unwrap(),
+            "different defer"
+        );
+
+        let (mut graph, common_parent, left, _) = sibling_merge_candidate();
+        let other_subgraph = add_test_node(&mut graph, "Subgraph1", None);
+        dag_add_parent_with_path(&mut graph, common_parent, other_subgraph, OpPath::default());
+        assert!(
+            !graph.can_merge_sibling_in(left, other_subgraph).unwrap(),
+            "different subgraph"
+        );
+
+        let (mut graph, _, left, right) = sibling_merge_candidate();
+        dag_add_input_mask(&mut graph, right, 0b010);
+        assert!(
+            graph.can_merge_sibling_in(left, right).unwrap(),
+            "different input payloads are intentionally unioned during merge"
+        );
+    }
+
+    fn grandchild_merge_candidate() -> (FetchDependencyGraph, NodeIndex, NodeIndex, NodeIndex) {
+        let mut graph = make_test_dep_graph();
+        let grandparent = add_merge_test_node(&mut graph, 1, 0b111, None);
+        let parent = add_merge_test_node(&mut graph, 2, 0b001, None);
+        let grandchild = add_merge_test_node(&mut graph, 4, 0b001, None);
+        dag_add_parent_with_path(&mut graph, grandparent, parent, OpPath::default());
+        dag_add_parent_with_path(&mut graph, parent, grandchild, OpPath::default());
+        (graph, grandparent, parent, grandchild)
+    }
+
+    #[test]
+    fn can_merge_grandchild_in_rejects_every_unsafe_relation() {
+        let (graph, grandparent, parent, grandchild) = grandchild_merge_candidate();
+        assert!(
+            graph
+                .can_merge_grand_child_in(grandparent, parent, grandchild)
+                .unwrap()
+        );
+
+        let (mut graph, grandparent, parent, grandchild) = grandchild_merge_candidate();
+        let extra_parent = add_test_node(&mut graph, "Subgraph1", None);
+        dag_add_parent_with_path(&mut graph, extra_parent, grandchild, OpPath::default());
+        assert!(
+            !graph
+                .can_merge_grand_child_in(grandparent, parent, grandchild)
+                .unwrap(),
+            "multiple parents"
+        );
+
+        let (mut graph, grandparent, parent, grandchild) = grandchild_merge_candidate();
+        Arc::make_mut(graph.graph.node_weight_mut(grandchild).unwrap()).merge_at =
+            Some(vec![FetchDataPathElement::Key(name!("other"), None)]);
+        assert!(
+            !graph
+                .can_merge_grand_child_in(grandparent, parent, grandchild)
+                .unwrap(),
+            "different merge_at"
+        );
+
+        let (mut graph, grandparent, parent, grandchild) = grandchild_merge_candidate();
+        dag_add_input_mask(&mut graph, grandchild, 0b010);
+        assert!(
+            !graph
+                .can_merge_grand_child_in(grandparent, parent, grandchild)
+                .unwrap(),
+            "grandchild inputs not contained by its parent"
+        );
+
+        let (mut graph, grandparent, parent, grandchild) = grandchild_merge_candidate();
+        Arc::make_mut(graph.graph.node_weight_mut(grandchild).unwrap()).defer_ref =
+            Some("deferred".to_string());
+        assert!(
+            !graph
+                .can_merge_grand_child_in(grandparent, parent, grandchild)
+                .unwrap(),
+            "different defer"
+        );
+    }
+
+    /// A redundant edge is safe to remove only while another ordering path supplies the same
+    /// still-required input. All entity fetches below act on the same object at response path t.
+    #[test]
+    fn reduce_and_optimize_preserves_an_input_dependency_through_a_late_merge() {
+        let mut graph = make_test_dep_graph();
+        let root = add_entity_test_root(&mut graph, "t { __typename id }");
+        let earlier = add_entity_test_fetch(&mut graph, "Subgraph2", "t", "id v1", "__typename id");
+        let provider =
+            add_entity_test_fetch(&mut graph, "Subgraph2", "t", "id v2", "__typename id v1");
+        let later = add_entity_test_fetch(&mut graph, "Subgraph2", "t", "id v1", "__typename id");
+        let consumer =
+            add_entity_test_fetch(&mut graph, "Subgraph2", "t", "v1", "__typename id v2");
+        let root_path = entity_test_root_path(&graph, "t");
+        dag_add_parent_with_path(&mut graph, root, earlier, root_path);
+        // Root supplies id; earlier supplies v1; provider supplies v2.
+        // R -> earlier -> provider -> later -> consumer, plus provider -> consumer.
+        for (parent, child) in [
+            (earlier, provider),
+            (provider, later),
+            (later, consumer),
+            (provider, consumer),
+        ] {
+            dag_add_parent_with_path(&mut graph, parent, child, OpPath::default());
+        }
+        graph.reduce();
+        assert!(
+            !graph.is_parent_of(provider, consumer),
+            "the shortcut should be redundant"
+        );
+        assert!(petgraph::algo::has_path_connecting(
+            &graph.graph,
+            provider,
+            consumer,
+            None
+        ));
+
+        graph.reduce_and_optimize().unwrap();
+
+        // Inspect the current work, rather than demanding that particular NodeIndices survive
+        // a future valid rewrite. Whichever fetch still requires v2 must have a provider.
+        let v2_inputs = parse_field_set(&graph.supergraph_schema, name!("T"), "v2", true).unwrap();
+        let consumers: Vec<_> = graph.graph.node_indices().filter(|node| {
+            graph.graph[*node].inputs.as_ref().is_some_and(|inputs| {
+                inputs.selection_sets_per_parent_type.values().any(|selection| {
+                    selection.contains(&v2_inputs) || selection.selections.values().any(|part| {
+                        matches!(part, Selection::InlineFragment(fragment) if fragment.selection_set.contains(&v2_inputs))
+                    })
+                })
+            })
+        }).collect();
+        assert!(
+            !consumers.is_empty(),
+            "fixture must retain the v2-consuming work"
+        );
+        for consumer in consumers {
+            let selection = &graph.graph[consumer].selection_set.selection_set;
+            let v2_output = SelectionSet::parse(
+                selection.schema.clone(),
+                selection.type_position.clone(),
+                "... on T { v2 }",
+            )
+            .unwrap();
+            let providers: Vec<_> = graph
+                .graph
+                .node_indices()
+                .filter(|node| {
+                    graph.graph[*node].merge_at == graph.graph[consumer].merge_at
+                        && graph.graph[*node]
+                            .selection_set
+                            .selection_set
+                            .contains(&v2_output)
+                })
+                .collect();
+            assert!(
+                !providers.is_empty(),
+                "the v2 output must remain in the graph"
+            );
+            assert!(
+                providers.into_iter().any(|provider| {
+                    provider != consumer
+                        && petgraph::algo::has_path_connecting(
+                            &graph.graph,
+                            provider,
+                            consumer,
+                            None,
+                        )
+                }),
+                "a fetch still requiring v2 has lost its provider ordering"
+            );
+        }
+    }
+
+    /// Merging one bucket changes the ancestry used by the next. Use real subgraph buckets,
+    /// key-fetch constructors and root-supplied inputs at t; no invented response locations.
+    #[test]
+    fn reduce_and_optimize_does_not_use_stale_topology_across_merge_buckets() {
+        let mut graph = make_test_dep_graph();
+        let root = add_entity_test_root(&mut graph, "t { __typename id }");
+        let p = add_entity_test_fetch(
+            &mut graph,
+            "Subgraph1",
+            "t",
+            "p: __typename",
+            "__typename id",
+        );
+        let u = add_entity_test_fetch(
+            &mut graph,
+            "Subgraph2",
+            "t",
+            "u: __typename",
+            "__typename id",
+        );
+        let d = add_entity_test_fetch(
+            &mut graph,
+            "Subgraph1",
+            "t",
+            "d: __typename",
+            "__typename id",
+        );
+        let v = add_entity_test_fetch(
+            &mut graph,
+            "Subgraph2",
+            "t",
+            "v: __typename",
+            "__typename id",
+        );
+        let root_path = entity_test_root_path(&graph, "t");
+        dag_add_parent_with_path(&mut graph, root, p, root_path.clone());
+        dag_add_parent_with_path(&mut graph, root, u, root_path);
+        for (parent, child) in [(u, d), (u, v), (p, v)] {
+            dag_add_parent_with_path(&mut graph, parent, child, OpPath::default());
+        }
+        assert!(petgraph::algo::toposort(&graph.graph, None).is_ok());
+        assert_eq!(graph.graph[p].inputs, graph.graph[d].inputs);
+        assert_eq!(graph.graph[u].inputs, graph.graph[v].inputs);
+        assert!(!petgraph::algo::has_path_connecting(
+            &graph.graph,
+            p,
+            u,
+            None
+        ));
+        assert!(!petgraph::algo::has_path_connecting(
+            &graph.graph,
+            u,
+            p,
+            None
+        ));
+
+        // U/V merging transfers P's dependency to U, creating P -> U -> D. The P/D bucket
+        // must not reuse a pre-merge order that now attempts to create a cycle.
+        graph.reduce_and_optimize().unwrap();
+        assert!(petgraph::algo::toposort(&graph.graph, None).is_ok());
+    }
+
+    /// Optimization proposal, not a promised global normal form. Demonstrate the intermediate
+    /// opportunity separately so the final assertions can accept a correct additional merge.
+    #[test]
+    fn reduce_and_optimize_consumes_siblings_created_by_the_late_merge_phase() {
+        let mut graph = make_optimizer_dep_graph();
+        let root = add_entity_test_root(&mut graph, "t { __typename id }");
+        let first = add_entity_test_fetch(&mut graph, "Subgraph1", "t", "v1", "__typename id");
+        let second = add_entity_test_fetch(&mut graph, "Subgraph1", "t", "v2", "__typename id");
+        let left = add_entity_test_fetch(
+            &mut graph,
+            "Subgraph2",
+            "t",
+            "left: __typename",
+            "__typename id",
+        );
+        let right = add_entity_test_fetch(
+            &mut graph,
+            "Subgraph2",
+            "t",
+            "right: __typename",
+            "__typename id v1",
+        );
+        let root_path = entity_test_root_path(&graph, "t");
+        dag_add_parent_with_path(&mut graph, root, first, root_path);
+        for (parent, child) in [(first, second), (first, left), (second, right)] {
+            dag_add_parent_with_path(&mut graph, parent, child, OpPath::default());
+        }
+
+        // A separate phase snapshot establishes why the optimization is possible. Do not
+        // require these two NodeIndices to survive the complete optimizer below.
+        let mut phase_snapshot = graph.clone();
+        phase_snapshot.reduce();
+        phase_snapshot
+            .merge_child_fetches_for_same_subgraph_and_path()
+            .unwrap();
+        phase_snapshot
+            .merge_fetches_to_same_subgraph_and_same_inputs()
+            .unwrap();
+        assert!(phase_snapshot.can_merge_sibling_in(left, right).unwrap());
+
+        graph.reduce_and_optimize().unwrap();
+        let children: Vec<_> = graph
+            .graph
+            .node_indices()
+            .filter(|node| graph.graph[*node].subgraph_name.as_ref() == "Subgraph2")
+            .collect();
+        assert_eq!(
+            children.len(),
+            1,
+            "proposed optimization should combine the new siblings"
+        );
+        let actual = &graph.graph[children[0]].selection_set.selection_set;
+        let expected = SelectionSet::parse(
+            actual.schema.clone(),
+            actual.type_position.clone(),
+            "... on T { left: __typename right: __typename }",
+        )
+        .unwrap();
+        assert_eq!(
+            actual.as_ref(),
+            &expected,
+            "combining siblings must preserve both outputs"
+        );
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1024))]
+
+        /// `merge_child_in` delegates path placement to the operation selection machinery. Keep
+        /// the oracle deliberately simple: recursively wrap the merged payload in `child { ... }`
+        /// and compare the complete resulting selection tree, without flattening field names.
+        #[test]
+        fn merge_child_places_selection_at_the_exact_recursive_path(
+            survivor_selection in 1u8..8,
+            merged_selection in 1u8..8,
+            depth in 1usize..5,
+            relocated_child_depth in 0usize..4,
+        ) {
+            let mut graph = make_recursive_test_dep_graph();
+            let survivor = add_merge_test_node(
+                &mut graph,
+                survivor_selection,
+                0,
+                None,
+            );
+            let merged = add_merge_test_node(&mut graph, merged_selection, 0, None);
+            let path = dag_recursive_child_path(&graph, depth);
+            dag_add_parent_with_path(&mut graph, survivor, merged, path.clone());
+            let relocated_child = add_test_node(&mut graph, "Subgraph1", None);
+            let relocated_child_path =
+                dag_recursive_child_path(&graph, relocated_child_depth);
+            dag_add_parent_with_path(
+                &mut graph,
+                merged,
+                relocated_child,
+                relocated_child_path.clone(),
+            );
+
+            prop_assert!(graph.can_merge_child_in(survivor, merged).unwrap());
+            graph.merge_child_in(survivor, merged).unwrap();
+
+            let actual = &graph.graph[survivor].selection_set.selection_set;
+            let expected_text = format!(
+                "{} {}",
+                dag_plain_selection_text(survivor_selection),
+                dag_selection_nested_at_child_path(merged_selection, depth),
+            );
+            let expected = SelectionSet::parse(
+                actual.schema.clone(),
+                actual.type_position.clone(),
+                &expected_text,
+            )
+            .unwrap();
+            prop_assert_eq!(
+                actual.as_ref(),
+                &expected,
+                "merged selection was not placed at path depth {}: {}",
+                depth,
+                expected_text,
+            );
+
+            let expected_relocated_path = Arc::new(OpPath(
+                path.0
+                    .iter()
+                    .chain(&relocated_child_path.0)
+                    .cloned()
+                    .collect(),
+            ));
+            prop_assert_eq!(
+                graph
+                    .parent_relation(relocated_child, survivor)
+                    .and_then(|relation| relation.path_in_parent),
+                Some(expected_relocated_path),
+                "relocated child path was not prefixed by the merge path",
+            );
+        }
+
+        /// Grandchild merging composes two independently stored parent-relative paths. Compare it
+        /// with literal path concatenation and recursive selection wrapping, including an outgoing
+        /// edge that must be relocated from the removed grandchild.
+        #[test]
+        fn merge_grandchild_places_payload_at_concatenated_recursive_path(
+            survivor_selection in 1u8..8,
+            grandchild_selection in 1u8..8,
+            first_depth in 1usize..4,
+            second_depth in 1usize..4,
+            outgoing_depth in 0usize..3,
+        ) {
+            let mut graph = make_recursive_test_dep_graph();
+            let survivor = add_merge_test_node(
+                &mut graph,
+                survivor_selection,
+                0b111,
+                None,
+            );
+            let middle = add_merge_test_node(&mut graph, 1, 0b111, None);
+            let grandchild = add_merge_test_node(
+                &mut graph,
+                grandchild_selection,
+                0b001,
+                None,
+            );
+            let first_path = dag_recursive_child_path(&graph, first_depth);
+            let second_path = dag_recursive_child_path(&graph, second_depth);
+            dag_add_parent_with_path(&mut graph, survivor, middle, first_path.clone());
+            dag_add_parent_with_path(&mut graph, middle, grandchild, second_path.clone());
+
+            let outgoing = add_test_node(&mut graph, "Subgraph1", None);
+            let outgoing_path = dag_recursive_child_path(&graph, outgoing_depth);
+            dag_add_parent_with_path(
+                &mut graph,
+                grandchild,
+                outgoing,
+                outgoing_path.clone(),
+            );
+
+            prop_assert!(
+                graph
+                    .can_merge_grand_child_in(survivor, middle, grandchild)
+                    .unwrap()
+            );
+            graph
+                .merge_grand_child_in(survivor, grandchild)
+                .unwrap();
+
+            let merged_depth = first_depth + second_depth;
+            let actual = &graph.graph[survivor].selection_set.selection_set;
+            let expected_text = format!(
+                "{} {}",
+                dag_plain_selection_text(survivor_selection),
+                dag_selection_nested_at_child_path(grandchild_selection, merged_depth),
+            );
+            let expected = SelectionSet::parse(
+                actual.schema.clone(),
+                actual.type_position.clone(),
+                &expected_text,
+            )
+            .unwrap();
+            prop_assert_eq!(
+                actual.as_ref(),
+                &expected,
+                "grandchild payload was not placed at concatenated depth {}",
+                merged_depth,
+            );
+
+            let expected_outgoing_path = Arc::new(OpPath(
+                first_path
+                    .0
+                    .iter()
+                    .chain(&second_path.0)
+                    .chain(&outgoing_path.0)
+                    .cloned()
+                    .collect(),
+            ));
+            prop_assert_eq!(
+                graph
+                    .parent_relation(outgoing, survivor)
+                    .and_then(|relation| relation.path_in_parent),
+                Some(expected_outgoing_path),
+                "grandchild outgoing path did not receive both merge prefixes",
+            );
+        }
+
+        /// Reduced-defer recovery compares the source selection at the target node's `merge_at`
+        /// depth. Model that alignment as "remove the exact shared prefix, then descend once per
+        /// remaining field key"; list-index elements deliberately consume no selection depth.
+        #[test]
+        fn collect_reduced_defer_dependencies_aligns_nested_merge_at_paths(
+            source_selection in 1u8..8,
+            target_inputs in 1u8..8,
+            shared_depth in 0usize..3,
+            suffix_depth in 0usize..4,
+            source_has_merge_at in any::<bool>(),
+            shared_index_mask in any::<u8>(),
+            suffix_index_mask in any::<u8>(),
+        ) {
+            let mut graph = make_recursive_test_dep_graph();
+            let shared_path = dag_merge_at_child_path(shared_depth, shared_index_mask);
+            let suffix_path = dag_merge_at_child_path(suffix_depth, suffix_index_mask);
+            let child_path = shared_path
+                .iter()
+                .chain(&suffix_path)
+                .cloned()
+                .collect::<Vec<_>>();
+
+            let source = add_merge_test_node_at(
+                &mut graph,
+                0,
+                0,
+                None,
+                if source_has_merge_at {
+                    Some(shared_path.clone())
+                } else {
+                    None
+                },
+            );
+            let middle = add_test_node(&mut graph, "Subgraph1", None);
+            let target = add_merge_test_node_at(
+                &mut graph,
+                1,
+                target_inputs,
+                Some("nested-defer"),
+                Some(child_path),
+            );
+
+            let source_schema = graph.graph[source].selection_set.selection_set.schema.clone();
+            let source_type = graph.graph[source]
+                .selection_set
+                .selection_set
+                .type_position
+                .clone();
+            let selection_depth = if source_has_merge_at {
+                suffix_depth
+            } else {
+                shared_depth + suffix_depth
+            };
+            let source_text = dag_selection_nested_at_child_path(
+                source_selection,
+                selection_depth,
+            );
+            let nested_selection = SelectionSet::parse(source_schema, source_type, &source_text)
+                .unwrap();
+            Arc::make_mut(graph.graph.node_weight_mut(source).unwrap())
+                .selection_set_mut()
+                .add_selections(&Arc::new(nested_selection))
+                .unwrap();
+
+            add_test_edge(&mut graph, source, middle);
+            add_test_edge(&mut graph, middle, target);
+            add_test_edge(&mut graph, source, target);
+            graph.reduce();
+            prop_assert_eq!(graph.reduced_defer_edges.clone(), vec![(source, target)]);
+
+            let mut dependencies = Vec::new();
+            graph
+                .collect_reduced_defer_dependencies(source, &mut dependencies)
+                .unwrap();
+            let expected_overlap = source_selection & target_inputs != 0;
+            prop_assert_eq!(
+                !dependencies.is_empty(),
+                expected_overlap,
+                "merge_at alignment disagreed at shared depth {}, suffix depth {}: {}",
+                shared_depth,
+                suffix_depth,
+                source_text,
+            );
+        }
+
+        /// Check actual constructed inputs against the semantic specs, without running the
+        /// optimizer. This continues searching the generator's validity domain even when a
+        /// separate optimizer property stops at a known production failure.
+        #[test]
+        fn generated_optimizer_dags_have_complete_payloads_and_location_valid_inputs(
+            specs in optimizer_dag_strategy(),
+        ) {
+            for reverse in [false, true] {
+                let (graph, root, edges, inputs) = build_optimizer_dag(&specs, reverse);
+                audit_generated_optimizer_input_availability(&specs, &edges, &inputs)?;
+                audit_optimizer_payloads(&graph, root, &specs, &inputs)?;
+                audit_optimized_input_availability(&graph)?;
+            }
+        }
+
+        /// A single equal-input bucket has no cross-bucket ancestry feedback. Keep this domain
+        /// separate so known late-phase failures cannot stop all whole-optimizer exploration.
+        /// Its DAG topology is still arbitrary: multi-parent nodes, shortcuts and diamonds.
+        #[test]
+        fn whole_optimizer_conserves_single_bucket_dags(
+            mut specs in optimizer_dag_strategy(),
+        ) {
+            for spec in &mut specs {
+                spec.subgraph = 1;
+                spec.merge_at = 0;
+                spec.input_subset = 0;
+            }
+            for reverse in [false, true] {
+                let (mut graph, root, _, inputs) = build_optimizer_dag(&specs, reverse);
+                graph.reduce_and_optimize().unwrap();
+                let snapshot = audit_optimized_dag(&graph, root, &specs, &inputs)?;
+                audit_optimized_input_availability(&graph)?;
+                prop_assert_eq!(snapshot.token_groups, vec![(0..specs.len()).collect::<Vec<_>>()]);
+            }
+        }
+
+        /// Do not let provenance aliases make every fetch artificially useful. These sibling
+        /// leaves span empty selections, outputs already supplied by inputs, genuine new work,
+        /// and preserved nonempty selections. Empty nodes have no dependents, matching the
+        /// documented remove_empty_nodes precondition.
+        #[test]
+        fn whole_optimizer_removes_only_redundant_sibling_work(
+            selections in prop::collection::vec((0u8..8, any::<bool>()), 1..9),
+            reverse in any::<bool>(),
+        ) {
+            let mut graph = make_test_dep_graph();
+            let root = add_entity_test_root(&mut graph, "t { __typename id }");
+            let root_path = entity_test_root_path(&graph, "t");
+            let mut children = Vec::new();
+            let mut expected_new_fields = 0;
+            let mut expected_preserved_fields = 0;
+            for &(mask, preserve) in &selections {
+                let node = if mask == 0 {
+                    graph.new_key_node(&Arc::from("Subgraph2"),
+                        vec![FetchDataPathElement::Key(name!("t"), None)], None).unwrap()
+                } else {
+                    add_entity_test_fetch(&mut graph, "Subgraph2", "t",
+                        &dag_plain_selection_text(mask), "__typename id")
+                };
+                // must_preserve prevents removal of nonempty selections as "useless"; it is
+                // not a requirement to preserve an empty temporary fetch.
+                let preserve = preserve && mask != 0;
+                Arc::make_mut(graph.graph.node_weight_mut(node).unwrap()).must_preserve_selection_set = preserve;
+                expected_new_fields |= mask & !FIELD_ID;
+                if preserve { expected_preserved_fields |= mask; }
+                children.push(node);
+            }
+            if reverse { children.reverse(); }
+            for child in children { dag_add_parent_with_path(&mut graph, root, child, root_path.clone()); }
+            graph.reduce_and_optimize().unwrap();
+            let remaining: Vec<_> = graph.graph.node_indices().filter(|node| *node != root).collect();
+            let needs_fetch = expected_new_fields != 0 || expected_preserved_fields != 0;
+            prop_assert_eq!(remaining.len(), usize::from(needs_fetch));
+            if let Some(&node) = remaining.first() {
+                let selected = dag_selection_mask(&graph.graph[node].selection_set.selection_set);
+                prop_assert_eq!(selected & !FIELD_ID, expected_new_fields);
+                prop_assert_eq!(selected & expected_preserved_fields, expected_preserved_fields);
+                prop_assert_eq!(graph.graph[node].must_preserve_selection_set, expected_preserved_fields != 0);
+                prop_assert_eq!(&graph.graph[node].merge_at, &optimizer_merge_at(0));
+            }
+            audit_optimized_input_availability(&graph)?;
+        }
+
+        /// Run the complete optimizer over a connected generated DAG, not a preselected merge
+        /// shape. Audit complete payloads in both edge orders. Do not require the same merge
+        /// partition: different valid optimization choices are not necessarily wrong results.
+        /// Required-field availability has its own property below.
+        #[test]
+        fn whole_optimizer_conserves_generated_payloads_independent_of_edge_order(
+            specs in optimizer_dag_strategy(),
+        ) {
+            let (mut forward, forward_root, original_edges, original_input_masks) =
+                build_optimizer_dag(&specs, false);
+            forward.reduce_and_optimize().map_err(|error| {
+                TestCaseError::fail(format!("forward optimizer pass failed: {error}"))
+            })?;
+            audit_optimized_dag(
+                &forward,
+                forward_root,
+                &specs,
+                &original_input_masks,
+            )?;
+
+            let (
+                mut reversed,
+                reversed_root,
+                reversed_original_edges,
+                reversed_input_masks,
+            ) =
+                build_optimizer_dag(&specs, true);
+            prop_assert_eq!(&reversed_original_edges, &original_edges);
+            prop_assert_eq!(&reversed_input_masks, &original_input_masks);
+            reversed.reduce_and_optimize().map_err(|error| {
+                TestCaseError::fail(format!("reversed optimizer pass failed: {error}"))
+            })?;
+            audit_optimized_dag(
+                &reversed,
+                reversed_root,
+                &specs,
+                &original_input_masks,
+            )?;
+
+        }
+
+        /// Independently validate that every generated input is available, run the complete
+        /// optimizer, then recompute availability from the resulting dependency graph. This is
+        /// the data-flow law that catches a reduced provider edge being lost when an intermediate
+        /// equal-input fetch is subsequently hoisted.
+        #[test]
+        fn whole_optimizer_preserves_generated_input_availability(
+            specs in optimizer_dag_strategy(),
+        ) {
+            let (mut graph, root, original_edges, original_input_masks) =
+                build_optimizer_dag(&specs, false);
+            audit_generated_optimizer_input_availability(
+                &specs,
+                &original_edges,
+                &original_input_masks,
+            )?;
+            graph.reduce_and_optimize().map_err(|error| {
+                TestCaseError::fail(format!("optimizer pass failed: {error}"))
+            })?;
+            audit_optimized_dag(
+                &graph,
+                root,
+                &specs,
+                &original_input_masks,
+            )?;
+            audit_optimized_input_availability(&graph)?;
+        }
+
+        /// Proposed optimization goal, not a documented global-normal-form guarantee: a second
+        /// pass should find no further merge. Keep this separate from conservation laws so a
+        /// missed optimization is not reported as lost work or an incorrect query result.
+        #[test]
+        fn whole_optimizer_reaches_a_semantic_fixed_point(
+            specs in optimizer_dag_strategy(),
+        ) {
+            let (mut graph, root, _original_edges, original_input_masks) =
+                build_optimizer_dag(&specs, false);
+            graph.reduce_and_optimize().map_err(|error| {
+                TestCaseError::fail(format!("first optimizer pass failed: {error}"))
+            })?;
+            let first = audit_optimized_dag(
+                &graph,
+                root,
+                &specs,
+                &original_input_masks,
+            )?;
+
+            // Re-open the guard so this tests the optimizer's actual phase sequence instead of
+            // the `is_optimized` early return.
+            graph.on_modification();
+            graph.reduce_and_optimize().map_err(|error| {
+                TestCaseError::fail(format!("second optimizer pass failed: {error}"))
+            })?;
+            let second = audit_optimized_dag(
+                &graph,
+                root,
+                &specs,
+                &original_input_masks,
+            )?;
+            prop_assert_eq!(
+                second,
+                first,
+                "a second complete optimizer pass changed the semantic fetch quotient",
+            );
+        }
+
+        /// Exercise the public optimization sequence rather than its merge primitives in
+        /// isolation. Re-opening the optimization guard must produce an identical normal form.
+        #[test]
+        fn reduce_and_optimize_is_idempotent_and_conserves_sibling_payload(
+            left_selection in 1u8..8,
+            right_selection in 1u8..8,
+            left_first in any::<bool>(),
+        ) {
+            let mut graph = make_test_dep_graph();
+            let root = add_test_root(&mut graph, "Subgraph1");
+            let left = add_merge_test_node(&mut graph, left_selection, 0, None);
+            let right = add_merge_test_node(&mut graph, right_selection, 0, None);
+            let ordered = if left_first { [left, right] } else { [right, left] };
+            for child in ordered {
+                dag_add_parent_with_path(&mut graph, root, child, OpPath::default());
+            }
+
+            graph.reduce_and_optimize().unwrap();
+            let children = graph.children_of(root).collect::<Vec<_>>();
+            prop_assert_eq!(children.len(), 1, "mergeable root siblings survived optimization");
+            let survivor = children[0];
+            prop_assert_eq!(
+                dag_selection_mask(&graph.graph[survivor].selection_set.selection_set),
+                left_selection | right_selection,
+                "full optimization lost sibling selection payload",
+            );
+            let first_nodes = graph
+                .graph
+                .node_indices()
+                .map(|node| {
+                    (
+                        node,
+                        graph.graph[node].subgraph_name.clone(),
+                        dag_selection_mask(&graph.graph[node].selection_set.selection_set),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let first_edges = graph
+                .graph
+                .edge_references()
+                .map(|edge| (edge.source(), edge.target(), edge.weight().path.clone()))
+                .collect::<Vec<_>>();
+            let first_ledger = graph.reduced_defer_edges.clone();
+
+            graph.on_modification();
+            graph.reduce_and_optimize().unwrap();
+            let second_nodes = graph
+                .graph
+                .node_indices()
+                .map(|node| {
+                    (
+                        node,
+                        graph.graph[node].subgraph_name.clone(),
+                        dag_selection_mask(&graph.graph[node].selection_set.selection_set),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let second_edges = graph
+                .graph
+                .edge_references()
+                .map(|edge| (edge.source(), edge.target(), edge.weight().path.clone()))
+                .collect::<Vec<_>>();
+            prop_assert_eq!(second_nodes, first_nodes);
+            prop_assert_eq!(second_edges, first_edges);
+            prop_assert_eq!(graph.reduced_defer_edges.clone(), first_ledger);
+            prop_assert!(graph.is_reduced && graph.is_optimized);
+
+            let mut reordered = make_test_dep_graph();
+            let reordered_root = add_test_root(&mut reordered, "Subgraph1");
+            let reordered_left =
+                add_merge_test_node(&mut reordered, left_selection, 0, None);
+            let reordered_right =
+                add_merge_test_node(&mut reordered, right_selection, 0, None);
+            let reversed = if left_first {
+                [reordered_right, reordered_left]
+            } else {
+                [reordered_left, reordered_right]
+            };
+            for child in reversed {
+                dag_add_parent_with_path(
+                    &mut reordered,
+                    reordered_root,
+                    child,
+                    OpPath::default(),
+                );
+            }
+            reordered.reduce_and_optimize().unwrap();
+
+            let canonical = |candidate: &FetchDependencyGraph| {
+                let mut nodes = candidate
+                    .graph
+                    .node_indices()
+                    .map(|node| {
+                        (
+                            candidate.graph[node].subgraph_name.to_string(),
+                            dag_selection_mask(
+                                &candidate.graph[node].selection_set.selection_set,
+                            ),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                nodes.sort();
+                let mut edges = candidate
+                    .graph
+                    .edge_references()
+                    .map(|edge| {
+                        (
+                            candidate.graph[edge.source()].subgraph_name.to_string(),
+                            dag_selection_mask(
+                                &candidate.graph[edge.source()].selection_set.selection_set,
+                            ),
+                            candidate.graph[edge.target()].subgraph_name.to_string(),
+                            dag_selection_mask(
+                                &candidate.graph[edge.target()].selection_set.selection_set,
+                            ),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                edges.sort();
+                (nodes, edges)
+            };
+            prop_assert_eq!(
+                canonical(&reordered),
+                canonical(&graph),
+                "optimized semantics depended on sibling edge insertion order",
+            );
+        }
+
+        /// Exercise the later equal-input optimization rather than the earlier sibling merge.
+        /// The two merge candidates begin under different parents, and each has a distinct child;
+        /// after `reduce_and_optimize` the single survivor must retain the union of both sides'
+        /// incoming dependencies, outgoing dependencies, selections, and inputs.
+        #[test]
+        fn reduce_and_optimize_conserves_all_dependencies_of_equal_input_fetches(
+            left_selection in 1u8..8,
+            right_selection in 1u8..8,
+            reverse_parent_order in any::<bool>(),
+        ) {
+            let mut graph = make_test_dep_graph();
+            let root = add_test_root(&mut graph, "Subgraph1");
+            let left_parent = add_test_node_at(
+                &mut graph,
+                "Subgraph1",
+                None,
+                Some(vec![FetchDataPathElement::Key(name!("left"), None)]),
+            );
+            let right_parent = add_test_node_at(
+                &mut graph,
+                "Subgraph1",
+                None,
+                Some(vec![FetchDataPathElement::Key(name!("right"), None)]),
+            );
+            dag_add_selection_mask(&mut graph, left_parent, 0b001);
+            dag_add_selection_mask(&mut graph, right_parent, 0b001);
+
+            let left = add_merge_test_node(&mut graph, left_selection, 0b001, None);
+            let right = add_merge_test_node(&mut graph, right_selection, 0b001, None);
+            let left_child = add_test_node(&mut graph, "Subgraph1", None);
+            let right_child = add_test_node(&mut graph, "Subgraph1", None);
+            dag_add_selection_mask(&mut graph, left_child, 0b001);
+            dag_add_selection_mask(&mut graph, right_child, 0b001);
+
+            let parents = if reverse_parent_order {
+                [right_parent, left_parent]
+            } else {
+                [left_parent, right_parent]
+            };
+            for parent in parents {
+                dag_add_parent_with_path(&mut graph, root, parent, OpPath::default());
+            }
+            // Unknown parent-relative paths deliberately prevent the child-merge pass from
+            // consuming either equal-input candidate before the all-dependencies pass sees it.
+            add_test_edge(&mut graph, left_parent, left);
+            add_test_edge(&mut graph, right_parent, right);
+            add_test_edge(&mut graph, left, left_child);
+            add_test_edge(&mut graph, right, right_child);
+
+            graph.reduce_and_optimize().unwrap();
+
+            let survivors = [left, right]
+                .into_iter()
+                .filter(|node| graph.graph.node_weight(*node).is_some())
+                .collect::<Vec<_>>();
+            prop_assert_eq!(survivors.len(), 1, "equal-input fetches were not merged");
+            let survivor = survivors[0];
+            prop_assert_eq!(
+                dag_selection_mask(&graph.graph[survivor].selection_set.selection_set),
+                left_selection | right_selection,
+            );
+            prop_assert_eq!(dag_input_mask(&graph.graph[survivor]), 0b001);
+            for parent in [left_parent, right_parent] {
+                prop_assert!(graph.is_parent_of(parent, survivor));
+            }
+            for child in [left_child, right_child] {
+                prop_assert!(graph.is_parent_of(survivor, child));
+            }
+            prop_assert!(graph.is_reduced && graph.is_optimized);
+        }
+
+        /// A sibling merge must transfer both payloads and outgoing dependencies from the merged
+        /// sibling. The defer ledger is produced by the real B -> M -> D / B -> D reduction, so
+        /// successful dependency recovery proves the remap still points at the node that now owns
+        /// B's selected fields.
+        #[test]
+        fn merge_sibling_conserves_payload_topology_and_defer_source(
+            a_selection in 1u8..8,
+            b_selection in 1u8..8,
+            a_inputs in 0u8..8,
+            b_inputs in 0u8..8,
+            deferred_input_seed in any::<u8>(),
+            nested_child_path in any::<bool>(),
+            preserve_a in any::<bool>(),
+            preserve_b in any::<bool>(),
+        ) {
+            let mut graph = make_test_dep_graph();
+            let root = add_test_node(&mut graph, "Subgraph1", None);
+            let a = add_merge_test_node(&mut graph, a_selection, a_inputs, None);
+            let b = add_merge_test_node(&mut graph, b_selection, b_inputs, None);
+            let middle = add_test_node(&mut graph, "Subgraph1", None);
+
+            // Force at least one target input to be provided specifically by B. The remaining
+            // bits stay generated so both exact and partial overlaps are exercised.
+            let overlap_bit = 1 << b_selection.trailing_zeros();
+            let deferred_inputs = (deferred_input_seed & 0b111) | overlap_bit;
+            let deferred = add_merge_test_node(&mut graph, 1, deferred_inputs, Some("defer"));
+
+            Arc::make_mut(graph.graph.node_weight_mut(a).unwrap())
+                .must_preserve_selection_set = preserve_a;
+            Arc::make_mut(graph.graph.node_weight_mut(b).unwrap())
+                .must_preserve_selection_set = preserve_b;
+
+            dag_add_parent_with_path(&mut graph, root, a, OpPath::default());
+            dag_add_parent_with_path(&mut graph, root, b, OpPath::default());
+            let child_path = dag_test_fragment_path(&graph, nested_child_path);
+            dag_add_parent_with_path(&mut graph, b, middle, child_path.clone());
+            dag_add_parent_with_path(&mut graph, middle, deferred, OpPath::default());
+            dag_add_parent_with_path(&mut graph, b, deferred, OpPath::default());
+
+            graph.reduce();
+            prop_assert_eq!(graph.reduced_defer_edges.clone(), vec![(b, deferred)]);
+            prop_assert!(graph.can_merge_sibling_in(a, b).unwrap());
+
+            // Warm the survivor's derived state before the payload mutation.
+            {
+                let node = Arc::make_mut(graph.graph.node_weight_mut(a).unwrap());
+                let _ = node.selection_set.conditions().unwrap();
+                let _ = node.cost();
+            }
+
+            graph.merge_sibling_in(a, b).unwrap();
+
+            prop_assert!(graph.graph.node_weight(b).is_none());
+            let survivor = graph.graph.node_weight(a).unwrap();
+            prop_assert_eq!(
+                dag_selection_mask(&survivor.selection_set.selection_set),
+                a_selection | b_selection,
+                "sibling selections were not unioned"
+            );
+            prop_assert_eq!(
+                dag_input_mask(survivor),
+                a_inputs | b_inputs,
+                "sibling inputs were not unioned"
+            );
+            prop_assert_eq!(
+                survivor.must_preserve_selection_set,
+                preserve_a || preserve_b,
+            );
+            prop_assert_eq!(
+                graph.parent_relation(middle, a).unwrap().path_in_parent,
+                Some(Arc::new(child_path)),
+                "the merged sibling's child path changed"
+            );
+            prop_assert!(graph.is_parent_of(middle, deferred));
+            prop_assert!(petgraph::algo::has_path_connecting(
+                &graph.graph,
+                root,
+                deferred,
+                None,
+            ));
+            prop_assert_eq!(graph.reduced_defer_edges.clone(), vec![(a, deferred)]);
+            dag_assert_ledger_is_live(&graph)?;
+            prop_assert!(!graph.is_reduced, "a merge must invalidate reduction state");
+
+            let survivor = Arc::make_mut(graph.graph.node_weight_mut(a).unwrap());
+            prop_assert_eq!(
+                survivor.cost(),
+                survivor.selection_set.selection_set.cost(1.0),
+                "the survivor retained a stale cached cost"
+            );
+            prop_assert_eq!(
+                survivor.selection_set.conditions().unwrap(),
+                &survivor.selection_set.selection_set.conditions().unwrap(),
+                "the survivor retained stale cached conditions"
+            );
+
+            let mut dependencies = Vec::new();
+            graph.collect_reduced_defer_dependencies(a, &mut dependencies).unwrap();
+            let id = graph.graph[a].id.get().unwrap();
+            prop_assert_eq!(dependencies, vec![("defer".to_string(), id.to_string())]);
+        }
+
+        /// A child merge exercises the opposite ledger endpoint. Here P -> B is genuinely
+        /// transitively redundant through P -> A -> B. After B is folded into A, the ledger and
+        /// B's outgoing edge must both target A without losing B's selection payload.
+        #[test]
+        fn merge_child_conserves_payload_topology_and_defer_target(
+            a_selection in 1u8..8,
+            b_selection in 1u8..8,
+            a_inputs in 1u8..8,
+            b_input_seed in any::<u8>(),
+            source_selection_seed in any::<u8>(),
+            nested_merge_path in any::<bool>(),
+            preserve_a in any::<bool>(),
+            preserve_b in any::<bool>(),
+        ) {
+            let mut graph = make_test_dep_graph();
+            let overlap_bit = 1 << a_inputs.trailing_zeros();
+            let source_selection = (source_selection_seed & 0b111) | overlap_bit;
+            let source = add_test_node(&mut graph, "Subgraph2", None);
+            dag_add_selection_mask(&mut graph, source, source_selection);
+
+            let b_inputs = b_input_seed & a_inputs;
+            let a = add_merge_test_node(
+                &mut graph,
+                a_selection,
+                a_inputs,
+                Some("defer"),
+            );
+            let b = add_merge_test_node(
+                &mut graph,
+                b_selection,
+                b_inputs,
+                Some("defer"),
+            );
+            let tail = add_test_node(&mut graph, "Subgraph1", Some("defer"));
+
+            Arc::make_mut(graph.graph.node_weight_mut(a).unwrap())
+                .must_preserve_selection_set = preserve_a;
+            Arc::make_mut(graph.graph.node_weight_mut(b).unwrap())
+                .must_preserve_selection_set = preserve_b;
+
+            dag_add_parent_with_path(&mut graph, source, a, OpPath::default());
+            let merge_path = dag_test_fragment_path(&graph, nested_merge_path);
+            dag_add_parent_with_path(&mut graph, a, b, merge_path.clone());
+            dag_add_parent_with_path(&mut graph, source, b, OpPath::default());
+            dag_add_parent_with_path(&mut graph, b, tail, OpPath::default());
+
+            graph.reduce();
+            prop_assert_eq!(graph.reduced_defer_edges.clone(), vec![(source, b)]);
+            prop_assert!(graph.can_merge_child_in(a, b).unwrap());
+
+            {
+                let node = Arc::make_mut(graph.graph.node_weight_mut(a).unwrap());
+                let _ = node.selection_set.conditions().unwrap();
+                let _ = node.cost();
+            }
+
+            graph.merge_child_in(a, b).unwrap();
+
+            prop_assert!(graph.graph.node_weight(b).is_none());
+            let survivor = graph.graph.node_weight(a).unwrap();
+            prop_assert_eq!(
+                dag_selection_mask(&survivor.selection_set.selection_set),
+                a_selection | b_selection,
+                "child selections were not unioned"
+            );
+            prop_assert_eq!(
+                dag_input_mask(survivor),
+                a_inputs,
+                "a child merge must not copy inputs already supplied by the parent"
+            );
+            prop_assert_eq!(
+                survivor.must_preserve_selection_set,
+                preserve_a || preserve_b,
+            );
+            prop_assert_eq!(
+                graph.parent_relation(tail, a).unwrap().path_in_parent,
+                Some(Arc::new(merge_path)),
+                "the child merge path was not prefixed onto its relocated edge"
+            );
+            prop_assert!(petgraph::algo::has_path_connecting(
+                &graph.graph,
+                source,
+                tail,
+                None,
+            ));
+            prop_assert_eq!(graph.reduced_defer_edges.clone(), vec![(source, a)]);
+            dag_assert_ledger_is_live(&graph)?;
+            prop_assert!(!graph.is_reduced, "a merge must invalidate reduction state");
+
+            let survivor = Arc::make_mut(graph.graph.node_weight_mut(a).unwrap());
+            prop_assert_eq!(
+                survivor.cost(),
+                survivor.selection_set.selection_set.cost(1.0),
+                "the survivor retained a stale cached cost"
+            );
+            prop_assert_eq!(
+                survivor.selection_set.conditions().unwrap(),
+                &survivor.selection_set.selection_set.conditions().unwrap(),
+                "the survivor retained stale cached conditions"
+            );
+
+            let mut dependencies = Vec::new();
+            graph
+                .collect_reduced_defer_dependencies(source, &mut dependencies)
+                .unwrap();
+            let id = graph.graph[source].id.get().unwrap();
+            prop_assert_eq!(dependencies, vec![("defer".to_string(), id.to_string())]);
+        }
+    }
+
+    // Deterministic derived-state invalidation repro.
+
+    fn add_node_with_selection_and_matching_inputs(
+        graph: &mut FetchDependencyGraph,
+        selected_text: &str,
+        input_text: &str,
+    ) -> NodeIndex {
+        let node_id = add_test_node(graph, "Subgraph2", None);
+        let subgraph_schema = graph
+            .federated_query_graph
+            .schema_by_source("Subgraph2")
+            .unwrap()
+            .clone();
+        let selected = SelectionSet::parse(
+            subgraph_schema.clone(),
+            subgraph_schema
+                .get_type(&name!("T"))
+                .unwrap()
+                .try_into()
+                .unwrap(),
+            selected_text,
+        )
+        .unwrap();
+        let inputs = SelectionSet::parse(
+            graph.supergraph_schema.clone(),
+            graph
+                .supergraph_schema
+                .get_type(&name!("T"))
+                .unwrap()
+                .try_into()
+                .unwrap(),
+            input_text,
+        )
+        .unwrap();
+        let node = Arc::make_mut(graph.graph.node_weight_mut(node_id).unwrap());
+        node.selection_set_mut()
+            .add_selections(&Arc::new(selected))
+            .unwrap();
+        node.add_inputs(&inputs, iter::empty()).unwrap();
+        node_id
+    }
+
+    /// Hardening invariant: the production mutator must invalidate every derived value even if a
+    /// future caller reads conditions before removing inputs. The current planner caller mutates a
+    /// fresh copied node, so this warm-before-mutate ordering is not known to be reachable today.
+    #[test]
+    fn remove_inputs_from_selection_invalidates_warmed_conditions_regression() {
+        let mut graph = make_test_dep_graph();
+        let node_id = add_node_with_selection_and_matching_inputs(&mut graph, "id", "id");
+
+        let node = graph.graph.node_weight(node_id).unwrap();
+        assert_eq!(
+            node.selection_set.conditions().unwrap(),
+            &Conditions::always(),
+            "a non-empty unconditional selection must initially execute",
+        );
+
+        graph.remove_inputs_from_selection(node_id).unwrap();
+
+        let node = graph.graph.node_weight(node_id).unwrap();
+        assert!(node.selection_set.selection_set.is_empty());
+        assert_eq!(
+            node.selection_set.conditions().unwrap(),
+            &Conditions::never(),
+            "conditions must be recomputed from the now-empty selection",
+        );
+    }
+
+    // =========================================================================================
+    // Generated cache-invalidation coverage. The production type deliberately memoizes both
+    // selection conditions and cost, so mutation tests read those values before mutation. The
+    // generator assigns every field one of the meaningful constant @skip/@include forms and
+    // removes a non-empty subset through the node's real `_entities` inputs.
+    // =========================================================================================
+
+    const DAG_CACHE_FIELDS: [&str; 3] = ["id", "v1", "v2"];
+
+    fn dag_cache_directive(seed: u8) -> &'static str {
+        match seed % 5 {
+            0 => "",
+            1 => " @include(if: true)",
+            2 => " @include(if: false)",
+            3 => " @skip(if: true)",
+            4 => " @skip(if: false)",
+            _ => unreachable!("modulo five"),
+        }
+    }
+
+    fn dag_cache_selection_text(mask: u8, mut directive_seed: u8) -> String {
+        DAG_CACHE_FIELDS
+            .iter()
+            .enumerate()
+            .filter_map(|(index, field)| {
+                let directive = dag_cache_directive(directive_seed);
+                directive_seed /= 5;
+                (mask & (1 << index) != 0).then(|| format!("{field}{directive}"))
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1024))]
+
+        #[test]
+        fn remove_inputs_from_selection_invalidates_all_derived_selection_state(
+            selected_mask in 1u8..8,
+            removed_seed in any::<u8>(),
+            directive_seed in 0u8..125,
+        ) {
+            let mut graph = make_test_dep_graph();
+
+            // Always remove at least one selected field. Choice-by-modulo keeps every generated
+            // case valid and shrinkable without `prop_assume`/`prop_filter` rejection.
+            let mut removed_mask = removed_seed & selected_mask;
+            if removed_mask == 0 {
+                removed_mask = 1 << selected_mask.trailing_zeros();
+            }
+
+            let selected_text = dag_cache_selection_text(selected_mask, directive_seed);
+            let removed_text = dag_cache_selection_text(removed_mask, directive_seed);
+            let node_id = add_node_with_selection_and_matching_inputs(
+                &mut graph,
+                &selected_text,
+                &removed_text,
+            );
+
+            {
+                let node = Arc::make_mut(graph.graph.node_weight_mut(node_id).unwrap());
+                // Warm both caches before mutation; otherwise this property would be vacuous.
+                let cached_conditions = node.selection_set.conditions().unwrap().clone();
+                let direct_conditions = node.selection_set.selection_set.conditions().unwrap();
+                prop_assert_eq!(cached_conditions, direct_conditions);
+                let cached_cost = node.cost();
+                let direct_cost = node.selection_set.selection_set.cost(1.0);
+                prop_assert_eq!(cached_cost, direct_cost);
+            }
+
+            graph.remove_inputs_from_selection(node_id).unwrap();
+
+            let node = Arc::make_mut(graph.graph.node_weight_mut(node_id).unwrap());
+            let direct_conditions = node.selection_set.selection_set.conditions().unwrap();
+            let cached_conditions = node.selection_set.conditions().unwrap().clone();
+            prop_assert_eq!(
+                cached_conditions,
+                direct_conditions,
+                "stale conditions after removing `{}` from `{}`",
+                removed_text,
+                selected_text,
+            );
+            let direct_cost = node.selection_set.selection_set.cost(1.0);
+            let cached_cost = node.cost();
+            prop_assert_eq!(
+                cached_cost,
+                direct_cost,
+                "stale cost after removing `{}` from `{}`",
+                removed_text,
+                selected_text,
+            );
+        }
+    }
+
+    // =========================================================================================
+    // FetchDependencyGraphNodePath as a cached state machine.
+    //
+    // The production type updates five parallel representations on every field/fragment append
+    // and preserves four of them while resetting `path_in_node` for a new key fetch. This trace
+    // generator only emits schema-valid next steps and audits after every command against a small
+    // direct interpreter. The schema deliberately includes aliases, an abstract type with three
+    // implementations, recursive composite fields, and nested lists.
+    // =========================================================================================
+
+    const FETCH_PATH_SCHEMA: &str = r#"
+        schema { query: Query }
+
+        type Query {
+            id: ID!
+            one: Node
+            list: [Node]
+            many: [[Node]]
+        }
+
+        interface Node {
+            id: ID!
+            next: Node
+            list: [Node]
+            matrix: [[Node]]
+        }
+
+        type A implements Node {
+            id: ID!
+            next: Node
+            list: [Node]
+            matrix: [[Node]]
+        }
+
+        type B implements Node {
+            id: ID!
+            next: Node
+            list: [Node]
+            matrix: [[Node]]
+        }
+
+        type C implements Node {
+            id: ID!
+            next: Node
+            list: [Node]
+            matrix: [[Node]]
+        }
+    "#;
+
+    #[derive(Debug, Clone, Copy)]
+    enum FetchPathCommand {
+        /// `shape % 4`: scalar leaf, composite, list of composite, nested list of composite.
+        Field {
+            shape: u8,
+            alias: u8,
+        },
+        Fragment {
+            conditioned: bool,
+            target: u8,
+        },
+        ResetForKey {
+            retain_full_path: bool,
+        },
+    }
+
+    fn fetch_path_command_strategy() -> impl Strategy<Value = FetchPathCommand> {
+        prop_oneof![
+            6 => (any::<u8>(), any::<u8>())
+                .prop_map(|(shape, alias)| FetchPathCommand::Field {
+                    shape,
+                    alias,
+                }),
+            4 => (any::<bool>(), any::<u8>())
+                .prop_map(|(conditioned, target)| FetchPathCommand::Fragment {
+                    conditioned,
+                    target,
+                }),
+            2 => any::<bool>().prop_map(|retain_full_path| FetchPathCommand::ResetForKey {
+                retain_full_path,
+            }),
+        ]
+    }
+
+    fn make_fetch_path_schema() -> ValidFederationSchema {
+        let schema = apollo_compiler::Schema::parse_and_validate(
+            FETCH_PATH_SCHEMA,
+            "fetch_path_schema.graphql",
+        )
+        .unwrap();
+        ValidFederationSchema::new(schema).unwrap()
+    }
+
+    fn fetch_path_runtime_types() -> IndexSet<Name> {
+        [name!("A"), name!("B"), name!("C")].into_iter().collect()
+    }
+
+    fn fetch_path_alias(seed: u8) -> Option<Name> {
+        match seed % 4 {
+            0 => None,
+            1 => Some(name!("first")),
+            2 => Some(name!("second")),
+            3 => Some(name!("third")),
+            _ => unreachable!("modulo four"),
+        }
+    }
+
+    fn fetch_path_field_element(
+        schema: &ValidFederationSchema,
+        declared_type: &Name,
+        shape: u8,
+        alias_seed: u8,
+    ) -> Arc<OpPathElement> {
+        let field_name = match (declared_type == &name!("Query"), shape % 4) {
+            (_, 0) => name!("id"),
+            (true, 1) => name!("one"),
+            (false, 1) => name!("next"),
+            (_, 2) => name!("list"),
+            (true, 3) => name!("many"),
+            (false, 3) => name!("matrix"),
+            _ => unreachable!("modulo four"),
+        };
+        let field_position: FieldDefinitionPosition = match schema.get_type(declared_type).unwrap()
+        {
+            TypeDefinitionPosition::Object(position) => position.field(field_name).into(),
+            TypeDefinitionPosition::Interface(position) => position.field(field_name).into(),
+            other => panic!("generated path reached non-field-bearing type {other}"),
+        };
+        Arc::new(OpPathElement::Field(Field {
+            schema: schema.clone(),
+            field_position,
+            alias: fetch_path_alias(alias_seed),
+            arguments: Default::default(),
+            directives: Default::default(),
+            sibling_typename: None,
+        }))
+    }
+
+    fn fetch_path_fragment_element(
+        schema: &ValidFederationSchema,
+        declared_type: &Name,
+        possible_types: &IndexSet<Name>,
+        conditioned: bool,
+        target_seed: u8,
+    ) -> Arc<OpPathElement> {
+        let target = conditioned.then(|| {
+            let candidates: Vec<_> = possible_types.iter().cloned().collect();
+            candidates[target_seed as usize % candidates.len()].clone()
+        });
+        Arc::new(inline_fragment_element(
+            schema,
+            declared_type.clone(),
+            target,
+        ))
+    }
+
+    #[derive(Debug)]
+    struct FetchPathModel {
+        full_path: Vec<Arc<OpPathElement>>,
+        path_in_node: Vec<Arc<OpPathElement>>,
+        response_path: Vec<FetchDataPathElement>,
+        possible_types: IndexSet<Name>,
+        possible_types_after_last_field: IndexSet<Name>,
+        declared_type: Name,
+    }
+
+    impl FetchPathModel {
+        fn new(type_conditioned_fetching_enabled: bool) -> Self {
+            let possible_types = if type_conditioned_fetching_enabled {
+                IndexSet::from_iter([name!("Query")])
+            } else {
+                IndexSet::default()
+            };
+            Self {
+                full_path: Vec::new(),
+                path_in_node: Vec::new(),
+                response_path: Vec::new(),
+                possible_types_after_last_field: possible_types.clone(),
+                possible_types,
+                declared_type: name!("Query"),
+            }
+        }
+
+        fn add_field(
+            &mut self,
+            element: Arc<OpPathElement>,
+            shape: u8,
+            type_conditioned_fetching_enabled: bool,
+        ) {
+            let OpPathElement::Field(field) = element.as_ref() else {
+                unreachable!("field command constructed a fragment")
+            };
+
+            if self.possible_types_after_last_field.len() != self.possible_types.len() {
+                let conditions: Vec<Name> = self.possible_types.iter().cloned().collect();
+                match self.response_path.last_mut() {
+                    Some(FetchDataPathElement::Key(_, stored))
+                    | Some(FetchDataPathElement::AnyIndex(stored)) => {
+                        *stored = Some(conditions);
+                    }
+                    _ => {}
+                }
+            }
+
+            self.response_path.push(FetchDataPathElement::Key(
+                field.response_name().clone(),
+                None,
+            ));
+            for _ in 0..match shape % 4 {
+                2 => 1,
+                3 => 2,
+                _ => 0,
+            } {
+                self.response_path
+                    .push(FetchDataPathElement::AnyIndex(None));
+            }
+
+            let is_composite = shape % 4 != 0;
+            self.possible_types = if type_conditioned_fetching_enabled && is_composite {
+                fetch_path_runtime_types()
+            } else {
+                IndexSet::default()
+            };
+            self.possible_types_after_last_field = self.possible_types.clone();
+            self.declared_type = if is_composite {
+                name!("Node")
+            } else {
+                name!("ID")
+            };
+            self.full_path.push(element.clone());
+            self.path_in_node.push(element);
+        }
+
+        fn add_fragment(
+            &mut self,
+            element: Arc<OpPathElement>,
+            type_conditioned_fetching_enabled: bool,
+        ) {
+            let OpPathElement::InlineFragment(fragment) = element.as_ref() else {
+                unreachable!("fragment command constructed a field")
+            };
+            if let Some(target) = &fragment.type_condition_position {
+                self.declared_type = target.type_name().clone();
+                if type_conditioned_fetching_enabled {
+                    self.possible_types
+                        .retain(|possible| possible == target.type_name());
+                }
+            }
+            self.full_path.push(element.clone());
+            self.path_in_node.push(element);
+        }
+    }
+
+    fn audit_fetch_path(
+        production: &FetchDependencyGraphNodePath,
+        model: &FetchPathModel,
+    ) -> Result<(), TestCaseError> {
+        prop_assert_eq!(
+            production.full_path.0.as_slice(),
+            model.full_path.as_slice()
+        );
+        prop_assert_eq!(
+            production.path_in_node.0.as_slice(),
+            model.path_in_node.as_slice()
+        );
+        prop_assert_eq!(&production.response_path, &model.response_path);
+        prop_assert_eq!(&production.possible_types, &model.possible_types);
+        prop_assert_eq!(
+            &production.possible_types_after_last_field,
+            &model.possible_types_after_last_field
+        );
+        Ok(())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1024))]
+
+        #[test]
+        fn fetch_node_path_trace_matches_schema_interpreter(
+            commands in prop::collection::vec(fetch_path_command_strategy(), 1..40),
+            type_conditioned_fetching_enabled in any::<bool>(),
+        ) {
+            let schema = make_fetch_path_schema();
+            let root_type = schema
+                .get_type(&name!("Query"))
+                .unwrap()
+                .try_into()
+                .unwrap();
+            let mut production = FetchDependencyGraphNodePath::new(
+                schema.clone(),
+                type_conditioned_fetching_enabled,
+                root_type,
+            )
+            .unwrap();
+            let mut model = FetchPathModel::new(type_conditioned_fetching_enabled);
+            audit_fetch_path(&production, &model)?;
+
+            for command in commands {
+                match command {
+                    FetchPathCommand::Field { shape, alias } => {
+                        let element = fetch_path_field_element(
+                            &schema,
+                            &model.declared_type,
+                            shape,
+                            alias,
+                        );
+                        production = production.add(element.clone()).unwrap();
+                        model.add_field(
+                            element,
+                            shape,
+                            type_conditioned_fetching_enabled,
+                        );
+                        audit_fetch_path(&production, &model)?;
+                        if shape % 4 == 0 {
+                            // Scalar fields terminate an operation path. Reaching this branch is
+                            // the point of generating them; later commands cannot validly extend it.
+                            break;
+                        }
+                    }
+                    FetchPathCommand::Fragment { conditioned, target } => {
+                        // The Query root has only one runtime object and a same-type fragment is
+                        // valid; after the first field, target selection is always from the
+                        // current non-empty runtime set, so no generated cast is disjoint.
+                        let choices = if model.possible_types.is_empty() {
+                            IndexSet::from_iter([model.declared_type.clone()])
+                        } else {
+                            model.possible_types.clone()
+                        };
+                        let element = fetch_path_fragment_element(
+                            &schema,
+                            &model.declared_type,
+                            &choices,
+                            conditioned,
+                            target,
+                        );
+                        production = production.add(element.clone()).unwrap();
+                        model.add_fragment(element, type_conditioned_fetching_enabled);
+                    }
+                    FetchPathCommand::ResetForKey { retain_full_path } => {
+                        let context = if retain_full_path {
+                            production.full_path.clone()
+                        } else {
+                            Arc::new(OpPath::default())
+                        };
+                        production = production.for_new_key_fetch(context.clone());
+                        model.path_in_node = context.0.clone();
+                    }
+                }
+                audit_fetch_path(&production, &model)?;
+            }
+        }
     }
 }
