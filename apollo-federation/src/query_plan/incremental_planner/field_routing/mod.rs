@@ -260,6 +260,7 @@ impl FieldRoutingSearchSpace {
         let satisfiable = self.cached_can_satisfy(
             conditions,
             &source.type_pos,
+            &source.subgraph,
             &source.schema,
         ) || self.conditions_resolvable_at_node(node, conditions.as_ref())?;
         Ok(satisfiable && !self.conditions_have_requires(node, conditions)?)
@@ -759,9 +760,8 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
         // so the probe (apply → cost → rollback) sees them as free;
         // the penalty ranks them above any structural cost but below
         // drops so BULB treats them as a last resort.
-        let cost = base
-            + candidate.type_explosions as f64 * 5e17
-            + candidate.dropped_fields as f64 * 1e18;
+        let cost =
+            base + candidate.type_explosions as f64 * 5e17 + candidate.dropped_fields as f64 * 1e18;
         trace!(cost, "candidate cost");
         cost
     }
