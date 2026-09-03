@@ -472,3 +472,77 @@ fn flat_wrap_nodes(
         NodeKind::Sequence => PlanNode::Sequence(SequenceNode { nodes }),
     })
 }
+
+#[cfg(test)]
+mod proptests {
+    use proptest::prelude::*;
+
+    use super::*;
+
+    fn marker(id: u8) -> PlanNode {
+        let variable = format!("marker_{id}");
+        PlanNode::Condition(Box::new(ConditionNode {
+            condition_variable: Name::new(&variable).unwrap(),
+            if_clause: None,
+            else_clause: None,
+        }))
+    }
+
+    fn same_kind(kind: NodeKind, nodes: Vec<PlanNode>) -> PlanNode {
+        match kind {
+            NodeKind::Parallel => PlanNode::Parallel(ParallelNode { nodes }),
+            NodeKind::Sequence => PlanNode::Sequence(SequenceNode { nodes }),
+        }
+    }
+
+    fn literal_flat_wrap(kind: NodeKind, nodes: Vec<Option<PlanNode>>) -> Option<PlanNode> {
+        let present = nodes.into_iter().flatten().collect::<Vec<_>>();
+        match present.as_slice() {
+            [] => None,
+            [only] => Some(only.clone()),
+            _ => Some(same_kind(
+                kind,
+                present
+                    .into_iter()
+                    .flat_map(|node| match (kind, node) {
+                        (NodeKind::Parallel, PlanNode::Parallel(inner)) => inner.nodes,
+                        (NodeKind::Sequence, PlanNode::Sequence(inner)) => inner.nodes,
+                        (_, node) => vec![node],
+                    })
+                    .collect(),
+            )),
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1024))]
+
+        /// The processor's sequence/parallel constructor is a normalization boundary: absent
+        /// branches disappear, zero/one children are unwrapped, and immediate same-kind children
+        /// are flattened only when an actual wrapper is needed.
+        #[test]
+        fn flat_wrap_nodes_matches_literal_normal_form(
+            parallel in any::<bool>(),
+            specs in prop::collection::vec(
+                prop::option::of((any::<bool>(), prop::collection::vec(any::<u8>(), 1..5))),
+                0..24,
+            ),
+        ) {
+            let kind = if parallel { NodeKind::Parallel } else { NodeKind::Sequence };
+            let nodes = specs
+                .into_iter()
+                .map(|spec| spec.map(|(nested, ids)| {
+                    if nested {
+                        same_kind(kind, ids.into_iter().map(marker).collect())
+                    } else {
+                        marker(ids[0])
+                    }
+                }))
+                .collect::<Vec<_>>();
+            prop_assert_eq!(
+                flat_wrap_nodes(kind, nodes.clone()),
+                literal_flat_wrap(kind, nodes),
+            );
+        }
+    }
+}

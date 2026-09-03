@@ -12,8 +12,6 @@ use super::SelectionSet;
 use super::TYPENAME_FIELD;
 use super::runtime_types_intersect;
 use crate::error::FederationError;
-use crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::spec_definition::SpecDefinition;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
@@ -204,16 +202,10 @@ impl Field {
         if let Some(federation_spec_definition) = schema
             .subgraph_metadata()
             .map(|d| d.federation_spec_definition())
-            // `subgraph_metadata` is populated even for subgraphs that default to Federation 1
-            // (no `@link` at all) or that link an early Federation 2.x spec, neither of which
-            // defines `@fromContext` (added in 2.8). `try_directive_definition` reports that
-            // absence as `None` instead of erroring, unlike `from_context_directive_definition`:
-            // no `@fromContext` directive in this schema's spec means no argument can possibly
-            // have it applied, so there's nothing to check below.
-            && let Some(from_context_directive_definition) = federation_spec_definition
-                .try_directive_definition(schema, &FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)
         {
-            let from_context_directive_definition_name = &from_context_directive_definition.name;
+            let from_context_directive_definition_name = &federation_spec_definition
+                .from_context_directive_definition(schema)?
+                .name;
             // We need to ensure that all arguments with `@fromContext` are provided. If the
             // would-be parent type's field has an argument with `@fromContext` and that argument
             // has no value/data in this field, then we return `None` to indicate the rebase isn't
@@ -509,15 +501,7 @@ impl SelectionSet {
 
 #[cfg(test)]
 mod tests {
-    // =====================================================================================
-    // Rebase (proptest-graph-notes.md, "Supporting operation properties"): checks
-    // `SelectionSet::can_rebase_on`/`rebase_on` against each other and against algebraic
-    // laws, biased toward the interface/implementing-object boundary the notes call out
-    // ("key collapse happens at those boundaries") — here, rebasing a selection made
-    // against an interface onto one of two disjoint implementing object types, which is
-    // the one case in this schema where a `... on <Type>` fragment condition can fail to
-    // intersect the rebase target.
-    // =====================================================================================
+    // Deterministic regression repros appear before the generated coverage that found them.
 
     use apollo_compiler::name;
     use proptest::prelude::*;
@@ -553,6 +537,61 @@ mod tests {
         .unwrap();
         ValidFederationSchema::new(schema).unwrap()
     }
+
+    /// The generated laws should explore ordinary rebase outcomes rather than all stopping at
+    /// the Federation-1 missing-`@fromContext` defect reproduced below. Build the same semantic
+    /// schema through the normal Federation-2 link-expansion path so the relevant directive
+    /// definitions and subgraph metadata are present.
+    fn rebase_federation_2_test_schema() -> ValidFederationSchema {
+        let expanded = crate::subgraph::typestate::Subgraph::parse(
+            "rebase",
+            "http://rebase",
+            r#"
+            extend schema @link(url: "https://specs.apollo.dev/federation/v2.9")
+
+            interface Intf {
+                intfField: Int
+            }
+            type HasA implements Intf {
+                a: Boolean
+                intfField: Int
+            }
+            type HasB implements Intf {
+                b: Boolean
+                intfField: Int
+            }
+            type Query {
+                intf: Intf
+            }
+            "#,
+        )
+        .unwrap()
+        .expand_links()
+        .unwrap();
+        ValidFederationSchema::new_assume_valid(expanded.schema().clone()).unwrap()
+    }
+
+    /// Operation-level repro: a schema whose federation version predates `@fromContext` has no
+    /// contextual arguments to validate. Rebasing an otherwise compatible field through the
+    /// production `SelectionSet::can_rebase_on` API must therefore return `Ok(true)`.
+    #[test]
+    fn can_rebase_on_does_not_crash_on_a_federation_1_subgraph() {
+        let schema = rebase_test_schema();
+        let selection_set = parse_field_set(&schema, name!("Intf"), "intfField", true)
+            .expect("intfField must be valid on Intf");
+        let has_a: CompositeTypeDefinitionPosition =
+            schema.get_type(&name!("HasA")).unwrap().try_into().unwrap();
+
+        let can_rebase = selection_set
+            .can_rebase_on(&has_a, &schema)
+            .expect("can_rebase_on must not internal-error on a Federation-1-style subgraph");
+        assert!(
+            can_rebase,
+            "a field shared by the interface and implementing object must be rebaseable"
+        );
+    }
+
+    // Generated coverage.
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum RebaseTarget {
@@ -623,29 +662,7 @@ mod tests {
 
     fn parse_intf_selection(schema: &ValidFederationSchema, source: &str) -> SelectionSet {
         parse_field_set(schema, name!("Intf"), source, true)
-            .expect("generated selection set must be valid under Intf")
-    }
-
-    /// Regression for a real bug the property below found on its first run: `can_rebase_on`
-    /// (via `Field::type_if_added_to`) crashed with an internal error, instead of returning a
-    /// plain `bool`, whenever a field actually resolves on the rebase target and the schema's
-    /// federation spec version doesn't define `@fromContext` (added in Federation 2.8) — which
-    /// is every ordinary Federation 1 subgraph (no `@link` to the federation spec at all,
-    /// `rebase_test_schema()`'s exact shape) as well as any Federation 2.0-2.7 subgraph.
-    /// `type_if_added_to` unconditionally called the erroring `from_context_directive_definition`
-    /// instead of the `Option`-returning `try_directive_definition`. Fixed by skipping the
-    /// `@fromContext`-argument check entirely when the directive isn't defined in this schema's
-    /// spec, since no argument could possibly carry it in that case.
-    #[test]
-    fn can_rebase_on_does_not_crash_on_a_federation_1_subgraph() {
-        let schema = rebase_test_schema();
-        let selection_set = parse_intf_selection(&schema, "intfField");
-        let has_a = RebaseTarget::HasA.composite_type(&schema);
-
-        assert!(
-            selection_set.can_rebase_on(&has_a, &schema).is_ok(),
-            "can_rebase_on must not internal-error on a Federation-1-style subgraph"
-        );
+            .expect("selection set must be valid under Intf")
     }
 
     proptest! {
@@ -658,7 +675,7 @@ mod tests {
             selection_str in intf_selection_string_strategy(),
             target in object_target_strategy(),
         ) {
-            let schema = rebase_test_schema();
+            let schema = rebase_federation_2_test_schema();
             let target_type = target.composite_type(&schema);
             let selection_set = parse_intf_selection(&schema, &selection_str);
 
@@ -696,7 +713,7 @@ mod tests {
                 Just(RebaseTarget::HasB),
             ],
         ) {
-            let schema = rebase_test_schema();
+            let schema = rebase_federation_2_test_schema();
             let selection_set = parse_intf_selection(&schema, &selection_str);
 
             if target == RebaseTarget::Intf {
@@ -727,7 +744,7 @@ mod tests {
             b_str in intf_selection_string_strategy(),
             target in object_target_strategy(),
         ) {
-            let schema = rebase_test_schema();
+            let schema = rebase_federation_2_test_schema();
             let target_type = target.composite_type(&schema);
             let a = parse_intf_selection(&schema, &a_str);
             let b = parse_intf_selection(&schema, &b_str);

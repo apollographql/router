@@ -40,6 +40,53 @@ const SUBGRAPH2: &str = r#"
   }
 "#;
 
+const SUBGRAPH1_WITH_INTERSECTING_INTERFACE: &str = r#"
+  type Query {
+    iFromS1: I
+  }
+
+  interface I @key(fields: "id") {
+    id: ID!
+    x: Int
+  }
+
+  interface J {
+    z: Int
+  }
+
+  type A implements I & J @key(fields: "id") {
+    id: ID!
+    x: Int
+    z: Int
+  }
+
+  type B implements I @key(fields: "id") {
+    id: ID!
+    x: Int
+  }
+"#;
+
+/// This is a normal planner workflow: composition establishes that `I` and `J` overlap through
+/// `A`, the operation is validated against that API schema, and planning starts from the
+/// `@interfaceObject` representation of `I` in S2.
+#[test]
+fn preserves_empty_object_for_intersecting_interface_from_an_interface_object() {
+    let planner = planner!(
+        S1: SUBGRAPH1_WITH_INTERSECTING_INTERFACE,
+        S2: SUBGRAPH2,
+    );
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "{ iFromS2 { ... on J { z } } }",
+        "operation.graphql",
+    )
+    .unwrap();
+
+    planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("the valid operation must produce an empty-object plan");
+}
+
 #[test]
 fn can_use_a_key_on_an_interface_object_type() {
     let planner = planner!(

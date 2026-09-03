@@ -2320,3 +2320,2231 @@ where
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::collections::VecDeque;
+
+    use apollo_compiler::collections::IndexSet;
+    use apollo_compiler::executable;
+    use apollo_compiler::name;
+    use proptest::prelude::*;
+    use proptest::proptest;
+    use proptest::test_runner::TestCaseError;
+
+    use crate::Supergraph;
+    use crate::link::graphql_definition::DeferDirectiveArguments;
+    use crate::operation::DirectiveList;
+    use crate::operation::InlineFragment;
+    use crate::operation::SelectionId;
+    use crate::query_graph::build_federated_query_graph;
+    use crate::query_graph::graph_path::operation::OpGraphPath;
+    use crate::query_graph::graph_path::operation::OpGraphPathContext;
+    use crate::query_graph::graph_path::operation::OpGraphPathTrigger;
+    use crate::query_graph::graph_path::operation::OpPathElement;
+    use crate::query_graph::graph_path::operation::SimultaneousPaths;
+    use crate::query_graph::graph_path::operation::SimultaneousPathsWithLazyIndirectPaths;
+    use crate::query_graph::graph_path::transition::TransitionGraphPath;
+
+    const PATH_GRAPH_FIXTURES: [(&str, &str); 6] = [
+        (
+            "interface-object",
+            include_str!(
+                "../../tests/query_plan/supergraphs/can_use_a_key_on_an_interface_object_type.graphql"
+            ),
+        ),
+        (
+            "key-chain",
+            include_str!(
+                "../../tests/query_plan/supergraphs/handles_case_of_key_chains_in_parallel_requires.graphql"
+            ),
+        ),
+        (
+            "abstract-runtime-types",
+            include_str!(
+                "../../tests/query_plan/supergraphs/field_covariance_and_type_explosion.graphql"
+            ),
+        ),
+        (
+            "subscription",
+            include_str!(
+                "../../tests/query_plan/supergraphs/basic_subscription_query_plan.graphql"
+            ),
+        ),
+        (
+            "from-context",
+            include_str!(
+                "../../tests/query_plan/supergraphs/set_context_test_with_type_conditions_for_union.graphql"
+            ),
+        ),
+        (
+            "progressive-override",
+            include_str!(
+                "../../tests/query_plan/supergraphs/it_handles_progressive_override_on_entity_fields.graphql"
+            ),
+        ),
+    ];
+
+    fn build_path_query_graph(fixture: usize) -> Arc<QueryGraph> {
+        let (_, sdl) = PATH_GRAPH_FIXTURES[fixture % PATH_GRAPH_FIXTURES.len()];
+        let supergraph = Supergraph::new_with_router_specs(sdl).unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        Arc::new(
+            build_federated_query_graph(supergraph.schema, api_schema, None, Some(true)).unwrap(),
+        )
+    }
+
+    fn path_test_error(message: impl Into<String>) -> TestCaseError {
+        TestCaseError::fail(message.into())
+    }
+
+    struct AlwaysSatisfiedConditionResolver;
+
+    impl ConditionResolver for AlwaysSatisfiedConditionResolver {
+        fn resolve(
+            &mut self,
+            _edge: EdgeIndex,
+            _context: &OpGraphPathContext,
+            _excluded_destinations: &ExcludedDestinations,
+            _excluded_conditions: &ExcludedConditions,
+            _extra_conditions: Option<&SelectionSet>,
+        ) -> Result<ConditionResolution, FederationError> {
+            Ok(ConditionResolution::Satisfied {
+                cost: 1.0,
+                path_tree: None,
+                context_map: None,
+            })
+        }
+    }
+
+    struct DirectLeafConditionResolver {
+        graph: Arc<QueryGraph>,
+    }
+
+    impl DirectLeafConditionResolver {
+        fn is_collectable_at(&self, node: NodeIndex, conditions: &SelectionSet) -> bool {
+            conditions.selections.values().all(|selection| {
+                let Selection::Field(required_field) = selection else {
+                    return false;
+                };
+                if required_field.selection_set.is_some() {
+                    return false;
+                }
+                self.graph.out_edges(node).into_iter().any(|edge| {
+                    edge.weight().conditions.is_none()
+                        && edge.weight().required_contexts.is_empty()
+                        && matches!(
+                            &edge.weight().transition,
+                            QueryGraphEdgeTransition::FieldCollection {
+                                field_definition_position,
+                                ..
+                            } if field_definition_position.field_name()
+                                == required_field.field.name()
+                        )
+                })
+            })
+        }
+    }
+
+    impl ConditionResolver for DirectLeafConditionResolver {
+        fn resolve(
+            &mut self,
+            edge: EdgeIndex,
+            _context: &OpGraphPathContext,
+            _excluded_destinations: &ExcludedDestinations,
+            _excluded_conditions: &ExcludedConditions,
+            extra_conditions: Option<&SelectionSet>,
+        ) -> Result<ConditionResolution, FederationError> {
+            let (head, _) = self.graph.edge_endpoints(edge)?;
+            let edge_conditions_collectable = self
+                .graph
+                .edge_weight(edge)?
+                .conditions
+                .as_ref()
+                .is_none_or(|conditions| self.is_collectable_at(head, conditions));
+            let extra_conditions_collectable =
+                extra_conditions.is_none_or(|conditions| self.is_collectable_at(head, conditions));
+            Ok(
+                if edge_conditions_collectable && extra_conditions_collectable {
+                    ConditionResolution::Satisfied {
+                        cost: 1.0,
+                        path_tree: None,
+                        context_map: None,
+                    }
+                } else {
+                    ConditionResolution::Unsatisfied { reason: None }
+                },
+            )
+        }
+    }
+
+    /// A normal leaf-condition resolver with a generated set of otherwise-valid edges forced to
+    /// `Unsatisfied`. This lets the optimized search's rejection behavior be compared with an
+    /// independent BFS instead of only exercising the all-satisfied path.
+    struct SelectiveLeafConditionResolver {
+        graph: Arc<QueryGraph>,
+        unsatisfied_edges: IndexSet<EdgeIndex>,
+    }
+
+    impl ConditionResolver for SelectiveLeafConditionResolver {
+        fn resolve(
+            &mut self,
+            edge: EdgeIndex,
+            context: &OpGraphPathContext,
+            excluded_destinations: &ExcludedDestinations,
+            excluded_conditions: &ExcludedConditions,
+            extra_conditions: Option<&SelectionSet>,
+        ) -> Result<ConditionResolution, FederationError> {
+            if self.unsatisfied_edges.contains(&edge) {
+                return Ok(ConditionResolution::Unsatisfied { reason: None });
+            }
+            DirectLeafConditionResolver {
+                graph: self.graph.clone(),
+            }
+            .resolve(
+                edge,
+                context,
+                excluded_destinations,
+                excluded_conditions,
+                extra_conditions,
+            )
+        }
+    }
+
+    fn generated_shortest_edge_path(
+        graph: &QueryGraph,
+        start: NodeIndex,
+        target: NodeIndex,
+        order_seed: u16,
+    ) -> Vec<EdgeIndex> {
+        let mut queue = VecDeque::from([start]);
+        let mut predecessor = IndexMap::<NodeIndex, (NodeIndex, EdgeIndex)>::default();
+        let mut visited = IndexSet::from_iter([start]);
+        while let Some(node) = queue.pop_front() {
+            if node == target {
+                break;
+            }
+            let mut edges = graph.out_edges(node);
+            edges.retain(|edge| {
+                !matches!(
+                    &edge.weight().transition,
+                    QueryGraphEdgeTransition::FieldCollection {
+                        field_definition_position,
+                        ..
+                    } if field_definition_position.field_name().as_str().starts_with('_')
+                )
+            });
+            edges.sort_by_key(|edge| edge.id().index());
+            if !edges.is_empty() {
+                let edge_count = edges.len();
+                edges.rotate_left(order_seed as usize % edge_count);
+            }
+            for edge in edges {
+                if visited.insert(edge.target()) {
+                    predecessor.insert(edge.target(), (node, edge.id()));
+                    queue.push_back(edge.target());
+                }
+            }
+        }
+        assert!(
+            visited.contains(&target),
+            "no route to generated context edge"
+        );
+        let mut reversed = Vec::new();
+        let mut cursor = target;
+        while cursor != start {
+            let (previous, edge) = predecessor[&cursor];
+            reversed.push(edge);
+            cursor = previous;
+        }
+        reversed.reverse();
+        reversed
+    }
+
+    fn slow_initial_runtime_types(
+        graph: &QueryGraph,
+        head: NodeIndex,
+    ) -> Result<IndexSet<ObjectTypeDefinitionPosition>, TestCaseError> {
+        let node = &graph.graph[head];
+        let QueryGraphNodeType::SchemaType(position) = &node.type_ else {
+            return Ok(IndexSet::default());
+        };
+        let composite: CompositeTypeDefinitionPosition = position
+            .clone()
+            .try_into()
+            .map_err(|error| path_test_error(format!("non-composite path head: {error}")))?;
+        graph.sources[&node.source]
+            .possible_runtime_types(composite)
+            .map_err(|error| path_test_error(format!("head runtime types: {error}")))
+    }
+
+    /// Direct transition interpreter for the path's cached runtime set. This intentionally does
+    /// not call `QueryGraph::advance_possible_runtime_types`.
+    fn slow_advance_runtime_types(
+        graph: &QueryGraph,
+        current: &IndexSet<ObjectTypeDefinitionPosition>,
+        edge_id: EdgeIndex,
+    ) -> Result<IndexSet<ObjectTypeDefinitionPosition>, TestCaseError> {
+        let edge = &graph.graph[edge_id];
+        let (_, tail_id) = graph.graph.edge_endpoints(edge_id).unwrap();
+        let tail = &graph.graph[tail_id];
+        let QueryGraphNodeType::SchemaType(tail_position) = &tail.type_ else {
+            return Err(path_test_error(format!(
+                "edge {edge_id:?} unexpectedly ends at a federated root"
+            )));
+        };
+        match &edge.transition {
+            QueryGraphEdgeTransition::FieldCollection {
+                source,
+                field_definition_position,
+                ..
+            } => {
+                if CompositeTypeDefinitionPosition::try_from(tail_position.clone()).is_err() {
+                    return Ok(IndexSet::default());
+                }
+                let schema = &graph.sources[source];
+                let mut result = IndexSet::default();
+                for runtime_type in current {
+                    let field_position =
+                        runtime_type.field(field_definition_position.field_name().clone());
+                    let Some(field) = field_position.try_get(schema.schema()) else {
+                        continue;
+                    };
+                    let Ok(output_type) =
+                        schema
+                            .get_type(field.ty.inner_named_type())
+                            .and_then(|position| {
+                                CompositeTypeDefinitionPosition::try_from(position)
+                                    .map_err(FederationError::from)
+                            })
+                    else {
+                        continue;
+                    };
+                    result.extend(
+                        schema
+                            .possible_runtime_types(output_type)
+                            .map_err(|error| {
+                                path_test_error(format!(
+                                    "edge {edge_id:?} field runtime types: {error}"
+                                ))
+                            })?,
+                    );
+                }
+                Ok(result)
+            }
+            QueryGraphEdgeTransition::Downcast {
+                source,
+                to_type_position,
+                ..
+            } => {
+                let allowed = graph.sources[source]
+                    .possible_runtime_types(to_type_position.clone())
+                    .map_err(|error| {
+                        path_test_error(format!("edge {edge_id:?} downcast types: {error}"))
+                    })?;
+                Ok(current
+                    .iter()
+                    .filter(|runtime| allowed.contains(*runtime))
+                    .cloned()
+                    .collect())
+            }
+            QueryGraphEdgeTransition::KeyResolution => {
+                let tail_type: CompositeTypeDefinitionPosition =
+                    tail_position
+                        .clone()
+                        .try_into()
+                        .map_err(|error| path_test_error(format!("key tail: {error}")))?;
+                graph.sources[&tail.source]
+                    .possible_runtime_types(tail_type)
+                    .map_err(|error| path_test_error(format!("key runtime types: {error}")))
+            }
+            QueryGraphEdgeTransition::RootTypeResolution { .. }
+            | QueryGraphEdgeTransition::SubgraphEnteringTransition => {
+                let OutputTypeDefinitionPosition::Object(root) = tail_position else {
+                    return Err(path_test_error(format!(
+                        "root transition {edge_id:?} ends at non-object {tail_position}"
+                    )));
+                };
+                Ok(IndexSet::from_iter([root.clone()]))
+            }
+            QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. } => Ok(current.clone()),
+        }
+    }
+
+    fn direct_non_trivial_followups(graph: &QueryGraph, edge_id: EdgeIndex) -> Vec<EdgeIndex> {
+        let previous = &graph.graph[edge_id];
+        let (_, tail) = graph.graph.edge_endpoints(edge_id).unwrap();
+        graph
+            .out_edges(tail)
+            .into_iter()
+            .filter(|followup| match &previous.transition {
+                QueryGraphEdgeTransition::KeyResolution => {
+                    !(matches!(
+                        followup.weight().transition,
+                        QueryGraphEdgeTransition::KeyResolution
+                    ) && previous.conditions == followup.weight().conditions)
+                }
+                QueryGraphEdgeTransition::RootTypeResolution { .. }
+                | QueryGraphEdgeTransition::SubgraphEnteringTransition => !matches!(
+                    followup.weight().transition,
+                    QueryGraphEdgeTransition::RootTypeResolution { .. }
+                ),
+                _ => true,
+            })
+            .map(|edge| edge.id())
+            .collect()
+    }
+
+    /// A small interpreter for the state cached by `GraphPath::add`. It records the inputs to
+    /// every command, so the assertions do not have to guess where an old `@defer` or condition
+    /// cost came from by inspecting the final production path.
+    #[derive(Clone, Debug)]
+    struct TransitionPathModel {
+        head: NodeIndex,
+        tail: NodeIndex,
+        edges: Vec<EdgeIndex>,
+        runtime_types: IndexSet<ObjectTypeDefinitionPosition>,
+        runtime_types_before_last_cast: Option<IndexSet<ObjectTypeDefinitionPosition>>,
+        last_subgraph_entering_edge: Option<(usize, QueryPlanCost)>,
+        defer_on_tail: Option<DeferDirectiveArguments>,
+    }
+
+    impl TransitionPathModel {
+        fn new(graph: &QueryGraph, head: NodeIndex) -> Result<Self, TestCaseError> {
+            Ok(Self {
+                head,
+                tail: head,
+                edges: Vec::new(),
+                runtime_types: slow_initial_runtime_types(graph, head)?,
+                runtime_types_before_last_cast: None,
+                last_subgraph_entering_edge: None,
+                defer_on_tail: None,
+            })
+        }
+
+        fn add(
+            &mut self,
+            graph: &QueryGraph,
+            edge_id: EdgeIndex,
+            condition_cost: QueryPlanCost,
+            defer: Option<DeferDirectiveArguments>,
+        ) -> Result<(), TestCaseError> {
+            let (edge_head, edge_tail) = graph.graph.edge_endpoints(edge_id).unwrap();
+            prop_assert_eq!(
+                edge_head,
+                self.tail,
+                "model command is not a path continuation"
+            );
+            let transition = &graph.graph[edge_id].transition;
+            let replacing_fake_downcast =
+                matches!(transition, QueryGraphEdgeTransition::KeyResolution)
+                    && self.edges.last().is_some_and(|last| {
+                        matches!(
+                            graph.graph[*last].transition,
+                            QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. }
+                        )
+                    })
+                    && matches!(
+                        graph.graph[edge_tail].type_,
+                        QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Interface(_))
+                    );
+
+            let prior_runtime_types = self.runtime_types.clone();
+            self.runtime_types = slow_advance_runtime_types(graph, &self.runtime_types, edge_id)?;
+            self.tail = edge_tail;
+
+            if replacing_fake_downcast {
+                // The fake cast is a self-edge and a runtime-type identity operation. Production
+                // normalizes `[fake cast, key]` to `[key]`, while advancing from the same state.
+                self.edges.pop();
+                self.edges.push(edge_id);
+                self.runtime_types_before_last_cast = None;
+                self.defer_on_tail = defer.clone();
+                if defer.is_some() {
+                    self.last_subgraph_entering_edge = None;
+                } else if graph.graph[edge_head].source != graph.graph[edge_tail].source {
+                    self.last_subgraph_entering_edge = Some((self.edges.len() - 1, condition_cost));
+                }
+                return Ok(());
+            }
+
+            let index = self.edges.len();
+            self.edges.push(edge_id);
+            self.runtime_types_before_last_cast =
+                matches!(transition, QueryGraphEdgeTransition::Downcast { .. })
+                    .then_some(prior_runtime_types);
+            self.defer_on_tail = if defer.is_some() {
+                defer.clone()
+            } else if matches!(transition, QueryGraphEdgeTransition::Downcast { .. }) {
+                self.defer_on_tail.clone()
+            } else {
+                None
+            };
+            if defer.is_some() {
+                self.last_subgraph_entering_edge = None;
+            } else if graph.graph[edge_head].source != graph.graph[edge_tail].source {
+                self.last_subgraph_entering_edge = Some((index, condition_cost));
+            }
+            Ok(())
+        }
+    }
+
+    fn audit_transition_path(
+        path: &TransitionGraphPath,
+        model: &TransitionPathModel,
+    ) -> Result<(), TestCaseError> {
+        let graph = &path.graph;
+        prop_assert_eq!(path.head, model.head);
+        prop_assert_eq!(path.tail, model.tail);
+        prop_assert_eq!(&path.edges, &model.edges);
+        prop_assert_eq!(path.edges.len(), path.edge_triggers.len());
+        prop_assert_eq!(path.edges.len(), path.edge_conditions.len());
+        prop_assert_eq!(path.edges.len(), path.matching_context_ids.len());
+        prop_assert_eq!(path.edges.len(), path.arguments_to_context_usages.len());
+        prop_assert!(path.edge_conditions.iter().all(Option::is_none));
+        prop_assert!(path.matching_context_ids.iter().all(Option::is_none));
+        prop_assert!(path.arguments_to_context_usages.iter().all(Option::is_none));
+
+        // Independently fold the retained edge sequence as a second check on the state-machine
+        // model. The only normalization above removes a runtime-type-identity self-edge.
+        let mut tail = model.head;
+        let mut runtime_types = slow_initial_runtime_types(graph, path.head)?;
+        let mut before_last_cast = None;
+
+        for (index, edge_id) in path.edges.iter().copied().enumerate() {
+            let (edge_head, edge_tail) = graph.graph.edge_endpoints(edge_id).unwrap();
+            prop_assert_eq!(edge_head, tail, "edge {} does not continue the path", index);
+            prop_assert_eq!(
+                path.edge_triggers[index].as_ref(),
+                &graph.graph[edge_id].transition,
+                "trigger {} does not describe its edge",
+                index
+            );
+
+            let runtime_before = runtime_types.clone();
+            runtime_types = slow_advance_runtime_types(graph, &runtime_types, edge_id)?;
+            before_last_cast = matches!(
+                graph.graph[edge_id].transition,
+                QueryGraphEdgeTransition::Downcast { .. }
+            )
+            .then_some(runtime_before);
+            tail = edge_tail;
+        }
+
+        prop_assert_eq!(model.tail, tail);
+        prop_assert_eq!(&model.runtime_types, &runtime_types);
+        prop_assert_eq!(
+            model.runtime_types_before_last_cast.as_ref(),
+            before_last_cast.as_ref()
+        );
+        prop_assert_eq!(&*path.runtime_types_of_tail, &runtime_types);
+        prop_assert_eq!(
+            path.runtime_types_before_tail_if_last_is_cast.as_deref(),
+            model.runtime_types_before_last_cast.as_ref()
+        );
+        prop_assert_eq!(&path.defer_on_tail, &model.defer_on_tail);
+        prop_assert_eq!(
+            path.last_subgraph_entering_edge_info
+                .as_ref()
+                .map(|info| (info.index, info.conditions_cost)),
+            model.last_subgraph_entering_edge
+        );
+
+        let expected_next = if path.defer_on_tail.is_some() {
+            graph
+                .out_edges_with_federation_self_edges(path.tail)
+                .into_iter()
+                .map(|edge| edge.id())
+                .collect::<Vec<_>>()
+        } else if let Some(edge) = path.edges.last() {
+            direct_non_trivial_followups(graph, *edge)
+        } else {
+            graph
+                .out_edges(path.tail)
+                .into_iter()
+                .map(|edge| edge.id())
+                .collect::<Vec<_>>()
+        };
+        let actual_next = path
+            .next_edges()
+            .map_err(|error| path_test_error(format!("next_edges failed: {error}")))?
+            .collect::<Vec<_>>();
+        prop_assert_eq!(actual_next, expected_next);
+        Ok(())
+    }
+
+    fn operation_trigger_for_edge(
+        graph: &QueryGraph,
+        edge_id: EdgeIndex,
+    ) -> Result<OpGraphPathTrigger, TestCaseError> {
+        Ok(match &graph.graph[edge_id].transition {
+            QueryGraphEdgeTransition::FieldCollection {
+                source,
+                field_definition_position,
+                ..
+            } => Field::from_position(&graph.sources[source], field_definition_position.clone())
+                .into(),
+            QueryGraphEdgeTransition::Downcast {
+                source,
+                from_type_position,
+                to_type_position,
+                ..
+            } => InlineFragment {
+                schema: graph.sources[source].clone(),
+                parent_type_position: from_type_position.clone(),
+                type_condition_position: Some(to_type_position.clone()),
+                directives: Default::default(),
+                selection_id: SelectionId::new(),
+            }
+            .into(),
+            QueryGraphEdgeTransition::InterfaceObjectFakeDownCast {
+                from_type_position,
+                to_type_name,
+                ..
+            } => {
+                let supergraph_schema = graph
+                    .supergraph_schema()
+                    .map_err(|error| path_test_error(format!("supergraph schema: {error}")))?;
+                InlineFragment {
+                    schema: supergraph_schema.clone(),
+                    parent_type_position: supergraph_schema
+                        .get_type(from_type_position.type_name())
+                        .and_then(|position| {
+                            CompositeTypeDefinitionPosition::try_from(position)
+                                .map_err(FederationError::from)
+                        })
+                        .map_err(|error| {
+                            path_test_error(format!("fake downcast parent: {error}"))
+                        })?,
+                    type_condition_position: Some(
+                        supergraph_schema
+                            .get_type(to_type_name)
+                            .and_then(|position| {
+                                CompositeTypeDefinitionPosition::try_from(position)
+                                    .map_err(FederationError::from)
+                            })
+                            .map_err(|error| {
+                                path_test_error(format!("fake downcast target: {error}"))
+                            })?,
+                    ),
+                    directives: Default::default(),
+                    selection_id: SelectionId::new(),
+                }
+                .into()
+            }
+            QueryGraphEdgeTransition::KeyResolution
+            | QueryGraphEdgeTransition::RootTypeResolution { .. }
+            | QueryGraphEdgeTransition::SubgraphEnteringTransition => {
+                OpGraphPathContext::default().into()
+            }
+        })
+    }
+
+    fn directive_only_trigger(path: &OpGraphPath) -> Option<OpGraphPathTrigger> {
+        let QueryGraphNodeType::SchemaType(position) = &path.graph.graph[path.tail].type_ else {
+            return None;
+        };
+        let supergraph_schema = path.graph.supergraph_schema().ok()?;
+        let parent_type_position = supergraph_schema
+            .get_type(position.type_name())
+            .ok()?
+            .try_into()
+            .ok()?;
+        Some(
+            InlineFragment {
+                schema: supergraph_schema,
+                parent_type_position,
+                type_condition_position: None,
+                directives: DirectiveList::one(executable::Directive {
+                    name: name!("include"),
+                    arguments: vec![(name!("if"), false).into()],
+                }),
+                selection_id: SelectionId::new(),
+            }
+            .into(),
+        )
+    }
+
+    fn type_explosion_key_patterns(
+        graph: &QueryGraph,
+    ) -> Vec<(NodeIndex, EdgeIndex, EdgeIndex, EdgeIndex)> {
+        let mut patterns = Vec::new();
+        for head in graph.graph.node_indices() {
+            for direct_key in graph.out_edges_with_federation_self_edges(head) {
+                if !matches!(
+                    direct_key.weight().transition,
+                    QueryGraphEdgeTransition::KeyResolution
+                ) {
+                    continue;
+                }
+                for downcast in graph.out_edges_with_federation_self_edges(head) {
+                    if !matches!(
+                        downcast.weight().transition,
+                        QueryGraphEdgeTransition::Downcast {
+                            from_type_position: CompositeTypeDefinitionPosition::Interface(_),
+                            ..
+                        }
+                    ) {
+                        continue;
+                    }
+                    for exploded_key in
+                        graph.out_edges_with_federation_self_edges(downcast.target())
+                    {
+                        if matches!(
+                            exploded_key.weight().transition,
+                            QueryGraphEdgeTransition::KeyResolution
+                        ) && exploded_key.target() == direct_key.target()
+                            && exploded_key.weight().conditions == direct_key.weight().conditions
+                        {
+                            patterns.push((
+                                head,
+                                direct_key.id(),
+                                downcast.id(),
+                                exploded_key.id(),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        patterns
+    }
+
+    fn type_explosion_fixture_patterns() -> &'static Vec<(
+        Arc<QueryGraph>,
+        Vec<(NodeIndex, EdgeIndex, EdgeIndex, EdgeIndex)>,
+    )> {
+        static CORPUS: LazyLock<
+            Vec<(
+                Arc<QueryGraph>,
+                Vec<(NodeIndex, EdgeIndex, EdgeIndex, EdgeIndex)>,
+            )>,
+        > = LazyLock::new(|| {
+            (0..PATH_GRAPH_FIXTURES.len())
+                .filter_map(|fixture| {
+                    let graph = build_path_query_graph(fixture);
+                    let patterns = type_explosion_key_patterns(&graph);
+                    (!patterns.is_empty()).then_some((graph, patterns))
+                })
+                .collect()
+        });
+        &CORPUS
+    }
+
+    /// Shadow state for operation-driven paths. Unlike `TransitionPathModel`, this includes the
+    /// normalization of adjacent operation type conditions and directive-only `None` steps.
+    #[derive(Clone, Debug)]
+    struct OpPathModel {
+        head: NodeIndex,
+        tail: NodeIndex,
+        edges: Vec<Option<EdgeIndex>>,
+        triggers: Vec<OpGraphPathTrigger>,
+        runtime_types: IndexSet<ObjectTypeDefinitionPosition>,
+        runtime_types_before_last_cast: Option<IndexSet<ObjectTypeDefinitionPosition>>,
+        last_subgraph_entering_edge: Option<(usize, QueryPlanCost)>,
+    }
+
+    impl OpPathModel {
+        fn new(graph: &QueryGraph, head: NodeIndex) -> Result<Self, TestCaseError> {
+            Ok(Self {
+                head,
+                tail: head,
+                edges: Vec::new(),
+                triggers: Vec::new(),
+                runtime_types: slow_initial_runtime_types(graph, head)?,
+                runtime_types_before_last_cast: None,
+                last_subgraph_entering_edge: None,
+            })
+        }
+
+        fn add_none(&mut self, trigger: OpGraphPathTrigger) {
+            self.edges.push(None);
+            self.triggers.push(trigger);
+            self.runtime_types_before_last_cast = None;
+        }
+
+        fn add_edge(
+            &mut self,
+            graph: &QueryGraph,
+            edge_id: EdgeIndex,
+            trigger: OpGraphPathTrigger,
+            condition_cost: QueryPlanCost,
+        ) -> Result<(), TestCaseError> {
+            let (edge_head, edge_tail) = graph.graph.edge_endpoints(edge_id).unwrap();
+            prop_assert_eq!(edge_head, self.tail, "generated edge is not a continuation");
+            let transition = &graph.graph[edge_id].transition;
+
+            // Specification-level adjacent-cast law: A -> B -> C can become A -> C when C's
+            // possible runtime objects are a non-empty subset of B's and the direct cast exists.
+            if matches!(transition, QueryGraphEdgeTransition::Downcast { .. })
+                && self.edges.last().copied().flatten().is_some()
+                && matches!(
+                    self.triggers.last(),
+                    Some(OpGraphPathTrigger::OpPathElement(
+                        OpPathElement::InlineFragment(fragment)
+                    )) if fragment.directives.is_empty()
+                )
+                && let Some(runtime_types_before_last_cast) = &self.runtime_types_before_last_cast
+            {
+                let collapsed_runtime_types =
+                    slow_advance_runtime_types(graph, runtime_types_before_last_cast, edge_id)?;
+                if !collapsed_runtime_types.is_empty()
+                    && collapsed_runtime_types.is_subset(&self.runtime_types)
+                {
+                    let last_edge = self.edges.last().copied().flatten().unwrap();
+                    let (last_edge_head, _) = graph.graph.edge_endpoints(last_edge).unwrap();
+                    let direct_edge = graph.out_edges(last_edge_head).into_iter().find(|edge| {
+                        matches!(
+                            edge.weight().transition,
+                            QueryGraphEdgeTransition::Downcast { .. }
+                        ) && graph.graph[edge.target()].type_ == graph.graph[edge_tail].type_
+                    });
+                    if let Some(direct_edge) = direct_edge {
+                        self.edges.pop();
+                        self.triggers.pop();
+                        self.edges.push(Some(direct_edge.id()));
+                        self.triggers.push(trigger);
+                        self.tail = edge_tail;
+                        self.runtime_types = collapsed_runtime_types;
+                        return Ok(());
+                    }
+                }
+            }
+
+            let replacing_fake_downcast =
+                matches!(transition, QueryGraphEdgeTransition::KeyResolution)
+                    && self.edges.last().copied().flatten().is_some_and(|last| {
+                        matches!(
+                            graph.graph[last].transition,
+                            QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. }
+                        )
+                    })
+                    && matches!(
+                        graph.graph[edge_tail].type_,
+                        QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Interface(_))
+                    );
+            let prior_runtime_types = self.runtime_types.clone();
+            self.runtime_types = slow_advance_runtime_types(graph, &self.runtime_types, edge_id)?;
+            self.tail = edge_tail;
+
+            if replacing_fake_downcast {
+                self.edges.pop();
+                self.triggers.pop();
+                self.edges.push(Some(edge_id));
+                self.triggers.push(trigger);
+                self.runtime_types_before_last_cast = None;
+                if graph.graph[edge_head].source != graph.graph[edge_tail].source {
+                    self.last_subgraph_entering_edge = Some((self.edges.len() - 1, condition_cost));
+                }
+                return Ok(());
+            }
+
+            let index = self.edges.len();
+            self.edges.push(Some(edge_id));
+            self.triggers.push(trigger);
+            self.runtime_types_before_last_cast =
+                matches!(transition, QueryGraphEdgeTransition::Downcast { .. })
+                    .then_some(prior_runtime_types);
+            if graph.graph[edge_head].source != graph.graph[edge_tail].source {
+                self.last_subgraph_entering_edge = Some((index, condition_cost));
+            }
+            Ok(())
+        }
+    }
+
+    fn audit_operation_path(path: &OpGraphPath, model: &OpPathModel) -> Result<(), TestCaseError> {
+        let graph = &path.graph;
+        prop_assert_eq!(path.head, model.head);
+        prop_assert_eq!(path.tail, model.tail);
+        prop_assert_eq!(&path.edges, &model.edges);
+        prop_assert_eq!(path.edges.len(), path.edge_triggers.len());
+        prop_assert_eq!(path.edges.len(), path.edge_conditions.len());
+        prop_assert_eq!(path.edges.len(), path.matching_context_ids.len());
+        prop_assert_eq!(path.edges.len(), path.arguments_to_context_usages.len());
+        prop_assert!(path.edge_conditions.iter().all(Option::is_none));
+        prop_assert!(path.matching_context_ids.iter().all(Option::is_none));
+        prop_assert!(path.arguments_to_context_usages.iter().all(Option::is_none));
+        prop_assert_eq!(
+            path.edge_triggers
+                .iter()
+                .map(|trigger| trigger.as_ref())
+                .collect::<Vec<_>>(),
+            model.triggers.iter().collect::<Vec<_>>()
+        );
+
+        let mut tail = model.head;
+        let mut runtime_types = slow_initial_runtime_types(graph, model.head)?;
+        let mut before_last_cast = None;
+        let mut last_entering = None;
+        let mut jump_count = 0;
+        for (index, (edge, trigger)) in path.edges.iter().zip(&path.edge_triggers).enumerate() {
+            let Some(edge_id) = edge else {
+                let OpGraphPathTrigger::OpPathElement(OpPathElement::InlineFragment(fragment)) =
+                    trigger.as_ref()
+                else {
+                    return Err(path_test_error(format!(
+                        "None edge {index} did not retain its inline fragment"
+                    )));
+                };
+                prop_assert!(fragment.type_condition_position.is_none());
+                prop_assert!(!fragment.directives.is_empty());
+                before_last_cast = None;
+                continue;
+            };
+
+            let (edge_head, edge_tail) = graph.graph.edge_endpoints(*edge_id).unwrap();
+            prop_assert_eq!(edge_head, tail, "retained edge {} is disconnected", index);
+            match (&graph.graph[*edge_id].transition, trigger.as_ref()) {
+                (
+                    QueryGraphEdgeTransition::FieldCollection {
+                        field_definition_position,
+                        ..
+                    },
+                    OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)),
+                ) => prop_assert_eq!(&field.field_position, field_definition_position),
+                (
+                    QueryGraphEdgeTransition::Downcast {
+                        to_type_position, ..
+                    },
+                    OpGraphPathTrigger::OpPathElement(OpPathElement::InlineFragment(fragment)),
+                ) => prop_assert_eq!(
+                    fragment
+                        .type_condition_position
+                        .as_ref()
+                        .map(|position| position.type_name()),
+                    Some(to_type_position.type_name())
+                ),
+                (
+                    QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { to_type_name, .. },
+                    OpGraphPathTrigger::OpPathElement(OpPathElement::InlineFragment(fragment)),
+                ) => prop_assert_eq!(
+                    fragment
+                        .type_condition_position
+                        .as_ref()
+                        .map(|position| position.type_name()),
+                    Some(to_type_name)
+                ),
+                (
+                    QueryGraphEdgeTransition::KeyResolution
+                    | QueryGraphEdgeTransition::RootTypeResolution { .. }
+                    | QueryGraphEdgeTransition::SubgraphEnteringTransition,
+                    OpGraphPathTrigger::Context(_),
+                ) => {}
+                (transition, trigger) => {
+                    return Err(path_test_error(format!(
+                        "trigger {trigger:?} does not represent {transition:?} at {index}"
+                    )));
+                }
+            }
+
+            let runtime_before = runtime_types.clone();
+            runtime_types = slow_advance_runtime_types(graph, &runtime_types, *edge_id)?;
+            before_last_cast = matches!(
+                graph.graph[*edge_id].transition,
+                QueryGraphEdgeTransition::Downcast { .. }
+            )
+            .then_some(runtime_before);
+            if graph.graph[edge_head].source != graph.graph[edge_tail].source {
+                jump_count += 1;
+                last_entering = Some((index, edge_id.index() as QueryPlanCost));
+            }
+            tail = edge_tail;
+        }
+
+        prop_assert_eq!(tail, model.tail);
+        prop_assert_eq!(&runtime_types, &model.runtime_types);
+        prop_assert_eq!(
+            before_last_cast.as_ref(),
+            model.runtime_types_before_last_cast.as_ref()
+        );
+        prop_assert_eq!(&*path.runtime_types_of_tail, &runtime_types);
+        prop_assert_eq!(
+            path.runtime_types_before_tail_if_last_is_cast.as_deref(),
+            before_last_cast.as_ref()
+        );
+        prop_assert!(path.defer_on_tail.is_none());
+        prop_assert_eq!(model.last_subgraph_entering_edge, last_entering);
+        prop_assert_eq!(
+            path.last_subgraph_entering_edge_info
+                .as_ref()
+                .map(|info| (info.index, info.conditions_cost)),
+            last_entering
+        );
+        prop_assert_eq!(
+            path.subgraph_jumps()
+                .map_err(|error| path_test_error(format!("subgraph_jumps: {error}")))?,
+            jump_count
+        );
+
+        let expected_next = match path.edges.last().copied().flatten() {
+            Some(edge_id) => direct_non_trivial_followups(graph, edge_id),
+            None => graph
+                .out_edges(path.tail)
+                .into_iter()
+                .map(|edge| edge.id())
+                .collect(),
+        };
+        let actual_next = path
+            .next_edges()
+            .map_err(|error| path_test_error(format!("next_edges failed: {error}")))?
+            .collect::<Vec<_>>();
+        prop_assert_eq!(actual_next, expected_next);
+        Ok(())
+    }
+
+    fn audit_search_result_path(path: &OpGraphPath) -> Result<(), TestCaseError> {
+        let length = path.edges.len();
+        prop_assert_eq!(path.edge_triggers.len(), length);
+        prop_assert_eq!(path.edge_conditions.len(), length);
+        prop_assert_eq!(path.matching_context_ids.len(), length);
+        prop_assert_eq!(path.arguments_to_context_usages.len(), length);
+
+        let mut tail = path.head;
+        let mut runtime_types = slow_initial_runtime_types(&path.graph, path.head)?;
+        for edge in path.edges.iter().flatten() {
+            let (head, next_tail) = path.graph.graph.edge_endpoints(*edge).unwrap();
+            prop_assert_eq!(head, tail, "search returned a disconnected retained edge");
+            runtime_types = slow_advance_runtime_types(&path.graph, &runtime_types, *edge)?;
+            tail = next_tail;
+        }
+        prop_assert_eq!(path.tail, tail);
+        prop_assert_eq!(path.runtime_types_of_tail.as_ref(), &runtime_types);
+        Ok(())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        /// Select every step from the path's currently valid next-edge set, append it through
+        /// production, then rebuild every cached attribute from the retained edge sequence.
+        #[test]
+        fn transition_graph_path_attributes_match_full_recomputation(
+            fixture in 0usize..PATH_GRAPH_FIXTURES.len(),
+            start_seed in any::<u16>(),
+            commands in prop::collection::vec((any::<u16>(), any::<bool>()), 0..32),
+        ) {
+            let graph = build_path_query_graph(fixture);
+            let starts: Vec<_> = graph
+                .graph
+                .node_indices()
+                .filter(|node| match &graph.graph[*node].type_ {
+                    QueryGraphNodeType::FederatedRootType(_) => true,
+                    QueryGraphNodeType::SchemaType(position) => {
+                        CompositeTypeDefinitionPosition::try_from(position.clone()).is_ok()
+                    }
+                })
+                .collect();
+            let start = starts[start_seed as usize % starts.len()];
+            let mut path = TransitionGraphPath::new(graph.clone(), start).unwrap();
+            let mut model = TransitionPathModel::new(&graph, start)?;
+            audit_transition_path(&path, &model)?;
+
+            for (edge_seed, add_defer) in commands {
+                let candidates = path.next_edges().unwrap().collect::<Vec<_>>();
+                if candidates.is_empty() {
+                    break;
+                }
+                let edge_id = candidates[edge_seed as usize % candidates.len()];
+                let transition = graph.graph[edge_id].transition.clone();
+                let defer = add_defer.then(|| DeferDirectiveArguments {
+                    label: Some("generated".to_string()),
+                    if_: None,
+                });
+                let condition_cost = edge_id.index() as QueryPlanCost;
+                model.add(&graph, edge_id, condition_cost, defer.clone())?;
+                path = path
+                    .add(
+                        transition,
+                        edge_id,
+                        ConditionResolution::Satisfied {
+                            path_tree: None,
+                            cost: condition_cost,
+                            context_map: None,
+                        },
+                        defer,
+                    )
+                    .unwrap();
+                audit_transition_path(&path, &model)?;
+            }
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1024))]
+
+        /// For an unconditioned field edge that is directly collectable from an object node, the
+        /// full operation-advancement search must retain the simple direct result. This drives the
+        /// same direct/indirect option machinery used by planning and compares it with a literal
+        /// one-edge `OpGraphPath::add` construction.
+        #[test]
+        fn operation_element_advancement_contains_direct_field_baseline(
+            fixture in 0usize..PATH_GRAPH_FIXTURES.len(),
+            candidate_seed in any::<usize>(),
+        ) {
+            let graph = build_path_query_graph(fixture);
+            let candidates = graph
+                .graph
+                .edge_references()
+                .filter(|edge| {
+                    let (head, _) = graph.graph.edge_endpoints(edge.id()).unwrap();
+                    matches!(
+                        graph.graph[head].type_,
+                        QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(_))
+                    ) && edge.weight().conditions.is_none()
+                        && edge.weight().required_contexts.is_empty()
+                        && matches!(
+                            edge.weight().transition,
+                            QueryGraphEdgeTransition::FieldCollection { .. }
+                        )
+                })
+                .map(|edge| edge.id())
+                .collect::<Vec<_>>();
+            prop_assert!(!candidates.is_empty());
+            let edge = candidates[candidate_seed % candidates.len()];
+            let (head, _) = graph.graph.edge_endpoints(edge).unwrap();
+            let trigger = operation_trigger_for_edge(&graph, edge)?;
+            let operation_element = match &trigger {
+                OpGraphPathTrigger::OpPathElement(operation_element) => operation_element.clone(),
+                _ => return Err(path_test_error("field edge did not produce an operation element")),
+            };
+            let path = OpGraphPath::new(graph.clone(), head).unwrap();
+            let expected = path
+                .add(
+                    trigger,
+                    Some(edge),
+                    ConditionResolution::no_conditions(),
+                    None,
+                )
+                .unwrap();
+            let mut search = SimultaneousPathsWithLazyIndirectPaths::new(
+                SimultaneousPaths::from(path),
+                OpGraphPathContext::default(),
+                ExcludedDestinations::default(),
+                ExcludedConditions::default(),
+            );
+            let mut resolver = AlwaysSatisfiedConditionResolver;
+            let options = search
+                .advance_with_operation_element(
+                    graph.supergraph_schema().unwrap(),
+                    &operation_element,
+                    &mut resolver,
+                    &OverrideConditions::default(),
+                    &|| Ok(()),
+                    &IndexSet::default(),
+                )?
+                .ok_or_else(|| path_test_error("direct field unexpectedly had no options"))?;
+            for option in &options {
+                for candidate in &option.paths.0 {
+                    audit_search_result_path(candidate)?;
+                }
+            }
+
+            prop_assert!(options.iter().any(|option| {
+                option.paths.0.iter().any(|candidate| {
+                    candidate.tail == expected.tail
+                        && candidate.edges == expected.edges
+                        && candidate.edge_triggers == expected.edge_triggers
+                })
+            }), "optimized operation advancement omitted the literal direct field path");
+        }
+
+        /// Progressive override creates paired field edges guarded by opposite values of one
+        /// label. Both the direct lookup and the full operation-advancement path must select the
+        /// edge whose guard matches the generated planner input.
+        #[test]
+        fn operation_element_advancement_respects_progressive_override_conditions(
+            candidate_seed in any::<usize>(),
+            condition in any::<bool>(),
+        ) {
+            let graph = build_path_query_graph(5);
+            let candidates = graph
+                .graph
+                .edge_references()
+                .filter(|edge| {
+                    edge.weight().override_condition.as_ref().is_some_and(|override_| {
+                        override_.condition == condition
+                            && matches!(
+                                edge.weight().transition,
+                                QueryGraphEdgeTransition::FieldCollection { .. }
+                            )
+                    })
+                })
+                .map(|edge| edge.id())
+                .collect::<Vec<_>>();
+            prop_assert!(!candidates.is_empty(), "override fixture lost condition={condition}");
+            let expected_edge = candidates[candidate_seed % candidates.len()];
+            let expected_override = graph.graph[expected_edge]
+                .override_condition
+                .as_ref()
+                .unwrap();
+            let (head, _) = graph.graph.edge_endpoints(expected_edge).unwrap();
+            let trigger = operation_trigger_for_edge(&graph, expected_edge)?;
+            let OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field)) = &trigger else {
+                return Err(path_test_error("override edge did not produce a field"));
+            };
+            let mut overrides = OverrideConditions::default();
+            overrides.insert(expected_override.label.clone(), condition);
+
+            let selected = graph
+                .edge_for_field(head, field, &overrides)
+                .ok_or_else(|| path_test_error("matching override field was not collectable"))?;
+            prop_assert_eq!(
+                graph.graph[selected].override_condition.as_ref(),
+                Some(expected_override),
+            );
+
+            let path = OpGraphPath::new(graph.clone(), head).unwrap();
+            let mut search = SimultaneousPathsWithLazyIndirectPaths::new(
+                SimultaneousPaths::from(path),
+                OpGraphPathContext::default(),
+                ExcludedDestinations::default(),
+                ExcludedConditions::default(),
+            );
+            let mut resolver = AlwaysSatisfiedConditionResolver;
+            let options = search
+                .advance_with_operation_element(
+                    graph.supergraph_schema().unwrap(),
+                    &OpPathElement::Field(field.clone()),
+                    &mut resolver,
+                    &overrides,
+                    &|| Ok(()),
+                    &IndexSet::default(),
+                )?
+                .ok_or_else(|| path_test_error("matching override had no advancement option"))?;
+            prop_assert!(
+                options.iter().any(|option| option.paths.0.iter().any(|candidate| {
+                    candidate.edges.last().copied().flatten() == Some(selected)
+                })),
+                "operation advancement omitted selected override edge {:?}",
+                selected,
+            );
+        }
+
+        /// A one-hop non-collecting transition followed by a field edge is the smallest useful
+        /// indirect-search witness. Generate only cases where that field has no direct edge from
+        /// the starting node, then require the optimized search to find a collecting path after a
+        /// real subgraph jump.
+        #[test]
+        fn operation_element_advancement_finds_one_hop_indirect_field(
+            fixture_seed in any::<usize>(),
+            candidate_seed in any::<usize>(),
+        ) {
+            let mut selected = None;
+            for offset in 0..PATH_GRAPH_FIXTURES.len() {
+                let fixture = (fixture_seed + offset) % PATH_GRAPH_FIXTURES.len();
+                let graph = build_path_query_graph(fixture);
+                let mut candidates = Vec::new();
+                for transition in graph.graph.edge_references().filter(|edge| {
+                    !edge.weight().transition.collect_operation_elements()
+                        && edge.weight().required_contexts.is_empty()
+                }) {
+                    let (start, indirect_target) =
+                        graph.graph.edge_endpoints(transition.id()).unwrap();
+                    let (
+                        QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(start_type)),
+                        QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(target_type)),
+                    ) = (&graph.graph[start].type_, &graph.graph[indirect_target].type_)
+                    else {
+                        continue;
+                    };
+                    if start_type.type_name != target_type.type_name
+                        || graph.graph[start].source == graph.graph[indirect_target].source
+                    {
+                        continue;
+                    }
+                    let conditions_locally_available = transition
+                        .weight()
+                        .conditions
+                        .as_ref()
+                        .is_none_or(|conditions| {
+                            conditions.selections.values().all(|selection| {
+                                let Selection::Field(required_field) = selection
+                                else {
+                                    return false;
+                                };
+                                if required_field.selection_set.is_some() {
+                                    return false;
+                                }
+                                graph.out_edges(start).into_iter().any(|edge| {
+                                    edge.weight().conditions.is_none()
+                                        && edge.weight().required_contexts.is_empty()
+                                        && matches!(
+                                        &edge.weight().transition,
+                                        QueryGraphEdgeTransition::FieldCollection {
+                                            field_definition_position,
+                                            ..
+                                        } if field_definition_position.field_name()
+                                            == required_field.field.name()
+                                        )
+                                })
+                            })
+                        });
+                    if !conditions_locally_available {
+                        continue;
+                    }
+                    for field_edge in graph.out_edges(indirect_target).into_iter().filter(|edge| {
+                        edge.weight().conditions.is_none()
+                            && edge.weight().required_contexts.is_empty()
+                            && matches!(
+                                edge.weight().transition,
+                                QueryGraphEdgeTransition::FieldCollection { .. }
+                            )
+                    }) {
+                        let QueryGraphEdgeTransition::FieldCollection {
+                            field_definition_position,
+                            ..
+                        } = &field_edge.weight().transition
+                        else {
+                            unreachable!()
+                        };
+                        let has_direct = graph.out_edges(start).into_iter().any(|edge| {
+                            matches!(
+                                &edge.weight().transition,
+                                QueryGraphEdgeTransition::FieldCollection {
+                                    field_definition_position: direct,
+                                    ..
+                                } if direct.field_name() == field_definition_position.field_name()
+                            )
+                        });
+                        if !has_direct {
+                            candidates.push((start, transition.id(), field_edge.id()));
+                        }
+                    }
+                }
+                if !candidates.is_empty() {
+                    selected = Some((fixture, graph, candidates));
+                    break;
+                }
+            }
+            let Some((fixture, graph, candidates)) = selected else {
+                return Err(path_test_error(
+                    "fixture palette contains no one-hop indirect-only object field",
+                ));
+            };
+            let (start, transition_edge, field_edge) =
+                candidates[candidate_seed % candidates.len()];
+            let trigger = operation_trigger_for_edge(&graph, field_edge)?;
+            let operation_element = match &trigger {
+                OpGraphPathTrigger::OpPathElement(operation_element) => operation_element.clone(),
+                _ => return Err(path_test_error("field edge did not produce an operation element")),
+            };
+            let OpPathElement::Field(requested_field) = &operation_element else {
+                return Err(path_test_error("generated operation element is not a field"));
+            };
+            let requested_field_name = requested_field.name().clone();
+            let path = OpGraphPath::new(graph.clone(), start).unwrap();
+            let direct_witness = path
+                .add(
+                    operation_trigger_for_edge(&graph, transition_edge)?,
+                    Some(transition_edge),
+                    ConditionResolution::Satisfied {
+                        cost: 1.0,
+                        path_tree: None,
+                        context_map: None,
+                    },
+                    None,
+                )
+                .and_then(|path| {
+                    path.add(
+                        trigger.clone(),
+                        Some(field_edge),
+                        ConditionResolution::no_conditions(),
+                        None,
+                    )
+                })?;
+            prop_assert_eq!(
+                direct_witness.edge_triggers.last().unwrap().as_ref(),
+                &OpGraphPathTrigger::OpPathElement(operation_element.clone()),
+            );
+            let mut search = SimultaneousPathsWithLazyIndirectPaths::new(
+                SimultaneousPaths::from(path),
+                OpGraphPathContext::default(),
+                ExcludedDestinations::default(),
+                ExcludedConditions::default(),
+            );
+            let mut resolver = DirectLeafConditionResolver {
+                graph: graph.clone(),
+            };
+            let options = search
+                .advance_with_operation_element(
+                    graph.supergraph_schema().unwrap(),
+                    &operation_element,
+                    &mut resolver,
+                    &OverrideConditions::default(),
+                    &|| Ok(()),
+                    &IndexSet::default(),
+                )?
+                .ok_or_else(|| {
+                    path_test_error(format!(
+                        "literal one-hop candidate had no options: fixture={}, start={}, transition_edge={} ({:?}), field_edge={}, field={}, witness={}",
+                        PATH_GRAPH_FIXTURES[fixture].0,
+                        graph.graph[start],
+                        transition_edge.index(),
+                        graph.graph[transition_edge].transition,
+                        field_edge.index(),
+                        requested_field_name,
+                        direct_witness,
+                    ))
+                })?;
+            for option in &options {
+                for candidate in &option.paths.0 {
+                    audit_search_result_path(candidate)?;
+                }
+            }
+
+            prop_assert!(options.iter().any(|option| {
+                option.paths.0.iter().any(|candidate| {
+                    candidate.subgraph_jumps().is_ok_and(|jumps| jumps >= 1)
+                        && candidate.edge_triggers.last().is_some_and(|trigger| matches!(
+                            trigger.as_ref(),
+                            OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field))
+                                if field.name() == &requested_field_name
+                        ))
+                })
+            }), "optimized operation advancement missed the one-hop indirect field");
+        }
+
+        /// Compare optimized indirect search with the smallest non-trivial bounded-BFS result:
+        /// a destination whose shortest locally-satisfiable non-collecting route has two edges.
+        #[test]
+        fn operation_element_advancement_finds_shortest_two_hop_indirect_field(
+            fixture_seed in any::<usize>(),
+            candidate_seed in any::<usize>(),
+        ) {
+            let mut selected = None;
+            for offset in 0..PATH_GRAPH_FIXTURES.len() {
+                let fixture = (fixture_seed + offset) % PATH_GRAPH_FIXTURES.len();
+                let graph = build_path_query_graph(fixture);
+                let resolver_model = DirectLeafConditionResolver { graph: graph.clone() };
+                let locally_valid_transition = |edge: EdgeIndex| {
+                    let weight = &graph.graph[edge];
+                    let (head, tail) = graph.graph.edge_endpoints(edge).unwrap();
+                    !weight.transition.collect_operation_elements()
+                        && weight.required_contexts.is_empty()
+                        && weight.conditions.as_ref().is_none_or(|conditions| {
+                            resolver_model.is_collectable_at(head, conditions)
+                        })
+                        && matches!(
+                            (&graph.graph[head].type_, &graph.graph[tail].type_),
+                            (
+                                QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(a)),
+                                QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(b)),
+                            ) if a.type_name == b.type_name
+                        )
+                        && graph.graph[head].source != graph.graph[tail].source
+                };
+                let mut candidates = Vec::new();
+                for start in graph.graph.node_indices() {
+                    let one_hop = graph
+                        .out_edges(start)
+                        .into_iter()
+                        .map(|edge| edge.id())
+                        .filter(|edge| locally_valid_transition(*edge))
+                        .collect::<Vec<_>>();
+                    let direct_destinations = one_hop
+                        .iter()
+                        .map(|edge| graph.graph.edge_endpoints(*edge).unwrap().1)
+                        .collect::<IndexSet<_>>();
+                    for first_edge in one_hop {
+                        let middle = graph.graph.edge_endpoints(first_edge).unwrap().1;
+                        for second_edge in graph
+                            .out_edges(middle)
+                            .into_iter()
+                            .map(|edge| edge.id())
+                            .filter(|edge| locally_valid_transition(*edge))
+                        {
+                            let destination = graph.graph.edge_endpoints(second_edge).unwrap().1;
+                            if destination == start || direct_destinations.contains(&destination) {
+                                continue;
+                            }
+                            for field_edge in graph.out_edges(destination).into_iter().filter(|edge| {
+                                edge.weight().conditions.is_none()
+                                    && edge.weight().required_contexts.is_empty()
+                                    && matches!(
+                                        edge.weight().transition,
+                                        QueryGraphEdgeTransition::FieldCollection { .. }
+                                    )
+                            }) {
+                                let QueryGraphEdgeTransition::FieldCollection {
+                                    field_definition_position,
+                                    ..
+                                } = &field_edge.weight().transition else {
+                                    unreachable!()
+                                };
+                                let field_name = field_definition_position.field_name();
+                                let exists_at_start = graph.out_edges(start).into_iter().any(|edge| {
+                                    matches!(
+                                        &edge.weight().transition,
+                                        QueryGraphEdgeTransition::FieldCollection {
+                                            field_definition_position: direct,
+                                            ..
+                                        } if direct.field_name() == field_name
+                                    )
+                                });
+                                let is_last_key_field = graph.graph[second_edge]
+                                    .conditions
+                                    .as_ref()
+                                    .is_some_and(|conditions| {
+                                        conditions.selections.values().any(|selection| matches!(
+                                            selection,
+                                            Selection::Field(required) if required.field.name() == field_name
+                                        ))
+                                    });
+                                if !exists_at_start && !is_last_key_field {
+                                    candidates.push((start, first_edge, second_edge, field_edge.id()));
+                                }
+                            }
+                        }
+                    }
+                }
+                if !candidates.is_empty() {
+                    selected = Some((fixture, graph, candidates));
+                    break;
+                }
+            }
+            let Some((fixture, graph, candidates)) = selected else {
+                // This palette is finite and may cease to contain a shortest-two-hop field as
+                // fixtures evolve. Treat that as a test-maintenance failure, not a vacuous pass.
+                return Err(path_test_error("fixture palette contains no valid shortest-two-hop field"));
+            };
+            let (start, first_edge, second_edge, field_edge) =
+                candidates[candidate_seed % candidates.len()];
+            let field_trigger = operation_trigger_for_edge(&graph, field_edge)?;
+            let OpGraphPathTrigger::OpPathElement(operation_element) = &field_trigger else {
+                return Err(path_test_error("field edge did not produce an operation element"));
+            };
+            let OpPathElement::Field(requested_field) = operation_element else {
+                return Err(path_test_error("generated operation element is not a field"));
+            };
+            let requested_name = requested_field.name().clone();
+            let path = OpGraphPath::new(graph.clone(), start).unwrap();
+            let literal_witness = path
+                .add(
+                    operation_trigger_for_edge(&graph, first_edge)?,
+                    Some(first_edge),
+                    ConditionResolution::Satisfied { cost: 1.0, path_tree: None, context_map: None },
+                    None,
+                )?
+                .add(
+                    operation_trigger_for_edge(&graph, second_edge)?,
+                    Some(second_edge),
+                    ConditionResolution::Satisfied { cost: 1.0, path_tree: None, context_map: None },
+                    None,
+                )?
+                .add(
+                    field_trigger.clone(),
+                    Some(field_edge),
+                    ConditionResolution::no_conditions(),
+                    None,
+                )?;
+            let expected_tail = literal_witness.tail;
+            let mut search = SimultaneousPathsWithLazyIndirectPaths::new(
+                SimultaneousPaths::from(path),
+                OpGraphPathContext::default(),
+                ExcludedDestinations::default(),
+                ExcludedConditions::default(),
+            );
+            let mut resolver = DirectLeafConditionResolver { graph: graph.clone() };
+            let options = search
+                .advance_with_operation_element(
+                    graph.supergraph_schema().unwrap(),
+                    operation_element,
+                    &mut resolver,
+                    &OverrideConditions::default(),
+                    &|| Ok(()),
+                    &IndexSet::default(),
+                )?
+                .ok_or_else(|| path_test_error(format!(
+                    "two-hop witness had no options: fixture={}, field={}, witness={}",
+                    PATH_GRAPH_FIXTURES[fixture].0,
+                    requested_name,
+                    literal_witness,
+                )))?;
+            for option in &options {
+                for candidate in &option.paths.0 {
+                    audit_search_result_path(candidate)?;
+                }
+            }
+            prop_assert!(options.iter().any(|option| option.paths.0.iter().any(|candidate| {
+                candidate.tail == expected_tail
+                    && candidate.subgraph_jumps().is_ok_and(|jumps| jumps >= 2)
+                    && candidate.edge_triggers.last().is_some_and(|trigger| matches!(
+                        trigger.as_ref(),
+                        OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field))
+                            if field.name() == &requested_name
+                    ))
+            })), "optimized advancement omitted the shortest two-hop field witness");
+        }
+
+        /// On starts whose satisfiable key closure is exhausted within two hops, compare the
+        /// complete optimized indirect result with an independent breadth-first search. This is
+        /// deliberately stronger than the field-witness properties: missing and extra
+        /// destinations, as well as non-shortest retained paths, all fail.
+        #[test]
+        fn bounded_indirect_key_search_matches_exact_bfs_destination_set(
+            fixture_seed in any::<usize>(),
+            start_seed in any::<usize>(),
+            disabled_seed in any::<u64>(),
+            unsatisfied_seed in any::<u64>(),
+        ) {
+            let mut corpora = Vec::new();
+            for offset in 0..PATH_GRAPH_FIXTURES.len() {
+                let fixture = (fixture_seed + offset) % PATH_GRAPH_FIXTURES.len();
+                let graph = build_path_query_graph(fixture);
+                let model = DirectLeafConditionResolver { graph: graph.clone() };
+                let valid_key = |edge: EdgeIndex| {
+                    let weight = &graph.graph[edge];
+                    let (head, tail) = graph.graph.edge_endpoints(edge).unwrap();
+                    matches!(weight.transition, QueryGraphEdgeTransition::KeyResolution)
+                        && weight.required_contexts.is_empty()
+                        && weight.conditions.as_ref().is_none_or(|conditions| {
+                            model.is_collectable_at(head, conditions)
+                        })
+                        && matches!(
+                            (&graph.graph[head].type_, &graph.graph[tail].type_),
+                            (
+                                QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(a)),
+                                QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(b)),
+                            ) if a.type_name == b.type_name
+                        )
+                        && graph.graph[head].source != graph.graph[tail].source
+                };
+                for start in graph.graph.node_indices() {
+                    if !matches!(
+                        graph.graph[start].type_,
+                        QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(_))
+                    ) {
+                        continue;
+                    }
+                    let original_source = graph.graph[start].source.clone();
+                    let mut distance = IndexMap::from_iter([(start, 0usize)]);
+                    let mut frontier = VecDeque::from([start]);
+                    while let Some(node) = frontier.pop_front() {
+                        let depth = distance[&node];
+                        if depth == 2 {
+                            continue;
+                        }
+                        for edge in graph
+                            .out_edges(node)
+                            .into_iter()
+                            .map(|edge| edge.id())
+                            .filter(|edge| valid_key(*edge))
+                        {
+                            let tail = graph.graph.edge_endpoints(edge).unwrap().1;
+                            if graph.graph[tail].source == original_source {
+                                continue;
+                            }
+                            if !distance.contains_key(&tail) {
+                                distance.insert(tail, depth + 1);
+                                frontier.push_back(tail);
+                            }
+                        }
+                    }
+                    let has_two_hop = distance.values().any(|depth| *depth == 2);
+                    let closure_exhausted = distance.iter().all(|(node, depth)| {
+                        *depth != 2
+                            || graph
+                                .out_edges(*node)
+                                .into_iter()
+                                .map(|edge| edge.id())
+                                .filter(|edge| valid_key(*edge))
+                                .all(|edge| {
+                                    let tail = graph.graph.edge_endpoints(edge).unwrap().1;
+                                    graph.graph[tail].source == original_source
+                                        || distance.contains_key(&tail)
+                                })
+                    });
+                    if has_two_hop && closure_exhausted {
+                        corpora.push((fixture, graph.clone(), start));
+                    }
+                }
+            }
+            prop_assert!(!corpora.is_empty(), "fixture palette has no closed two-hop key corpus");
+            let (fixture, graph, start) =
+                corpora.swap_remove(start_seed % corpora.len());
+            let model = DirectLeafConditionResolver { graph: graph.clone() };
+            let valid_key = |edge: EdgeIndex| {
+                let weight = &graph.graph[edge];
+                let (head, tail) = graph.graph.edge_endpoints(edge).unwrap();
+                matches!(weight.transition, QueryGraphEdgeTransition::KeyResolution)
+                    && weight.required_contexts.is_empty()
+                    && weight.conditions.as_ref().is_none_or(|conditions| {
+                        model.is_collectable_at(head, conditions)
+                    })
+                    && matches!(
+                        (&graph.graph[head].type_, &graph.graph[tail].type_),
+                        (
+                            QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(a)),
+                            QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(b)),
+                        ) if a.type_name == b.type_name
+                    )
+                    && graph.graph[head].source != graph.graph[tail].source
+            };
+            let unsatisfied_edges: IndexSet<EdgeIndex> = graph
+                .graph
+                .edge_indices()
+                .filter(|edge| valid_key(*edge))
+                .enumerate()
+                .filter_map(|(index, edge)| {
+                    (unsatisfied_seed & (1_u64 << (index % 64)) != 0).then_some(edge)
+                })
+                .collect();
+
+            // Recompute the bounded reference closure after removing the generated unsatisfied
+            // edges. The original corpus is closed at two hops, and removing transitions cannot
+            // introduce a new third-hop destination.
+            let original_source = graph.graph[start].source.clone();
+            let mut distance = IndexMap::from_iter([(start, 0usize)]);
+            let mut frontier = VecDeque::from([start]);
+            while let Some(node) = frontier.pop_front() {
+                let depth = distance[&node];
+                if depth == 2 {
+                    continue;
+                }
+                for edge in graph
+                    .out_edges(node)
+                    .into_iter()
+                    .map(|edge| edge.id())
+                    .filter(|edge| valid_key(*edge) && !unsatisfied_edges.contains(edge))
+                {
+                    let tail = graph.graph.edge_endpoints(edge).unwrap().1;
+                    if graph.graph[tail].source != original_source && !distance.contains_key(&tail) {
+                        distance.insert(tail, depth + 1);
+                        frontier.push_back(tail);
+                    }
+                }
+            }
+            let mut expected = distance
+                .into_iter()
+                .filter(|(node, depth)| *node != start && *depth > 0)
+                .fold(IndexMap::<Arc<str>, usize>::default(), |mut map, (node, depth)| {
+                    map.entry(graph.graph[node].source.clone())
+                        .and_modify(|old| *old = (*old).min(depth))
+                        .or_insert(depth);
+                    map
+                });
+            // Disable an arbitrary subset of terminal (two-hop) destinations. Because this
+            // corpus is closed at two hops, those nodes are never intermediates to another
+            // expected result; filtering them is therefore an exact disabled-subgraph oracle.
+            let disabled_subgraphs: IndexSet<Arc<str>> = expected
+                .iter()
+                .enumerate()
+                .filter_map(|(index, (source, depth))| {
+                    (*depth == 2 && disabled_seed & (1_u64 << (index % 64)) != 0)
+                        .then(|| source.clone())
+                })
+                .collect();
+            expected.retain(|source, _| !disabled_subgraphs.contains(source));
+            let path = Arc::new(OpGraphPath::new(graph.clone(), start).unwrap());
+            let mut resolver = SelectiveLeafConditionResolver {
+                graph: graph.clone(),
+                unsatisfied_edges,
+            };
+            let actual: IndirectPaths<OpGraphPathTrigger, Option<EdgeIndex>, ()> = path
+                .advance_with_non_collecting_and_type_preserving_transitions(
+                    &OpGraphPathContext::default(),
+                    &mut resolver,
+                    &ExcludedDestinations::default(),
+                    &ExcludedConditions::default(),
+                    &OverrideConditions::default(),
+                    |_, context| OpGraphPathTrigger::Context(context.clone()),
+                    |graph, node, trigger, overrides| {
+                        Ok(graph.edge_for_op_graph_path_trigger(node, trigger, overrides))
+                    },
+                    &disabled_subgraphs,
+                )?;
+            let actual = actual.paths.iter().try_fold(
+                IndexMap::<Arc<str>, usize>::default(),
+                |mut map, path| {
+                    audit_search_result_path(path)?;
+                    let source = path.graph.graph[path.tail].source.clone();
+                    let distance = path.edges.iter().flatten().count();
+                    map.entry(source)
+                        .and_modify(|old| *old = (*old).min(distance))
+                        .or_insert(distance);
+                    Ok::<_, TestCaseError>(map)
+                },
+            )?;
+            prop_assert_eq!(
+                actual,
+                expected,
+                "exact bounded key closure disagreed for fixture {} at {}",
+                PATH_GRAPH_FIXTURES[fixture].0,
+                graph.graph[start],
+            );
+        }
+
+        /// Drive `OpGraphPath` with operation-shaped triggers and directive-only fragments. The
+        /// oracle implements adjacent-cast elimination as a runtime-set law, then audits all path
+        /// caches and bookkeeping by folding the normalized retained edge sequence from scratch.
+        #[test]
+        fn operation_graph_path_normalization_preserves_semantics_and_bookkeeping(
+            fixture in 0usize..PATH_GRAPH_FIXTURES.len(),
+            start_seed in any::<u16>(),
+            commands in prop::collection::vec((any::<u16>(), any::<bool>()), 0..40),
+        ) {
+            let graph = build_path_query_graph(fixture);
+            let starts: Vec<_> = graph
+                .graph
+                .node_indices()
+                .filter(|node| match &graph.graph[*node].type_ {
+                    QueryGraphNodeType::FederatedRootType(_) => true,
+                    QueryGraphNodeType::SchemaType(position) => {
+                        CompositeTypeDefinitionPosition::try_from(position.clone()).is_ok()
+                    }
+                })
+                .collect();
+            let start = starts[start_seed as usize % starts.len()];
+            let mut path = OpGraphPath::new(graph.clone(), start).unwrap();
+            let mut model = OpPathModel::new(&graph, start)?;
+            audit_operation_path(&path, &model)?;
+
+            for (edge_seed, insert_directive_only_fragment) in commands {
+                if insert_directive_only_fragment
+                    && let Some(trigger) = directive_only_trigger(&path)
+                {
+                    model.add_none(trigger.clone());
+                    path = path
+                        .add(
+                            trigger,
+                            None,
+                            ConditionResolution::no_conditions(),
+                            None,
+                        )
+                        .unwrap();
+                    audit_operation_path(&path, &model)?;
+                }
+
+                let candidates = path.next_edges().unwrap().collect::<Vec<_>>();
+                if candidates.is_empty() {
+                    continue;
+                }
+                let edge_id = candidates[edge_seed as usize % candidates.len()];
+                let trigger = operation_trigger_for_edge(&graph, edge_id)?;
+                let condition_cost = edge_id.index() as QueryPlanCost;
+                model.add_edge(&graph, edge_id, trigger.clone(), condition_cost)?;
+                path = path
+                    .add(
+                        trigger,
+                        Some(edge_id),
+                        ConditionResolution::Satisfied {
+                            path_tree: None,
+                            cost: condition_cost,
+                            context_map: None,
+                        },
+                        None,
+                    )
+                    .unwrap();
+                audit_operation_path(&path, &model)?;
+            }
+        }
+    }
+
+    // Generated context-path coverage.
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1024))]
+
+        /// Exercise context placement only through states the planner can actually reach. Start
+        /// at the federated root, walk to a real `@fromContext` consumer through the fixture's
+        /// context-setting union/object path, and let `can_satisfy_conditions` derive every level
+        /// and payload rather than fabricating a `ContextMapEntry`.
+        #[test]
+        fn reachable_operation_path_context_resolution_keeps_attributes_in_lockstep(
+            route_order_seed in any::<u16>(),
+            directive_counts in prop::collection::vec(0u8..4, 0..12),
+        ) {
+            let graph = build_path_query_graph(4);
+            let consumer_edge = graph
+                .graph
+                .edge_references()
+                .find(|edge| !edge.weight().required_contexts.is_empty())
+                .expect("context fixture must contain a @fromContext field edge")
+                .id();
+            let (consumer_head, _) = graph.graph.edge_endpoints(consumer_edge).unwrap();
+            let federated_root = graph
+                .graph
+                .node_indices()
+                .find(|node| {
+                    graph.graph[*node].source.as_ref() == "_"
+                        && graph.graph[*node].root_kind
+                            == Some(SchemaRootDefinitionKind::Query)
+                })
+                .expect("federated graph must have a synthetic query root");
+            let route = generated_shortest_edge_path(
+                &graph,
+                federated_root,
+                consumer_head,
+                route_order_seed,
+            );
+            let mut path = OpGraphPath::new(graph.clone(), federated_root).unwrap();
+            for (step, edge) in route.into_iter().enumerate() {
+                let directive_count = directive_counts
+                    .get(step % directive_counts.len().max(1))
+                    .copied()
+                    .unwrap_or_default();
+                for _ in 0..directive_count {
+                    let Some(trigger) = directive_only_trigger(&path) else {
+                        // The synthetic federated root is not a schema composite and therefore
+                        // cannot carry an operation fragment. Real schema nodes later in the route
+                        // can, and remain generated below.
+                        break;
+                    };
+                    path = path
+                        .add(
+                            trigger,
+                            None,
+                            ConditionResolution::no_conditions(),
+                            None,
+                        )
+                        .unwrap();
+                }
+                path = path
+                    .add(
+                        operation_trigger_for_edge(&graph, edge)?,
+                        Some(edge),
+                        ConditionResolution::no_conditions(),
+                        None,
+                    )
+                    .unwrap();
+            }
+            prop_assert_eq!(path.tail(), consumer_head);
+
+            let before_len = path.edges.len();
+            let mut resolver = AlwaysSatisfiedConditionResolver;
+            let resolution = path.can_satisfy_conditions(
+                consumer_edge,
+                &mut resolver,
+                &OpGraphPathContext::default(),
+                &ExcludedDestinations::default(),
+                &ExcludedConditions::default(),
+            )?;
+            let ConditionResolution::Satisfied {
+                context_map: Some(context_map),
+                ..
+            } = &resolution
+            else {
+                return Err(path_test_error(format!(
+                    "reachable @fromContext consumer was not satisfied: path={path}; resolution={resolution:?}",
+                )));
+            };
+            let context_map = context_map.clone();
+            prop_assert!(!context_map.is_empty());
+            for entry in context_map.values() {
+                prop_assert!(entry.levels_in_query_path >= 1);
+                prop_assert!(entry.levels_in_query_path <= before_len);
+                prop_assert!(entry.levels_in_data_path >= 1);
+                prop_assert!(entry.levels_in_data_path <= entry.levels_in_query_path);
+            }
+
+            path = path
+                .add(
+                    operation_trigger_for_edge(&graph, consumer_edge)?,
+                    Some(consumer_edge),
+                    resolution,
+                    None,
+                )
+                .unwrap();
+            prop_assert_eq!(path.edges.len(), before_len + 1);
+            prop_assert_eq!(path.edges.len(), path.edge_conditions.len());
+            prop_assert_eq!(path.edges.len(), path.matching_context_ids.len());
+            prop_assert_eq!(path.edges.len(), path.arguments_to_context_usages.len());
+
+            let usages = path.arguments_to_context_usages[before_len]
+                .as_ref()
+                .expect("consumer field must own generated context argument usages");
+            for entry in context_map.values() {
+                let context_step = before_len - entry.levels_in_query_path;
+                prop_assert!(path.matching_context_ids[context_step]
+                    .as_ref()
+                    .is_some_and(|ids| ids.contains(&entry.context_id)));
+                if let Some(condition_tree) = &entry.path_tree {
+                    prop_assert_eq!(
+                        path.edge_conditions[context_step].as_ref(),
+                        Some(condition_tree),
+                    );
+                }
+                let usage = usages
+                    .get(&entry.argument_name)
+                    .expect("derived context argument usage was not attached to consumer");
+                prop_assert_eq!(&usage.context_id, &entry.context_id);
+                prop_assert_eq!(&usage.selection_set, &entry.selection_set);
+                prop_assert_eq!(&usage.subgraph_argument_type, &entry.argument_type);
+                prop_assert_eq!(
+                    &usage.relative_path,
+                    &vec![FetchDataPathElement::Parent; entry.levels_in_data_path],
+                );
+            }
+        }
+
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1024))]
+
+        /// Build the exact pair recognized by
+        /// `is_equivalent_save_for_type_explosion_to`: one path takes an interface key directly,
+        /// while the other downcasts to a runtime implementation before taking an equivalent key.
+        /// Append the same generated suffix to both paths, then require the asymmetric recognizer
+        /// to agree with that literal construction.
+        #[test]
+        fn operation_path_type_explosion_equivalence_matches_literal_edge_pattern(
+            fixture_seed in any::<usize>(),
+            pattern_seed in any::<usize>(),
+            suffix_seeds in prop::collection::vec(any::<u16>(), 0..16),
+        ) {
+            let candidates = type_explosion_fixture_patterns();
+            prop_assert!(
+                !candidates.is_empty(),
+                "fixture palette no longer contains a direct-key/type-exploded-key pair"
+            );
+            let (graph, patterns) = &candidates[fixture_seed % candidates.len()];
+            let (head, direct_key, downcast, exploded_key) =
+                patterns[pattern_seed % patterns.len()];
+
+            let mut direct = OpGraphPath::new(graph.clone(), head).unwrap();
+            direct = direct
+                .add(
+                    operation_trigger_for_edge(graph, direct_key)?,
+                    Some(direct_key),
+                    ConditionResolution::no_conditions(),
+                    None,
+                )
+                .unwrap();
+            let mut exploded = OpGraphPath::new(graph.clone(), head).unwrap();
+            for edge in [downcast, exploded_key] {
+                exploded = exploded
+                    .add(
+                        operation_trigger_for_edge(graph, edge)?,
+                        Some(edge),
+                        ConditionResolution::no_conditions(),
+                        None,
+                    )
+                    .unwrap();
+            }
+
+            for seed in suffix_seeds {
+                let direct_next = direct.next_edges().unwrap().collect::<Vec<_>>();
+                let exploded_next = exploded.next_edges().unwrap().collect::<Vec<_>>();
+                let common = direct_next
+                    .into_iter()
+                    .filter(|edge| exploded_next.contains(edge))
+                    .collect::<Vec<_>>();
+                if common.is_empty() {
+                    break;
+                }
+                let edge = common[seed as usize % common.len()];
+                let trigger = operation_trigger_for_edge(graph, edge)?;
+                direct = direct
+                    .add(
+                        trigger.clone(),
+                        Some(edge),
+                        ConditionResolution::no_conditions(),
+                        None,
+                    )
+                    .unwrap();
+                exploded = exploded
+                    .add(
+                        trigger,
+                        Some(edge),
+                        ConditionResolution::no_conditions(),
+                        None,
+                    )
+                    .unwrap();
+            }
+
+            prop_assert_eq!(direct.head, exploded.head);
+            prop_assert_eq!(direct.tail, exploded.tail);
+            prop_assert_eq!(direct.edges.len() + 1, exploded.edges.len());
+            prop_assert!(direct
+                .is_equivalent_save_for_type_explosion_to(&exploded)
+                .unwrap());
+            prop_assert!(!exploded
+                .is_equivalent_save_for_type_explosion_to(&direct)
+                .unwrap());
+            prop_assert!(!direct
+                .is_equivalent_save_for_type_explosion_to(&direct)
+                .unwrap());
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1024))]
+
+        /// `terminate_with_non_requested_typename_field` is a second path-normalization route:
+        /// it removes every trailing cast/directive-only step and then appends `__typename` when
+        /// the retained tail is composite. Derive that prefix directly from the pre-call path and
+        /// verify that every cached vector and runtime attribute describes the rewritten path.
+        #[test]
+        fn typename_termination_truncates_trailing_path_attributes_in_lockstep(
+            fixture in 0usize..PATH_GRAPH_FIXTURES.len(),
+            start_seed in any::<u16>(),
+            commands in prop::collection::vec((any::<u16>(), any::<bool>()), 0..40),
+        ) {
+            let graph = build_path_query_graph(fixture);
+            let starts = graph
+                .graph
+                .node_indices()
+                .filter(|node| match &graph.graph[*node].type_ {
+                    QueryGraphNodeType::FederatedRootType(_) => true,
+                    QueryGraphNodeType::SchemaType(position) => {
+                        CompositeTypeDefinitionPosition::try_from(position.clone()).is_ok()
+                    }
+                })
+                .collect::<Vec<_>>();
+            let start = starts[start_seed as usize % starts.len()];
+            let mut path = OpGraphPath::new(graph.clone(), start).unwrap();
+
+            for (edge_seed, insert_directive_only_fragment) in commands {
+                if insert_directive_only_fragment
+                    && let Some(trigger) = directive_only_trigger(&path)
+                {
+                    path = path
+                        .add(
+                            trigger,
+                            None,
+                            ConditionResolution::no_conditions(),
+                            None,
+                        )
+                        .unwrap();
+                }
+                let candidates = path.next_edges().unwrap().collect::<Vec<_>>();
+                if candidates.is_empty() {
+                    continue;
+                }
+                let edge_id = candidates[edge_seed as usize % candidates.len()];
+                let trigger = operation_trigger_for_edge(&graph, edge_id)?;
+                path = path
+                    .add(
+                        trigger,
+                        Some(edge_id),
+                        ConditionResolution::Satisfied {
+                            path_tree: None,
+                            cost: edge_id.index() as QueryPlanCost,
+                            context_map: None,
+                        },
+                        None,
+                    )
+                    .unwrap();
+            }
+
+            let prefix_len = path
+                .edges
+                .iter()
+                .enumerate()
+                .rev()
+                .find_map(|(index, edge)| {
+                    edge.and_then(|edge| {
+                        (!matches!(
+                            graph.graph[edge].transition,
+                            QueryGraphEdgeTransition::Downcast { .. }
+                        ))
+                        .then_some(index + 1)
+                    })
+                })
+                .unwrap_or(0);
+            let prefix_tail = if prefix_len == 0 {
+                path.head
+            } else {
+                let edge = path.edges[prefix_len - 1]
+                    .expect("the last retained step is a concrete non-cast edge");
+                graph.graph.edge_endpoints(edge).unwrap().1
+            };
+            let prefix_is_composite = match &graph.graph[prefix_tail].type_ {
+                QueryGraphNodeType::SchemaType(position) => {
+                    CompositeTypeDefinitionPosition::try_from(position.clone()).is_ok()
+                }
+                QueryGraphNodeType::FederatedRootType(_) => false,
+            };
+            let expected_len = prefix_len + usize::from(prefix_is_composite);
+            let terminated = path
+                .terminate_with_non_requested_typename_field(&OverrideConditions::default())
+                .map_err(|error| {
+                    path_test_error(format!(
+                        "typename termination failed: {error}; fixture={}; head={:?} {:?}; prefix_tail={:?} {:?}; path={path:?}",
+                        PATH_GRAPH_FIXTURES[fixture].0,
+                        path.head,
+                        graph.graph[path.head],
+                        prefix_tail,
+                        graph.graph[prefix_tail],
+                    ))
+                })?;
+
+            prop_assert_eq!(terminated.edges.len(), expected_len);
+            prop_assert_eq!(terminated.edge_triggers.len(), expected_len);
+            prop_assert_eq!(terminated.edge_conditions.len(), expected_len);
+            prop_assert_eq!(terminated.matching_context_ids.len(), expected_len);
+            prop_assert_eq!(terminated.arguments_to_context_usages.len(), expected_len);
+            prop_assert_eq!(&terminated.edges[..prefix_len], &path.edges[..prefix_len]);
+            prop_assert_eq!(
+                &terminated.edge_triggers[..prefix_len],
+                &path.edge_triggers[..prefix_len]
+            );
+            prop_assert_eq!(
+                &terminated.edge_conditions[..prefix_len],
+                &path.edge_conditions[..prefix_len]
+            );
+            prop_assert_eq!(
+                &terminated.matching_context_ids[..prefix_len],
+                &path.matching_context_ids[..prefix_len]
+            );
+            prop_assert_eq!(
+                &terminated.arguments_to_context_usages[..prefix_len],
+                &path.arguments_to_context_usages[..prefix_len]
+            );
+
+            if prefix_is_composite {
+                let typename_edge = terminated.edges[prefix_len]
+                    .expect("typename termination must append a real field edge");
+                let QueryGraphEdgeTransition::FieldCollection {
+                    field_definition_position,
+                    ..
+                } = &graph.graph[typename_edge].transition
+                else {
+                    return Err(path_test_error("typename termination appended a non-field edge"));
+                };
+                prop_assert_eq!(field_definition_position.field_name().as_str(), "__typename");
+                prop_assert!(terminated.edge_conditions[prefix_len].is_none());
+                prop_assert!(terminated.matching_context_ids[prefix_len].is_none());
+                prop_assert!(terminated.arguments_to_context_usages[prefix_len].is_none());
+            }
+
+            let mut expected_tail = terminated.head;
+            let mut expected_runtime_types = slow_initial_runtime_types(&graph, terminated.head)?;
+            let mut before_last_cast = None;
+            for edge in &terminated.edges {
+                let Some(edge) = edge else {
+                    before_last_cast = None;
+                    continue;
+                };
+                let runtime_before = expected_runtime_types.clone();
+                expected_runtime_types =
+                    slow_advance_runtime_types(&graph, &expected_runtime_types, *edge)?;
+                before_last_cast = matches!(
+                    graph.graph[*edge].transition,
+                    QueryGraphEdgeTransition::Downcast { .. }
+                )
+                .then_some(runtime_before);
+                expected_tail = graph.graph.edge_endpoints(*edge).unwrap().1;
+            }
+            prop_assert_eq!(terminated.tail, expected_tail);
+            prop_assert_eq!(&*terminated.runtime_types_of_tail, &expected_runtime_types);
+            prop_assert_eq!(
+                terminated.runtime_types_before_tail_if_last_is_cast.as_deref(),
+                before_last_cast.as_ref()
+            );
+            prop_assert!(terminated.defer_on_tail.is_none());
+            prop_assert_eq!(
+                terminated
+                    .last_subgraph_entering_edge_info
+                    .as_ref()
+                    .map(|info| (info.index, info.conditions_cost)),
+                path.last_subgraph_entering_edge_info
+                    .as_ref()
+                    .map(|info| (info.index, info.conditions_cost))
+            );
+        }
+    }
+}

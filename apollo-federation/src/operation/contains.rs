@@ -392,6 +392,7 @@ mod tests {
                 a: Int
                 b: Int
                 c: Int
+                arg(x: Int): Int
                 object: Nested
                 intf: Intf
             }
@@ -626,6 +627,35 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct KeyedFieldSpec {
+        alias: u8,
+        argument: u8,
+        directive: u8,
+    }
+
+    fn keyed_field_strategy() -> impl Strategy<Value = KeyedFieldSpec> {
+        (0u8..3, 0u8..3, 0u8..3).prop_map(|(alias, argument, directive)| KeyedFieldSpec {
+            alias,
+            argument,
+            directive,
+        })
+    }
+
+    fn keyed_field_text(spec: KeyedFieldSpec) -> String {
+        let alias = match spec.alias {
+            0 => "".to_string(),
+            value => format!("alias_{value}: "),
+        };
+        let directive = match spec.directive {
+            0 => "",
+            1 => " @include(if: true)",
+            2 => " @skip(if: false)",
+            _ => unreachable!("generated in 0..3"),
+        };
+        format!("{alias}arg(x: {}){directive}", spec.argument)
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(256))]
 
@@ -770,6 +800,43 @@ mod tests {
             prop_assert!(
                 merge_ab_c.contains(&merge_ab),
                 "a superset of a and b must contain their merge"
+            );
+        }
+
+
+        /// Selection identity includes response name, arguments, and directives. Generate those
+        /// dimensions independently so containment cannot accidentally collapse distinct
+        /// `SelectionKey`s or become sensitive to insertion order.
+        #[test]
+        fn selection_containment_distinguishes_complete_field_keys(
+            a in keyed_field_strategy(),
+            b in keyed_field_strategy(),
+        ) {
+            let schema = selection_lattice_schema();
+            let a_text = keyed_field_text(a);
+            let b_text = keyed_field_text(b);
+            let a_selection = Operation::parse(
+                schema.clone(),
+                &format!("{{ {a_text} }}"),
+                "key-a.graphql",
+            )
+            .unwrap()
+            .selection_set;
+            let b_selection = Operation::parse(
+                schema,
+                &format!("{{ {b_text} }}"),
+                "key-b.graphql",
+            )
+            .unwrap()
+            .selection_set;
+            prop_assert_eq!(
+                a_selection
+                    .containment(&b_selection, ContainmentOptions::default())
+                    .is_equal(),
+                a == b,
+                "field-key containment collapsed `{}` and `{}`",
+                a_text,
+                b_text,
             );
         }
     }
