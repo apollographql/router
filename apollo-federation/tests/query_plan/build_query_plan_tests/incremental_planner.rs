@@ -9,7 +9,6 @@ use apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryCo
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
-use apollo_federation::Supergraph;
 
 fn incremental_config() -> QueryPlannerConfig {
     QueryPlannerConfig {
