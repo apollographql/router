@@ -1,0 +1,65 @@
+---
+source: apollo-federation/tests/query_plan/build_query_plan_tests/incremental_planner.rs
+assertion_line: 4699
+expression: plan
+---
+QueryPlan {
+  Sequence {
+    Fetch(service: "Subgraph1") {
+      {
+        entry(id: "1") {
+          __typename
+          ... on A {
+            item {
+              __typename
+              ... on Widget {
+                __typename
+                id
+              }
+            }
+          }
+          ... on B {
+            __typename
+            id
+          }
+        }
+      }
+    },
+    Flatten(path: "entry") {
+      Fetch(service: "Subgraph2") {
+        {
+          ... on B {
+            __typename
+            id
+          }
+        } =>
+        {
+          ... on B {
+            item {
+              __typename
+              ... on Widget {
+                __typename
+                id
+              }
+            }
+          }
+        }
+      },
+    },
+    Flatten(path: "entry.item") {
+      Fetch(service: "Subgraph3") {
+        {
+          ... on Widget {
+            __typename
+            id
+          }
+        } =>
+        {
+          ... on Widget {
+            value
+          }
+        }
+      },
+    },
+  },
+}
