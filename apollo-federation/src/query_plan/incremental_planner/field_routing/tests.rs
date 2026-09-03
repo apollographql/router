@@ -2244,4 +2244,3 @@ fn entity_shareable_field_filters_inconsistent_union_members() {
     }
     "###);
 }
-
