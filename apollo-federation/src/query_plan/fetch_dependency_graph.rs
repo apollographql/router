@@ -6032,6 +6032,13 @@ mod tests {
                 .map(|&(_, target)| target)
         }
 
+        fn parents(&self, node: NodeIndex) -> impl Iterator<Item = NodeIndex> + '_ {
+            self.edges
+                .iter()
+                .filter(move |&&(_, target)| target == node)
+                .map(|&(source, _)| source)
+        }
+
         /// Nodes reachable from `start` via a path of length >= 1 (proper descendants).
         fn descendants(&self, start: NodeIndex) -> IndexSet<NodeIndex> {
             let mut visited = IndexSet::default();
@@ -6701,5 +6708,348 @@ mod tests {
         assert_eq!(edges_after_first, edges_after_second);
         assert_eq!(ledger_after_first, graph.reduced_defer_edges);
         assert!(graph.is_reduced);
+    }
+
+    // =========================================================================================
+    // ProcessingState sub-property (proptest-graph-notes.md, Sentinel 1 / "Graph PR 2").
+    //
+    // `ProcessingState` is a separate exact state machine over the same generated DAG. Two kinds
+    // of property here:
+    //   - `create_state_for_children_of_processed_node` is compared against a naive
+    //     recomputation over the Sentinel-1 `DagModel` graph (an oracle test).
+    //   - `merge_with`/`update_for_processed_nodes` are pure data operations on `ProcessingState`
+    //     itself (no `&FetchDependencyGraph` involved), so their laws are checked directly against
+    //     synthetically generated, internally well-formed states, with no graph needed at all.
+    // =========================================================================================
+
+    /// Snapshot a `ProcessingState` into a normalized, order-independent form for comparison:
+    /// sorted `next` indices, and sorted `(node index, sorted parent indices)` pairs for
+    /// `unhandled`. `path_in_parent` is always `None` in every state this harness builds, so the
+    /// index alone identifies a `ParentRelation`.
+    fn processing_state_snapshot(
+        state: &ProcessingState,
+    ) -> (Vec<usize>, Vec<(usize, Vec<usize>)>) {
+        let mut next: Vec<usize> = state.next.iter().map(|n| n.index()).collect();
+        next.sort_unstable();
+        let mut unhandled: Vec<(usize, Vec<usize>)> = state
+            .unhandled
+            .iter()
+            .map(|u| {
+                let mut parents: Vec<usize> = u
+                    .unhandled_parents
+                    .iter()
+                    .map(|p| p.parent_node_id.index())
+                    .collect();
+                parents.sort_unstable();
+                (u.node.index(), parents)
+            })
+            .collect();
+        unhandled.sort_unstable();
+        (next, unhandled)
+    }
+
+    /// `ProcessingState`/`UnhandledNode` don't derive `Clone` (their production-visible API is
+    /// consuming-by-value), so tests that need the same state twice rebuild it field-by-field.
+    fn clone_processing_state(state: &ProcessingState) -> ProcessingState {
+        ProcessingState {
+            next: state.next.clone(),
+            unhandled: state
+                .unhandled
+                .iter()
+                .map(|u| UnhandledNode {
+                    node: u.node,
+                    unhandled_parents: u.unhandled_parents.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        /// `create_state_for_children_of_processed_node` must exactly match a naive
+        /// recomputation from the Sentinel-1 `DagModel`: a child is "next" iff `processed_index`
+        /// is its only parent, otherwise "unhandled" with every other parent still outstanding.
+        #[test]
+        fn create_state_for_children_of_processed_node_matches_naive_recomputation(
+            commands in dag_command_trace_strategy(),
+            pick in any::<u16>(),
+        ) {
+            let mut graph = make_test_dep_graph();
+            let mut model = DagModel::default();
+            for command in &commands {
+                apply_dag_command(&mut graph, &mut model, command);
+            }
+            let Some(processed_index) = model.pick(pick) else {
+                return Ok(());
+            };
+            let children: Vec<NodeIndex> = model.children(processed_index).collect();
+
+            let mut expected_next = Vec::new();
+            let mut expected_unhandled: Vec<(usize, Vec<usize>)> = Vec::new();
+            for &child in &children {
+                let parents: Vec<NodeIndex> = model.parents(child).collect();
+                if parents.len() == 1 {
+                    expected_next.push(child.index());
+                } else {
+                    let mut remaining: Vec<usize> = parents
+                        .iter()
+                        .filter(|&&p| p != processed_index)
+                        .map(|p| p.index())
+                        .collect();
+                    remaining.sort_unstable();
+                    expected_unhandled.push((child.index(), remaining));
+                }
+            }
+            expected_next.sort_unstable();
+            expected_unhandled.sort_unstable();
+
+            let actual = graph.create_state_for_children_of_processed_node(processed_index, children);
+            let (actual_next, actual_unhandled) = processing_state_snapshot(&actual);
+            prop_assert_eq!(actual_next.clone(), expected_next);
+            prop_assert_eq!(actual_unhandled.clone(), expected_unhandled);
+
+            // Well-formedness is guaranteed here because a single real call can't produce the
+            // cross-state conflicts that make it inapplicable to the pure-algebra properties
+            // below (see their doc comments).
+            let next_set: IndexSet<usize> = actual_next.iter().copied().collect();
+            prop_assert_eq!(next_set.len(), actual_next.len(), "duplicate `next` entry");
+            let unhandled_nodes: Vec<usize> = actual_unhandled.iter().map(|(n, _)| *n).collect();
+            let unhandled_node_set: IndexSet<usize> = unhandled_nodes.iter().copied().collect();
+            prop_assert_eq!(
+                unhandled_node_set.len(),
+                unhandled_nodes.len(),
+                "duplicate `unhandled` entry"
+            );
+            for node in &unhandled_nodes {
+                prop_assert!(!next_set.contains(node), "node {node} in both next and unhandled");
+            }
+            for (_, parents) in &actual_unhandled {
+                prop_assert!(!parents.is_empty(), "unhandled entry with no remaining parents");
+            }
+        }
+
+        /// `merge_with` is commutative, associative, and idempotent as a *set* operation (vector
+        /// order is incidental).
+        ///
+        /// The three states being merged are NOT independently generated: an earlier version of
+        /// this property did that and found a real associativity failure, which turned out to be
+        /// a generator bug rather than a production one (see the long comment above
+        /// `dag_consistent_sibling_states_strategy` for the full analysis and the discarded
+        /// counterexample). `merge_with`'s only caller (`process_nodes`) always merges states
+        /// that are per-sibling *views of the same underlying parent sets* — each state's opinion
+        /// about a shared descendant differs only in which one already-processed sibling has been
+        /// subtracted from that descendant's true parent set. Three views that disagree about a
+        /// descendant's true parent set (e.g. one claims it's `{0, A}`, another claims `{1, B}`)
+        /// can't arise from real siblings and aren't a precondition `merge_with` is expected to
+        /// tolerate, so the generator below constructs three such internally-consistent views
+        /// from one shared ground truth instead of three unrelated random states.
+        #[test]
+        fn processing_state_merge_with_is_commutative_associative_idempotent(
+            full_parents in dag_shared_full_parent_sets_strategy(),
+        ) {
+            let state_a = || dag_sibling_view(&full_parents, PS_SIBLINGS[0]);
+            let state_b = || dag_sibling_view(&full_parents, PS_SIBLINGS[1]);
+            let state_c = || dag_sibling_view(&full_parents, PS_SIBLINGS[2]);
+
+            let commutative_ab = state_a().merge_with(state_b());
+            let commutative_ba = state_b().merge_with(state_a());
+            prop_assert_eq!(
+                processing_state_snapshot(&commutative_ab),
+                processing_state_snapshot(&commutative_ba),
+                "merge_with is not commutative"
+            );
+
+            let assoc_left = state_a().merge_with(state_b()).merge_with(state_c());
+            let assoc_right = state_a().merge_with(state_b().merge_with(state_c()));
+            prop_assert_eq!(
+                processing_state_snapshot(&assoc_left),
+                processing_state_snapshot(&assoc_right),
+                "merge_with is not associative"
+            );
+
+            let idempotent = state_a().merge_with(state_a());
+            prop_assert_eq!(
+                processing_state_snapshot(&idempotent),
+                processing_state_snapshot(&state_a()),
+                "merge_with(a, a) must equal a"
+            );
+        }
+
+        /// `update_for_processed_nodes` is a pure filter over each `unhandled` entry's remaining
+        /// parents. For disjoint `p1`/`p2`, applying it twice (once per set) must equal applying
+        /// it once to their union; applying it to the empty set is the identity; applying the
+        /// same set twice is idempotent.
+        #[test]
+        fn processing_state_update_for_processed_nodes_matches_sequential_application(
+            state in dag_processing_state_strategy(),
+            p1 in prop::collection::vec(0..PS_PARENT_UNIVERSE, 0..4),
+            p2_raw in prop::collection::vec(0..PS_PARENT_UNIVERSE, 0..4),
+        ) {
+            let p1: Vec<NodeIndex> = {
+                let mut v: Vec<usize> = p1;
+                v.sort_unstable();
+                v.dedup();
+                v.into_iter().map(NodeIndex::new).collect()
+            };
+            // Keep `p2` disjoint from `p1`, per the law's precondition.
+            let p2: Vec<NodeIndex> = {
+                let mut v: Vec<usize> = p2_raw;
+                v.sort_unstable();
+                v.dedup();
+                v.into_iter()
+                    .filter(|n| !p1.contains(&NodeIndex::new(*n)))
+                    .map(NodeIndex::new)
+                    .collect()
+            };
+
+            let identity = clone_processing_state(&state).update_for_processed_nodes(&[]);
+            prop_assert_eq!(
+                processing_state_snapshot(&identity),
+                processing_state_snapshot(&state),
+                "update_for_processed_nodes(&[]) must be the identity"
+            );
+
+            let mut union = p1.clone();
+            union.extend(p2.iter().copied());
+            let union_applied = clone_processing_state(&state).update_for_processed_nodes(&union);
+            let sequential_applied = clone_processing_state(&state)
+                .update_for_processed_nodes(&p1)
+                .update_for_processed_nodes(&p2);
+            prop_assert_eq!(
+                processing_state_snapshot(&union_applied),
+                processing_state_snapshot(&sequential_applied),
+                "update_for_processed_nodes(p1 ++ p2) must equal update(p1).update(p2) for disjoint p1/p2"
+            );
+
+            let applied_once = clone_processing_state(&state).update_for_processed_nodes(&p1);
+            let applied_twice = clone_processing_state(&state)
+                .update_for_processed_nodes(&p1)
+                .update_for_processed_nodes(&p1);
+            prop_assert_eq!(
+                processing_state_snapshot(&applied_once),
+                processing_state_snapshot(&applied_twice),
+                "update_for_processed_nodes(p1) must be idempotent"
+            );
+        }
+    }
+
+    /// Universe sizes for `dag_processing_state_strategy`: small enough to shrink well and to
+    /// make node/parent collisions (needed to exercise `merge_with`'s intersection logic) common.
+    const PS_NODE_UNIVERSE: usize = 6;
+    const PS_PARENT_UNIVERSE: usize = 6;
+
+    /// Generate an internally well-formed `ProcessingState`: no duplicate `next` entry, no
+    /// duplicate `unhandled` node, no node in both, and every `unhandled` entry has at least one
+    /// (deduplicated) parent — the invariant `ProcessingState`'s own doc comment states
+    /// ("we make sure that this never hold node with no edges").
+    fn dag_processing_state_strategy() -> impl Strategy<Value = ProcessingState> {
+        prop::collection::vec(0..PS_NODE_UNIVERSE, 0..PS_NODE_UNIVERSE).prop_flat_map(|raw| {
+            let mut tracked = raw;
+            tracked.sort_unstable();
+            tracked.dedup();
+            let n = tracked.len();
+            (
+                prop::collection::vec(any::<bool>(), n),
+                prop::collection::vec(prop::collection::vec(0..PS_PARENT_UNIVERSE, 1..4), n),
+            )
+                .prop_map(move |(is_next_flags, parent_choices)| {
+                    let mut next = Vec::new();
+                    let mut unhandled = Vec::new();
+                    for (i, &node_idx) in tracked.iter().enumerate() {
+                        let node = NodeIndex::new(node_idx);
+                        if is_next_flags[i] {
+                            next.push(node);
+                        } else {
+                            let mut parents = parent_choices[i].clone();
+                            parents.sort_unstable();
+                            parents.dedup();
+                            let unhandled_parents = parents
+                                .into_iter()
+                                .map(|p| ParentRelation {
+                                    parent_node_id: NodeIndex::new(p),
+                                    path_in_parent: None,
+                                })
+                                .collect();
+                            unhandled.push(UnhandledNode {
+                                node,
+                                unhandled_parents,
+                            });
+                        }
+                    }
+                    ProcessingState { next, unhandled }
+                })
+        })
+    }
+
+    /// Three fixed "already-processed sibling" identifiers, deliberately far outside the
+    /// candidate/background-parent ranges below so they can never collide with an ordinary
+    /// parent by coincidence.
+    const PS_SIBLINGS: [usize; 3] = [1_000, 1_001, 1_002];
+    const PS_CANDIDATE_UNIVERSE: usize = 5;
+    const PS_BACKGROUND_PARENT_UNIVERSE: usize = 4;
+    /// Offset applied to background-parent ids so they can never collide with `PS_SIBLINGS`.
+    const PS_BACKGROUND_OFFSET: usize = 5_000;
+
+    /// Ground truth for `dag_sibling_view`: for each of a small number of candidate nodes, its
+    /// true, complete parent set — a subset of `PS_SIBLINGS` plus zero or more "background"
+    /// parents that no generated sibling view ever accounts for (so some candidates stay
+    /// permanently unhandled no matter which siblings are merged, exactly like a real fetch node
+    /// that also depends on a fetch outside the batch being processed).
+    fn dag_shared_full_parent_sets_strategy() -> impl Strategy<Value = Vec<Vec<usize>>> {
+        prop::collection::vec(
+            (
+                prop::collection::vec(0..PS_SIBLINGS.len(), 0..PS_SIBLINGS.len()),
+                prop::collection::vec(0..PS_BACKGROUND_PARENT_UNIVERSE, 0..3),
+            ),
+            PS_CANDIDATE_UNIVERSE,
+        )
+        .prop_map(|per_candidate| {
+            per_candidate
+                .into_iter()
+                .map(|(sibling_idxs, background)| {
+                    let mut parents: Vec<usize> =
+                        sibling_idxs.into_iter().map(|i| PS_SIBLINGS[i]).collect();
+                    parents.extend(background.into_iter().map(|b| PS_BACKGROUND_OFFSET + b));
+                    parents.sort_unstable();
+                    parents.dedup();
+                    parents
+                })
+                .collect()
+        })
+    }
+
+    /// The `ProcessingState` a single sibling (`excluded_sibling`) would compute via
+    /// `create_state_for_children_of_processed_node`, given the shared ground truth
+    /// `full_parents`: a candidate is in this view at all only if `excluded_sibling` is really
+    /// one of its parents (mirroring "only this sibling's own children are candidates"), and its
+    /// remaining parents are every other true parent.
+    fn dag_sibling_view(full_parents: &[Vec<usize>], excluded_sibling: usize) -> ProcessingState {
+        let mut next = Vec::new();
+        let mut unhandled = Vec::new();
+        for (candidate_idx, parents) in full_parents.iter().enumerate() {
+            if !parents.contains(&excluded_sibling) {
+                continue;
+            }
+            let node = NodeIndex::new(candidate_idx);
+            let remaining: Vec<ParentRelation> = parents
+                .iter()
+                .copied()
+                .filter(|&p| p != excluded_sibling)
+                .map(|p| ParentRelation {
+                    parent_node_id: NodeIndex::new(p),
+                    path_in_parent: None,
+                })
+                .collect();
+            if remaining.is_empty() {
+                next.push(node);
+            } else {
+                unhandled.push(UnhandledNode {
+                    node,
+                    unhandled_parents: remaining,
+                });
+            }
+        }
+        ProcessingState { next, unhandled }
     }
 }
