@@ -461,7 +461,7 @@ impl FieldRoutingSearchSpace {
         key_edge: &crate::query_graph::QueryGraphEdge,
         target_subgraph: Arc<str>,
         provides_anchor: Option<NodeIndex>,
-        (current_source, source_type, source_schema): (
+        (_current_source, source_type, source_schema): (
             &Arc<str>,
             &Option<CompositeTypeDefinitionPosition>,
             &Option<&crate::schema::ValidFederationSchema>,
@@ -475,9 +475,7 @@ impl FieldRoutingSearchSpace {
             true
         } else {
             match (&key_edge.conditions, source_type, source_schema) {
-                (Some(conds), Some(st), Some(ss)) => {
-                    self.can_satisfy(conds, st, ss)
-                }
+                (Some(conds), Some(st), Some(ss)) => self.can_satisfy(conds, st, ss),
                 (None, _, _) => true,
                 _ => false,
             }
