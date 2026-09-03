@@ -700,7 +700,8 @@ impl FieldRoutingSearchSpace {
     /// later. Ranking keeps the direct edge first, so a greedy pass that later
     /// strands a descendant relies on BULB backtracking to revisit the hop.
     ///
-    /// At an abstract-type position, per-concrete-type explosion is always a
+    /// At an abstract-type position whose concrete implementers have
+    /// cross-subgraph entity keys, per-concrete-type explosion is a
     /// genuine alternative: a direct interface-level edge whose target strands
     /// a descendant is otherwise a forced commit with no decision point to
     /// backtrack into. Enumerating it (ranked last via Fallback preference)
@@ -738,7 +739,9 @@ impl FieldRoutingSearchSpace {
         )?;
         options.extend(hops);
 
-        if !options.is_empty() && self.node_type_is_abstract(pending.query_graph_node)? {
+        if !options.is_empty()
+            && self.abstract_type_has_cross_subgraph_keys(pending.query_graph_node)?
+        {
             options.push(RoutingChoice::fallback(RoutingTarget::TypeExplosion));
         }
 
@@ -825,19 +828,55 @@ impl FieldRoutingSearchSpace {
             Selection::InlineFragment(_) => Ok(Some(RoutingChoice::fallback(
                 RoutingTarget::RestructureFragment,
             ))),
-            Selection::Field(_) => Ok(self
-                .node_type_is_abstract(pending.query_graph_node)?
-                .then(|| RoutingChoice::fallback(RoutingTarget::TypeExplosion))),
+            Selection::Field(_) => {
+                let node_data = self.query_graph.node_weight(pending.query_graph_node)?;
+                let is_abstract = matches!(
+                    CompositeTypeDefinitionPosition::try_from(node_data.type_.clone()),
+                    Ok(pos) if pos.is_abstract_type()
+                );
+                Ok(is_abstract.then(|| RoutingChoice::fallback(RoutingTarget::TypeExplosion)))
+            }
         }
     }
 
-    fn node_type_is_abstract(&self, node: NodeIndex) -> Result<bool, FederationError> {
+    /// Whether any concrete implementer of the abstract type at `node` has a
+    /// cross-subgraph key edge. Type explosion is only useful when at least
+    /// one implementer can be routed to a different subgraph via an entity
+    /// key, so this gates the TypeExplosion fallback to avoid doubling the
+    /// BULB search tree at every abstract-type field.
+    fn abstract_type_has_cross_subgraph_keys(
+        &self,
+        node: NodeIndex,
+    ) -> Result<bool, FederationError> {
         let node_data = self.query_graph.node_weight(node)?;
-        if let Ok(pos) = CompositeTypeDefinitionPosition::try_from(node_data.type_.clone()) {
-            Ok(pos.is_abstract_type())
-        } else {
-            Ok(false)
+        let current_source = &node_data.source;
+        let Ok(pos) = CompositeTypeDefinitionPosition::try_from(node_data.type_.clone()) else {
+            return Ok(false);
+        };
+        if !pos.is_abstract_type() {
+            return Ok(false);
         }
+        let schema = self.query_graph.schema_by_source(current_source)?;
+        let runtime_types = schema.possible_runtime_types(pos)?;
+        for concrete_type in &runtime_types {
+            let type_name = &concrete_type.type_name;
+            let Ok(nodes) = self.query_graph.nodes_for_type(type_name) else {
+                continue;
+            };
+            for &concrete_node in nodes {
+                let concrete_data = self.query_graph.node_weight(concrete_node)?;
+                if &concrete_data.source != current_source {
+                    continue;
+                }
+                for edge_idx in self.out_edge_indices(concrete_node) {
+                    let edge = self.query_graph.edge_weight(edge_idx)?;
+                    if matches!(edge.transition, QueryGraphEdgeTransition::KeyResolution) {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
     }
 
     /// Order options best-first: @provides beats a direct local edge beats a
