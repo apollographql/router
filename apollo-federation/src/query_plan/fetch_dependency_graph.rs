@@ -5877,6 +5877,8 @@ mod tests {
     use proptest::proptest;
     use proptest::test_runner::TestCaseError;
 
+    use crate::schema::field_set::parse_field_set;
+
     /// Only the two subgraphs the shared test fixture (`TEST_SUPERGRAPH_SDL`) defines.
     const DAG_TEST_SUBGRAPHS: [&str; 2] = ["Subgraph1", "Subgraph2"];
 
@@ -7051,5 +7053,193 @@ mod tests {
             }
         }
         ProcessingState { next, unhandled }
+    }
+
+    // =========================================================================================
+    // Defer dependency extension (proptest-graph-notes.md, Sentinel 1 / "Graph PR 2"): real
+    // top-level field tokens, `merge_at = None`, no aliases, no fragments — the first payload
+    // stage the notes describe.
+    //
+    // The rule under test, from `collect_reduced_defer_dependencies`'s own doc comment: a removed
+    // cross-defer edge source -> target must be recovered as a defer dependency iff the source's
+    // selection shares a field (other than `__typename`) with one of the target's `_entities`
+    // input selections. This builds the canonical three-node shape from the notes
+    // (`A(primary) -> B(primary) -> C(deferred)`, plus a redundant `A -> C` shortcut, reduced via
+    // the real `reduce()` — not hand-pushed into the ledger) with real field selections on `A`
+    // and real `_entities` inputs on `C`, and compares the recovered dependency against a direct
+    // field-name-set-intersection oracle.
+    // =========================================================================================
+
+    /// Which of the shared test fixture's three real `T` fields (`id`, `v1`, `v2` — see
+    /// `TEST_SUPERGRAPH_SDL`), plus `__typename`, a selection includes. This is the fixed field
+    /// universe the notes recommend materializing tokens from. `__typename` is kept separate
+    /// because the production rule explicitly excludes it from intersection.
+    #[derive(Debug, Clone, Copy)]
+    struct DagFieldSelection {
+        id: bool,
+        v1: bool,
+        v2: bool,
+        typename: bool,
+    }
+
+    fn dag_field_selection_strategy() -> impl Strategy<Value = DagFieldSelection> {
+        any::<(bool, bool, bool, bool)>().prop_map(|(id, v1, v2, typename)| {
+            // A field set string can't be empty; if every flag came back false, force one real
+            // field on rather than falling back to `__typename` alone, so the "no real overlap"
+            // case is still exercised as often as the "some overlap" case.
+            let id = id || !(v1 || v2 || typename);
+            DagFieldSelection {
+                id,
+                v1,
+                v2,
+                typename,
+            }
+        })
+    }
+
+    fn dag_field_selection_string(selection: DagFieldSelection) -> String {
+        let mut parts = Vec::new();
+        if selection.typename {
+            parts.push("__typename");
+        }
+        if selection.id {
+            parts.push("id");
+        }
+        if selection.v1 {
+            parts.push("v1");
+        }
+        if selection.v2 {
+            parts.push("v2");
+        }
+        parts.join(" ")
+    }
+
+    /// The oracle: field-name-set intersection, `__typename` excluded — independent of
+    /// `has_field_intersection`'s `SelectionMap`/inline-fragment-aware traversal.
+    fn dag_field_selections_intersect(a: DagFieldSelection, b: DagFieldSelection) -> bool {
+        (a.id && b.id) || (a.v1 && b.v1) || (a.v2 && b.v2)
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        /// See the module doc comment above for the full rule and shape being tested.
+        #[test]
+        fn collect_reduced_defer_dependencies_matches_field_intersection(
+            source_selection in dag_field_selection_strategy(),
+            target_selection in dag_field_selection_strategy(),
+            defer_choice in 0u8..4,
+        ) {
+            let mut graph = make_test_dep_graph();
+            // `a` and `c` are both in Subgraph2: per the fixture SDL, `v1`/`v2` are owned only by
+            // Subgraph2 (`id` is the shared key field, present in both), so Subgraph2 is the only
+            // subgraph schema against which all three real `T` fields can be parsed.
+            let a = add_test_node(&mut graph, "Subgraph2", None);
+            let b = add_test_node(&mut graph, "Subgraph1", None);
+            let defer_label = format!("d{defer_choice}");
+            let c = add_test_node(&mut graph, "Subgraph2", Some(defer_label.as_str()));
+
+            // Give `a` a real top-level selection (the source's tokens).
+            let a_subgraph_schema = graph.federated_query_graph.schema_by_source("Subgraph2").unwrap().clone();
+            let source_fields = parse_field_set(
+                &a_subgraph_schema,
+                name!("T"),
+                &dag_field_selection_string(source_selection),
+                true,
+            )
+            .unwrap();
+            Arc::make_mut(graph.graph.node_weight_mut(a).unwrap())
+                .selection_set_mut()
+                .add_selections(&Arc::new(source_fields))
+                .unwrap();
+
+            // Give `c` real `_entities` inputs (the target's tokens). These are built against the
+            // supergraph schema, matching `FetchInputs::add`'s precondition; `SelectionKey` is
+            // schema-independent (response name + directives), so intersection with `a`'s
+            // subgraph-schema-rooted selection still matches by field name.
+            let supergraph_schema = graph.supergraph_schema.clone();
+            let target_fields = parse_field_set(
+                &supergraph_schema,
+                name!("T"),
+                &dag_field_selection_string(target_selection),
+                true,
+            )
+            .unwrap();
+            Arc::make_mut(graph.graph.node_weight_mut(c).unwrap())
+                .add_inputs(&target_fields, iter::empty())
+                .unwrap();
+
+            add_test_edge(&mut graph, a, b);
+            add_test_edge(&mut graph, b, c);
+            add_test_edge(&mut graph, a, c);
+
+            graph.reduce();
+            prop_assert_eq!(
+                graph.reduced_defer_edges.clone(),
+                vec![(a, c)],
+                "the shortcut must be ledgered before the dependency-recovery rule can be exercised"
+            );
+
+            let mut deps = Vec::new();
+            graph.collect_reduced_defer_dependencies(a, &mut deps).unwrap();
+
+            if dag_field_selections_intersect(source_selection, target_selection) {
+                let id = *graph
+                    .graph
+                    .node_weight(a)
+                    .unwrap()
+                    .id
+                    .get()
+                    .expect("a's fetch id must be assigned once a dependency is recorded");
+                prop_assert_eq!(deps, vec![(defer_label, format!("{id}"))]);
+            } else {
+                prop_assert!(
+                    deps.is_empty(),
+                    "recovered a dependency despite no shared field: {deps:?}"
+                );
+            }
+        }
+    }
+
+    /// `__typename` alone must never be enough to recover a dependency, even though it's a valid,
+    /// non-empty selection on both sides (the property above already covers this via generated
+    /// cases, but the exact all-`__typename` combination is worth a deterministic witness).
+    #[test]
+    fn dag_collect_reduced_defer_dependencies_ignores_typename_only_overlap() {
+        let mut graph = make_test_dep_graph();
+        let a = add_test_node(&mut graph, "Subgraph1", None);
+        let b = add_test_node(&mut graph, "Subgraph2", None);
+        let c = add_test_node(&mut graph, "Subgraph2", Some("defer1"));
+
+        let subgraph1_schema = graph
+            .federated_query_graph
+            .schema_by_source("Subgraph1")
+            .unwrap()
+            .clone();
+        let source_fields =
+            parse_field_set(&subgraph1_schema, name!("T"), "__typename", true).unwrap();
+        Arc::make_mut(graph.graph.node_weight_mut(a).unwrap())
+            .selection_set_mut()
+            .add_selections(&Arc::new(source_fields))
+            .unwrap();
+
+        let supergraph_schema = graph.supergraph_schema.clone();
+        let target_fields =
+            parse_field_set(&supergraph_schema, name!("T"), "__typename", true).unwrap();
+        Arc::make_mut(graph.graph.node_weight_mut(c).unwrap())
+            .add_inputs(&target_fields, iter::empty())
+            .unwrap();
+
+        add_test_edge(&mut graph, a, b);
+        add_test_edge(&mut graph, b, c);
+        add_test_edge(&mut graph, a, c);
+        graph.reduce();
+        assert_eq!(graph.reduced_defer_edges, vec![(a, c)]);
+
+        let mut deps = Vec::new();
+        graph
+            .collect_reduced_defer_dependencies(a, &mut deps)
+            .unwrap();
+        assert!(deps.is_empty(), "expected no dependency, got {deps:?}");
     }
 }
