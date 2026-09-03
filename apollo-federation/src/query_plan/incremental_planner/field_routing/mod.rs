@@ -238,7 +238,7 @@ impl FieldRoutingSearchSpace {
     /// `backtrack_forced`), otherwise drop the selection.
     fn recover_doomed(&self, state: &mut PlanState, trail: &mut ForcedTrail) {
         let pending = state.pop_pending().unwrap();
-        if !self.backtrack_forced(state, trail) {
+        if pending.best_effort || !self.backtrack_forced(state, trail) {
             self.drop_unresolvable(state, &pending);
         }
     }
@@ -270,6 +270,7 @@ impl FieldRoutingSearchSpace {
             );
         }
         let failed = result.is_err();
+        let best_effort = pending.best_effort;
         if options.len() > 1 {
             trail.frames.push(ForcedFrame {
                 pending: pending.clone(),
@@ -280,7 +281,9 @@ impl FieldRoutingSearchSpace {
         } else if failed {
             trail.doomed.insert(pending_site(&pending));
         }
-        if failed && !self.backtrack_forced(state, trail) {
+        // A failed best-effort commit stays a silent no-op: its loss must
+        // neither burn backtracking budget nor fail the plan.
+        if failed && !best_effort && !self.backtrack_forced(state, trail) {
             state.dropped_fields += 1;
         }
     }
