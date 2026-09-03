@@ -1170,6 +1170,7 @@ impl std::fmt::Display for FetchGraph {
                 FetchGroupKind::RootHop {
                     root_type,
                     merge_at,
+                    ..
                 } => {
                     let path: Vec<String> = merge_at.iter().map(|e| e.to_string()).collect();
                     format!(

@@ -3553,3 +3553,220 @@ type C
         "There should be non-A entity fetches: {plan_str}"
     );
 }
+
+// TODO: Improve correctness checker to handle type-conditioned fetching
+// where mutually exclusive union branches select the same parameterized
+// field with different arguments across parallel hops.
+#[test]
+fn inc_union_branch_arg_conflict_across_parallel_hops() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Query {
+            entry(id: ID!): Entry
+        }
+
+        union Entry = A | B
+
+        type A {
+            item: Item
+        }
+
+        type B @key(fields: "id") {
+            id: ID!
+        }
+
+        union Item = Widget
+
+        type Widget @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        Subgraph2: r#"
+        type B @key(fields: "id") {
+            id: ID!
+            item: Item
+        }
+
+        union Item = Widget
+
+        type Widget @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        Subgraph3: r#"
+        type Widget @key(fields: "id") {
+            id: ID!
+            value(scale: Int): String
+        }
+        "#,
+    );
+
+    let api_schema = planner.api_schema();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        r#"
+        {
+            entry(id: "1") {
+                ... on A {
+                    item {
+                        ... on Widget {
+                            value
+                        }
+                    }
+                }
+                ... on B {
+                    item {
+                        ... on Widget {
+                            value(scale: 100)
+                        }
+                    }
+                }
+            }
+        }
+        "#,
+        "operation.graphql",
+    )
+    .expect("valid operation");
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("plan should build");
+    // TODO: Improve correctness checker to handle type-conditioned
+    // fetching that discriminates union branches with conflicting args.
+    insta::assert_snapshot!(plan);
+}
+
+// TODO: Improve correctness checker to handle multi-parent entity fetches
+// where the requires array order differs from the fetch operation's fragment
+// order, requiring type-condition-based pairing instead of index-based.
+#[test]
+fn inc_multi_parent_entity_fetch_requires_order_agnostic_check() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Query {
+            w: W
+        }
+
+        type W { elements: [EL] }
+
+        interface EL { id: ID! }
+
+        type L1 implements EL { id: ID! teasers: [X] }
+
+        type L2 implements EL @key(fields: "id") { id: ID! }
+
+        interface X { id: ID! }
+
+        type Z implements X @key(fields: "id") { id: ID! }
+
+        interface Y { id: ID! }
+
+        type A implements Y @key(fields: "id") { id: ID! }
+        "#,
+        Subgraph2: r#"
+        type Img { d: String }
+        type Logo { c: String }
+
+        type Z @key(fields: "id") { id: ID! img: Img }
+
+        type A @key(fields: "id") { id: ID! logo: Logo }
+        "#,
+        Subgraph3: r#"
+        type L2 @key(fields: "id") { id: ID! teasers: [Y] }
+
+        interface Y { id: ID! }
+
+        type A implements Y @key(fields: "id", resolvable: false) { id: ID! }
+        "#,
+    );
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+        {
+            w {
+                elements {
+                    ... on L1 { teasers { ... on Z { img { d } } } }
+                    ... on L2 { teasers { ... on A { logo { c } } } }
+                }
+            }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            w {
+              elements {
+                __typename
+                ... on L1 {
+                  teasers {
+                    __typename
+                    ... on Z {
+                      __typename
+                      id
+                    }
+                  }
+                }
+                ... on L2 {
+                  __typename
+                  id
+                }
+              }
+            }
+          }
+        },
+        Flatten(path: "w.elements.@") {
+          Fetch(service: "Subgraph3") {
+            {
+              ... on L2 {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on L2 {
+                teasers {
+                  __typename
+                  ... on A {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "w.elements.@.teasers.@") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on A {
+                __typename
+                id
+              }
+              ... on Z {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Z {
+                img {
+                  d
+                }
+              }
+              ... on A {
+                logo {
+                  c
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
