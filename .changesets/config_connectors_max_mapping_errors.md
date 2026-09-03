@@ -20,4 +20,4 @@ Errors past the limit are replaced by a single summary error carrying the `CONNE
 
 The default is no limit: every declared error is reported, matching how the router passes through subgraph errors. The limit applies only to errors a mapping declares with `->withError`; mapping *problems* — the mapping language's own diagnostics — are never sent to clients and are unaffected.
 
-By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/PR_NUMBER
+By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/10160
