@@ -514,13 +514,13 @@ When a connector response is aborted because it exceeds the configured limit:
 
 ### `max_mapping_errors`
 
-Limits how many errors a connector's response mapping may add to the GraphQL `errors` array using the [`->withError` method](/graphos/connectors/responses/error-handling#report-errors-without-failing-a-field).
+Limits how many errors a connector's response mapping can add to the GraphQL `errors` array using the [`->withError` method](/graphos/connectors/responses/error-handling#report-errors-without-failing-a-field).
 
 A `->withError` call inside a `->map` records one error per element, so a mapping over a large API response can contribute one error per row. This limit caps that contribution.
 
-There is no default limit; every declared error is reported unless you configure this option, matching how the router passes through subgraph errors.
+There is no default limit; every declared error is reported unless you configure this option, matching how Apollo Router passes through subgraph errors.
 
-Identify sources by `subgraph_name.source_name`, the same key format used by `http_max_response_size`. You can set a global default and optionally override it per source:
+Identify sources by `subgraph_name.source_name`, the same key format used by `http_max_response_size`. Set a global default and optionally override it per source:
 
 ```yaml title="router.yaml"
 limits:
@@ -540,4 +540,4 @@ This limit applies only to errors the mapping declares with `->withError`. Mappi
 
 ### Monitoring exceeded limits
 
-When a connector response's mapping errors are truncated, the router increments the `apollo.router.limits.connector_mapping_errors.exceeded` counter with a `connector.source` attribute identifying the affected source.
+When a connector response's mapping errors are truncated, Apollo Router increments the `apollo.router.limits.connector_mapping_errors.exceeded` counter with a `connector.source` attribute identifying the affected source.
