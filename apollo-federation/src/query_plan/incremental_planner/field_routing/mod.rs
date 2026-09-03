@@ -193,16 +193,16 @@ pub(crate) struct FieldRoutingSearchSpace {
 }
 
 impl FieldRoutingSearchSpace {
+    pub(super) fn qg(&self) -> &crate::query_graph::QueryGraph {
+        &self.cached_query_graph.query_graph
+    }
+
     pub(super) fn node_source(&self, node: NodeIndex) -> Result<NodeSource, FederationError> {
-        let data = self.cached_query_graph.query_graph.node_weight(node)?;
+        let data = self.qg().node_weight(node)?;
         Ok(NodeSource {
             subgraph: data.source.clone(),
             type_pos: data.type_.clone().try_into()?,
-            schema: self
-                .cached_query_graph
-                .query_graph
-                .schema_by_source(&data.source)?
-                .clone(),
+            schema: self.qg().schema_by_source(&data.source)?.clone(),
         })
     }
 
