@@ -268,7 +268,7 @@ impl FieldRoutingSearchSpace {
         node: NodeIndex,
         edge_idx: EdgeIndex,
     ) -> Result<bool, FederationError> {
-        let edge = self.cached_query_graph.query_graph.edge_weight(edge_idx)?;
+        let edge = self.qg().edge_weight(edge_idx)?;
         let Some(conditions) = &edge.conditions else {
             return Ok(true);
         };
@@ -808,8 +808,8 @@ impl FieldRoutingSearchSpace {
                 .cached_query_graph
                 .query_graph
                 .edge_endpoints(edge_idx)?;
-            let target_node = self.cached_query_graph.query_graph.node_weight(target)?;
-            let edge = self.cached_query_graph.query_graph.edge_weight(edge_idx)?;
+            let target_node = self.qg().node_weight(target)?;
+            let edge = self.qg().edge_weight(edge_idx)?;
             // @fromContext at a position the entity boundary does not already
             // isolate needs a same-subgraph entity re-entry so the context
             // value rides the representation.
@@ -866,7 +866,7 @@ impl FieldRoutingSearchSpace {
                 .cached_query_graph
                 .query_graph
                 .edge_endpoints(edge_idx)?;
-            let target_node = self.cached_query_graph.query_graph.node_weight(target)?;
+            let target_node = self.qg().node_weight(target)?;
             options.push(RoutingChoice::direct(edge_idx, target_node.source.clone()));
         }
 
@@ -882,7 +882,7 @@ impl FieldRoutingSearchSpace {
             .iter()
             .copied()
         {
-            let edge_weight = self.cached_query_graph.query_graph.edge_weight(edge_idx)?;
+            let edge_weight = self.qg().edge_weight(edge_idx)?;
             if let QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { to_type_name, .. } =
                 &edge_weight.transition
                 && type_cond.type_name() == to_type_name
@@ -891,7 +891,7 @@ impl FieldRoutingSearchSpace {
                     .cached_query_graph
                     .query_graph
                     .edge_endpoints(edge_idx)?;
-                let target_node = self.cached_query_graph.query_graph.node_weight(target)?;
+                let target_node = self.qg().node_weight(target)?;
                 let has_local_sub_sel =
                     fragment_selection
                         .selection_set
@@ -941,10 +941,7 @@ impl FieldRoutingSearchSpace {
                 RoutingTarget::RestructureFragment,
             ))),
             Selection::Field(_) => {
-                let node_data = self
-                    .cached_query_graph
-                    .query_graph
-                    .node_weight(pending.query_graph_node)?;
+                let node_data = self.qg().node_weight(pending.query_graph_node)?;
                 let is_abstract = matches!(
                     CompositeTypeDefinitionPosition::try_from(node_data.type_.clone()),
                     Ok(pos) if pos.is_abstract_type()
@@ -963,7 +960,7 @@ impl FieldRoutingSearchSpace {
         &self,
         node: NodeIndex,
     ) -> Result<bool, FederationError> {
-        let qg = &self.cached_query_graph.query_graph;
+        let qg = self.qg();
         let node_data = qg.node_weight(node)?;
         let current_source = &node_data.source;
         let Ok(pos) = CompositeTypeDefinitionPosition::try_from(node_data.type_.clone()) else {
@@ -1011,9 +1008,7 @@ impl FieldRoutingSearchSpace {
                     return (RoutingPreference::RestructureFragment, 0);
                 }
             };
-            let preference = if let Ok(edge) =
-                self.cached_query_graph.query_graph.edge_weight(edge_index)
-            {
+            let preference = if let Ok(edge) = self.qg().edge_weight(edge_index) {
                 match &edge.transition {
                     QueryGraphEdgeTransition::FieldCollection {
                         is_part_of_provides: true,

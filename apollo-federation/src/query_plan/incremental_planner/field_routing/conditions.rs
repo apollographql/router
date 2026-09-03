@@ -89,15 +89,12 @@ impl FieldRoutingSearchSpace {
                         }
                         continue;
                     };
-                    let edge = self.cached_query_graph.query_graph.edge_weight(edge_idx)?;
+                    let edge = self.qg().edge_weight(edge_idx)?;
                     if edge.conditions.is_some() {
                         return Ok(!fail_on_unreachable);
                     }
                     if let Some(sub_sel) = field_sel.selection_set.as_ref() {
-                        let (_, target) = self
-                            .cached_query_graph
-                            .query_graph
-                            .edge_endpoints(edge_idx)?;
+                        let (_, target) = self.qg().edge_endpoints(edge_idx)?;
                         let sub_result =
                             self.walk_conditions_graph(target, sub_sel, fail_on_unreachable)?;
                         if sub_result != fail_on_unreachable {
@@ -110,10 +107,7 @@ impl FieldRoutingSearchSpace {
                         .cached_query_graph
                         .edge_for_inline_fragment(node, &frag_sel.inline_fragment)
                         .map(|edge_idx| {
-                            self.cached_query_graph
-                                .query_graph
-                                .edge_endpoints(edge_idx)
-                                .map(|(_, target)| target)
+                            self.qg().edge_endpoints(edge_idx).map(|(_, target)| target)
                         })
                         .transpose()?
                         .unwrap_or(node);
