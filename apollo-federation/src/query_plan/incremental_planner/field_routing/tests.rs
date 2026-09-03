@@ -1386,3 +1386,305 @@ fn interface_object_fake_downcast_preserves_include_condition() {
     }
     "###);
 }
+
+/// Interface field resolved only on some concrete types: A has the field for
+/// Dog but not Cat; Cat must key-hop to B. The plan explodes the abstract
+/// `animals` into per-concrete-type fragments so each follows its own path.
+/// Targets type_conditions.rs try_explode_interface_field and the
+/// per-concrete-type routing that follows.
+#[test]
+fn interface_field_without_local_edge_explodes_per_concrete_type() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+interface Animal
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  id: ID!
+  name: String @join__field(graph: B)
+}
+
+type Cat implements Animal
+  @join__implements(graph: A, interface: "Animal")
+  @join__implements(graph: B, interface: "Animal")
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+{
+  id: ID!
+  name: String @join__field(graph: B)
+}
+
+type Dog implements Animal
+  @join__implements(graph: A, interface: "Animal")
+  @join__type(graph: A, key: "id")
+{
+  id: ID!
+  name: String @join__field(graph: A)
+}
+
+type Query
+  @join__type(graph: A)
+{
+  animals: [Animal] @join__field(graph: A)
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ animals { name } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            animals {
+              __typename
+              ... on Cat {
+                __typename
+                id
+              }
+              ... on Dog {
+                name
+              }
+            }
+          }
+        },
+        Flatten(path: "animals.@") {
+          Fetch(service: "b") {
+            {
+              ... on Cat {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Cat {
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// A fragment conditioned on an interface applied to a union with partial
+/// overlap (`... on N` where only member X implements N) has no downcast
+/// edge and explodes into the intersection's concrete-type fragments.
+/// Targets type_conditions.rs try_explode_abstract_type's non-empty
+/// partial-intersection path.
+#[test]
+fn union_fragment_on_interface_explodes_to_members() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")"#,
+        r#"
+union U
+  @join__type(graph: A)
+  @join__unionMember(graph: A, member: "X")
+  @join__unionMember(graph: A, member: "Y")
+ = X | Y
+
+interface N
+  @join__type(graph: A)
+{
+  n: String
+}
+
+type X implements N
+  @join__implements(graph: A, interface: "N")
+  @join__type(graph: A)
+{
+  n: String
+}
+
+type Y
+  @join__type(graph: A)
+{
+  y: String
+}
+
+type Query
+  @join__type(graph: A)
+{
+  search: [U] @join__field(graph: A)
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ search { ... on N { n } } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "a") {
+        {
+          search {
+            __typename
+            ... on X {
+              n
+            }
+          }
+        }
+      },
+    }
+    "###);
+}
+
+/// A fragment on a union member that does not exist in the resolving
+/// subgraph (Y is only a member of U in B, but `search` only resolves in A)
+/// has an empty local runtime intersection. The fragment is dropped and the
+/// plan completes without fabricating Y data.
+/// Targets the empty-intersection/satisfiable-elsewhere arm of
+/// type_conditions.rs try_explode_abstract_type.
+#[test]
+fn union_member_missing_locally_drops_fragment_and_commits_typename() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+union U
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__unionMember(graph: A, member: "X")
+  @join__unionMember(graph: B, member: "Y")
+ = X | Y
+
+type X
+  @join__type(graph: A)
+{
+  x: String
+}
+
+type Y
+  @join__type(graph: B)
+{
+  y: String
+}
+
+type Query
+  @join__type(graph: A)
+{
+  search: [U] @join__field(graph: A)
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ search { __typename ... on Y { y } } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "a") {
+        {
+          search {
+            __typename
+          }
+        }
+      },
+    }
+    "###);
+}
+
+/// A field with locally-unresolvable @requires reached through an
+/// @include-gated fragment: the same-subgraph entity re-fetch must carry the
+/// gating fragment into its op path (or the hopped selection loses its
+/// condition), and boolean conditions on the path disable condition-field
+/// sharing.
+/// Targets requires.rs trailing_condition_fragments on the self-key-hop
+/// commit path (routing.rs self_key_hop -> commit.rs target_paths) and
+/// path_has_boolean_conditions in shareable_condition_fields.
+#[test]
+fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
+    let plan_str = plan_query(
+        REQUIRES_LOCAL_UNSATISFIABLE_SCHEMA,
+        "query($v: Boolean!) { product { ... on Product @include(if: $v) { shippingCost } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "b") {
+          {
+            product {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "product") {
+          Fetch(service: "a") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                __require_0_weight: weight
+              }
+            }
+          },
+        },
+        Include(if: $v) {
+          Flatten(path: "product") {
+            Fetch(service: "b") {
+              {
+                ... on Product {
+                  __typename
+                  id
+                  __require_0_weight: weight
+                }
+              } =>
+              {
+                ... on Product {
+                  shippingCost
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// A key-hop @requires reached through an @include-gated fragment: boolean
+/// conditions on the anchor path make condition-field sharing unprovable, so
+/// the condition is aliased instead of deduped with any user selection.
+/// Targets requires.rs path_has_boolean_conditions in
+/// shareable_condition_fields.
+#[test]
+fn key_hop_requires_under_include_fragment_uses_alias() {
+    let plan_str = plan_query(
+        &requires_key_hop_schema(),
+        "query($v: Boolean!) { product { ... on Product @include(if: $v) { shippingEstimate } } }",
+    );
+    assert!(
+        plan_str.contains("shippingEstimate"),
+        "Plan should fetch shippingEstimate: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("__require"),
+        "Gated condition must be aliased, not shared: {plan_str}"
+    );
+}
+
+/// Statically constant @skip(if: true) should eliminate the fragment entirely;
+/// a type condition on the root Query type is vacuous and passes through.
+/// Targets type_conditions.rs try_pass_through_fragment's Boolean(false)
+/// arm and try_vacuous_type_condition's federated-root arm.
+#[test]
+fn constant_skip_and_root_type_condition_fragments() {
+    let skipped = plan_query(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { name ... @skip(if: true) { email } } }",
+    );
+    assert!(
+        !skipped.contains("email"),
+        "Statically skipped fragment must not be fetched: {skipped}"
+    );
+
+    let rooted = plan_query(
+        CROSS_SUBGRAPH_SCHEMA,
+        "query($v: Boolean!) { ... on Query @skip(if: $v) { user { name } } }",
+    );
+    assert!(
+        rooted.contains("name"),
+        "Root type condition should pass through: {rooted}"
+    );
+}
