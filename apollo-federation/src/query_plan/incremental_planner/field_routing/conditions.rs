@@ -90,9 +90,7 @@ impl FieldRoutingSearchSpace {
                     };
                     // A field carrying @requires draws data from the entity
                     // representation; it cannot be selected in place.
-                    if self
-                        .cached_query_graph
-                        .query_graph
+                    if self.qg()
                         .edge_weight(edge_idx)?
                         .conditions
                         .is_some()
@@ -100,9 +98,7 @@ impl FieldRoutingSearchSpace {
                         return Ok(!fail_on_unreachable);
                     }
                     if let Some(sub) = &field_sel.selection_set {
-                        let (_, tail) = self
-                            .cached_query_graph
-                            .query_graph
+                        let (_, tail) = self.qg()
                             .edge_endpoints(edge_idx)?;
                         let sub_result =
                             self.walk_conditions_graph(tail, sub, fail_on_unreachable)?;
@@ -121,9 +117,7 @@ impl FieldRoutingSearchSpace {
                             .cached_query_graph
                             .edge_for_inline_fragment(node, &frag_sel.inline_fragment)
                         {
-                            Some(edge) => {
-                                self.cached_query_graph.query_graph.edge_endpoints(edge)?.1
-                            }
+                            Some(edge) => self.qg().edge_endpoints(edge)?.1,
                             None if fail_on_unreachable => return Ok(false),
                             // FIXME: falling back to `node` when no downcast
                             // edge exists can miss @requires behind the type
@@ -302,11 +296,13 @@ mod tests {
     ) {
         let space = test_support::search_space(&[("S1", S1), ("S2", S2)]);
         let s1 = space
+            .cached_query_graph
             .query_graph
             .schema_by_source("S1")
             .expect("S1 schema")
             .clone();
         let s2 = space
+            .cached_query_graph
             .query_graph
             .schema_by_source("S2")
             .expect("S2 schema")
@@ -484,6 +480,7 @@ mod tests {
         "#;
         let space = test_support::search_space(&[("R1", R1), ("R2", R2)]);
         let r2 = space
+            .cached_query_graph
             .query_graph
             .schema_by_source("R2")
             .expect("R2 schema")
@@ -538,6 +535,7 @@ mod tests {
         "#;
         let space = test_support::search_space(&[("P1", P1), ("P2", P2)]);
         let p2 = space
+            .cached_query_graph
             .query_graph
             .schema_by_source("P2")
             .expect("P2 schema")
@@ -591,6 +589,7 @@ mod tests {
         "#;
         let space = test_support::search_space(&[("Q1", Q1), ("Q2", Q2)]);
         let q2 = space
+            .cached_query_graph
             .query_graph
             .schema_by_source("Q2")
             .expect("Q2 schema")
@@ -601,6 +600,7 @@ mod tests {
 
         // Parse against Q1's schema where J has both A and B.
         let q1 = space
+            .cached_query_graph
             .query_graph
             .schema_by_source("Q1")
             .expect("Q1 schema")
