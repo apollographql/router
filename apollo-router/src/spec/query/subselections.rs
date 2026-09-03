@@ -19,6 +19,10 @@ use crate::spec::selection::Selection;
 pub(crate) struct SubSelectionKey {
     pub(crate) defer_label: Option<String>,
     pub(crate) defer_conditions: BooleanValues,
+    /// Response keys from the operation root to the deferred fragment. A labeled `@defer` in a
+    /// fragment spread multiple times yields one subselection per spread position, sharing a
+    /// label and distinguished by this path.
+    pub(crate) defer_path: Vec<String>,
 }
 
 // Do not replace this with a derived Serialize implementation
@@ -29,9 +33,10 @@ impl Serialize for SubSelectionKey {
         S: serde::Serializer,
     {
         let s = format!(
-            "{:?}|{}",
+            "{:?}|{}|{}",
             self.defer_conditions.bits,
-            self.defer_label.as_deref().unwrap_or("")
+            self.defer_label.as_deref().unwrap_or(""),
+            self.defer_path.join("/")
         );
         serializer.serialize_str(&s)
     }
@@ -59,7 +64,8 @@ impl Visitor<'_> for SubSelectionKeyVisitor {
     where
         E: serde::de::Error,
     {
-        if let Some((bits_str, label)) = s.split_once('|') {
+        if let Some((bits_str, rest)) = s.split_once('|') {
+            let (label, path) = rest.split_once('|').unwrap_or((rest, ""));
             Ok(SubSelectionKey {
                 defer_conditions: BooleanValues {
                     bits: bits_str
@@ -70,6 +76,11 @@ impl Visitor<'_> for SubSelectionKeyVisitor {
                     None
                 } else {
                     Some(label.to_string())
+                },
+                defer_path: if path.is_empty() {
+                    Vec::new()
+                } else {
+                    path.split('/').map(str::to_owned).collect()
                 },
             })
         } else {
@@ -137,6 +148,7 @@ pub(crate) fn collect_subselections(
                 SubSelectionKey {
                     defer_label: None,
                     defer_conditions,
+                    defer_path: Vec::new(),
                 },
                 SubSelectionValue {
                     selection_set: primary,
@@ -184,6 +196,18 @@ impl BooleanValues {
     }
 }
 
+/// Normalize a deferred response's path to the field response keys of `defer_path`: array
+/// indices and type conditions appear in response paths but not in query-derived paths.
+pub(crate) fn defer_path_from_response_path(path: &crate::json_ext::Path) -> Vec<String> {
+    path.0
+        .iter()
+        .filter_map(|element| match element {
+            crate::json_ext::PathElement::Key(key, _) => Some(key.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Common arguments to multiple function calls
 struct Shared<'a> {
     defer_stats: &'a DeferStats,
@@ -200,6 +224,13 @@ impl Shared<'_> {
             Condition::No => false,
             Condition::Variable(name) => self.defer_conditions.eval(name, self.defer_stats),
         }
+    }
+
+    fn defer_path(&self) -> Vec<String> {
+        self.path
+            .iter()
+            .map(|(name, _)| name.as_str().to_owned())
+            .collect()
     }
 
     /// Take a selection set at `self.path` and reconstruct a selection set that belong
@@ -289,6 +320,7 @@ fn collect_from_selection_set<'a>(
                         SubSelectionKey {
                             defer_label: defer_label.clone(),
                             defer_conditions: shared.defer_conditions,
+                            defer_path: shared.defer_path(),
                         },
                         SubSelectionValue {
                             selection_set: shared.reconstruct_up_to_root(nested),
@@ -337,6 +369,7 @@ fn collect_from_selection_set<'a>(
                         SubSelectionKey {
                             defer_label: defer_label.clone(),
                             defer_conditions: shared.defer_conditions,
+                            defer_path: shared.defer_path(),
                         },
                         SubSelectionValue {
                             selection_set: shared.reconstruct_up_to_root(nested),
