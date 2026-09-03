@@ -18,6 +18,25 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 📚 Documentation
 -->
 
+# [2.16.x](unreleased) - Unreleased
+
+## 🐛 Fixes
+
+### Deduplicate equivalent paths during satisfiability validation ([PR #10134](https://github.com/apollographql/router/pull/10134))
+
+During satisfiability validation, advancing subgraph paths across a transition
+can produce multiple options that share the same tail node, subgraph-entry
+source, contexts, and runtime types. These equivalent options advance identically
+from that point on, so keeping more than one exemplar per equivalence class only
+multiplies work on every subsequent transition.
+
+This change deduplicates such options after each transition, keeping one exemplar
+per equivalence class. Trade-off: satisfiability error messages may omit some
+subgraph bullets that would have appeared without dedup. The set of schemas that
+pass or fail validation is unchanged.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10134>
+
 # [2.16.2](https://crates.io/crates/apollo-federation/2.16.2) - 2026-08-13
 
 ## 🐛 Fixes
