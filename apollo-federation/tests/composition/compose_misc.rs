@@ -794,3 +794,34 @@ mod supergraph_spec_imports {
         );
     }
 }
+
+/// Adding a sibling field that returns the root `Query` type should
+/// not break @external/@requires composition on the same entity.
+#[test]
+fn misc_requires_rejected_when_sibling_field_returns_query_root() {
+    let owner = ServiceDefinition {
+        name: "owner",
+        type_defs: r#"
+        type Query {
+          a: A
+        }
+
+        type A @key(fields: "id") {
+          id: ID
+          name: String
+        }
+        "#,
+    };
+    let requirer = ServiceDefinition {
+        name: "requirer",
+        type_defs: r#"
+        type A @key(fields: "id") {
+          id: ID
+          other: Query @requires(fields: "name")
+          name: String @external
+        }
+        "#,
+    };
+
+    compose_as_fed2_subgraphs(&[owner, requirer]).expect("composition should succeed");
+}

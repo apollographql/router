@@ -1,5 +1,6 @@
 ---
 source: apollo-federation/tests/extract_subgraphs.rs
+assertion_line: 892
 expression: snapshot
 ---
 A
@@ -169,6 +170,11 @@ enum Enum {
   ENUM_VALUE
 }
 
+type Query {
+  _entities(representations: [_Any!]!): [_Entity]!
+  _service: _Service!
+}
+
 scalar _Any
 
 type _Service {
@@ -176,8 +182,3 @@ type _Service {
 }
 
 union _Entity = Entity
-
-type Query {
-  _entities(representations: [_Any!]!): [_Entity]!
-  _service: _Service!
-}
