@@ -212,14 +212,12 @@ pub(super) fn handle_from_context(
     let pending = ctx.pending;
     // The field edge's source gives the subgraph defining the @fromContext
     // field; for key hops this differs from pending.query_graph_node.
-    let (edge_source_node, _) = search_space.cached_query_graph.query_graph.edge_endpoints(
+    let (edge_source_node, _) = search_space.qg().edge_endpoints(
         ctx.choice.edge_index().ok_or_else(|| {
             FederationError::internal("edge_index called on non-edge routing choice")
         })?,
     )?;
-    let edge_source_data = search_space
-        .cached_query_graph
-        .query_graph
+    let edge_source_data = search_space.qg()
         .node_weight(edge_source_node)?;
     let source_subgraph = &edge_source_data.source;
 
@@ -237,9 +235,7 @@ pub(super) fn handle_from_context(
     // pairs to splice into the field's arguments.
     let mut context_args: Vec<(Name, Name)> = Vec::new();
     for cond in required_contexts {
-        let context_id = search_space
-            .cached_query_graph
-            .query_graph
+        let context_id = search_space.qg()
             .context_id_by_source_and_argument(source_subgraph, &cond.argument_coordinate)?;
 
         let (ancestor_type, ancestor_idx, levels_in_data_path) =
@@ -494,7 +490,7 @@ fn ancestor_anchor(
     ancestor_idx: usize,
     ancestor_op_path: &SharedPath<Arc<OpPathElement>>,
 ) -> Option<super::PendingSelection> {
-    let graph = search_space.cached_query_graph.query_graph.graph();
+    let graph = search_space.qg().graph();
     let node = graph.node_indices().find(|&idx| {
         let data = &graph[idx];
         data.source == *subgraph
