@@ -830,11 +830,9 @@ mod shape_tests {
                 None,
                 Shape::string([]),
                 Shape::none(),
-            ),
-            Shape::error(
-                "Method ->get requires one argument".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get requires one argument")"#,
         );
     }
 
@@ -847,11 +845,9 @@ mod shape_tests {
                     WithRange::new(LitExpr::Number(Number::from(1)), None)
                 ],
                 Shape::string([])
-            ),
-            Shape::error(
-                "Method ->get requires only one argument, but 2 were provided".to_string(),
-                []
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get requires only one argument, but 2 were provided")"#,
         );
     }
 
@@ -894,11 +890,9 @@ mod shape_tests {
             get_test_shape(
                 vec![WithRange::new(LitExpr::Number(Number::from(10)), None)],
                 Shape::string_value("hello", [])
-            ),
-            Shape::error(
-                "Method ->get index 10 out of bounds in string of length 5".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get index 10 out of bounds in string of length 5")"#,
         );
     }
 
@@ -908,11 +902,9 @@ mod shape_tests {
             get_test_shape(
                 vec![WithRange::new(LitExpr::Number(Number::from(-10)), None)],
                 Shape::string_value("hello", [])
-            ),
-            Shape::error(
-                "Method ->get index -10 out of bounds in string of length 5".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get index -10 out of bounds in string of length 5")"#,
         );
     }
 
@@ -922,11 +914,9 @@ mod shape_tests {
             get_test_shape(
                 vec![WithRange::new(LitExpr::Number(Number::from(0)), None)],
                 Shape::string_value("", [])
-            ),
-            Shape::error(
-                "Method ->get index 0 out of bounds in string of length 0".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get index 0 out of bounds in string of length 0")"#,
         );
     }
 
@@ -936,12 +926,9 @@ mod shape_tests {
             get_test_shape(
                 vec![WithRange::new(LitExpr::String("invalid".to_string()), None)],
                 Shape::string([])
-            ),
-            Shape::error(
-                "Method ->get must be provided an integer argument when applied to a string"
-                    .to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get must be provided an integer argument when applied to a string")"#,
         );
     }
 
@@ -1013,11 +1000,9 @@ mod shape_tests {
             get_test_shape(
                 vec![WithRange::new(LitExpr::Number(Number::from(5)), None)],
                 Shape::array([Shape::int([]), Shape::string([])], Shape::none(), [])
-            ),
-            Shape::error(
-                "Method ->get index 5 out of bounds in array of length 2".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get index 5 out of bounds in array of length 2")"#,
         );
     }
 
@@ -1027,11 +1012,9 @@ mod shape_tests {
             get_test_shape(
                 vec![WithRange::new(LitExpr::Number(Number::from(-5)), None)],
                 Shape::array([Shape::int([]), Shape::string([])], Shape::none(), [])
-            ),
-            Shape::error(
-                "Method ->get index -5 out of bounds in array of length 2".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get index -5 out of bounds in array of length 2")"#,
         );
     }
 
@@ -1041,11 +1024,9 @@ mod shape_tests {
             get_test_shape(
                 vec![WithRange::new(LitExpr::Number(Number::from(0)), None)],
                 Shape::array([], Shape::none(), [])
-            ),
-            Shape::error(
-                "Method ->get index 0 out of bounds in array of length 0".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get index 0 out of bounds in array of length 0")"#,
         );
     }
 
@@ -1055,12 +1036,9 @@ mod shape_tests {
             get_test_shape(
                 vec![WithRange::new(LitExpr::String("invalid".to_string()), None)],
                 Shape::array([Shape::int([])], Shape::none(), [])
-            ),
-            Shape::error(
-                "Method ->get must be provided an integer argument when applied to an array"
-                    .to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get must be provided an integer argument when applied to an array")"#,
         );
     }
 
@@ -1121,11 +1099,9 @@ mod shape_tests {
             get_test_shape(
                 vec![WithRange::new(LitExpr::String("missing".to_string()), None)],
                 Shape::object(fields, Shape::none(), [])
-            ),
-            Shape::error(
-                "Method ->get property missing not found in object".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get property missing not found in object")"#,
         );
     }
 
@@ -1137,12 +1113,9 @@ mod shape_tests {
             get_test_shape(
                 vec![WithRange::new(LitExpr::Number(Number::from(42)), None)],
                 Shape::object(fields, Shape::none(), [])
-            ),
-            Shape::error(
-                "Method ->get must be provided an string argument when applied to an object"
-                    .to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get must be provided an string argument when applied to an object")"#,
         );
     }
 
@@ -1154,12 +1127,9 @@ mod shape_tests {
             get_test_shape(
                 vec![WithRange::new(LitExpr::Bool(false), None)],
                 Shape::object(fields, Shape::none(), [])
-            ),
-            Shape::error(
-                "Method ->get must be provided an string argument when applied to an object"
-                    .to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get must be provided an string argument when applied to an object")"#,
         );
     }
 
@@ -1171,12 +1141,9 @@ mod shape_tests {
             get_test_shape(
                 vec![WithRange::new(LitExpr::Null, None)],
                 Shape::object(fields, Shape::none(), [])
-            ),
-            Shape::error(
-                "Method ->get must be provided an string argument when applied to an object"
-                    .to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get must be provided an string argument when applied to an object")"#,
         );
     }
 
@@ -1232,11 +1199,9 @@ mod shape_tests {
             get_test_shape(
                 vec![WithRange::new(LitExpr::Bool(true), None)],
                 Shape::unknown([])
-            ),
-            Shape::error(
-                "Method ->get must be provided an integer or string argument".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get must be provided an integer or string argument")"#,
         );
     }
 
@@ -1266,11 +1231,9 @@ mod shape_tests {
             get_test_shape(
                 vec![WithRange::new(LitExpr::Number(Number::from(0)), None)],
                 Shape::bool([])
-            ),
-            Shape::error(
-                "Method ->get must be applied to a string, array, or object".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get must be applied to a string, array, or object")"#,
         );
     }
 
@@ -1280,11 +1243,9 @@ mod shape_tests {
             get_test_shape(
                 vec![WithRange::new(LitExpr::Number(Number::from(0)), None)],
                 Shape::null([])
-            ),
-            Shape::error(
-                "Method ->get must be applied to a string, array, or object".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get must be applied to a string, array, or object")"#,
         );
     }
 
@@ -1294,11 +1255,9 @@ mod shape_tests {
             get_test_shape(
                 vec![WithRange::new(LitExpr::Number(Number::from(0)), None)],
                 Shape::int([])
-            ),
-            Shape::error(
-                "Method ->get must be applied to a string, array, or object".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->get must be applied to a string, array, or object")"#,
         );
     }
 }

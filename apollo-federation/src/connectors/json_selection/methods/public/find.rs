@@ -146,10 +146,10 @@ fn find_shape(
     // so the condition must be shaped against the array's ELEMENT shape, not the
     // whole array. Passing `input_shape` directly only happened to work when the
     // input was `Unknown` (the lenient check below accepts it); for a concrete
-    // list — e.g. the output of a prior `->filter`, which is `List<…>` — a
+    // list — e.g. the output of a prior `->filter`, which is `[...]` — a
     // condition like `@.field->gt(…)` mapped `.field` across the list and then
     // applied the comparison to a list, yielding a non-boolean shape and a
-    // spurious `Error<"->find condition must return a boolean value">`. That
+    // spurious `(err "->find condition must return a boolean value")`. That
     // error then propagated into expansion as an empty output object type.
     // Unlike `->filter`, `->find` returns a single item (not a list), so it is
     // only ever the *victim* of this mismatch (as the terminal consumer of a
@@ -490,22 +490,17 @@ mod shape_tests {
                     None
                 )],
                 Shape::string([])
-            ),
-            Shape::error(
-                "->find condition must return a boolean value".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "->find condition must return a boolean value")"#,
         );
     }
 
     #[test]
     fn find_shape_should_error_on_no_args() {
         assert_eq!(
-            get_shape(vec![], Shape::string([])),
-            Shape::error(
-                "Method ->find requires one argument".to_string(),
-                [get_location()]
-            )
+            get_shape(vec![], Shape::string([])).pretty_print(),
+            r#"Unknown (err "Method ->find requires one argument")"#,
         );
     }
 
@@ -518,11 +513,9 @@ mod shape_tests {
                     WithRange::new(LitExpr::Bool(false), None)
                 ],
                 Shape::string([])
-            ),
-            Shape::error(
-                "Method ->find requires only one argument, but 2 were provided".to_string(),
-                []
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->find requires only one argument, but 2 were provided")"#,
         );
     }
 
@@ -536,11 +529,9 @@ mod shape_tests {
                 None,
                 Shape::string([]),
                 Shape::none(),
-            ),
-            Shape::error(
-                "Method ->find requires one argument".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->find requires one argument")"#,
         );
     }
 
@@ -574,9 +565,9 @@ mod shape_tests {
     // not the whole array. Unlike `->filter`, `->find` returns a single item, so
     // it is never the *producer* in a chain — but it is still a *victim* as the
     // terminal consumer of a list-producing method (`->filter`/`->map`), which
-    // hands it a concrete `List<…>`. Before the fix, `->find`'s condition
+    // hands it a concrete `[...]`. Before the fix, `->find`'s condition
     // (`@.field->gt(0)`) mapped `.field` across that list and applied `->gt` to a
-    // list, producing `Error<"->find condition must return a boolean value">`.
+    // list, producing `(err "->find condition must return a boolean value")`.
     // The expander turned that error shape into an empty output object type,
     // which slipped past release builds (validation skipped) and surfaced
     // downstream as a composition `SATISFIABILITY_ERROR`. A bare `->find` over an
@@ -585,7 +576,7 @@ mod shape_tests {
     // See integration fixture `chained_methods_v0_4.graphql`.
     #[test]
     fn find_shape_supports_concrete_list_condition() {
-        // The concrete `List<Unknown>` a prior `->filter`/`->map` produces.
+        // The concrete `[...Unknown]` a prior `->filter`/`->map` produces.
         let input_shape = Shape::list(Shape::unknown([]), []);
         let result = get_shape(vec![parse_condition("@.rank->gt(0)")], input_shape.clone());
         assert!(
