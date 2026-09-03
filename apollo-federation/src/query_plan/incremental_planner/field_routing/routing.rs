@@ -214,8 +214,11 @@ enum RoutingPreference {
     /// the anchor already provides the full key, so every other hop is
     /// preferred.
     CircularKeyHop,
-    /// Non-edge fallback (TypeExplosion, RestructureFragment). Always last.
-    Fallback,
+    /// Restructure an inline fragment when normal enumeration yields nothing.
+    RestructureFragment,
+    /// Per-concrete-type explosion at an abstract position. Defers real
+    /// fetch cost to child fragments, so always ranked last.
+    TypeExplosion,
 }
 
 struct KeyHopCandidate {
@@ -883,11 +886,14 @@ impl FieldRoutingSearchSpace {
     /// key hop whose conditions are locally satisfiable beats a remote hop.
     pub(super) fn rank_options(&self, options: &mut [RoutingChoice]) {
         options.sort_by_key(|opt| {
-            let edge_index = match opt.target {
-                RoutingTarget::SubgraphEdge { edge_index, .. } => edge_index,
-                // Fallback variants (TypeExplosion, RestructureFragment) have no
-                // edge and always rank last.
-                _ => return (RoutingPreference::Fallback, 0),
+            let edge_index = match &opt.target {
+                RoutingTarget::SubgraphEdge { edge_index, .. } => *edge_index,
+                RoutingTarget::TypeExplosion => {
+                    return (RoutingPreference::TypeExplosion, 0)
+                }
+                RoutingTarget::RestructureFragment => {
+                    return (RoutingPreference::RestructureFragment, 0)
+                }
             };
             let preference = if let Ok(edge) = self.query_graph.edge_weight(edge_index) {
                 match &edge.transition {

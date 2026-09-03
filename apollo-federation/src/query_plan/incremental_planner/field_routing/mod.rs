@@ -27,6 +27,7 @@ use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use routing::RoutingChoice;
+use routing::RoutingTarget;
 pub(crate) use state::PendingSelection;
 use state::PlanCheckpoint;
 pub(crate) use state::PlanState;
@@ -433,6 +434,12 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
         // children (leaf fields); otherwise flat operations register no
         // effort and the search's fuel budget never binds.
         candidate.effort += 1;
+        if matches!(
+            choice.target,
+            RoutingTarget::TypeExplosion | RoutingTarget::RestructureFragment
+        ) {
+            candidate.type_explosions += 1;
+        }
         let Some(pending) = candidate.pop_pending() else {
             return;
         };
@@ -487,7 +494,15 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
     /// with no completion when all successors have drops).
     fn cost(&self, candidate: &PlanState) -> QueryPlanCost {
         let base = candidate.graph.cost();
-        let cost = base + candidate.dropped_fields as f64 * 1e18;
+        // Dropped fields are hard failures (requested data omitted),
+        // penalized so heavily that any complete plan beats them.
+        // Type explosions defer their real fetch cost to child fragments,
+        // so the probe (apply → cost → rollback) sees them as free;
+        // the penalty ranks them above any structural cost but below
+        // drops so BULB treats them as a last resort.
+        let cost = base
+            + candidate.type_explosions as f64 * 5e17
+            + candidate.dropped_fields as f64 * 1e18;
         trace!(cost, "candidate cost");
         cost
     }
