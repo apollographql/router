@@ -111,6 +111,12 @@ impl RuntimeError {
         self.code.as_deref().unwrap_or("CONNECTORS_FETCH")
     }
 
+    /// Like [`Self::with_code`], for when the error is already owned by something else
+    /// and cannot be consumed.
+    pub fn set_code(&mut self, code: impl Into<String>) {
+        self.code = Some(code.into());
+    }
+
     pub fn span_event_emitted(&self) -> bool {
         self.span_event_emitted
     }
