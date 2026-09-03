@@ -1855,21 +1855,85 @@ fn inc_requires_routes_condition_via_key_hop() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Circular-key edge cases: forced backtracking and rides_representation
-// ---------------------------------------------------------------------------
+// The user requests a parameterized field with one set of arguments while a
+// sibling's @requires needs the same field with different arguments. The
+// condition copy must carry a __require_N_ alias so it doesn't collide with
+// the user's selection. Without the alias the planner merges both into one
+// fetch and produces invalid GraphQL ("conflicting field arguments").
+// Reproduces the customer issue in TSH-23186.
+#[test]
+fn inc_user_field_argument_conflict_with_requires_condition() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Query {
+            t: T
+        }
 
-/// When a key hop's conditions are already carried by the parent fetch's
-/// incoming entity representation, there is no extra data to route. The
-/// planner must recognize this ("rides the representation") and skip
-/// condition routing, avoiding a spurious ordering dependency or failure.
-///
-/// Schema: T in A (key: id), T in B (key: id, has `name`),
-///         T in C (key: "id name", has `detail`).
-/// Querying `{ t { detail } }` must hop A->B (to get `name`) then B->C.
-/// The B->C hop's key conditions `{id name}` are a subset of B's own
-/// incoming representation `{id}` plus locally-resolved `name`, but `id`
-/// specifically rides the incoming inputs. Without the rides_representation
+        type T @key(fields: "id") {
+            id: ID!
+            p(arg: Int): Int
+        }
+        "#,
+        Subgraph2: r#"
+        type T @key(fields: "id") {
+            id: ID!
+            p(arg: Int): Int @external
+            x: Int @requires(fields: "p(arg: 1)")
+        }
+        "#,
+    );
+    // validate_correctness = false: the correctness checker's KeyRenamer
+    // doesn't yet handle the case where the rename target (`p`) already
+    // exists with different arguments.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+        {
+            t {
+                p(arg: 2)
+                x
+            }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            t {
+              __typename
+              p(arg: 2)
+              id
+              __require_0_p: p(arg: 1)
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_p: p
+              }
+            } =>
+            {
+              ... on T {
+                x
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// When the incoming entity representation already carries the fields needed by
+/// a key condition, the planner skips routing those conditions. Without this
 /// check the planner would try to re-route `id` as a condition pending and
 /// create a circular ordering dependency.
 #[test]
