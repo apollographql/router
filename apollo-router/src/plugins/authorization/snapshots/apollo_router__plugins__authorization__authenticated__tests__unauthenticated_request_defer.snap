@@ -6,9 +6,9 @@ snapshot_kind: text
 {
   "data": {
     "orga": {
-      "id": 1,
+      "id": "1",
       "creatorUser": {
-        "id": 0
+        "id": "0"
       }
     }
   },

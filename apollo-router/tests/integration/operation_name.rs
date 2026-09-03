@@ -63,7 +63,7 @@ async fn anonymous_operation() {
     {
       "data": {
         "me": {
-          "id": 1
+          "id": "1"
         }
       }
     }
@@ -81,7 +81,7 @@ async fn named_operation() {
     {
       "data": {
         "me": {
-          "id": 1
+          "id": "1"
         }
       }
     }
@@ -104,7 +104,7 @@ async fn two_named_operations() {
     {
       "data": {
         "me": {
-          "id": 1
+          "id": "1"
         }
       }
     }

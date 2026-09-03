@@ -1268,11 +1268,7 @@ fn reformat_response_expected_types() {
                 "b": null,
                 "e": null,
                 "u": null,
-                // FIXME(@goto-bus-stop): this should be null, but we do not
-                // validate ID values today
-                "id": {
-                    "test": "test",
-                },
+                "id": null,
                 "l": null
             },
         }})
@@ -1295,6 +1291,11 @@ fn reformat_response_expected_types() {
             {
                 "message": "Invalid value found for the type Boolean",
                 "path": ["get", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type ID",
+                "path": ["get", "id"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
         /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router

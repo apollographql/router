@@ -63,17 +63,17 @@ async fn basic_batch() {
       "data": {
         "users": [
           {
-            "id": 3,
+            "id": "3",
             "name": "Clementine Bauch",
             "username": "Samantha"
           },
           {
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": "Antonette"
           }
@@ -224,17 +224,17 @@ async fn connect_on_type() {
       "data": {
         "users": [
           {
-            "id": 3,
+            "id": "3",
             "name": "Clementine Bauch",
             "username": "Samantha"
           },
           {
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": "Antonette"
           }

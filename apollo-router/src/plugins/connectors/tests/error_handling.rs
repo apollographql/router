@@ -59,17 +59,17 @@ async fn only_source_no_error() {
       "data": {
         "only_source": [
           {
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": "Antonette"
           },
           {
-            "id": 3,
+            "id": "3",
             "name": "Clementine Bauch",
             "username": "Samantha"
           }
@@ -199,17 +199,17 @@ async fn only_connect_no_error() {
       "data": {
         "only_connect": [
           {
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": "Antonette"
           },
           {
-            "id": 3,
+            "id": "3",
             "name": "Clementine Bauch",
             "username": "Samantha"
           }
@@ -338,17 +338,17 @@ async fn both_source_and_connect_no_error() {
       "data": {
         "both_source_and_connect": [
           {
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": "Antonette"
           },
           {
-            "id": 3,
+            "id": "3",
             "name": "Clementine Bauch",
             "username": "Samantha"
           }
