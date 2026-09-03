@@ -1,4 +1,5 @@
 use apollo_compiler::Name;
+use apollo_federation::Supergraph;
 use apollo_federation::query_plan::FetchDataPathElement;
 use apollo_federation::query_plan::FetchDataRewrite;
 use apollo_federation::query_plan::PlanNode;
