@@ -1,3 +1,5 @@
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
@@ -21,10 +23,12 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 /// `->match`, this lets a mapping attach errors to values without interrupting
 /// them:
 ///
-///     status: type_code->match(
-///         ["2", $("VAN")],
-///         [@, @->withError("Unrecognized type code")]
-///     )
+/// ```text
+/// status: type_code->match(
+///     ["2", $("VAN")],
+///     [@, @->withError("Unrecognized type code")]
+/// )
+/// ```
 ///
 /// Any number of arguments is allowed, and they may be of any type, in the
 /// spirit of `console.log`: string arguments are interpolated as written, every
@@ -32,7 +36,9 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 /// and the results are joined with single spaces into one message. So a
 /// diagnostic can carry the offending value along with the prose describing it:
 ///
-///     @->withError("Unrecognized type code:", @.type_code, "in", @.id)
+/// ```text
+/// @->withError("Unrecognized type code:", @.type_code, "in", @.id)
+/// ```
 ///
 /// If every argument produces a value, the input flows through unchanged, so
 /// the tail applies to it exactly as if the method were absent. If any argument
@@ -49,10 +55,36 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 /// An author who wants the message reported even when a path may be missing
 /// says so with `??`, which supplies a value where there would have been none:
 ///
-///     @->withError("Unrecognized type code:", @.type_code ?? "<absent>")
+/// ```text
+/// @->withError("Unrecognized type code:", @.type_code ?? "<absent>")
+/// ```
 ///
 /// That spells the absence out in the message text instead of losing the whole
 /// message to it.
+///
+/// # The structured form
+///
+/// A single object argument carrying a `message` field declares the error's
+/// parts directly instead of flattening them into prose, so the error can
+/// reach a client with a code and structured fields under `extensions` rather
+/// than only a sentence:
+///
+/// ```text
+/// requiredField: $response.requiredField ?? $("<missing>")->withError({
+///   message: "Field 'requiredField' was not found"
+///   extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
+/// })
+/// ```
+///
+/// `message` must be a string and `extensions` must be an object; either
+/// mistake costs the message, the same as a failed argument does, so a
+/// malformed declared error never reaches a client half-formed. Fields other
+/// than those two are ignored, and each one is reported, so an author who
+/// expected a sibling of `message` to travel hears that it did not.
+///
+/// An object argument *without* a `message` field is not the structured form
+/// and is serialized into the message like any other value, which is what lets
+/// `@->withError({ unknown: @ })` keep meaning what it reads as.
 fn with_error_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -82,7 +114,7 @@ fn with_error_method(
     let args = method_args.map_or(&[][..], |method_args| method_args.args.as_slice());
 
     let mut errors = Vec::new();
-    let mut parts = Vec::with_capacity(args.len());
+    let mut values = Vec::with_capacity(args.len());
 
     // Whether the author's message can still be recorded. An argument that
     // produces no value, or a value that cannot be serialized, costs the whole
@@ -112,29 +144,7 @@ fn with_error_method(
         errors.extend(arg_errors);
 
         match value_opt {
-            // A string argument is interpolated as written, so prose reads
-            // as prose rather than arriving wrapped in quotes.
-            Some(JSON::String(string)) => parts.push(string.as_str().to_string()),
-
-            // Everything else is serialized the way ->jsonStringify would
-            // serialize it, so a structured argument survives legibly.
-            Some(value) => match serde_json::to_string(&value) {
-                Ok(json) => parts.push(json),
-                Err(err) => {
-                    can_record_message = false;
-                    errors.push(ApplyToError::new(
-                        format!(
-                            "Method ->{}{} recorded no message because argument {} could not be serialized: {err}",
-                            method_name.as_ref(),
-                            printed_args(),
-                            arg.pretty_print_with_indentation(true, 0),
-                        ),
-                        input_path.to_vec(),
-                        arg.range(),
-                        spec,
-                    ));
-                }
-            },
+            Some(value) => values.push(value),
 
             // An absent argument makes the whole method absent, the way it
             // does for every other method. arg_errors (already collected)
@@ -164,16 +174,182 @@ fn with_error_method(
         return (None, errors);
     }
 
-    errors.push(ApplyToError::new(
+    let args_range = method_args.and_then(Ranged::range);
+
+    // The structured form: one object argument carrying an explicit `message`.
+    // Keying on the `message` field rather than on a distinct syntax keeps one
+    // method for both forms, and means an author who already has an error
+    // object in hand can forward it as-is. The cost is that a single object
+    // argument that happens to carry a `message` field takes this branch
+    // whether or not its author meant it to, which is why unrecognized
+    // siblings are reported below instead of being silently dropped.
+    if let [JSON::Object(fields)] = values.as_slice()
+        && fields.contains_key("message")
+    {
+        return structured_error(
+            fields,
+            method_name,
+            &printed_args,
+            data,
+            input_path,
+            args_range,
+            spec,
+            errors,
+        );
+    }
+
+    // The message-only form: every argument becomes one part of one sentence.
+    // A string is interpolated as written, so prose reads as prose rather than
+    // arriving wrapped in quotes; everything else is serialized the way
+    // ->jsonStringify would serialize it, so a structured argument survives
+    // legibly.
+    let mut parts = Vec::with_capacity(values.len());
+    for (arg, value) in args.iter().zip(&values) {
+        match value {
+            JSON::String(string) => parts.push(string.as_str().to_string()),
+            value => match serde_json::to_string(value) {
+                Ok(json) => parts.push(json),
+                Err(err) => {
+                    errors.push(ApplyToError::new(
+                        format!(
+                            "Method ->{}{} recorded no message because argument {} could not be serialized: {err}",
+                            method_name.as_ref(),
+                            printed_args(),
+                            arg.pretty_print_with_indentation(true, 0),
+                        ),
+                        input_path.to_vec(),
+                        arg.range(),
+                        spec,
+                    ));
+                    return (None, errors);
+                }
+            },
+        }
+    }
+
+    errors.push(ApplyToError::declared(
         parts.join(" "),
         input_path.to_vec(),
-        method_args.and_then(Ranged::range),
+        args_range,
         spec,
+        None,
     ));
 
     // Every argument produced a value, so the input flows through unchanged and
     // the dispatcher applies the tail to it.
     (Some(data.clone()), errors)
+}
+
+/// The fields of a structured `->withError({ message: ..., extensions: ... })`
+/// argument, recognized because the object carries a `message`.
+///
+/// `message` must be a string, because that is what the GraphQL response's
+/// `errors[].message` is; a non-string there is a mistake worth naming rather
+/// than quietly stringifying, since the alternative is a client reading
+/// `"[object]"` and no way to tell where it came from. `extensions` must be an
+/// object for the same reason. Either mistake costs the message, the same as a
+/// failed argument does, so a malformed declared error never reaches a client
+/// half-formed.
+#[allow(clippy::too_many_arguments)]
+fn structured_error(
+    fields: &Map<ByteString, JSON>,
+    method_name: &WithRange<String>,
+    printed_args: &dyn Fn() -> String,
+    data: &JSON,
+    input_path: &InputPath<JSON>,
+    args_range: crate::connectors::json_selection::location::OffsetRange,
+    spec: ConnectSpec,
+    mut errors: Vec<ApplyToError>,
+) -> (Option<JSON>, Vec<ApplyToError>) {
+    let mut malformed = false;
+
+    let message = match fields.get("message") {
+        Some(JSON::String(message)) => message.as_str().to_string(),
+        other => {
+            malformed = true;
+            errors.push(ApplyToError::new(
+                format!(
+                    "Method ->{}{} recorded no message because `message` must be a string, got {}",
+                    method_name.as_ref(),
+                    printed_args(),
+                    json_type_name(other),
+                ),
+                input_path.to_vec(),
+                args_range.clone(),
+                spec,
+            ));
+            String::new()
+        }
+    };
+
+    let extensions = match fields.get("extensions") {
+        None => None,
+        Some(JSON::Object(_)) => fields.get("extensions").cloned(),
+        Some(other) => {
+            malformed = true;
+            errors.push(ApplyToError::new(
+                format!(
+                    "Method ->{}{} recorded no message because `extensions` must be an object, got {}",
+                    method_name.as_ref(),
+                    printed_args(),
+                    json_type_name(Some(other)),
+                ),
+                input_path.to_vec(),
+                args_range.clone(),
+                spec,
+            ));
+            None
+        }
+    };
+
+    // Anything else in the object is reported rather than dropped. An author
+    // who wrote `{ message: ..., code: ... }` expecting `code` to reach the
+    // client hears that it did not, instead of discovering it from a response
+    // that is missing it. This does not cost the message: the error is still
+    // well-formed, just smaller than intended.
+    for key in fields.keys() {
+        let key = key.as_str();
+        if key != "message" && key != "extensions" {
+            errors.push(ApplyToError::new(
+                format!(
+                    "Method ->{}{} ignored unknown field `{key}`; a structured error carries only `message` and `extensions`",
+                    method_name.as_ref(),
+                    printed_args(),
+                ),
+                input_path.to_vec(),
+                args_range.clone(),
+                spec,
+            ));
+        }
+    }
+
+    if malformed {
+        return (None, errors);
+    }
+
+    errors.push(ApplyToError::declared(
+        message,
+        input_path.to_vec(),
+        args_range,
+        spec,
+        extensions,
+    ));
+
+    (Some(data.clone()), errors)
+}
+
+/// The name of a JSON value's type, for messages that have to say what arrived
+/// where something else was required.
+fn json_type_name(value: Option<&JSON>) -> &'static str {
+    match value {
+        None => "nothing",
+        Some(JSON::Null) => "null",
+        Some(JSON::Bool(_)) => "a boolean",
+        Some(JSON::Number(_)) => "a number",
+        Some(JSON::String(_)) => "a string",
+        Some(JSON::Array(_)) => "an array",
+        Some(JSON::Object(_)) => "an object",
+    }
 }
 
 // The output shape is the input shape: this method is an identity function on
@@ -224,6 +400,7 @@ mod tests {
 
     use crate::connectors::JSONSelection;
     use crate::connectors::json_selection::ApplyToError;
+    use crate::connectors::json_selection::ApplyToErrorKind;
     use crate::selection;
 
     /// Apply `selection` to `data`, assert the value flowed through unchanged,
@@ -251,6 +428,7 @@ mod tests {
                     "message": "This is an error",
                     "path": ["->withError"],
                     "range": [12, 32],
+                    "declared": true,
                 }))],
             ),
         );
@@ -268,6 +446,7 @@ mod tests {
                     "message": "{\"hi\":\"Alice\"}",
                     "path": ["->withError"],
                     "range": [12, 28],
+                    "declared": true,
                 }))],
             ),
         );
@@ -485,6 +664,10 @@ mod tests {
                     "message": "Ok error",
                     "path": ["input", "->match", "->withError"],
                     "range": [79, 91],
+                    "declared": true,
+                    // The mapping reads `input` and writes `result`; only the
+                    // latter can be handed to a client.
+                    "output_path": ["result"],
                 }))],
             ),
         );
@@ -497,8 +680,258 @@ mod tests {
                     "message": "{\"unknown\":null}",
                     "path": ["input", "->match", "->withError"],
                     "range": [126, 144],
+                    "declared": true,
+                    "output_path": ["result"],
                 }))],
             ),
+        );
+    }
+
+    /// The structured form is what carries a code to a client. The message and
+    /// the extensions arrive as separate parts rather than one flattened
+    /// sentence, and the error is marked `Declared` so the response mapper
+    /// knows an author asked for it rather than the language reporting on
+    /// itself.
+    #[test]
+    fn with_error_should_carry_a_message_and_extensions_separately() {
+        let (value, errors) = selection!(
+            r#"$->withError({
+                message: "Field 'balance' was not found"
+                extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
+            })"#
+        )
+        .apply_to(&json!("<missing>"));
+
+        assert_eq!(value, Some(json!("<missing>")));
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].message(), "Field 'balance' was not found");
+        assert_eq!(errors[0].kind(), ApplyToErrorKind::Declared);
+        assert_eq!(
+            errors[0].extensions(),
+            Some(&json!({ "code": "INTERNAL_SERVER_ERROR", "number": 210099 })),
+        );
+    }
+
+    /// `extensions` is optional: the structured form is also the way to write a
+    /// message that happens to contain characters the message-only form would
+    /// have to fight with, and it stays `Declared` either way.
+    #[test]
+    fn with_error_should_accept_a_structured_error_without_extensions() {
+        let (value, errors) =
+            selection!(r#"$->withError({ message: "plain" })"#).apply_to(&json!(1));
+
+        assert_eq!(value, Some(json!(1)));
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].message(), "plain");
+        assert_eq!(errors[0].kind(), ApplyToErrorKind::Declared);
+        assert_eq!(errors[0].extensions(), None);
+    }
+
+    /// The structured form is recognized by the `message` field, so an object
+    /// without one keeps its old meaning and is serialized into the message.
+    /// This is what makes `{ unknown: @ }` still read as it always did, and it
+    /// is the reason the branch is worth pinning: the two forms are told apart
+    /// by the data, not by the syntax.
+    #[test]
+    fn an_object_without_a_message_field_is_not_the_structured_form() {
+        let (value, errors) = selection!(r#"$->withError({ unknown: @ })"#).apply_to(&json!("v"));
+
+        assert_eq!(value, Some(json!("v")));
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].message(), r#"{"unknown":"v"}"#);
+        assert_eq!(errors[0].kind(), ApplyToErrorKind::Declared);
+        assert_eq!(errors[0].extensions(), None);
+    }
+
+    /// A structured error whose `message` is not a string is malformed, and a
+    /// malformed declared error is discarded rather than handed to a client
+    /// half-formed — the same trade the method already makes for an argument
+    /// that produced no value.
+    #[test]
+    fn with_error_should_reject_a_structured_error_whose_message_is_not_a_string() {
+        let (value, errors) = selection!(r#"$->withError({ message: 42 })"#).apply_to(&json!("v"));
+
+        assert_eq!(value, None);
+        assert_eq!(
+            errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
+            vec![concat!(
+                "Method ->withError( { message: 42 } ) recorded no message ",
+                "because `message` must be a string, got a number",
+            )],
+        );
+        assert!(
+            errors
+                .iter()
+                .all(|e| e.kind() == ApplyToErrorKind::Diagnostic)
+        );
+    }
+
+    /// Same trade for `extensions`: GraphQL says `errors[].extensions` is a
+    /// map, so a scalar there cannot be forwarded and cannot be guessed at.
+    #[test]
+    fn with_error_should_reject_structured_extensions_that_are_not_an_object() {
+        let (value, errors) =
+            selection!(r#"$->withError({ message: "m", extensions: "nope" })"#).apply_to(&json!(1));
+
+        assert_eq!(value, None);
+        assert_eq!(
+            errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
+            vec![concat!(
+                r#"Method ->withError( { message: "m", extensions: "nope" } ) recorded no message "#,
+                "because `extensions` must be an object, got a string",
+            )],
+        );
+    }
+
+    /// The cost of recognizing the structured form by its `message` field: an
+    /// author who wrote a sibling expecting it to travel gets told it did not,
+    /// rather than finding out from a response that is missing it. The error
+    /// itself is still well-formed, so the message is recorded and the value
+    /// still flows through.
+    #[test]
+    fn with_error_should_report_unknown_fields_of_a_structured_error() {
+        let (value, errors) =
+            selection!(r#"$->withError({ message: "m", code: "OOPS" })"#).apply_to(&json!(1));
+
+        assert_eq!(value, Some(json!(1)));
+        assert_eq!(
+            errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
+            vec![
+                concat!(
+                    r#"Method ->withError( { message: "m", code: "OOPS" } ) ignored unknown field "#,
+                    "`code`; a structured error carries only `message` and `extensions`",
+                ),
+                "m",
+            ],
+        );
+        // The complaint is the language's, the message is the author's, and
+        // only the author's is eligible to reach a client.
+        assert_eq!(errors[0].kind(), ApplyToErrorKind::Diagnostic);
+        assert_eq!(errors[1].kind(), ApplyToErrorKind::Declared);
+    }
+
+    /// The customer-facing shape this whole form exists for: a required field
+    /// takes a default and records a coded error at the same time. `??`
+    /// short-circuits, so the `->withError` on the right runs only when the
+    /// left produced nothing — the field resolves normally, and silently, when
+    /// the data is there.
+    #[test]
+    fn a_defaulted_field_should_record_a_coded_error_only_when_it_defaults() {
+        let selection = selection!(
+            r#"requiredField: value ?? $("<missing>")->withError({
+                message: "Field 'requiredField' was not found"
+                extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
+            })"#
+        );
+
+        // Present: the value passes through and nothing is recorded.
+        let (value, errors) = selection.apply_to(&json!({ "value": "real" }));
+        assert_eq!(value, Some(json!({ "requiredField": "real" })));
+        assert_eq!(errors, vec![]);
+
+        // Absent: the field still resolves, with the default, and the coded
+        // error is recorded alongside it.
+        let (value, errors) = selection.apply_to(&json!({}));
+        assert_eq!(value, Some(json!({ "requiredField": "<missing>" })));
+        let declared = errors
+            .iter()
+            .filter(|error| error.kind() == ApplyToErrorKind::Declared)
+            .collect::<Vec<_>>();
+        assert_eq!(declared.len(), 1);
+        assert_eq!(declared[0].message(), "Field 'requiredField' was not found");
+        assert_eq!(
+            declared[0].extensions(),
+            Some(&json!({ "code": "INTERNAL_SERVER_ERROR", "number": 210099 })),
+        );
+    }
+
+    /// A default of `null` must still record its message. `??` steps over a
+    /// null and, having run out of operands, returns that null — and it drops
+    /// the errors of every operand it stepped over, which is right for the
+    /// "path produced nothing" diagnostics that coalescing exists to absorb but
+    /// wrong for a message the author deliberately declared. Without the
+    /// carve-out, `?? $(null)->withError(...)` silently does nothing, which is
+    /// the worst possible outcome for an error-reporting feature: it looks
+    /// correct and reports nothing.
+    #[test]
+    fn a_null_default_should_still_record_its_declared_error() {
+        let data = json!({ "other": 1 });
+
+        // The value is null either way; the question is whether the message
+        // survives. Both spellings must record it.
+        for selection in [
+            r#"f: $.field ?? $(null)->withError("boom")"#,
+            r#"f: $.field ?! $(null)->withError("boom")"#,
+        ] {
+            let (value, errors) = selection!(selection).apply_to(&data);
+            assert_eq!(value, Some(json!({ "f": null })), "for `{selection}`");
+            assert_eq!(
+                errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
+                vec!["boom"],
+                "for `{selection}`",
+            );
+        }
+    }
+
+    /// The other half of that carve-out: the diagnostics coalescing absorbs are
+    /// still absorbed. A defaulted field must not report "Property .field not
+    /// found" alongside the author's message, or every default becomes noisy.
+    #[test]
+    fn a_default_should_not_report_the_failed_path_as_well() {
+        let (value, errors) = selection!(r#"f: $.field ?? $("<missing>")->withError("boom")"#)
+            .apply_to(&json!({ "other": 1 }));
+
+        assert_eq!(value, Some(json!({ "f": "<missing>" })));
+        assert_eq!(
+            errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
+            vec!["boom"],
+        );
+    }
+
+    /// A declared error on the losing side of a `??` survives too: the author
+    /// asked to record it, and whether a later operand happened to produce a
+    /// value is unrelated to that.
+    #[test]
+    fn a_declared_error_survives_a_later_operand_succeeding() {
+        let (value, errors) = selection!(r#"f: $.a->withError("saw a") ?? "fallback""#)
+            .apply_to(&json!({ "a": null }));
+
+        assert_eq!(value, Some(json!({ "f": "fallback" })));
+        assert_eq!(
+            errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
+            vec!["saw a"],
+        );
+    }
+
+    /// Redaction, which needs no new mechanism: `$config` is in scope for
+    /// response mappings, so the same selection emits detail in one
+    /// environment and a safe sentence in another. Pinned here because it is
+    /// the answer to "can we sanitize per environment", and an answer that
+    /// rests on an untested composition is not one.
+    #[test]
+    fn a_structured_error_should_redact_its_detail_from_config() {
+        let selection = selection!(
+            r#"$->withError({
+                message: $config.verboseErrors->match([true, $.detail], [@, "An error occurred"])
+                extensions: { code: "INTERNAL_SERVER_ERROR" }
+            })"#
+        );
+        let data = json!({ "detail": "connection refused to db-7" });
+
+        let verbose =
+            IndexMap::from_iter([("$config".to_string(), json!({ "verboseErrors": true }))]);
+        let (_, errors) = selection.apply_with_vars(&data, &verbose);
+        assert_eq!(
+            errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
+            vec!["connection refused to db-7"],
+        );
+
+        let redacted =
+            IndexMap::from_iter([("$config".to_string(), json!({ "verboseErrors": false }))]);
+        let (_, errors) = selection.apply_with_vars(&data, &redacted);
+        assert_eq!(
+            errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
+            vec!["An error occurred"],
         );
     }
 

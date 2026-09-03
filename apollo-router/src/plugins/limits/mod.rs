@@ -210,11 +210,24 @@ pub(crate) struct ConnectorLimits {
     /// to protect against running out of memory. Default: no limit.
     #[schemars(with = "Option<String>", default)]
     pub(crate) http_max_response_size: Option<ByteSize>,
+
+    /// Limit how many errors a connector's response mapping may add to the GraphQL
+    /// response via `->withError`. A `->withError` inside a `->map` records one error
+    /// per element, so a mapping over a large API response can contribute an error per
+    /// row. Errors past the limit are replaced by a single summary error naming how
+    /// many were dropped. Default: no limit.
+    #[schemars(default)]
+    pub(crate) max_mapping_errors: Option<usize>,
 }
 
 /// Extension type placed on the request context to signal the connector response size limit.
 #[derive(Clone, Copy, Debug, Ord, PartialOrd, PartialEq, Eq)]
 pub(crate) struct ConnectorResponseSizeLimit(pub usize);
+
+/// Extension type placed on the request context to signal how many mapping errors a
+/// connector response may contribute to the GraphQL `errors` array.
+#[derive(Clone, Copy, Debug, Ord, PartialOrd, PartialEq, Eq)]
+pub(crate) struct ConnectorMappingErrorLimit(pub usize);
 
 impl Config {
     fn subgraph_response_size_limit(
@@ -247,6 +260,22 @@ impl Config {
 
         // convert to usize (needed for limits plugin)
         Some(ConnectorResponseSizeLimit(limit.as_u64().try_into().ok()?))
+    }
+
+    fn connector_mapping_error_limit(
+        &self,
+        source_name: &str,
+    ) -> Option<ConnectorMappingErrorLimit> {
+        // Per-source setting wins over the `all` default, matching
+        // `connector_response_size_limit`.
+        let source_limit = self
+            .connector
+            .sources
+            .get(source_name)
+            .and_then(|s| s.max_mapping_errors);
+        let limit = source_limit.or(self.connector.all.max_mapping_errors)?;
+
+        Some(ConnectorMappingErrorLimit(limit))
     }
 }
 
@@ -303,16 +332,30 @@ impl PluginPrivate for LimitsPlugin {
         service: connector::request_service::BoxService,
         source_name: String,
     ) -> connector::request_service::BoxService {
-        match self.config.connector_response_size_limit(&source_name) {
-            None => service,
-            Some(limit) => ServiceBuilder::new()
-                .map_request(move |req: connector::request_service::Request| {
-                    req.context.extensions().with_lock(|e| e.insert(limit));
-                    req
-                })
-                .service(service)
-                .boxed(),
+        let response_size_limit = self.config.connector_response_size_limit(&source_name);
+        let mapping_error_limit = self.config.connector_mapping_error_limit(&source_name);
+
+        // Both limits are optional and independent, so the service is only
+        // wrapped when at least one is configured — keeping the untouched path
+        // free of a layer that would have nothing to do.
+        if response_size_limit.is_none() && mapping_error_limit.is_none() {
+            return service;
         }
+
+        ServiceBuilder::new()
+            .map_request(move |req: connector::request_service::Request| {
+                req.context.extensions().with_lock(|e| {
+                    if let Some(limit) = response_size_limit {
+                        e.insert(limit);
+                    }
+                    if let Some(limit) = mapping_error_limit {
+                        e.insert(limit);
+                    }
+                });
+                req
+            })
+            .service(service)
+            .boxed()
     }
 }
 
@@ -826,6 +869,7 @@ mod test {
                 "products.rest".to_string(),
                 ConnectorLimits {
                     http_max_response_size: Some(ByteSize::b(512)),
+                    max_mapping_errors: None,
                 },
             );
 
@@ -845,12 +889,14 @@ mod test {
                 "products.rest".to_string(),
                 ConnectorLimits {
                     http_max_response_size: Some(ByteSize::b(500)),
+                    max_mapping_errors: None,
                 },
             );
             connector_config.sources.insert(
                 "reviews.api".to_string(),
                 ConnectorLimits {
                     http_max_response_size: None,
+                    max_mapping_errors: None,
                 },
             );
 
@@ -864,6 +910,65 @@ mod test {
             assert_eq!(
                 config.connector_response_size_limit("reviews.api"),
                 Some(ConnectorResponseSizeLimit(1024))
+            );
+        }
+
+        /// Unset by default, matching `http_max_response_size`: a connector
+        /// reports every error its mapping declares unless an operator says
+        /// otherwise.
+        #[test]
+        fn mapping_error_limit_is_unset_by_default() {
+            use crate::plugins::limits::ConnectorMappingErrorLimit;
+
+            let config: Config = ConnectorConfiguration::<ConnectorLimits>::default().into();
+            assert_eq!(config.connector_mapping_error_limit("products.rest"), None);
+
+            // And the two limits are independent: setting one leaves the other
+            // unset rather than implying a default for it.
+            let mut connector_config = ConnectorConfiguration::<ConnectorLimits>::default();
+            connector_config.all.http_max_response_size = Some(ByteSize::kib(1));
+            let config: Config = connector_config.into();
+            assert_eq!(config.connector_mapping_error_limit("products.rest"), None);
+            assert_eq!(
+                config.connector_response_size_limit("products.rest"),
+                Some(ConnectorResponseSizeLimit(1024)),
+            );
+
+            let _ = ConnectorMappingErrorLimit(0);
+        }
+
+        /// Same resolution order as the size limit: a per-source setting wins,
+        /// otherwise `all` applies.
+        #[test]
+        fn mapping_error_limit_source_overrides_all() {
+            use crate::plugins::limits::ConnectorMappingErrorLimit;
+
+            let mut connector_config = ConnectorConfiguration::<ConnectorLimits>::default();
+            connector_config.all.max_mapping_errors = Some(100);
+            connector_config.sources.insert(
+                "products.rest".to_string(),
+                ConnectorLimits {
+                    http_max_response_size: None,
+                    max_mapping_errors: Some(5),
+                },
+            );
+            connector_config.sources.insert(
+                "reviews.api".to_string(),
+                ConnectorLimits {
+                    http_max_response_size: None,
+                    max_mapping_errors: None,
+                },
+            );
+
+            let config: Config = connector_config.into();
+            assert_eq!(
+                config.connector_mapping_error_limit("products.rest"),
+                Some(ConnectorMappingErrorLimit(5)),
+            );
+            // Falls back to `all` despite having an entry in the map.
+            assert_eq!(
+                config.connector_mapping_error_limit("reviews.api"),
+                Some(ConnectorMappingErrorLimit(100)),
             );
         }
     }
@@ -954,6 +1059,7 @@ mod test {
                 data: Value::Null,
                 key: req.key.clone(),
                 problems: vec![],
+                errors: vec![],
             },
         }
     }

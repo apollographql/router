@@ -2269,7 +2269,8 @@ expression: "&schema"
             }
           ],
           "default": {
-            "http_max_response_size": null
+            "http_max_response_size": null,
+            "max_mapping_errors": null
           },
           "description": "Options applying to all sources"
         },
@@ -2336,6 +2337,16 @@ expression: "&schema"
           "description": "Limit the size of incoming connector response bodies read from the network,\nto protect against running out of memory. Default: no limit.",
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "max_mapping_errors": {
+          "default": null,
+          "description": "Limit how many errors a connector's response mapping may add to the GraphQL\nresponse via `->withError`. A `->withError` inside a `->map` records one error\nper element, so a mapping over a large API response can contribute an error per\nrow. Errors past the limit are replaced by a single summary error naming how\nmany were dropped. Default: no limit.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
             "null"
           ]
         }
@@ -7098,7 +7109,8 @@ expression: "&schema"
           ],
           "default": {
             "all": {
-              "http_max_response_size": null
+              "http_max_response_size": null,
+              "max_mapping_errors": null
             },
             "sources": {}
           },

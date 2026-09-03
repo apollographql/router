@@ -19,10 +19,12 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
+use crate::connectors::ApplyToError;
 use crate::connectors::ConnectSpec;
 use crate::connectors::Connector;
 use crate::connectors::JSONSelection;
 use crate::connectors::ProblemLocation;
+use crate::connectors::json_selection::ApplyToErrorKind;
 use crate::connectors::runtime::errors::RuntimeError;
 use crate::connectors::runtime::inputs::ContextReader;
 use crate::connectors::runtime::key::ResponseKey;
@@ -126,7 +128,7 @@ pub fn handle_raw_response(
         warnings,
     );
     if success {
-        let response = map_response(data, key, inputs, warnings);
+        let response = map_response(connector, data, key, inputs, warnings);
         check_response_shape(connector, response)
     } else {
         map_error(connector, data, parts, key, inputs, warnings)
@@ -158,6 +160,7 @@ fn check_response_shape(connector: &Connector, response: MappedResponse) -> Mapp
         data,
         key,
         problems,
+        errors,
     } = response
     else {
         return response;
@@ -168,6 +171,7 @@ fn check_response_shape(connector: &Connector, response: MappedResponse) -> Mapp
             data,
             key,
             problems,
+            errors,
         };
     }
 
@@ -203,6 +207,25 @@ fn check_response_shape(connector: &Connector, response: MappedResponse) -> Mapp
         let mut error = RuntimeError::new(message, &key).with_code(RESPONSE_SHAPE_ERROR_CODE);
         error.subgraph_name = Some(connector.id.subgraph_name.clone());
         error.coordinate = Some(connector.id.coordinate());
+
+        // The field is failing, so its declared errors cannot travel with it:
+        // they were written to accompany data that is not being returned, and
+        // `MappedResponse::Error` reports the one error that explains the
+        // failure. They are still true statements about the response body
+        // though, and a mapping author debugging a shape violation wants to
+        // see them, so they are demoted to problems rather than dropped.
+        let mut problems = problems;
+        problems.extend(errors.into_iter().map(|declared| Problem {
+            message: format!(
+                "Declared error not reported to the client because the response \
+                 failed its shape check: {}",
+                declared.message
+            ),
+            path: declared.path,
+            count: 1,
+            location: ProblemLocation::Selection,
+        }));
+
         MappedResponse::Error {
             error,
             key,
@@ -213,6 +236,7 @@ fn check_response_shape(connector: &Connector, response: MappedResponse) -> Mapp
             data,
             key,
             problems,
+            errors,
         }
     }
 }
@@ -382,25 +406,174 @@ pub fn handle_mapping_only_response(
         .context(context)
         .request(&connector.response_headers, client_headers)
         .merge();
-    map_response(&data, key, inputs, Vec::new())
+    map_response(connector, &data, key, inputs, Vec::new())
 }
+
+/// The mapping-side path an error was declared at, as a dotted string, for the
+/// `connector.selectionPath` extension.
+///
+/// This is *not* a GraphQL response path, and the difference is the reason it
+/// lives in an extension rather than in `path`. [`ApplyToError`] records an
+/// [`InputPath`](crate::connectors::json_selection::immutable::InputPath):
+/// where the mapping was reading in the *source* JSON, interleaved with
+/// `->method` markers for the methods it passed through. In a mapping like
+/// `balance: amount->withError(...)` that path says `amount` — the API's field
+/// — while the response path is `balance`. The two coincide only when the
+/// mapping happens to be a rename-free passthrough.
+///
+/// The `->method` markers are dropped: they describe the mapping's internals,
+/// and the customer feedback's objection to a path reading `["->withError"]`
+/// applies just as well here.
+fn selection_path(error: &ApplyToError) -> String {
+    error
+        .path()
+        .iter()
+        .filter_map(|segment| match segment {
+            Value::String(name) if name.as_str().starts_with("->") => None,
+            Value::String(name) => Some(name.as_str().to_string()),
+            Value::Number(index) => Some(index.to_string()),
+            _ => None,
+        })
+        .join(".")
+}
+
+/// Turn an error the schema author declared with `->withError` into the
+/// client-facing GraphQL error it was written to be.
+///
+/// The author's `extensions` are merged over the connector's defaults rather
+/// than replacing them, matching what `map_error` already does for
+/// `@connect(errors:)`, so `code` is the author's while `service` and
+/// `connector.coordinate` still identify where the error came from.
+///
+/// # On `path`
+///
+/// The error's `path` is the connector's response path followed by
+/// [`ApplyToError::output_path`] — where inside the connector's output the
+/// error was declared, so the whole thing resolves against the data the client
+/// received.
+///
+/// This deliberately does not use `ApplyToError::path`, which records where the
+/// mapping was *reading* in the API's JSON. The two diverge under any rename:
+/// `balance: amount->withError(...)` reads `amount` and writes `balance`, and
+/// `acct: { bal: amount->... }` reads `amount` and writes `acct.bal`. The read
+/// path is still useful for debugging a mapping, so it is preserved under
+/// `extensions.connector.selectionPath`.
+///
+/// One gap remains: a client that *aliases* a field sees the alias in its
+/// response, while `output_path` carries the schema field name, since aliases
+/// are applied later in `apply_operation`. Renames inside the mapping — the
+/// common case, and the one the feedback was about — are handled.
+fn declared_error_to_runtime_error(
+    error: &ApplyToError,
+    key: &ResponseKey,
+    connector: &Connector,
+) -> RuntimeError {
+    let mut runtime_error = RuntimeError::new(error.message(), key);
+    runtime_error.subgraph_name = Some(connector.id.subgraph_name.clone());
+    runtime_error.coordinate = Some(connector.id.coordinate());
+
+    // Descend from the connector's response path into the mapping's output.
+    let mut path = vec![key.path_string()];
+    path.extend(
+        error
+            .output_path()
+            .iter()
+            .filter_map(|segment| match segment {
+                Value::String(name) => Some(name.as_str().to_string()),
+                Value::Number(index) => Some(index.to_string()),
+                _ => None,
+            }),
+    );
+    runtime_error.path = path.join("/");
+
+    let selection_path = selection_path(error);
+    if !selection_path.is_empty() {
+        runtime_error = runtime_error.merge_extension(
+            "connector",
+            Value::Object(Map::from_iter([(
+                "selectionPath".into(),
+                Value::String(selection_path.into()),
+            )])),
+        );
+    }
+
+    let mut code = None;
+    if let Some(Value::Object(extensions)) = error.extensions() {
+        if let Some(Value::String(author_code)) = extensions.get("code") {
+            code = Some(author_code.as_str().to_string());
+        }
+        for (name, value) in extensions {
+            runtime_error = runtime_error.merge_extension(name.clone(), value.clone());
+        }
+    }
+
+    runtime_error.with_code(code.unwrap_or_else(|| DECLARED_ERROR_CODE.to_string()))
+}
+
+/// The code a declared error carries when its author did not supply one.
+/// Distinct from `CONNECTORS_FETCH` because nothing failed to fetch: the
+/// request succeeded and the mapping author chose to report something about
+/// its contents.
+const DECLARED_ERROR_CODE: &str = "CONNECTORS_MAPPING_ERROR";
 
 /// Returns a response with data transformed by the selection mapping.
 pub(super) fn map_response(
+    connector: &Connector,
     data: &Value,
     key: ResponseKey,
     inputs: IndexMap<String, Value>,
     mut warnings: Vec<Problem>,
 ) -> MappedResponse {
     let (res, apply_to_errors) = key.selection().apply_with_vars(data, &inputs);
+
+    // Declared errors are the author's, addressed to the client; diagnostics
+    // are the language's, addressed to the author. The split decides what
+    // *additionally* travels to the client — it does not decide what reaches
+    // the debugger, which is why `warnings` below still receives both kinds.
+    // `->withError` shipped as a debugger and telemetry feature, and mapping
+    // problems are what both of those read, so removing declared errors from
+    // them would be a regression dressed up as a feature.
+    //
+    // Selecting rather than partitioning, for the same reason: the errors are
+    // needed twice, in two different shapes. Client-facing errors are built
+    // from the untouched `ApplyToError`s, because aggregation discards both
+    // the structured extensions and the array indices they carry.
+    //
+    // Deliberately not gated on a spec version. No mapping method is: method
+    // availability is decided by `ArrowMethod::is_public`, and every method's
+    // *behavior* is version-invariant — the rstest cases across V0_2..V0_5 in
+    // the methods directory exist to assert exactly that. Gating this would
+    // make `->withError` mean two different things depending on a connector's
+    // `@link` URL, for a method that has never shipped and so has no earlier
+    // behavior to preserve. Writing `->withError` is itself the opt-in.
+    let declared = apply_to_errors
+        .iter()
+        .filter(|error| error.kind() == ApplyToErrorKind::Declared)
+        .cloned()
+        .collect::<Vec<_>>();
+
     warnings.extend(aggregate_apply_to_errors(
         apply_to_errors,
         ProblemLocation::Selection,
     ));
+
+    // Every declared error is reported. The count is deliberately not capped:
+    // nothing else in the router truncates a response's errors (a subgraph
+    // returning thousands has them all passed through), and the feature exists
+    // so an author can record every defect they find — handing a client "and
+    // 400 more" would defeat that. The element count is already bounded
+    // upstream by the `http_max_response_size` connector limit, which is where
+    // an operator worried about response size sets a policy.
+    let errors = declared
+        .iter()
+        .map(|error| declared_error_to_runtime_error(error, &key, connector))
+        .collect::<Vec<_>>();
+
     MappedResponse::Data {
         key,
         data: res.unwrap_or_else(|| Value::Null),
         problems: warnings,
+        errors,
     }
 }
 
@@ -520,6 +693,14 @@ pub enum MappedResponse {
         data: Value,
         key: ResponseKey,
         problems: Vec<Problem>,
+        /// Errors the mapping author declared with `->withError`, to be added
+        /// to the GraphQL response's `errors` array alongside this data.
+        ///
+        /// Distinct from `problems`, which never leave the router: these are
+        /// addressed to the client, and the field resolves normally in spite
+        /// of them — that combination is the whole point of `->withError`, and
+        /// is why they cannot ride along in the `Error` variant instead.
+        errors: Vec<RuntimeError>,
     },
 }
 
@@ -553,100 +734,111 @@ impl MappedResponse {
                 errors.push(error);
             }
             Self::Data {
-                data: value, key, ..
-            } => match key {
-                ResponseKey::RootField { ref name, .. } => {
-                    data.insert(name.clone(), value);
-                }
-                ResponseKey::Entity { index, .. } => {
-                    let entities = data
-                        .entry(ENTITIES)
-                        .or_insert(Value::Array(Vec::with_capacity(count)));
-                    entities
-                        .as_array_mut()
-                        .ok_or_else(|| {
-                            HandleResponseError::MergeError("_entities is not an array".into())
-                        })?
-                        .insert(index, value);
-                }
-                ResponseKey::EntityField {
-                    index,
-                    ref field_name,
-                    ref typename,
-                    ..
-                } => {
-                    let entities = data
-                        .entry(ENTITIES)
-                        .or_insert(Value::Array(Vec::with_capacity(count)))
-                        .as_array_mut()
-                        .ok_or_else(|| {
-                            HandleResponseError::MergeError("_entities is not an array".into())
-                        })?;
+                data: value,
+                key,
+                errors: declared,
+                ..
+            } => {
+                // The data is still added below: a declared error accompanies
+                // its field rather than replacing it, which is the difference
+                // between `->withError` and failing the field.
+                errors.extend(declared);
 
-                    match entities.get_mut(index) {
-                        Some(Value::Object(entity)) => {
-                            entity.insert(field_name.clone(), value);
-                        }
-                        _ => {
-                            let mut entity = Map::new();
-                            if let Some(typename) = typename {
-                                entity.insert(TYPENAME, Value::String(typename.as_str().into()));
+                match key {
+                    ResponseKey::RootField { ref name, .. } => {
+                        data.insert(name.clone(), value);
+                    }
+                    ResponseKey::Entity { index, .. } => {
+                        let entities = data
+                            .entry(ENTITIES)
+                            .or_insert(Value::Array(Vec::with_capacity(count)));
+                        entities
+                            .as_array_mut()
+                            .ok_or_else(|| {
+                                HandleResponseError::MergeError("_entities is not an array".into())
+                            })?
+                            .insert(index, value);
+                    }
+                    ResponseKey::EntityField {
+                        index,
+                        ref field_name,
+                        ref typename,
+                        ..
+                    } => {
+                        let entities = data
+                            .entry(ENTITIES)
+                            .or_insert(Value::Array(Vec::with_capacity(count)))
+                            .as_array_mut()
+                            .ok_or_else(|| {
+                                HandleResponseError::MergeError("_entities is not an array".into())
+                            })?;
+
+                        match entities.get_mut(index) {
+                            Some(Value::Object(entity)) => {
+                                entity.insert(field_name.clone(), value);
                             }
-                            entity.insert(field_name.clone(), value);
-                            entities.insert(index, Value::Object(entity));
-                        }
-                    };
+                            _ => {
+                                let mut entity = Map::new();
+                                if let Some(typename) = typename {
+                                    entity
+                                        .insert(TYPENAME, Value::String(typename.as_str().into()));
+                                }
+                                entity.insert(field_name.clone(), value);
+                                entities.insert(index, Value::Object(entity));
+                            }
+                        };
+                    }
+                    ResponseKey::BatchEntity {
+                        selection,
+                        keys,
+                        inputs,
+                    } => {
+                        let Value::Array(values) = value else {
+                            return Err(HandleResponseError::MergeError(
+                                "Response for a batch request does not map to an array".into(),
+                            ));
+                        };
+
+                        let spec = selection.spec();
+                        let key_selection = JSONSelection::parse_with_spec(
+                            &keys.serialize().no_indent().to_string(),
+                            spec,
+                        )
+                        .map_err(|e| HandleResponseError::MergeError(e.to_string()))?;
+
+                        // Convert representations into keys for use in the map
+                        let key_values = inputs.batch.iter().map(|v| {
+                            key_selection
+                                .apply_to(&Value::Object(v.clone()))
+                                .0
+                                .unwrap_or(Value::Null)
+                        });
+
+                        // Create a map of keys to entities
+                        let mut map = values
+                            .into_iter()
+                            .filter_map(|v| key_selection.apply_to(&v).0.map(|key| (key, v)))
+                            .collect::<HashMap<_, _>>();
+
+                        // Make a list of entities that matches the representations list
+                        let new_entities = key_values
+                            .map(|key| map.remove(&key).unwrap_or(Value::Null))
+                            .collect_vec();
+
+                        // Because we may have multiple batch entities requests, we should add to ENTITIES as the requests come in so it is additive
+                        let entities = data
+                            .entry(ENTITIES)
+                            .or_insert(Value::Array(Vec::with_capacity(count)));
+
+                        entities
+                            .as_array_mut()
+                            .ok_or_else(|| {
+                                HandleResponseError::MergeError("_entities is not an array".into())
+                            })?
+                            .extend(new_entities);
+                    }
                 }
-                ResponseKey::BatchEntity {
-                    selection,
-                    keys,
-                    inputs,
-                } => {
-                    let Value::Array(values) = value else {
-                        return Err(HandleResponseError::MergeError(
-                            "Response for a batch request does not map to an array".into(),
-                        ));
-                    };
-
-                    let spec = selection.spec();
-                    let key_selection = JSONSelection::parse_with_spec(
-                        &keys.serialize().no_indent().to_string(),
-                        spec,
-                    )
-                    .map_err(|e| HandleResponseError::MergeError(e.to_string()))?;
-
-                    // Convert representations into keys for use in the map
-                    let key_values = inputs.batch.iter().map(|v| {
-                        key_selection
-                            .apply_to(&Value::Object(v.clone()))
-                            .0
-                            .unwrap_or(Value::Null)
-                    });
-
-                    // Create a map of keys to entities
-                    let mut map = values
-                        .into_iter()
-                        .filter_map(|v| key_selection.apply_to(&v).0.map(|key| (key, v)))
-                        .collect::<HashMap<_, _>>();
-
-                    // Make a list of entities that matches the representations list
-                    let new_entities = key_values
-                        .map(|key| map.remove(&key).unwrap_or(Value::Null))
-                        .collect_vec();
-
-                    // Because we may have multiple batch entities requests, we should add to ENTITIES as the requests come in so it is additive
-                    let entities = data
-                        .entry(ENTITIES)
-                        .or_insert(Value::Array(Vec::with_capacity(count)));
-
-                    entities
-                        .as_array_mut()
-                        .ok_or_else(|| {
-                            HandleResponseError::MergeError("_entities is not an array".into())
-                        })?
-                        .extend(new_entities);
-                }
-            },
+            }
         }
 
         Ok(())
@@ -681,6 +873,7 @@ impl MappedResponse {
                     data,
                     key,
                     problems,
+                    errors,
                 },
                 Some(operation),
             ) => {
@@ -821,6 +1014,7 @@ impl MappedResponse {
                     data,
                     key,
                     problems,
+                    errors,
                 }
             }
 
@@ -850,17 +1044,20 @@ mod tests {
 
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
+    use apollo_compiler::collections::IndexMap;
     use apollo_compiler::schema::Type;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::StatusCode;
     use http::response::Parts;
+    use serde_json_bytes::Map;
     use serde_json_bytes::Value;
     use serde_json_bytes::json;
 
     use super::MappedResponse;
     use super::deserialize_response;
     use super::is_success;
+    use super::map_response;
     use crate::connectors::ConnectSpec;
     use crate::connectors::JSONSelection;
     use crate::connectors::runtime::inputs::RequestInputs;
@@ -980,6 +1177,7 @@ mod tests {
             },
             data: mapped_data,
             problems: vec![],
+            errors: vec![],
         };
 
         let result = response.apply_operation(Some(&*operation), &Default::default());
@@ -1053,6 +1251,358 @@ mod tests {
         }
     }
 
+    /// Build a `ResponseKey` whose selection is `selection`, so a test can
+    /// exercise a real mapping rather than the identity one.
+    fn root_field_key_with_selection(name: &str, selection: &str) -> ResponseKey {
+        ResponseKey::RootField {
+            name: name.to_string(),
+            inputs: RequestInputs::default(),
+            selection: Arc::new(JSONSelection::parse(selection).unwrap()),
+        }
+    }
+
+    /// The whole point of `->withError`, asserted where it actually has to
+    /// hold: the field resolves with its default *and* the error reaches the
+    /// GraphQL `errors` array, carrying the author's code and structured
+    /// fields. Asserted through `add_to_data`, the function that builds the
+    /// client-facing response, rather than on the intermediate value, because
+    /// the gap this closes was precisely that the intermediate value was
+    /// correct and nothing carried it any further.
+    #[test]
+    fn a_declared_error_reaches_the_response_errors_beside_its_resolved_field() {
+        let connector = make_connector(None, ConnectSpec::V0_5);
+        let key = root_field_key_with_selection(
+            "account",
+            r#"balance: amount ?? $("<missing>")->withError({
+                message: "Field 'amount' was not found"
+                extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
+            })"#,
+        );
+
+        let mapped = map_response(
+            &connector,
+            &json!({ "id": "acct-1" }),
+            key,
+            IndexMap::default(),
+            Vec::new(),
+        );
+
+        let mut data = Map::new();
+        let mut errors = Vec::new();
+        mapped.add_to_data(&mut data, &mut errors, 1).unwrap();
+
+        // The field resolved, with the default: nothing was nulled out.
+        assert_eq!(
+            data.get("account"),
+            Some(&json!({ "balance": "<missing>" })),
+        );
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].message, "Field 'amount' was not found");
+        assert_eq!(errors[0].code(), "INTERNAL_SERVER_ERROR");
+        assert_eq!(errors[0].extensions().get("number"), Some(&json!(210099)),);
+        // The connector's own identity survives alongside the author's fields.
+        assert_eq!(
+            errors[0].extensions().get("service"),
+            Some(&json!("subgraph")),
+        );
+        // The path names the GraphQL field the error is about, through the
+        // mapping's *output* — `balance`, the field written, not `amount`, the
+        // field read. This is the acceptance criterion the original feedback
+        // raised about a path reading `["->withError"]`.
+        assert_eq!(errors[0].path, "account/balance");
+    }
+
+    /// Surfacing a declared error to the client must not take it away from the
+    /// author. `->withError` shipped as a debugger and telemetry feature, and
+    /// mapping problems are what both of those read, so a declared error has
+    /// to appear in *both* places — the split decides what additionally
+    /// reaches the client, not what stops reaching the debugger.
+    #[test]
+    fn a_declared_error_reaches_the_debugger_as_well_as_the_client() {
+        let connector = make_connector(None, ConnectSpec::V0_5);
+        let key = root_field_key_with_selection(
+            "account",
+            r#"balance: amount ?? $("<missing>")->withError("Field 'amount' was not found")"#,
+        );
+
+        let mapped = map_response(
+            &connector,
+            &json!({ "id": "acct-1" }),
+            key,
+            IndexMap::default(),
+            Vec::new(),
+        );
+
+        assert!(
+            mapped
+                .problems()
+                .iter()
+                .any(|problem| problem.message == "Field 'amount' was not found"),
+            "a declared error must still reach the debugger, got: {:?}",
+            mapped.problems(),
+        );
+
+        let mut data = Map::new();
+        let mut errors = Vec::new();
+        mapped.add_to_data(&mut data, &mut errors, 1).unwrap();
+        assert_eq!(errors.len(), 1, "and still reach the client");
+    }
+
+    /// The error path has to name the field the mapping *writes*, not the one
+    /// it reads, and has to keep doing so through nesting and lists. Each case
+    /// here reads a differently-named source field, so a path built from the
+    /// read side would be visibly wrong rather than accidentally right.
+    #[test]
+    fn declared_error_paths_name_the_written_field() {
+        let cases: &[(&str, Value, &str)] = &[
+            // A plain rename.
+            (
+                r#"balance: amount->withError("x")"#,
+                json!({ "amount": 1 }),
+                "account/balance",
+            ),
+            // Nesting: the path is the full route through the output object,
+            // which shares no segment with the input path (`amount`).
+            (
+                r#"acct: { bal: amount->withError("x") }"#,
+                json!({ "amount": 1 }),
+                "account/acct/bal",
+            ),
+            // A deep read collapsing to a shallow write.
+            (
+                r#"bal: a.b.c->withError("x")"#,
+                json!({ "a": { "b": { "c": 1 } } }),
+                "account/bal",
+            ),
+            // ->map is index-preserving, so the element is named.
+            (
+                r#"rows: items->map(@.code->withError("x"))"#,
+                json!({ "items": [{ "code": 1 }] }),
+                "account/rows/0",
+            ),
+            // Auto-mapping a subselection over an array, down to the field.
+            (
+                r#"rows: items { c: code->withError("x") }"#,
+                json!({ "items": [{ "code": 1 }] }),
+                "account/rows/0/c",
+            ),
+        ];
+
+        for (selection, data, expected_path) in cases {
+            let connector = make_connector(None, ConnectSpec::V0_5);
+            let key = root_field_key_with_selection("account", selection);
+            let mapped = map_response(&connector, data, key, IndexMap::default(), Vec::new());
+
+            let mut out = Map::new();
+            let mut errors = Vec::new();
+            mapped.add_to_data(&mut out, &mut errors, 1).unwrap();
+
+            assert_eq!(errors.len(), 1, "for selection `{selection}`");
+            assert_eq!(
+                &errors[0].path, expected_path,
+                "for selection `{selection}`",
+            );
+        }
+    }
+
+    /// `->filter` renumbers: the element at input index 1 can land at output
+    /// index 0. The mapping engine deliberately does not prepend an index
+    /// there, so the path stops at the list rather than naming the wrong
+    /// element. A coarse path that resolves beats a precise one that lies.
+    #[test]
+    fn a_declared_error_under_filter_does_not_claim_an_element_index() {
+        let connector = make_connector(None, ConnectSpec::V0_5);
+        let key = root_field_key_with_selection(
+            "account",
+            r#"rows: items->filter(@.keep->withError("checking"))"#,
+        );
+
+        let mapped = map_response(
+            &connector,
+            &json!({ "items": [{ "keep": false }, { "keep": true }] }),
+            key,
+            IndexMap::default(),
+            Vec::new(),
+        );
+
+        let mut out = Map::new();
+        let mut errors = Vec::new();
+        mapped.add_to_data(&mut out, &mut errors, 1).unwrap();
+
+        for error in &errors {
+            assert_eq!(
+                error.path, "account/rows",
+                "filter must not attribute an input index to an output element",
+            );
+        }
+    }
+
+    /// The counterpart: a mapping *diagnostic* describes the mapping's
+    /// internals and must never reach a client. Both kinds ride the same
+    /// `Vec<ApplyToError>` out of the selection, so this is the assertion that
+    /// the split actually splits.
+    #[test]
+    fn a_mapping_diagnostic_stays_out_of_the_response_errors() {
+        let connector = make_connector(None, ConnectSpec::V0_5);
+        let key = root_field_key_with_selection("account", "balance: nope");
+
+        let mapped = map_response(
+            &connector,
+            &json!({ "id": "acct-1" }),
+            key,
+            IndexMap::default(),
+            Vec::new(),
+        );
+
+        // The diagnostic was recorded for the author...
+        assert!(
+            mapped
+                .problems()
+                .iter()
+                .any(|problem| problem.message.contains("not found")),
+            "expected a diagnostic problem, got: {:?}",
+            mapped.problems(),
+        );
+
+        // ...and stayed out of the client's response.
+        let mut data = Map::new();
+        let mut errors = Vec::new();
+        mapped.add_to_data(&mut data, &mut errors, 1).unwrap();
+        assert_eq!(errors.len(), 0);
+    }
+
+    /// `->withError` behaves the same at every spec version, like every other
+    /// mapping method. Nothing about a method's behavior is version-dependent —
+    /// the rstest cases spanning V0_2..V0_5 throughout the methods directory
+    /// exist to assert that — so this is written the same way, to catch anyone
+    /// reintroducing a gate here.
+    #[rstest::rstest]
+    #[case::v0_1(ConnectSpec::V0_1)]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
+    fn a_declared_error_reaches_the_response_at_every_spec_version(#[case] spec: ConnectSpec) {
+        let connector = make_connector(None, spec);
+        let key = root_field_key_with_selection(
+            "account",
+            r#"balance: amount ?? $("<missing>")->withError("Field 'amount' was not found")"#,
+        );
+
+        let mapped = map_response(
+            &connector,
+            &json!({ "id": "acct-1" }),
+            key,
+            IndexMap::default(),
+            Vec::new(),
+        );
+
+        let problems = mapped.problems().to_vec();
+
+        let mut data = Map::new();
+        let mut errors = Vec::new();
+        mapped.add_to_data(&mut data, &mut errors, 1).unwrap();
+
+        assert_eq!(errors.len(), 1, "{spec:?} must surface declared errors");
+        assert_eq!(errors[0].message, "Field 'amount' was not found");
+        assert!(
+            problems
+                .iter()
+                .any(|problem| problem.message == "Field 'amount' was not found"),
+            "the message should still reach the debugger",
+        );
+    }
+
+    /// Every declared error is reported, however many there are. The feature
+    /// exists so an author can record every defect they find, so truncating
+    /// would quietly defeat the thing it was asked for — and nothing else in
+    /// the router truncates a response's errors either. Response size is an
+    /// operator policy, set upstream via the `http_max_response_size` connector
+    /// limit, not a constant hidden in the mapping layer.
+    #[test]
+    fn declared_errors_are_not_truncated() {
+        let connector = make_connector(None, ConnectSpec::V0_5);
+        let key = root_field_key_with_selection(
+            "rows",
+            r#"$.rows->map(@.code->withError("bad code:", @))"#,
+        );
+
+        let row_count = 500;
+        let rows = (0..row_count)
+            .map(|index| json!({ "code": index }))
+            .collect::<Vec<_>>();
+
+        let mapped = map_response(
+            &connector,
+            &json!({ "rows": rows }),
+            key,
+            IndexMap::default(),
+            Vec::new(),
+        );
+
+        let mut data = Map::new();
+        let mut errors = Vec::new();
+        mapped.add_to_data(&mut data, &mut errors, 1).unwrap();
+
+        assert_eq!(errors.len(), row_count);
+        // And each one still names its own element, rather than the last few
+        // being summarized away.
+        assert_eq!(errors[0].path, "rows/0");
+        assert_eq!(
+            errors[row_count - 1].path,
+            format!("rows/{}", row_count - 1)
+        );
+    }
+
+    /// Declared errors from a `->map` stay one-per-element rather than being
+    /// collapsed by message the way mapping problems are, and each keeps the
+    /// element it came from in `connector.selectionPath`. This is the reason
+    /// they are capped rather than aggregated: aggregation groups array
+    /// indices together under `@`, which would erase exactly this.
+    #[test]
+    fn declared_errors_from_a_list_are_not_collapsed_by_message() {
+        let connector = make_connector(None, ConnectSpec::V0_5);
+        let key = root_field_key_with_selection(
+            "rows",
+            r#"$.rows->map(@.code->withError("bad code:", @))"#,
+        );
+
+        let mapped = map_response(
+            &connector,
+            &json!({ "rows": [{ "code": 7 }, { "code": 7 }] }),
+            key,
+            IndexMap::default(),
+            Vec::new(),
+        );
+
+        let mut data = Map::new();
+        let mut errors = Vec::new();
+        mapped.add_to_data(&mut data, &mut errors, 1).unwrap();
+
+        // Identical messages, still two errors — aggregation would have made
+        // this one problem with a count of 2.
+        assert_eq!(errors.len(), 2);
+        assert_eq!(errors[0].message, "bad code: 7");
+        assert_eq!(errors[1].message, "bad code: 7");
+
+        // And each one still says which element it came from.
+        let selection_paths = errors
+            .iter()
+            .map(|error| {
+                error
+                    .extensions()
+                    .get("connector")
+                    .and_then(|connector| connector.as_object()?.get("selectionPath"))
+                    .cloned()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            selection_paths,
+            vec![Some(json!("rows.0.code")), Some(json!("rows.1.code"))],
+        );
+    }
+
     // CNN-564: when schema declares a list field but API returns a single object,
     // check_response_shape must return an error instead of silently passing through
     // the wrong-shaped data (which the router would null without explanation).
@@ -1064,6 +1614,7 @@ mod tests {
             data: json!({"id": 1, "title": "First"}),
             key,
             problems: vec![],
+            errors: vec![],
         };
 
         let result = super::check_response_shape(&connector, response);
@@ -1089,6 +1640,7 @@ mod tests {
             data: json!([{"id": 1}, {"id": 2}]),
             key,
             problems: vec![],
+            errors: vec![],
         };
 
         let result = super::check_response_shape(&connector, response);
@@ -1114,6 +1666,7 @@ mod tests {
             data: Value::Null,
             key,
             problems: vec![],
+            errors: vec![],
         };
 
         let result = super::check_response_shape(&connector, response);
@@ -1135,6 +1688,7 @@ mod tests {
             data: json!([{"id": 1}, {"id": 2}]),
             key,
             problems: vec![],
+            errors: vec![],
         };
 
         let result = super::check_response_shape(&connector, response);
@@ -1157,6 +1711,7 @@ mod tests {
             data: Value::Null,
             key,
             problems: vec![],
+            errors: vec![],
         };
 
         let result = super::check_response_shape(&connector, response);
@@ -1183,6 +1738,7 @@ mod tests {
             data: json!({"id": 1, "title": "First"}),
             key,
             problems: vec![],
+            errors: vec![],
         };
 
         let result = super::check_response_shape(&connector, response);
