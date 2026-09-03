@@ -18,7 +18,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 📚 Documentation
 -->
 
-# [2.18.x](unreleased) - Unreleased
+# [2.16.x](unreleased) - Unreleased
 
 ## 🚀 Features
 
