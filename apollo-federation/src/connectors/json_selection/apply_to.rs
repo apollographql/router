@@ -809,7 +809,11 @@ impl ApplyToInternal for WithRange<PathList> {
         // so they can be reapplied to whatever the structural recursion below
         // produces. A pure error (case == Unknown carrying error metadata) has
         // no partial structure to drive shape computation, so we short-circuit
-        // and return it as-is.
+        // and return it as-is. Note: this collapses the distinction between
+        // error_with_partial(msg, Unknown) and error(msg) — both early-return
+        // here — so if a future call site constructs the former and expects
+        // tail computation through the Unknown partial, this path will need
+        // refinement.
         let pending_errors: Vec<(String, Vec<Location>)> = if input_shape.has_own_errors() {
             if matches!(input_shape.case(), ShapeCase::Unknown) {
                 return input_shape;
@@ -1452,7 +1456,7 @@ impl SubSelection {
         }
 
         if all_shape.is_unknown() {
-            Shape::any_object(locations)
+            Shape::empty_object(locations)
         } else {
             all_shape
         }
@@ -4086,7 +4090,7 @@ mod tests {
     fn test_compute_output_shape() {
         let spec = ConnectSpec::V0_3;
 
-        assert_eq!(selection!("", spec).shape().pretty_print(), "{...}");
+        assert_eq!(selection!("", spec).shape().pretty_print(), "{}");
 
         assert_eq!(
             selection!("id name", spec).shape().pretty_print(),
