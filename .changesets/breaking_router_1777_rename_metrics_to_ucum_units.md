@@ -14,10 +14,6 @@ Renamed metrics (Prometheus names):
 | `apollo_router_query_planning_warmup_duration` | `apollo_router_query_planning_warmup_duration_seconds` |
 | `apollo_router_schema_load_duration` | `apollo_router_schema_load_duration_seconds` |
 | `apollo_router_uplink_fetch_duration_seconds` | `apollo_router_uplink_fetch_duration_seconds` (Prometheus output unchanged; the underlying OTel metric name changes from `apollo.router.uplink.fetch.duration.seconds` to `apollo.router.uplink.fetch.duration`, which matters for OTLP consumers) |
-| `apollo_router_operations_fetch_request_size_total` | `apollo_router_operations_fetch_request_size_bytes_total` |
-| `apollo_router_operations_fetch_response_size_total` | `apollo_router_operations_fetch_response_size_bytes_total` |
-| `apollo_router_operations_request_size_total` | `apollo_router_operations_request_size_bytes_total` |
-| `apollo_router_operations_response_size_total` | `apollo_router_operations_response_size_bytes_total` |
 | `apollo_router_operations_file_uploads_file_size` | `apollo_router_operations_file_uploads_file_size_bytes` |
 
 **Action required:** update dashboards, alerts, and recording rules that reference the legacy names above. See the [router 3.x upgrade guide](https://www.apollographql.com/docs/graphos/routing/upgrade/from-router-v2#renamed-prometheus-metrics) for the full mapping.
