@@ -12,7 +12,6 @@ use serde::Serialize;
 use serde::ser::SerializeSeq;
 
 use crate::error::FederationError;
-use crate::operation::ArgumentList;
 use crate::operation::DirectiveList;
 use crate::operation::Selection;
 use crate::operation::SelectionId;
@@ -38,8 +37,6 @@ pub(crate) enum SelectionKey<'a> {
         response_name: &'a Name,
         /// directives applied on the field
         directives: &'a DirectiveList,
-        /// arguments applied on the field
-        arguments: &'a ArgumentList,
     },
     FragmentSpread {
         /// The name of the fragment.
@@ -67,11 +64,9 @@ impl SelectionKey<'_> {
             Self::Field {
                 response_name,
                 directives,
-                arguments,
             } => OwnedSelectionKey::Field {
                 response_name: response_name.clone(),
                 directives: directives.clone(),
-                arguments: arguments.clone(),
             },
             Self::FragmentSpread {
                 fragment_name,
@@ -99,7 +94,6 @@ pub(crate) enum OwnedSelectionKey {
     Field {
         response_name: Name,
         directives: DirectiveList,
-        arguments: ArgumentList,
     },
     FragmentSpread {
         fragment_name: Name,
@@ -121,11 +115,9 @@ impl OwnedSelectionKey {
             OwnedSelectionKey::Field {
                 response_name,
                 directives,
-                arguments,
             } => SelectionKey::Field {
                 response_name,
                 directives,
-                arguments,
             },
             OwnedSelectionKey::FragmentSpread {
                 fragment_name,
@@ -155,12 +147,10 @@ impl<'a> SelectionKey<'a> {
     /// This is available for tests only as selection keys should not normally be created outside of
     /// `HasSelectionKey::key`.
     pub(crate) fn field_name(name: &'a Name) -> Self {
-        static EMPTY_DIRECTIVES: DirectiveList = DirectiveList::new();
-        static EMPTY_ARGUMENTS: ArgumentList = ArgumentList::new();
+        static EMPTY_LIST: DirectiveList = DirectiveList::new();
         SelectionKey::Field {
             response_name: name,
-            directives: &EMPTY_DIRECTIVES,
-            arguments: &EMPTY_ARGUMENTS,
+            directives: &EMPTY_LIST,
         }
     }
 }
