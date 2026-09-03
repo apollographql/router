@@ -108,7 +108,7 @@ pub enum FetchProtocol {
     #[default]
     GraphQL,
     /// Connector-based fetch (REST, etc.). The coordinate string identifies
-    /// the connector (e.g., "subgraph:Type.field[0]") for execution-layer
+    /// the connector (e.g., `subgraph:Type.field[0]`) for execution-layer
     /// lookup.
     Connector { coordinate: String },
 }
