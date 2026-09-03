@@ -726,9 +726,17 @@ impl FieldRoutingSearchSpace {
         Ok(options)
     }
 
-    /// Options for a field: the direct edge (if any) plus key hops, which
-    /// are enumerated alongside a viable direct edge because hopping early
-    /// can beat hopping per-child later.
+    /// Options for a field selection: the direct edge (if any) plus every
+    /// cross-subgraph key hop. Hops are enumerated even when a viable direct
+    /// edge exists, because hopping early can be cheaper than hopping per-child
+    /// later. Ranking keeps the direct edge first, so a greedy pass that later
+    /// strands a descendant relies on BULB backtracking to revisit the hop.
+    ///
+    /// At an abstract-type position, per-concrete-type explosion is always a
+    /// genuine alternative: a direct interface-level edge whose target strands
+    /// a descendant is otherwise a forced commit with no decision point to
+    /// backtrack into. Enumerating it (ranked last via Fallback preference)
+    /// makes the escape a normal search decision.
     pub(super) fn field_options(
         &self,
         pending: &PendingSelection,
@@ -761,6 +769,10 @@ impl FieldRoutingSearchSpace {
             &mut options,
             |key_target| self.edge_for_field(key_target, &field_selection.field),
         )?;
+
+        if !options.is_empty() && self.node_type_is_abstract(pending.query_graph_node)? {
+            options.push(RoutingChoice::fallback(RoutingTarget::TypeExplosion));
+        }
 
         Ok(options)
     }
