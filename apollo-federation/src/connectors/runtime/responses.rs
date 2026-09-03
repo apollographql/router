@@ -20,11 +20,11 @@ use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
 use crate::connectors::ApplyToError;
+use crate::connectors::ApplyToErrorKind;
 use crate::connectors::ConnectSpec;
 use crate::connectors::Connector;
 use crate::connectors::JSONSelection;
 use crate::connectors::ProblemLocation;
-use crate::connectors::json_selection::ApplyToErrorKind;
 use crate::connectors::runtime::errors::RuntimeError;
 use crate::connectors::runtime::inputs::ContextReader;
 use crate::connectors::runtime::key::ResponseKey;
