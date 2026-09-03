@@ -96,7 +96,7 @@ impl FieldRoutingSearchSpace {
             };
         }
 
-        let qg = &self.cached_query_graph.query_graph;
+        let qg = self.qg();
         let (_, target_qg_node) = qg.edge_endpoints(choice.edge_index())?;
 
         // Reject unexpected edge transitions before any mutation, so a
@@ -168,7 +168,7 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         choice: &RoutingChoice,
     ) -> Result<(NodeIndex, EdgeIndex), FederationError> {
-        let qg = &self.cached_query_graph.query_graph;
+        let qg = self.qg();
         trace!(
             target_subgraph = %choice.target_subgraph(),
             "committing root type resolution hop",
@@ -203,7 +203,7 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         choice: &RoutingChoice,
     ) -> Result<(NodeIndex, EdgeIndex), FederationError> {
-        let qg = &self.cached_query_graph.query_graph;
+        let qg = self.qg();
         trace!(
             target_subgraph = %choice.target_subgraph(),
             selection = %selection_label(&pending.selection),
@@ -361,7 +361,7 @@ impl FieldRoutingSearchSpace {
         first_group: NodeIndex,
         merge_at: Vec<FetchDataPathElement>,
     ) -> Result<(NodeIndex, EdgeIndex), FederationError> {
-        let qg = &self.cached_query_graph.query_graph;
+        let qg = self.qg();
         let mut prev_group = first_group;
 
         for (i, hop) in choice.intermediate_key_hops.iter().enumerate() {
@@ -571,7 +571,7 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         choice: &RoutingChoice,
     ) -> Result<NodeIndex, FederationError> {
-        let qg = &self.cached_query_graph.query_graph;
+        let qg = self.qg();
         let current_node_data = qg.node_weight(pending.query_graph_node)?;
         if matches!(
             current_node_data.type_,
@@ -600,7 +600,7 @@ impl FieldRoutingSearchSpace {
         edge_index: EdgeIndex,
         selection: &Selection,
     ) -> Result<Option<Vec<FetchDataPathElement>>, FederationError> {
-        let qg = &self.cached_query_graph.query_graph;
+        let qg = self.qg();
         let edge = qg.edge_weight(edge_index)?;
         match &edge.transition {
             QueryGraphEdgeTransition::FieldCollection {
@@ -646,7 +646,7 @@ impl FieldRoutingSearchSpace {
         fetch_node: NodeIndex,
         response_path_elements: Vec<FetchDataPathElement>,
     ) -> Result<CommitTarget, FederationError> {
-        let qg = &self.cached_query_graph.query_graph;
+        let qg = self.qg();
         let op_path = match hop {
             // Hops restart the op path at the new group's root: empty for
             // root hops; for key hops, `... on <ConcreteType>` (entity
