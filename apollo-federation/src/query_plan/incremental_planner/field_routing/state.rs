@@ -165,6 +165,13 @@ pub(crate) struct PlanState {
     /// Fields dropped for lack of routing options. Heavily penalized in
     /// `cost()` so BULB backtracks to explore alternatives.
     pub(crate) dropped_fields: usize,
+    /// Type-explosion or fragment-restructuring commits applied. These
+    /// decompose abstract types into per-concrete-type fragments, deferring
+    /// real fetch cost to later decisions. The probe (apply → cost →
+    /// rollback) sees them as free, so without a penalty BULB chases them
+    /// eagerly, creating combinatorial blowup on wide interfaces. Penalized
+    /// in `cost()` above any structural cost but below drops.
+    pub(crate) type_explosions: usize,
     /// Monotonic count of pending-stack pushes over the whole search,
     /// including rolled-back work. Every unit of planning effort flows
     /// through `push_pending`, so this tracks wall time far more tightly
@@ -189,6 +196,7 @@ pub(crate) struct PlanCheckpoint {
     graph_cp: usize,
     pending_cp: usize,
     dropped_fields: usize,
+    type_explosions: usize,
 }
 
 impl PlanState {
@@ -202,6 +210,7 @@ impl PlanState {
             pending: pending.into_iter().map(Arc::new).collect(),
             pending_undo: Vec::new(),
             dropped_fields: 0,
+            type_explosions: 0,
             effort: 0,
             forced_backtracks: 0,
             condition_alias_ids: BTreeMap::new(),
@@ -238,6 +247,7 @@ impl PlanState {
             graph_cp: self.graph.checkpoint(),
             pending_cp: self.pending_undo.len(),
             dropped_fields: self.dropped_fields,
+            type_explosions: self.type_explosions,
         }
     }
 
@@ -259,5 +269,6 @@ impl PlanState {
             }
         }
         self.dropped_fields = cp.dropped_fields;
+        self.type_explosions = cp.type_explosions;
     }
 }
