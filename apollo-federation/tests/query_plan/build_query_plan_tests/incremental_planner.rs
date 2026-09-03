@@ -1540,3 +1540,80 @@ fn inc_requires_routes_condition_via_key_hop() {
     "###
     );
 }
+
+// The user requests a parameterized field with one set of arguments while a
+// sibling's @requires needs the same field with different arguments. The
+// condition copy must carry a __require_N_ alias so it doesn't collide with
+// the user's selection. Without the alias the planner merges both into one
+// fetch and produces invalid GraphQL ("conflicting field arguments").
+// Reproduces the customer issue in TSH-23186.
+#[test]
+fn inc_user_field_argument_conflict_with_requires_condition() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Query {
+            t: T
+        }
+
+        type T @key(fields: "id") {
+            id: ID!
+            p(arg: Int): Int
+        }
+        "#,
+        Subgraph2: r#"
+        type T @key(fields: "id") {
+            id: ID!
+            p(arg: Int): Int @external
+            x: Int @requires(fields: "p(arg: 1)")
+        }
+        "#,
+    );
+    // validate_correctness = false: the correctness checker's KeyRenamer
+    // doesn't yet handle the case where the rename target (`p`) already
+    // exists with different arguments.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+        {
+            t {
+                p(arg: 2)
+                x
+            }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            t {
+              __typename
+              p(arg: 2)
+              id
+              __require_0_p: p(arg: 1)
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_p: p
+              }
+            } =>
+            {
+              ... on T {
+                x
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
