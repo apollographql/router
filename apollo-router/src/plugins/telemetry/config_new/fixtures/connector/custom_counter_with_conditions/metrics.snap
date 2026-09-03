@@ -25,6 +25,17 @@ info:
                     - user_api
                     - connector_source: name
 ---
+- name: apollo.router.operations.fetch.duration
+  description: Duration of a subgraph fetch.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 2
+        attributes:
+          connector.source: user_api
+          has_errors: false
+          subgraph.name: users
 - name: not.found.count
   description: Count of 404 responses from the user API
   unit: count

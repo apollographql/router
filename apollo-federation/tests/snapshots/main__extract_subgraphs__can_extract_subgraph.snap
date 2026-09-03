@@ -1,5 +1,6 @@
 ---
 source: apollo-federation/tests/extract_subgraphs.rs
+assertion_line: 104
 expression: snapshot
 ---
 Subgraph1: https://Subgraph1
@@ -165,6 +166,11 @@ enum E {
   V2
 }
 
+type Query {
+  _entities(representations: [_Any!]!): [_Entity]!
+  _service: _Service!
+}
+
 type T @key(fields: "k") {
   k: ID @shareable
   a: Int
@@ -178,8 +184,3 @@ type _Service {
 }
 
 union _Entity = T
-
-type Query {
-  _entities(representations: [_Any!]!): [_Entity]!
-  _service: _Service!
-}
