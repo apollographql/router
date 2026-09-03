@@ -303,6 +303,19 @@ pub enum CompositionError {
 }
 
 impl CompositionError {
+    /// Converts a `FederationError` into merge errors, preserving each underlying error's code
+    /// rather than collapsing it into a generic internal error.
+    pub fn from_federation_error(error: FederationError) -> Vec<Self> {
+        error
+            .into_errors()
+            .into_iter()
+            .map(|error| Self::MergeError {
+                error,
+                locations: Vec::new(),
+            })
+            .collect()
+    }
+
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::ConnectorsValidationError { code, .. } => ErrorCode::ConnectorsValidation(*code),
