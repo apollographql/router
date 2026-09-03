@@ -68,6 +68,7 @@ mime = "0.3.17"
 diff = "0.1.13"
 hex.workspace = true
 insta.workspace = true
+proptest.workspace = true
 sha1.workspace = true
 similar.workspace = true
 tempfile.workspace = true

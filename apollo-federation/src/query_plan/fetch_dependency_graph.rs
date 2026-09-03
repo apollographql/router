@@ -5854,4 +5854,852 @@ mod tests {
             graph.reduced_defer_edges
         );
     }
+
+    // =========================================================================================
+    // Sentinel 1 (proptest-graph-notes.md, "Graph PR 1"): FetchDependencyGraph mutation and
+    // reduction model.
+    //
+    // `DagCommand` drives a `FetchDependencyGraph` through its own private mutation methods
+    // (`new_node`, `add_parent`, `remove_node`, `retain_nodes`, `reduce`,
+    // `remove_redundant_edges`), while `DagModel` performs the same mutation against a naive,
+    // independently-written in-memory graph (plain BFS/DFS reachability, no Petgraph transitive
+    // reduction). After every command, `audit_dag_matches_model` recomputes every fact the
+    // production graph caches — the edge set, acyclicity, `is_reduced`/`is_optimized`, and the
+    // `reduced_defer_edges` ledger — from the model's own state and compares it to production.
+    //
+    // Node identity is the production `NodeIndex` itself (`StableDiGraph` reuses freed indices,
+    // so a node's `NodeIndex` is not proof of insertion order). A separate monotonic `rank` is
+    // assigned at creation and used only to orient generated edges low-rank -> high-rank, which
+    // guarantees every generated trace stays acyclic without ever needing to reject a command.
+    // =========================================================================================
+
+    use proptest::prelude::*;
+    use proptest::proptest;
+    use proptest::test_runner::TestCaseError;
+
+    /// Only the two subgraphs the shared test fixture (`TEST_SUPERGRAPH_SDL`) defines.
+    const DAG_TEST_SUBGRAPHS: [&str; 2] = ["Subgraph1", "Subgraph2"];
+
+    /// Deliberate adversarial shapes from proptest-graph-notes.md's "Required adversarial
+    /// shapes" list (the topology-relevant subset; the rest — mergeable siblings, nested
+    /// `@requires`, interface/union restrictions, list-of-list paths — need selection/input
+    /// payloads that are out of scope for this topology-only harness). Each shape is applied as
+    /// an atomic unit using freshly-created nodes, so it composes with arbitrary surrounding
+    /// commands regardless of where in the trace it lands.
+    #[derive(Debug, Clone, Copy)]
+    enum DagShape {
+        /// A -> B -> C.
+        Chain,
+        /// A -> B -> C, plus a redundant direct A -> C.
+        Shortcut,
+        /// A -> B, A -> C, B -> D, C -> D: no edge here is individually redundant.
+        Diamond,
+        /// A diamond plus a redundant direct A -> D.
+        DiamondWithShortcut,
+        /// A -> M, B -> M, M -> X, M -> Y: multiple roots into a shared middle, fanning back out.
+        BowTie,
+        /// A bow tie plus a redundant direct A -> X.
+        BowTieWithShortcut,
+        /// A(primary) -> B(primary) -> C(deferred), plus a direct A -> C shortcut that crosses
+        /// the defer boundary and must be reduced-defer-ledgered rather than just dropped.
+        DeferCrossingShortcut,
+        /// Remove an existing live node (if any), then add two fresh nodes and connect them —
+        /// the new nodes are likely to reuse the freed `NodeIndex` slot.
+        StableIndexHole,
+    }
+
+    fn dag_shape_strategy() -> impl Strategy<Value = DagShape> {
+        prop_oneof![
+            Just(DagShape::Chain),
+            Just(DagShape::Shortcut),
+            Just(DagShape::Diamond),
+            Just(DagShape::DiamondWithShortcut),
+            Just(DagShape::BowTie),
+            Just(DagShape::BowTieWithShortcut),
+            Just(DagShape::DeferCrossingShortcut),
+            Just(DagShape::StableIndexHole),
+        ]
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    enum DagCommand {
+        AddNode {
+            subgraph: u8,
+            defer_group: Option<u8>,
+        },
+        AddParent {
+            parent: u16,
+            child: u16,
+        },
+        RemoveNode {
+            node: u16,
+        },
+        RetainByMask {
+            mask: u32,
+        },
+        Reduce,
+        ReduceFrom {
+            node: u16,
+        },
+        /// Deliberately construct one of the required adversarial shapes above, using freshly
+        /// created nodes (`StableIndexHole` additionally consumes `victim` to pick a node to
+        /// remove first).
+        Shape {
+            shape: DagShape,
+            subgraph_seed: u8,
+            defer_seed: u8,
+            victim: u16,
+        },
+    }
+
+    fn dag_defer_group_strategy() -> impl Strategy<Value = Option<u8>> {
+        prop_oneof![
+            3 => Just(None),
+            7 => (0u8..4).prop_map(Some),
+        ]
+    }
+
+    fn dag_command_strategy() -> impl Strategy<Value = DagCommand> {
+        prop_oneof![
+            2 => (any::<u8>(), dag_defer_group_strategy())
+                .prop_map(|(subgraph, defer_group)| DagCommand::AddNode {
+                    subgraph,
+                    defer_group
+                }),
+            4 => (any::<u16>(), any::<u16>())
+                .prop_map(|(parent, child)| DagCommand::AddParent { parent, child }),
+            1 => any::<u16>().prop_map(|node| DagCommand::RemoveNode { node }),
+            1 => any::<u32>().prop_map(|mask| DagCommand::RetainByMask { mask }),
+            2 => Just(DagCommand::Reduce),
+            1 => any::<u16>().prop_map(|node| DagCommand::ReduceFrom { node }),
+            // Weighted so that, combined with the usual 0..40 trace length, the overwhelming
+            // majority of generated traces contain at least one deliberate adversarial shape —
+            // comfortably above the notes' "at least half" floor — while `AddNode`/`AddParent`
+            // above still generate general, unstructured valid DAGs the rest of the time.
+            6 => (dag_shape_strategy(), any::<u8>(), any::<u8>(), any::<u16>()).prop_map(
+                |(shape, subgraph_seed, defer_seed, victim)| DagCommand::Shape {
+                    shape,
+                    subgraph_seed,
+                    defer_seed,
+                    victim,
+                }
+            ),
+        ]
+    }
+
+    fn dag_command_trace_strategy() -> impl Strategy<Value = Vec<DagCommand>> {
+        prop::collection::vec(dag_command_strategy(), 0..40)
+    }
+
+    /// Naive reference model for `FetchDependencyGraph`'s topology. Deliberately independent of
+    /// every production algorithm: no `dag_transitive_reduction_closure`, no incremental
+    /// bookkeeping, just plain graph traversal recomputed from scratch each time.
+    #[derive(Default)]
+    struct DagModel {
+        live: IndexSet<NodeIndex>,
+        rank: IndexMap<NodeIndex, u64>,
+        defer_group: IndexMap<NodeIndex, Option<u8>>,
+        edges: IndexSet<(NodeIndex, NodeIndex)>,
+        /// Mirrors `FetchDependencyGraph::reduced_defer_edges`. Compared as a multiset: per the
+        /// sprint decision log, internal duplicates are not (yet) known to be a contract
+        /// violation, only the externally-collected dependency set is.
+        ledger: Vec<(NodeIndex, NodeIndex)>,
+        next_rank: u64,
+        is_reduced: bool,
+    }
+
+    impl DagModel {
+        fn sorted_live(&self) -> Vec<NodeIndex> {
+            let mut nodes: Vec<NodeIndex> = self.live.iter().copied().collect();
+            nodes.sort_by_key(|n| n.index());
+            nodes
+        }
+
+        /// Choice-by-modulo selection of a currently-live node (see proptest-graph-notes.md).
+        fn pick(&self, choice: u16) -> Option<NodeIndex> {
+            let sorted = self.sorted_live();
+            if sorted.is_empty() {
+                None
+            } else {
+                Some(sorted[choice as usize % sorted.len()])
+            }
+        }
+
+        fn children(&self, node: NodeIndex) -> impl Iterator<Item = NodeIndex> + '_ {
+            self.edges
+                .iter()
+                .filter(move |&&(source, _)| source == node)
+                .map(|&(_, target)| target)
+        }
+
+        /// Nodes reachable from `start` via a path of length >= 1 (proper descendants).
+        fn descendants(&self, start: NodeIndex) -> IndexSet<NodeIndex> {
+            let mut visited = IndexSet::default();
+            let mut stack: Vec<NodeIndex> = self.children(start).collect();
+            while let Some(node) = stack.pop() {
+                if visited.insert(node) {
+                    stack.extend(self.children(node));
+                }
+            }
+            visited
+        }
+
+        /// Whether `target` remains reachable from `source` using every edge except `excluded`.
+        fn reachable_excluding(
+            &self,
+            source: NodeIndex,
+            target: NodeIndex,
+            excluded: (NodeIndex, NodeIndex),
+        ) -> bool {
+            let mut visited = IndexSet::default();
+            let mut stack = vec![source];
+            while let Some(node) = stack.pop() {
+                for child in self.children(node) {
+                    if (node, child) == excluded {
+                        continue;
+                    }
+                    if child == target {
+                        return true;
+                    }
+                    if visited.insert(child) {
+                        stack.push(child);
+                    }
+                }
+            }
+            false
+        }
+
+        /// Global transitive reduction: an edge is redundant iff its endpoints remain connected
+        /// without it. For a DAG this set is unique, so this is directly comparable to whatever
+        /// edges `dag_transitive_reduction_closure` retains.
+        fn globally_redundant_edges(&self) -> IndexSet<(NodeIndex, NodeIndex)> {
+            self.edges
+                .iter()
+                .copied()
+                .filter(|&(source, target)| {
+                    self.reachable_excluding(source, target, (source, target))
+                })
+                .collect()
+        }
+
+        /// Local reduction restricted to edges leaving `node`, matching
+        /// `FetchDependencyGraph::remove_redundant_edges`: an edge `node -> v` is redundant iff
+        /// `v` is also reachable from `node` via some other direct child (a path of length >= 2).
+        fn locally_redundant_edges_from(
+            &self,
+            node: NodeIndex,
+        ) -> IndexSet<(NodeIndex, NodeIndex)> {
+            let mut reachable_via_other_child = IndexSet::default();
+            for child in self.children(node).collect::<Vec<_>>() {
+                reachable_via_other_child.extend(self.descendants(child));
+            }
+            self.children(node)
+                .filter(|target| reachable_via_other_child.contains(target))
+                .map(|target| (node, target))
+                .collect()
+        }
+
+        /// Mirrors `record_reduced_defer_edges`: only cross-defer-boundary edges are ledgered.
+        fn record_ledger(&mut self, removed: &IndexSet<(NodeIndex, NodeIndex)>) {
+            for &(source, target) in removed {
+                if self.defer_group[&source] != self.defer_group[&target] {
+                    self.ledger.push((source, target));
+                }
+            }
+        }
+
+        /// Mirrors the lockstep cleanup in `remove_node`/`retain_nodes`.
+        fn drop_node(&mut self, node: NodeIndex) {
+            self.live.shift_remove(&node);
+            self.rank.shift_remove(&node);
+            self.defer_group.shift_remove(&node);
+            self.edges.retain(|&(s, t)| s != node && t != node);
+            self.ledger.retain(|&(s, t)| s != node && t != node);
+        }
+    }
+
+    /// Apply one command to both the production graph and the reference model. Every branch
+    /// documents which production `on_modification`/flag behavior it is mirroring.
+    fn apply_dag_command(
+        graph: &mut FetchDependencyGraph,
+        model: &mut DagModel,
+        command: &DagCommand,
+    ) {
+        match *command {
+            DagCommand::AddNode {
+                subgraph,
+                defer_group,
+            } => {
+                let subgraph_name =
+                    DAG_TEST_SUBGRAPHS[subgraph as usize % DAG_TEST_SUBGRAPHS.len()];
+                let defer_ref = defer_group.map(|g| format!("d{g}"));
+                let node = add_test_node(graph, subgraph_name, defer_ref.as_deref());
+                model.live.insert(node);
+                model.rank.insert(node, model.next_rank);
+                model.next_rank += 1;
+                model.defer_group.insert(node, defer_group);
+                // `new_node` unconditionally calls `on_modification`.
+                model.is_reduced = false;
+            }
+            DagCommand::AddParent { parent, child } => {
+                let (Some(a), Some(b)) = (model.pick(parent), model.pick(child)) else {
+                    return;
+                };
+                if a == b {
+                    // A self-relation: production's descendant assert would fire on this, so
+                    // there is no valid interpretation other than skipping (a no-op trace entry).
+                    return;
+                }
+                // Only ever add low-rank -> high-rank edges, so the trace can never build a
+                // cycle even after `StableDiGraph` reuses a freed `NodeIndex`.
+                let (lo, hi) = if model.rank[&a] < model.rank[&b] {
+                    (a, b)
+                } else {
+                    (b, a)
+                };
+                if model.edges.contains(&(lo, hi)) {
+                    // `add_parent` early-returns via `contains_edge` without calling
+                    // `on_modification`.
+                    return;
+                }
+                graph.add_parent(
+                    hi,
+                    ParentRelation {
+                        parent_node_id: lo,
+                        path_in_parent: None,
+                    },
+                );
+                model.edges.insert((lo, hi));
+                model.is_reduced = false;
+            }
+            DagCommand::RemoveNode { node } => {
+                let Some(node) = model.pick(node) else {
+                    return;
+                };
+                graph.remove_node(node);
+                model.drop_node(node);
+                // `remove_node` unconditionally calls `on_modification`.
+                model.is_reduced = false;
+            }
+            DagCommand::RetainByMask { mask } => {
+                let sorted = model.sorted_live();
+                if sorted.is_empty() {
+                    return;
+                }
+                // Bit `i` of `mask` decides whether to keep the `i`-th live node in index order;
+                // beyond the mask's 32 bits, default to keeping (never shift by >= 32).
+                let keep: IndexSet<NodeIndex> = sorted
+                    .iter()
+                    .enumerate()
+                    .filter(|&(i, _)| i >= 32 || (mask >> i) & 1 == 1)
+                    .map(|(_, &n)| n)
+                    .collect();
+                graph.retain_nodes(|n| keep.contains(n));
+                if keep.len() < sorted.len() {
+                    for &node in &sorted {
+                        if !keep.contains(&node) {
+                            model.drop_node(node);
+                        }
+                    }
+                    // `retain_nodes` only calls `on_modification` when the node count dropped.
+                    model.is_reduced = false;
+                }
+            }
+            DagCommand::Reduce => {
+                if model.is_reduced {
+                    graph.reduce(); // exercises the early-return; no state change expected.
+                    return;
+                }
+                let removed = model.globally_redundant_edges();
+                model.record_ledger(&removed);
+                for edge in &removed {
+                    model.edges.shift_remove(edge);
+                }
+                graph.reduce();
+                model.is_reduced = true;
+            }
+            DagCommand::ReduceFrom { node } => {
+                let Some(node) = model.pick(node) else {
+                    return;
+                };
+                let removed = model.locally_redundant_edges_from(node);
+                model.record_ledger(&removed);
+                graph.remove_redundant_edges(node);
+                for edge in &removed {
+                    model.edges.shift_remove(edge);
+                }
+                if !removed.is_empty() {
+                    // `remove_redundant_edges` only calls `on_modification` when it actually
+                    // removed an edge.
+                    model.is_reduced = false;
+                }
+            }
+            DagCommand::Shape {
+                shape,
+                subgraph_seed,
+                defer_seed,
+                victim,
+            } => apply_dag_shape(graph, model, shape, subgraph_seed, defer_seed, victim),
+        }
+    }
+
+    /// Construct one adversarial shape using freshly created nodes, wired together directly by
+    /// their concrete `NodeIndex` values (no modulo addressing needed, since the nodes are all
+    /// created right here).
+    fn apply_dag_shape(
+        graph: &mut FetchDependencyGraph,
+        model: &mut DagModel,
+        shape: DagShape,
+        subgraph_seed: u8,
+        defer_seed: u8,
+        victim: u16,
+    ) {
+        let subgraph_for = |i: u8| -> &'static str {
+            DAG_TEST_SUBGRAPHS[(subgraph_seed.wrapping_add(i) as usize) % DAG_TEST_SUBGRAPHS.len()]
+        };
+        let add = |graph: &mut FetchDependencyGraph,
+                   model: &mut DagModel,
+                   i: u8,
+                   defer_group: Option<u8>|
+         -> NodeIndex {
+            let defer_ref = defer_group.map(|g| format!("d{g}"));
+            let node = add_test_node(graph, subgraph_for(i), defer_ref.as_deref());
+            model.live.insert(node);
+            model.rank.insert(node, model.next_rank);
+            model.next_rank += 1;
+            model.defer_group.insert(node, defer_group);
+            node
+        };
+        let connect = |graph: &mut FetchDependencyGraph,
+                       model: &mut DagModel,
+                       parent: NodeIndex,
+                       child: NodeIndex| {
+            if model.edges.contains(&(parent, child)) {
+                return;
+            }
+            graph.add_parent(
+                child,
+                ParentRelation {
+                    parent_node_id: parent,
+                    path_in_parent: None,
+                },
+            );
+            model.edges.insert((parent, child));
+        };
+
+        match shape {
+            DagShape::Chain => {
+                let a = add(graph, model, 0, None);
+                let b = add(graph, model, 1, None);
+                let c = add(graph, model, 2, None);
+                connect(graph, model, a, b);
+                connect(graph, model, b, c);
+            }
+            DagShape::Shortcut => {
+                let a = add(graph, model, 0, None);
+                let b = add(graph, model, 1, None);
+                let c = add(graph, model, 2, None);
+                connect(graph, model, a, b);
+                connect(graph, model, b, c);
+                connect(graph, model, a, c);
+            }
+            DagShape::Diamond => {
+                let a = add(graph, model, 0, None);
+                let b = add(graph, model, 1, None);
+                let c = add(graph, model, 2, None);
+                let d = add(graph, model, 3, None);
+                connect(graph, model, a, b);
+                connect(graph, model, a, c);
+                connect(graph, model, b, d);
+                connect(graph, model, c, d);
+            }
+            DagShape::DiamondWithShortcut => {
+                let a = add(graph, model, 0, None);
+                let b = add(graph, model, 1, None);
+                let c = add(graph, model, 2, None);
+                let d = add(graph, model, 3, None);
+                connect(graph, model, a, b);
+                connect(graph, model, a, c);
+                connect(graph, model, b, d);
+                connect(graph, model, c, d);
+                connect(graph, model, a, d);
+            }
+            DagShape::BowTie => {
+                let a = add(graph, model, 0, None);
+                let b = add(graph, model, 1, None);
+                let m = add(graph, model, 2, None);
+                let x = add(graph, model, 3, None);
+                let y = add(graph, model, 4, None);
+                connect(graph, model, a, m);
+                connect(graph, model, b, m);
+                connect(graph, model, m, x);
+                connect(graph, model, m, y);
+            }
+            DagShape::BowTieWithShortcut => {
+                let a = add(graph, model, 0, None);
+                let b = add(graph, model, 1, None);
+                let m = add(graph, model, 2, None);
+                let x = add(graph, model, 3, None);
+                let y = add(graph, model, 4, None);
+                connect(graph, model, a, m);
+                connect(graph, model, b, m);
+                connect(graph, model, m, x);
+                connect(graph, model, m, y);
+                connect(graph, model, a, x);
+            }
+            DagShape::DeferCrossingShortcut => {
+                let a = add(graph, model, 0, None);
+                let b = add(graph, model, 1, None);
+                let c = add(graph, model, 2, Some(defer_seed % 4));
+                connect(graph, model, a, b);
+                connect(graph, model, b, c);
+                connect(graph, model, a, c);
+            }
+            DagShape::StableIndexHole => {
+                let Some(victim_node) = model.pick(victim) else {
+                    return;
+                };
+                graph.remove_node(victim_node);
+                model.drop_node(victim_node);
+                let a = add(graph, model, 0, None);
+                let b = add(graph, model, 1, None);
+                connect(graph, model, a, b);
+            }
+        }
+        // Every reachable branch above creates at least one node, which unconditionally calls
+        // `on_modification` in production (the early-return branch of `StableIndexHole`, which
+        // makes no production call at all, returns before reaching this line).
+        model.is_reduced = false;
+    }
+
+    /// Recompute every audited fact from `model`'s own state and compare it to `graph`.
+    fn audit_dag_matches_model(
+        graph: &FetchDependencyGraph,
+        model: &DagModel,
+    ) -> Result<(), TestCaseError> {
+        // 1. Live node sets correspond exactly.
+        let mut production_nodes: Vec<usize> =
+            graph.graph.node_indices().map(|n| n.index()).collect();
+        production_nodes.sort_unstable();
+        let mut model_nodes: Vec<usize> = model.live.iter().map(|n| n.index()).collect();
+        model_nodes.sort_unstable();
+        prop_assert_eq!(production_nodes, model_nodes, "live node sets diverged");
+
+        // 2. The production graph must remain acyclic.
+        prop_assert!(
+            petgraph::algo::toposort(&graph.graph, None).is_ok(),
+            "production graph is not acyclic"
+        );
+
+        // 3. Direct edge endpoints match exactly.
+        let mut production_edges: Vec<(usize, usize)> = graph
+            .graph
+            .edge_references()
+            .map(|e| (e.source().index(), e.target().index()))
+            .collect();
+        production_edges.sort_unstable();
+        let mut model_edges: Vec<(usize, usize)> = model
+            .edges
+            .iter()
+            .map(|&(s, t)| (s.index(), t.index()))
+            .collect();
+        model_edges.sort_unstable();
+        prop_assert_eq!(production_edges, model_edges, "edge sets diverged");
+
+        // 4. `is_reduced`/`is_optimized` match the model's invalidation state. This harness never
+        // calls `reduce_and_optimize`, so `is_optimized` should never become true.
+        prop_assert_eq!(graph.is_reduced, model.is_reduced, "is_reduced diverged");
+        prop_assert!(!graph.is_optimized, "is_optimized unexpectedly set");
+
+        // 5. If reduced, every retained edge must be indispensable.
+        if model.is_reduced {
+            let redundant = model.globally_redundant_edges();
+            prop_assert!(
+                redundant.is_empty(),
+                "reduced graph retains a redundant edge: {redundant:?}"
+            );
+        }
+
+        // 6. `reduced_defer_edges` ledger, compared as a multiset.
+        let mut production_ledger: Vec<(usize, usize)> = graph
+            .reduced_defer_edges
+            .iter()
+            .map(|&(s, t)| (s.index(), t.index()))
+            .collect();
+        production_ledger.sort_unstable();
+        let mut model_ledger: Vec<(usize, usize)> = model
+            .ledger
+            .iter()
+            .map(|&(s, t)| (s.index(), t.index()))
+            .collect();
+        model_ledger.sort_unstable();
+        prop_assert_eq!(
+            production_ledger,
+            model_ledger,
+            "reduced_defer_edges ledger diverged"
+        );
+
+        // 7. Every ledger entry refers to a live node.
+        for &(s, t) in &graph.reduced_defer_edges {
+            prop_assert!(model.live.contains(&s), "ledger source {s:?} is not live");
+            prop_assert!(model.live.contains(&t), "ledger target {t:?} is not live");
+        }
+
+        Ok(())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        /// The core sentinel: after every command in a generated trace, the production graph's
+        /// topology, `is_reduced`/`is_optimized` flags, and `reduced_defer_edges` ledger must
+        /// match a naive reference model recomputed from scratch. See "Sentinel 1" in
+        /// proptest-graph-notes.md.
+        #[test]
+        fn fetch_dependency_graph_trace_matches_naive_model(commands in dag_command_trace_strategy()) {
+            let mut graph = make_test_dep_graph();
+            let mut model = DagModel::default();
+            for command in &commands {
+                apply_dag_command(&mut graph, &mut model, command);
+                audit_dag_matches_model(&graph, &model)?;
+            }
+        }
+
+        /// Focused dense-index property: `to_toposorted_adjacency_list`'s rank mapping must round
+        /// trip every edge back to its original `NodeIndex` pair, including across stable-index
+        /// holes left by node removal.
+        #[test]
+        fn toposorted_adjacency_round_trips_edges_with_stable_index_holes(
+            commands in dag_command_trace_strategy()
+        ) {
+            let mut graph = make_test_dep_graph();
+            let mut model = DagModel::default();
+            for command in &commands {
+                apply_dag_command(&mut graph, &mut model, command);
+            }
+
+            let Some((adj, tred_index_of)) = to_toposorted_adjacency_list(&graph.graph) else {
+                // This harness only ever builds a DAG (see the rank-ordering invariant above).
+                return Err(TestCaseError::fail("expected an acyclic graph"));
+            };
+
+            let live_count = tred_index_of.iter().filter(|&&rank| rank != usize::MAX).count();
+            let mut rank_to_node: Vec<Option<NodeIndex>> = vec![None; live_count];
+            for (original_index, &rank) in tred_index_of.iter().enumerate() {
+                if rank != usize::MAX {
+                    rank_to_node[rank] = Some(NodeIndex::new(original_index));
+                }
+            }
+
+            let mut round_tripped: Vec<(usize, usize)> = adj
+                .edge_references()
+                .map(|e| {
+                    let source = rank_to_node[e.source().index()].expect("rank must map back to a node");
+                    let target = rank_to_node[e.target().index()].expect("rank must map back to a node");
+                    (source.index(), target.index())
+                })
+                .collect();
+            round_tripped.sort_unstable();
+
+            let mut actual: Vec<(usize, usize)> = graph
+                .graph
+                .edge_references()
+                .map(|e| (e.source().index(), e.target().index()))
+                .collect();
+            actual.sort_unstable();
+
+            prop_assert_eq!(round_tripped, actual);
+        }
+    }
+
+    /// A -> B -> C: transitive reduction of a plain chain must remove nothing.
+    #[test]
+    fn dag_chain_has_no_redundant_edges() {
+        let mut graph = make_test_dep_graph();
+        let a = add_test_node(&mut graph, "Subgraph1", None);
+        let b = add_test_node(&mut graph, "Subgraph2", None);
+        let c = add_test_node(&mut graph, "Subgraph2", None);
+        add_test_edge(&mut graph, a, b);
+        add_test_edge(&mut graph, b, c);
+
+        graph.reduce();
+
+        let mut edges: Vec<(usize, usize)> = graph
+            .graph
+            .edge_references()
+            .map(|e| (e.source().index(), e.target().index()))
+            .collect();
+        edges.sort_unstable();
+        assert_eq!(edges, vec![(a.index(), b.index()), (b.index(), c.index())]);
+        assert!(graph.reduced_defer_edges.is_empty());
+    }
+
+    /// A -> B -> C plus a direct A -> C shortcut: reduce must remove exactly the shortcut.
+    #[test]
+    fn dag_reduce_removes_shortcut_edge() {
+        let mut graph = make_test_dep_graph();
+        let a = add_test_node(&mut graph, "Subgraph1", None);
+        let b = add_test_node(&mut graph, "Subgraph2", None);
+        let c = add_test_node(&mut graph, "Subgraph2", None);
+        add_test_edge(&mut graph, a, b);
+        add_test_edge(&mut graph, b, c);
+        add_test_edge(&mut graph, a, c);
+
+        graph.reduce();
+
+        let mut edges: Vec<(usize, usize)> = graph
+            .graph
+            .edge_references()
+            .map(|e| (e.source().index(), e.target().index()))
+            .collect();
+        edges.sort_unstable();
+        assert_eq!(edges, vec![(a.index(), b.index()), (b.index(), c.index())]);
+        assert!(graph.is_reduced);
+    }
+
+    /// Diamond (A -> B, A -> C, B -> D, C -> D) plus a redundant direct A -> D shortcut: reduce
+    /// must remove only the shortcut, keeping every diamond edge (none of them are individually
+    /// redundant).
+    #[test]
+    fn dag_reduce_keeps_diamond_removes_shortcut() {
+        let mut graph = make_test_dep_graph();
+        let a = add_test_node(&mut graph, "Subgraph1", None);
+        let b = add_test_node(&mut graph, "Subgraph2", None);
+        let c = add_test_node(&mut graph, "Subgraph2", None);
+        let d = add_test_node(&mut graph, "Subgraph1", None);
+        add_test_edge(&mut graph, a, b);
+        add_test_edge(&mut graph, a, c);
+        add_test_edge(&mut graph, b, d);
+        add_test_edge(&mut graph, c, d);
+        add_test_edge(&mut graph, a, d);
+
+        graph.reduce();
+
+        let mut edges: Vec<(usize, usize)> = graph
+            .graph
+            .edge_references()
+            .map(|e| (e.source().index(), e.target().index()))
+            .collect();
+        edges.sort_unstable();
+        let mut expected = vec![
+            (a.index(), b.index()),
+            (a.index(), c.index()),
+            (b.index(), d.index()),
+            (c.index(), d.index()),
+        ];
+        expected.sort_unstable();
+        assert_eq!(edges, expected);
+    }
+
+    /// Bow tie (A -> M, B -> M, M -> X, M -> Y) plus a redundant direct A -> X shortcut: reduce
+    /// must remove only the shortcut.
+    #[test]
+    fn dag_reduce_keeps_bow_tie_removes_shortcut() {
+        let mut graph = make_test_dep_graph();
+        let a = add_test_node(&mut graph, "Subgraph1", None);
+        let b = add_test_node(&mut graph, "Subgraph1", None);
+        let m = add_test_node(&mut graph, "Subgraph2", None);
+        let x = add_test_node(&mut graph, "Subgraph1", None);
+        let y = add_test_node(&mut graph, "Subgraph1", None);
+        add_test_edge(&mut graph, a, m);
+        add_test_edge(&mut graph, b, m);
+        add_test_edge(&mut graph, m, x);
+        add_test_edge(&mut graph, m, y);
+        add_test_edge(&mut graph, a, x);
+
+        graph.reduce();
+
+        let mut edges: Vec<(usize, usize)> = graph
+            .graph
+            .edge_references()
+            .map(|e| (e.source().index(), e.target().index()))
+            .collect();
+        edges.sort_unstable();
+        let mut expected = vec![
+            (a.index(), m.index()),
+            (b.index(), m.index()),
+            (m.index(), x.index()),
+            (m.index(), y.index()),
+        ];
+        expected.sort_unstable();
+        assert_eq!(edges, expected);
+    }
+
+    /// Removing an interior node and adding a new one exercises a stable-index hole: the new
+    /// node reuses the freed `NodeIndex`, and reduction must still behave correctly across it.
+    #[test]
+    fn dag_reduce_across_stable_index_hole() {
+        let mut graph = make_test_dep_graph();
+        let a = add_test_node(&mut graph, "Subgraph1", None);
+        let b = add_test_node(&mut graph, "Subgraph2", None);
+        let c = add_test_node(&mut graph, "Subgraph2", None);
+        graph.remove_node(b);
+        // Reuses `b`'s freed slot; `d.index() == b.index()` is the point of this test.
+        let d = add_test_node(&mut graph, "Subgraph1", None);
+        assert_eq!(d.index(), b.index());
+
+        add_test_edge(&mut graph, a, d);
+        add_test_edge(&mut graph, d, c);
+        add_test_edge(&mut graph, a, c);
+
+        graph.reduce();
+
+        let mut edges: Vec<(usize, usize)> = graph
+            .graph
+            .edge_references()
+            .map(|e| (e.source().index(), e.target().index()))
+            .collect();
+        edges.sort_unstable();
+        assert_eq!(edges, vec![(a.index(), d.index()), (d.index(), c.index())]);
+    }
+
+    /// A(primary) -> B(primary) -> C(deferred), plus a direct A -> C shortcut crossing the defer
+    /// boundary: `reduce` (not just `remove_redundant_edges`) must ledger the shortcut so
+    /// `collect_reduced_defer_dependencies` can still recover the dependency later.
+    #[test]
+    fn dag_reduce_records_defer_crossing_shortcut_in_ledger() {
+        let mut graph = make_test_dep_graph();
+        let a = add_test_node(&mut graph, "Subgraph1", None);
+        let b = add_test_node(&mut graph, "Subgraph2", None);
+        let c = add_test_node(&mut graph, "Subgraph2", Some("defer1"));
+        add_test_edge(&mut graph, a, b);
+        add_test_edge(&mut graph, b, c);
+        add_test_edge(&mut graph, a, c);
+
+        graph.reduce();
+
+        assert_eq!(graph.reduced_defer_edges, vec![(a, c)]);
+    }
+
+    /// Calling `reduce` a second time on an already-reduced graph must be a complete no-op:
+    /// edges, ledger, and flags are all unchanged.
+    #[test]
+    fn dag_reduce_is_idempotent() {
+        let mut graph = make_test_dep_graph();
+        let a = add_test_node(&mut graph, "Subgraph1", None);
+        let b = add_test_node(&mut graph, "Subgraph2", None);
+        let c = add_test_node(&mut graph, "Subgraph2", Some("defer1"));
+        add_test_edge(&mut graph, a, b);
+        add_test_edge(&mut graph, b, c);
+        add_test_edge(&mut graph, a, c);
+
+        graph.reduce();
+        let edges_after_first: Vec<(usize, usize)> = graph
+            .graph
+            .edge_references()
+            .map(|e| (e.source().index(), e.target().index()))
+            .collect();
+        let ledger_after_first = graph.reduced_defer_edges.clone();
+        assert!(graph.is_reduced);
+
+        graph.reduce();
+        let edges_after_second: Vec<(usize, usize)> = graph
+            .graph
+            .edge_references()
+            .map(|e| (e.source().index(), e.target().index()))
+            .collect();
+        assert_eq!(edges_after_first, edges_after_second);
+        assert_eq!(ledger_after_first, graph.reduced_defer_edges);
+        assert!(graph.is_reduced);
+    }
 }
