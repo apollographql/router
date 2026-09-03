@@ -118,14 +118,16 @@ pub(crate) struct OciContent {
 
 #[derive(Debug, Error)]
 pub(crate) enum OciError {
-    #[error("expected oci layer with media type '{0}' not found in manifest")]
-    LayerNotFound(String),
     #[error("oci distribution error: {0}")]
     Distribution(OciDistributionError),
     #[error("oci parsing error: {0}")]
     Parse(oci_client::ParseError),
+    #[error("expected oci layer with media type '{0}' not found in manifest")]
+    LayerNotFound(String),
     #[error("unable to parse layer: {0}")]
     LayerParse(FromUtf8Error),
+    #[error("license identifier not found in OCI manifest annotations: {0}")]
+    LicenseIdNotFound(String),
     #[error("unable to parse license: {0}")]
     LicenseParse(LicenseError),
 }
@@ -135,6 +137,7 @@ const APOLLO_REGISTRY_USERNAME: &str = "apollo-registry";
 const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
 //  Keep in sync with value in mdg-private/monorepo/libs/entitlements/oci/model/src/main/kotlin/apollo/entitlements/oci/model/EntitlementArtifact.kt:15
 const ENTITLEMENT_MEDIA_TYPE: &str = "application/vnd.apollographql.entitlement.v1+jwt";
+const APOLLO_MANIFEST_ENTITLEMENT_ID_ANNOTATION: &str = "com.apollograph.graph.entitlement.id";
 const APOLLO_MANIFEST_LAUNCH_ID_ANNOTATION: &str = "com.apollograph.launch.id";
 
 impl From<oci_client::ParseError> for OciError {
@@ -672,27 +675,60 @@ fn stream_license_from_oci(oci_config: OciConfig) -> impl Stream<Item = Result<L
 
 #[allow(dead_code)]
 async fn fetch_license_oci(oci_config: &OciConfig) -> Result<License, OciError> {
-    let reference: Reference = oci_config.reference.as_str().parse()?;
-    let auth = build_auth(&reference, &oci_config.apollo_key);
+    // Grab the schema ref from the OCI config
+    let schema_reference: Reference = oci_config.reference.as_str().parse()?;
+    let auth = build_auth(&schema_reference, &oci_config.apollo_key);
     let protocol = oci_config.client_protocol();
 
     tracing::debug!(
-        "prepared to fetch license from oci over {:?}, auth anonymous? {:?}",
+        "preparing to fetch license from oci over {:?}, auth anonymous? {:?}",
         protocol,
         auth == RegistryAuth::Anonymous
     );
 
-    match fetch_license_from_reference(
-        &mut Client::new(ClientConfig {
-            protocol,
-            ..Default::default()
-        }),
-        &auth,
-        &reference,
-        Some(oci_config),
-    )
-    .await
-    {
+    // Create a new client for the manifest fetches
+    // We will need to fetch the graph@variant's manifest first, and then
+    // use its identifier to fetch the entitlement's manifest
+    let client = &mut Client::new(ClientConfig {
+        protocol,
+        ..Default::default()
+    });
+
+    // Fetch graph manifest
+    let (graph_manifest, _) =
+        fetch_oci_manifest(client, &auth, &schema_reference, Some(oci_config)).await?;
+
+    let annotations = graph_manifest.annotations;
+
+    let identifier = match &annotations {
+        Some(annotations) => annotations.get(APOLLO_MANIFEST_ENTITLEMENT_ID_ANNOTATION),
+        None => None,
+    }
+    .cloned();
+
+    let identifier = identifier
+        .ok_or_else(|| OciError::LicenseIdNotFound(String::from("entitlement id not found")))?;
+    let license_repository = format!("entitlements/{identifier}");
+    let registry = schema_reference.registry().to_string();
+
+    // Build the license Reference, select the relevant constructor based on the
+    // presence or absence of the tag and digest
+    let license_reference = match (schema_reference.tag(), schema_reference.digest()) {
+        (Some(tag), Some(digest)) => Reference::with_tag_and_digest(
+            registry,
+            license_repository,
+            tag.to_string(),
+            digest.to_string(),
+        ),
+        (Some(tag), None) => Reference::with_tag(registry, license_repository, tag.to_string()),
+        (None, Some(digest)) => {
+            Reference::with_digest(registry, license_repository, digest.to_string())
+        }
+        (None, None) => Reference::with_tag(registry, license_repository, "latest".to_string()),
+    };
+
+    // Fetch the license
+    match fetch_license_from_reference(client, &auth, &license_reference, Some(oci_config)).await {
         Ok(license) => Ok(license),
         Err(err) => {
             tracing::error!("error fetching license from oci registry: {}", err);
@@ -865,6 +901,49 @@ mod tests {
         }
     }
 
+    const TEST_ENTITLEMENT_ID: &str = "test-entitlement-id";
+
+    fn entitlement_annotations(entitlement_id: &str) -> BTreeMap<String, String> {
+        let mut annotations = BTreeMap::new();
+        annotations.insert(
+            APOLLO_MANIFEST_ENTITLEMENT_ID_ANNOTATION.to_string(),
+            entitlement_id.to_string(),
+        );
+        annotations
+    }
+
+    struct GraphManifestWithEntitlement {
+        oci_manifest: OciManifest,
+        manifest_digest: String,
+    }
+
+    /// Build the graph@variant manifest `fetch_license_oci` reads first: it carries
+    /// no schema layer, only the entitlement id annotation used to locate the
+    /// entitlement's own manifest.
+    fn create_graph_manifest_with_entitlement_id(
+        entitlement_id: &str,
+        extra_annotations: Option<BTreeMap<String, String>>,
+    ) -> GraphManifestWithEntitlement {
+        let mut annotations = entitlement_annotations(entitlement_id);
+        if let Some(extra) = extra_annotations {
+            annotations.extend(extra);
+        }
+        let oci_manifest = OciManifest::Image(OciImageManifest {
+            schema_version: 2,
+            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+            config: Default::default(),
+            layers: vec![],
+            subject: None,
+            artifact_type: None,
+            annotations: Some(annotations),
+        });
+        let manifest_digest = calculate_manifest_digest(&oci_manifest);
+        GraphManifestWithEntitlement {
+            oci_manifest,
+            manifest_digest,
+        }
+    }
+
     struct SequentialManifestDigests {
         digests: Mutex<VecDeque<String>>,
     }
@@ -968,7 +1047,44 @@ mod tests {
         layers: Vec<ImageLayer>,
         manifest_annotations: Option<BTreeMap<String, String>>,
     ) -> Reference {
-        let graph_id = "test-graph-id";
+        setup_mocks_with_repository(mock_server, "test-graph-id", layers, manifest_annotations)
+            .await
+    }
+
+    /// Mount the graph@variant manifest (with the entitlement id annotation) and
+    /// the entitlement's own manifest + blob(s), matching the two round trips
+    /// `fetch_license_oci` now makes: it fetches the graph manifest first to
+    /// discover the entitlement id, then fetches the entitlement's manifest
+    /// under the `entitlements/{entitlement_id}` repository. Returns the graph
+    /// `Reference` to point `fetch_license_oci`/`stream_license_from_oci` at.
+    async fn setup_license_mocks(
+        mock_server: &MockServer,
+        entitlement_id: &str,
+        license_layers: Vec<ImageLayer>,
+    ) -> Reference {
+        let graph_reference = setup_mocks_with_repository(
+            mock_server,
+            "test-graph-id",
+            vec![],
+            Some(entitlement_annotations(entitlement_id)),
+        )
+        .await;
+        setup_mocks_with_repository(
+            mock_server,
+            &format!("entitlements/{entitlement_id}"),
+            license_layers,
+            None,
+        )
+        .await;
+        graph_reference
+    }
+
+    async fn setup_mocks_with_repository(
+        mock_server: &MockServer,
+        graph_id: &str,
+        layers: Vec<ImageLayer>,
+        manifest_annotations: Option<BTreeMap<String, String>>,
+    ) -> Reference {
         let reference = "latest";
 
         let layer_descriptors = join_all(layers.iter().map(async |layer| {
@@ -1149,12 +1265,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn stream_license_from_oci_success() {
         let mock_server = &MockServer::start().await;
-        let license_layer = ImageLayer {
-            data: TEST_LICENSE_JWT.into(),
-            media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
-            annotations: None,
-        };
-        let image_reference = setup_mocks(mock_server, vec![license_layer], None).await;
+        let image_reference = setup_license_mocks(
+            mock_server,
+            TEST_ENTITLEMENT_ID,
+            vec![license_layer(TEST_LICENSE_JWT)],
+        )
+        .await;
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
         let results = stream_license_from_oci(oci_config)
@@ -1175,26 +1291,50 @@ mod tests {
         let mock_server = &MockServer::start().await;
         let graph_id = "test-graph-id";
         let reference = "latest";
-        let manifest_info = create_manifest_from_license_layer(TEST_LICENSE_JWT.as_bytes(), None);
-        let blob_url = Url::parse(&format!(
-            "{}/v2/{graph_id}/blobs/{}",
-            mock_server.uri(),
-            manifest_info.blob_digest
-        ))
-        .expect("url must be valid");
+        let entitlement_id = "test-entitlement-id";
+        let graph_manifest_info = create_graph_manifest_with_entitlement_id(entitlement_id, None);
+        let entitlement_manifest_info =
+            create_manifest_from_license_layer(TEST_LICENSE_JWT.as_bytes(), None);
 
         // Count blob (data) requests: should only fire on the first poll.
+        let entitlement_blob_url = Url::parse(&format!(
+            "{}/v2/entitlements/{entitlement_id}/blobs/{}",
+            mock_server.uri(),
+            entitlement_manifest_info.blob_digest
+        ))
+        .expect("url must be valid");
         let blob_request_count = Arc::new(AtomicUsize::new(0));
         let blob_count = blob_request_count.clone();
-        let license_data = manifest_info.license_data;
+        let license_data = entitlement_manifest_info.license_data;
         Mock::given(method("GET"))
-            .and(path(blob_url.path()))
+            .and(path(entitlement_blob_url.path()))
             .respond_with(move |_request: &Request| {
                 blob_count.fetch_add(1, Ordering::Relaxed);
                 ResponseTemplate::new(200)
                     .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
                     .set_body_bytes(license_data.clone())
             })
+            .mount(mock_server)
+            .await;
+
+        let entitlement_manifest_url = Url::parse(&format!(
+            "{}/v2/entitlements/{entitlement_id}/manifests/{reference}",
+            mock_server.uri()
+        ))
+        .expect("url must be valid");
+        let _ = Mock::given(method("GET"))
+            .and(path(entitlement_manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header(
+                        "Docker-Content-Digest",
+                        &entitlement_manifest_info.manifest_digest,
+                    )
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                    .set_body_bytes(
+                        serde_json::to_vec(&entitlement_manifest_info.oci_manifest).unwrap(),
+                    ),
+            )
             .mount(mock_server)
             .await;
 
@@ -1210,7 +1350,7 @@ mod tests {
         // the poll loop has completed an additional unchanged-digest cycle.
         let head_request_count = Arc::new(AtomicUsize::new(0));
         let head_count = head_request_count.clone();
-        let head_manifest_digest = manifest_info.manifest_digest.clone();
+        let head_manifest_digest = graph_manifest_info.manifest_digest.clone();
         let _ = Mock::given(method("HEAD"))
             .and(path(manifest_url.path()))
             .respond_with(move |_request: &Request| {
@@ -1227,9 +1367,12 @@ mod tests {
             .and(path(manifest_url.path()))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
+                    .append_header(
+                        "Docker-Content-Digest",
+                        &graph_manifest_info.manifest_digest,
+                    )
                     .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
-                    .set_body_bytes(serde_json::to_vec(&manifest_info.oci_manifest).unwrap()),
+                    .set_body_bytes(serde_json::to_vec(&graph_manifest_info.oci_manifest).unwrap()),
             )
             .mount(mock_server)
             .await;
@@ -1283,47 +1426,70 @@ mod tests {
         let mock_server = &MockServer::start().await;
         let graph_id = "test-graph-id";
         let reference = "latest";
+        let entitlement_id = "test-entitlement-id";
 
-        // Use different annotations with the same data (the license blob) to simulate
-        // a change in data. The different annotations result in different manifest
-        // digests, so the stream sees a "changed" manifest and re-fetches
-        // the data (the license) even though it hasn't changed.
-        // [Using two distinct valid JWTs isn't possible here because the JWKS bundled
-        // via `include_str!` only signs one test token.]
+        // Use different annotations on the graph manifest (both pointing at the
+        // same entitlement id) to simulate a change in the graph manifest. The
+        // different annotations result in different manifest digests, so the
+        // stream sees a "changed" manifest and re-fetches the license even
+        // though the entitlement/license data hasn't changed.
         let mut ann1 = BTreeMap::new();
         ann1.insert("v".to_string(), "1".to_string());
         let mut ann2 = BTreeMap::new();
         ann2.insert("v".to_string(), "2".to_string());
 
-        let manifest_info1 =
-            create_manifest_from_license_layer(TEST_LICENSE_JWT.as_bytes(), Some(ann1));
-        let manifest_info2 =
-            create_manifest_from_license_layer(TEST_LICENSE_JWT.as_bytes(), Some(ann2));
+        let graph_manifest_info1 =
+            create_graph_manifest_with_entitlement_id(entitlement_id, Some(ann1));
+        let graph_manifest_info2 =
+            create_graph_manifest_with_entitlement_id(entitlement_id, Some(ann2));
 
-        assert_eq!(manifest_info1.blob_digest, manifest_info2.blob_digest);
         assert_ne!(
-            manifest_info1.manifest_digest,
-            manifest_info2.manifest_digest
+            graph_manifest_info1.manifest_digest,
+            graph_manifest_info2.manifest_digest
         );
 
-        let blob_url = Url::parse(&format!(
-            "{}/v2/{graph_id}/blobs/{}",
+        let entitlement_manifest_info =
+            create_manifest_from_license_layer(TEST_LICENSE_JWT.as_bytes(), None);
+
+        let entitlement_blob_url = Url::parse(&format!(
+            "{}/v2/entitlements/{entitlement_id}/blobs/{}",
             mock_server.uri(),
-            manifest_info1.blob_digest
+            entitlement_manifest_info.blob_digest
         ))
         .expect("url must be valid");
 
         let blob_request_count = Arc::new(AtomicUsize::new(0));
         let blob_count = blob_request_count.clone();
-        let license_data = manifest_info1.license_data.clone();
+        let license_data = entitlement_manifest_info.license_data.clone();
         Mock::given(method("GET"))
-            .and(path(blob_url.path()))
+            .and(path(entitlement_blob_url.path()))
             .respond_with(move |_request: &Request| {
                 blob_count.fetch_add(1, Ordering::Relaxed);
                 ResponseTemplate::new(200)
                     .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
                     .set_body_bytes(license_data.clone())
             })
+            .mount(mock_server)
+            .await;
+
+        let entitlement_manifest_url = Url::parse(&format!(
+            "{}/v2/entitlements/{entitlement_id}/manifests/{reference}",
+            mock_server.uri()
+        ))
+        .expect("url must be valid");
+        let _ = Mock::given(method("GET"))
+            .and(path(entitlement_manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header(
+                        "Docker-Content-Digest",
+                        &entitlement_manifest_info.manifest_digest,
+                    )
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                    .set_body_bytes(
+                        serde_json::to_vec(&entitlement_manifest_info.oci_manifest).unwrap(),
+                    ),
+            )
             .mount(mock_server)
             .await;
 
@@ -1339,8 +1505,8 @@ mod tests {
             .and(path(manifest_url.path()))
             .respond_with(SequentialManifestDigests {
                 digests: Mutex::new(VecDeque::from([
-                    manifest_info1.manifest_digest.clone(),
-                    manifest_info2.manifest_digest.clone(),
+                    graph_manifest_info1.manifest_digest.clone(),
+                    graph_manifest_info2.manifest_digest.clone(),
                 ])),
             })
             .expect(2..=3)
@@ -1352,12 +1518,12 @@ mod tests {
             .respond_with(SequentialManifests {
                 manifests: Mutex::new(VecDeque::from([
                     (
-                        manifest_info1.manifest_digest.clone(),
-                        serde_json::to_vec(&manifest_info1.oci_manifest).unwrap(),
+                        graph_manifest_info1.manifest_digest.clone(),
+                        serde_json::to_vec(&graph_manifest_info1.oci_manifest).unwrap(),
                     ),
                     (
-                        manifest_info2.manifest_digest.clone(),
-                        serde_json::to_vec(&manifest_info2.oci_manifest).unwrap(),
+                        graph_manifest_info2.manifest_digest.clone(),
+                        serde_json::to_vec(&graph_manifest_info2.oci_manifest).unwrap(),
                     ),
                 ])),
             })
@@ -1400,21 +1566,45 @@ mod tests {
         let mock_server = &MockServer::start().await;
         let graph_id = "test-graph-id";
         let reference = "latest";
+        let entitlement_id = "test-entitlement-id";
 
-        let manifest_info = create_manifest_from_license_layer(TEST_LICENSE_JWT.as_bytes(), None);
-        let blob_url = Url::parse(&format!(
-            "{}/v2/{graph_id}/blobs/{}",
+        let graph_manifest_info = create_graph_manifest_with_entitlement_id(entitlement_id, None);
+        let entitlement_manifest_info =
+            create_manifest_from_license_layer(TEST_LICENSE_JWT.as_bytes(), None);
+
+        let entitlement_blob_url = Url::parse(&format!(
+            "{}/v2/entitlements/{entitlement_id}/blobs/{}",
             mock_server.uri(),
-            manifest_info.blob_digest
+            entitlement_manifest_info.blob_digest
         ))
         .expect("url must be valid");
-
         Mock::given(method("GET"))
-            .and(path(blob_url.path()))
+            .and(path(entitlement_blob_url.path()))
             .respond_with(
                 ResponseTemplate::new(200)
                     .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
-                    .set_body_bytes(manifest_info.license_data.clone()),
+                    .set_body_bytes(entitlement_manifest_info.license_data.clone()),
+            )
+            .mount(mock_server)
+            .await;
+
+        let entitlement_manifest_url = Url::parse(&format!(
+            "{}/v2/entitlements/{entitlement_id}/manifests/{reference}",
+            mock_server.uri()
+        ))
+        .expect("url must be valid");
+        let _ = Mock::given(method("GET"))
+            .and(path(entitlement_manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header(
+                        "Docker-Content-Digest",
+                        &entitlement_manifest_info.manifest_digest,
+                    )
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                    .set_body_bytes(
+                        serde_json::to_vec(&entitlement_manifest_info.oci_manifest).unwrap(),
+                    ),
             )
             .mount(mock_server)
             .await;
@@ -1439,14 +1629,17 @@ mod tests {
             .and(path(manifest_url.path()))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
+                    .append_header(
+                        "Docker-Content-Digest",
+                        &graph_manifest_info.manifest_digest,
+                    )
                     .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
             )
             .expect(2)
             .mount(mock_server)
             .await;
 
-        // First GET: 429 with Retry-After. Second GET: 200 with the manifest.
+        // First GET: 429 with Retry-After. Second GET: 200 with the graph manifest.
         let _ = Mock::given(method("GET"))
             .and(path(manifest_url.path()))
             .respond_with(SequentialBackoffResponse {
@@ -1456,9 +1649,14 @@ mod tests {
                         .append_header(http::header::CONTENT_TYPE, "application/json")
                         .set_body_json(&oci_error_body),
                     ResponseTemplate::new(200)
-                        .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
+                        .append_header(
+                            "Docker-Content-Digest",
+                            &graph_manifest_info.manifest_digest,
+                        )
                         .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
-                        .set_body_bytes(serde_json::to_vec(&manifest_info.oci_manifest).unwrap()),
+                        .set_body_bytes(
+                            serde_json::to_vec(&graph_manifest_info.oci_manifest).unwrap(),
+                        ),
                 ])),
             })
             .mount(mock_server)
@@ -1515,12 +1713,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn create_oci_license_stream_valid_reference() {
         let mock_server = &MockServer::start().await;
-        let license_layer = ImageLayer {
-            data: TEST_LICENSE_JWT.into(),
-            media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
-            annotations: None,
-        };
-        let image_reference = setup_mocks(mock_server, vec![license_layer], None).await;
+        let image_reference = setup_license_mocks(
+            mock_server,
+            TEST_ENTITLEMENT_ID,
+            vec![license_layer(TEST_LICENSE_JWT)],
+        )
+        .await;
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
         let result = create_oci_license_stream(oci_config);
@@ -1552,12 +1750,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn fetch_license_oci_success() {
         let mock_server = &MockServer::start().await;
-        let license_layer = ImageLayer {
-            data: TEST_LICENSE_JWT.into(),
-            media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
-            annotations: None,
-        };
-        let image_reference = setup_mocks(mock_server, vec![license_layer], None).await;
+        let image_reference = setup_license_mocks(
+            mock_server,
+            TEST_ENTITLEMENT_ID,
+            vec![license_layer(TEST_LICENSE_JWT)],
+        )
+        .await;
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
         let license = fetch_license_oci(&oci_config)
@@ -1599,9 +1797,12 @@ mod tests {
         let mock_server = &MockServer::start().await;
         let graph_id = "test-graph-id";
         let reference = "latest";
-        let manifest_info = create_manifest_from_license_layer(TEST_LICENSE_JWT.as_bytes(), None);
+        let entitlement_id = "test-entitlement-id";
+        let graph_manifest_info = create_graph_manifest_with_entitlement_id(entitlement_id, None);
+        let entitlement_manifest_info =
+            create_manifest_from_license_layer(TEST_LICENSE_JWT.as_bytes(), None);
 
-        // Manifest HEAD/GET always succeed with the same digest.
+        // Graph manifest HEAD/GET always succeed with the same digest.
         let manifest_url = Url::parse(&format!(
             "{}/v2/{}/manifests/{}",
             mock_server.uri(),
@@ -1613,7 +1814,10 @@ mod tests {
             .and(path(manifest_url.path()))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
+                    .append_header(
+                        "Docker-Content-Digest",
+                        &graph_manifest_info.manifest_digest,
+                    )
                     .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
             )
             .mount(mock_server)
@@ -1622,23 +1826,48 @@ mod tests {
             .and(path(manifest_url.path()))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
+                    .append_header(
+                        "Docker-Content-Digest",
+                        &graph_manifest_info.manifest_digest,
+                    )
                     .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
-                    .set_body_bytes(serde_json::to_vec(&manifest_info.oci_manifest).unwrap()),
+                    .set_body_bytes(serde_json::to_vec(&graph_manifest_info.oci_manifest).unwrap()),
             )
             .mount(mock_server)
             .await;
 
-        // Blob GET fails once, then succeeds.
-        let blob_url = Url::parse(&format!(
-            "{}/v2/{graph_id}/blobs/{}",
-            mock_server.uri(),
-            manifest_info.blob_digest
+        // Entitlement manifest GET always succeeds.
+        let entitlement_manifest_url = Url::parse(&format!(
+            "{}/v2/entitlements/{entitlement_id}/manifests/{reference}",
+            mock_server.uri()
         ))
         .expect("url must be valid");
-        let license_data = manifest_info.license_data.clone();
         let _ = Mock::given(method("GET"))
-            .and(path(blob_url.path()))
+            .and(path(entitlement_manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header(
+                        "Docker-Content-Digest",
+                        &entitlement_manifest_info.manifest_digest,
+                    )
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                    .set_body_bytes(
+                        serde_json::to_vec(&entitlement_manifest_info.oci_manifest).unwrap(),
+                    ),
+            )
+            .mount(mock_server)
+            .await;
+
+        // Entitlement blob GET fails once, then succeeds.
+        let entitlement_blob_url = Url::parse(&format!(
+            "{}/v2/entitlements/{entitlement_id}/blobs/{}",
+            mock_server.uri(),
+            entitlement_manifest_info.blob_digest
+        ))
+        .expect("url must be valid");
+        let license_data = entitlement_manifest_info.license_data.clone();
+        let _ = Mock::given(method("GET"))
+            .and(path(entitlement_blob_url.path()))
             .respond_with(SequentialBackoffResponse {
                 responses: Mutex::new(VecDeque::from([
                     ResponseTemplate::new(500),
