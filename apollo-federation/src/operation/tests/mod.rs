@@ -1976,3 +1976,264 @@ fn fragments_with_non_intersecting_types() {
         }
     "###);
 }
+
+/// Path insertion checks (proptest-graph-notes.md, "Supporting operation properties"):
+/// `SelectionSet::add_at_path` matches a direct recursive wrap-and-merge model over valid paths,
+/// and inserting selections under disjoint top-level fields commutes. Reuses `field_element`,
+/// `ADD_AT_PATH_TEST_SCHEMA`, and `SelectionSet::parse` from the deterministic examples above.
+mod add_at_path_proptest {
+    use std::collections::BTreeMap;
+
+    use apollo_compiler::name;
+    use apollo_compiler::schema::Schema;
+    use proptest::prelude::*;
+    use proptest::proptest;
+
+    use super::ADD_AT_PATH_TEST_SCHEMA;
+    use super::field_element;
+    use crate::operation::SelectionSet;
+    use crate::operation::contains::ContainmentOptions;
+    use crate::schema::ValidFederationSchema;
+    use crate::schema::position::ObjectTypeDefinitionPosition;
+
+    fn schema() -> ValidFederationSchema {
+        let schema = Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql").unwrap();
+        ValidFederationSchema::new(schema).unwrap()
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum LeafChoice {
+        D,
+        EArg1,
+        Both,
+    }
+
+    impl LeafChoice {
+        fn field_set_text(self) -> &'static str {
+            match self {
+                LeafChoice::D => "d",
+                LeafChoice::EArg1 => "e(arg: 1)",
+                LeafChoice::Both => "d e(arg: 1)",
+            }
+        }
+
+        /// Model keys for the fields this leaf selects, distinct from their printed text so the
+        /// model doesn't need to embed argument syntax in a map key.
+        fn model_keys(self) -> &'static [&'static str] {
+            match self {
+                LeafChoice::D => &["d"],
+                LeafChoice::EArg1 => &["e_arg1"],
+                LeafChoice::Both => &["d", "e_arg1"],
+            }
+        }
+    }
+
+    fn leaf_choice_strategy() -> impl Strategy<Value = LeafChoice> {
+        prop_oneof![
+            Just(LeafChoice::D),
+            Just(LeafChoice::EArg1),
+            Just(LeafChoice::Both),
+        ]
+    }
+
+    /// One `add_at_path` call: a scalar leaf directly under `Query` (`something`/`scalar`), or a
+    /// composite leaf reached through the two-level chain `a.b.c`.
+    #[derive(Debug, Clone, Copy)]
+    enum Insertion {
+        Something,
+        Scalar,
+        AbcLeaf(LeafChoice),
+    }
+
+    fn insertion_strategy() -> impl Strategy<Value = Insertion> {
+        prop_oneof![
+            Just(Insertion::Something),
+            Just(Insertion::Scalar),
+            leaf_choice_strategy().prop_map(Insertion::AbcLeaf),
+        ]
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum ModelSelection {
+        Leaf,
+        Field(ModelSelectionSet),
+    }
+    type ModelSelectionSet = BTreeMap<String, ModelSelection>;
+
+    fn singleton(key: &str, value: ModelSelection) -> ModelSelectionSet {
+        let mut set = BTreeMap::new();
+        set.insert(key.to_string(), value);
+        set
+    }
+
+    /// Plain recursive union merge, independent of `add_at_path`/`merge_selection_sets`.
+    fn merge(a: &ModelSelectionSet, b: &ModelSelectionSet) -> ModelSelectionSet {
+        let mut result = a.clone();
+        for (key, b_selection) in b {
+            match (result.get(key), b_selection) {
+                (Some(ModelSelection::Field(a_sub)), ModelSelection::Field(b_sub)) => {
+                    result.insert(key.clone(), ModelSelection::Field(merge(a_sub, b_sub)));
+                }
+                _ => {
+                    // No existing entry, or both leaves (same key implies same field, so a leaf
+                    // merged with a leaf is just that leaf again): either way, `b`'s value wins.
+                    result.insert(key.clone(), b_selection.clone());
+                }
+            }
+        }
+        result
+    }
+
+    /// The direct "wrap" half of the model: build the nested selection set this insertion
+    /// contributes, independent of anything already accumulated.
+    fn insertion_model(insertion: Insertion) -> ModelSelectionSet {
+        match insertion {
+            Insertion::Something => singleton("something", ModelSelection::Leaf),
+            Insertion::Scalar => singleton("scalar", ModelSelection::Leaf),
+            Insertion::AbcLeaf(leaf) => {
+                let mut leaf_set = BTreeMap::new();
+                for key in leaf.model_keys() {
+                    leaf_set.insert((*key).to_string(), ModelSelection::Leaf);
+                }
+                singleton(
+                    "a",
+                    ModelSelection::Field(singleton(
+                        "b",
+                        ModelSelection::Field(singleton("c", ModelSelection::Field(leaf_set))),
+                    )),
+                )
+            }
+        }
+    }
+
+    fn leaf_text(model_key: &str) -> &str {
+        match model_key {
+            "e_arg1" => "e(arg: 1)",
+            other => other,
+        }
+    }
+
+    fn print_model(set: &ModelSelectionSet) -> String {
+        set.iter()
+            .map(|(key, selection)| match selection {
+                ModelSelection::Leaf => leaf_text(key).to_string(),
+                ModelSelection::Field(sub) => {
+                    format!("{} {{ {} }}", leaf_text(key), print_model(sub))
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Apply one insertion to a production `SelectionSet` via the real `add_at_path`.
+    fn apply_insertion(
+        schema: &ValidFederationSchema,
+        selection_set: &mut SelectionSet,
+        insertion: Insertion,
+    ) {
+        match insertion {
+            Insertion::Something => {
+                selection_set
+                    .add_at_path(
+                        &[field_element(schema, name!("Query"), name!("something")).into()],
+                        None,
+                    )
+                    .unwrap();
+            }
+            Insertion::Scalar => {
+                selection_set
+                    .add_at_path(
+                        &[field_element(schema, name!("Query"), name!("scalar")).into()],
+                        None,
+                    )
+                    .unwrap();
+            }
+            Insertion::AbcLeaf(leaf) => {
+                let path = [
+                    field_element(schema, name!("Query"), name!("a")).into(),
+                    field_element(schema, name!("A"), name!("b")).into(),
+                    field_element(schema, name!("B"), name!("c")).into(),
+                ];
+                let leaf_set = SelectionSet::parse(
+                    schema.clone(),
+                    ObjectTypeDefinitionPosition::new(name!("C")).into(),
+                    leaf.field_set_text(),
+                )
+                .unwrap();
+                selection_set
+                    .add_at_path(&path, Some(&leaf_set.into()))
+                    .unwrap();
+            }
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        /// After every `add_at_path` call, the accumulated production selection set must match
+        /// an independently-built model: wrap each insertion's own nested shape, union it into
+        /// what's accumulated so far, and compare the printed-and-reparsed result semantically.
+        #[test]
+        fn add_at_path_matches_wrap_and_merge_model(
+            insertions in prop::collection::vec(insertion_strategy(), 0..12),
+        ) {
+            let schema = schema();
+            let mut production = SelectionSet::empty(
+                schema.clone(),
+                ObjectTypeDefinitionPosition::new(name!("Query")).into(),
+            );
+            let mut model = ModelSelectionSet::new();
+            for insertion in insertions {
+                apply_insertion(&schema, &mut production, insertion);
+                model = merge(&model, &insertion_model(insertion));
+            }
+
+            if model.is_empty() {
+                prop_assert!(production.is_empty());
+                return Ok(());
+            }
+
+            let expected_text = format!("{{ {} }}", print_model(&model));
+            let expected = SelectionSet::parse(
+                schema,
+                ObjectTypeDefinitionPosition::new(name!("Query")).into(),
+                &expected_text,
+            )
+            .unwrap();
+            prop_assert!(
+                production
+                    .containment(&expected, ContainmentOptions::default())
+                    .is_equal(),
+                "add_at_path result did not match the wrap-and-merge model; expected `{expected_text}`, got `{production}`"
+            );
+        }
+
+        /// Inserting into disjoint top-level fields commutes: `something` and the `a.b.c` chain
+        /// never interact, so applying them in either order must produce the same selection set.
+        #[test]
+        fn add_at_path_disjoint_insertions_commute(leaf in leaf_choice_strategy()) {
+            let schema = schema();
+
+            let mut something_then_abc = SelectionSet::empty(
+                schema.clone(),
+                ObjectTypeDefinitionPosition::new(name!("Query")).into(),
+            );
+            apply_insertion(&schema, &mut something_then_abc, Insertion::Something);
+            apply_insertion(&schema, &mut something_then_abc, Insertion::AbcLeaf(leaf));
+
+            let mut abc_then_something = SelectionSet::empty(
+                schema.clone(),
+                ObjectTypeDefinitionPosition::new(name!("Query")).into(),
+            );
+            apply_insertion(&schema, &mut abc_then_something, Insertion::AbcLeaf(leaf));
+            apply_insertion(&schema, &mut abc_then_something, Insertion::Something);
+
+            prop_assert!(
+                something_then_abc
+                    .containment(&abc_then_something, ContainmentOptions::default())
+                    .is_equal(),
+                "disjoint insertions must commute"
+            );
+        }
+    }
+}
