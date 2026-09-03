@@ -1026,6 +1026,11 @@ impl FieldRoutingSearchSpace {
             }
         }
 
+        // Connector-backed subgraphs have no GraphQL endpoint; drop their
+        // edges before enumerating key hops so they don't crowd out real
+        // alternatives.
+        self.drop_connector_subgraph_edges(&mut options);
+
         trace!(
             type_condition = %type_cond.type_name(),
             "searching key hops for fragment downcast",
@@ -1042,7 +1047,15 @@ impl FieldRoutingSearchSpace {
         )?;
         options.extend(hops.iter().cloned());
 
-        if type_cond.is_abstract_type() {
+        // Key hops into connector-backed subgraphs are equally unexecutable.
+        self.drop_connector_subgraph_edges(&mut options);
+
+        // TypeExplosion decomposes the fragment into per-concrete-type
+        // fragments, or drops it if the runtime intersection is empty.
+        // For abstract type conditions it's a genuine alternative (ranked
+        // last); for concrete conditions with no other options it handles
+        // the "type absent in this subgraph" case.
+        if type_cond.is_abstract_type() || options.is_empty() {
             options.push(RoutingChoice::TypeExplosion);
         }
 
