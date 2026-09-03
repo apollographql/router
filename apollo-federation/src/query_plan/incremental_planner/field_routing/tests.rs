@@ -1,4 +1,5 @@
 use crate::Supergraph;
+use crate::error::FederationError;
 use crate::query_plan::TopLevelPlanNode;
 use crate::query_plan::query_planner::IncrementalPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanOptions;
@@ -528,7 +529,7 @@ fn cancellation_at_any_check_point_aborts_planning() {
 
 /// Like `plan_query` but returns the planner's Result, for tests that
 /// assert planning fails (e.g. circular @requires).
-fn try_plan_query(schema: &str, query: &str) -> Result<String, crate::error::FederationError> {
+fn try_plan_query(schema: &str, query: &str) -> Result<String, FederationError> {
     let supergraph = Supergraph::new(schema).expect("supergraph parse");
     let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
     let document = apollo_compiler::ExecutableDocument::parse_and_validate(
