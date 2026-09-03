@@ -34,11 +34,10 @@ use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 
 /// Return true if a directive application is "semantic", meaning it's observable in introspection.
 fn is_semantic_directive_application(directive: &Directive) -> bool {
-    match directive.name.as_str() {
-        "specifiedBy" | "oneOf" => true,
-        "deprecated" => true,
-        _ => false,
-    }
+    matches!(
+        directive.name.as_str(),
+        "specifiedBy" | "oneOf" | "deprecated"
+    )
 }
 
 /// Remove `reason` argument from a `@deprecated` directive if it has the default value, just to match graphql-js output.
