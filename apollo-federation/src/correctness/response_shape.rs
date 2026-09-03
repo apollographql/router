@@ -641,8 +641,11 @@ fn field_selection_key(field: &Field) -> FieldSelectionKey {
 }
 
 fn eq_field_selection_key(a: &FieldSelectionKey, b: &FieldSelectionKey) -> bool {
-    // Note: Arguments are expected to be normalized.
-    a.name == b.name && a.arguments == b.arguments
+    // Fields with the same response name are considered to have the same selection key
+    // in the response shape. Arguments are intentionally excluded from this comparison
+    // because different fetches may produce the same field with different argument values,
+    // and the response shape is keyed by response name per the GraphQL spec.
+    a.name == b.name
 }
 
 //==================================================================================================

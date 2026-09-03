@@ -13,7 +13,6 @@ use super::response_shape::Clause;
 use super::response_shape::PossibleDefinitions;
 use super::response_shape::ResponseShape;
 use super::response_shape::compute_response_shape_for_selection_set;
-use super::response_shape_compare::compare_representative_field;
 use crate::FederationError;
 use crate::bail;
 use crate::internal_error;
@@ -612,12 +611,11 @@ mod key_only_response_shape_compare {
         let first = iter.next()?;
         let mut result_sub = first.sub_selection_response_shape().cloned();
         for variant in iter {
-            if compare_representative_field(
-                variant.representative_field(),
-                first.representative_field(),
-            )
-            .is_err()
-            {
+            // Only compare field names, not arguments or directives. The `requires`
+            // items on the fetch node lack arguments, while `@key/@requires` field
+            // sets may include them. A name-only check is sufficient here since
+            // response keys already matched at the outer level.
+            if variant.representative_field().name != first.representative_field().name {
                 // Unexpected: GraphQL invariant violation
                 return None;
             }
