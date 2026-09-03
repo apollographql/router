@@ -171,7 +171,9 @@ fn trying_to_use_defer_with_a_subscription_results_in_an_error() {
         }
     "#);
 
-    let document = ExecutableDocument::parse_and_validate(
+    // Since apollo-compiler 1.33.0, unconditional @defer in a subscription is rejected at
+    // document validation, before the planner's own DeferredSubscriptionUnsupported error.
+    ExecutableDocument::parse_and_validate(
         planner.api_schema().schema(),
         r#"
         subscription MySubscription {
@@ -186,11 +188,7 @@ fn trying_to_use_defer_with_a_subscription_results_in_an_error() {
         "#,
         "trying_to_use_defer_with_a_subcription_results_in_an_error.graphql",
     )
-    .unwrap();
-
-    planner
-        .build_query_plan(&document, Some(name!(MySubscription)), Default::default())
-        .expect_err("should return an error");
+    .expect_err("unconditional @defer in a subscription must fail document validation");
 }
 
 #[test]
