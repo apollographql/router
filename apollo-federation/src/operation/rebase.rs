@@ -12,6 +12,8 @@ use super::SelectionSet;
 use super::TYPENAME_FIELD;
 use super::runtime_types_intersect;
 use crate::error::FederationError;
+use crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::spec_definition::SpecDefinition;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
@@ -202,10 +204,16 @@ impl Field {
         if let Some(federation_spec_definition) = schema
             .subgraph_metadata()
             .map(|d| d.federation_spec_definition())
+            // `subgraph_metadata` is populated even for subgraphs that default to Federation 1
+            // (no `@link` at all) or that link an early Federation 2.x spec, neither of which
+            // defines `@fromContext` (added in 2.8). `try_directive_definition` reports that
+            // absence as `None` instead of erroring, unlike `from_context_directive_definition`:
+            // no `@fromContext` directive in this schema's spec means no argument can possibly
+            // have it applied, so there's nothing to check below.
+            && let Some(from_context_directive_definition) = federation_spec_definition
+                .try_directive_definition(schema, &FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)
         {
-            let from_context_directive_definition_name = &federation_spec_definition
-                .from_context_directive_definition(schema)?
-                .name;
+            let from_context_directive_definition_name = &from_context_directive_definition.name;
             // We need to ensure that all arguments with `@fromContext` are provided. If the
             // would-be parent type's field has an argument with `@fromContext` and that argument
             // has no value/data in this field, then we return `None` to indicate the rebase isn't
@@ -496,5 +504,256 @@ impl SelectionSet {
         self.selections
             .values()
             .fallible_all(|selection| selection.can_add_to(parent_type, schema))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // =====================================================================================
+    // Rebase (proptest-graph-notes.md, "Supporting operation properties"): checks
+    // `SelectionSet::can_rebase_on`/`rebase_on` against each other and against algebraic
+    // laws, biased toward the interface/implementing-object boundary the notes call out
+    // ("key collapse happens at those boundaries") — here, rebasing a selection made
+    // against an interface onto one of two disjoint implementing object types, which is
+    // the one case in this schema where a `... on <Type>` fragment condition can fail to
+    // intersect the rebase target.
+    // =====================================================================================
+
+    use apollo_compiler::name;
+    use proptest::prelude::*;
+    use proptest::proptest;
+
+    use super::super::merging::merge_selection_sets;
+    use crate::operation::SelectionSet;
+    use crate::operation::contains::ContainmentOptions;
+    use crate::schema::ValidFederationSchema;
+    use crate::schema::field_set::parse_field_set;
+    use crate::schema::position::CompositeTypeDefinitionPosition;
+
+    fn rebase_test_schema() -> ValidFederationSchema {
+        let schema = apollo_compiler::Schema::parse_and_validate(
+            r#"
+            interface Intf {
+                intfField: Int
+            }
+            type HasA implements Intf {
+                a: Boolean
+                intfField: Int
+            }
+            type HasB implements Intf {
+                b: Boolean
+                intfField: Int
+            }
+            type Query {
+                intf: Intf
+            }
+            "#,
+            "schema.graphql",
+        )
+        .unwrap();
+        ValidFederationSchema::new(schema).unwrap()
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum RebaseTarget {
+        Intf,
+        HasA,
+        HasB,
+    }
+
+    impl RebaseTarget {
+        fn composite_type(self, schema: &ValidFederationSchema) -> CompositeTypeDefinitionPosition {
+            let name = match self {
+                RebaseTarget::Intf => name!("Intf"),
+                RebaseTarget::HasA => name!("HasA"),
+                RebaseTarget::HasB => name!("HasB"),
+            };
+            schema.get_type(&name).unwrap().try_into().unwrap()
+        }
+    }
+
+    fn object_target_strategy() -> impl Strategy<Value = RebaseTarget> {
+        prop_oneof![Just(RebaseTarget::HasA), Just(RebaseTarget::HasB)]
+    }
+
+    /// A selection set under `Intf`: `intfField` directly, an inline fragment on `HasA` or
+    /// `HasB` selecting some of `{own_field, intfField}`, or both — always non-empty. The
+    /// fragment's type condition is independent of whichever target the property later
+    /// rebases onto, so roughly half of generated (selection, target) pairs are expected to
+    /// fail to rebase (mismatched fragment condition) and half to succeed.
+    fn intf_selection_string_strategy() -> impl Strategy<Value = String> {
+        (
+            any::<bool>(),
+            prop::option::of((object_target_strategy(), any::<bool>(), any::<bool>())),
+        )
+            .prop_map(|(mut has_intf_field, fragment)| {
+                let mut parts = Vec::new();
+                if let Some((target, mut frag_own_field, frag_intf_field)) = fragment {
+                    frag_own_field |= !(frag_own_field || frag_intf_field);
+                    let own_field_name = match target {
+                        RebaseTarget::HasA => "a",
+                        RebaseTarget::HasB => "b",
+                        RebaseTarget::Intf => {
+                            unreachable!("object_target_strategy only yields HasA/HasB")
+                        }
+                    };
+                    let type_name = match target {
+                        RebaseTarget::HasA => "HasA",
+                        RebaseTarget::HasB => "HasB",
+                        RebaseTarget::Intf => {
+                            unreachable!("object_target_strategy only yields HasA/HasB")
+                        }
+                    };
+                    let mut inner = Vec::new();
+                    if frag_own_field {
+                        inner.push(own_field_name.to_string());
+                    }
+                    if frag_intf_field {
+                        inner.push("intfField".to_string());
+                    }
+                    parts.push(format!("... on {type_name} {{ {} }}", inner.join(" ")));
+                }
+                has_intf_field |= parts.is_empty();
+                if has_intf_field {
+                    parts.push("intfField".to_string());
+                }
+                parts.join(" ")
+            })
+    }
+
+    fn parse_intf_selection(schema: &ValidFederationSchema, source: &str) -> SelectionSet {
+        parse_field_set(schema, name!("Intf"), source, true)
+            .expect("generated selection set must be valid under Intf")
+    }
+
+    /// Regression for a real bug the property below found on its first run: `can_rebase_on`
+    /// (via `Field::type_if_added_to`) crashed with an internal error, instead of returning a
+    /// plain `bool`, whenever a field actually resolves on the rebase target and the schema's
+    /// federation spec version doesn't define `@fromContext` (added in Federation 2.8) — which
+    /// is every ordinary Federation 1 subgraph (no `@link` to the federation spec at all,
+    /// `rebase_test_schema()`'s exact shape) as well as any Federation 2.0-2.7 subgraph.
+    /// `type_if_added_to` unconditionally called the erroring `from_context_directive_definition`
+    /// instead of the `Option`-returning `try_directive_definition`. Fixed by skipping the
+    /// `@fromContext`-argument check entirely when the directive isn't defined in this schema's
+    /// spec, since no argument could possibly carry it in that case.
+    #[test]
+    fn can_rebase_on_does_not_crash_on_a_federation_1_subgraph() {
+        let schema = rebase_test_schema();
+        let selection_set = parse_intf_selection(&schema, "intfField");
+        let has_a = RebaseTarget::HasA.composite_type(&schema);
+
+        assert!(
+            selection_set.can_rebase_on(&has_a, &schema).is_ok(),
+            "can_rebase_on must not internal-error on a Federation-1-style subgraph"
+        );
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        /// `can_rebase_on` must agree with whether `rebase_on` succeeds, and a successful
+        /// rebase must validate against the target type/schema.
+        #[test]
+        fn rebase_can_rebase_on_agrees_with_rebase_on_success(
+            selection_str in intf_selection_string_strategy(),
+            target in object_target_strategy(),
+        ) {
+            let schema = rebase_test_schema();
+            let target_type = target.composite_type(&schema);
+            let selection_set = parse_intf_selection(&schema, &selection_str);
+
+            let can_rebase = selection_set.can_rebase_on(&target_type, &schema).unwrap();
+            let rebase_result = selection_set.rebase_on(&target_type, &schema);
+            prop_assert_eq!(
+                can_rebase,
+                rebase_result.is_ok(),
+                "can_rebase_on disagreed with rebase_on's success"
+            );
+
+            if let Ok(rebased) = rebase_result {
+                let rebased_text = format!("{rebased}");
+                let target_name = match target {
+                    RebaseTarget::HasA => name!("HasA"),
+                    RebaseTarget::HasB => name!("HasB"),
+                    RebaseTarget::Intf => unreachable!("object_target_strategy only yields HasA/HasB"),
+                };
+                let reparsed = parse_field_set(&schema, target_name, &rebased_text, true);
+                prop_assert!(
+                    reparsed.is_ok(),
+                    "rebased selection set failed to validate on the target schema: {reparsed:?}"
+                );
+            }
+        }
+
+        /// Rebasing to the exact same schema/type is identity; rebasing an already-rebased
+        /// selection set to the same target again is idempotent.
+        #[test]
+        fn rebase_to_same_type_is_identity_and_double_rebase_is_idempotent(
+            selection_str in intf_selection_string_strategy(),
+            target in prop_oneof![
+                Just(RebaseTarget::Intf),
+                Just(RebaseTarget::HasA),
+                Just(RebaseTarget::HasB),
+            ],
+        ) {
+            let schema = rebase_test_schema();
+            let selection_set = parse_intf_selection(&schema, &selection_str);
+
+            if target == RebaseTarget::Intf {
+                let rebased = selection_set
+                    .rebase_on(&target.composite_type(&schema), &schema)
+                    .unwrap();
+                prop_assert_eq!(rebased, selection_set);
+                return Ok(());
+            }
+
+            let target_type = target.composite_type(&schema);
+            let Ok(once) = selection_set.rebase_on(&target_type, &schema) else {
+                return Ok(());
+            };
+            let twice = once.clone().rebase_on(&target_type, &schema).unwrap();
+            prop_assert_eq!(
+                once,
+                twice,
+                "rebasing an already-rebased set to the same target must be idempotent"
+            );
+        }
+
+        /// Rebase distributes over merge: `rebase(merge(a, b)) == merge(rebase(a), rebase(b))`,
+        /// whenever `a` and `b` individually rebase onto the target.
+        #[test]
+        fn rebase_distributes_over_merge(
+            a_str in intf_selection_string_strategy(),
+            b_str in intf_selection_string_strategy(),
+            target in object_target_strategy(),
+        ) {
+            let schema = rebase_test_schema();
+            let target_type = target.composite_type(&schema);
+            let a = parse_intf_selection(&schema, &a_str);
+            let b = parse_intf_selection(&schema, &b_str);
+
+            let Ok(rebased_a) = a.rebase_on(&target_type, &schema) else {
+                return Ok(());
+            };
+            let Ok(rebased_b) = b.rebase_on(&target_type, &schema) else {
+                return Ok(());
+            };
+
+            let merged = merge_selection_sets(vec![a, b]).unwrap();
+            let merged_rebased = merged.rebase_on(&target_type, &schema);
+            prop_assert!(
+                merged_rebased.is_ok(),
+                "merge(a, b) failed to rebase even though both a and b individually rebase onto the same target"
+            );
+            let merged_then_rebased = merged_rebased.unwrap();
+            let rebased_then_merged = merge_selection_sets(vec![rebased_a, rebased_b]).unwrap();
+
+            prop_assert!(
+                merged_then_rebased
+                    .containment(&rebased_then_merged, ContainmentOptions::default())
+                    .is_equal(),
+                "rebase(merge(a, b)) must equal merge(rebase(a), rebase(b))"
+            );
+        }
     }
 }
