@@ -754,7 +754,7 @@ impl Merger {
         // _assert_ that `Schema.validate()` doesn't throw as a sanity check.
         let supergraph_schema = merged
             .validate_or_return_self()
-            .map_err(|(_partial_schema, err)| Self::convert_to_merge_errors(err))?;
+            .map_err(|(_partial_schema, err)| CompositionError::from_federation_error(err))?;
 
         // Lastly, we validate that the API schema of the supergraph can be successfully computed,
         // which currently will surface issues around misuses of `@inaccessible` (there should be
@@ -770,18 +770,6 @@ impl Merger {
         )?;
 
         Ok(supergraph_schema)
-    }
-
-    /// Convert a FederationError into a Vec<CompositionError> for merge errors.
-    fn convert_to_merge_errors(error: FederationError) -> Vec<CompositionError> {
-        error
-            .into_errors()
-            .into_iter()
-            .map(|e| CompositionError::MergeError {
-                error: e,
-                locations: Vec::new(),
-            })
-            .collect()
     }
 
     /// Push non-internal errors as merge errors, but bubble up the first internal error.

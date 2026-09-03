@@ -54,11 +54,7 @@ pub fn validate_satisfiability(
         Ok(expansion) => expansion,
         Err(e) => {
             return Err(CompositionFailure {
-                errors: vec![CompositionError::InternalError {
-                    message: format!(
-                        "Composition failed due to an internal error when expanding connectors, please report this: {e}"
-                    ),
-                }],
+                errors: CompositionError::from_federation_error(e),
                 hints,
             });
         }
@@ -72,9 +68,7 @@ pub fn validate_satisfiability(
             Ok(expanded) => (expanded, Some(connectors)),
             Err(e) => {
                 return Err(CompositionFailure {
-                    errors: vec![CompositionError::InternalError {
-                        message: e.to_string(),
-                    }],
+                    errors: CompositionError::from_federation_error(e),
                     hints,
                 });
             }
@@ -99,9 +93,7 @@ pub fn validate_satisfiability(
 
     if let Err(e) = result {
         return Err(CompositionFailure {
-            errors: vec![CompositionError::InternalError {
-                message: e.to_string(),
-            }],
+            errors: CompositionError::from_federation_error(e),
             hints,
         });
     }
