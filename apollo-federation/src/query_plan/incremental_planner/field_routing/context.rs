@@ -167,9 +167,13 @@ pub(super) fn handle_from_context(
     // The field edge's source gives the subgraph defining the @fromContext
     // field; for key hops this differs from pending.query_graph_node.
     let (edge_source_node, _) = search_space
+        .cached_query_graph
         .query_graph
         .edge_endpoints(ctx.choice.edge_index())?;
-    let edge_source_data = search_space.query_graph.node_weight(edge_source_node)?;
+    let edge_source_data = search_space
+        .cached_query_graph
+        .query_graph
+        .node_weight(edge_source_node)?;
     let source_subgraph = &edge_source_data.source;
 
     let placement = classify_placement(pending, current_fetch_node, required_contexts);
@@ -187,6 +191,7 @@ pub(super) fn handle_from_context(
     let mut context_args: Vec<(Name, Name)> = Vec::new();
     for cond in required_contexts {
         let context_id = search_space
+            .cached_query_graph
             .query_graph
             .context_id_by_source_and_argument(source_subgraph, &cond.argument_coordinate)?;
 

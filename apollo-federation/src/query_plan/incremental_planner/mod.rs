@@ -98,13 +98,12 @@ pub(crate) fn build_bulb_plan(
     let selection_set = &selection_set;
 
     let search_space = FieldRoutingSearchSpace {
-        query_graph: query_graph.clone(),
+        cached_query_graph: field_routing::cached_query_graph::CachedQueryGraph::new(
+            query_graph.clone(),
+            parameters.override_conditions.clone(),
+        ),
         supergraph_schema: supergraph_schema.clone(),
-        override_conditions: parameters.override_conditions.clone(),
-        inconsistent_abstract_types: parameters
-            .abstract_types_with_inconsistent_runtime_types
-            .clone(),
-        key_hops_in_flight: Default::default(),
+        caches: field_routing::PlannerCaches::new(),
         disabled_subgraphs: parameters.disabled_subgraphs.clone(),
     };
 
