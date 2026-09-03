@@ -75,6 +75,17 @@ info:
               supergraph.operation.name:
                 supergraph_operation_name: string
 ---
+- name: apollo.router.operations.fetch.duration
+  description: Duration of a subgraph fetch.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 1
+        attributes:
+          graphql.operation.name: Test
+          has_errors: false
+          subgraph.name: products
 - name: apollo.router.response.cache
   description: Response cache hit/miss operations at the subgraph level
   unit: ops

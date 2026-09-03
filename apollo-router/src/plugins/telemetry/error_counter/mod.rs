@@ -220,14 +220,14 @@ fn count_operation_errors<'a>(
 
         let send_otlp_errors = if service.is_empty() {
             matches!(
-                errors_config.preview_extended_error_metrics,
+                errors_config.extended_error_metrics,
                 ExtendedErrorMetricsMode::Enabled
             )
         } else {
             let subgraph_error_config = errors_config.subgraph.get_error_config(&service);
             subgraph_error_config.send
                 && matches!(
-                    errors_config.preview_extended_error_metrics,
+                    errors_config.extended_error_metrics,
                     ExtendedErrorMetricsMode::Enabled
                 )
         };
