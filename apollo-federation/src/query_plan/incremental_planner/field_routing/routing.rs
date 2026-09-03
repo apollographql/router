@@ -888,11 +888,9 @@ impl FieldRoutingSearchSpace {
         options.sort_by_key(|opt| {
             let edge_index = match &opt.target {
                 RoutingTarget::SubgraphEdge { edge_index, .. } => *edge_index,
-                RoutingTarget::TypeExplosion => {
-                    return (RoutingPreference::TypeExplosion, 0)
-                }
+                RoutingTarget::TypeExplosion => return (RoutingPreference::TypeExplosion, 0),
                 RoutingTarget::RestructureFragment => {
-                    return (RoutingPreference::RestructureFragment, 0)
+                    return (RoutingPreference::RestructureFragment, 0);
                 }
             };
             let preference = if let Ok(edge) = self.query_graph.edge_weight(edge_index) {

@@ -500,9 +500,8 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
         // so the probe (apply → cost → rollback) sees them as free;
         // the penalty ranks them above any structural cost but below
         // drops so BULB treats them as a last resort.
-        let cost = base
-            + candidate.type_explosions as f64 * 5e17
-            + candidate.dropped_fields as f64 * 1e18;
+        let cost =
+            base + candidate.type_explosions as f64 * 5e17 + candidate.dropped_fields as f64 * 1e18;
         trace!(cost, "candidate cost");
         cost
     }
