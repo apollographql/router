@@ -1247,6 +1247,166 @@ mod lazy_map_tests {
     }
 }
 
+/// `lazy_map` copy-on-write law (proptest-graph-notes.md, "Supporting operation properties"):
+/// for a small generated mapping language (keep, delete, replace one, replace many), `lazy_map`'s
+/// result must match a plain last-write-wins reconstruction from the mapper's own outputs,
+/// regardless of whether `lazy_map`'s copy-on-write fast path (nothing changed) is taken.
+mod lazy_map_proptest {
+    use proptest::prelude::*;
+    use proptest::proptest;
+
+    use super::super::*;
+    use super::*;
+    use crate::operation::contains::ContainmentOptions;
+
+    const LAZY_MAP_SCHEMA: &str = r#"
+        type Query {
+            a: Int
+            b: Int
+            c: Int
+            d: Int
+            e: Int
+        }
+    "#;
+    const LAZY_MAP_FIELDS: [&str; 5] = ["a", "b", "c", "d", "e"];
+
+    fn query_type() -> CompositeTypeDefinitionPosition {
+        ObjectTypeDefinitionPosition::new(name!("Query")).into()
+    }
+
+    fn field_selection(schema: &ValidFederationSchema, field_name: &str) -> Selection {
+        SelectionSet::parse(schema.clone(), query_type(), field_name)
+            .unwrap()
+            .selections
+            .values()
+            .next()
+            .unwrap()
+            .clone()
+    }
+
+    #[derive(Debug, Clone)]
+    enum Decision {
+        Keep,
+        Delete,
+        ReplaceOne(&'static str),
+        ReplaceMany(Vec<&'static str>),
+    }
+
+    fn decision_strategy() -> impl Strategy<Value = Decision> {
+        prop_oneof![
+            2 => Just(Decision::Keep),
+            1 => Just(Decision::Delete),
+            2 => prop::sample::select(&LAZY_MAP_FIELDS[..]).prop_map(Decision::ReplaceOne),
+            2 => prop::collection::vec(prop::sample::select(&LAZY_MAP_FIELDS[..]), 0..3)
+                .prop_map(Decision::ReplaceMany),
+        ]
+    }
+
+    /// Insert-or-overwrite-by-key, preserving first-insertion position: mirrors the documented
+    /// `make_selection_set`/`lazy_map` contract ("if the same selection key repeats in a later
+    /// group, the previous group will be ignored and replaced by the new group").
+    fn upsert(
+        expected: &mut Vec<(&'static str, &'static str)>,
+        key: &'static str,
+        text: &'static str,
+    ) {
+        if let Some(existing) = expected.iter_mut().find(|(k, _)| *k == key) {
+            existing.1 = text;
+        } else {
+            expected.push((key, text));
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        #[test]
+        fn lazy_map_matches_eager_last_write_wins_reconstruction(
+            decisions in prop::collection::vec(decision_strategy(), 4),
+        ) {
+            let schema = parse_schema(LAZY_MAP_SCHEMA);
+            let base = SelectionSet::parse(schema.clone(), query_type(), "a b c d").unwrap();
+
+            let mut expected: Vec<(&'static str, &'static str)> = Vec::new();
+            let original_keys = ["a", "b", "c", "d"];
+            for (key, decision) in original_keys.iter().zip(&decisions) {
+                match decision {
+                    Decision::Keep => upsert(&mut expected, key, key),
+                    // `SelectionMapperReturn::None` is documented as "Removed; Skip it." and its
+                    // handling is a literal no-op (`update_new_selection`, mod.rs): a deleted
+                    // position contributes nothing of its own, but — unlike a set-based delete —
+                    // it does NOT retroactively remove an entry some *other* position's
+                    // replacement already inserted under this same key. An earlier version of
+                    // this model called `retain` here (removing by key), which is wrong: it
+                    // failed on `decisions = [Keep, ReplaceOne("c"), Delete, Keep]`, where `b`'s
+                    // replacement inserts key "c" and the original `c` position's own delete must
+                    // not erase it. Confirmed via the doc comment/source before fixing (see
+                    // triage note above `Decision`).
+                    Decision::Delete => {}
+                    Decision::ReplaceOne(replacement) => {
+                        upsert(&mut expected, replacement, replacement);
+                    }
+                    Decision::ReplaceMany(replacements) => {
+                        for r in replacements {
+                            upsert(&mut expected, r, r);
+                        }
+                    }
+                }
+            }
+
+            let mut decisions_iter = decisions.into_iter();
+            let result = base
+                .lazy_map(|sel| {
+                    let decision = decisions_iter
+                        .next()
+                        .expect("one decision per original top-level selection");
+                    Ok(match decision {
+                        Decision::Keep => SelectionMapperReturn::Selection(sel.clone()),
+                        Decision::Delete => SelectionMapperReturn::None,
+                        Decision::ReplaceOne(name) => {
+                            SelectionMapperReturn::Selection(field_selection(&schema, name))
+                        }
+                        Decision::ReplaceMany(names) => SelectionMapperReturn::SelectionList(
+                            names.iter().map(|n| field_selection(&schema, n)).collect(),
+                        ),
+                    })
+                })
+                .unwrap();
+
+            if expected.is_empty() {
+                prop_assert!(result.is_empty());
+                return Ok(());
+            }
+
+            let expected_text = format!(
+                "{{ {} }}",
+                expected.iter().map(|(_, t)| *t).collect::<Vec<_>>().join(" ")
+            );
+            let expected_selection_set = SelectionSet::parse(schema, query_type(), &expected_text).unwrap();
+
+            prop_assert!(
+                result
+                    .containment(&expected_selection_set, ContainmentOptions::default())
+                    .is_equal(),
+                "lazy_map result did not match the eager last-write-wins reconstruction; \
+                 expected `{expected_text}`, got `{result}`"
+            );
+        }
+    }
+
+    /// `lazy_map`'s copy-on-write fast path (every selection maps to itself unchanged) returns
+    /// exactly the original selection set, not just something semantically equal to it.
+    #[test]
+    fn lazy_map_all_keep_is_the_identity() {
+        let schema = parse_schema(LAZY_MAP_SCHEMA);
+        let base = SelectionSet::parse(schema, query_type(), "a b c d").unwrap();
+        let result = base
+            .lazy_map(|sel| Ok(SelectionMapperReturn::Selection(sel.clone())))
+            .unwrap();
+        assert_eq!(result, base);
+    }
+}
+
 fn field_element(schema: &ValidFederationSchema, object: Name, field: Name) -> OpPathElement {
     OpPathElement::Field(Field {
         schema: schema.clone(),
