@@ -363,4 +363,152 @@ mod tests {
             ],
         );
     }
+
+    // =========================================================================================
+    // "Supporting exact property" (proptest-graph-notes.md): the pruned search must always find
+    // the same minimum cost as an exhaustive Cartesian-product search, for a monotone builder
+    // (element weights are non-negative, so a plan's cost never decreases as elements are
+    // added — the precondition the branch-and-bound pruning above relies on). Deliberately not
+    // tested against a non-monotone builder: the notes are explicit that current pruning assumes
+    // monotone partial costs, and testing that precondition's absence isn't this property's job.
+    // =========================================================================================
+
+    use proptest::prelude::*;
+    use proptest::proptest;
+
+    /// `Plan`/`Element` instantiated as plain integer weights (mirrors `TestPlanBuilder` above,
+    /// but tracks weights directly rather than string lengths, so the reference oracle below is
+    /// exact integer arithmetic rather than a derived string-length cost).
+    struct RecordingPlanBuilder {
+        target_len: usize,
+    }
+
+    impl PlanBuilder<Vec<i64>, i64> for RecordingPlanBuilder {
+        fn add_to_plan(&mut self, plan: &Vec<i64>, elem: i64) -> Result<Vec<i64>, FederationError> {
+            let mut new_plan = plan.clone();
+            new_plan.push(elem);
+            Ok(new_plan)
+        }
+
+        fn compute_plan_cost(
+            &mut self,
+            plan: &mut Vec<i64>,
+        ) -> Result<QueryPlanCost, FederationError> {
+            Ok(plan.iter().sum::<i64>() as QueryPlanCost)
+        }
+
+        fn on_plan_generated(
+            &self,
+            plan: &Vec<i64>,
+            _cost: QueryPlanCost,
+            _prev_cost: Option<QueryPlanCost>,
+        ) {
+            assert_eq!(
+                plan.len(),
+                self.target_len,
+                "on_plan_generated must only ever be called with a complete plan"
+            );
+        }
+    }
+
+    /// Exhaustive reference: enumerate the full Cartesian product recursively and take the
+    /// minimum sum. No stack, no pruning, no branch-and-bound — just direct recursion.
+    fn exhaustive_min_cost(initial_weight: i64, choices: &[Vec<i64>]) -> i64 {
+        fn recurse(remaining: &[Vec<i64>], acc: i64) -> i64 {
+            match remaining.split_first() {
+                None => acc,
+                Some((first, rest)) => first
+                    .iter()
+                    .map(|&weight| recurse(rest, acc + weight))
+                    .min()
+                    .expect("each choice group is non-empty by construction"),
+            }
+        }
+        recurse(choices, initial_weight)
+    }
+
+    fn run_pruned_search(
+        initial_weight: i64,
+        choice_weights: &[Vec<i64>],
+    ) -> (Vec<i64>, QueryPlanCost) {
+        let initial = vec![initial_weight];
+        let to_add: Vec<Choices<i64>> = choice_weights
+            .iter()
+            .map(|choices| choices.iter().map(|&w| Some(w)).collect())
+            .collect();
+        let target_len = initial.len() + to_add.len();
+        let mut builder = RecordingPlanBuilder { target_len };
+        generate_all_plans_and_find_best::<Vec<i64>, i64>(initial, to_add, &mut builder).unwrap()
+    }
+
+    fn choice_weights_strategy() -> impl Strategy<Value = Vec<Vec<i64>>> {
+        prop::collection::vec(prop::collection::vec(0i64..1000, 1..5), 0..6)
+    }
+
+    proptest! {
+        // Narrow and cheap (the doc's own assessment): this code is comparatively
+        // self-contained, so a high case count is affordable.
+        #![proptest_config(ProptestConfig::with_cases(1024))]
+
+        #[test]
+        fn pruned_plan_search_matches_exhaustive_monotone_search(
+            initial_weight in 0i64..1000,
+            choice_weights in choice_weights_strategy(),
+        ) {
+            let exhaustive_min = exhaustive_min_cost(initial_weight, &choice_weights);
+            let target_len = 1 + choice_weights.len();
+
+            let (best_plan, best_cost) = run_pruned_search(initial_weight, &choice_weights);
+
+            // Optimized returned cost equals the exhaustive minimum.
+            prop_assert_eq!(best_cost, exhaustive_min as QueryPlanCost);
+            // The returned plan is one of the minimum-cost plans: its own weights really sum to
+            // that cost, and every element is actually one of the offered choices at that
+            // position (not, say, a stray element from a different branch).
+            prop_assert_eq!(best_plan.len(), target_len);
+            prop_assert_eq!(best_plan.iter().sum::<i64>(), exhaustive_min);
+            prop_assert_eq!(best_plan[0], initial_weight);
+            for (i, choices) in choice_weights.iter().enumerate() {
+                prop_assert!(
+                    choices.contains(&best_plan[i + 1]),
+                    "returned plan picked a weight not among the offered choices at position {i}"
+                );
+            }
+
+            // Empty `to_add` returns the initial plan and its cost unchanged.
+            if choice_weights.is_empty() {
+                prop_assert_eq!(&best_plan, &vec![initial_weight]);
+                prop_assert_eq!(best_cost, initial_weight as QueryPlanCost);
+            }
+
+            // Choice-vector permutation preserves the minimum cost (reordering independent
+            // choice groups can't change which combination is cheapest, only where its elements
+            // land in the plan).
+            if !choice_weights.is_empty() {
+                let mut permuted = choice_weights.clone();
+                permuted.reverse();
+                let permuted_exhaustive_min = exhaustive_min_cost(initial_weight, &permuted);
+                prop_assert_eq!(permuted_exhaustive_min, exhaustive_min);
+                let (_, permuted_best_cost) = run_pruned_search(initial_weight, &permuted);
+                prop_assert_eq!(permuted_best_cost, exhaustive_min as QueryPlanCost);
+            }
+
+            // Dominated-choice addition cannot improve the minimum cost: appending a new group
+            // whose cheapest option is `0` (as good as any option can be) and whose other option
+            // is astronomically expensive (so it can never win) must leave the minimum exactly
+            // where it was, plus that group's forced `0` contribution.
+            let mut with_dominated = choice_weights.clone();
+            with_dominated.push(vec![0, 1_000_000_000]);
+            let dominated_exhaustive_min = exhaustive_min_cost(initial_weight, &with_dominated);
+            prop_assert_eq!(dominated_exhaustive_min, exhaustive_min);
+            let (dominated_best_plan, dominated_best_cost) =
+                run_pruned_search(initial_weight, &with_dominated);
+            prop_assert_eq!(dominated_best_cost, exhaustive_min as QueryPlanCost);
+            prop_assert_eq!(
+                *dominated_best_plan.last().unwrap(),
+                0,
+                "the dominated (astronomically expensive) option must never be selected"
+            );
+        }
+    }
 }
