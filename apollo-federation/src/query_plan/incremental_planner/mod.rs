@@ -101,9 +101,6 @@ pub(crate) fn build_bulb_plan(
         cached_query_graph: field_routing::cached_query_graph::CachedQueryGraph::new(
             query_graph.clone(),
             parameters.override_conditions.clone(),
-            parameters
-                .abstract_types_with_inconsistent_runtime_types
-                .clone(),
         ),
         supergraph_schema: supergraph_schema.clone(),
         caches: field_routing::PlannerCaches::new(),

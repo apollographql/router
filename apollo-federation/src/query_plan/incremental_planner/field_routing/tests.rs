@@ -1953,9 +1953,8 @@ fn context_value_rides_entity_representation_at_boundary() {
 /// per subgraph (U is X|Y in A but only X in B): fragments committed under
 /// the B route must be filtered to B's member set, dropping `... on Y`
 /// there without a penalty, while the A route keeps both.
-/// Targets field_routing/mod.rs allowed_inconsistent_members, routing.rs
-/// fragment_options' intersection filter, and type_conditions.rs
-/// dropped-by-intersection-filter arm.
+/// Targets routing.rs fragment_options' intersection filter, and
+/// type_conditions.rs dropped-by-intersection-filter arm.
 #[test]
 fn inconsistent_union_members_filtered_per_subgraph() {
     let schema = wrap_supergraph(
@@ -2067,9 +2066,8 @@ type Query
 /// key) puts its descendants on a shareable path; `search` below it returns
 /// a union whose members differ per subgraph, so its child fragments get an
 /// intersection filter from the committed subgraph's own member set.
-/// Targets field_routing/mod.rs allowed_inconsistent_members and commit.rs
-/// intersection_filter_for_field / field_is_shareable_here /
-/// field_in_multiple_subgraphs.
+/// Targets commit.rs intersection_filter_for_field /
+/// field_is_shareable_here / field_in_multiple_subgraphs.
 #[test]
 fn entity_shareable_field_filters_inconsistent_union_members() {
     let plan_str = plan_query(
@@ -2103,49 +2101,3 @@ fn entity_shareable_field_filters_inconsistent_union_members() {
     "###);
 }
 
-/// Unit test for the allowed_inconsistent_members cache: A has {X, Y},
-/// B has {X}, a consistent type returns None.
-/// Targets field_routing/mod.rs allowed_inconsistent_members.
-#[test]
-fn inconsistent_member_sets_are_per_subgraph() {
-    let supergraph =
-        Supergraph::new(&entity_inconsistent_union_schema()).expect("supergraph parse");
-    let api_schema = supergraph
-        .to_api_schema(Default::default())
-        .expect("api schema");
-    let query_graph = std::sync::Arc::new(
-        crate::query_graph::build_federated_query_graph(
-            supergraph.schema.clone(),
-            api_schema,
-            Some(true),
-            Some(true),
-        )
-        .expect("query graph"),
-    );
-    let u = apollo_compiler::Name::new("U").unwrap();
-    let cached_qg = super::CachedQueryGraph::new(
-        query_graph.clone(),
-        crate::query_graph::OverrideConditions::new(&query_graph, &Default::default()),
-        std::sync::Arc::new([u.clone()].into_iter().collect()),
-    );
-
-    let a: std::sync::Arc<str> = std::sync::Arc::from("a");
-    let b: std::sync::Arc<str> = std::sync::Arc::from("b");
-    let members_a = cached_qg
-        .allowed_inconsistent_members(&u, &a)
-        .expect("U is inconsistent");
-    assert_eq!(members_a.len(), 2, "a has both members: {members_a:?}");
-    let members_b = cached_qg
-        .allowed_inconsistent_members(&u, &b)
-        .expect("U is inconsistent");
-    assert_eq!(members_b.len(), 1, "b has only X: {members_b:?}");
-    let members_b_again = cached_qg
-        .allowed_inconsistent_members(&u, &b)
-        .expect("cache hit");
-    assert_eq!(members_b_again.len(), 1);
-    assert!(
-        cached_qg
-            .allowed_inconsistent_members(&apollo_compiler::Name::new("X").unwrap(), &a)
-            .is_none()
-    );
-}
