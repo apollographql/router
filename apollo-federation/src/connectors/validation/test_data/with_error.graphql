@@ -1,0 +1,74 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+)
+@source(name: "api", http: { baseURL: "http://127.0.0.1" })
+
+type Query {
+    messageOnly: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withError("Unrecognized code:", @)
+        """
+    )
+
+    structured: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code ?? $("<missing>")->withError({
+            message: "Field 'code' was not found"
+            extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
+        })
+        """
+    )
+
+    redactedByConfig: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code ?? $("<missing>")->withError({
+            message: $config.verboseErrors->match([true, $.detail], [@, "An error occurred"])
+            extensions: { code: "INTERNAL_SERVER_ERROR" }
+        })
+        """
+    )
+
+    # INVALID - caught at composition: `with_error_shape` returns a
+    # `Shape::error`, which the selection walker now reports rather than
+    # treating the field as an ordinary scalar leaf.
+    noArguments: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withError
+        """
+    )
+
+    # NOT caught, and correctly so: the API response has no declared shape, so
+    # a path into it cannot be checked statically.
+    unknownFieldInArgument: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withError("saw:", @.nonexistent)
+        """
+    )
+}
+
+type T {
+    id: ID
+    status: String
+}

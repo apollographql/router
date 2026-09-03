@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: result.errors
+input_file: apollo-federation/src/connectors/validation/test_data/with_error.graphql
+---
+[
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.noArguments` contains an invalid mapping for field `status`: Method ->withError requires at least one argument",
+        locations: [
+            54:23..54:32,
+        ],
+    },
+]
