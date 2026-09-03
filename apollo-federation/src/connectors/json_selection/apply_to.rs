@@ -519,8 +519,15 @@ impl ApplyToError {
         }
     }
 
-    /// Where this error belongs in the mapping's output. See
-    /// [`DeclaredParts::output_path`]. Always empty for a diagnostic.
+    /// Where this error belongs in the mapping's *output*, as opposed to
+    /// [`Self::path`], which says where the mapping was reading in its input.
+    ///
+    /// The two differ under any rename: `balance: amount->withError(...)` reads
+    /// `amount` and writes `balance`. Only this one resolves against the data a
+    /// client received, so only this one belongs in a GraphQL error's `path`.
+    ///
+    /// Always empty for a diagnostic, which carries no output path because it
+    /// is addressed to the mapping author rather than to a client.
     pub fn output_path(&self) -> &[JSON] {
         self.declared
             .as_ref()
