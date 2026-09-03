@@ -40,13 +40,18 @@ impl FieldRoutingSearchSpace {
         node: NodeIndex,
         conditions: &Arc<SelectionSet>,
     ) -> Result<bool, FederationError> {
-        self.conditions_resolvable_inner(node, conditions.as_ref())
+        self.walk_conditions_graph(node, conditions.as_ref(), true)
     }
 
-    fn conditions_resolvable_inner(
+    /// Walk condition fields via graph edges. When `fail_on_unreachable` is
+    /// true, returns false if any field lacks an edge (resolvability check).
+    /// When false, skips missing fields and returns true if any edge carries
+    /// conditions (requires detection).
+    fn walk_conditions_graph(
         &self,
         node: NodeIndex,
         conditions: &SelectionSet,
+        fail_on_unreachable: bool,
     ) -> Result<bool, FederationError> {
         for selection in conditions.selections.values() {
             match selection {
@@ -55,16 +60,21 @@ impl FieldRoutingSearchSpace {
                         continue;
                     }
                     let Some(edge_idx) = self.edge_for_field(node, &field_sel.field) else {
-                        return Ok(false);
+                        if fail_on_unreachable {
+                            return Ok(false);
+                        }
+                        continue;
                     };
                     let edge = self.query_graph.edge_weight(edge_idx)?;
                     if edge.conditions.is_some() {
-                        return Ok(false);
+                        return Ok(!fail_on_unreachable);
                     }
                     if let Some(sub_sel) = field_sel.selection_set.as_ref() {
                         let (_, target) = self.query_graph.edge_endpoints(edge_idx)?;
-                        if !self.conditions_resolvable_inner(target, sub_sel)? {
-                            return Ok(false);
+                        let sub_result =
+                            self.walk_conditions_graph(target, sub_sel, fail_on_unreachable)?;
+                        if sub_result != fail_on_unreachable {
+                            return Ok(sub_result);
                         }
                     }
                 }
@@ -78,13 +88,18 @@ impl FieldRoutingSearchSpace {
                         })
                         .transpose()?
                         .unwrap_or(node);
-                    if !self.conditions_resolvable_inner(target, &frag_sel.selection_set)? {
-                        return Ok(false);
+                    let sub_result = self.walk_conditions_graph(
+                        target,
+                        &frag_sel.selection_set,
+                        fail_on_unreachable,
+                    )?;
+                    if sub_result != fail_on_unreachable {
+                        return Ok(sub_result);
                     }
                 }
             }
         }
-        Ok(true)
+        Ok(fail_on_unreachable)
     }
 
     /// Whether any condition field (recursively) carries @requires of its
@@ -95,51 +110,7 @@ impl FieldRoutingSearchSpace {
         node: NodeIndex,
         conditions: &Arc<SelectionSet>,
     ) -> Result<bool, FederationError> {
-        self.conditions_have_requires_inner(node, conditions.as_ref())
-    }
-
-    fn conditions_have_requires_inner(
-        &self,
-        node: NodeIndex,
-        conditions: &SelectionSet,
-    ) -> Result<bool, FederationError> {
-        for selection in conditions.selections.values() {
-            match selection {
-                Selection::Field(field_sel) => {
-                    if *field_sel.field.name() == TYPENAME_FIELD {
-                        continue;
-                    }
-                    let Some(edge_idx) = self.edge_for_field(node, &field_sel.field) else {
-                        continue;
-                    };
-                    let edge = self.query_graph.edge_weight(edge_idx)?;
-                    if edge.conditions.is_some() {
-                        return Ok(true);
-                    }
-                    if let Some(sub_sel) = field_sel.selection_set.as_ref() {
-                        let (_, target) = self.query_graph.edge_endpoints(edge_idx)?;
-                        if self.conditions_have_requires_inner(target, sub_sel)? {
-                            return Ok(true);
-                        }
-                    }
-                }
-                Selection::InlineFragment(frag_sel) => {
-                    let target = self
-                        .edge_for_inline_fragment(node, &frag_sel.inline_fragment)
-                        .map(|edge_idx| {
-                            self.query_graph
-                                .edge_endpoints(edge_idx)
-                                .map(|(_, target)| target)
-                        })
-                        .transpose()?
-                        .unwrap_or(node);
-                    if self.conditions_have_requires_inner(target, &frag_sel.selection_set)? {
-                        return Ok(true);
-                    }
-                }
-            }
-        }
-        Ok(false)
+        self.walk_conditions_graph(node, conditions.as_ref(), false)
     }
 
     /// Filter key conditions to the subset the source subgraph can resolve.
