@@ -1,4 +1,5 @@
 use apollo_federation::query_plan::query_planner::IncrementalPlannerConfig;
+use apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
@@ -10,6 +11,19 @@ fn incremental_config() -> QueryPlannerConfig {
             fuel: 100_000,
             ..Default::default()
         },
+        ..Default::default()
+    }
+}
+
+fn incremental_defer_config() -> QueryPlannerConfig {
+    QueryPlannerConfig {
+        incremental_planner: IncrementalPlannerConfig {
+            enabled: true,
+            beam_width: 4,
+            fuel: 100_000,
+            ..Default::default()
+        },
+        incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
         ..Default::default()
     }
 }
@@ -1962,6 +1976,89 @@ fn inc_conditionless_fragment_skip_preserved() {
             }
           }
         }
+      },
+    }
+    "###
+    );
+}
+
+// ---------------------------------------------------------------------------
+// @defer: deferred fragment across subgraphs produces a Defer plan node
+// with primary and deferred blocks. The @defer directive is stripped from
+// subgraph operations since subgraph schemas do not define it.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn inc_defer_cross_subgraph_produces_defer_plan() {
+    let planner = planner!(
+        config = incremental_defer_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            y: Int
+          }
+        "#,
+    );
+
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            t {
+              ...OnT @defer
+              x
+            }
+          }
+
+          fragment OnT on T {
+            y
+            __typename
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { x } }:
+          Fetch(service: "Subgraph1", id: 0) {
+            {
+              t {
+                __typename
+                id
+                x
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "t") {
+            { ... on T { __typename y } }:
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    y
+                  }
+                }
+              },
+            },
+          },
+        ]
       },
     }
     "###
