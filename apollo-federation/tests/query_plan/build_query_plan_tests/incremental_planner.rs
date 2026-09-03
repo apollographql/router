@@ -1967,3 +1967,86 @@ fn inc_conditionless_fragment_skip_preserved() {
     "###
     );
 }
+
+#[test]
+fn inc_interface_type_explosion_routes_value_type_field() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+          type Query {
+            i: I
+          }
+
+          interface I {
+            s: S
+          }
+
+          type T implements I @key(fields: "id") {
+            id: ID!
+            s: S @shareable
+          }
+
+          type S @shareable {
+            x: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            s: S @shareable
+          }
+
+          type S @shareable {
+            x: Int
+            y: Int
+          }
+        "#,
+    );
+
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            i {
+              s {
+                y
+              }
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "Subgraph1") {
+              {
+                i {
+                  __typename
+                  ... on T {
+                    __typename
+                    id
+                  }
+                }
+              }
+            },
+            Flatten(path: "i") {
+              Fetch(service: "Subgraph2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    s {
+                      y
+                    }
+                  }
+                }
+              },
+            },
+          },
+        }
+      "###
+    );
+}
