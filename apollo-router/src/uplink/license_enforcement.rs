@@ -793,15 +793,6 @@ impl LicenseState {
         !self.is_unlicensed()
     }
 
-    pub(crate) fn get_limits(&self) -> Option<&LicenseLimits> {
-        match self {
-            LicenseState::Licensed { limits }
-            | LicenseState::LicensedWarn { limits }
-            | LicenseState::LicensedHalt { limits } => limits.as_ref(),
-            _ => None,
-        }
-    }
-
     pub(crate) fn get_allowed_features(&self) -> HashSet<AllowedFeature> {
         match self {
             LicenseState::Licensed { limits }

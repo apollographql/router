@@ -413,7 +413,7 @@ commands:
             # Use the settings from the "ci" profile in nextest configuration.
             NEXTEST_PROFILE: ci
           command: |
-            cargo xtask test --no-fail-fast --workspace --locked --features ci,snapshot
+            cargo xtask test --no-fail-fast --workspace --locked --features ci,snapshot,mock_subgraphs_testing
 
       - run:
           name: Delete large files from cache
