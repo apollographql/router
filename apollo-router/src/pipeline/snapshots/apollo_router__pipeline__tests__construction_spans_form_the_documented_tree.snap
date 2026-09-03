@@ -1,0 +1,39 @@
+---
+source: apollo-router/src/pipeline/tests.rs
+assertion_line: 314
+expression: "layer.render(&[\"prepare_pipeline\", \"activate\", \"apply_pipeline\"])"
+---
+prepare_pipeline
+  query_planner_creation
+  plugins
+    plugin: apollo.include_subgraph_errors
+    plugin: apollo.headers
+    plugin: apollo.license_enforcement
+    plugin: apollo.health_check
+    plugin: apollo.traffic_shaping
+    plugin: apollo.limits
+    plugin: apollo.csrf
+    plugin: apollo.fleet_detector
+    plugin: apollo.enhanced_client_awareness
+    plugin: apollo.experimental_diagnostics
+    plugin: apollo.forbid_mutations
+    plugin: apollo.subscription
+    plugin: apollo.override_subgraph_url
+    plugin: apollo.authorization
+    plugin: apollo.authentication
+    plugin: apollo.preview_file_uploads
+    plugin: apollo.progressive_override
+    plugin: apollo.demand_control
+    plugin: apollo.connectors
+    plugin: apollo.rhai
+    plugin: apollo.coprocessor
+    plugin: apollo.response_cache
+    plugin: apollo.experimental_mock_subgraphs
+  http_client_inputs
+  query_plan_redis_connect
+  apq_redis_connect
+  persisted_queries_manifest
+activate
+apply_pipeline
+  supergraph_creation
+  warmup

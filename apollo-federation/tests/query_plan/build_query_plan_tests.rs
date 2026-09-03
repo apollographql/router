@@ -42,6 +42,7 @@ mod field_merging_with_skip_and_include;
 mod fragment_autogeneration;
 mod handles_fragments_with_directive_conditions;
 mod handles_operations_with_directives;
+mod incremental_planner;
 mod interface_object;
 mod interface_type_explosion;
 mod introspection_typename_handling;

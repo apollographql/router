@@ -1,0 +1,90 @@
+---
+title: Upgrading from Versions 2.x
+subtitle: Upgrade from version 2.x to 3.x of GraphOS Router
+description: Learn how to upgrade from version 2.x to 3.x of Apollo GraphOS Router.
+---
+
+GraphOS Router v3.x includes various breaking changes when upgrading from v2.x, including removing deprecated features and consolidating on OpenTelemetry-native tracing formats.
+
+This upgrade guide describes the steps to upgrade your GraphOS Router deployment from version 2.x to 3.x. It describes breaking changes and how to resolve them. It also recommends new features to use.
+
+## Upgrade strategy
+
+Before making any changes, auto-upgrade your configuration. This will remove options that already have no effect in v2.x, and make the rest of the upgrade easier.
+
+Check the changes that will be applied using:
+```bash
+router config upgrade --diff router.yaml
+```
+
+Then apply the changes using:
+```bash
+router config upgrade router.yaml > router.next.yaml
+mv router.next.yaml router.yaml
+```
+
+## Removals and deprecations
+
+The following headings describe features that have been removed in router v3.x. Alternatives to the removed features are described, if available.
+
+### Removed Jaeger trace propagator
+
+The `opentelemetry-jaeger-propagator` crate has deprecated the Jaeger propagation format in favor of W3C TraceContext propagation. The Jaeger propagator has been removed entirely.
+
+**Upgrade step**:
+
+- Change your router config to use `trace_context` propagation instead:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      propagation:
+        # Before (no longer supported)
+        # jaeger: true
+        trace_context: true
+```
+
+This only affects the propagation format used for distributed tracing headers; sending traces to Jaeger via the OTLP exporter is unaffected.
+
+### Removed Zipkin trace exporter and propagator
+
+The `opentelemetry-zipkin` crate has deprecated its exporter and propagator in favor of OTLP (Zipkin supports OTLP ingestion via [zipkin-otel](https://github.com/openzipkin-contrib/zipkin-otel)). The native Zipkin exporter and propagator have been removed entirely.
+
+**Upgrade step**:
+
+- Change your router config to send traces to Zipkin via the `otlp` exporter instead:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      # Before (no longer supported)
+      # zipkin:
+      #   enabled: true
+      #   endpoint: "http://127.0.0.1:9411/api/v2/spans"
+      otlp:
+        enabled: true
+        endpoint: "http://127.0.0.1:9411"
+        protocol: http
+```
+
+### Removed legacy Apollo trace transport and `otlp_tracing_sampler`
+
+In v1.x and v2.x, traces could be sent to GraphOS either via the legacy Apollo Usage Reporting protocol or via OTLP, with the split between the two controlled by `telemetry.apollo.otlp_tracing_sampler`. In v3.x, the legacy trace transport is removed: traces are always reported to GraphOS via OTLP, and the `otlp_tracing_sampler` option no longer exists.
+
+This only affects trace export. Usage report metrics are unchanged and continue to use the Apollo Usage Reporting protocol.
+
+**Upgrade step**:
+
+- Remove `telemetry.apollo.otlp_tracing_sampler` from your router config. The `router config upgrade` command does this for you.
+- To control how many traces are sent to GraphOS, use `telemetry.apollo.sampler` or the common tracing sampler. See [trace reporting via OTLP](/graphos/routing/observability/graphos/graphos-reporting#trace-reporting-via-otlp).
+
+### Default rustls crypto provider switched from `ring` to `aws-lc-rs`
+
+The router's default process-wide rustls `CryptoProvider` is now `aws-lc-rs` instead of `ring`. This only affects consumers embedding `apollo-router` as a library:
+
+- If your binary installs `rustls::crypto::ring::default_provider()` (or otherwise assumes `ring` is the installed provider) before or after calling into `apollo-router`, the two installs will race, and whichever runs first wins. Update your own crypto-provider install to use `aws-lc-rs`, or remove it and rely on the router's install.
+- If your binary depends directly on `ring`-backed features of `reqwest`, `tonic`, `fred`, or `aws-smithy-http-client`, switch to their `aws-lc-rs`-backed equivalents to avoid pulling in a second copy of `ring` alongside the router's `aws-lc-rs` build.
+
+Deployments that only use the `router` binary as-is are unaffected.

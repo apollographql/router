@@ -3,8 +3,6 @@ rhai:
   main: "override_client_name.rhai"
 telemetry:
   instrumentation:
-    spans:
-      mode: spec_compliant
     events:
       router:
         request: info

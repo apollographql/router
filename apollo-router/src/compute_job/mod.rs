@@ -8,8 +8,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
-use opentelemetry::metrics::MeterProvider as _;
-use opentelemetry::metrics::ObservableGauge;
 use tokio::sync::oneshot;
 use tokio::task_local;
 use tracing::Instrument;
@@ -18,6 +16,7 @@ use tracing::info_span;
 use tracing_core::Dispatch;
 use tracing_subscriber::util::SubscriberInitExt;
 
+pub(crate) use self::metrics::ComputeJobMetricsLayer;
 use self::metrics::JobWatcher;
 use self::metrics::Outcome;
 use self::metrics::observe_compute_duration;
@@ -25,7 +24,6 @@ use self::metrics::observe_queue_wait_duration;
 use crate::ageing_priority_queue::AgeingPriorityQueue;
 use crate::ageing_priority_queue::Priority;
 use crate::ageing_priority_queue::SendError;
-use crate::metrics::meter_provider;
 use crate::plugins::telemetry::consts::COMPUTE_JOB_EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::consts::COMPUTE_JOB_SPAN_NAME;
 
@@ -103,6 +101,24 @@ pub(crate) enum MaybeBackPressureError<E> {
 impl<E> From<E> for MaybeBackPressureError<E> {
     fn from(error: E) -> Self {
         Self::PermanentError(error)
+    }
+}
+
+impl<E: std::fmt::Display> std::fmt::Display for MaybeBackPressureError<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PermanentError(e) => write!(f, "{e}"),
+            Self::TemporaryError(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for MaybeBackPressureError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::PermanentError(e) => Some(e),
+            Self::TemporaryError(e) => Some(e),
+        }
     }
 }
 
@@ -395,17 +411,6 @@ where
         }
         .in_current_span())
     })
-}
-
-pub(crate) fn create_queue_size_gauge() -> ObservableGauge<u64> {
-    meter_provider()
-        .meter("apollo/router")
-        .u64_observable_gauge("apollo.router.compute_jobs.queued")
-        .with_description(
-            "Number of computation jobs (parsing, planning, …) waiting to be scheduled",
-        )
-        .with_callback(move |m| m.observe(queue().queued_count() as u64, &[]))
-        .build()
 }
 
 #[cfg(test)]

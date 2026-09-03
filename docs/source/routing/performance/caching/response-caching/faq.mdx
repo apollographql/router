@@ -95,9 +95,7 @@ The 2024 preview used a linear scan approach for active invalidation that scaled
 
 ### How does the current release affect existing users?
 
-Response caching is backward-compatible with entity caching. You can switch to response caching without breaking changes.
-
-If you're currently using the `preview_entity_caching` plugin, migrate to response caching as soon as possible. The new implementation provides better performance and more flexible caching controls.
+The `preview_entity_cache` plugin has been removed in Router 3.0. If you're upgrading from Router 2.x, you must migrate to `response_cache` before upgrading. The new implementation provides better performance and more flexible caching controls.
 
 ### How do I migrate from entity caching to response caching?
 

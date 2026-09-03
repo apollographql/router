@@ -18,7 +18,6 @@ telemetry:
           scheduled_delay: 10ms
   instrumentation:
     spans:
-      mode: spec_compliant
       supergraph:
         attributes:
           graphql.operation.name: true

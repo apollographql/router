@@ -4,9 +4,13 @@ use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
 use tower::BoxError;
+use tower::Service as _;
+use tower::ServiceBuilder;
+use tower::ServiceExt as _;
 
 use super::*; // Import items from mod.rs
 use crate::graphql;
+use crate::plugin::test::await_mock_driver;
 use crate::plugins::test::PluginTestHarness;
 use crate::services::supergraph; // Required for collect
 
@@ -43,26 +47,42 @@ async fn run_test_case(
 ) {
     let harness = build_harness(config).await.expect("plugin should load");
 
-    let mock_response_elements = mock_responses
+    let mock_response_elements: Vec<graphql::Response> = mock_responses
         .iter()
         .map(|response| {
             serde_json::from_str(response).expect("Failed to parse mock response bytes")
         })
-        .collect::<Vec<_>>();
+        .collect();
 
-    let service = harness.supergraph_service(move |req| {
-        let mock_response_elements = mock_response_elements.clone();
-        async {
-            supergraph::Response::fake_stream_builder()
-                .responses(mock_response_elements)
-                .context(req.context)
-                .build()
-        }
+    let (mock_service, mut handle) =
+        tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        let response = supergraph::Response::fake_stream_builder()
+            .responses(mock_response_elements)
+            .context(req.context)
+            .build()
+            .expect("valid fake stream response");
+        responder.send_response(response);
     });
-    let mut response = service.call_default().await.unwrap();
+
+    let mut service = ServiceBuilder::new()
+        .layer(harness.redact_subgraph_errors_layer())
+        .service(mock_service);
+
+    let mut response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(supergraph::Request::fake_builder().build().unwrap())
+        .await
+        .unwrap();
 
     // Collect the actual response body (potentially modified by the plugin)
     let actual_responses: Vec<graphql::Response> = response.response.body_mut().collect().await;
+
+    await_mock_driver(driver).await;
 
     let config = serde_yaml::to_string(config).expect("config to yaml");
     let parsed_responses = mock_responses
@@ -502,4 +522,90 @@ async fn it_processes_incremental_responses() {
         "incremental_response",
     )
     .await;
+}
+
+/// Drives one subgraph error through a pipeline built by `create_plugins` and
+/// `pipeline::stages`, and returns the response the client would see.
+///
+/// The tests above stack the layers by hand, which says nothing about whether they are
+/// installed in the real pipeline. A dropped `.apply_required_plugin_layer(..)` call in
+/// `stages.rs` would leave every error unredacted — so the wiring needs a test of its own.
+async fn error_through_real_pipeline(config: Value) -> graphql::Response {
+    let service = crate::TestHarness::builder()
+        .configuration_json(json!({ "include_subgraph_errors": config }))
+        .expect("valid config")
+        .schema(include_str!("../../../testing_schema.graphql"))
+        // Replaces the subgraph transport only: this hook is a user plugin, so it sits
+        // *inside* the layers under test.
+        .subgraph_hook(|_name, _service| {
+            let (mock, mut handle) =
+                tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+            tokio::spawn(async move {
+                while let Some((req, responder)) = handle.next_request().await {
+                    responder.send_response(
+                        subgraph::Response::fake_builder()
+                            .context(req.context)
+                            .error(
+                                graphql::Error::builder()
+                                    .message("the subgraph blew up")
+                                    .extension_code("SUBGRAPH_BOOM")
+                                    .build(),
+                            )
+                            .build(),
+                    );
+                }
+            });
+            mock.boxed_clone()
+        })
+        .build_supergraph()
+        .await
+        .expect("supergraph pipeline");
+
+    let mut response = service
+        .oneshot(
+            supergraph::Request::fake_builder()
+                // `me` resolves against the `accounts` subgraph only.
+                .query("query { me { name } }")
+                .build()
+                .expect("valid request"),
+        )
+        .await
+        .expect("supergraph call");
+
+    response.next_response().await.expect("one response")
+}
+
+#[tokio::test]
+async fn redaction_is_wired_into_the_pipeline() {
+    let response = error_through_real_pipeline(json!({ "all": false })).await;
+
+    let error = response.errors.first().expect("one error");
+    assert_eq!(error.message, REDACTED_ERROR_MESSAGE);
+    assert!(
+        error.extensions.is_empty(),
+        "redaction clears every extension, got {:?}",
+        error.extensions
+    );
+}
+
+#[tokio::test]
+async fn subgraph_name_tagging_is_wired_into_the_pipeline() {
+    let response = error_through_real_pipeline(json!({ "all": true })).await;
+
+    let error = response.errors.first().expect("one error");
+    assert_eq!(error.message, "the subgraph blew up");
+    // `service` is derived from the tag the subgraph-stage layer applied, so it is only
+    // present — and only correct — if that layer ran on the `accounts` stack.
+    assert_eq!(
+        error.extensions.get("service").and_then(|v| v.as_str()),
+        Some("accounts"),
+    );
+    // The private tag itself must never reach a client.
+    assert!(
+        !error
+            .extensions
+            .contains_key("apollo.private.subgraph.name"),
+        "the private subgraph-name tag leaked to the client: {:?}",
+        error.extensions
+    );
 }

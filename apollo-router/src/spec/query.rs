@@ -36,9 +36,9 @@ use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::fetch::OperationKind;
-use crate::services::layers::query_analysis::ParsedDocument;
-use crate::services::layers::query_analysis::ParsedDocumentInner;
-use crate::services::layers::query_analysis::get_operation;
+use crate::services::query_parsing::ParsedDocument;
+use crate::services::query_parsing::ParsedDocumentInner;
+use crate::services::query_parsing::get_operation;
 use crate::spec::FieldType;
 use crate::spec::Fragments;
 use crate::spec::InvalidValue;
@@ -127,6 +127,43 @@ impl Query {
     /// This will discard unrequested fields and re-order the output to match the order of the
     /// query.
     #[tracing::instrument(skip_all, level = "trace")]
+    /// Formats a response for an operation that authorization may have filtered,
+    /// returning the nullified paths from every pass.
+    ///
+    /// The filtered query formats first, projecting the data onto the authorized shape
+    /// and discarding fields the subgraphs returned beyond it (via `@requires`, or a
+    /// misbehaving subgraph). The original query formats second, expanding the result to
+    /// the shape the client requested and nulling what filtering removed. One pass cannot
+    /// do both: the original alone returns unauthorized values, the filtered alone drops
+    /// requested fields from the response.
+    pub(crate) fn format_response_filtered_then_original(
+        &self,
+        response: &mut Response,
+        variables: Object,
+        schema: &ApiSchema,
+        defer_conditions: BooleanValues,
+        include_coercion_errors: bool,
+    ) -> Vec<Path> {
+        let mut paths = Vec::new();
+        if let Some(filtered_query) = self.filtered_query.as_ref() {
+            paths = filtered_query.format_response(
+                response,
+                variables.clone(),
+                schema,
+                defer_conditions,
+                include_coercion_errors,
+            );
+        }
+        paths.extend(self.format_response(
+            response,
+            variables,
+            schema,
+            defer_conditions,
+            include_coercion_errors,
+        ));
+        paths
+    }
+
     pub(crate) fn format_response(
         &self,
         response: &mut Response,
@@ -255,7 +292,8 @@ impl Query {
                 return vec![];
             }
             _ => {
-                failfast_debug!("invalid type for data in response. data: {:#?}", data);
+                // XXX(@goto-bus-stop): this should raise an execution error?
+                tracing::debug!("invalid type for data in response. data: {data:#?}");
             }
         }
 
@@ -1012,7 +1050,13 @@ impl Query {
                         }
                     } else {
                         // the fragment should have been already checked with the schema
-                        failfast_debug!("missing fragment named: {}", name);
+                        // XXX(@goto-bus-stop): can we store a reference to the fragment instead of
+                        // just a name?
+                        tracing::error!(
+                            name = name,
+                            "missing fragment in response formatting, this is a bug"
+                        );
+                        return Err(InvalidValue);
                     }
                 }
             }
@@ -1204,7 +1248,13 @@ impl Query {
                         }
                     } else {
                         // the fragment should have been already checked with the schema
-                        failfast_debug!("missing fragment named: {}", name);
+                        // XXX(@goto-bus-stop): can we store a reference to the fragment instead of
+                        // just a name?
+                        tracing::error!(
+                            name = name,
+                            "missing fragment in response formatting, this is a bug"
+                        );
+                        return Err(InvalidValue);
                     }
                 }
             }
@@ -1239,9 +1289,9 @@ impl Query {
                 .difference(&known_variables)
                 .collect::<Vec<_>>();
             if !unknown_variables.is_empty() {
-                failfast_debug!(
-                    "Received variable unknown to the query: {:?}",
-                    unknown_variables,
+                tracing::debug!(
+                    unknown_variables = ?unknown_variables,
+                    "Received variable unknown to the query",
                 );
             }
         }

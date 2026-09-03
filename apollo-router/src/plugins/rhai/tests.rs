@@ -141,7 +141,7 @@ async fn rhai_plugin_supergraph_service() -> Result<(), BoxError> {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed());
+        let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed_clone());
         let context = Context::new();
         context.insert("test", 5i64).unwrap();
         let supergraph_req = SupergraphRequest::fake_builder().context(context).build()?;
@@ -192,7 +192,7 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.execution_service(mock_service.boxed());
+        let mut router_service = dyn_plugin.execution_service(mock_service.boxed_clone());
         let fake_req = http_ext::Request::fake_builder()
             .header("x-custom-header", "CUSTOM_VALUE")
             .body(Request::builder().query(String::new()).build())
@@ -237,6 +237,61 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
     }
     .with_subscriber(assert_snapshot_subscriber!({r#"[].message"# => "[message]"}))
     .await
+}
+
+// Regression test for the Rhai plugin blocking the async executor: script evaluation is
+// expected to run on the blocking thread pool via `spawn_blocking`, not inline on the async
+// executor thread that dispatched the request.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn rhai_script_execution_does_not_block_async_executor() -> Result<(), BoxError> {
+    let (mock_service, mut handle) =
+        tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            SupergraphResponse::fake_builder()
+                .context(req.context)
+                .build()
+                .unwrap(),
+        );
+    });
+
+    let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.rhai")
+        .expect("Plugin not found")
+        .create_instance_without_schema(
+            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"thread_id.rhai"}"#).unwrap(),
+        )
+        .await
+        .unwrap();
+    let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed_clone());
+
+    let supergraph_req = SupergraphRequest::fake_builder().build()?;
+    // Spawned so the request is handled by the runtime's single worker thread. `#[tokio::test]`'s
+    // own body runs on the test-harness thread via `block_on`, which is not a worker thread, so
+    // capturing the thread ID there wouldn't tell us anything about where the script ran.
+    let (executor_thread_id, supergraph_resp) = tokio::spawn(async move {
+        let executor_thread_id = format!("{:?}", std::thread::current().id());
+        let resp = router_service.ready().await?.call(supergraph_req).await?;
+        Ok::<_, BoxError>((executor_thread_id, resp))
+    })
+    .await??;
+
+    crate::plugin::test::await_mock_driver(driver).await;
+
+    let script_thread_id = supergraph_resp
+        .context
+        .get::<_, String>("thread_id")
+        .unwrap()
+        .expect("script should have recorded the thread it ran on");
+
+    // If the script ran inline on the async executor rather than via `spawn_blocking`, it would
+    // report the same thread ID as the one that dispatched the request.
+    assert_ne!(
+        script_thread_id, executor_thread_id,
+        "the rhai script ran on the async executor thread instead of a spawn_blocking thread"
+    );
+    Ok(())
 }
 
 // A Rhai engine suitable for minimal testing. There are no scripts and the SDL is an empty
@@ -826,7 +881,7 @@ async fn test_router_service_adds_timestamp_header() -> Result<(), BoxError> {
         .await
         .unwrap();
 
-    let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed());
+    let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed_clone());
     let context = Context::new();
     context.insert("test", 5i64).unwrap();
     let supergraph_req = SupergraphRequest::fake_builder()
@@ -868,7 +923,7 @@ async fn it_can_access_demand_control_context() -> Result<(), BoxError> {
         .await
         .unwrap();
 
-    let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed());
+    let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed_clone());
     let context = Context::new();
     context.insert_estimated_cost(50.0).unwrap();
     context.insert_actual_cost(35.0).unwrap();
@@ -945,7 +1000,7 @@ async fn test_rhai_header_removal_with_non_utf8_header() -> Result<(), BoxError>
         .await
         .unwrap();
 
-    let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed());
+    let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed_clone());
     let context = Context::new();
     let supergraph_req = SupergraphRequest::fake_builder().context(context).build()?;
 
@@ -982,7 +1037,7 @@ async fn test_supergraph_error_logging(script_name: &str) -> Result<(), BoxError
 
     let dyn_plugin = create_plugin(script_name).await?;
 
-    let mut service = dyn_plugin.supergraph_service(mock_service.boxed());
+    let mut service = dyn_plugin.supergraph_service(mock_service.boxed_clone());
     let req = SupergraphRequest::fake_builder()
         .context(Context::new())
         .build()?;
@@ -1009,7 +1064,7 @@ async fn test_execution_error_logging(script_name: &str) -> Result<(), BoxError>
     let (mock_service, handle) =
         tower_test::mock::pair::<execution::Request, execution::Response>();
     let dyn_plugin = create_plugin(script_name).await?;
-    let mut service = dyn_plugin.execution_service(mock_service.boxed());
+    let mut service = dyn_plugin.execution_service(mock_service.boxed_clone());
     let fake_req = http_ext::Request::fake_builder()
         .body(Request::builder().query(String::new()).build())
         .build()?;
@@ -1028,7 +1083,7 @@ async fn test_router_error_logging(script_name: &str) -> Result<(), BoxError> {
 
     let dyn_plugin = create_plugin(script_name).await?;
 
-    let mut service = dyn_plugin.router_service(mock_service.boxed());
+    let mut service = dyn_plugin.router_service(mock_service.boxed_clone());
     let req = crate::services::RouterRequest::fake_builder()
         .context(Context::new())
         .build()?;
@@ -1043,7 +1098,7 @@ async fn test_subgraph_error_logging(script_name: &str) -> Result<(), BoxError> 
 
     let dyn_plugin = create_plugin(script_name).await?;
 
-    let mut service = dyn_plugin.subgraph_service("test_subgraph", mock_service.boxed());
+    let mut service = dyn_plugin.subgraph_service("test_subgraph", mock_service.boxed_clone());
     let req = SubgraphRequest::fake_builder()
         .context(Context::new())
         .build();
@@ -1253,7 +1308,7 @@ async fn test_rhai_metric_router_request() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.router_service(mock_service.boxed());
+        let mut router_service = dyn_plugin.router_service(mock_service.boxed_clone());
         let req = router::Request::fake_builder().build().unwrap();
         let _ = router_service.ready().await.unwrap().call(req).await;
         crate::plugin::test::await_mock_driver(driver).await;
@@ -1295,7 +1350,7 @@ async fn test_rhai_metric_supergraph_request() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed());
+        let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed_clone());
         let req = SupergraphRequest::fake_builder().build().unwrap();
         let _ = router_service.ready().await.unwrap().call(req).await;
         crate::plugin::test::await_mock_driver(driver).await;
@@ -1336,7 +1391,7 @@ async fn test_rhai_metric_subgraph_request() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.subgraph_service("test", mock_service.boxed());
+        let mut router_service = dyn_plugin.subgraph_service("test", mock_service.boxed_clone());
         let req = SubgraphRequest::fake_builder().build();
         let _ = router_service.ready().await.unwrap().call(req).await;
         crate::plugin::test::await_mock_driver(driver).await;
@@ -1371,7 +1426,7 @@ async fn test_rhai_metric_failed_callback() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed());
+        let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed_clone());
         let req = SupergraphRequest::fake_builder().build().unwrap();
         let _ = router_service.ready().await.unwrap().call(req).await;
         drop(router_service);
@@ -1407,7 +1462,7 @@ async fn test_rhai_metric_no_callback_no_emission() {
             .unwrap();
         // No supergraph_service callback registered — plugin returns original service unchanged
         // and no metric is emitted
-        let _service = dyn_plugin.supergraph_service(mock_service.boxed());
+        let _service = dyn_plugin.supergraph_service(mock_service.boxed_clone());
         crate::plugin::test::assert_no_mock_calls(handle).await;
 
         assert_histogram_not_exists!(
@@ -1445,7 +1500,7 @@ async fn test_rhai_metric_subgraph_response() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.subgraph_service("test", mock_service.boxed());
+        let mut router_service = dyn_plugin.subgraph_service("test", mock_service.boxed_clone());
         let req = SubgraphRequest::fake_builder().build();
         let _ = router_service.ready().await.unwrap().call(req).await;
         crate::plugin::test::await_mock_driver(driver).await;
@@ -1492,7 +1547,7 @@ async fn test_rhai_metric_deferred_response_causes_multiple_executions() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed());
+        let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed_clone());
         let req = SupergraphRequest::fake_builder().build().unwrap();
         let resp = router_service
             .ready()

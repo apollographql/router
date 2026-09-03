@@ -8,9 +8,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use strum::Display;
 
-pub(crate) use self::execution::service::*;
 pub(crate) use self::query_planner::*;
-pub(crate) use self::subgraph_service::*;
+pub(crate) use self::subgraph::service::*;
 pub(crate) use self::supergraph::service::*;
 use crate::graphql::Request;
 use crate::http_ext;
@@ -31,7 +30,6 @@ pub(crate) use crate::services::subgraph::Request as SubgraphRequest;
 pub(crate) use crate::services::subgraph::Response as SubgraphResponse;
 pub(crate) use crate::services::supergraph::Request as SupergraphRequest;
 pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
-pub(crate) use crate::services::supergraph::service::SupergraphCreator;
 
 pub(crate) mod connect;
 pub(crate) mod connector;
@@ -44,11 +42,10 @@ pub(crate) mod header_masking;
 pub(crate) mod hickory_dns_connector;
 pub(crate) mod http;
 pub(crate) mod layers;
-pub(crate) mod new_service;
+pub(crate) mod query_parsing;
 pub(crate) mod query_planner;
 pub mod router;
 pub mod subgraph;
-pub(crate) mod subgraph_service;
 pub mod supergraph;
 
 /// Represents the steps of the pipeline that can support user-extensibility.

@@ -12,7 +12,8 @@ async fn test_supergraph_errors_on_http1_max_headers() -> Result<(), BoxError> {
         .config(
             r#"
             limits:
-              http1_max_request_headers: 100
+              router:
+                http1_max_request_headers: 100
             "#,
         )
         .build()
@@ -44,7 +45,8 @@ async fn test_supergraph_allow_to_change_http1_max_headers() -> Result<(), BoxEr
         .config(
             r#"
             limits:
-              http1_max_request_headers: 200
+              router:
+                http1_max_request_headers: 200
             "#,
         )
         .build()
@@ -81,7 +83,8 @@ async fn test_supergraph_errors_on_http1_header_that_does_not_fit_inside_buffer(
         .config(
             r#"
             limits:
-              http1_max_request_buf_size: 100kib
+              router:
+                http1_max_request_buf_size: 100kib
             "#,
         )
         .build()
@@ -129,7 +132,8 @@ async fn test_supergraph_allow_to_change_http1_max_buf_size() -> Result<(), BoxE
         .config(
             r#"
             limits:
-              http1_max_request_buf_size: 2mib
+              router:
+                http1_max_request_buf_size: 2mib
             "#,
         )
         .build()

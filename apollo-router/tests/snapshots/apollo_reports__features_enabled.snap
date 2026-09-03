@@ -1,7 +1,6 @@
 ---
 source: apollo-router/tests/apollo_reports.rs
 expression: report
-snapshot_kind: text
 ---
 header:
   graph_ref: test
@@ -150,4 +149,3 @@ traces_pre_aggregated: true
 extended_references_enabled: true
 router_features_enabled:
   - distributed_apq_cache
-  - entity_cache

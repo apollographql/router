@@ -10,10 +10,10 @@ use parking_lot::Mutex;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt as TowerServiceExt;
+use tower::ServiceExt;
 
 use super::query_plans::get_connectors;
-use crate::layers::ServiceExt;
+use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::connectors::configuration::ConnectorsConfig;
@@ -59,15 +59,6 @@ impl Plugin for Connectors {
             );
         }
 
-        #[allow(deprecated)]
-        if !init.config.subgraphs.is_empty() {
-            tracing::warn!(
-                "The `connectors.subgraphs` configuration field is deprecated and will be \
-                 removed in a future release. Rename it to `connectors.sources`. See \
-                 https://www.apollographql.com/docs/graphos/routing/configuration/yaml#connectors"
-            );
-        }
-
         let max_requests = init
             .config
             .max_requests_per_operation_per_source
@@ -82,7 +73,10 @@ impl Plugin for Connectors {
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         let conf_enabled = self.debug_extensions;
         let max_requests = self.max_requests;
         service
@@ -145,10 +139,10 @@ impl Plugin for Connectors {
                     res
                 },
             )
-            .boxed()
+            .boxed_clone()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         if !self.expose_sources_in_context {
             return service;
         }
@@ -164,7 +158,9 @@ impl Plugin for Connectors {
                 let list = req
                     .query_plan
                     .root
-                    .service_usage_set()
+                    .as_ref()
+                    .map(|node| node.service_usage_set())
+                    .unwrap_or_default()
                     .into_iter()
                     .flat_map(|service_name| {
                         connectors
@@ -180,7 +176,7 @@ impl Plugin for Connectors {
                 req
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 

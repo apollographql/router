@@ -35,5 +35,9 @@ name = "rhai_string_interning"
 harness = false
 
 [[bench]]
+name = "rhai_scope_lock"
+harness = false
+
+[[bench]]
 name = "query_plan_cache_concurrency"
 harness = false

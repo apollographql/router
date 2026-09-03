@@ -42,6 +42,8 @@ use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
 use crate::plugins::telemetry::reload::otel::LayeredTracer;
 use crate::plugins::telemetry::reload::otel::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::reload::otel::reload_fmt;
+use crate::plugins::telemetry::reload::otel::set_installed_tracer_provider;
+use crate::plugins::telemetry::reload::otel::shutdown_tracer_provider;
 
 /// State container for telemetry components to be activated.
 ///
@@ -200,10 +202,13 @@ impl Activation {
             let tracer = tracer_provider.tracer_with_scope(scope);
             hot_tracer.reload(tracer);
 
-            // Install the new provider globally. The old provider is returned and must be
-            // dropped in a blocking task to avoid deadlocking the async runtime during shutdown.
-            // block_in_place is used to ensure that no tasks after this point use the old tracer provider.
-            block_in_place(move || opentelemetry::global::set_tracer_provider(tracer_provider));
+            // Remember the provider we are about to install so that process shutdown can flush
+            // and stop it explicitly. The `hot_tracer` above keeps a strong reference to it for
+            // the process lifetime, so dropping the global clone is never enough to trigger the
+            // provider's own `Drop` -> `shutdown()`.
+            let previous = set_installed_tracer_provider(tracer_provider.clone());
+
+            swap_global_tracer_provider(tracer_provider, previous);
         }
     }
 
@@ -213,6 +218,18 @@ impl Activation {
     /// in `self.new_meter_providers`. The old providers will be safely dropped when this `Activation`
     /// is dropped (using blocking tasks to avoid runtime deadlocks).
     pub(crate) fn reload_metrics(&mut self) {
+        // Route `opentelemetry::global::meter*` at the router's provider so that instruments
+        // created by dependencies (e.g apollo platform libraries) export
+        // alongside the router's own metrics instead of no-oping.
+        //
+        // Only do this when we own the process-wide telemetry, i.e. when we are executing in the
+        // context of a vanilla Apollo executable. `set_meter_provider` overwrites whatever is
+        // already installed, so for a custom router this would silently hijack the meter provider
+        // the host application set up for itself. Same reasoning as `reload_tracing`.
+        if OPENTELEMETRY_TRACER_HANDLE.get().is_some() {
+            crate::metrics::install_global_meter_provider_bridge();
+        }
+
         let global_meter_provider = meter_provider_internal();
         // Swap new meter providers with old ones. Old providers stored here will be
         // safely dropped in the Drop implementation using blocking tasks.
@@ -235,6 +252,30 @@ impl Activation {
             opentelemetry::global::set_text_map_propagator(propagator);
         }
     }
+}
+
+/// Swaps `tracer_provider` in as the process-wide OpenTelemetry tracer provider and disposes of
+/// the `previous` one.
+///
+/// `block_in_place` is used so that no task after this point uses the old tracer provider, and
+/// because disposing of it blocks while its span processors flush.
+///
+/// The replaced provider is shut down rather than dropped. Dropping only reaches the span
+/// processors if it is the last clone, and under traffic it is not: every span still in flight
+/// holds a strong clone of the provider it started under (`SdkSpan` -> `SdkTracer` ->
+/// `SdkTracerProvider`). Left to drop, the old provider's batch processor would keep running
+/// until the last such span closed, and the blocking flush and export would then run wherever
+/// that happened to be — an async runtime worker, or never, if a span leaks. Spans straddling
+/// the reload are discarded as a result, which is the cost of the old provider being reliably
+/// done as of this point.
+fn swap_global_tracer_provider(
+    tracer_provider: opentelemetry_sdk::trace::SdkTracerProvider,
+    previous: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
+) {
+    block_in_place(move || {
+        opentelemetry::global::set_tracer_provider(tracer_provider);
+        shutdown_tracer_provider(previous);
+    });
 }
 
 /// Safely drops OpenTelemetry providers using blocking tasks (Phase 3 of reload lifecycle).
@@ -274,5 +315,46 @@ impl Drop for Activation {
                 drop(tracer_provider);
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use opentelemetry::trace::Tracer as _;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
+
+    use super::*;
+    use crate::plugins::telemetry::reload::testing::ShutdownProbe;
+
+    /// A reload has to leave the provider it replaced shut down.
+    ///
+    /// Dropping it is not enough: any span in flight when the reload lands holds a strong clone
+    /// of the provider it started under, so the drop here is not the last one. The old provider's
+    /// batch processor would keep running — and its blocking shutdown would eventually fire on
+    /// whichever async runtime worker closed that last span, or not at all.
+    ///
+    /// This exercises the disposal half of [`swap_global_tracer_provider`] directly rather than
+    /// calling it: the other half is `opentelemetry::global::set_tracer_provider`, a
+    /// process-wide write with no way to restore what it replaced, which would leak this test's
+    /// provider into every other test in the binary.
+    #[test]
+    fn reload_shuts_down_the_replaced_tracer_provider() {
+        let probe = ShutdownProbe::default();
+        let replaced = SdkTracerProvider::builder()
+            .with_span_processor(probe.clone())
+            .build();
+        let in_flight = replaced
+            .tracer_with_scope(InstrumentationScope::builder("test").build())
+            .start("in-flight");
+        assert!(!probe.was_shut_down());
+
+        shutdown_tracer_provider(Some(replaced));
+
+        assert!(
+            probe.was_shut_down(),
+            "the reload must shut the replaced provider down itself rather than leave it to the \
+             last in-flight span to drop"
+        );
+        drop(in_flight);
     }
 }

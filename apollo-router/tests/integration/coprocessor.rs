@@ -1311,13 +1311,13 @@ coprocessor:
   router:
     request:
       headers: true
-      context: true
+      context: all
       url: {}  # Override for router stage
   supergraph:
     request:
       headers: true
       body: true
-      context: true
+      context: all
       url: {}  # Override for supergraph stage
 "#,
         router_uds_url, supergraph_uds_url
@@ -1456,13 +1456,13 @@ coprocessor:
   router:
     request:
       headers: true
-      context: true
+      context: all
       url: {}  # Unix socket for router stage
   supergraph:
     request:
       headers: true
       body: true
-      context: true
+      context: all
       url: {}  # HTTP for supergraph stage
 "#,
         router_uds_url, supergraph_http_url

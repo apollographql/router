@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/metrics.rs
-expression: "&metrics.non_zero()"
+expression: "& metrics.non_zero()"
 ---
 - name: apollo.router.config.connectors
   data:
@@ -10,6 +10,6 @@ expression: "&metrics.non_zero()"
           opt.debug_extensions: true
           opt.expose_sources_in_context: true
           opt.max_requests_per_operation_per_source: true
+          opt.source.config: true
           opt.source.max_requests_per_operation: true
           opt.source.override_url: true
-          opt.subgraph.config: true

@@ -28,10 +28,10 @@ use tracing_futures::WithSubscriber;
 
 use crate::axum_factory::AxumHttpServerFactory;
 use crate::configuration::ListenAddr;
-use crate::orbiter::OrbiterRouterSuperServiceFactory;
+use crate::orbiter::OrbiterPipelineFactory;
 use crate::plugins::chaos::ChaosEventStream;
 use crate::router::event::reload::ReloadableEventStream;
-use crate::router_factory::YamlRouterFactory;
+use crate::router_factory::PipelineFactory;
 use crate::state_machine::ListenAddresses;
 use crate::state_machine::StateMachine;
 use crate::uplink::UplinkConfig;
@@ -140,7 +140,7 @@ impl RouterHttpServer {
             shutdown_receiver,
         );
         let server_factory = AxumHttpServerFactory::new();
-        let router_factory = OrbiterRouterSuperServiceFactory::new(YamlRouterFactory);
+        let router_factory = OrbiterPipelineFactory::new(PipelineFactory);
         let state_machine = StateMachine::new(
             is_telemetry_disabled.unwrap_or(false),
             server_factory,
@@ -263,8 +263,7 @@ impl TestRouterHttpServer {
         let state_machine_update_notifier = Arc::new(Notify::new());
 
         let server_factory = AxumHttpServerFactory::new();
-        let router_factory: OrbiterRouterSuperServiceFactory =
-            OrbiterRouterSuperServiceFactory::new(YamlRouterFactory);
+        let router_factory: OrbiterPipelineFactory = OrbiterPipelineFactory::new(PipelineFactory);
         let state_machine = StateMachine::for_tests(
             server_factory,
             router_factory,

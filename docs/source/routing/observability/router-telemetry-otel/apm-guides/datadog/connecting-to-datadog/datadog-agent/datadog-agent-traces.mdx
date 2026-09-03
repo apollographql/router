@@ -108,7 +108,6 @@ To enable Datadog log correlation, you must configure `dd.trace_id` to appear on
 telemetry:
   instrumentation:
     spans:
-      mode: spec_compliant
       router:
         attributes:
           dd.trace_id: true #highlight-line
@@ -147,7 +146,6 @@ telemetry:
   # Enable graphql.operation.name attribute on supergraph spans.
   instrumentation:
     spans:
-      mode: spec_compliant
       supergraph:
         attributes:
           graphql.operation.name: true

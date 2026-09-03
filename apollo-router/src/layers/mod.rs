@@ -2,6 +2,7 @@
 //! Layers that are specific to one plugin should not be placed in this module.
 use std::future::Future;
 use std::ops::ControlFlow;
+use std::sync::Arc;
 
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -17,15 +18,18 @@ use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::instrument::InstrumentLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataService;
-use crate::layers::sync_checkpoint::CheckpointLayer;
+use crate::layers::rust_plugins::RustPluginsLayer;
 use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
+use crate::plugin::DynPlugin;
+use crate::plugin::PluginPrivate;
+use crate::services::Plugins;
 use crate::services::supergraph;
 
 pub mod async_checkpoint;
 pub mod instrument;
 pub mod map_first_graphql_response;
 pub mod map_future_with_request_data;
-pub mod sync_checkpoint;
+pub(crate) mod rust_plugins;
 pub mod unconstrained_buffer;
 
 // Note: We use Buffer in many places throughout the router. 50_000 represents
@@ -43,65 +47,9 @@ pub(crate) const DEFAULT_BUFFER_SIZE: usize = 50_000;
 #[allow(clippy::type_complexity)]
 pub trait ServiceBuilderExt<L>: Sized {
     /// Decide if processing should continue or not, and if not allow returning of a response.
-    ///
-    /// This is useful for validation functionality where you want to abort processing but return a
-    /// valid response.
-    ///
-    /// # Arguments
-    ///
-    /// * `checkpoint_fn`: Ths callback to decides if processing should continue or not.
-    ///
-    /// returns: ServiceBuilder<Stack<CheckpointLayer<S, Request>, L>>
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use std::ops::ControlFlow;
-    /// # use http::Method;
-    /// # use tower::ServiceBuilder;
-    /// # use tower_service::Service;
-    /// # use tracing::info_span;
-    /// # use apollo_router::services::supergraph;
-    /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: supergraph::BoxService) {
-    /// let _ = ServiceBuilder::new()
-    ///     .checkpoint(|req: supergraph::Request|{
-    ///         if req.supergraph_request.method() == Method::GET {
-    ///             Ok(ControlFlow::Break(supergraph::Response::builder()
-    ///                 .data("Only get requests allowed")
-    ///                 .context(req.context)
-    ///                 .build()?))
-    ///         } else {
-    ///             Ok(ControlFlow::Continue(req))
-    ///         }
-    ///     })
-    ///     .service(service);
-    /// # }
-    /// ```
-    fn checkpoint<S, Request>(
-        self,
-        checkpoint_fn: impl Fn(
-            Request,
-        ) -> Result<
-            ControlFlow<<S as Service<Request>>::Response, Request>,
-            <S as Service<Request>>::Error,
-        > + Send
-        + Sync
-        + 'static,
-    ) -> ServiceBuilder<Stack<CheckpointLayer<S, Request>, L>>
-    where
-        S: Service<Request> + Send + 'static,
-        Request: Send + 'static,
-        S::Future: Send,
-        S::Response: Send + 'static,
-        S::Error: Into<BoxError> + Send + 'static,
-    {
-        self.layer(CheckpointLayer::new(checkpoint_fn))
-    }
-
-    /// Decide if processing should continue or not, and if not allow returning of a response.
     /// Unlike checkpoint it is possible to perform async operations in the callback. However
-    /// this requires that the service is `Clone`. This can be achieved using `.buffered()`.
+    /// the resulting service requires `S: Clone`. Since `BoxCloneService` is already `Clone`,
+    /// a `.buffered()` call is no longer needed when wrapping a `BoxCloneService`.
     ///
     /// This is useful for things like authentication where you need to make an external call to
     /// check if a request should proceed or not.
@@ -123,7 +71,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tracing::info_span;
     /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: supergraph::BoxService) {
+    /// # fn test(service: supergraph::BoxCloneService) {
     /// let _ = ServiceBuilder::new()
     ///     .checkpoint_async(|req: supergraph::Request|
     ///         async {
@@ -158,7 +106,18 @@ pub trait ServiceBuilderExt<L>: Sized {
 
     /// Adds a buffer to the service stack with a default size.
     ///
-    /// This is useful for making services `Clone` and `Send`
+    /// The buffer spawns a dedicated worker task and queues requests in an in-memory channel.
+    /// The primary reasons to include a buffer are:
+    ///
+    /// - **Backpressure**: callers block (rather than failing immediately) when the inner
+    ///   service is busy processing previous requests.
+    /// - **`LoadShed` / `ConcurrencyLimit` / `RateLimit` interaction**: these layers
+    ///   signal overload by returning `Poll::Pending` from `poll_ready`. A buffer placed
+    ///   *before* them absorbs that pending state and prevents Tokio's cooperative-scheduling
+    ///   budget from causing spurious `Overloaded` responses.
+    ///
+    /// Now that pipeline services are `BoxCloneService`, a buffer is **no longer needed
+    /// merely to make a service `Clone` or `Send`**.
     ///
     /// # Examples
     ///
@@ -168,7 +127,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tracing::info_span;
     /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: supergraph::BoxService) {
+    /// # fn test(service: supergraph::BoxCloneService) {
     /// let _ = ServiceBuilder::new()
     ///             .buffered()
     ///             .service(service);
@@ -197,7 +156,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tracing::info_span;
     /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: supergraph::BoxService) {
+    /// # fn test(service: supergraph::BoxCloneService) {
     /// let instrumented = ServiceBuilder::new()
     ///             .instrument(|_request| info_span!("query_planning"))
     ///             .service(service);
@@ -249,7 +208,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     ///     #     Ok(Self)
     ///     # }
     ///     // …
-    ///     fn supergraph_service(&self, inner: supergraph::BoxService) -> supergraph::BoxService {
+    ///     fn supergraph_service(&self, inner: supergraph::BoxCloneService) -> supergraph::BoxCloneService {
     ///         tower::ServiceBuilder::new()
     ///             .map_first_graphql_response(|context, mut http_parts, mut graphql_response| {
     ///                 // Something interesting here
@@ -292,19 +251,18 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// ```rust
     /// # use std::future::Future;
     /// # use tower::{BoxError, ServiceBuilder, ServiceExt};
-    /// # use tower::util::BoxService;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::Context;
     /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: supergraph::BoxService) {
-    /// let _ : supergraph::BoxService = ServiceBuilder::new()
+    /// # fn test(service: supergraph::BoxCloneService) {
+    /// let _ : supergraph::BoxCloneService = ServiceBuilder::new()
     ///     .map_future_with_request_data(
     ///         |req: &supergraph::Request| req.context.clone(),
     ///         |ctx : Context, fut| async { fut.await })
     ///     .service(service)
-    ///     .boxed();
+    ///     .boxed_clone();
     /// # }
     /// ```
     fn map_future_with_request_data<RF, MF>(
@@ -384,7 +342,7 @@ pub trait ServiceExt<Request>: Service<Request> {
     ///     #     Ok(Self)
     ///     # }
     ///     // …
-    ///     fn supergraph_service(&self, inner: supergraph::BoxService) -> supergraph::BoxService {
+    ///     fn supergraph_service(&self, inner: supergraph::BoxCloneService) -> supergraph::BoxCloneService {
     ///         inner
     ///             .map_first_graphql_response(|context, mut http_parts, mut graphql_response| {
     ///                 // Something interesting here
@@ -430,20 +388,19 @@ pub trait ServiceExt<Request>: Service<Request> {
     /// ```rust
     /// # use std::future::Future;
     /// # use tower::{BoxError, ServiceBuilder, ServiceExt};
-    /// # use tower::util::BoxService;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::Context;
     /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
     /// # use apollo_router::layers::ServiceExt as ApolloServiceExt;
-    /// # fn test(service: supergraph::BoxService) {
-    /// let _ : supergraph::BoxService = service
+    /// # fn test(service: supergraph::BoxCloneService) {
+    /// let _ : supergraph::BoxCloneService = service
     ///     .map_future_with_request_data(
     ///         |req: &supergraph::Request| req.context.clone(),
     ///         |ctx : Context, fut| async { fut.await }
     ///     )
-    ///     .boxed();
+    ///     .boxed_clone();
     /// # }
     /// ```
     fn map_future_with_request_data<RF, MF>(
@@ -460,3 +417,151 @@ pub trait ServiceExt<Request>: Service<Request> {
     }
 }
 impl<T: ?Sized, Request> ServiceExt<Request> for T where T: Service<Request> {}
+
+/// Helper type to name layers produced by [`ServiceBuilder::option_layer()`].
+type OptionLayer<L> = tower::util::Either<L, tower::layer::util::Identity>;
+
+/// Extension to [`ServiceBuilder`] for pipeline utilities that are not exposed to crate consumers.
+pub(crate) trait InternalServiceBuilderExt<L>: Sized {
+    /// Apply plugins to a service stack.
+    ///
+    /// Provide the way of applying the plugin as a closure. The inner service must be a
+    /// [`BoxCloneService`][tower::util::BoxCloneService] to work with plugin hooks.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// ServiceBuilder::new()
+    ///     .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
+    ///     .service(router_service.boxed_clone());
+    /// ```
+    fn rust_plugins<F, R, Resp, Err>(
+        self,
+        plugins: Arc<Plugins>,
+        apply: F,
+    ) -> ServiceBuilder<Stack<RustPluginsLayer<F, R>, L>>
+    where
+        F: Fn(
+            &dyn DynPlugin,
+            tower::util::BoxCloneService<R, Resp, Err>,
+        ) -> tower::util::BoxCloneService<R, Resp, Err>;
+
+    /// Apply a plugin layer to a service stack.
+    ///
+    /// Provide the plugin layer to apply as a method reference.
+    ///
+    /// If the plugin isn't available in the `plugins` registry, this function is a no-op.
+    /// For a plugin that `create_plugins` always registers, prefer
+    /// [`Self::apply_required_plugin_layer`], which panics on a miss instead of silently
+    /// dropping the layer.
+    ///
+    /// ## Example
+    ///
+    /// To apply the masking-context layer from the Headers plugin:
+    ///
+    /// ```rust,ignore
+    /// ServiceBuilder::new()
+    ///     .apply_plugin_layer(&plugins, Headers::router_masking_layer)
+    ///     .service(router_service)
+    /// ```
+    fn apply_plugin_layer<P, OutLayer>(
+        self,
+        plugins: &Plugins,
+        get_layer: impl FnOnce(&P) -> OutLayer,
+    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    where
+        P: PluginPrivate;
+
+    /// Apply the layer of a *mandatory* plugin to a service stack.
+    ///
+    /// Same as [`Self::apply_plugin_layer`], except that a missing plugin is treated as a
+    /// bug rather than a supported configuration: the miss panics instead of quietly
+    /// reducing the stack to a no-op.
+    fn apply_required_plugin_layer<P, OutLayer>(
+        self,
+        plugins: &Plugins,
+        get_layer: impl FnOnce(&P) -> OutLayer,
+    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    where
+        P: PluginPrivate;
+}
+
+/// Find the single instance of plugin type `P` in the registry, if it was built.
+fn find_plugin<P: PluginPrivate>(plugins: &Plugins) -> Option<&P> {
+    plugins
+        .values()
+        .find_map(|plugin| plugin.as_any().downcast_ref::<P>())
+}
+
+impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
+    fn rust_plugins<F, R, Resp, Err>(
+        self,
+        plugins: Arc<Plugins>,
+        apply: F,
+    ) -> ServiceBuilder<Stack<RustPluginsLayer<F, R>, L>>
+    where
+        F: Fn(
+            &dyn DynPlugin,
+            tower::util::BoxCloneService<R, Resp, Err>,
+        ) -> tower::util::BoxCloneService<R, Resp, Err>,
+    {
+        self.layer(RustPluginsLayer::new(plugins, apply))
+    }
+
+    fn apply_plugin_layer<P, OutLayer>(
+        self,
+        plugins: &Plugins,
+        get_layer: impl FnOnce(&P) -> OutLayer,
+    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    where
+        P: PluginPrivate,
+    {
+        self.option_layer(find_plugin::<P>(plugins).map(get_layer))
+    }
+
+    fn apply_required_plugin_layer<P, OutLayer>(
+        self,
+        plugins: &Plugins,
+        get_layer: impl FnOnce(&P) -> OutLayer,
+    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    where
+        P: PluginPrivate,
+    {
+        if find_plugin::<P>(plugins).is_none() && !plugins.is_empty() {
+            panic!(
+                "mandatory plugin {} is missing from the plugin registry, so its layer will not \
+                 be applied to the pipeline; this is a router bug",
+                std::any::type_name::<P>()
+            );
+        }
+        self.apply_plugin_layer(plugins, get_layer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tower::ServiceBuilder;
+
+    use super::InternalServiceBuilderExt;
+    use crate::plugins::headers::Headers;
+    use crate::services::Plugins;
+    use crate::test_harness::MockedSubgraphs;
+
+    #[test]
+    fn apply_required_plugin_layer_skips_empty_registry() {
+        let plugins = Plugins::default();
+        let _ = ServiceBuilder::new()
+            .apply_required_plugin_layer(&plugins, Headers::router_masking_layer);
+    }
+
+    #[test]
+    #[should_panic(expected = "mandatory plugin")]
+    fn apply_required_plugin_layer_panics_when_mandatory_plugin_is_missing() {
+        let mut plugins = Plugins::default();
+        plugins.insert(
+            "unrelated".to_string(),
+            Box::new(MockedSubgraphs::default()),
+        );
+        let _ = ServiceBuilder::new()
+            .apply_required_plugin_layer(&plugins, Headers::router_masking_layer);
+    }
+}

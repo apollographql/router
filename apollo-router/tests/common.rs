@@ -419,6 +419,8 @@ pub struct IntegrationTest {
     log: String,
     subgraph_context: Arc<Mutex<Option<SpanContext>>>,
     logs: Vec<String>,
+    /// Exit status of the router process, or `None` until the router has exited.
+    exit_status: Option<std::process::ExitStatus>,
     port_replacements: HashMap<String, u16>,
     jwt: Option<String>,
     env: Option<HashMap<String, OsString>>,
@@ -435,7 +437,7 @@ pub struct IntegrationTest {
     /// **Note:** Studio reporting (`usage-reporting.api.apollographql.com`)
     /// is NOT reached even in the opt-in branch. `merge_overrides()`
     /// unconditionally pins `telemetry.apollo.endpoint` and
-    /// `telemetry.apollo.experimental_otlp_endpoint` in the YAML config
+    /// `telemetry.apollo.otlp_endpoint` in the YAML config
     /// to the per-test `apollo_otlp_server` mock, regardless of this
     /// flag. That pinning is load-bearing for keeping CI off the
     /// public Internet. If a future test genuinely needs real Studio
@@ -611,7 +613,6 @@ pub enum Telemetry {
         endpoint: Option<String>,
     },
     Datadog,
-    Zipkin,
     #[default]
     None,
 }
@@ -662,24 +663,6 @@ impl Telemetry {
                     .build(),
                 )
                 .build(),
-            Telemetry::Zipkin => SdkTracerProvider::builder()
-                .with_resource(resource)
-                .with_span_processor(
-                    BatchSpanProcessor::builder(
-                        opentelemetry_zipkin::ZipkinExporter::builder()
-                            .with_collector_endpoint("http://127.0.0.1:9411/api/v2/spans")
-                            .build()
-                            .expect("zipkin pipeline failed"),
-                        runtime::Tokio,
-                    )
-                    .with_batch_config(
-                        BatchConfigBuilder::default()
-                            .with_scheduled_delay(Duration::from_millis(10))
-                            .build(),
-                    )
-                    .build(),
-                )
-                .build(),
             Telemetry::None | Telemetry::Otlp { endpoint: None } => SdkTracerProvider::builder()
                 .with_resource(resource)
                 .with_simple_exporter(NoopSpanExporter::default())
@@ -712,13 +695,6 @@ impl Telemetry {
             }
             Telemetry::Otlp { .. } => {
                 let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
-                propagator.inject_context(
-                    &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                )
-            }
-            Telemetry::Zipkin => {
-                let propagator = opentelemetry_zipkin::Propagator::new();
                 propagator.inject_context(
                     &ctx,
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
@@ -779,10 +755,6 @@ impl Telemetry {
             }
             Telemetry::Otlp { .. } => {
                 let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
-                propagator.extract_with_context(context, &headers)
-            }
-            Telemetry::Zipkin => {
-                let propagator = opentelemetry_zipkin::Propagator::new();
                 propagator.extract_with_context(context, &headers)
             }
             _ => context.clone(),
@@ -1011,6 +983,7 @@ impl IntegrationTest {
             log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
             subgraph_context,
             logs: vec![],
+            exit_status: None,
             port_replacements: HashMap::new(),
             jwt,
             env,
@@ -2102,7 +2075,8 @@ impl IntegrationTest {
         let now = Instant::now();
         while now.elapsed() < deadline {
             match router.try_wait() {
-                Ok(Some(_)) => {
+                Ok(Some(status)) => {
+                    self.exit_status = Some(status);
                     self.router = None;
                     return;
                 }
@@ -2113,6 +2087,24 @@ impl IntegrationTest {
 
         self.dump_stack_traces().await;
         panic!("unable to shutdown router, this probably means a hang and should be investigated");
+    }
+
+    /// Asserts the router process exited successfully.
+    ///
+    /// `assert_shutdown` only waits for the process to be reaped and deliberately ignores the
+    /// exit code, so a router that panics on its way out still looks like a clean shutdown to
+    /// it. Call this after `graceful_shutdown()` when a test cares that SIGTERM produced an
+    /// orderly exit rather than just an exit.
+    #[allow(dead_code)]
+    pub fn assert_clean_exit(&self) {
+        let status = self
+            .exit_status
+            .expect("router has not been shut down yet - call graceful_shutdown() first");
+        assert!(
+            status.success(),
+            "router exited with {status}, expected a clean exit. Log dump below:\n\n{logs}",
+            logs = self.logs.join("\n")
+        );
     }
 
     #[allow(dead_code)]
@@ -2486,7 +2478,7 @@ fn merge_overrides(
     // tests only did so if the request landed within the assertion deadline).
     //
     // We override two distinct keys:
-    //   * `experimental_otlp_endpoint` is consumed by the OTLP exporter
+    //   * `otlp_endpoint` is consumed by the OTLP exporter
     //     (`apollo_otlp_exporter.rs`).
     //   * `endpoint` is consumed by the legacy Apollo-protocol exporter
     //     (`apollo_exporter.rs`).
@@ -2507,7 +2499,7 @@ fn merge_overrides(
             .or_insert_with(|| serde_json::Value::Object(Default::default()));
         if let Some(apollo_config) = apollo_entry.as_object_mut() {
             apollo_config.insert(
-                "experimental_otlp_endpoint".to_string(),
+                "otlp_endpoint".to_string(),
                 serde_json::Value::String(apollo_otlp_endpoint.to_string()),
             );
             apollo_config.insert(
@@ -2534,19 +2526,13 @@ fn merge_overrides(
 
     insert_redis_namespace(config.pointer_mut("/supergraph/query_planning/cache/redis"));
     insert_redis_namespace(config.pointer_mut("/apq/router/cache/redis"));
-    insert_redis_namespace(config.pointer_mut("/preview_entity_cache/subgraph/all/redis"));
     insert_redis_namespace(config.pointer_mut("/response_cache/subgraph/all/redis"));
-    for per_subgraph_path in [
-        "/response_cache/subgraph/subgraphs",
-        "/preview_entity_cache/subgraph/subgraphs",
-    ] {
-        if let Some(subgraphs) = config
-            .pointer_mut(per_subgraph_path)
-            .and_then(|o| o.as_object_mut())
-        {
-            for subgraph_config in subgraphs.values_mut() {
-                insert_redis_namespace(subgraph_config.pointer_mut("/redis"));
-            }
+    if let Some(subgraphs) = config
+        .pointer_mut("/response_cache/subgraph/subgraphs")
+        .and_then(|o| o.as_object_mut())
+    {
+        for subgraph_config in subgraphs.values_mut() {
+            insert_redis_namespace(subgraph_config.pointer_mut("/redis"));
         }
     }
 
@@ -2565,7 +2551,6 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
     let top_level_paths = [
         "/supergraph/query_planning/cache/redis/urls",
         "/apq/router/cache/redis/urls",
-        "/preview_entity_cache/subgraph/all/redis/urls",
         "/response_cache/subgraph/all/redis/urls",
     ];
     for path in top_level_paths {
@@ -2574,19 +2559,16 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
         }
     }
 
-    let per_subgraph_sections = [
-        "/response_cache/subgraph/subgraphs",
-        "/preview_entity_cache/subgraph/subgraphs",
-    ];
-    for section in per_subgraph_sections {
-        if let Some(subgraphs) = config.pointer(section).and_then(|o| o.as_object()) {
-            for subgraph_config in subgraphs.values() {
-                if let Some(urls) = subgraph_config
-                    .pointer("/redis/urls")
-                    .and_then(|o| o.as_array())
-                {
-                    return Some(convert_urls(urls));
-                }
+    if let Some(subgraphs) = config
+        .pointer("/response_cache/subgraph/subgraphs")
+        .and_then(|o| o.as_object())
+    {
+        for subgraph_config in subgraphs.values() {
+            if let Some(urls) = subgraph_config
+                .pointer("/redis/urls")
+                .and_then(|o| o.as_array())
+            {
+                return Some(convert_urls(urls));
             }
         }
     }

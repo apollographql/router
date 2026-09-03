@@ -157,10 +157,6 @@ items:
                         href: "./observability/router-telemetry-otel/apm-guides/prometheus/prometheus-metrics"
                       - label: "Trace Metrics"
                         href: "./observability/router-telemetry-otel/apm-guides/prometheus/otel-traces-to-prometheus"
-                  - label: "Zipkin"
-                    children:
-                      - label: "Traces"
-                        href: "./observability/router-telemetry-otel/apm-guides/zipkin/zipkin-traces"
                   - label: "Jaeger"
                     children:
                       - label: "Traces"
@@ -311,6 +307,8 @@ items:
         href: "./about-v2"
       - label: "Upgrade from Router v1"
         href: "./upgrade/from-router-v1"
+      - label: "Upgrade from Router v2"
+        href: "./upgrade/from-router-v2"
       - label: "Migrate from Gateway"
         href: "./migration/from-gateway"
       - label: "API Gateway Comparison"

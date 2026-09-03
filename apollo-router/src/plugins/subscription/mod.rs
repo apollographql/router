@@ -305,12 +305,12 @@ impl Plugin for Subscription {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: crate::services::subgraph::BoxService,
-    ) -> crate::services::subgraph::BoxService {
+        service: crate::services::subgraph::BoxCloneService,
+    ) -> crate::services::subgraph::BoxCloneService {
         let enabled = self.config.enabled
             && (self.config.mode.callback.is_some() || self.config.mode.passthrough.is_some());
         ServiceBuilder::new()
-            .checkpoint(move |req: SubgraphRequest| {
+            .checkpoint_async(move |req: SubgraphRequest| async move {
                 if req.operation_kind == OperationKind::Subscription && !enabled {
                     Ok(ControlFlow::Break(
                         SubgraphResponse::builder()
@@ -330,7 +330,7 @@ impl Plugin for Subscription {
                 }
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
@@ -346,7 +346,7 @@ impl Plugin for Subscription {
             let endpoint = Endpoint::from_router_service(
                 format!("{path}/{{callback}}"),
                 CallbackService::new(self.notify.clone(), path.to_string(), callback_hmac_key)
-                    .boxed(),
+                    .boxed_clone(),
             );
             map.insert(listen.clone().unwrap_or_else(default_listen_addr), endpoint);
         }
@@ -366,6 +366,7 @@ mod tests {
     use serde_json::Value;
     use tower::Service;
     use tower::ServiceExt;
+    use tower::util::BoxCloneService;
 
     use super::*;
     use crate::Notify;
@@ -800,7 +801,8 @@ mod tests {
         // The subscription plugin intercepts this request and never calls the inner service.
         let (mock, handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
-        let mut subgraph_service = dyn_plugin.subgraph_service("my_subgraph_name", mock.boxed());
+        let mut subgraph_service =
+            dyn_plugin.subgraph_service("my_subgraph_name", BoxCloneService::new(mock));
         let subgraph_req = SubgraphRequest::fake_builder()
             .subgraph_request(
                 http_ext::Request::fake_builder()

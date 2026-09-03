@@ -38,36 +38,27 @@ Starting in v1.49.0, the router can use OpenTelemetry Protocol (OTLP) to report 
 Usage metrics are still using the Apollo Usage Reporting protocol.
 
 <a id="configuring-usage-reporting-via-otlp"></a>
-#### Configuring trace reporting via OTLP
+#### Trace reporting via OTLP
 
-You can enable trace reporting via OTLP by an option that can also configure the ratio of traces sent via OTLP and Apollo Usage Reporting protocol:
+The router always exports traces to GraphOS via OTLP. Two samplers control how many traces are sent:
 
-- In router v1.49-1.60, this is controlled using the `experimental_otlp_tracing_sampler` option and is disabled by default.
-
-- In router v1.61, v2.x and later, this option is renamed to `otlp_tracing_sampler`.
-
-- In router v2.x and later, this option is enabled by default.
-
-The supported values of the OTLP sampler option are the following:
-
-- `always_off`: send all traces via Apollo Usage Reporting protocol. Default for v1.x.
-- `always_on`: send all traces via OTLP. Default for v2.x and later.
-- `0.0 - 1.0`: the ratio of traces to send via OTLP (for example, 0.6 = 60% OTLP, 40% Apollo Usage Reporting protocol).
-
-The OTLP sampler is applied _after_ the common tracing sampler. In the following example, the common sampler samples traces at 1% of all traffic. The OTLP sampler sets its ratio to 0.7. This results in 0.7% of all traffic having traces sent via OTLP, and the remaining 0.3% of all traffic having traces sent via Apollo Usage Reporting protocol:
+- `telemetry.exporters.tracing.common.sampler` sets the fraction of all requests that are traced at all.
+- `telemetry.apollo.sampler` sets the fraction of all requests whose traces reach GraphOS. This is an absolute fraction of all traffic, so it must not exceed the common sampler.
 
 ```yaml title="router.yaml"
 telemetry:
-  apollo:
-    # Send 0.7 OTLP / 0.3 Apollo
-    otlp_tracing_sampler: 0.7
-
   exporters:
     tracing:
       common:
-        # Sample traces at 1% of all traffic
-        sampler: 0.01
+        # Trace 50% of all requests globally
+        sampler: 0.5
+
+  apollo:
+    # Send 10% of all requests to GraphOS. This is an absolute fraction of all traffic and must not exceed the common sampler
+    sampler: 0.1
 ```
+
+Whatever these samplers let through is then subject to a safeguard that further reduces GraphOS trace volume — see the [Apollo trace throttling section](#apollo-trace-throttling).
 
 <OTelEnvVarsCaution />
 
@@ -75,13 +66,13 @@ telemetry:
 
 <MinVersionBadge version="Router v2.13.0" />
 
-By default, the router sends GraphOS OTLP data over gRPC. To switch to HTTP protobuf, set `experimental_otlp_tracing_protocol` and `experimental_otlp_metrics_protocol`:
+By default, the router sends GraphOS OTLP data over gRPC. To switch to HTTP protobuf, set `otlp_tracing_protocol` and `otlp_metrics_protocol`:
 
 ```yaml title="router.yaml"
 telemetry:
   apollo:
-    experimental_otlp_tracing_protocol: http   # grpc (default) | http
-    experimental_otlp_metrics_protocol: http   # grpc (default) | http
+    otlp_tracing_protocol: http   # grpc (default) | http
+    otlp_metrics_protocol: http   # grpc (default) | http
 ```
 
 Use HTTP when your network or proxy infrastructure handles HTTP traffic but not gRPC. For proxy routing, see [HTTP proxy support](#http-proxy-support).
@@ -102,7 +93,25 @@ telemetry:
 
 The value uses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`, so it's an absolute fraction of all requests. It must not exceed `telemetry.exporters.tracing.common.sampler`; the router returns an error at startup if it does.
 
-If omitted, Apollo Studio receives all spans that pass the common sampler.
+#### Apollo trace throttling
+
+<MinVersionBadge version="Router v3.0.0" />
+
+To keep trace volume manageable for high-traffic graphs, the router applies a throttle that further reduces the number of traces it sends to GraphOS. This runs after the `telemetry.apollo.sampler` and `telemetry.exporters.tracing.common.sampler` head samplers, so it only ever affects the traces those samplers already selected. This reduces the processing and transfer of traces, and it affects only the GraphOS pipeline — traces sent to your own OTLP collector or to Datadog are unaffected.
+
+Configure the strategy of the throttle with `telemetry.apollo.tracing.throttle`:
+
+```yaml title="router.yaml"
+telemetry:
+  apollo:
+    tracing:
+      throttle: representative_traces   # representative_traces (default) | rate_limited
+```
+
+- `representative_traces` (default): Sends at most one representative trace per minute for each distinct combination of operation, client, latency bucket, error status, and operation type. The router drops traces that duplicate a combination already seen within the current minute. Error traces are sampled at a higher rate so that failures remain visible. This gives broad coverage of distinct behaviors while significantly reducing volume for repetitive traffic.
+- `rate_limited`: Sends every trace but caps the export rate at a fixed maximum of 100 traces per second, per router instance. This is cheaper in CPU and memory than `representative_traces` and is a good fallback if you find that representative sampling is too resource-intensive for your workload. The rate is not configurable.
+
+Independently of the throttle, the router always drops any individual trace larger than 10MB before sending it to GraphOS. GraphOS rejects oversized traces at ingestion anyway, so exporting them would only waste CPU and bandwidth. Oversized traces are most often caused by pathologically large field-level (FTV1) trace data on subgraph spans. This limit is fixed and can't be configured.
 
 ## Reporting field-level traces
 
@@ -488,6 +497,6 @@ The router's GraphOS OTLP exporters respect the standard `HTTP_PROXY`, `HTTPS_PR
 
 <Note>
 
-HTTP proxy routing applies to the HTTP transport. Set `experimental_otlp_tracing_protocol` and `experimental_otlp_metrics_protocol` to `http` to route GraphOS OTLP traffic through a proxy. See [Configuring the transport protocol](#configuring-the-transport-protocol) for details.
+HTTP proxy routing applies to the HTTP transport. Set `otlp_tracing_protocol` and `otlp_metrics_protocol` to `http` to route GraphOS OTLP traffic through a proxy. See [Configuring the transport protocol](#configuring-the-transport-protocol) for details.
 
 </Note>

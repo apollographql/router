@@ -179,18 +179,9 @@ coprocessor:
 ### Context configuration
 
 The router request context is used to share data across stages of the request pipeline. The coprocessor can also use this context.
-By default, the context is not sent to the coprocessor (`context: false`).
+By default, the context is not sent to the coprocessor — either omit the `context` field or explicitly set `context: none`.
 You can send _all_ context keys to your coprocessor using `context: all`.
 You can also specify exactly which context keys you wish to send to a coprocessor by listing them under the `selective` key. This will reduce the size of the request/response and may improve performance.
-
-If you're upgrading from router 1.x, the [context key names changed](/docs/graphos/routing/upgrade/from-router-v1#renamed-context-keys) in router v2.0. You can specify `context: deprecated` to send all context with the old names, compatible with v1.x. Context keys are translated to their v1.x names before being sent to the coprocessor, and translated back to the v2.x names after being received from the coprocessor.
-
-<Note>
-
-`context: true` from router 1.x is still supported by the configuration, and is an alias for `context: deprecated`.
-We strongly recommend using `context: deprecated` or `context: all` instead.
-
-</Note>
 
 Example:
 
@@ -199,7 +190,7 @@ coprocessor:
   url: http://127.0.0.1:3000 # mandatory URL which is the address of the coprocessor
   router:
     request:
-      context: false # Do not send any context entries
+      context: none # Do not send any context entries (also the default if `context` is omitted)
   supergraph:
     request:
       headers: true
@@ -215,18 +206,12 @@ coprocessor:
   subgraph:
     all:
       request:
-        context: deprecated # It will send all the context keys with deprecated names (1.x version)
+        context: all # It will send all context keys to the coprocessor
   connector:
     all:
       request:
         context: all # It will send all context keys to the coprocessor for connector requests
 ```
-
-<Note>
-
-If you use the `selective` configuration, you must use the new context key names from v2.x. It does not support the `deprecated` keys from v1.x. So for example, if you try to specify `operation_name` instead of `apollo::supergraph::operation_name`, it won't map to the new context key.
-
-</Note>
 
 ### Client configuration
 

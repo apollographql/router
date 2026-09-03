@@ -1,0 +1,9 @@
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: json
+authorization:
+  directives:
+    enabled: true
+    reject_unauthorized: true

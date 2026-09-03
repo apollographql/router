@@ -5,6 +5,7 @@ use std::task::Context;
 use std::task::Poll;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::header::ACCEPT;
@@ -44,7 +45,6 @@ use crate::plugin::serde::deserialize_regex;
 use crate::services::SubgraphRequest;
 use crate::services::connector;
 use crate::services::router;
-use crate::services::subgraph;
 
 register_private_plugin!("apollo", "headers", Headers);
 
@@ -250,7 +250,7 @@ struct GlobalHeadersConfiguration {
 #[derive(Clone, JsonSchema, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 #[schemars(rename = "HeadersConfig")]
-struct Config {
+pub(crate) struct Config {
     /// Rules to apply to all subgraphs (global defaults)
     #[serde(default)]
     all: Option<GlobalHeadersConfiguration>,
@@ -264,7 +264,7 @@ struct Config {
     connector: ConnectorHeadersConfiguration,
 }
 
-struct Headers {
+pub(crate) struct Headers {
     all_operations: Arc<Vec<Operation>>,
     subgraph_operations: HashMap<String, Arc<Vec<Operation>>>,
     all_connector_operations: Arc<Vec<Operation>>,
@@ -449,43 +449,64 @@ impl PluginPrivate for Headers {
             masking_rules_map,
         })
     }
+}
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        // Get operations for this subgraph (fallback to global)
+impl Headers {
+    /// Returns a layer that applies this subgraph's header operations.
+    ///
+    /// Note: masking rules aren't installed here — they're inserted into request context
+    /// once by [`Headers::router_masking_layer`], and consumers resolve per-subgraph rules
+    /// at read time via `MaskingRulesMap::get_request(Some(name))` / `get_response(...)`.
+    pub(crate) fn subgraph_headers_layer(&self, name: &str) -> HeadersLayer {
         let operations = self
             .subgraph_operations
             .get(name)
             .cloned()
             .unwrap_or_else(|| self.all_operations.clone());
 
-        // Note: masking rules aren't installed here — they're inserted into
-        // request context once in `router_service` below, and consumers
-        // resolve per-subgraph rules at read time via
-        // `MaskingRulesMap::get_request(Some(name))` / `get_response(...)`.
-        ServiceBuilder::new()
-            .layer(HeadersLayer::new(operations))
-            .service(service)
-            .boxed()
+        HeadersLayer::new(operations)
     }
 
-    fn connector_request_service(
-        &self,
-        service: crate::services::connector::request_service::BoxService,
-        source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    /// Returns a layer that applies this connector source's header operations (falling back
+    /// to the global connector operations if the source has none of its own).
+    pub(crate) fn connector_headers_layer(&self, source_name: &str) -> HeadersLayer {
         let operations = self
             .connector_source_operations
-            .get(&source_name)
+            .get(source_name)
             .cloned()
             .unwrap_or_else(|| self.all_connector_operations.clone());
 
-        ServiceBuilder::new()
-            .layer(HeadersLayer::new(operations))
-            .service(service)
-            .boxed()
+        HeadersLayer::new(operations)
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    /// Returns a layer that inserts a [`MaskingRulesMap`] into the request context.
+    pub(crate) fn router_masking_layer(&self) -> MaskingContextLayer {
+        MaskingContextLayer::new(self.masking_rules_map.clone())
+    }
+}
+
+/// Layer type for [`Headers::router_masking_layer`].
+pub(crate) struct MaskingContextLayer {
+    masking_rules_map: Arc<crate::services::header_masking::MaskingRulesMap>,
+}
+
+impl MaskingContextLayer {
+    fn new(masking_rules_map: Arc<crate::services::header_masking::MaskingRulesMap>) -> Self {
+        Self { masking_rules_map }
+    }
+}
+
+impl<S> Layer<S> for MaskingContextLayer
+where
+    S: Service<router::Request, Response = router::Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = router::BoxCloneService;
+
+    fn layer(&self, inner: S) -> Self::Service {
         let masking_rules_map = self.masking_rules_map.clone();
 
         ServiceBuilder::new()
@@ -495,12 +516,12 @@ impl PluginPrivate for Headers {
                 });
                 req
             })
-            .service(service)
-            .boxed()
+            .service(inner)
+            .boxed_clone()
     }
 }
 
-struct HeadersLayer {
+pub(crate) struct HeadersLayer {
     operations: Arc<Vec<Operation>>,
 }
 
@@ -521,7 +542,8 @@ impl<S> Layer<S> for HeadersLayer {
     }
 }
 
-struct HeadersService<S> {
+#[derive(Clone)]
+pub(crate) struct HeadersService<S> {
     inner: S,
     operations: Arc<Vec<Operation>>,
 }
@@ -550,42 +572,56 @@ static RESERVED_HEADERS: [HeaderName; 14] = [
 
 impl<S> Service<SubgraphRequest> for HeadersService<S>
 where
-    S: Service<SubgraphRequest>,
+    S: Service<SubgraphRequest> + Clone + Send + 'static,
+    S::Future: Send + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = S::Future;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
-        self.modify_subgraph_request(&mut req);
-        self.inner.call(req)
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
+        let operations = self.operations.clone();
+
+        Box::pin(async move {
+            Self::modify_subgraph_request(&operations, &mut req);
+            inner.call(req).await
+        })
     }
 }
 
 impl<S> Service<connector::request_service::Request> for HeadersService<S>
 where
-    S: Service<connector::request_service::Request>,
+    S: Service<connector::request_service::Request> + Clone + Send + 'static,
+    S::Future: Send + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = S::Future;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, mut req: connector::request_service::Request) -> Self::Future {
-        self.modify_connector_request(&mut req);
-        self.inner.call(req)
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
+        let operations = self.operations.clone();
+
+        Box::pin(async move {
+            Self::modify_connector_request(&operations, &mut req);
+            inner.call(req).await
+        })
     }
 }
 
 impl<S> HeadersService<S> {
-    fn modify_subgraph_request(&self, req: &mut SubgraphRequest) {
+    fn modify_subgraph_request(operations: &Arc<Vec<Operation>>, req: &mut SubgraphRequest) {
         let mut already_propagated: HashSet<String> = HashSet::new();
 
         let body_to_value = serde_json_bytes::value::to_value(req.supergraph_request.body()).ok();
@@ -593,7 +629,7 @@ impl<S> HeadersService<S> {
         let context = &req.context;
         let headers_mut = req.subgraph_request.headers_mut();
 
-        for operation in &*self.operations {
+        for operation in &**operations {
             operation.process_header_rules(
                 &mut already_propagated,
                 supergraph_headers,
@@ -605,7 +641,10 @@ impl<S> HeadersService<S> {
         }
     }
 
-    fn modify_connector_request(&self, req: &mut connector::request_service::Request) {
+    fn modify_connector_request(
+        operations: &Arc<Vec<Operation>>,
+        req: &mut connector::request_service::Request,
+    ) {
         let mut already_propagated: HashSet<String> = HashSet::new();
 
         let TransportRequest::Http(ref mut http_request) = req.transport_request else {
@@ -618,7 +657,7 @@ impl<S> HeadersService<S> {
         let existing_headers = http_request.inner.headers().clone();
         let headers_mut = http_request.inner.headers_mut();
 
-        for operation in &*self.operations {
+        for operation in &**operations {
             operation.process_header_rules(
                 &mut already_propagated,
                 supergraph_headers,
@@ -843,6 +882,7 @@ mod test {
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
+    use crate::services::subgraph;
 
     #[test]
     fn test_subgraph_config() {
@@ -1874,7 +1914,7 @@ mod test {
             id: SubgraphRequestId(String::new()),
             is_deferred_fetch: false,
         };
-        service.modify_subgraph_request(&mut request);
+        HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, &mut request);
         let headers = request
             .subgraph_request
             .headers()
@@ -1947,7 +1987,7 @@ mod test {
             id: SubgraphRequestId(String::new()),
             is_deferred_fetch: false,
         };
-        service.modify_subgraph_request(&mut request);
+        HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, &mut request);
         let headers = request
             .subgraph_request
             .headers()
@@ -2162,25 +2202,29 @@ mod test {
         input: Vec<(&'static str, &'static str)>,
         output: Vec<(&'static str, &'static str)>,
     ) {
-        let test_harness = PluginTestHarness::<Headers>::builder()
+        let harness = PluginTestHarness::<Headers>::builder()
             .config(config)
             .build()
             .await
             .expect("test harness");
-        let service = test_harness.subgraph_service("test", move |r| {
-            let output = output.clone();
-            async move {
-                // Assert the headers here
-                let headers = r.subgraph_request.headers();
-                for (name, value) in output.iter() {
-                    if let Some(header) = headers.get(*name) {
-                        assert_eq!(header.to_str().unwrap(), *value);
-                    } else {
-                        panic!("missing header {name}");
-                    }
+
+        let (mock, mut handle) = tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+
+        let mut service = ServiceBuilder::new()
+            .layer(harness.subgraph_headers_layer("test"))
+            .service(mock);
+
+        let driver = tokio::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+            let headers = request.subgraph_request.headers();
+            for (name, value) in output.iter() {
+                if let Some(header) = headers.get(*name) {
+                    assert_eq!(header.to_str().unwrap(), *value);
+                } else {
+                    panic!("missing header {name}");
                 }
-                Ok(subgraph::Response::fake_builder().build())
             }
+            responder.send_response(subgraph::Response::fake_builder().build());
         });
 
         let mut req = http::Request::builder();
@@ -2189,6 +2233,9 @@ mod test {
         }
 
         service
+            .ready()
+            .await
+            .unwrap()
             .call(
                 subgraph::Request::fake_builder()
                     .supergraph_request(Arc::new(
@@ -2199,6 +2246,8 @@ mod test {
             )
             .await
             .unwrap();
+
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]

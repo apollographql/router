@@ -35,9 +35,12 @@ impl Plugin for EnhancedClientAwareness {
         Ok(EnhancedClientAwareness {})
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         ServiceBuilder::new()
-            .checkpoint(|request: supergraph::Request| {
+            .checkpoint_async(|request: supergraph::Request| async move {
                 if let Some(client_library_metadata) = request
                     .supergraph_request
                     .body()
@@ -88,7 +91,7 @@ impl Plugin for EnhancedClientAwareness {
                 Ok(ControlFlow::Continue(request))
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 

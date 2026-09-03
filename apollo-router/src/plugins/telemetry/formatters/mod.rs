@@ -25,7 +25,6 @@ use tracing_subscriber::registry::SpanRef;
 use super::config_new::logging::RateLimit;
 use super::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::otel::OtelData;
-use crate::plugins::telemetry::reload::otel::SampledSpan;
 
 pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
 // FIXME: this is a temporary solution to avoid exposing hardcoded attributes in connector spans instead of using the custom telemetry features.
@@ -270,34 +269,19 @@ pub(crate) trait EventFormatter<S> {
         W: std::fmt::Write;
 }
 
+/// Returns the trace ID and span ID for the given span, or `None` if the span context is invalid.
+///
+/// A span context is invalid (all-zero IDs) when produced by a `NoopTracer` or a not-yet-
+/// initialised provider. Callers should omit trace/span IDs from output rather than emit zeros.
 #[inline]
 pub(crate) fn get_trace_and_span_id<S>(span: &SpanRef<S>) -> Option<(TraceId, SpanId)>
 where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
 {
-    let ext = span.extensions();
-    if let Some(otel_data) = ext.get::<OtelData>() {
-        // The root span is being built and has no parent
-        if let (Some(trace_id), Some(span_id)) =
-            (otel_data.builder.trace_id, otel_data.builder.span_id)
-        {
-            return Some((trace_id, span_id));
-        }
-
-        // Child spans with a valid trace context
-        let span = otel_data.parent_cx.span();
-        let span_context = span.span_context();
-        if span_context.is_valid() {
-            return Some((span_context.trace_id(), span_context.span_id()));
-        }
-    }
-    if let Some(sampled_span) = ext.get::<SampledSpan>() {
-        let (trace_id, span_id) = sampled_span.trace_and_span_id();
-        return Some((
-            opentelemetry::trace::TraceId::from(trace_id.to_u128()),
-            span_id,
-        ));
-    }
-
-    None
+    // OtelData is always inserted by on_new_span — the ? here is a defensive fallback.
+    let extensions = span.extensions();
+    let d = extensions.get::<OtelData>()?;
+    let otel_span = d.current_cx.span();
+    let sc = otel_span.span_context();
+    sc.is_valid().then(|| (sc.trace_id(), sc.span_id()))
 }

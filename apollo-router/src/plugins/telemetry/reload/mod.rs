@@ -49,6 +49,8 @@ pub(crate) mod builder;
 pub(crate) mod metrics;
 pub(crate) mod otel;
 pub(crate) mod rate_limit;
+#[cfg(test)]
+mod testing;
 pub(crate) mod tracing;
 
 /// Prepares telemetry components for activation (Phase 1 of reload lifecycle).

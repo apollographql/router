@@ -1,6 +1,0 @@
-description: "`traffic_shaping.deduplicate_variables` is deprecated."
-actions:
-  - type: log
-    level: warn
-    path: traffic_shaping.deduplicate_variables
-    log: The `traffic_shaping.deduplicate_variables` config field is now deprecated because it is unconditionally enabled. Please remove the field from your config.

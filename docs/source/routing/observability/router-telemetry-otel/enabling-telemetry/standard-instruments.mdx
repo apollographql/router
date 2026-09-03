@@ -88,16 +88,6 @@ You can attach custom attributes using [router selectors](/router/configuration/
 - `apollo.router.graphql_error` - counts GraphQL errors in responses. Also counts errors which occur during the response validation phase, which are represented in client responses as `extensions.valueCompletion` instead of actual GraphQL errors. Attributes:
   - `code`: error code, including `RESPONSE_VALIDATION_FAILED` in the case of a value completion error.
 
-## Session
-
-- `apollo.router.session.count.active` - Number of in-flight GraphQL requests. **Deprecated**: use `http.server.active_requests` instead.
-
-<Note>
-
-`apollo.router.session.count.active` is a legacy Apollo-specific metric. Apollo recommends using [`http.server.active_requests`](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/instruments#opentelemetry-standard-instruments) instead, which follows OpenTelemetry semantic conventions and is the standard way to measure in-flight HTTP requests. `apollo.router.session.count.active` might be removed in a future release.
-
-</Note>
-
 ## Cache
 
 - `apollo.router.cache.size` — Number of entries in the cache
@@ -325,12 +315,12 @@ telemetry:
 
 - `apollo.router.telemetry.studio.reports` - The number of reports submitted to GraphOS Studio by the router.
   - `report.type`: The type of report submitted: "traces" or "metrics"
-  - `report.protocol`: Either "apollo" or "otlp", depending on the otlp_tracing_sampler configuration.
+  - `report.protocol`: "apollo" for usage report metrics, "otlp" for traces.
 
 ## Telemetry
 
 - `apollo.router.telemetry.batch_processor.errors` - The number of errors encountered by exporter batch processors.
-  - `name`: One of `apollo-tracing`, `datadog-tracing`, `jaeger-collector`, `otlp-tracing`, `zipkin-tracing`.
+  - `name`: One of `apollo-tracing`, `datadog-tracing`, `otlp-tracing`.
   - `error`: One of `channel closed`, `channel full`.
 
 - `apollo.router.telemetry.metrics.cardinality_overflow` - A count of how often a telemetry metric hit OpenTelemetry's cardinality limit. When a metric exceeds its cardinality limit, new attribute combinations are aggregated into an overflow bucket.

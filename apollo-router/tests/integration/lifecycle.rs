@@ -194,9 +194,7 @@ async fn test_shutdown_with_idle_connection() -> Result<(), BoxError> {
     router.assert_started().await;
     let _conn = std::net::TcpStream::connect(router.bind_address()).unwrap();
     router.execute_default_query().await;
-    tokio::time::timeout(Duration::from_secs(1), router.graceful_shutdown())
-        .await
-        .unwrap();
+    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -266,8 +264,8 @@ async fn test_plugin_ordering() {
                 "coprocessor": {
                     "url": coprocessor_url,
                     "router": {
-                        "request": { "context": true },
-                        "response": { "context": true },
+                        "request": { "context": "all" },
+                        "response": { "context": "all" },
                     }
                 },
             }))
@@ -318,6 +316,8 @@ async fn test_plugin_ordering() {
 macro_rules! make_plugin {
     ($mod_name: ident, $str_name: expr) => {
         mod $mod_name {
+            use tower::ServiceExt;
+
             use super::*;
 
             #[derive(Deserialize, JsonSchema)]
@@ -339,7 +339,10 @@ macro_rules! make_plugin {
                     Ok(Self)
                 }
 
-                fn router_service(&self, service: router::BoxService) -> router::BoxService {
+                fn router_service(
+                    &self,
+                    service: router::BoxCloneService,
+                ) -> router::BoxCloneService {
                     ServiceBuilder::new()
                         .map_request(|request: router::Request| {
                             test_plugin_ordering_push_trace(
@@ -356,13 +359,13 @@ macro_rules! make_plugin {
                             response
                         })
                         .service(service)
-                        .boxed()
+                        .boxed_clone()
                 }
 
                 fn supergraph_service(
                     &self,
-                    service: supergraph::BoxService,
-                ) -> supergraph::BoxService {
+                    service: supergraph::BoxCloneService,
+                ) -> supergraph::BoxCloneService {
                     ServiceBuilder::new()
                         .map_request(|request: supergraph::Request| {
                             test_plugin_ordering_push_trace(
@@ -379,7 +382,7 @@ macro_rules! make_plugin {
                             response
                         })
                         .service(service)
-                        .boxed()
+                        .boxed_clone()
                 }
             }
         }

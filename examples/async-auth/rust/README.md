@@ -18,13 +18,13 @@ authentication server.
 ```rust
     fn supergraph_service(
         &mut self,
-        service: router::BoxService,
-    ) -> router::BoxService {
+        service: router::BoxCloneService,
+    ) -> router::BoxCloneService {
         ServiceBuilder::new()
             .checkpoint_async(...) // Authentication happens here
             .buffer(20_000) // Required, see note below
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 ```
 

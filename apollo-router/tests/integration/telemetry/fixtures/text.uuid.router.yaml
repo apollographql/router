@@ -1,7 +1,5 @@
 telemetry:
   instrumentation:
-    spans:
-      mode: spec_compliant
     events:
       router:
         # Standard events
@@ -12,7 +10,6 @@ telemetry:
     tracing:
       propagation:
         trace_context: true
-        jaeger: true
       otlp:
         enabled: true
         batch_processor:

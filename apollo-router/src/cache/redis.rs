@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::Deref;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -30,8 +29,6 @@ use fred::types::config::ReconnectPolicy;
 use fred::types::config::TlsConfig;
 use fred::types::config::TlsHostMapping;
 use fred::types::config::UnresponsiveConfig;
-use fred::types::scan::ScanResult;
-use futures::Stream;
 use futures::future::join_all;
 use parking_lot::RwLock;
 use tokio::sync::Mutex;
@@ -47,7 +44,8 @@ use super::ValueType;
 use super::metrics::RedisMetricsCollector;
 use crate::cache::replica_filter::RouteableReplicaFilter;
 use crate::configuration::RedisCache;
-use crate::services::generate_tls_client_config;
+use crate::services::subgraph::http::create_certificate_store;
+use crate::services::subgraph::http::generate_tls_client_config;
 
 pub(super) static ACTIVE_CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
 const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
@@ -142,15 +140,9 @@ struct DropSafeRedisPool {
     // establishes replica connections. `None` otherwise.
     replica_heartbeat_abort_handle: Option<AbortHandle>,
     watcher_abort_handle: AbortHandle,
-    // Metrics collector handles its own abort and spawns a background task for gauge updates
-    metrics_collector: RedisMetricsCollector,
-}
-
-impl DropSafeRedisPool {
-    /// Signal that the meter provider is ready and metrics gauges can be created.
-    fn activate(&self) {
-        self.metrics_collector.activate();
-    }
+    // Held so the metrics polling task is aborted (via the collector's Drop) when the
+    // pool is dropped.
+    _metrics_collector: RedisMetricsCollector,
 }
 
 impl Deref for DropSafeRedisPool {
@@ -314,7 +306,7 @@ impl RedisCacheStorage {
         }
 
         if let Some(tls) = config.tls.as_ref() {
-            let tls_cert_store = tls.create_certificate_store().transpose()?;
+            let tls_cert_store = create_certificate_store(tls).transpose()?;
             let client_cert_config = tls.client_authentication.as_ref();
             let tls_client_config = generate_tls_client_config(
                 tls_cert_store,
@@ -603,30 +595,13 @@ impl RedisCacheStorage {
                 .as_ref()
                 .map(|h| h.abort_handle()),
             watcher_abort_handle: watcher_handle.abort_handle(),
-            metrics_collector,
+            _metrics_collector: metrics_collector,
         };
 
         // replace the current pool (if there is one) with the new one
         *self.inner.write() = Some(inner);
 
-        // set up metrics
-        self.activate();
-
         Ok(())
-    }
-
-    pub(crate) fn ttl(&self) -> Option<Duration> {
-        self.ttl
-    }
-
-    /// Signal that the meter provider is ready and metrics gauges can be created.
-    ///
-    /// This MUST be called after `Telemetry.activate()` to ensure gauges are
-    /// registered with the correct meter provider.
-    pub(crate) fn activate(&self) {
-        if let Some(inner) = self.inner.read().as_ref() {
-            inner.activate();
-        }
     }
 
     /// Helper method to record Redis errors for metrics. Calls `record_redis_error` for both
@@ -713,11 +688,6 @@ impl RedisCacheStorage {
                 Ok(result)
             }
         }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn set_ttl(&mut self, ttl: Option<Duration>) {
-        self.ttl = ttl;
     }
 
     // NOTE: we return a RedisError here because it's easier to integrate into the rest of the
@@ -849,14 +819,6 @@ impl RedisCacheStorage {
         }
     }
 
-    pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
-        &self,
-        keys: Vec<RedisKey<K>>,
-    ) -> Result<Vec<Result<RedisValue<V>, RedisError>>, RedisError> {
-        self.get_multiple_with_options(keys, Options::default())
-            .await
-    }
-
     /// `Result<Vec<Result<RedisValue<V>, RedisError>>, RedisError>` is a horrible return type but
     /// is needed to capture the multiple levels of errors that can occur.
     ///
@@ -938,48 +900,6 @@ impl RedisCacheStorage {
         }
     }
 
-    /// Inserts multiple records. Returns Ok(()) on success, emitting traces for successful
-    /// inserts, and otherwise an error and error traces and error-level log
-    pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
-        &self,
-        data: &[(RedisKey<K>, RedisValue<V>)],
-        ttl: Option<Duration>,
-    ) -> Result<(), RedisError> {
-        tracing::trace!("inserting into redis: {:#?}", data);
-        let expiration = self.expiration(ttl);
-
-        // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
-        // seems to split the pipeline by hash slot in the background.
-        let pipeline = self.pipeline().await?;
-        for (key, value) in data {
-            let key = self.make_key(key.clone());
-            let _: Result<(), _> = pipeline
-                .set(key, value.clone(), expiration.clone(), None, false)
-                .await;
-        }
-
-        let result: Result<Vec<()>, _> = pipeline.all().await;
-        match result {
-            Ok(values) => tracing::trace!("successfully inserted {} values", values.len()),
-            Err(err) => {
-                tracing::trace!("caught error during insert: {err:?}");
-                self.record_query_error(&err);
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
-    /// `scan_with_namespaced_results` and already includes it.
-    pub(crate) async fn delete_from_scan_result<I>(&self, keys: I) -> Result<u32, RedisError>
-    where
-        I: Iterator<Item = fred::types::Key>,
-    {
-        self.delete_from_scan_result_with_options(keys, Options::default())
-            .await
-    }
-
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
     /// `scan_with_namespaced_results` and already includes it.
     pub(crate) async fn delete_from_scan_result_with_options<I>(
@@ -1011,25 +931,6 @@ impl RedisCacheStorage {
         }
 
         Ok(total)
-    }
-
-    /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
-    pub(crate) async fn scan_with_namespaced_results(
-        &self,
-        pattern: String,
-        count: Option<u32>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>>, RedisError>
-    {
-        let pattern = self.make_key(RedisKey(pattern));
-        if self.is_cluster {
-            // NOTE: scans might be better send to only the read replicas, but the read-only client
-            // doesn't have a scan_cluster(), just a paginated version called scan_page()
-            Ok(Box::pin(
-                self.client().await?.scan_cluster(pattern, count, None),
-            ))
-        } else {
-            Ok(Box::pin(self.client().await?.scan(pattern, count, None)))
-        }
     }
 }
 
@@ -1139,7 +1040,10 @@ fn setup_event_listeners(caller: &'static str, client: &Client) {
 ))]
 impl RedisCacheStorage {
     pub(crate) async fn truncate_namespace(&self) -> Result<(), RedisError> {
+        use std::pin::Pin;
+
         use fred::prelude::Key;
+        use futures::Stream;
         use futures::StreamExt;
 
         if self.namespace.is_none() {
@@ -1172,6 +1076,82 @@ impl RedisCacheStorage {
                 .map(ToString::to_string)
                 .unwrap_or(key),
             None => key,
+        }
+    }
+
+    pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
+        &self,
+        keys: Vec<RedisKey<K>>,
+    ) -> Result<Vec<Result<RedisValue<V>, RedisError>>, RedisError> {
+        self.get_multiple_with_options(keys, Options::default())
+            .await
+    }
+
+    /// Inserts multiple records. Returns Ok(()) on success, emitting traces for successful
+    /// inserts, and otherwise an error and error traces and error-level log
+    pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
+        &self,
+        data: &[(RedisKey<K>, RedisValue<V>)],
+        ttl: Option<Duration>,
+    ) -> Result<(), RedisError> {
+        tracing::trace!("inserting into redis: {:#?}", data);
+        let expiration = self.expiration(ttl);
+
+        // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
+        // seems to split the pipeline by hash slot in the background.
+        let pipeline = self.pipeline().await?;
+        for (key, value) in data {
+            let key = self.make_key(key.clone());
+            let _: Result<(), _> = pipeline
+                .set(key, value.clone(), expiration.clone(), None, false)
+                .await;
+        }
+
+        let result: Result<Vec<()>, _> = pipeline.all().await;
+        match result {
+            Ok(values) => tracing::trace!("successfully inserted {} values", values.len()),
+            Err(err) => {
+                tracing::trace!("caught error during insert: {err:?}");
+                self.record_query_error(&err);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
+    /// `scan_with_namespaced_results` and already includes it.
+    pub(crate) async fn delete_from_scan_result<I>(&self, keys: I) -> Result<u32, RedisError>
+    where
+        I: Iterator<Item = fred::types::Key>,
+    {
+        self.delete_from_scan_result_with_options(keys, Options::default())
+            .await
+    }
+
+    /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
+    pub(crate) async fn scan_with_namespaced_results(
+        &self,
+        pattern: String,
+        count: Option<u32>,
+    ) -> Result<
+        std::pin::Pin<
+            Box<
+                dyn futures::Stream<Item = Result<fred::types::scan::ScanResult, RedisError>>
+                    + Send,
+            >,
+        >,
+        RedisError,
+    > {
+        let pattern = self.make_key(RedisKey(pattern));
+        if self.is_cluster {
+            // NOTE: scans might be better send to only the read replicas, but the read-only client
+            // doesn't have a scan_cluster(), just a paginated version called scan_page()
+            Ok(Box::pin(
+                self.client().await?.scan_cluster(pattern, count, None),
+            ))
+        } else {
+            Ok(Box::pin(self.client().await?.scan(pattern, count, None)))
         }
     }
 }
@@ -1476,10 +1456,7 @@ mod test {
                 let inner = guard.as_ref().unwrap();
                 (
                     inner.heartbeat_abort_handle.clone(),
-                    inner
-                        .metrics_collector
-                        .abort_handle()
-                        .expect("metrics not activated"),
+                    inner._metrics_collector.abort_handle(),
                 )
             };
             assert!(!old_heartbeat.is_finished());
@@ -1504,10 +1481,7 @@ mod test {
             let guard = storage.inner.read();
             let new_inner = guard.as_ref().unwrap();
             assert!(!new_inner.heartbeat_abort_handle.is_finished());
-            let new_metrics = new_inner
-                .metrics_collector
-                .abort_handle()
-                .expect("metrics not activated after recreation");
+            let new_metrics = new_inner._metrics_collector.abort_handle();
             assert!(!new_metrics.is_finished());
             Ok(())
         }
@@ -1579,20 +1553,7 @@ mod test {
             Ok(())
         }
 
-        /// activate() on an empty inner (None) should be a no-op and not panic
-        #[tokio::test]
-        #[rstest::rstest]
-        async fn activate_on_none_inner_is_noop(
-            #[values(true, false)] clustered: bool,
-        ) -> Result<(), BoxError> {
-            let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
-            assert!(storage.inner.read().is_none());
-            storage.activate();
-            Ok(())
-        }
-
-        /// activate() after initial create_client_pool() populates the metrics abort handle
+        /// create_client_pool() starts the metrics collection task
         #[tokio::test]
         #[rstest::rstest]
         async fn create_client_pool_starts_metrics(
@@ -1601,8 +1562,7 @@ mod test {
             let _guard = lock_for_static().lock().await;
             let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
 
-            // before initialize, which calls activate(), metrics abort handle should be None
-            // (because the inner is None!)
+            // before create_client_pool() there is no pool and no metrics collector
             assert!(storage.inner.read().as_ref().is_none());
 
             storage.create_client_pool().await?;
@@ -1612,51 +1572,9 @@ mod test {
                 .read()
                 .as_ref()
                 .unwrap()
-                .metrics_collector
-                .abort_handle()
-                .expect("metrics should be activated");
+                ._metrics_collector
+                .abort_handle();
             assert!(!handle.is_finished());
-            Ok(())
-        }
-
-        /// Calling activate() twice should abort the first metrics task before starting a new one,
-        /// not orphan it
-        #[tokio::test]
-        #[rstest::rstest]
-        async fn activate_twice_does_not_orphan_old_task(
-            #[values(true, false)] clustered: bool,
-        ) -> Result<(), BoxError> {
-            let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
-            storage.create_client_pool().await?;
-
-            let first_handle = storage
-                .inner
-                .read()
-                .as_ref()
-                .unwrap()
-                .metrics_collector
-                .abort_handle()
-                .expect("first activate should populate handle");
-            assert!(!first_handle.is_finished());
-
-            storage.activate();
-            tokio::task::yield_now().await;
-
-            assert!(
-                first_handle.is_finished(),
-                "first metrics task should be aborted"
-            );
-
-            let second_handle = storage
-                .inner
-                .read()
-                .as_ref()
-                .unwrap()
-                .metrics_collector
-                .abort_handle()
-                .expect("second activate should populate handle");
-            assert!(!second_handle.is_finished());
             Ok(())
         }
 

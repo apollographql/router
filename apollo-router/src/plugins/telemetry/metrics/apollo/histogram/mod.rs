@@ -7,6 +7,7 @@ use std::ops::AddAssign;
 
 pub(crate) use cost::CostHistogram;
 pub(crate) use duration::DurationHistogram;
+pub(crate) use duration::duration_bucket;
 pub(crate) use list_length::ListLengthHistogram;
 use num_traits::AsPrimitive;
 use serde::Serialize;

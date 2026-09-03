@@ -23,16 +23,15 @@ use crate::plugins::telemetry::tracing::datadog::DatadogSpanProcessor;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_telemetry;
+pub(crate) mod apollo_trace_throttle;
 pub(crate) mod datadog;
 #[allow(unreachable_pub, dead_code)]
 pub(crate) mod datadog_exporter;
 mod named;
 pub(crate) mod otlp;
 pub(crate) mod reload;
-pub(crate) mod zipkin;
 
 pub(crate) use named::NamedSpanExporter;
-pub(crate) use named::NamedTokioRuntime;
 
 #[derive(Debug)]
 struct ApolloFilterSpanProcessor<T: SpanProcessor> {
@@ -278,9 +277,7 @@ fn max_concurrent_exports_default() -> usize {
 }
 
 impl BatchProcessorConfig {
-    /// Apply OTEL_BSP_* environment variable overrides to this config.
-    /// This should be used for third-party exporters (OTLP, Datadog, Zipkin)
-    /// but NOT for Apollo exporters.
+    /// Applies `OTEL_BSP_*` environment variable overrides to this config.
     pub(crate) fn with_env_overrides(self) -> Result<Self, BoxError> {
         Ok(BatchProcessorConfig {
             scheduled_delay: Self::parse_duration_env(

@@ -56,7 +56,7 @@ pub(crate) fn default_pool_idle_timeout() -> Option<Duration> {
     Some(DEFAULT_POOL_IDLE_TIMEOUT)
 }
 
-#[derive(PartialEq, Default, Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[derive(PartialEq, Eq, Hash, Default, Debug, Clone, Copy, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum DnsResolutionStrategy {
     /// Only query for `A` (IPv4) records

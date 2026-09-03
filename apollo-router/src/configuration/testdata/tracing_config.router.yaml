@@ -17,8 +17,6 @@ telemetry:
         service_namespace: "bar"
       propagation:
         datadog: false
-        jaeger: false
         baggage: false
         trace_context: false
-        zipkin: false
 

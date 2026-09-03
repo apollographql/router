@@ -7,8 +7,9 @@ connectors:
   debug_extensions: true
   expose_sources_in_context: true
   max_requests_per_operation_per_source: 50
-  subgraphs:
-    subgraph_name:
-      sources:
-        source_name:
-          override_url: "http://localhost:5280"
+  sources:
+    subgraph_name.source_name:
+      override_url: "http://localhost:5280"
+      max_requests_per_operation: 50
+      $config:
+        api_key: secret

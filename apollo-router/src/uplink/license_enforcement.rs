@@ -342,15 +342,6 @@ impl LicenseEnforcementReport {
                     .build(),
             );
         }
-        if !allowed_features.contains(&AllowedFeature::EntityCaching) {
-            configuration_restrictions.push(
-                ConfigurationRestriction::builder()
-                    .path("$.preview_entity_cache.enabled")
-                    .value(true)
-                    .name("Subgraph entity caching")
-                    .build(),
-            );
-        }
         if !allowed_features.contains(&AllowedFeature::ResponseCaching) {
             configuration_restrictions.push(
                 ConfigurationRestriction::builder()
@@ -673,8 +664,6 @@ pub enum AllowedFeature {
     DemandControl,
     /// Distributed query planning
     DistributedQueryPlanning,
-    /// Subgraph entity caching
-    EntityCaching,
     /// Subgraph response caching
     ResponseCaching,
     /// Experimental features in the router
@@ -704,7 +693,6 @@ impl From<&str> for AllowedFeature {
             "coprocessors" => Self::Coprocessors,
             "demand_control" => Self::DemandControl,
             "distributed_query_planning" => Self::DistributedQueryPlanning,
-            "entity_caching" => Self::EntityCaching,
             "response_caching" => Self::ResponseCaching,
             "experimental" => Self::Experimental,
             "extended_reference_reporting" => Self::ExtendedReferenceReporting,
@@ -726,7 +714,6 @@ impl AllowedFeature {
             "subscription" => Some(AllowedFeature::Subscriptions),
             "authorization" => Some(AllowedFeature::Authorization),
             "authentication" => Some(AllowedFeature::Authentication),
-            "preview_entity_cache" => Some(AllowedFeature::EntityCaching),
             "response_cache" => Some(AllowedFeature::ResponseCaching),
             "demand_control" => Some(AllowedFeature::DemandControl),
             "coprocessor" => Some(AllowedFeature::Coprocessors),
@@ -1211,7 +1198,6 @@ mod test {
                         AllowedFeature::Authorization,
                         AllowedFeature::Batching,
                         AllowedFeature::DemandControl,
-                        AllowedFeature::EntityCaching,
                         AllowedFeature::PersistedQueries,
                         AllowedFeature::ApqCaching,
                     ]),

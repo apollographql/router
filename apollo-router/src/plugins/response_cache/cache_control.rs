@@ -477,12 +477,6 @@ impl CacheControl {
         self.private
     }
 
-    /// Returns `true` if the `public` directive is set.
-    /// Note: `private` takes precedence — both will not be true simultaneously.
-    pub(crate) fn public(&self) -> bool {
-        self.public
-    }
-
     /// Returns `true` if this response should be stored in the cache.
     ///
     /// A response should be stored if `no-store` is not set and the TTL (if present) has not
@@ -760,7 +754,7 @@ mod tests {
         };
 
         let merged = first.merge_inner(&second, now, true);
-        assert!(!merged.public());
+        assert!(!merged.public);
         assert!(merged.private());
         assert!(merged.can_use());
     }
@@ -891,7 +885,7 @@ mod tests {
         let cc =
             CacheControl::try_from(&header_map(&[("cache-control", "public,private")])).unwrap();
         assert!(cc.private());
-        assert!(!cc.public());
+        assert!(!cc.public);
     }
 
     #[test]

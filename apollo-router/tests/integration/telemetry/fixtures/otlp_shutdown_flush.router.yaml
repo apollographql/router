@@ -1,0 +1,23 @@
+# Copy of `otlp.router.yaml` with the tracing batch processor's scheduled delay pushed far out
+# of the way, so that a span buffered by the processor can only reach the collector via the
+# flush performed when the tracer provider is shut down at exit.
+telemetry:
+  exporters:
+    tracing:
+      common:
+        service_name: router
+      otlp:
+        enabled: true
+        protocol: http
+        endpoint: <otel-collector-endpoint>
+        batch_processor:
+          scheduled_delay: 10min
+    metrics:
+      common:
+        service_name: router
+      otlp:
+        enabled: true
+        endpoint: <otel-collector-endpoint>/metrics
+        protocol: http
+        batch_processor:
+          scheduled_delay: 10ms

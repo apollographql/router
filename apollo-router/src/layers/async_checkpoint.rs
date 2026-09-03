@@ -80,6 +80,22 @@ where
     checkpoint_fn: Arc<Pin<Box<dyn Fn(Request) -> Fut + Send + Sync + 'static>>>,
 }
 
+impl<S, Fut, Request> Clone for AsyncCheckpointService<S, Fut, Request>
+where
+    Request: Send + 'static,
+    S: Service<Request, Error = BoxError> + Clone + Send + 'static,
+    <S as Service<Request>>::Response: Send + 'static,
+    <S as Service<Request>>::Future: Send + 'static,
+    Fut: Future<Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            service: self.service.clone(),
+            checkpoint_fn: Arc::clone(&self.checkpoint_fn),
+        }
+    }
+}
+
 impl<S, Fut, Request> AsyncCheckpointService<S, Fut, Request>
 where
     Request: Send + 'static,
