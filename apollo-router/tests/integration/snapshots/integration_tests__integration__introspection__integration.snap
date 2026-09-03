@@ -1,6 +1,5 @@
 ---
 source: apollo-router/tests/integration/introspection.rs
-assertion_line: 392
 expression: "response.json::<serde_json::Value>().await.unwrap()"
 ---
 {

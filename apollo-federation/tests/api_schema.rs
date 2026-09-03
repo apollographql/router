@@ -2390,7 +2390,7 @@ fn rejects_deprecated_with_null_reason() {
 // apollo-compiler v2 validates default values against input types, so empty objects
 // for inputs with required fields are now rejected during schema parsing.
 #[test]
-fn matches_federation_default_value_propagation() {
+fn rejects_invalid_default_values_for_inputs_with_required_fields() {
     inaccessible_to_api_schema(
         r#"
         type Query {

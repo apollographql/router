@@ -544,7 +544,7 @@ impl InstrumentData {
 
         populate_config_instrument!(
             apollo.router.config.supergraph.validate_default_values,
-            "$.supergraph[?(@.validate_default_values == true)]"
+            "$.supergraph[?(@.validate_default_values == false)]"
         );
 
         // We need to update the entry we just made because the selected strategy is a named object in the config.

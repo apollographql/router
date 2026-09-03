@@ -36,17 +36,6 @@ use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 fn is_semantic_directive_application(directive: &Directive) -> bool {
     match directive.name.as_str() {
         "specifiedBy" | "oneOf" => true,
-        // graphql-js’ intropection returns `isDeprecated: false` for `@deprecated(reason: null)`,
-        // which is arguably a bug. Do the same here for now.
-        // TODO: remove this and allow `isDeprecated: true`, `deprecatedReason: null`
-        // after we fully move to Rust introspection?
-        "deprecated"
-            if directive
-                .specified_argument_by_name("reason")
-                .is_some_and(|value| value.is_null()) =>
-        {
-            false
-        }
         "deprecated" => true,
         _ => false,
     }

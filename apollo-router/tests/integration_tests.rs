@@ -86,7 +86,6 @@ async fn validation_errors_from_rust() {
 #[tokio::test(flavor = "multi_thread")]
 async fn oneof_input_rejects_multiple_fields() {
     let router = apollo_router::TestHarness::builder()
-        .with_subgraph_network_requests()
         .configuration_json(serde_json::json!({
             "telemetry": {
                 "apollo": {
@@ -127,8 +126,8 @@ async fn oneof_input_rejects_multiple_fields() {
         response
             .errors
             .iter()
-            .any(|e| e.message.contains("oneOf") || e.message.contains("exactly one")),
-        "expected @oneOf validation error, got: {:?}",
+            .any(|e| e.message.contains("exactly one")),
+        "expected @oneOf validation error about exactly one field, got: {:?}",
         response.errors
     );
 }

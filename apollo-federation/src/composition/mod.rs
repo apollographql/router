@@ -193,7 +193,7 @@ pub fn validate_satisfiability_with_connectors(
 ) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
     let merge_hints = supergraph.hints().to_vec();
     let supergraph_str = supergraph.schema().schema().to_string();
-    let expansion_result = match expand_connectors(&supergraph_str, &Default::default()) {
+    let expansion_result = match expand_connectors(&supergraph_str, &Default::default(), true) {
         Ok(result) => result,
         Err(e) => {
             return Err(CompositionFailure {

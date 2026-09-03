@@ -1603,44 +1603,41 @@ fn reformat_response_expected_id() {
             "a": "1234",
             "b": "ABCD",
             "c": 1234,
-            "d": 1234.0, // Integer represented as a float should be coerced
-            "e": false,
-            "f": 1234.5678, // Float should not be truncated
-            "g": ["s"],
-        }))
-        .expected(json!({
-            // Note technically IDs should always be represented as a String in JSON,
-            // though the value returned from a field can be either Int or String.
-            // We do not coerce the acceptable types to strings today.
-            "a": "1234",
-            "b": "ABCD",
-            "c": 1234,
-            // FIXME(@goto-bus-stop): We should coerce this to string "1234" (without .0),
-            // but we don't do so today
             "d": 1234.0,
-            // FIXME(@goto-bus-stop): We should null out all these values,
-            // but we don't validate IDs today
             "e": false,
             "f": 1234.5678,
             "g": ["s"],
         }))
+        .expected(json!({
+            "a": "1234",
+            "b": "ABCD",
+            "c": "1234",
+            "d": null,
+            "e": null,
+            "f": null,
+            "g": null,
+        }))
         .expected_errors(json!([
-            // FIXME(@goto-bus-stop): we should expect these errors:
-            // {
-            //     "message": "Invalid value found for field Query.e",
-            //     "path": ["e"],
-            //     "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            // },
-            // {
-            //     "message": "Invalid value found for field Query.f",
-            //     "path": ["f"],
-            //     "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            // },
-            // {
-            //     "message": "Invalid value found for field Query.g",
-            //     "path": ["g"],
-            //     "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            // },
+            {
+                "message": "Invalid value found for the type ID",
+                "path": ["d"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type ID",
+                "path": ["e"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type ID",
+                "path": ["f"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type ID",
+                "path": ["g"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
         ]))
         .test();
 }

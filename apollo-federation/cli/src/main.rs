@@ -634,6 +634,7 @@ fn cmd_expand(
     let ExpansionResult::Expanded { raw_sdl, .. } = expand_connectors(
         &original_supergraph.schema.schema().serialize().to_string(),
         &ApiSchemaOptions::default(),
+        true,
     )?
     else {
         bail!("supplied supergraph has no connectors to expand",);

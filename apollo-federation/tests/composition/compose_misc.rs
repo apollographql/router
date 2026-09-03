@@ -13,7 +13,7 @@ use super::print_sdl;
 /// apollo-compiler v2 validates default values against input types, so `{}` on inputs with
 /// required fields is now rejected during subgraph parsing.
 #[test]
-fn misc_keeps_invalid_empty_object_argument_defaults_on_supergraph() {
+fn misc_rejects_invalid_empty_object_argument_defaults() {
     let subgraph = ServiceDefinition {
         name: "subgraph",
         type_defs: r#"

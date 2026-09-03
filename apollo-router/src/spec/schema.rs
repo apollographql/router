@@ -68,8 +68,12 @@ impl Schema {
             ..Default::default()
         };
 
-        let expansion =
-            expand_connectors(&raw_sdl.sdl, &api_schema_options).map_err(SchemaError::Connector)?;
+        let expansion = expand_connectors(
+            &raw_sdl.sdl,
+            &api_schema_options,
+            config.supergraph.validate_default_values,
+        )
+        .map_err(SchemaError::Connector)?;
         let preserved_launch_id = raw_sdl.launch_id.clone();
         let (raw_sdl, api_schema, connectors) = match expansion {
             ExpansionResult::Expanded {
