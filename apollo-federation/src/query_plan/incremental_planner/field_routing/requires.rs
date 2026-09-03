@@ -502,6 +502,9 @@ impl FieldRoutingSearchSpace {
                 condition_alias_rewrites: alias_rewrites,
             };
             let dest = if has_input_conflict || rewrites_collide {
+                // The original target.fetch_node is abandoned: it retains its
+                // key-hop edge and inputs but receives no query selections, so
+                // plan_builder's empty-selection pruning drops it.
                 let merge_at = state.graph.merge_at(target.fetch_node).to_vec();
                 let split_group = state
                     .graph
