@@ -1,4 +1,5 @@
 use apollo_compiler::Name;
+use apollo_federation::Supergraph;
 use apollo_federation::query_plan::FetchDataPathElement;
 use apollo_federation::query_plan::FetchDataRewrite;
 use apollo_federation::query_plan::PlanNode;
@@ -8,7 +9,6 @@ use apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryCo
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
-use apollo_federation::Supergraph;
 
 fn incremental_config() -> QueryPlannerConfig {
     QueryPlannerConfig {
