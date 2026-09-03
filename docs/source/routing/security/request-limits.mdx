@@ -518,7 +518,7 @@ Limits how many errors a connector's response mapping can add to the GraphQL `er
 
 A `->withError` call inside a `->map` records one error per element, so a mapping over a large API response can contribute one error per row. This limit caps that contribution.
 
-There is no default limit; every declared error is reported unless you configure this option, which aligns with how Apollo Router passes through subgraph errors.
+There is no default limit; every declared error is reported unless you configure this option, which matches how Apollo Router passes through subgraph errors.
 
 Identify sources by `subgraph_name.source_name`, the same key format used by `http_max_response_size`. Set a global default and optionally override it per source:
 
@@ -536,7 +536,7 @@ The per-source entry under `sources` takes precedence over `all`.
 
 Errors beyond the limit are replaced by a single summary error carrying the `CONNECTORS_TOO_MANY_ERRORS` code and stating how many were dropped, so a truncated list is visible in the response rather than silent.
 
-This limit applies only to errors the mapping defines with `->withError`. Mapping *problems* — the mapping language's own diagnostics, such as a path that matched nothing — are never sent to clients and are unaffected.
+This limit applies only to errors the mapping defines with `->withError`. Mapping problems — the mapping language's own diagnostics, such as a path that matched nothing — are never sent to clients and are unaffected.
 
 ### Monitoring exceeded limits
 
