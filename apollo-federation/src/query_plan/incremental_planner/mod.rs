@@ -247,6 +247,7 @@ fn root_pending_selections(
             op_path: Default::default(),
             path_in_fetch: Default::default(),
             condition: None,
+            provides_anchor: None,
         })
         .collect()
 }

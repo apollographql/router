@@ -57,6 +57,7 @@ pub(super) enum RoutingCacheKey {
 
 /// Subgraph, type position, and schema at a query graph node.
 pub(super) struct NodeSource {
+    #[allow(dead_code)]
     pub(super) subgraph: Arc<str>,
     pub(super) type_pos: CompositeTypeDefinitionPosition,
     pub(super) schema: ValidFederationSchema,
@@ -139,12 +140,8 @@ impl FieldRoutingSearchSpace {
         conditions: &Arc<SelectionSet>,
         source: &NodeSource,
     ) -> Result<bool, FederationError> {
-        let satisfiable = self.can_satisfy(
-            conditions,
-            &source.type_pos,
-            &source.subgraph,
-            &source.schema,
-        ) || self.conditions_resolvable_at_node(node, conditions)?;
+        let satisfiable = self.can_satisfy(conditions, &source.type_pos, &source.schema)
+            || self.conditions_resolvable_at_node(node, conditions.as_ref())?;
         Ok(satisfiable && !self.conditions_have_requires(node, conditions)?)
     }
 
