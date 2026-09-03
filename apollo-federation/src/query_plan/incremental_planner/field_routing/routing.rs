@@ -1033,6 +1033,11 @@ impl FieldRoutingSearchSpace {
             }
         }
 
+        // Connector-backed subgraphs have no GraphQL endpoint; drop their
+        // edges before enumerating key hops so they don't crowd out real
+        // alternatives.
+        self.drop_connector_subgraph_edges(&mut options);
+
         trace!(
             type_condition = %type_cond.type_name(),
             "searching key hops for fragment downcast",
@@ -1048,6 +1053,10 @@ impl FieldRoutingSearchSpace {
             },
         )?;
         options.extend(hops.iter().cloned());
+
+        // Key hops into connector-backed subgraphs are equally unexecutable.
+        self.drop_connector_subgraph_edges(&mut options);
+
         Ok(options)
     }
 
