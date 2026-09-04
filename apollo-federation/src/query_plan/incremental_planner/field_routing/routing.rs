@@ -700,15 +700,25 @@ impl FieldRoutingSearchSpace {
             super::SelectionArcKey::new(&pending.selection),
             None::<super::ArcKey<std::collections::HashSet<apollo_compiler::Name>>>,
         );
-        if let Some(cached) = self.caches.routing_options.borrow().get(&key) {
-            return Ok(cached.clone());
+        let unfiltered = if let Some(cached) = self.caches.routing_options.borrow().get(&key) {
+            cached.clone()
+        } else {
+            let result = Arc::new(self.routing_options(pending)?);
+            self.caches
+                .routing_options
+                .borrow_mut()
+                .insert(key, result.clone());
+            result
+        };
+        if let Some(avoid) = &pending.split_avoid {
+            let options = unfiltered
+                .iter()
+                .filter(|choice| choice.target_subgraph() != avoid)
+                .cloned()
+                .collect::<Vec<_>>();
+            return Ok(Arc::new(options));
         }
-        let result = Arc::new(self.routing_options(pending)?);
-        self.caches
-            .routing_options
-            .borrow_mut()
-            .insert(key, result.clone());
-        Ok(result)
+        Ok(unfiltered)
     }
 
     /// Options at the FederatedRootType head node, which fans out to
@@ -1073,7 +1083,7 @@ impl FieldRoutingSearchSpace {
     /// Cached wrapper around `key_hops_guarded`: if the guard fires (cycle),
     /// we record that as a guard_hit and return empty without caching, so
     /// the outermost call still gets the real result and caches it.
-    fn cached_key_hops(
+    pub(super) fn cached_key_hops(
         &self,
         node: NodeIndex,
         provides_anchor: Option<NodeIndex>,

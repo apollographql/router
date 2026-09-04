@@ -88,6 +88,19 @@ pub(crate) struct PendingSelection {
     /// concrete-`__typename` recovery, where no subgraph may be able to
     /// supply the concrete typename.
     pub(crate) best_effort: bool,
+    /// The ancestor pending this selection was dispatched from, chaining up
+    /// to the operation root. When a selection strands with no recovery, the
+    /// chain lets `try_split_repush` re-push a wrapped remainder at the
+    /// nearest ancestor field with an alternative routing target, so the
+    /// remainder can reach another subgraph through a key hop the stranded
+    /// position itself lacks (keyless subtrees split across subgraphs).
+    pub(crate) split_parent: Option<Arc<PendingSelection>>,
+    /// Set on split re-pushes: the subgraph whose descent stranded the
+    /// remainder this pending carries. Routing options targeting it are
+    /// filtered out — the failure already proved it cannot resolve this
+    /// remainder — which usually leaves a single forced hop instead of a
+    /// decision that would greedily repeat the doomed choice.
+    pub(crate) split_avoid: Option<Arc<str>>,
 }
 
 impl PendingSelection {
@@ -106,6 +119,12 @@ impl PendingSelection {
             parent_types: self.parent_types.clone(),
             context_anchor: self.context_anchor.clone(),
             best_effort: self.best_effort,
+            split_parent: self.split_parent.clone(),
+            // The avoid constraint belongs to one re-pushed wrap only; a
+            // fork is a different selection (a child, a condition, a
+            // restructured shape) that may legitimately need the avoided
+            // subgraph. `try_split_repush` re-sets it explicitly.
+            split_avoid: None,
         }
     }
 
@@ -148,6 +167,16 @@ impl PendingSelection {
 
     pub(super) fn with_context_anchor(mut self, context_anchor: ContextAnchor) -> Self {
         self.context_anchor = context_anchor;
+        self
+    }
+
+    pub(super) fn with_split_parent(mut self, split_parent: Option<Arc<PendingSelection>>) -> Self {
+        self.split_parent = split_parent;
+        self
+    }
+
+    pub(super) fn with_split_avoid(mut self, split_avoid: Option<Arc<str>>) -> Self {
+        self.split_avoid = split_avoid;
         self
     }
 
@@ -219,6 +248,15 @@ pub(crate) struct PlanState {
     /// eagerly, creating combinatorial blowup on wide interfaces. Penalized
     /// in `cost()` above any structural cost but below drops.
     pub(crate) type_explosions: usize,
+    /// Split re-pushes performed (see `try_split_repush`). Penalized in
+    /// `cost()` above any structural cost but far below a drop, so plans
+    /// achievable without splitting always win over split plans — splitting
+    /// only rescues candidates that would otherwise drop selections.
+    pub(crate) splits: usize,
+    /// Whether `try_split_repush` may fire. Off in the first search pass: a
+    /// split-free plan is always preferred, and disabling splits saves the
+    /// budget that finds split-free plans.
+    pub(crate) split_repush_enabled: bool,
     /// Monotonic count of pending-stack pushes over the whole search,
     /// including rolled-back work. Every unit of planning effort flows
     /// through `push_pending`, so this tracks wall time far more tightly
@@ -244,6 +282,7 @@ pub(crate) struct PlanCheckpoint {
     pending_cp: usize,
     dropped_fields: usize,
     type_explosions: usize,
+    splits: usize,
 }
 
 impl PlanState {
@@ -258,6 +297,8 @@ impl PlanState {
             pending_undo: Vec::new(),
             dropped_fields: 0,
             type_explosions: 0,
+            splits: 0,
+            split_repush_enabled: false,
             effort: 0,
             forced_backtracks: 0,
             condition_alias_ids: BTreeMap::new(),
@@ -295,6 +336,7 @@ impl PlanState {
             pending_cp: self.pending_undo.len(),
             dropped_fields: self.dropped_fields,
             type_explosions: self.type_explosions,
+            splits: self.splits,
         }
     }
 
@@ -317,5 +359,6 @@ impl PlanState {
         }
         self.dropped_fields = cp.dropped_fields;
         self.type_explosions = cp.type_explosions;
+        self.splits = cp.splits;
     }
 }

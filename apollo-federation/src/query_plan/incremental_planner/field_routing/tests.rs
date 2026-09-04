@@ -1688,6 +1688,93 @@ fn key_hop_requires_under_include_fragment_uses_alias() {
     );
 }
 
+/// A keyless value type (no @key on V) whose fields are split across two
+/// subgraphs: `a` in A and `b` in B. A single fetch can't resolve both, so the
+/// planner must split the parent selection and fetch each half independently.
+/// Targets the split_for_other_subgraph path in commit.rs dispatch_sub_selections.
+#[test]
+fn keyless_value_type_splits_across_subgraphs() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type V
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  a: String @join__field(graph: A)
+  b: String @join__field(graph: B)
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  v: V
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ v { __typename a b } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Parallel {
+        Fetch(service: "b") {
+          {
+            v {
+              b
+            }
+          }
+        },
+        Fetch(service: "a") {
+          {
+            v {
+              __typename
+              a
+            }
+          }
+        },
+      },
+    }
+    "###);
+}
+
+/// Same keyless split, but the stranded child hides inside a @defer'd
+/// fragment: the split walk must recurse through the fragment and preserve
+/// the wrapper (carrying @defer) on the split-off duplicate.
+/// Targets commit.rs split_fragment_children.
+#[test]
+fn keyless_value_type_split_recovers_deferred_fragment_children() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type V
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  a: String @join__field(graph: A)
+  b: String @join__field(graph: B)
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  v: V
+}
+"#,
+    );
+    let plan_str = plan_query_with_defer(
+        &schema,
+        "query($s: Boolean!) { v { a ... @defer { __typename ... on V @skip(if: $s) { b } } } }",
+    );
+    assert!(plan_str.contains("a"), "Plan should fetch 'a': {plan_str}");
+    assert!(
+        plan_str.contains("b"),
+        "Plan should fetch deferred 'b' from the other subgraph: {plan_str}"
+    );
+}
+
 /// Statically constant @skip(if: true) should eliminate the fragment entirely;
 /// a type condition on the root Query type is vacuous and passes through.
 /// Targets type_conditions.rs try_pass_through_fragment's Boolean(false)
@@ -2096,6 +2183,92 @@ fn entity_shareable_field_filters_inconsistent_union_members() {
             }
           }
         }
+      },
+    }
+    "###);
+}
+
+/// Deep keyless split: the strand sits two keyless levels below the field
+/// with routing alternatives, where the one-level lookahead in
+/// `split_for_other_subgraph` cannot see it. Committing `conn` to A strands
+/// `Inner.b` (Inner and Conn are keyless, so no hop can recover it); the
+/// drop-time recovery re-pushes `conn { inner { b } }` at the entity anchor,
+/// avoiding A, so it key-hops to B and the responses merge at the same path.
+/// Targets mod.rs try_split_repush / wrap_in_parent / split_avoid filtering.
+#[test]
+fn deep_keyless_split_repushes_remainder_at_entity_anchor() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type E
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+{
+  id: ID!
+  conn: Conn
+  onlyA: String @join__field(graph: A)
+}
+
+type Conn
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  inner: Inner
+}
+
+type Inner
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  a: String @join__field(graph: A)
+  b: String @join__field(graph: B)
+}
+
+type Query
+  @join__type(graph: A)
+{
+  e: E
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ e { onlyA conn { inner { a b } } } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            e {
+              __typename
+              onlyA
+              conn {
+                inner {
+                  a
+                }
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "e") {
+          Fetch(service: "b") {
+            {
+              ... on E {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on E {
+                conn {
+                  inner {
+                    b
+                  }
+                }
+              }
+            }
+          },
+        },
       },
     }
     "###);
