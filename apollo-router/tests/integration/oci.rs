@@ -154,6 +154,23 @@ async fn setup_mock_oci_server(schema_content: &str) -> (MockServer, String) {
         .mount(&mock_server)
         .await;
 
+    // HEAD on the same manifest, for the license stream's digest polling.
+    // create_oci_license_stream (unlike create_oci_schema_stream) doesn't special-case
+    // digest references, so it polls this endpoint indefinitely even though the digest
+    // is immutable and hot-reload is off for this reference type.
+    Mock::given(method("HEAD"))
+        .and(path(format!(
+            "/v2/{}/manifests/{}",
+            graph_id, manifest_digest
+        )))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", OCI_IMAGE_MEDIA_TYPE)
+                .append_header("docker-content-digest", manifest_digest.as_str()),
+        )
+        .mount(&mock_server)
+        .await;
+
     let artifact_reference = format!("{}/{}@{}", mock_server.address(), graph_id, manifest_digest);
     (mock_server, artifact_reference)
 }
@@ -292,6 +309,17 @@ async fn setup_mock_oci_server_with_tag(
         .mount(&mock_server)
         .await;
 
+    // The router polls this endpoint from two independent, concurrent loops whenever a
+    // graph artifact reference is configured: one for the schema (create_oci_schema_stream)
+    // and one for the license (create_oci_license_stream) - see registry/mod.rs. Both loops
+    // start polling at router startup, so the first "real" poll each of them performs can
+    // land as either the 1st or the 2nd HTTP request against this mock, in either order.
+    // The response schedule below must therefore treat the first OCI_POLLING_CONSUMERS
+    // requests as "the initial state", not just the first one, or whichever loop's request
+    // happens to arrive second will see a premature tag change / 404 on what is, from its
+    // own perspective, still its first poll - which can wedge router startup entirely.
+    const OCI_POLLING_CONSUMERS: usize = 2;
+
     // Tag - HEAD returns initial, then next call will return updated (if tag_changes is true)
     // or 404 (if return_404_after_first is true)
     let tag_path = format!("/v2/{}/manifests/{}", graph_id, tag);
@@ -304,9 +332,9 @@ async fn setup_mock_oci_server_with_tag(
             let updated_digest = updated_manifest_digest.clone();
             move |_req: &wiremock::Request| {
                 let count = head_count.fetch_add(1, Ordering::SeqCst);
-                if return_404_after_first && count > 0 {
+                if return_404_after_first && count >= OCI_POLLING_CONSUMERS {
                     ResponseTemplate::new(404)
-                } else if count == 0 || !tag_changes {
+                } else if count < OCI_POLLING_CONSUMERS || !tag_changes {
                     ResponseTemplate::new(200)
                         .append_header("docker-content-digest", initial_digest.as_str())
                 } else {
@@ -333,9 +361,9 @@ async fn setup_mock_oci_server_with_tag(
                 Arc::new(serde_json::to_vec(&updated_oci_manifest).unwrap());
             move |_req: &wiremock::Request| {
                 let count = get_count.fetch_add(1, Ordering::SeqCst);
-                if return_404_after_first && count > 0 {
+                if return_404_after_first && count >= OCI_POLLING_CONSUMERS {
                     ResponseTemplate::new(404)
-                } else if count == 0 || !tag_changes {
+                } else if count < OCI_POLLING_CONSUMERS || !tag_changes {
                     ResponseTemplate::new(200)
                         .append_header("content-type", OCI_IMAGE_MEDIA_TYPE)
                         .append_header("docker-content-digest", initial_digest.as_str())
