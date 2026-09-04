@@ -372,21 +372,21 @@ impl FetchNode {
                                 for values_path in
                                     inverted_paths.get(*i).iter().flat_map(|v| v.iter())
                                 {
-                                    errors.push(
-                                        Error::builder()
-                                            .locations(error.locations.clone())
-                                            // append to the entity's path the error's path without
-                                            //`_entities` and the index
-                                            .path(Path::from_iter(
-                                                values_path.0.iter().chain(&path.0[2..]).cloned(),
-                                            ))
-                                            .message(error.message.clone())
-                                            .and_extension_code(error.extension_code())
-                                            .extensions(error.extensions.clone())
-                                            // re-use the original ID so we don't double count this error
-                                            .apollo_id(error.apollo_id())
-                                            .build(),
-                                    )
+                                    let mut new_error = Error::builder()
+                                        .locations(error.locations.clone())
+                                        // append to the entity's path the error's path without
+                                        //`_entities` and the index
+                                        .path(Path::from_iter(
+                                            values_path.0.iter().chain(&path.0[2..]).cloned(),
+                                        ))
+                                        .message(error.message.clone())
+                                        .and_extension_code(error.extension_code())
+                                        .extensions(error.extensions.clone())
+                                        // re-use the original ID so we don't double count this error
+                                        .apollo_id(error.apollo_id())
+                                        .build();
+                                    new_error.set_span_event_emitted(error.span_event_emitted());
+                                    errors.push(new_error)
                                 }
                             }
                             _ => {
@@ -465,14 +465,16 @@ impl FetchNode {
                         })
                         .unwrap_or_else(|| current_dir.clone());
 
-                    Error::builder()
+                    let mut new_error = Error::builder()
                         .locations(error.locations.clone())
                         .path(path)
                         .message(error.message.clone())
                         .and_extension_code(error.extension_code())
                         .extensions(error.extensions.clone())
                         .apollo_id(error.apollo_id())
-                        .build()
+                        .build();
+                    new_error.set_span_event_emitted(error.span_event_emitted());
+                    new_error
                 })
                 .collect();
             let mut data = response.data.unwrap_or_default();

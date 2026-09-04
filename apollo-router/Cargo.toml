@@ -50,13 +50,17 @@ ci = []
 # Enables the HTTP snapshot server for testing
 snapshot = []
 
+# Enables the `experimental_mock_subgraphs` plugin, the router's own internal
+# subgraph-mocking test tool. Always enabled for `cfg(test)` builds; this feature
+# additionally enables it for the separately-compiled integration test binary.
+# Not enabled in release builds, so it is not reachable via router.yaml in production.
+mock_subgraphs_testing = []
+
 [dependencies]
 addr2line = "0.27.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-errors = "0.7.1"
 apollo-federation = { path = "../apollo-federation", version = "=2.17.0" }
-apollo-qos = "0.5.0"
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "futures-io",

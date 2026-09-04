@@ -409,8 +409,8 @@ impl InstrumentData {
             "$.signature_normalization_algorithm",
             opt.metrics_reference_mode,
             "$.metrics_reference_mode",
-            opt.errors.preview_extended_error_metrics,
-            "$.errors.preview_extended_error_metrics",
+            opt.errors.extended_error_metrics,
+            "$.errors.extended_error_metrics",
             opt.field_level_instrumentation_sampler,
             "$.field_level_instrumentation_sampler",
             opt.tracing.batch_processor.scheduled_delay,
@@ -455,11 +455,6 @@ impl InstrumentData {
             "$[?(@.sources..override_url)]",
             opt.source.max_requests_per_operation,
             "$[?(@.sources..max_requests_per_operation)]"
-        );
-
-        populate_config_instrument!(
-            apollo.router.config.experimental_chaos,
-            "$.experimental_chaos[?(@.force_schema_reload || @.force_config_reload)]"
         );
 
         populate_config_instrument!(
