@@ -105,9 +105,11 @@ fn compose_subgraphs(
     let expanded_subgraphs = expand_subgraphs(subgraphs)?;
 
     tracing::debug!("Upgrading and validating subgraphs...");
-    let validated_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)?;
-    for subgraph in &validated_subgraphs {
-        hints.extend(subgraph.hints().iter().cloned());
+    let mut validated_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)?;
+    // Drained, not cloned: these hints are reported from here, and taking them keeps a later stage
+    // from reporting the same hint a second time.
+    for subgraph in &mut validated_subgraphs {
+        hints.extend(subgraph.take_hints());
     }
 
     tracing::debug!("Pre-merge validations...");
