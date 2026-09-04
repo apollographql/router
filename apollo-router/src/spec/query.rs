@@ -553,6 +553,7 @@ impl Query {
                 _ => field_type,
             };
 
+<<<<<<< HEAD
             if self
                 .apply_selection_set(
                     selection_set,
@@ -564,6 +565,23 @@ impl Query {
                 )
                 .is_err()
             {
+=======
+            // The spec's `CollectFields` step 1: "if visitedFragments is not provided,
+            // initialize it to the empty set". Each object gets a fresh set, so a
+            // fragment applied on a nested object can neither suppress nor be
+            // suppressed by the same fragment on an ancestor.
+            let mut visited_fragments = HashSet::new();
+
+            if let Err(err) = self.apply_selection_set(
+                selection_set,
+                parameters,
+                input_object,
+                output_object,
+                path,
+                current_type,
+                &mut visited_fragments,
+            ) {
+>>>>>>> bded25d (perf: add caching to `Query::apply_selection_set` (#9592))
                 parameters.nullified.push(Path::from_response_slice(path));
                 *output = Value::Null;
             }
@@ -699,6 +717,7 @@ impl Query {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn apply_selection_set<'a: 'b, 'b>(
         &'a self,
         selection_set: &'a [Selection],
@@ -708,6 +727,11 @@ impl Query {
         path: &mut Vec<ResponsePathElement<'b>>,
         // the type under which we apply selections
         current_type: &executable::Type,
+        // The spec's `visitedFragments` (CollectFields, step 3.d): shared with the
+        // recursive calls for inline fragments and fragment bodies on the same
+        // object; each new object gets a fresh set from its caller in
+        // `format_named_type`.
+        visited_fragments: &mut HashSet<&'a str>,
     ) -> Result<(), InvalidValue> {
         // For skip and include, using .unwrap_or is legit here because
         // validate_variables should have already checked that
@@ -840,6 +864,10 @@ impl Query {
                             output.insert(TYPENAME, input_type.clone());
                         }
 
+                        // Inline fragments collect fields into the same object, so
+                        // they share `visited_fragments` with their parent — an
+                        // anonymous `... on T { ...Frag }` wrapper still
+                        // de-duplicates `...Frag` (CollectFields step 3.c.iv).
                         self.apply_selection_set(
                             selection_set,
                             parameters,
@@ -847,6 +875,7 @@ impl Query {
                             output,
                             path,
                             current_type,
+                            visited_fragments,
                         )?;
                     }
                 }
@@ -858,6 +887,17 @@ impl Query {
                     defer_label: _,
                 } => {
                     if include_skip.should_skip(parameters.variables) {
+                        continue;
+                    }
+
+                    // Skip if we have already applied this named fragment to this
+                    // object. The first application wrote every reachable field; a
+                    // second application would write the same values, so it is safe
+                    // to omit. Recorded before the fragment-existence and
+                    // type-condition checks, as in CollectFields step 3.d.iii, so a
+                    // leaf reached via distinct chain names (`...Leaf` then
+                    // `...ChainA` where ChainA spreads Leaf) still de-duplicates.
+                    if !visited_fragments.insert(name.as_str()) {
                         continue;
                     }
 
@@ -890,6 +930,7 @@ impl Query {
                                 output,
                                 path,
                                 current_type,
+                                visited_fragments,
                             )?;
                         }
                     } else {
@@ -912,6 +953,40 @@ impl Query {
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
     ) -> Result<(), InvalidValue> {
+<<<<<<< HEAD
+=======
+        // Track which named fragments have already been applied to the root object
+        // — the spec's `visitedFragments` (CollectFields, step 1: "if
+        // visitedFragments is not provided, initialize it to the empty set").
+        // Re-applying a `...Frag` at the same (input, output, root_type_name, path)
+        // is idempotent — the same fields would be written from the same input — so
+        // the second application can be skipped. This collapses exponential
+        // fragment-of-fragment blowups (e.g. `L1 = ...L0 ...L0`, `L2 = ...L1 ...L1`,
+        // ...) into linear work.
+        let mut visited_fragments: HashSet<&'a str> = HashSet::new();
+        self.apply_root_selection_set_cached(
+            root_type_name,
+            selection_set,
+            parameters,
+            input,
+            output,
+            path,
+            &mut visited_fragments,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_root_selection_set_cached<'a: 'b, 'b>(
+        &'a self,
+        root_type_name: &str,
+        selection_set: &'a [Selection],
+        parameters: &mut FormatParameters,
+        input: &mut Object,
+        output: &mut Object,
+        path: &mut Vec<ResponsePathElement<'b>>,
+        visited_fragments: &mut HashSet<&'a str>,
+    ) -> Result<(), InvalidValue> {
+>>>>>>> bded25d (perf: add caching to `Query::apply_selection_set` (#9592))
         for selection in selection_set {
             match selection {
                 Selection::Field {
@@ -994,13 +1069,25 @@ impl Query {
                         || parameters.schema.is_subtype(type_condition, root_type_name);
 
                     if is_apply {
+<<<<<<< HEAD
                         self.apply_root_selection_set(
+=======
+                        // Inline fragments collect fields into the same object, so
+                        // they share `visited_fragments` with their parent — an
+                        // anonymous `... on T { ...Frag }` wrapper still
+                        // de-duplicates `...Frag` (CollectFields step 3.c.iv).
+                        self.apply_root_selection_set_cached(
+>>>>>>> bded25d (perf: add caching to `Query::apply_selection_set` (#9592))
                             root_type_name,
                             selection_set,
                             parameters,
                             input,
                             output,
                             path,
+<<<<<<< HEAD
+=======
+                            visited_fragments,
+>>>>>>> bded25d (perf: add caching to `Query::apply_selection_set` (#9592))
                         )?;
                     }
                 }
@@ -1015,6 +1102,20 @@ impl Query {
                         continue;
                     }
 
+<<<<<<< HEAD
+=======
+                    // Skip if we have already applied this named fragment to the root
+                    // object. The first application wrote every reachable field; a
+                    // second application would write the same values, so it is safe
+                    // to omit. Recorded before the fragment-existence and
+                    // type-condition checks, as in CollectFields step 3.d.iii, so a
+                    // leaf reached via distinct chain names (`...Leaf` then
+                    // `...ChainA` where ChainA spreads Leaf) still de-duplicates.
+                    if !visited_fragments.insert(name.as_str()) {
+                        continue;
+                    }
+
+>>>>>>> bded25d (perf: add caching to `Query::apply_selection_set` (#9592))
                     if let Some(Fragment {
                         type_condition,
                         selection_set,
@@ -1033,6 +1134,10 @@ impl Query {
                                 input,
                                 output,
                                 path,
+<<<<<<< HEAD
+=======
+                                visited_fragments,
+>>>>>>> bded25d (perf: add caching to `Query::apply_selection_set` (#9592))
                             )?;
                         }
                     } else {
