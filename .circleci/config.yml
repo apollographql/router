@@ -797,10 +797,17 @@ jobs:
                   # Build and push release image
                   docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} dockerfiles/.
                   docker push ${ROUTER_TAG}:${VERSION}
+                  # Build and push distroless image
+                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router.distroless -t ${ROUTER_TAG}:${VERSION}-distroless dockerfiles/.
+                  # There is no shell in the distroless image to debug with, so boot it here and confirm it serves.
+                  ./dockerfiles/verify_distroless_image.sh ${ROUTER_TAG}:${VERSION}-distroless ${BASE_VERSION}
+                  docker push ${ROUTER_TAG}:${VERSION}-distroless
+
                   # save containers for analysis
                   mkdir built-containers
                   docker save -o built-containers/router_${VERSION}-debug.tar ${ROUTER_TAG}:${VERSION}-debug
                   docker save -o built-containers/router_${VERSION}.tar ${ROUTER_TAG}:${VERSION}
+                  docker save -o built-containers/router_${VERSION}-distroless.tar ${ROUTER_TAG}:${VERSION}-distroless
 
             - persist_to_workspace:
                 root: .
@@ -966,10 +973,15 @@ jobs:
                   # If the manifest command succeeds, the images already exist
                   docker manifest inspect ${ROUTER_TAG}:${VERSION}  > /dev/null && exit 1
                   docker manifest inspect ${ROUTER_TAG}:${VERSION}-debug  > /dev/null && exit 1
+                  docker manifest inspect ${ROUTER_TAG}:${VERSION}-distroless  > /dev/null && exit 1
                   # Build and push debug image
                   docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug dockerfiles/.
                   # Build and push release image
                   docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} dockerfiles/.
+                  # Build, smoke test, and push distroless image
+                  docker buildx build --load --platform linux/amd64 --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router.distroless -t ${ROUTER_TAG}:${VERSION}-distroless dockerfiles/.
+                  ./dockerfiles/verify_distroless_image.sh ${ROUTER_TAG}:${VERSION}-distroless ${VERSION#v}
+                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router.distroless -t ${ROUTER_TAG}:${VERSION}-distroless dockerfiles/.
             - run:
                 name: Helm build
                 command: |
@@ -1080,9 +1092,15 @@ jobs:
             # Build and push regular image
             docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg ROUTER_RELEASE=${TAG} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${TAG} dockerfiles/.
             docker push ${ROUTER_TAG}:${TAG}
+            # Build and push distroless image
+            docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg ROUTER_RELEASE=${TAG} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router.distroless -t ${ROUTER_TAG}:${TAG}-distroless dockerfiles/.
+            # There is no shell in the distroless image to debug with so verify it now
+            ./dockerfiles/verify_distroless_image.sh ${ROUTER_TAG}:${TAG}-distroless ${BASE_VERSION}
+            docker push ${ROUTER_TAG}:${TAG}-distroless
 
             echo "Pushed: ${ROUTER_TAG}:${TAG}"
             echo "Pushed: ${ROUTER_TAG}:${TAG}-debug"
+            echo "Pushed: ${ROUTER_TAG}:${TAG}-distroless"
 
 workflows:
   ci_checks:
