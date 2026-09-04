@@ -540,6 +540,7 @@ impl FetchGraph {
         // 7. Construct FetchNode.
         let fetch_node = PlanNode::Fetch(Box::new(crate::query_plan::FetchNode {
             subgraph_name: node.subgraph.clone(),
+            protocol: Default::default(),
             id: None,
             variable_usages,
             requires,
