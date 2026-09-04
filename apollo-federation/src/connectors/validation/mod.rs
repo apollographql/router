@@ -6,6 +6,7 @@ mod errors;
 mod expression;
 mod graphql;
 mod http;
+mod methods;
 mod schema;
 mod source;
 
@@ -83,6 +84,18 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
     for source in source_directives {
         messages.extend(source.type_check());
     }
+
+    // Validate `@source(methods:)` / `@connect(methods:)` — version gate, per-body
+    // parse, builtin-shadowing advisory, and the global registry invariants
+    // (duplicates, reserved names, inlinability).
+    messages.extend(methods::validate(&schema_info));
+    // Validate `@method` — version gate, `selection:` parse, auto-derive
+    // placeholder.
+    messages.extend(methods::validate_method_directives(&schema_info));
+    // Reject `->method` calls that resolve to neither a built-in nor a declared
+    // def. Runs after the above so an unusable registry stays quiet rather than
+    // reporting every custom call as unknown.
+    messages.extend(methods::validate_method_calls(&schema_info));
 
     match fields_seen_by_all_connects(&schema_info, &all_source_names) {
         Ok(fields_seen_by_connectors) => {
@@ -295,12 +308,61 @@ pub enum Code {
     /// is transport-agnostic so that if/when a `sql:` (or other) transport
     /// joins `http:`, this same code keeps describing the same condition.
     RequestlessSelectionUsesRequestData,
+    /// `methods:` (reusable custom `->` method definitions) requires connect spec
+    /// v0.5 or later.
+    MethodsArgumentRequiresV0_5,
+    /// A custom `->` method body in a `methods:` block failed to parse.
+    InvalidMethod,
+    /// Two `methods:` entries declare the same method name. `@source(methods:)` and
+    /// `@connect(methods:)` share one namespace, so this spans both.
+    DuplicateMethod,
+    /// A `methods:` method reuses the name of an ordinary built-in `->method`. This
+    /// is allowed and the custom method wins; the message exists so the author
+    /// learns a built-in of that name now exists. Non-fatal — see
+    /// [`Code::severity`].
+    MethodShadowsBuiltin,
+    /// A `methods:` method reuses a *reserved* method name — one interpreted by the
+    /// mapping language itself (e.g. `->as`) rather than implemented as an
+    /// ordinary function. Unlike [`Code::MethodShadowsBuiltin`], this is fatal.
+    MethodShadowsReserved,
+    /// A set of `methods:` methods refer to one another in a cycle, so they cannot
+    /// be inlined.
+    NonInlinableMethods,
+    /// A selection calls a `->method` that is neither a built-in nor declared in
+    /// any `methods:` block — usually a typo. Caught at composition instead of
+    /// surfacing as a per-request error. Fatal, but only for connect v0.5+; see
+    /// [`Code::UnknownMethodLegacySpec`].
+    UnknownMethod,
+    /// As [`Code::UnknownMethod`], but on a connect spec version that shipped
+    /// *without* this check (v0.1–v0.4). Non-fatal: a schema with a typo'd
+    /// method composes today and fails only at request time, so promoting it to
+    /// an error would break graphs that currently deploy. The author still gets
+    /// told. See [`Code::severity`].
+    UnknownMethodLegacySpec,
+    /// `@method` (reusable type-based selections) requires connect spec v0.5
+    /// or later.
+    MethodDirectiveRequiresV0_5,
+    /// An auto-deriving `@method` (no `selection:`) was applied to a type with
+    /// an object-typed field. Auto-derive over nested object types is not yet
+    /// supported; provide an explicit `selection:`. (Parked co-design item.)
+    UnsupportedMethodAutoDerive,
 }
 
 impl Code {
     pub fn severity(&self) -> Severity {
         match self {
             Self::NoSourceImport => Severity::Warning,
+            // Shadowing an ordinary built-in is legal and the custom method
+            // wins; this only tells the author the built-in exists, so it must
+            // not fail composition. Making it an error would turn every future
+            // built-in into a breaking change for schemas already using that
+            // name.
+            Self::MethodShadowsBuiltin => Severity::Warning,
+            // Connect v0.1–v0.4 shipped without static method-name checking, so
+            // schemas with a typo'd `->method` compose and deploy today. Making
+            // that an error retroactively would break them on upgrade; warn
+            // instead, and reserve the error for v0.5+.
+            Self::UnknownMethodLegacySpec => Severity::Warning,
             _ => Severity::Error,
         }
     }

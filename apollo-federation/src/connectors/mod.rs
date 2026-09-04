@@ -43,9 +43,14 @@ use apollo_compiler::name;
 use id::ConnectorPosition;
 use id::ObjectTypeDefinitionDirectivePosition;
 pub use json_selection::ApplyToError;
+#[allow(unused_imports)] // Some consumers land in follow-up steps.
+pub(crate) use json_selection::CompiledMethod;
 pub use json_selection::JSONSelection;
 pub use json_selection::Key;
 pub(crate) use json_selection::LitExpr;
+#[allow(unused_imports)] // Some consumers land in follow-up steps.
+pub(crate) use json_selection::MethodError;
+pub use json_selection::MethodRegistry;
 pub use json_selection::PathSelection;
 pub(crate) use json_selection::SelectionTrie;
 pub use json_selection::SubSelection;

@@ -355,6 +355,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
                 ),
             ),
         ),
+        methods: None,
         label: Label(
             "one.json http: GET /t",
         ),
@@ -767,6 +768,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
                 "T",
             ),
         ),
+        methods: None,
         label: Label(
             "one.json http: GET /t/{$args.id}",
         ),
@@ -954,6 +956,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
                 "R",
             ),
         ),
+        methods: None,
         label: Label(
             "one.json http: GET /t/{$this.id}/r",
         ),

@@ -1,7 +1,7 @@
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 
-use crate::connectors::ConnectSpec;
+use crate::connectors::json_selection::ApplyContext;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
@@ -30,8 +30,9 @@ fn parse_int_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
+    let spec = context.spec();
     // Handle both string and number inputs
     let input_str = match data {
         JSON::String(s) => s.as_str().to_string(),
@@ -97,7 +98,7 @@ fn parse_int_method(
     // Parse base argument or use default (10)
     let base = match method_args
         .and_then(|args| args.args.first())
-        .map(|first_arg| first_arg.apply_to_path(data, vars, input_path, spec))
+        .map(|first_arg| first_arg.apply_to_path(data, vars, input_path, context))
     {
         Some((Some(JSON::Number(base_num)), _)) => {
             let Some(base_value) = base_num.as_u64() else {

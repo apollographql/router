@@ -157,6 +157,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/normali
                 ),
             ),
         ),
+        methods: None,
         label: Label(
             "connectors-subgraph.example http: GET /",
         ),
@@ -404,6 +405,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/normali
                 "User",
             ),
         ),
+        methods: None,
         label: Label(
             "connectors-subgraph.example http: GET /{$args.id}",
         ),

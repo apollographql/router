@@ -594,6 +594,7 @@ mod tests {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -667,6 +668,7 @@ mod tests {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -769,6 +771,7 @@ mod tests {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -884,6 +887,7 @@ mod tests {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -998,6 +1002,7 @@ mod tests {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1093,6 +1098,7 @@ mod tests {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1210,6 +1216,7 @@ mod tests {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1362,6 +1369,7 @@ mod tests {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1511,6 +1519,7 @@ mod tests {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1632,6 +1641,7 @@ mod tests {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
+            methods: None,
             transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -1732,6 +1742,7 @@ mod tests {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
+            methods: None,
             transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -1837,6 +1848,7 @@ mod tests {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
+            methods: None,
             transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -1944,6 +1956,7 @@ mod tests {
             spec: DEFAULT_CONNECT_SPEC,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
+            methods: None,
             transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: StringTemplate::parse_with_spec(
@@ -2011,6 +2024,7 @@ mod tests {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
+            methods: None,
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -2121,6 +2135,7 @@ mod tests {
         let conn = Connector {
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
+            methods: None,
             id: ConnectId::new(
                 "subgraph".into(),
                 None,

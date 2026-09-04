@@ -1,7 +1,7 @@
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 
-use crate::connectors::ConnectSpec;
+use crate::connectors::json_selection::ApplyContext;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
@@ -29,8 +29,9 @@ fn lt_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
+    let spec = context.spec();
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return (
             None,
@@ -46,7 +47,7 @@ fn lt_method(
         );
     };
 
-    let (value_opt, arg_errors) = first_arg.apply_to_path(data, vars, input_path, spec);
+    let (value_opt, arg_errors) = first_arg.apply_to_path(data, vars, input_path, context);
     let mut apply_to_errors = arg_errors;
     // We have to do this because Value doesn't implement PartialOrd
     let matches = value_opt.and_then(|value| {

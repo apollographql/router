@@ -14,6 +14,8 @@ use shape::location::Location;
 use shape::location::SourceId;
 
 use super::Ref;
+use super::custom_methods::CompiledMethod;
+use super::custom_methods::MethodRegistry;
 use super::helpers::json_merge;
 use super::helpers::json_type_name;
 use super::immutable::InputPath;
@@ -45,6 +47,32 @@ impl JSONSelection {
         data: &JSON,
         vars: &IndexMap<String, JSON>,
     ) -> (Option<JSON>, Vec<ApplyToError>) {
+        self.apply_with_context(data, vars, ApplyContext::new(self.spec()))
+    }
+
+    /// Like [`Self::apply_with_vars`], but with the global registry of custom
+    /// `->` method definitions (`@source(methods:)`) available during evaluation.
+    /// Connectors thread their merged registry in here at request time.
+    #[allow(dead_code)] // Used once connector threading lands (next commit).
+    pub(crate) fn apply_with_vars_and_methods(
+        &self,
+        data: &JSON,
+        vars: &IndexMap<String, JSON>,
+        methods: Option<Ref<MethodRegistry>>,
+    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        self.apply_with_context(
+            data,
+            vars,
+            ApplyContext::new(self.spec()).with_methods(methods),
+        )
+    }
+
+    fn apply_with_context(
+        &self,
+        data: &JSON,
+        vars: &IndexMap<String, JSON>,
+        context: ApplyContext,
+    ) -> (Option<JSON>, Vec<ApplyToError>) {
         // Using IndexSet over HashSet to preserve the order of the errors.
         let mut errors = IndexSet::default();
 
@@ -60,9 +88,8 @@ impl JSONSelection {
         // selection set was applied to.
         vars_with_paths.insert(KnownVariable::Dollar, (data, InputPath::empty()));
 
-        let spec = self.spec();
         let (value, apply_errors) =
-            self.apply_to_path(data, &vars_with_paths, &InputPath::empty(), spec);
+            self.apply_to_path(data, &vars_with_paths, &InputPath::empty(), &context);
 
         // Since errors is an IndexSet, this line effectively deduplicates the
         // errors, in an attempt to make them less verbose. However, now that we
@@ -75,9 +102,25 @@ impl JSONSelection {
     }
 
     pub fn shape(&self) -> Shape {
-        let context =
-            ShapeContext::new(SourceId::Other("JSONSelection".into())).with_spec(self.spec());
+        self.shape_with_context(
+            ShapeContext::new(SourceId::Other("JSONSelection".into())).with_spec(self.spec()),
+        )
+    }
 
+    /// Like [`Self::shape`], but with the global registry of custom `->` method
+    /// definitions (`@source(methods:)`) available, so `->customMethod` calls
+    /// resolve to their body's shape during shape analysis (e.g. composition
+    /// validation). Without it, a custom-method call shapes as "method not
+    /// found".
+    pub(crate) fn shape_with_methods(&self, methods: Option<Ref<MethodRegistry>>) -> Shape {
+        self.shape_with_context(
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(self.spec())
+                .with_methods(methods),
+        )
+    }
+
+    fn shape_with_context(&self, context: ShapeContext) -> Shape {
         self.compute_output_shape(
             // Relatively static/unchanging inputs to compute_output_shape,
             // passed down by immutable shared reference.
@@ -119,6 +162,32 @@ impl JSONSelection {
             computable.compute_output_shape(&cloned_context, input_shape, dollar_shape)
         }
     }
+
+    /// Like [`Self::compute_output_shape`], but with an explicit `$` (Dollar)
+    /// shape instead of clamping `$` to the input shape. Used for custom `->`
+    /// method (`@source(methods:)`) bodies, where `@` is the receiver but `$`
+    /// *lags* to the caller's ambient root — mirroring the runtime frame built
+    /// in `apply_custom_method`.
+    pub(crate) fn compute_output_shape_with_dollar(
+        &self,
+        context: &ShapeContext,
+        input_shape: Shape,
+        dollar_shape: Shape,
+    ) -> Shape {
+        let computable: &dyn ApplyToInternal = match &self.inner {
+            TopLevelSelection::Named(selection) => selection,
+            TopLevelSelection::Value(lit) => lit,
+        };
+
+        if Some(&input_shape) == context.named_shapes().get("$root") {
+            computable.compute_output_shape(context, input_shape, dollar_shape)
+        } else {
+            let cloned_context = context
+                .clone()
+                .with_named_shapes([("$root".to_string(), input_shape.clone())]);
+            computable.compute_output_shape(&cloned_context, input_shape, dollar_shape)
+        }
+    }
 }
 
 fn lookup_variable<'a>(
@@ -137,6 +206,112 @@ fn lookup_variable<'a>(
     entry.map(|(data, path)| (*data, path))
 }
 
+/// Dispatch a custom `->` method defined via `@source(methods:)`.
+///
+/// Semantics (the Splice Correspondence Principle): `input->Name(args)`
+/// evaluates the custom's body as a standalone selection over `input`, exactly as
+/// the inline body would mean:
+/// - arguments are evaluated **eagerly, once, in the caller's scope**;
+/// - the body runs with `@` = the receiver (`input`), but `$` *lags* — it keeps
+///   the caller's ambient root binding rather than being clamped to the
+///   receiver — so `$`/`@` read exactly as they would if the body were spliced
+///   inline at the call site. The positional params are bound as `Local`s, and
+///   the caller's `External`s are carried forward; caller *locals* are still
+///   dropped (no accidental capture, no closures);
+/// - recursion is impossible because composition guarantees the custom call graph
+///   is a DAG, so there is no runtime depth guard.
+///
+/// Returns the body's output (the method's tail is applied by the caller).
+fn apply_custom_method(
+    custom: &CompiledMethod,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    data: &JSON,
+    vars: &VarsWithPathsMap,
+    method_path: &InputPath<JSON>,
+    context: &ApplyContext,
+) -> (Option<JSON>, Vec<ApplyToError>) {
+    let spec = context.spec();
+    let arg_exprs: &[WithRange<LitExpr>] =
+        method_args.map(|args| args.args.as_slice()).unwrap_or(&[]);
+
+    if arg_exprs.len() != custom.params.len() {
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} expects {} argument(s) but received {}",
+                    method_name.as_ref(),
+                    custom.params.len(),
+                    arg_exprs.len(),
+                ),
+                method_path.to_vec(),
+                method_name.range(),
+                spec,
+            )],
+        );
+    }
+
+    // A method derived from a GraphQL type describes one object of that type, so
+    // a list receiver is a mistake — and one that would otherwise pass silently,
+    // because a field-list body distributes over an array on its own and returns
+    // a plausible-looking result. Say what to write instead.
+    //
+    // Only derived methods are checked. A hand-written custom may want the array
+    // whole, which is the whole point of anything that reduces.
+    if custom.derived_from_type && matches!(data, JSON::Array(_)) {
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{name} applies to a single object, but the input here is a list. Use ->map(@->{name}) to apply it to each element.",
+                    name = method_name.as_ref(),
+                ),
+                method_path.to_vec(),
+                method_name.range(),
+                spec,
+            )],
+        );
+    }
+
+    // Eagerly evaluate each argument once, in the caller's scope. Owned here so
+    // the fresh frame can borrow them for the duration of the body application.
+    let mut errors = Vec::new();
+    let mut arg_values: Vec<JSON> = Vec::with_capacity(arg_exprs.len());
+    for arg in arg_exprs {
+        let (value, arg_errors) = arg.apply_to_path(data, vars, method_path, context);
+        errors.extend(arg_errors);
+        arg_values.push(value.unwrap_or(JSON::Null));
+    }
+
+    // Build the body's frame: carry the caller's `External`s and the ambient
+    // `$` (Dollar) root forward, and bind params as locals. `@` is the receiver
+    // (`data`, passed as the apply value below), but `$` *lags* — it keeps the
+    // caller's root rather than being clamped to the receiver — so the body
+    // reads `$`/`@` exactly as the equivalent inline selection would. Caller
+    // *locals* are deliberately dropped (no accidental capture).
+    let mut frame: VarsWithPathsMap = vars
+        .iter()
+        .filter(|(var, _)| matches!(var, KnownVariable::External(_) | KnownVariable::Dollar))
+        .map(|(var, (value, path))| (var.clone(), (*value, path.clone())))
+        .collect();
+    for (param, value) in custom.params.iter().zip(arg_values.iter()) {
+        // Params are stored bare; the var lookup keys locals by their full
+        // `$`-prefixed spelling, so bind `$param`.
+        let dollar_param = format!("${param}");
+        frame.insert(
+            KnownVariable::Local(dollar_param.clone()),
+            (value, InputPath::empty().append(json!(dollar_param))),
+        );
+    }
+
+    let (result, body_errors) = custom
+        .body
+        .apply_to_path(data, &frame, method_path, context);
+    errors.extend(body_errors);
+    (result, errors)
+}
+
 impl Ranged for JSONSelection {
     fn range(&self) -> OffsetRange {
         match &self.inner {
@@ -150,6 +325,44 @@ impl Ranged for JSONSelection {
     }
 }
 
+/// Ambient, request-global context threaded through runtime application
+/// ([`ApplyToInternal::apply_to_path`] and friends).
+///
+/// Unlike [`VarsWithPathsMap`], which holds *scoped* bindings that are rebound
+/// and reset as evaluation descends (and deliberately discarded when a custom
+/// `->` method body runs in a fresh frame), `ApplyContext` is **constant across
+/// every frame**: the connect spec version, and the global registry of custom
+/// `->` method definitions (`@source(methods:)`). Threaded where `spec` used to be
+/// threaded.
+#[derive(Clone)]
+pub(crate) struct ApplyContext {
+    spec: ConnectSpec,
+    methods: Option<Ref<MethodRegistry>>,
+}
+
+impl ApplyContext {
+    pub(crate) fn new(spec: ConnectSpec) -> Self {
+        Self {
+            spec,
+            methods: None,
+        }
+    }
+
+    /// Attach the global custom registry. Cheap (`Arc` clone).
+    pub(crate) fn with_methods(mut self, methods: Option<Ref<MethodRegistry>>) -> Self {
+        self.methods = methods;
+        self
+    }
+
+    pub(crate) fn spec(&self) -> ConnectSpec {
+        self.spec
+    }
+
+    pub(crate) fn methods(&self) -> Option<&MethodRegistry> {
+        self.methods.as_deref()
+    }
+}
+
 pub(super) trait ApplyToInternal {
     // This is the trait method that should be implemented and called
     // recursively by the various JSONSelection types.
@@ -158,7 +371,7 @@ pub(super) trait ApplyToInternal {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        spec: ConnectSpec,
+        context: &ApplyContext,
     ) -> (Option<JSON>, Vec<ApplyToError>);
 
     // When array is encountered, the Self selection will be applied to each
@@ -168,7 +381,7 @@ pub(super) trait ApplyToInternal {
         data_array: &[JSON],
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        spec: ConnectSpec,
+        context: &ApplyContext,
     ) -> (Option<JSON>, Vec<ApplyToError>) {
         let mut output = Vec::with_capacity(data_array.len());
         let mut errors = Vec::new();
@@ -176,7 +389,7 @@ pub(super) trait ApplyToInternal {
         for (i, element) in data_array.iter().enumerate() {
             let input_path_with_index = input_path.append(json!(i));
             let (applied, apply_errors) =
-                self.apply_to_path(element, vars, &input_path_with_index, spec);
+                self.apply_to_path(element, vars, &input_path_with_index, context);
             errors.extend(apply_errors);
             // When building an Object, we can simply omit missing properties
             // and report an error, but when building an Array, we need to
@@ -226,6 +439,12 @@ pub(crate) struct ShapeContext {
     /// the *same* trie — each step of the recursion appends into one place.
     /// Inspectable with [`ShapeContext::consumption`] after recursion ends.
     consumption: Ref<RefCell<SelectionTrie>>,
+
+    /// The global registry of custom `->` method definitions (`@source(methods:)`),
+    /// so the shape pass can compute the output shape of a `->customMethod`
+    /// call. Mirrors [`ApplyContext::methods`] on the runtime side. `None` for
+    /// standalone shape analysis (no methods in scope).
+    methods: Option<Ref<MethodRegistry>>,
 }
 
 impl ShapeContext {
@@ -241,6 +460,7 @@ impl ShapeContext {
             named_shapes: IndexMap::default(),
             source_id,
             consumption,
+            methods: None,
         }
     }
 
@@ -252,6 +472,17 @@ impl ShapeContext {
     pub(crate) fn with_spec(mut self, spec: ConnectSpec) -> Self {
         self.spec = spec;
         self
+    }
+
+    /// Attach the global custom registry so the shape pass can resolve custom
+    /// `->` methods. Cheap (`Arc` clone).
+    pub(crate) fn with_methods(mut self, methods: Option<Ref<MethodRegistry>>) -> Self {
+        self.methods = methods;
+        self
+    }
+
+    pub(crate) fn methods(&self) -> Option<&MethodRegistry> {
+        self.methods.as_deref()
     }
 
     pub(crate) fn named_shapes(&self) -> &IndexMap<String, Shape> {
@@ -444,7 +675,7 @@ impl ApplyToInternal for JSONSelection {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        _spec: ConnectSpec,
+        context: &ApplyContext,
     ) -> (Option<JSON>, Vec<ApplyToError>) {
         match &self.inner {
             // Because we represent a JSONSelection::Named as a SubSelection, we
@@ -454,9 +685,9 @@ impl ApplyToInternal for JSONSelection {
             // need to create a temporary SubSelection to wrap the selections
             // Vec.
             TopLevelSelection::Named(named_selections) => {
-                named_selections.apply_to_path(data, vars, input_path, self.spec)
+                named_selections.apply_to_path(data, vars, input_path, context)
             }
-            TopLevelSelection::Value(lit) => lit.apply_to_path(data, vars, input_path, self.spec),
+            TopLevelSelection::Value(lit) => lit.apply_to_path(data, vars, input_path, context),
         }
     }
 
@@ -485,12 +716,13 @@ impl ApplyToInternal for NamedSelection {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        spec: ConnectSpec,
+        context: &ApplyContext,
     ) -> (Option<JSON>, Vec<ApplyToError>) {
+        let spec = context.spec();
         let mut output: Option<JSON> = None;
         let mut errors = Vec::new();
 
-        let (value_opt, apply_errors) = self.path.apply_to_path(data, vars, input_path, spec);
+        let (value_opt, apply_errors) = self.path.apply_to_path(data, vars, input_path, context);
         errors.extend(apply_errors);
 
         match &self.prefix {
@@ -575,7 +807,7 @@ impl ApplyToInternal for PathSelection {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        spec: ConnectSpec,
+        context: &ApplyContext,
     ) -> (Option<JSON>, Vec<ApplyToError>) {
         match (self.path.as_ref(), vars.get(&KnownVariable::Dollar)) {
             // If this is a KeyPath, instead of using data as given, we need to
@@ -585,14 +817,14 @@ impl ApplyToInternal for PathSelection {
             // obj references are interpreted as $.obj.
             (PathList::Key(_, _), Some((dollar_data, dollar_path))) => {
                 self.path
-                    .apply_to_path(dollar_data, vars, dollar_path, spec)
+                    .apply_to_path(dollar_data, vars, dollar_path, context)
             }
 
             // If $ is undefined for some reason, fall back to using data...
             // TODO: Since $ should never be undefined, we might want to
             // guarantee its existence at compile time, somehow.
             // (PathList::Key(_, _), None) => todo!(),
-            _ => self.path.apply_to_path(data, vars, input_path, spec),
+            _ => self.path.apply_to_path(data, vars, input_path, context),
         }
     }
 
@@ -625,8 +857,9 @@ impl ApplyToInternal for WithRange<PathList> {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        spec: ConnectSpec,
+        context: &ApplyContext,
     ) -> (Option<JSON>, Vec<ApplyToError>) {
+        let spec = context.spec();
         match self.as_ref() {
             PathList::Var(ranged_var_name, tail) => {
                 let var_name = ranged_var_name.as_ref();
@@ -634,14 +867,14 @@ impl ApplyToInternal for WithRange<PathList> {
                     // We represent @ as a variable name in PathList::Var, but
                     // it is never stored in the vars map, because it is always
                     // shorthand for the current data value.
-                    tail.apply_to_path(data, vars, input_path, spec)
+                    tail.apply_to_path(data, vars, input_path, context)
                 } else if let Some((var_data, var_path)) = lookup_variable(vars, var_name.as_str())
                 {
                     // Variables are associated with a path, which is always
                     // just the variable name for named $variables other than $.
                     // For the special variable $, the path represents the
                     // sequence of keys from the root input data to the $ data.
-                    tail.apply_to_path(var_data, vars, var_path, spec)
+                    tail.apply_to_path(var_data, vars, var_path, context)
                 } else {
                     (
                         None,
@@ -668,7 +901,7 @@ impl ApplyToInternal for WithRange<PathList> {
                         WithRange::new(PathList::Key(key.clone(), empty_tail), key.range());
 
                     self_with_empty_tail
-                        .apply_to_array(array, vars, input_path, spec)
+                        .apply_to_array(array, vars, input_path, context)
                         .and_then_collecting_errors(|shallow_mapped_array| {
                             // This tail.apply_to_path call happens only once,
                             // passing to the original/top-level tail the entire
@@ -677,7 +910,7 @@ impl ApplyToInternal for WithRange<PathList> {
                                 shallow_mapped_array,
                                 vars,
                                 &input_path_with_key,
-                                spec,
+                                context,
                             )
                         })
                 } else {
@@ -702,7 +935,7 @@ impl ApplyToInternal for WithRange<PathList> {
                     }
 
                     if let Some(child) = data.get(key.as_str()) {
-                        tail.apply_to_path(child, vars, &input_path_with_key, spec)
+                        tail.apply_to_path(child, vars, &input_path_with_key, context)
                     } else if tail.is_question() {
                         (None, vec![])
                     } else {
@@ -711,83 +944,111 @@ impl ApplyToInternal for WithRange<PathList> {
                 }
             }
             PathList::Expr(expr, tail) => expr
-                .apply_to_path(data, vars, input_path, spec)
+                .apply_to_path(data, vars, input_path, context)
                 .and_then_collecting_errors(|value| {
-                    tail.apply_to_path(value, vars, input_path, spec)
+                    tail.apply_to_path(value, vars, input_path, context)
                 }),
             PathList::Method(method_name, method_args, tail) => {
                 let method_path =
                     input_path.append(JSON::String(format!("->{}", method_name.as_ref()).into()));
 
-                ArrowMethod::lookup(method_name).map_or_else(
-                    || {
-                        (
-                            None,
-                            vec![ApplyToError::new(
-                                format!("Method ->{} not found", method_name.as_ref()),
-                                method_path.to_vec(),
-                                method_name.range(),
-                                spec,
-                            )],
-                        )
-                    },
-                    |method| {
-                        let (result_opt, errors) = method.apply(
-                            method_name,
-                            method_args.as_ref(),
-                            data,
-                            vars,
-                            &method_path,
+                // A custom custom wins over a built-in of the same name. See
+                // `MethodRegistry` for why: it makes shipping a new built-in
+                // additive rather than a breaking change for schemas that
+                // already define that name themselves.
+                let custom_method = context
+                    .methods()
+                    .and_then(|registry| registry.get(method_name.as_ref()));
+
+                if let Some(method) =
+                    ArrowMethod::lookup(method_name).filter(|_| custom_method.is_none())
+                {
+                    let (result_opt, errors) = method.apply(
+                        method_name,
+                        method_args.as_ref(),
+                        data,
+                        vars,
+                        &method_path,
+                        context,
+                    );
+
+                    // We special-case the ->as method here to avoid having
+                    // to give every -> method the ability to update
+                    // variables. The method.apply implementation for
+                    // ArrowMethod::As returns Some(json_object) where the
+                    // keys of json_object are variable names to update, and
+                    // the values are the values of those named variables.
+                    if let (ArrowMethod::As, Some(JSON::Object(bindings))) =
+                        (method, result_opt.as_ref())
+                    {
+                        let mut updated_vars = vars.clone();
+
+                        for (var_name, var_value) in bindings {
+                            updated_vars.insert(
+                                KnownVariable::Local(var_name.as_str().to_string()),
+                                // Should this InputPath include prior path information?
+                                (var_value, InputPath::empty().append(json!(var_name))),
+                            );
+                        }
+
+                        return tail
+                            // We always pass the original input data to the
+                            // tail, no matter what ->as returned.
+                            .apply_to_path(data, &updated_vars, &method_path, context)
+                            .prepend_errors(errors);
+                    }
+
+                    if let Some(result) = result_opt {
+                        tail.apply_to_path(&result, vars, &method_path, context)
+                            .prepend_errors(errors)
+                    } else {
+                        // If the method produced no output, assume the errors
+                        // explain the None. Methods can legitimately produce
+                        // None without errors (like ->first or ->last on an
+                        // empty array), so we do not report any blanket error
+                        // here when errors.is_empty().
+                        (None, errors)
+                    }
+                } else if let Some(custom) = custom_method {
+                    // Custom `->` method defined via `methods:`. Evaluate
+                    // the custom body over the input, then apply the tail to the
+                    // result, exactly as the inline body would behave.
+                    apply_custom_method(
+                        custom,
+                        method_name,
+                        method_args.as_ref(),
+                        data,
+                        vars,
+                        &method_path,
+                        context,
+                    )
+                    .and_then_collecting_errors(|result| {
+                        tail.apply_to_path(result, vars, &method_path, context)
+                    })
+                } else {
+                    (
+                        None,
+                        vec![ApplyToError::new(
+                            format!(
+                                "Method ->{} not found (no built-in or `methods:` method with that name)",
+                                method_name.as_ref()
+                            ),
+                            method_path.to_vec(),
+                            method_name.range(),
                             spec,
-                        );
-
-                        // We special-case the ->as method here to avoid having
-                        // to give every -> method the ability to update
-                        // variables. The method.apply implementation for
-                        // ArrowMethod::As returns Some(json_object) where the
-                        // keys of json_object are variable names to update, and
-                        // the values are the values of those named variables.
-                        if let (ArrowMethod::As, Some(JSON::Object(bindings))) =
-                            (method, result_opt.as_ref())
-                        {
-                            let mut updated_vars = vars.clone();
-
-                            for (var_name, var_value) in bindings {
-                                updated_vars.insert(
-                                    KnownVariable::Local(var_name.as_str().to_string()),
-                                    // Should this InputPath include prior path information?
-                                    (var_value, InputPath::empty().append(json!(var_name))),
-                                );
-                            }
-
-                            return tail
-                                // We always pass the original input data to the
-                                // tail, no matter what ->as returned.
-                                .apply_to_path(data, &updated_vars, &method_path, spec)
-                                .prepend_errors(errors);
-                        }
-
-                        if let Some(result) = result_opt {
-                            tail.apply_to_path(&result, vars, &method_path, spec)
-                                .prepend_errors(errors)
-                        } else {
-                            // If the method produced no output, assume the errors
-                            // explain the None. Methods can legitimately produce
-                            // None without errors (like ->first or ->last on an
-                            // empty array), so we do not report any blanket error
-                            // here when errors.is_empty().
-                            (None, errors)
-                        }
-                    },
-                )
+                        )],
+                    )
+                }
             }
-            PathList::Selection(selection) => selection.apply_to_path(data, vars, input_path, spec),
+            PathList::Selection(selection) => {
+                selection.apply_to_path(data, vars, input_path, context)
+            }
             PathList::Question(tail) => {
                 // Universal null check for any operation after ?
                 if data.is_null() {
                     (None, vec![])
                 } else {
-                    tail.apply_to_path(data, vars, input_path, spec)
+                    tail.apply_to_path(data, vars, input_path, context)
                 }
             }
             PathList::Empty => {
@@ -955,7 +1216,15 @@ impl ApplyToInternal for WithRange<PathList> {
                 // does not propagate the original name through to its result.
                 context.record_consumption(&input_shape, true);
 
-                if let Some(method) = ArrowMethod::lookup(method_name) {
+                // Custom methods win over same-named built-ins, matching runtime
+                // dispatch in `apply_to_path` above.
+                let custom_method = context
+                    .methods()
+                    .and_then(|registry| registry.get(method_name.as_str()));
+
+                if let Some(method) =
+                    ArrowMethod::lookup(method_name).filter(|_| custom_method.is_none())
+                {
                     // Before connect/v0.3, we did not consult method.shape at
                     // all, and instead returned Unknown. Since this behavior
                     // has consequences for URI validation, the older behavior
@@ -993,6 +1262,65 @@ impl ApplyToInternal for WithRange<PathList> {
                             (result_shape, Some(tail))
                         }
                     }
+                } else if let Some(custom) = custom_method {
+                    // A type-derived method applied to a list is the runtime
+                    // error from `apply_custom_method`, caught statically in the
+                    // cases where the input shape actually says "list". Most
+                    // connector payloads shape as `Unknown`/wildcard, so this
+                    // fires less often than the runtime check — the two are
+                    // complementary, not redundant.
+                    if custom.derived_from_type
+                        && matches!(input_shape.case(), ShapeCase::Array { .. })
+                    {
+                        // Returns the error shape directly rather than as a
+                        // `(shape, tail)` pair: there is no tail to apply once
+                        // the receiver is wrong.
+                        return Shape::error(
+                            format!(
+                                "Method ->{name} applies to a single object, but the input here is a list. Use ->map(@->{name}) to apply it to each element.",
+                                name = method_name.as_str(),
+                            ),
+                            method_name.shape_location(context.source_id()),
+                        );
+                    }
+
+                    // Custom `->` method (`methods:`): the body's output
+                    // shape is the method's result shape. The body sees `@` =
+                    // input (the receiver) but `$` *lagging* to the caller's
+                    // `dollar_shape` (matching the runtime frame in
+                    // `apply_custom_method`), with each param bound to its
+                    // argument's shape as a local (`$param`). Args are shaped in
+                    // the caller's scope. Unknown-tolerant and computed per call
+                    // site (recursion is impossible — the registry is a DAG), so
+                    // no memoization is needed.
+                    let arg_shapes: Vec<Shape> = method_args
+                        .as_ref()
+                        .map(|args| {
+                            args.args
+                                .iter()
+                                .map(|arg| {
+                                    arg.compute_output_shape(
+                                        context,
+                                        input_shape.clone(),
+                                        dollar_shape.clone(),
+                                    )
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let param_shapes = custom
+                        .params
+                        .iter()
+                        .cloned()
+                        .zip(arg_shapes)
+                        .map(|(param, shape)| (format!("${param}"), shape));
+                    let body_context = context.clone().with_named_shapes(param_shapes);
+                    let result_shape = custom.body.compute_output_shape_with_dollar(
+                        &body_context,
+                        input_shape,
+                        dollar_shape.clone(),
+                    );
+                    (result_shape, Some(tail))
                 } else {
                     (
                         Shape::error(
@@ -1143,8 +1471,9 @@ impl ApplyToInternal for WithRange<LitExpr> {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        spec: ConnectSpec,
+        context: &ApplyContext,
     ) -> (Option<JSON>, Vec<ApplyToError>) {
+        let _spec = context.spec();
         match self.as_ref() {
             LitExpr::String(s) => (Some(JSON::String(s.clone().into())), vec![]),
             LitExpr::Number(n) => (Some(JSON::Number(n.clone())), vec![]),
@@ -1155,7 +1484,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
                 let mut errors = Vec::new();
                 for (key, value) in map {
                     let (value_opt, apply_errors) =
-                        value.apply_to_path(data, vars, input_path, spec);
+                        value.apply_to_path(data, vars, input_path, context);
                     errors.extend(apply_errors);
                     if let Some(value_json) = value_opt {
                         output.insert(key.as_str(), value_json);
@@ -1169,7 +1498,8 @@ impl ApplyToInternal for WithRange<LitExpr> {
                 // the surrounding data. Nested `Key SubSelection` syntax
                 // (e.g. `{ foo { bar } }`) still rebinds `$` via the inner
                 // SubSelection, which is handled by NamedSelection itself.
-                let (output, errors) = sub.apply_selections_no_rebind(data, vars, input_path, spec);
+                let (output, errors) =
+                    sub.apply_selections_no_rebind(data, vars, input_path, context);
                 (Some(output), errors)
             }
             LitExpr::Array(vec) => {
@@ -1177,17 +1507,17 @@ impl ApplyToInternal for WithRange<LitExpr> {
                 let mut errors = Vec::new();
                 for value in vec {
                     let (value_opt, apply_errors) =
-                        value.apply_to_path(data, vars, input_path, spec);
+                        value.apply_to_path(data, vars, input_path, context);
                     errors.extend(apply_errors);
                     output.push(value_opt.unwrap_or(JSON::Null));
                 }
                 (Some(JSON::Array(output)), errors)
             }
-            LitExpr::Path(path) => path.apply_to_path(data, vars, input_path, spec),
+            LitExpr::Path(path) => path.apply_to_path(data, vars, input_path, context),
             LitExpr::LitPath(literal, subpath) => literal
-                .apply_to_path(data, vars, input_path, spec)
+                .apply_to_path(data, vars, input_path, context)
                 .and_then_collecting_errors(|value| {
-                    subpath.apply_to_path(value, vars, input_path, spec)
+                    subpath.apply_to_path(value, vars, input_path, context)
                 }),
             LitExpr::OpChain(op, operands) => {
                 match op.as_ref() {
@@ -1199,7 +1529,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
 
                         for operand in operands {
                             let (value, errors) =
-                                operand.apply_to_path(data, vars, input_path, spec);
+                                operand.apply_to_path(data, vars, input_path, context);
 
                             match value {
                                 // If we get a non-null, non-None value, return it
@@ -1241,7 +1571,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
 
                         for operand in operands {
                             let (value, errors) =
-                                operand.apply_to_path(data, vars, input_path, spec);
+                                operand.apply_to_path(data, vars, input_path, context);
 
                             match value {
                                 // If we get None, continue to next operand
@@ -1390,14 +1720,15 @@ impl SubSelection {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        spec: ConnectSpec,
+        context: &ApplyContext,
     ) -> (JSON, Vec<ApplyToError>) {
+        let spec = context.spec();
         let mut output = JSON::Object(JSONMap::new());
         let mut errors = Vec::new();
 
         for named_selection in self.selections.iter() {
             let (named_output_opt, apply_errors) =
-                named_selection.apply_to_path(data, vars, input_path, spec);
+                named_selection.apply_to_path(data, vars, input_path, context);
             errors.extend(apply_errors);
 
             let (merged, merge_errors) = json_merge(Some(&output), named_output_opt.as_ref());
@@ -1465,10 +1796,10 @@ impl ApplyToInternal for SubSelection {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        spec: ConnectSpec,
+        context: &ApplyContext,
     ) -> (Option<JSON>, Vec<ApplyToError>) {
         if let JSON::Array(array) = data {
-            return self.apply_to_array(array, vars, input_path, spec);
+            return self.apply_to_array(array, vars, input_path, context);
         }
 
         let vars: VarsWithPathsMap = {
@@ -1477,7 +1808,7 @@ impl ApplyToInternal for SubSelection {
             vars
         };
 
-        let (output, errors) = self.apply_selections_no_rebind(data, &vars, input_path, spec);
+        let (output, errors) = self.apply_selections_no_rebind(data, &vars, input_path, context);
 
         if !matches!(data, JSON::Object(_)) {
             let output_is_empty = match &output {
@@ -1591,7 +1922,277 @@ mod tests {
     use super::*;
     use crate::assert_debug_snapshot;
     use crate::connectors::json_selection::PrettyPrintable;
+    use crate::connectors::json_selection::custom_methods::CompiledMethod;
     use crate::selection;
+
+    /// Apply `selection` (parsed at v0.5) with a registry built from `methods`.
+    #[track_caller]
+    fn apply_with_methods(
+        selection: &str,
+        methods: &[(&str, &str)],
+        data: JSON,
+    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        let sel = JSONSelection::parse_with_spec(selection, ConnectSpec::V0_5)
+            .expect("selection should parse");
+        let compiled = methods
+            .iter()
+            .map(|(name, body)| {
+                CompiledMethod::parse(*name, body, ConnectSpec::V0_5).expect("custom should parse")
+            })
+            .collect::<Vec<_>>();
+        let registry = Ref::new(MethodRegistry::build(compiled).expect("registry should build"));
+        sel.apply_with_vars_and_methods(&data, &IndexMap::default(), Some(registry))
+    }
+
+    /// `->min` and `->max` are not built-ins, but they are expressible as methods
+    /// over ones that are: `->as` binds the receiver so it survives the
+    /// comparison, and `->match` switches on the resulting boolean.
+    const MIN_MAX_DEFS: [(&str, &str); 2] = [
+        (
+            "min",
+            "($other) => @->as($self)->lte($other)->match([true, $self], [@, $other])",
+        ),
+        (
+            "max",
+            "($other) => @->as($self)->gte($other)->match([true, $self], [@, $other])",
+        ),
+    ];
+
+    /// Like [`apply_with_methods`], but marks every custom as derived from a GraphQL
+    /// type, the way `@method` does.
+    fn apply_with_type_methods(
+        selection: &str,
+        methods: &[(&str, &str)],
+        data: JSON,
+    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        let sel = JSONSelection::parse_with_spec(selection, ConnectSpec::V0_5)
+            .expect("selection should parse");
+        let compiled = methods
+            .iter()
+            .map(|(name, body)| {
+                CompiledMethod::parse(*name, body, ConnectSpec::V0_5)
+                    .expect("custom should parse")
+                    .derived_from_type()
+            })
+            .collect::<Vec<_>>();
+        let registry = Ref::new(MethodRegistry::build(compiled).expect("registry should build"));
+        sel.apply_with_vars_and_methods(&data, &IndexMap::default(), Some(registry))
+    }
+
+    #[test]
+    fn type_derived_method_over_a_list_errors_with_a_suggestion() {
+        // Without this check the field-list body distributes on its own and
+        // returns a plausible-looking list, hiding the arity mistake. The message
+        // has to name the fix, since `->map(@->User)` is not guessable.
+        let data = json!([{ "id": 1, "name": "a" }, { "id": 2, "name": "b" }]);
+        let (out, errors) =
+            apply_with_type_methods("$->User", &[("User", "id name")], data.clone());
+        assert_eq!(out, None);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let message = format!("{:?}", errors[0]);
+        assert!(
+            message.contains("applies to a single object") && message.contains("->map(@->User)"),
+            "message should say what to write instead, got: {message}"
+        );
+
+        // The suggested form works.
+        let (out, errors) =
+            apply_with_type_methods("$->map(@->User)", &[("User", "id name")], data);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(
+            out,
+            Some(json!([{ "id": 1, "name": "a" }, { "id": 2, "name": "b" }]))
+        );
+
+        // And a single object is unaffected.
+        let (out, errors) = apply_with_type_methods(
+            "$->User",
+            &[("User", "id name")],
+            json!({ "id": 1, "name": "a" }),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(out, Some(json!({ "id": 1, "name": "a" })));
+    }
+
+    #[test]
+    fn hand_written_def_may_still_consume_a_list() {
+        // The check must not touch `methods:` entries — operating on the array whole
+        // is the point of anything that aggregates.
+        let (out, errors) =
+            apply_with_methods("$->count", &[("count", "@->size")], json!([1, 2, 3]));
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(out, Some(json!(3)));
+    }
+
+    #[test]
+    fn min_and_max_are_expressible_as_methods() {
+        for (input, other, min, max) in [(5, 3, 3, 5), (2, 3, 2, 3), (4, 4, 4, 4)] {
+            let (out, errors) =
+                apply_with_methods(&format!("$->min({other})"), &MIN_MAX_DEFS, json!(input));
+            assert!(errors.is_empty(), "{errors:?}");
+            assert_eq!(out, Some(json!(min)), "min({input}, {other})");
+
+            let (out, errors) =
+                apply_with_methods(&format!("$->max({other})"), &MIN_MAX_DEFS, json!(input));
+            assert!(errors.is_empty(), "{errors:?}");
+            assert_eq!(out, Some(json!(max)), "max({input}, {other})");
+        }
+    }
+
+    #[test]
+    fn clamp_composes_min_and_max_methods() {
+        // A custom calling methods — the payoff of a flat namespace over a DAG. This is
+        // the `clamp` from CNN-1107, working with `->min`/`->max` supplied as methods
+        // rather than as built-ins.
+        let methods: Vec<(&str, &str)> = MIN_MAX_DEFS
+            .iter()
+            .copied()
+            .chain([("clamp", "($lo, $hi) => @->min($hi)->max($lo)")])
+            .collect();
+
+        for (input, expected) in [(150, 100), (-5, 0), (42, 42)] {
+            let (out, errors) = apply_with_methods("$->clamp(0, 100)", &methods, json!(input));
+            assert!(errors.is_empty(), "{errors:?}");
+            assert_eq!(out, Some(json!(expected)), "clamp({input}, 0, 100)");
+        }
+    }
+
+    #[test]
+    fn custom_def_shadowing_a_builtin_wins() {
+        // `->echo` is a built-in, but a custom of the same name takes precedence, so
+        // that shipping a new built-in never silently changes (or rejects) a
+        // schema that already defined that name. See `MethodRegistry`.
+        let (out, errors) =
+            apply_with_methods("$->echo", &[("echo", "$('shadowed')")], json!({ "id": 1 }));
+        assert_eq!(out, Some(json!("shadowed")));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn custom_def_nullary_selection() {
+        let (out, errors) = apply_with_methods(
+            "$->User",
+            &[("User", "id name")],
+            json!({ "id": 1, "name": "Alice", "extra": true }),
+        );
+        assert_eq!(out, Some(json!({ "id": 1, "name": "Alice" })));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn custom_def_with_positional_arg() {
+        let (out, errors) =
+            apply_with_methods("$->addN(10)", &[("addN", "($n) => $->add($n)")], json!(5));
+        assert!(errors.is_empty(), "errors: {errors:?}");
+        assert_eq!(out, Some(json!(15)));
+    }
+
+    #[test]
+    fn custom_def_top_level_identity() {
+        // When a custom is invoked at the *root* (`$->T`), the receiver and the
+        // ambient root coincide, so `foo ≡ @.foo ≡ $.foo` at the top of the
+        // body. This is the degenerate case — see `custom_def_dollar_lags`
+        // for where `$` and `@` diverge.
+        let (out, errors) = apply_with_methods(
+            "$->T",
+            &[("T", "{ f: foo g: @.foo h: $.foo }")],
+            json!({ "foo": 7 }),
+        );
+        assert_eq!(out, Some(json!({ "f": 7, "g": 7, "h": 7 })));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn custom_def_dollar_lags() {
+        // Inside a custom body `@` is the receiver, but `$` *lags* to the caller's
+        // ambient root. Invoking `T` on a nested value (`nested->T`) makes the
+        // two distinct: `@.x` reads the receiver's `x`, `$.x` reads the root's.
+        let (out, errors) = apply_with_methods(
+            "nested->T",
+            &[("T", "{ at: @.x dollar: $.x }")],
+            json!({ "x": "root", "nested": { "x": "inner" } }),
+        );
+        assert_eq!(out, Some(json!({ "at": "inner", "dollar": "root" })));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn custom_method_calls_another_method() {
+        // outer -> inner (a DAG): dispatch recurses through the registry.
+        let (out, errors) = apply_with_methods(
+            "$->outer",
+            &[("outer", "$->inner"), ("inner", "$.id")],
+            json!({ "id": 9 }),
+        );
+        assert_eq!(out, Some(json!(9)));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn custom_def_constant_body_ignores_input() {
+        let (out, errors) = apply_with_methods(
+            "$->cors",
+            &[("cors", "{ allowOrigin: '*' maxAge: $(86400) }")],
+            json!({ "anything": true }),
+        );
+        assert_eq!(out, Some(json!({ "allowOrigin": "*", "maxAge": 86400 })));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn custom_def_arity_mismatch_errors() {
+        let (out, errors) =
+            apply_with_methods("$->addN(1, 2)", &[("addN", "($n) => $->add($n)")], json!(5));
+        assert!(out.is_none());
+        assert!(
+            format!("{errors:?}").contains("expects 1 argument"),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn unknown_method_still_errors() {
+        let (_out, errors) = apply_with_methods("$->nope", &[("User", "id")], json!({ "id": 1 }));
+        assert!(format!("{errors:?}").contains("not found"), "{errors:?}");
+    }
+
+    /// Compute a selection's output shape (at v0.5) with a registry built from
+    /// `methods`, returning the pretty-printed shape.
+    #[track_caller]
+    fn shape_with_methods(selection: &str, methods: &[(&str, &str)]) -> String {
+        let sel = JSONSelection::parse_with_spec(selection, ConnectSpec::V0_5)
+            .expect("selection should parse");
+        let compiled = methods
+            .iter()
+            .map(|(name, body)| {
+                CompiledMethod::parse(*name, body, ConnectSpec::V0_5).expect("custom should parse")
+            })
+            .collect::<Vec<_>>();
+        let registry = Ref::new(MethodRegistry::build(compiled).expect("registry should build"));
+        JSONSelection::shape_with_methods(&sel, Some(registry)).pretty_print()
+    }
+
+    #[test]
+    fn custom_def_shape_resolves_to_body_shape() {
+        // `$->User` with `User: "id name"` shapes as the body's object shape —
+        // not a "method not found" error.
+        let shape = shape_with_methods("$->User", &[("User", "id name")]);
+        assert!(
+            !shape.contains("not found"),
+            "unexpected error shape: {shape}"
+        );
+        assert!(
+            shape.contains("id") && shape.contains("name"),
+            "expected id/name in shape: {shape}"
+        );
+    }
+
+    #[test]
+    fn unknown_method_shape_is_error() {
+        // A method that is neither builtin nor a custom still shapes as an error.
+        let shape = shape_with_methods("$->nope", &[("User", "id name")]);
+        assert!(shape.contains("not found"), "expected error shape: {shape}");
+    }
 
     #[rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
