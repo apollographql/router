@@ -36,6 +36,7 @@ use super::requires::trailing_condition_fragments;
 use super::requires::unconditioned_input_path;
 use super::routing::HopKind;
 use super::routing::RoutingChoice;
+use super::routing::RoutingTarget;
 use super::selection_label;
 use super::state::ContextAnchor;
 use super::state::PendingSelection;
@@ -73,8 +74,6 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         choice: &RoutingChoice,
     ) -> Result<(), FederationError> {
-        use super::routing::RoutingTarget;
-
         if matches!(choice.target, RoutingTarget::TypeExplosion) {
             return if self.try_explode_interface_field(state, pending)? {
                 Ok(())
@@ -1022,11 +1021,13 @@ impl FieldRoutingSearchSpace {
         let options = self.routing_options(pending)?;
         let mut alt_targets: Vec<NodeIndex> = Vec::new();
         for opt in options.iter() {
-            let edge_index = opt.edge_index();
+            let RoutingTarget::SubgraphEdge { edge_index, .. } = &opt.target else {
+                continue;
+            };
             let (_, alt_target) = self
                 .cached_query_graph
                 .query_graph
-                .edge_endpoints(edge_index)?;
+                .edge_endpoints(*edge_index)?;
             if alt_target != target_qg_node && !alt_targets.contains(&alt_target) {
                 alt_targets.push(alt_target);
             }
