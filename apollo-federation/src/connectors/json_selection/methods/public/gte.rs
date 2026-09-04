@@ -430,24 +430,17 @@ mod shape_tests {
             get_shape(
                 vec![WithRange::new(LitExpr::String("a".to_string()), None)],
                 Shape::int([])
-            ),
-            Shape::error_with_partial(
-                "Method ->gte can only compare two numbers or two strings. Found Int >= \"a\""
-                    .to_string(),
-                Shape::bool_value(false, [get_location()]),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"false (err "Method ->gte can only compare two numbers or two strings. Found Int >= \"a\"")"#,
         );
     }
 
     #[test]
     fn gte_shape_should_error_on_no_args() {
         assert_eq!(
-            get_shape(vec![], Shape::string([])),
-            Shape::error(
-                "Method ->gte requires one argument".to_string(),
-                [get_location()]
-            )
+            get_shape(vec![], Shape::string([])).pretty_print(),
+            r#"Unknown (err "Method ->gte requires one argument")"#,
         );
     }
 
@@ -460,11 +453,9 @@ mod shape_tests {
                     WithRange::new(LitExpr::Number(Number::from(42)), None)
                 ],
                 Shape::int([])
-            ),
-            Shape::error(
-                "Method ->gte requires only one argument, but 2 were provided".to_string(),
-                []
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->gte requires only one argument, but 2 were provided")"#,
         );
     }
 
@@ -478,11 +469,9 @@ mod shape_tests {
                 None,
                 Shape::string([]),
                 Shape::none(),
-            ),
-            Shape::error(
-                "Method ->gte requires one argument".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->gte requires one argument")"#,
         );
     }
 }

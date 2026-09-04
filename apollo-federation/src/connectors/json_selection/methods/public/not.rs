@@ -194,11 +194,8 @@ mod shape_tests {
     #[test]
     fn not_shape_should_error_on_non_boolean_input() {
         assert_eq!(
-            get_shape(None, Shape::string([])),
-            Shape::error(
-                "Method ->not can only be applied to boolean values. Got String.".to_string(),
-                [get_location()]
-            )
+            get_shape(None, Shape::string([])).pretty_print(),
+            r#"Unknown (err "Method ->not can only be applied to boolean values. Got String.")"#,
         );
     }
 
@@ -211,11 +208,9 @@ mod shape_tests {
                     range: None
                 }),
                 Shape::bool([])
-            ),
-            Shape::error(
-                "Method ->not does not take any arguments".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->not does not take any arguments")"#,
         );
     }
 
