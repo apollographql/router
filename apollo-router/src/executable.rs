@@ -291,31 +291,33 @@ impl Opt {
         &self,
         current_directory: &std::path::Path,
     ) -> Result<LicenseSource, anyhow::Error> {
-        Ok(match (
-            &self.apollo_router_license,
-            &self.apollo_router_license_path,
-            &self.graph_artifact_reference,
-            &self.apollo_key,
-            &self.apollo_graph_ref,
-        ) {
-            (_, Some(license_path), _, _, _) => {
-                let license_path = if license_path.is_relative() {
-                    current_directory.join(license_path)
-                } else {
-                    license_path.clone()
-                };
-                LicenseSource::File {
-                    path: license_path,
-                    watch: self.hot_reload,
+        Ok(
+            match (
+                &self.apollo_router_license,
+                &self.apollo_router_license_path,
+                &self.graph_artifact_reference,
+                &self.apollo_key,
+                &self.apollo_graph_ref,
+            ) {
+                (_, Some(license_path), _, _, _) => {
+                    let license_path = if license_path.is_relative() {
+                        current_directory.join(license_path)
+                    } else {
+                        license_path.clone()
+                    };
+                    LicenseSource::File {
+                        path: license_path,
+                        watch: self.hot_reload,
+                    }
                 }
-            }
-            (Some(_license), _, _, _, _) => LicenseSource::Env,
-            (_, _, Some(_), _, _) => LicenseSource::OCI(self.oci_config()?),
-            (_, _, None, Some(_apollo_key), Some(_apollo_graph_ref)) => {
-                LicenseSource::Registry(self.uplink_config()?)
-            }
-            _ => LicenseSource::default(),
-        })
+                (Some(_license), _, _, _, _) => LicenseSource::Env,
+                (_, _, Some(_), _, _) => LicenseSource::OCI(self.oci_config()?),
+                (_, _, None, Some(_apollo_key), Some(_apollo_graph_ref)) => {
+                    LicenseSource::Registry(self.uplink_config()?)
+                }
+                _ => LicenseSource::default(),
+            },
+        )
     }
 
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
