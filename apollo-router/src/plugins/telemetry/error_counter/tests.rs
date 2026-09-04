@@ -1,6 +1,13 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
+use apollo_federation::connectors::JSONSelection;
+use apollo_federation::connectors::runtime::errors::RuntimeError;
+use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
+use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
+use apollo_federation::connectors::runtime::key::ResponseKey;
+use apollo_federation::connectors::runtime::responses::MappedResponse;
 use http::Method;
 use http::StatusCode;
 use http::Uri;
@@ -10,15 +17,6 @@ use opentelemetry::KeyValue;
 use serde_json_bytes::Value;
 use serde_json_bytes::json;
 use uuid::Uuid;
-
-use std::sync::Arc;
-
-use apollo_federation::connectors::JSONSelection;
-use apollo_federation::connectors::runtime::errors::RuntimeError;
-use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
-use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
-use apollo_federation::connectors::runtime::key::ResponseKey;
-use apollo_federation::connectors::runtime::responses::MappedResponse;
 
 use crate::Context;
 use crate::context::COUNTED_ERRORS;

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use ahash::HashMap;
 use ahash::HashSet;
+use apollo_federation::connectors::runtime::responses::MappedResponse;
 use futures::StreamExt;
 use futures::future::ready;
 use futures::stream::once;
@@ -27,7 +28,6 @@ use crate::services::RouterResponse;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphResponse;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
-use apollo_federation::connectors::runtime::responses::MappedResponse;
 
 #[cfg(test)]
 mod tests;
