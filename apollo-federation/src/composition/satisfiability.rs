@@ -47,18 +47,16 @@ pub fn validate_satisfiability(
     // we end up checking, because the expanded copy is parsed from SDL and so has none of them.
     let mut hints = supergraph.hints().to_vec();
 
-    let expansion = match expand_connectors(
-        &merged_schema.schema().to_string(),
-        &Default::default(),
-    ) {
-        Ok(expansion) => expansion,
-        Err(e) => {
-            return Err(CompositionFailure {
-                errors: CompositionError::from_federation_error(e),
-                hints,
-            });
-        }
-    };
+    let expansion =
+        match expand_connectors(&merged_schema.schema().to_string(), &Default::default()) {
+            Ok(expansion) => expansion,
+            Err(e) => {
+                return Err(CompositionFailure {
+                    errors: CompositionError::from_federation_error(e),
+                    hints,
+                });
+            }
+        };
     let (to_check, connectors) = match expansion {
         ExpansionResult::Expanded {
             raw_sdl,
