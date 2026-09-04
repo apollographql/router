@@ -22,8 +22,10 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 use crate::integration::IntegrationTest;
+use crate::integration::common::LICENSE_SIX_MONTHS_SECS;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::mint_license_jwt;
 
 /// Helper function to create a query for the count field
 fn query_count_field() -> Query {
@@ -37,6 +39,7 @@ fn query_count_field() -> Query {
 }
 
 const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
+const ENTITLEMENT_MEDIA_TYPE: &str = "application/vnd.apollographql.entitlement.v1+jwt";
 const ARTIFACT_REFERENCE_404: &str =
     "localhost/testrepo@sha256:0000000000000000000000000000000000000000000000000000000000000000";
 const MIN_CONFIG: &str = include_str!("fixtures/minimal-oci.router.yaml");
@@ -46,6 +49,19 @@ fn calculate_manifest_digest(manifest: &OciManifest) -> String {
     let manifest_bytes = serde_json::to_vec(manifest).unwrap();
     let hash = Sha256::digest(&manifest_bytes);
     format!("sha256:{:x}", hash)
+}
+
+/// Build an entitlement layer for a mock OCI manifest, signed with the same test JWKS
+/// (`TEST_JWKS_ENDPOINT`) that `IntegrationTest::start()` points the spawned router at
+/// by default. Since license-source precedence now routes through OCI whenever a graph
+/// artifact reference is configured (see `Opt::license_source`), every mock OCI manifest
+/// here needs a valid entitlement layer or the router refuses to start as unlicensed.
+fn test_license_layer() -> ImageLayer {
+    ImageLayer {
+        data: mint_license_jwt(None, LICENSE_SIX_MONTHS_SECS, LICENSE_SIX_MONTHS_SECS).into(),
+        media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
+        annotations: None,
+    }
 }
 
 /// Helper function to set up mock subgraph servers
@@ -99,23 +115,36 @@ async fn setup_mock_oci_server(schema_content: &str) -> (MockServer, String) {
         media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
         annotations: None,
     };
-
-    // Mock blob
     let blob_digest = schema_layer.sha256_digest();
+
+    // The license stream fetches from this same reference (see registry/mod.rs), so
+    // the manifest must carry an entitlement layer too.
+    let license_layer = test_license_layer();
+    let license_blob_digest = license_layer.sha256_digest();
 
     // Mock manifest
     let oci_manifest = OciManifest::Image(OciImageManifest {
         schema_version: 2,
         media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
         config: Default::default(),
-        layers: vec![OciDescriptor {
-            media_type: schema_layer.media_type.clone(),
-            digest: blob_digest.clone(),
-            size: schema_layer.data.len().try_into().unwrap(),
-            urls: None,
-            annotations: None,
-            artifact_type: None,
-        }],
+        layers: vec![
+            OciDescriptor {
+                media_type: schema_layer.media_type.clone(),
+                digest: blob_digest.clone(),
+                size: schema_layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+                artifact_type: None,
+            },
+            OciDescriptor {
+                media_type: license_layer.media_type.clone(),
+                digest: license_blob_digest.clone(),
+                size: license_layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+                artifact_type: None,
+            },
+        ],
         subject: None,
         artifact_type: None,
         annotations: None,
@@ -136,6 +165,20 @@ async fn setup_mock_oci_server(schema_content: &str) -> (MockServer, String) {
             ResponseTemplate::new(200)
                 .append_header("content-type", "application/octet-stream")
                 .set_body_bytes(schema_layer.data.clone()),
+        )
+        .mount(&mock_server)
+        .await;
+
+    // Set up license blob endpoint
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v2/{}/blobs/{}",
+            graph_id, license_blob_digest
+        )))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", "application/octet-stream")
+                .set_body_bytes(license_layer.data.clone()),
         )
         .mount(&mock_server)
         .await;
@@ -206,19 +249,36 @@ async fn setup_mock_oci_server_with_tag(
     };
     let updated_blob_digest = updated_schema_layer.sha256_digest();
 
+    // The license stream polls this same tag reference (see registry/mod.rs), so both
+    // manifests below must carry an entitlement layer too. The license doesn't change
+    // between initial/updated in these tests, so one layer is shared by both manifests.
+    let license_layer = test_license_layer();
+    let license_blob_digest = license_layer.sha256_digest();
+    let license_descriptor = OciDescriptor {
+        media_type: license_layer.media_type.clone(),
+        digest: license_blob_digest.clone(),
+        size: license_layer.data.len().try_into().unwrap(),
+        urls: None,
+        annotations: None,
+        artifact_type: None,
+    };
+
     // Create initial manifest
     let initial_oci_manifest = OciManifest::Image(OciImageManifest {
         schema_version: 2,
         media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
         config: Default::default(),
-        layers: vec![OciDescriptor {
-            media_type: initial_schema_layer.media_type.clone(),
-            digest: initial_blob_digest.clone(),
-            size: initial_schema_layer.data.len().try_into().unwrap(),
-            urls: None,
-            annotations: None,
-            artifact_type: None,
-        }],
+        layers: vec![
+            OciDescriptor {
+                media_type: initial_schema_layer.media_type.clone(),
+                digest: initial_blob_digest.clone(),
+                size: initial_schema_layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+                artifact_type: None,
+            },
+            license_descriptor.clone(),
+        ],
         subject: None,
         artifact_type: None,
         annotations: None,
@@ -230,14 +290,17 @@ async fn setup_mock_oci_server_with_tag(
         schema_version: 2,
         media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
         config: Default::default(),
-        layers: vec![OciDescriptor {
-            media_type: updated_schema_layer.media_type.clone(),
-            digest: updated_blob_digest.clone(),
-            size: updated_schema_layer.data.len().try_into().unwrap(),
-            urls: None,
-            annotations: None,
-            artifact_type: None,
-        }],
+        layers: vec![
+            OciDescriptor {
+                media_type: updated_schema_layer.media_type.clone(),
+                digest: updated_blob_digest.clone(),
+                size: updated_schema_layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+                artifact_type: None,
+            },
+            license_descriptor,
+        ],
         subject: None,
         artifact_type: None,
         annotations: None,
@@ -261,6 +324,20 @@ async fn setup_mock_oci_server_with_tag(
             ResponseTemplate::new(200)
                 .append_header("content-type", "application/octet-stream")
                 .set_body_bytes(initial_schema_layer.data.clone()),
+        )
+        .mount(&mock_server)
+        .await;
+
+    // Blob - license (shared by both initial and updated manifests)
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v2/{}/blobs/{}",
+            graph_id, license_blob_digest
+        )))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", "application/octet-stream")
+                .set_body_bytes(license_layer.data.clone()),
         )
         .mount(&mock_server)
         .await;
