@@ -111,6 +111,15 @@ This object provides fine-grained control over error propagation.
     *   `exclude_global_keys` removes keys from the inherited global list *before* the subgraph's `allow` or `deny` list is applied or extended.
 6.  **`service` Extension**: The `service` extension (containing the subgraph name) is added by default if errors are included for a subgraph, unless it's explicitly removed by an `allow_extensions_keys` list (that doesn't include `"service"`) or a `deny_extensions_keys` list (that includes `"service"`).
 
+## Connector mapping errors
+
+A connector response mapping can report an error without failing the field, using the [`->withError` method](/graphos/connectors/responses/error-handling#report-errors-without-failing-a-field). Those errors are written by the author of the connector's subgraph schema and can interpolate data from the API's response, so they are governed by this configuration too — under the name of the subgraph the connector belongs to.
+
+They are reported in the response's `extensions.connectorErrors` rather than in `errors`, so the rules apply slightly differently:
+
+*   If a subgraph's errors are **fully redacted** (its config is `false`, which is also the default), its connectors' mapping errors are **omitted entirely**. There is no `Subgraph errors redacted` placeholder in `extensions.connectorErrors`, because such a row would tell a client nothing but that something was withheld.
+*   Otherwise, `redact_message`, `allow_extensions_keys`, `deny_extensions_keys` and the `service` extension behave exactly as they do for errors in the `errors` array.
+
 ## Sending errors to GraphOS
 
 Reporting subgraph errors to GraphOS is configured separately and is not affected by client-facing error inclusion settings. See the [GraphOS reporting docs](/router/configuration/telemetry/apollo-telemetry).

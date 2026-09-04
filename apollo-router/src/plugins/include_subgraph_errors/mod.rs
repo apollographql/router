@@ -1,6 +1,6 @@
 // Declare modules
-mod config;
-mod effective_config;
+pub(crate) mod config;
+pub(crate) mod effective_config;
 #[cfg(test)]
 mod tests;
 
@@ -19,6 +19,7 @@ use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::fetch::AddSubgraphNameExt;
 use crate::services::fetch::SubgraphNameExt;
@@ -28,7 +29,7 @@ static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
 register_plugin!("apollo", "include_subgraph_errors", IncludeSubgraphErrors);
 
-struct IncludeSubgraphErrors {
+pub(crate) struct IncludeSubgraphErrors {
     // Store the calculated effective configuration
     config: Arc<EffectiveConfig>,
 }
@@ -58,8 +59,21 @@ impl Plugin for IncludeSubgraphErrors {
 
     fn supergraph_service(&self, service: BoxService) -> BoxService {
         let config = Arc::clone(&self.config);
+        let request_config = Arc::clone(&self.config);
 
         service
+            .map_request(move |req: SupergraphRequest| {
+                // Published for the code that builds errors it must not hand to
+                // the response hook below. Connectors' `->withError` errors are
+                // reported in `extensions`, not `errors`, so they never pass
+                // through the redaction pass and have to consult the config
+                // where they are built. See `apply_subgraph_error_config` in
+                // the connectors plugin.
+                req.context
+                    .extensions()
+                    .with_lock(|lock| lock.insert::<Arc<EffectiveConfig>>(request_config.clone()));
+                req
+            })
             .map_response(move |response: SupergraphResponse| {
                 response.map_stream(move |mut graphql_response: graphql::Response| {
                     for error in &mut graphql_response.errors {
@@ -99,7 +113,11 @@ impl Plugin for IncludeSubgraphErrors {
 }
 
 impl IncludeSubgraphErrors {
-    fn process_error(config: &Arc<EffectiveConfig>, error: &mut Error) {
+    /// Apply the effective configuration to one error: redact it fully when the
+    /// subgraph's errors are excluded, otherwise redact the message and filter
+    /// the extension keys as configured. Removes the private extension that
+    /// carries the subgraph name.
+    pub(crate) fn process_error(config: &Arc<EffectiveConfig>, error: &mut Error) {
         if let Some(subgraph_name) = error.subgraph_name() {
             // Get the effective config for this specific subgraph, or use default
             let effective_config = config

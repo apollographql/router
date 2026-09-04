@@ -272,6 +272,16 @@ impl InstrumentData {
             "$[?(@.http_max_request_bytes)]"
         );
         populate_config_instrument!(
+            apollo.router.config.connector_limits,
+            "$.limits.connector",
+            opt.http_max_response_size,
+            "$..http_max_response_size",
+            opt.max_mapping_errors,
+            "$..max_mapping_errors",
+            opt.sources,
+            "$[?(@.sources)]"
+        );
+        populate_config_instrument!(
             apollo.router.config.apq,
             "$.apq[?(@.enabled==true)]",
             opt.router.cache.redis,

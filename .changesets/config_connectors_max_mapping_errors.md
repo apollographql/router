@@ -1,6 +1,6 @@
 ### Add `limits.connector.max_mapping_errors` to bound connector mapping errors
 
-Connector response mappings can add errors to the GraphQL response with the [`->withError` mapping method](https://www.apollographql.com/docs/graphos/connectors/responses/error-handling). A `->withError` inside a `->map` records one error per element, so a mapping over a large API response can contribute one error per row.
+Connector response mappings can report errors in the response's `extensions.connectorErrors` with the [`->withError` mapping method](https://www.apollographql.com/docs/graphos/connectors/responses/error-handling). A `->withError` inside a `->map` records one error per element, so a mapping over a large API response can contribute one error per row.
 
 A new limit caps how many such errors one connector response may contribute, alongside the existing `http_max_response_size`:
 
