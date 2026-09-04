@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 2c44fca1dca09f3611b2c3d037001fdcb2bd607c
+# Composed from subgraphs with hash: 3e14a0d9a3a9c9d4efcc9c7d11cd955679846bfe
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -22,10 +22,19 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-interface I
-  @join__type(graph: SUBGRAPH1)
+type G
+  @join__type(graph: SUBGRAPH1, key: "id")
+  @join__type(graph: SUBGRAPH2, key: "gtid")
+  @join__type(graph: SUBGRAPH2, key: "pc")
+  @join__type(graph: SUBGRAPH2, key: "leader")
+  @join__type(graph: SUBGRAPH2, key: "id")
 {
-  s: S
+  id: ID!
+  leader: String @join__field(graph: SUBGRAPH1, external: true) @join__field(graph: SUBGRAPH2)
+  gm: Int @join__field(graph: SUBGRAPH1, requires: "leader")
+  gtid: ID! @join__field(graph: SUBGRAPH2)
+  pc: String @join__field(graph: SUBGRAPH2)
+  dep: String @join__field(graph: SUBGRAPH2)
 }
 
 input join__ContextArgument {
@@ -64,22 +73,12 @@ type Query
   @join__type(graph: SUBGRAPH1)
   @join__type(graph: SUBGRAPH2)
 {
-  i: I @join__field(graph: SUBGRAPH1)
+  t: T @join__field(graph: SUBGRAPH1)
 }
 
-type S
-  @join__type(graph: SUBGRAPH1)
-  @join__type(graph: SUBGRAPH2)
-{
-  x: Int
-  y: Int @join__field(graph: SUBGRAPH2)
-}
-
-type T implements I
-  @join__implements(graph: SUBGRAPH1, interface: "I")
+type T
   @join__type(graph: SUBGRAPH1, key: "id")
-  @join__type(graph: SUBGRAPH2, key: "id")
 {
   id: ID!
-  s: S
+  g: G
 }

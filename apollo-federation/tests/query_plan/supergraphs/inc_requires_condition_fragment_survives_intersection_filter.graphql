@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 2c44fca1dca09f3611b2c3d037001fdcb2bd607c
+# Composed from subgraphs with hash: f72f2b93f451795e14b7a45af014d077e1ac4045
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -22,10 +22,32 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-interface I
+type G implements J
+  @join__implements(graph: SUBGRAPH1, interface: "J")
+  @join__implements(graph: SUBGRAPH3, interface: "J")
   @join__type(graph: SUBGRAPH1)
+  @join__type(graph: SUBGRAPH3)
 {
-  s: S
+  jid: ID!
+}
+
+type H implements J
+  @join__implements(graph: SUBGRAPH2, interface: "J")
+  @join__implements(graph: SUBGRAPH3, interface: "J")
+  @join__type(graph: SUBGRAPH2)
+  @join__type(graph: SUBGRAPH3, key: "jid")
+  @join__type(graph: SUBGRAPH4, key: "jid")
+{
+  jid: ID!
+  x: Int @join__field(graph: SUBGRAPH2, external: true) @join__field(graph: SUBGRAPH4)
+}
+
+interface J
+  @join__type(graph: SUBGRAPH1)
+  @join__type(graph: SUBGRAPH2)
+  @join__type(graph: SUBGRAPH3)
+{
+  jid: ID!
 }
 
 input join__ContextArgument {
@@ -44,6 +66,8 @@ scalar join__FieldValue
 enum join__Graph {
   SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
   SUBGRAPH2 @join__graph(name: "Subgraph2", url: "none")
+  SUBGRAPH3 @join__graph(name: "Subgraph3", url: "none")
+  SUBGRAPH4 @join__graph(name: "Subgraph4", url: "none")
 }
 
 scalar link__Import
@@ -60,26 +84,30 @@ enum link__Purpose {
   EXECUTION
 }
 
+type P
+  @join__type(graph: SUBGRAPH1, key: "pid")
+  @join__type(graph: SUBGRAPH2)
+  @join__type(graph: SUBGRAPH3, key: "pid")
+{
+  pid: ID!
+  jd: J @join__field(graph: SUBGRAPH2, external: true) @join__field(graph: SUBGRAPH3)
+}
+
 type Query
   @join__type(graph: SUBGRAPH1)
   @join__type(graph: SUBGRAPH2)
+  @join__type(graph: SUBGRAPH3)
+  @join__type(graph: SUBGRAPH4)
 {
-  i: I @join__field(graph: SUBGRAPH1)
+  r: R @join__field(graph: SUBGRAPH1)
 }
 
-type S
-  @join__type(graph: SUBGRAPH1)
-  @join__type(graph: SUBGRAPH2)
-{
-  x: Int
-  y: Int @join__field(graph: SUBGRAPH2)
-}
-
-type T implements I
-  @join__implements(graph: SUBGRAPH1, interface: "I")
+type R
   @join__type(graph: SUBGRAPH1, key: "id")
   @join__type(graph: SUBGRAPH2, key: "id")
+  @join__type(graph: SUBGRAPH3, key: "id")
 {
   id: ID!
-  s: S
+  p: P @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true) @join__field(graph: SUBGRAPH3)
+  out: Int @join__field(graph: SUBGRAPH2, requires: "p { jd { ... on H { x } } }")
 }
