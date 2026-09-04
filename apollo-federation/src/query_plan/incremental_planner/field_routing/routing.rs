@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use tracing::trace;
@@ -7,6 +8,8 @@ use tracing::trace;
 use super::FieldRoutingSearchSpace;
 use super::RoutingSiteKey;
 use super::state::PendingSelection;
+use crate::connectors::Connector;
+use crate::connectors::EntityResolver;
 use crate::error::FederationError;
 use crate::operation::FieldSelection;
 use crate::operation::InlineFragmentSelection;
@@ -26,6 +29,12 @@ pub(crate) enum RoutingTarget {
     SubgraphEdge {
         edge_index: EdgeIndex,
         target_subgraph: Arc<str>,
+    },
+    /// Connector resolution (no query graph edge); the connector resolves
+    /// the field and its entire sub-selection tree.
+    Connector {
+        connector: Arc<Connector>,
+        source_subgraph: Arc<str>,
     },
     /// Per-concrete-type explosion at an abstract position: field on an
     /// abstract type with no direct FieldCollection edge decomposes into
@@ -169,12 +178,43 @@ impl RoutingChoice {
         }
     }
 
-    /// Target subgraph name.
+    /// A connector route; a key hop when `key_conditions` is given.
+    pub(super) fn connector(
+        connector: Arc<Connector>,
+        source_subgraph: Arc<str>,
+        key_conditions: Option<Arc<SelectionSet>>,
+    ) -> Self {
+        let hop_kind = if key_conditions.is_some() {
+            HopKind::KeyHop
+        } else {
+            HopKind::Direct
+        };
+        Self {
+            target: RoutingTarget::Connector {
+                connector,
+                source_subgraph,
+            },
+            hop_kind,
+            key_conditions,
+            conditions_locally_satisfiable: true,
+            conditions_provided: false,
+            requires_resolvable_in_place: true,
+            self_entity_reentry: false,
+            conditions_unroutable: false,
+            intermediate_key_hops: Vec::new(),
+        }
+    }
+
+    /// Target subgraph name (the connector's source subgraph for connector
+    /// routes).
     pub(crate) fn target_subgraph(&self) -> &Arc<str> {
         match &self.target {
             RoutingTarget::SubgraphEdge {
                 target_subgraph, ..
             } => target_subgraph,
+            RoutingTarget::Connector {
+                source_subgraph, ..
+            } => source_subgraph,
             RoutingTarget::TypeExplosion => {
                 static LABEL: std::sync::LazyLock<Arc<str>> =
                     std::sync::LazyLock::new(|| Arc::from("<type-explosion>"));
@@ -192,9 +232,21 @@ impl RoutingChoice {
     pub(crate) fn edge_index(&self) -> EdgeIndex {
         match &self.target {
             RoutingTarget::SubgraphEdge { edge_index, .. } => *edge_index,
-            RoutingTarget::TypeExplosion | RoutingTarget::RestructureFragment => {
+            RoutingTarget::Connector { .. }
+            | RoutingTarget::TypeExplosion
+            | RoutingTarget::RestructureFragment => {
                 panic!("edge_index() called on a non-edge routing choice")
             }
+        }
+    }
+
+    /// Query graph edge index, if this is a subgraph edge route.
+    pub(crate) fn edge_index_opt(&self) -> Option<EdgeIndex> {
+        match &self.target {
+            RoutingTarget::SubgraphEdge { edge_index, .. } => Some(*edge_index),
+            RoutingTarget::Connector { .. }
+            | RoutingTarget::TypeExplosion
+            | RoutingTarget::RestructureFragment => None,
         }
     }
 }
@@ -204,9 +256,13 @@ impl RoutingChoice {
 enum RoutingPreference {
     Provides,
     DirectLocal,
+    /// A connector resolving the field directly (no key hop).
+    DirectConnector,
     /// Same-subgraph entity re-entry for in-place-unresolvable @requires.
     SelfRequiresHop,
     LocallySatisfiableKeyHop,
+    /// A connector reached through entity resolution.
+    ConnectorEntityResolver,
     RemoteKeyHop,
     /// A 2+ hop key chain. Costs multiple entity fetches, so it ranks
     /// below single remote hops.
@@ -695,7 +751,7 @@ impl FieldRoutingSearchSpace {
         let key = (
             pending.query_graph_node,
             super::SelectionArcKey::new(&pending.selection),
-            None::<super::ArcKey<std::collections::HashSet<apollo_compiler::Name>>>,
+            None::<super::ArcKey<std::collections::HashSet<Name>>>,
         );
         let unfiltered = if let Some(cached) = self.caches.routing_options.borrow().get(&key) {
             cached.clone()
@@ -763,23 +819,39 @@ impl FieldRoutingSearchSpace {
             }
         }
 
-        // Rank root options by locally-resolvable sub-selection count.
+        // Connectors on root fields (Query/Mutation).
+        let current_node_data = self
+            .cached_query_graph
+            .query_graph
+            .node_weight(pending.query_graph_node)?;
+        if let QueryGraphNodeType::FederatedRootType(root_kind) = &current_node_data.type_
+            && let Some(root_type_name) = self
+                .supergraph_schema
+                .schema()
+                .root_operation((*root_kind).into())
+        {
+            self.push_connector_options(
+                &mut options,
+                root_type_name,
+                field_selection.field.name(),
+                true,
+            );
+        }
+
+        // Rank root options by locally-resolvable sub-selection count,
+        // preferring subgraphs that satisfy more children in one fetch.
         if options.len() > 1
             && let Some(sub_ss) = field_selection.selection_set.as_ref()
         {
             options.sort_by(|a, b| {
-                let count_a = self
-                    .cached_query_graph
-                    .query_graph
-                    .edge_endpoints(a.edge_index())
-                    .ok()
+                let count_a = a
+                    .edge_index_opt()
+                    .and_then(|ei| self.qg().edge_endpoints(ei).ok())
                     .map(|(_, target)| self.count_local_sub_selections(target, sub_ss))
                     .unwrap_or(0);
-                let count_b = self
-                    .cached_query_graph
-                    .query_graph
-                    .edge_endpoints(b.edge_index())
-                    .ok()
+                let count_b = b
+                    .edge_index_opt()
+                    .and_then(|ei| self.qg().edge_endpoints(ei).ok())
                     .map(|(_, target)| self.count_local_sub_selections(target, sub_ss))
                     .unwrap_or(0);
                 count_b.cmp(&count_a)
@@ -835,6 +907,34 @@ impl FieldRoutingSearchSpace {
             }
         }
 
+        // Connectors resolving this field on this type. A connector route
+        // covers the field's entire sub-selection tree, so when one exists
+        // there is no dead end to recover from and key hops are unnecessary.
+        let current_node_data = self
+            .cached_query_graph
+            .query_graph
+            .node_weight(pending.query_graph_node)?;
+        if let Ok(type_pos) =
+            CompositeTypeDefinitionPosition::try_from(current_node_data.type_.clone())
+        {
+            self.push_connector_options(
+                &mut options,
+                type_pos.type_name(),
+                field_selection.field.name(),
+                false,
+            );
+        }
+        if options
+            .iter()
+            .any(|opt| matches!(opt.target, RoutingTarget::Connector { .. }))
+        {
+            return Ok(options);
+        }
+
+        // No direct connector: drop unexecutable connector-subgraph edges
+        // before deciding whether key hops are needed.
+        self.drop_connector_subgraph_edges(&mut options);
+
         let key = RoutingSiteKey::Field(field_selection.field.name().clone());
         let hops = self.cached_key_hops(
             pending.query_graph_node,
@@ -846,6 +946,21 @@ impl FieldRoutingSearchSpace {
             },
         )?;
         options.extend(hops.iter().cloned());
+
+        // Key hops into connector-backed subgraphs are equally unexecutable;
+        // entity-resolver connector hops replace them.
+        self.drop_connector_subgraph_edges(&mut options);
+
+        // Entity-resolver connector hops.
+        if let Ok(type_pos) =
+            CompositeTypeDefinitionPosition::try_from(current_node_data.type_.clone())
+        {
+            self.push_entity_resolver_options(
+                &mut options,
+                type_pos.type_name(),
+                field_selection.field.name(),
+            );
+        }
 
         if !options.is_empty()
             && self.abstract_type_has_cross_subgraph_keys(pending.query_graph_node)?
@@ -918,6 +1033,11 @@ impl FieldRoutingSearchSpace {
             }
         }
 
+        // Connector-backed subgraphs have no GraphQL endpoint; drop their
+        // edges before enumerating key hops so they don't crowd out real
+        // alternatives.
+        self.drop_connector_subgraph_edges(&mut options);
+
         trace!(
             type_condition = %type_cond.type_name(),
             "searching key hops for fragment downcast",
@@ -933,6 +1053,10 @@ impl FieldRoutingSearchSpace {
             },
         )?;
         options.extend(hops.iter().cloned());
+
+        // Key hops into connector-backed subgraphs are equally unexecutable.
+        self.drop_connector_subgraph_edges(&mut options);
+
         Ok(options)
     }
 
@@ -1004,34 +1128,159 @@ impl FieldRoutingSearchSpace {
         Ok(false)
     }
 
+    /// Append connector options for `(type_name, field_name)`, superseding
+    /// subgraph-edge options from the same source subgraph: the resolver for
+    /// a @connect field IS the connector — there is no separate GraphQL
+    /// endpoint for it.
+    fn push_connector_options(
+        &self,
+        options: &mut Vec<RoutingChoice>,
+        type_name: &Name,
+        field_name: &Name,
+        at_root: bool,
+    ) {
+        let Some(connectors) = self.connector_index.by_field(type_name, field_name) else {
+            return;
+        };
+        for connector in connectors {
+            let source_subgraph: Arc<str> = Arc::from(connector.id.subgraph_name.as_str());
+            // A non-root connector commits an entity-style group, which
+            // materializes as an `_entities` fetch; a subgraph with no
+            // entity definitions cannot host one.
+            if !at_root && !self.subgraph_hosts_entity_fetches(&source_subgraph) {
+                continue;
+            }
+            options.retain(|opt| match &opt.target {
+                RoutingTarget::SubgraphEdge {
+                    target_subgraph, ..
+                } => target_subgraph != &source_subgraph,
+                _ => true,
+            });
+            let key_conditions = match &connector.entity_resolver {
+                Some(
+                    EntityResolver::Implicit
+                    | EntityResolver::TypeSingle
+                    | EntityResolver::TypeBatch,
+                ) => self
+                    .connector_index
+                    .key_conditions(&connector.id.coordinate())
+                    .cloned(),
+                _ => None,
+            };
+            options.push(RoutingChoice::connector(
+                connector.clone(),
+                source_subgraph,
+                key_conditions,
+            ));
+        }
+    }
+
+    /// Whether `subgraph`'s extracted schema defines the `_Entity` union:
+    /// entity-style fetch groups materialize as `_entities` operations,
+    /// which only build against a subgraph with at least one resolvable @key.
+    fn subgraph_hosts_entity_fetches(&self, subgraph: &str) -> bool {
+        self.cached_query_graph
+            .query_graph
+            .schema_by_source(subgraph)
+            .ok()
+            .and_then(|schema| schema.entity_type().ok().flatten())
+            .is_some()
+    }
+
+    /// Append entity-resolver connector hops for a field no connector serves
+    /// directly: connectors resolving the whole entity whose `selection`
+    /// returns the field.
+    fn push_entity_resolver_options(
+        &self,
+        options: &mut Vec<RoutingChoice>,
+        type_name: &Name,
+        field_name: &Name,
+    ) {
+        let Some(resolvers) = self.connector_index.entity_resolvers(type_name) else {
+            return;
+        };
+        for connector in resolvers {
+            let coordinate = connector.id.coordinate();
+            if !self
+                .connector_index
+                .resolver_provides(&coordinate, field_name.as_str())
+            {
+                continue;
+            }
+            if !self.subgraph_hosts_entity_fetches(connector.id.subgraph_name.as_str()) {
+                continue;
+            }
+            if options.iter().any(|opt| {
+                matches!(&opt.target, RoutingTarget::Connector { connector: c, .. }
+                    if c.id.coordinate() == coordinate)
+            }) {
+                continue;
+            }
+            let Some(key_conditions) = self.connector_index.key_conditions(&coordinate) else {
+                continue;
+            };
+            options.push(RoutingChoice::connector(
+                connector.clone(),
+                Arc::from(connector.id.subgraph_name.as_str()),
+                Some(key_conditions.clone()),
+            ));
+        }
+    }
+
+    /// Drop subgraph-edge options landing in a connector-backed subgraph:
+    /// no GraphQL endpoint exists behind its service name.
+    fn drop_connector_subgraph_edges(&self, options: &mut Vec<RoutingChoice>) {
+        options.retain(|opt| match &opt.target {
+            RoutingTarget::SubgraphEdge {
+                target_subgraph, ..
+            } => {
+                !self.connector_index.is_connector_subgraph(target_subgraph)
+                    || !self.subgraph_hosts_entity_fetches(target_subgraph)
+            }
+            _ => true,
+        });
+    }
+
     /// Order options best-first: @provides beats a direct local edge beats a
     /// key hop whose conditions are locally satisfiable beats a remote hop.
     pub(super) fn rank_options(&self, options: &mut [RoutingChoice]) {
         options.sort_by_key(|opt| {
-            let edge_index = match &opt.target {
-                RoutingTarget::SubgraphEdge { edge_index, .. } => *edge_index,
-                RoutingTarget::TypeExplosion => return (RoutingPreference::TypeExplosion, 0),
+            let preference = match &opt.target {
+                RoutingTarget::TypeExplosion => {
+                    return (RoutingPreference::TypeExplosion, 0);
+                }
                 RoutingTarget::RestructureFragment => {
                     return (RoutingPreference::RestructureFragment, 0);
                 }
-            };
-            let preference = if let Ok(edge) = self.qg().edge_weight(edge_index) {
-                match &edge.transition {
-                    QueryGraphEdgeTransition::FieldCollection {
-                        is_part_of_provides: true,
-                        ..
-                    } => RoutingPreference::Provides,
-                    _ if opt.hop_kind == HopKind::Direct => RoutingPreference::DirectLocal,
-                    _ if opt.self_entity_reentry => RoutingPreference::SelfRequiresHop,
-                    _ if opt.conditions_unroutable => RoutingPreference::CircularKeyHop,
-                    _ if !opt.intermediate_key_hops.is_empty() => RoutingPreference::ChainedKeyHop,
-                    _ if opt.conditions_locally_satisfiable => {
-                        RoutingPreference::LocallySatisfiableKeyHop
+                RoutingTarget::Connector { .. } => {
+                    if opt.hop_kind == HopKind::KeyHop {
+                        RoutingPreference::ConnectorEntityResolver
+                    } else {
+                        RoutingPreference::DirectConnector
                     }
-                    _ => RoutingPreference::RemoteKeyHop,
                 }
-            } else {
-                RoutingPreference::RemoteKeyHop
+                RoutingTarget::SubgraphEdge { edge_index, .. } => {
+                    if let Ok(edge) = self.qg().edge_weight(*edge_index) {
+                        match &edge.transition {
+                            QueryGraphEdgeTransition::FieldCollection {
+                                is_part_of_provides: true,
+                                ..
+                            } => RoutingPreference::Provides,
+                            _ if opt.hop_kind == HopKind::Direct => RoutingPreference::DirectLocal,
+                            _ if opt.self_entity_reentry => RoutingPreference::SelfRequiresHop,
+                            _ if opt.conditions_unroutable => RoutingPreference::CircularKeyHop,
+                            _ if !opt.intermediate_key_hops.is_empty() => {
+                                RoutingPreference::ChainedKeyHop
+                            }
+                            _ if opt.conditions_locally_satisfiable => {
+                                RoutingPreference::LocallySatisfiableKeyHop
+                            }
+                            _ => RoutingPreference::RemoteKeyHop,
+                        }
+                    } else {
+                        RoutingPreference::RemoteKeyHop
+                    }
+                }
             };
             let key_size = opt
                 .key_conditions
@@ -1243,10 +1492,15 @@ impl FieldRoutingSearchSpace {
             return Ok(true);
         };
         for hop in hops {
+            // Connector hops have no query-graph edge; the connector
+            // resolves its whole subtree, so treat it as reaching.
+            let Some(edge_index) = hop.edge_index_opt() else {
+                return Ok(true);
+            };
             let (_, target) = self
                 .cached_query_graph
                 .query_graph
-                .edge_endpoints(hop.edge_index())?;
+                .edge_endpoints(edge_index)?;
             if self.conditions_routable(target, sub_ss)? {
                 return Ok(true);
             }
@@ -1309,7 +1563,7 @@ impl FieldRoutingSearchSpace {
                     {
                         None => return Ok(false),
                         Some(edge_idx) => {
-                            let edge = self.cached_query_graph.query_graph.edge_weight(edge_idx)?;
+                            let edge = self.qg().edge_weight(edge_idx)?;
                             if !edge.required_contexts.is_empty() {
                                 return Ok(false);
                             }
