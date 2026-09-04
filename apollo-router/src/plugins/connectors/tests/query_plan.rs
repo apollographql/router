@@ -45,9 +45,7 @@ async fn basic_batch() {
         "query { users { id name username } }",
         Default::default(),
         Some(serde_json_bytes::json!({
-            "plugins": {
-              "experimental.expose_query_plan": true
-            }
+            "expose_query_plan": true
         })),
         |req| {
             req.router_request
