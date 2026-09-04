@@ -7,6 +7,7 @@ Sequence {
         Fetch(
             FetchNode {
                 service_name: "product",
+                protocol: GraphQL,
                 requires: [],
                 variable_usages: [],
                 operation: "{topProducts{__typename ...on Book{__typename isbn}...on Furniture{name}}product(upc:\"1\"){__typename ...on Book{__typename isbn}...on Furniture{name}}}",
@@ -48,6 +49,7 @@ Sequence {
                                 node: Fetch(
                                     FetchNode {
                                         service_name: "books",
+                                        protocol: GraphQL,
                                         requires: [
                                             InlineFragment(
                                                 InlineFragment {
@@ -111,6 +113,7 @@ Sequence {
                                 node: Fetch(
                                     FetchNode {
                                         service_name: "product",
+                                        protocol: GraphQL,
                                         requires: [
                                             InlineFragment(
                                                 InlineFragment {
@@ -187,6 +190,7 @@ Sequence {
                                 node: Fetch(
                                     FetchNode {
                                         service_name: "books",
+                                        protocol: GraphQL,
                                         requires: [
                                             InlineFragment(
                                                 InlineFragment {
@@ -245,6 +249,7 @@ Sequence {
                                 node: Fetch(
                                     FetchNode {
                                         service_name: "product",
+                                        protocol: GraphQL,
                                         requires: [
                                             InlineFragment(
                                                 InlineFragment {
