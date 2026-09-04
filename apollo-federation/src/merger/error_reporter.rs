@@ -61,6 +61,10 @@ impl ErrorReporter {
         self.hints.push(hint);
     }
 
+    pub(crate) fn add_hints<I: IntoIterator<Item = CompositionHint>>(&mut self, hints: I) {
+        self.hints.extend(hints);
+    }
+
     #[allow(dead_code)]
     pub(crate) fn has_hints(&self) -> bool {
         !self.hints.is_empty()
