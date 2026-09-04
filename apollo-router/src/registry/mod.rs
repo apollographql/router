@@ -711,21 +711,8 @@ async fn fetch_license_oci(oci_config: &OciConfig) -> Result<License, OciError> 
     let license_repository = format!("entitlements/{identifier}");
     let registry = schema_reference.registry().to_string();
 
-    // Build the license Reference, select the relevant constructor based on the
-    // presence or absence of the tag and digest
-    let license_reference = match (schema_reference.tag(), schema_reference.digest()) {
-        (Some(tag), Some(digest)) => Reference::with_tag_and_digest(
-            registry,
-            license_repository,
-            tag.to_string(),
-            digest.to_string(),
-        ),
-        (Some(tag), None) => Reference::with_tag(registry, license_repository, tag.to_string()),
-        (None, Some(digest)) => {
-            Reference::with_digest(registry, license_repository, digest.to_string())
-        }
-        (None, None) => Reference::with_tag(registry, license_repository, "latest".to_string()),
-    };
+    // Build the license Reference, fetching the latest digest
+    let license_reference = Reference::with_tag(registry, license_repository, "latest".to_string());
 
     // Fetch the license
     match fetch_license_from_reference(client, &auth, &license_reference, Some(oci_config)).await {
