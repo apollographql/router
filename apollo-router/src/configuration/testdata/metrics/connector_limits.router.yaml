@@ -1,0 +1,8 @@
+limits:
+  connector:
+    all:
+      http_max_response_size: 5MiB
+      max_mapping_errors: 100
+    sources:
+      products.rest:
+        max_mapping_errors: 20

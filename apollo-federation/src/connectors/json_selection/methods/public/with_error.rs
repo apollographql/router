@@ -243,8 +243,8 @@ fn with_error_method(
 /// The fields of a structured `->withError({ message: ..., extensions: ... })`
 /// argument, recognized because the object carries a `message`.
 ///
-/// `message` must be a string, because that is what the GraphQL response's
-/// `errors[].message` is; a non-string there is a mistake worth naming rather
+/// `message` must be a string, because that is what the reported error's
+/// `message` is; a non-string there is a mistake worth naming rather
 /// than quietly stringifying, since the alternative is a client reading
 /// `"[object]"` and no way to tell where it came from. `extensions` must be an
 /// object for the same reason. Either mistake costs the message, the same as a

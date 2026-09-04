@@ -27,6 +27,7 @@ use crate::services::RouterResponse;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphResponse;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
+use apollo_federation::connectors::runtime::responses::MappedResponse;
 
 #[cfg(test)]
 mod tests;
@@ -50,6 +51,42 @@ pub(crate) async fn count_subgraph_errors(
         id: response.id,
         response: response.response,
     }
+}
+
+/// Count the errors a connector mapping declared with `->withError`.
+///
+/// These are reported to clients in `extensions.connectorErrors` rather than in
+/// `errors` — the fields they describe resolved, and the GraphQL spec reserves
+/// `errors` for response positions absent from `data` — but they are errors the
+/// schema author raised on purpose, so they count like any other.
+///
+/// Counted at the connector layer, and not from the reported extension, for the
+/// same reason subgraph errors are counted at the subgraph layer: so that
+/// client-facing redaction cannot suppress a metric. `include_subgraph_errors`
+/// decides what a client sees, and it is applied later, when the response is
+/// built; what leaves the process as telemetry is decided by
+/// `telemetry.apollo.errors.subgraph`, which `count_operation_errors` honours.
+///
+/// This is the only place they are counted. They leave the `errors` array at the
+/// fetch service, so no later layer sees them to count again.
+pub(crate) fn count_connector_errors(
+    response: &crate::services::connector::request_service::Response,
+    errors_config: &ErrorsConfiguration,
+) {
+    let MappedResponse::Data { errors, .. } = &response.mapped_response else {
+        // A failed response reports one error explaining the failure, which is
+        // counted where every other connector error is: at the execution layer,
+        // once it reaches the `errors` array.
+        return;
+    };
+    if errors.is_empty() {
+        return;
+    }
+
+    // `RuntimeError::extensions` stamps `service` and the connector's
+    // coordinate, so the counted attributes match what the client would see.
+    let errors: Vec<Error> = errors.iter().cloned().map(Into::into).collect();
+    count_operation_errors(errors.iter(), &response.context, errors_config);
 }
 
 pub(crate) async fn count_supergraph_errors(

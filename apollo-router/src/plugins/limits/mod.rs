@@ -211,11 +211,11 @@ pub(crate) struct ConnectorLimits {
     #[schemars(with = "Option<String>", default)]
     pub(crate) http_max_response_size: Option<ByteSize>,
 
-    /// Limit how many errors a connector's response mapping may add to the GraphQL
-    /// response via `->withError`. A `->withError` inside a `->map` records one error
-    /// per element, so a mapping over a large API response can contribute an error per
-    /// row. Errors past the limit are replaced by a single summary error naming how
-    /// many were dropped. Default: no limit.
+    /// Limit how many errors a connector's response mapping may report in the response's
+    /// `extensions.connectorErrors` via `->withError`. A `->withError` inside a `->map`
+    /// records one error per element, so a mapping over a large API response can
+    /// contribute an error per row. Errors past the limit are replaced by a single
+    /// summary error naming how many were dropped. Default: no limit.
     #[schemars(default)]
     pub(crate) max_mapping_errors: Option<usize>,
 }
@@ -225,7 +225,7 @@ pub(crate) struct ConnectorLimits {
 pub(crate) struct ConnectorResponseSizeLimit(pub usize);
 
 /// Extension type placed on the request context to signal how many mapping errors a
-/// connector response may contribute to the GraphQL `errors` array.
+/// connector response may contribute to the response's `extensions.connectorErrors`.
 #[derive(Clone, Copy, Debug, Ord, PartialOrd, PartialEq, Eq)]
 pub(crate) struct ConnectorMappingErrorLimit(pub usize);
 

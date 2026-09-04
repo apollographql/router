@@ -438,7 +438,12 @@ fn selection_path(error: &ApplyToError) -> String {
 }
 
 /// Turn an error the schema author declared with `->withError` into the
-/// client-facing GraphQL error it was written to be.
+/// client-facing report it was written to be.
+///
+/// The result is a [`RuntimeError`] because that is the type the connectors
+/// runtime builds errors with, not because it becomes a GraphQL error: the
+/// router surfaces these under the response's `extensions`, since the field
+/// they describe resolved and is present in `data`.
 ///
 /// The author's `extensions` are merged over the connector's defaults rather
 /// than replacing them, matching what `map_error` already does for
@@ -693,21 +698,47 @@ pub enum MappedResponse {
         data: Value,
         key: ResponseKey,
         problems: Vec<Problem>,
-        /// Errors the mapping author declared with `->withError`, to be added
-        /// to the GraphQL response's `errors` array alongside this data.
+        /// Errors the mapping author declared with `->withError`, to be
+        /// reported to the client alongside this data.
         ///
         /// Distinct from `problems`, which never leave the router: these are
         /// addressed to the client, and the field resolves normally in spite
         /// of them — that combination is the whole point of `->withError`, and
         /// is why they cannot ride along in the `Error` variant instead.
+        ///
+        /// They are deliberately *not* GraphQL errors. [The spec][spec] says a
+        /// response position at which an execution error was raised must not
+        /// appear in `data`, and a declared error's field does appear — it
+        /// resolved. So the router carries these out of band and surfaces them
+        /// under the response's `extensions`, not its `errors`. Read them with
+        /// [`MappedResponse::take_declared_errors`]; [`Self::add_to_data`]
+        /// deliberately leaves them alone.
+        ///
+        /// [spec]: https://spec.graphql.org/draft/#sec-Errors.Execution-Errors
         errors: Vec<RuntimeError>,
     },
 }
 
 impl MappedResponse {
+    /// Removes the errors the mapping author declared with `->withError`, so
+    /// the caller can report them out of band.
+    ///
+    /// They must leave before [`Self::add_to_data`] runs: that function builds
+    /// the GraphQL `errors` array, and a declared error does not belong there
+    /// while its field is present in `data`.
+    pub fn take_declared_errors(&mut self) -> Vec<RuntimeError> {
+        match self {
+            Self::Error { .. } => Vec::new(),
+            Self::Data { errors, .. } => std::mem::take(errors),
+        }
+    }
+
     /// Adds the response data to the `data` map or the error to the `errors`
     /// array. How data is added depends on the `ResponseKey`: it's either a
     /// property directly on the map, or stored in the `_entities` array.
+    ///
+    /// Errors declared with `->withError` are not added: they are not GraphQL
+    /// errors, and [`Self::take_declared_errors`] is how they are collected.
     pub fn add_to_data(
         self,
         data: &mut Map<ByteString, Value>,
@@ -734,16 +765,8 @@ impl MappedResponse {
                 errors.push(error);
             }
             Self::Data {
-                data: value,
-                key,
-                errors: declared,
-                ..
+                data: value, key, ..
             } => {
-                // The data is still added below: a declared error accompanies
-                // its field rather than replacing it, which is the difference
-                // between `->withError` and failing the field.
-                errors.extend(declared);
-
                 match key {
                     ResponseKey::RootField { ref name, .. } => {
                         data.insert(name.clone(), value);
@@ -1262,14 +1285,15 @@ mod tests {
     }
 
     /// The whole point of `->withError`, asserted where it actually has to
-    /// hold: the field resolves with its default *and* the error reaches the
-    /// GraphQL `errors` array, carrying the author's code and structured
-    /// fields. Asserted through `add_to_data`, the function that builds the
-    /// client-facing response, rather than on the intermediate value, because
-    /// the gap this closes was precisely that the intermediate value was
-    /// correct and nothing carried it any further.
+    /// hold: the field resolves with its default *and* the error is reported,
+    /// carrying the author's code and structured fields. Asserted through the
+    /// pair of functions that build the client-facing response — the declared
+    /// errors leaving through `take_declared_errors`, the data through
+    /// `add_to_data` — rather than on the intermediate value, because the gap
+    /// this closes was precisely that the intermediate value was correct and
+    /// nothing carried it any further.
     #[test]
-    fn a_declared_error_reaches_the_response_errors_beside_its_resolved_field() {
+    fn a_declared_error_reaches_the_response_beside_its_resolved_field() {
         let connector = make_connector(None, ConnectSpec::V0_5);
         let key = root_field_key_with_selection(
             "account",
@@ -1279,7 +1303,7 @@ mod tests {
             })"#,
         );
 
-        let mapped = map_response(
+        let mut mapped = map_response(
             &connector,
             &json!({ "id": "acct-1" }),
             key,
@@ -1287,15 +1311,23 @@ mod tests {
             Vec::new(),
         );
 
+        let errors = mapped.take_declared_errors();
         let mut data = Map::new();
-        let mut errors = Vec::new();
-        mapped.add_to_data(&mut data, &mut errors, 1).unwrap();
+        let mut graphql_errors = Vec::new();
+        mapped
+            .add_to_data(&mut data, &mut graphql_errors, 1)
+            .unwrap();
 
         // The field resolved, with the default: nothing was nulled out.
         assert_eq!(
             data.get("account"),
             Some(&json!({ "balance": "<missing>" })),
         );
+
+        // And the error is not a GraphQL error: the spec reserves those for
+        // response positions absent from `data`, and `account.balance` is
+        // present.
+        assert!(graphql_errors.is_empty());
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].message, "Field 'amount' was not found");
@@ -1326,7 +1358,7 @@ mod tests {
             r#"balance: amount ?? $("<missing>")->withError("Field 'amount' was not found")"#,
         );
 
-        let mapped = map_response(
+        let mut mapped = map_response(
             &connector,
             &json!({ "id": "acct-1" }),
             key,
@@ -1343,10 +1375,11 @@ mod tests {
             mapped.problems(),
         );
 
-        let mut data = Map::new();
-        let mut errors = Vec::new();
-        mapped.add_to_data(&mut data, &mut errors, 1).unwrap();
-        assert_eq!(errors.len(), 1, "and still reach the client");
+        assert_eq!(
+            mapped.take_declared_errors().len(),
+            1,
+            "and still reach the client"
+        );
     }
 
     /// The error path has to name the field the mapping *writes*, not the one
@@ -1392,11 +1425,8 @@ mod tests {
         for (selection, data, expected_path) in cases {
             let connector = make_connector(None, ConnectSpec::V0_5);
             let key = root_field_key_with_selection("account", selection);
-            let mapped = map_response(&connector, data, key, IndexMap::default(), Vec::new());
-
-            let mut out = Map::new();
-            let mut errors = Vec::new();
-            mapped.add_to_data(&mut out, &mut errors, 1).unwrap();
+            let mut mapped = map_response(&connector, data, key, IndexMap::default(), Vec::new());
+            let errors = mapped.take_declared_errors();
 
             assert_eq!(errors.len(), 1, "for selection `{selection}`");
             assert_eq!(
@@ -1418,7 +1448,7 @@ mod tests {
             r#"rows: items->filter(@.keep->withError("checking"))"#,
         );
 
-        let mapped = map_response(
+        let mut mapped = map_response(
             &connector,
             &json!({ "items": [{ "keep": false }, { "keep": true }] }),
             key,
@@ -1426,11 +1456,7 @@ mod tests {
             Vec::new(),
         );
 
-        let mut out = Map::new();
-        let mut errors = Vec::new();
-        mapped.add_to_data(&mut out, &mut errors, 1).unwrap();
-
-        for error in &errors {
+        for error in &mapped.take_declared_errors() {
             assert_eq!(
                 error.path, "account/rows",
                 "filter must not attribute an input index to an output element",
@@ -1447,7 +1473,7 @@ mod tests {
         let connector = make_connector(None, ConnectSpec::V0_5);
         let key = root_field_key_with_selection("account", "balance: nope");
 
-        let mapped = map_response(
+        let mut mapped = map_response(
             &connector,
             &json!({ "id": "acct-1" }),
             key,
@@ -1466,10 +1492,7 @@ mod tests {
         );
 
         // ...and stayed out of the client's response.
-        let mut data = Map::new();
-        let mut errors = Vec::new();
-        mapped.add_to_data(&mut data, &mut errors, 1).unwrap();
-        assert_eq!(errors.len(), 0);
+        assert_eq!(mapped.take_declared_errors().len(), 0);
     }
 
     /// `->withError` behaves the same at every spec version, like every other
@@ -1490,7 +1513,7 @@ mod tests {
             r#"balance: amount ?? $("<missing>")->withError("Field 'amount' was not found")"#,
         );
 
-        let mapped = map_response(
+        let mut mapped = map_response(
             &connector,
             &json!({ "id": "acct-1" }),
             key,
@@ -1499,10 +1522,7 @@ mod tests {
         );
 
         let problems = mapped.problems().to_vec();
-
-        let mut data = Map::new();
-        let mut errors = Vec::new();
-        mapped.add_to_data(&mut data, &mut errors, 1).unwrap();
+        let errors = mapped.take_declared_errors();
 
         assert_eq!(errors.len(), 1, "{spec:?} must surface declared errors");
         assert_eq!(errors[0].message, "Field 'amount' was not found");
@@ -1533,7 +1553,7 @@ mod tests {
             .map(|index| json!({ "code": index }))
             .collect::<Vec<_>>();
 
-        let mapped = map_response(
+        let mut mapped = map_response(
             &connector,
             &json!({ "rows": rows }),
             key,
@@ -1541,9 +1561,7 @@ mod tests {
             Vec::new(),
         );
 
-        let mut data = Map::new();
-        let mut errors = Vec::new();
-        mapped.add_to_data(&mut data, &mut errors, 1).unwrap();
+        let errors = mapped.take_declared_errors();
 
         assert_eq!(errors.len(), row_count);
         // And each one still names its own element, rather than the last few
@@ -1568,7 +1586,7 @@ mod tests {
             r#"$.rows->map(@.code->withError("bad code:", @))"#,
         );
 
-        let mapped = map_response(
+        let mut mapped = map_response(
             &connector,
             &json!({ "rows": [{ "code": 7 }, { "code": 7 }] }),
             key,
@@ -1576,9 +1594,7 @@ mod tests {
             Vec::new(),
         );
 
-        let mut data = Map::new();
-        let mut errors = Vec::new();
-        mapped.add_to_data(&mut data, &mut errors, 1).unwrap();
+        let errors = mapped.take_declared_errors();
 
         // Identical messages, still two errors — aggregation would have made
         // this one problem with a count of 2.

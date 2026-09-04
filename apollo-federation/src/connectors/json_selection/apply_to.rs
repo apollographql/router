@@ -342,7 +342,7 @@ impl ShapeContext {
 /// describes the mapping's internals rather than the request's outcome. A
 /// [`Self::Declared`] is a sentence the schema author wrote on purpose with
 /// `->withError`, addressed to the client, and it is the only kind eligible
-/// to reach the GraphQL `errors` array.
+/// to be reported in the client's response, under its `extensions`.
 ///
 /// The distinction has to live on the error itself rather than being inferred
 /// at the point of collection: by the time a `Vec<ApplyToError>` reaches the
@@ -541,8 +541,8 @@ impl ApplyToError {
     /// first and the outermost last, leaving the segments in reading order.
     ///
     /// Only [`ApplyToErrorKind::Declared`] errors accumulate an output path,
-    /// because only they become client-facing GraphQL errors, which is the one
-    /// thing an output path is for. A diagnostic is addressed to the mapping
+    /// because only they are reported to the client, which is the one thing an
+    /// output path is for. A diagnostic is addressed to the mapping
     /// author, who wants [`Self::path`] — where the mapping was reading when it
     /// went wrong — and would be misled by a path naming the field it was
     /// writing. Restricting it this way also keeps every existing diagnostic
