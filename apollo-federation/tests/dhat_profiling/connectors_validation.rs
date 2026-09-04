@@ -45,7 +45,10 @@ fn valid_large_body() {
         .expand_links()
         .unwrap()
         .validate()
-        .ok();
+        // Not `.ok()`: connectors validation runs first and returns early on any error, so a fixture
+        // that drifted into being invalid would silently shrink the profiled region to
+        // parse-and-bail and let the limits below pass no matter how much the real path regressed.
+        .expect("fixture is expected to validate");
 
     let stats = dhat::HeapStats::get();
     dhat::assert!(
@@ -80,5 +83,7 @@ fn warm_up_lazy_statics() {
         .expand_links()
         .unwrap()
         .validate()
-        .ok();
+        // Same reason as above: a warm-up that bailed early would leave part of the one-time
+        // initialization unpaid, and it would land inside the profiled region instead.
+        .expect("warm-up subgraph is expected to validate");
 }
