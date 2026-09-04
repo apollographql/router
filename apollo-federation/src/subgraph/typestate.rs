@@ -576,14 +576,13 @@ impl Subgraph<Expanded> {
         }
     }
 
-    /// Validates the connectors (`@source`/`@connect`) directives.
+    /// Validates the expanded schema: first the connectors (`@source`/`@connect`) directives, then
+    /// GraphQL and Federation rules.
     ///
-    /// Runs on the expanded-but-not-yet-validated schema: expansion has put the connect and
-    /// federation definitions in place, and GraphQL validation has not happened yet, so a subgraph
-    /// that is both connector-invalid and GraphQL-invalid still reports its connector diagnostics.
-    /// See `ConnectorsBlueprint::on_validation`.
-    ///
-    /// Validates the expanded schema against GraphQL and Federation rules.
+    /// Connectors validation runs on the expanded-but-not-yet-validated schema: expansion has put
+    /// the connect and federation definitions in place, and GraphQL validation has not happened yet,
+    /// so a subgraph that is both connector-invalid and GraphQL-invalid still reports its connector
+    /// diagnostics. See `ConnectorsBlueprint::on_validation`.
     ///
     /// This is the only place GraphQL validation happens for a subgraph that needs no fed1 upgrade
     /// and no root type normalization; [`Subgraph::<Upgraded>::validate`] is its counterpart for

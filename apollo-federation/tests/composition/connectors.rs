@@ -920,6 +920,9 @@ type Resource @key(fields: "id") {
                 type Query {
                     resources: [Resource!]!
                     @connect(source: "v1", http: { GET: "/resources" }, selection: "id name")
+
+                    resource(id: ID!): Resource
+                    @connect(source: "v1", http: { GET: "/resources/{$args.id}" }, selection: "id name", entity: true)
                 }
 
                 type Resource @key(fields: "id") {
@@ -952,11 +955,9 @@ type Resource @key(fields: "id") {
             .iter()
             .map(|e| e.code().definition().code())
             .collect();
-        assert!(
-            !codes.contains(&"OVERRIDE_ON_CONNECTOR"),
-            "Merge errors should be reported alone, got: {codes:?}"
-        );
-        assert!(!codes.is_empty(), "Expected merge errors");
+        // Asserted exactly: anything else (a connectors validation error, say) would mean the merge
+        // conflict this test is built around was never reached.
+        assert_eq!(codes, vec!["FIELD_TYPE_MISMATCH"]);
     }
 
     /// Merge hints have to survive the connector-expansion detour: satisfiability runs against a

@@ -36,6 +36,7 @@ use crate::link::Import;
 use crate::link::Link;
 use crate::link::spec::Identity;
 use crate::schema::HasFields;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
@@ -505,6 +506,11 @@ impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
 /// This goes through [`FederationSchema::key_directive_applications`] rather than scanning for a
 /// directive literally named `key`, so a subgraph that imports `@key` under an alias — or doesn't
 /// import it at all, leaving it as `federation__key` — still has its keys found.
+///
+/// Only keys on object types are returned. `key_directive_applications` also yields interface keys,
+/// but entity resolution for an interface goes through its implementing objects, which carry their
+/// own `@key`; demanding an entity connector for the interface itself would reject a subgraph whose
+/// implementations are all resolvable.
 fn find_all_resolvable_keys<'a>(
     schema: &'a SchemaInfo,
 ) -> Vec<(FieldSet, &'a Component<Directive>)> {
@@ -518,6 +524,12 @@ fn find_all_resolvable_keys<'a>(
         // Malformed applications are reported by the federation validators, not here.
         .filter_map(Result::ok)
         .filter(|key| key.resolvable())
+        .filter(|key| {
+            matches!(
+                key.target(),
+                ObjectOrInterfaceTypeDefinitionPosition::Object(_)
+            )
+        })
         .filter(|key| key.schema_directive().location().is_some())
         .filter_map(|key| {
             let field_set = Parser::new()
