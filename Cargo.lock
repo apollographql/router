@@ -1617,6 +1617,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "connector-request-header"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-federation",
+ "apollo-router",
+ "async-trait",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "console"
 version = "0.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

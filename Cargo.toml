@@ -9,6 +9,7 @@ members = [
     "examples/add-timestamp-header/rhai",
     "examples/async-auth/rust",
     "examples/cache-control/rhai",
+    "examples/connector-request-header/rust",
     "examples/context/rust",
     "examples/cookies-to-headers/rhai",
     "examples/data-response-mutate/rhai",

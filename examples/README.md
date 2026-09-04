@@ -37,6 +37,7 @@ Scripting support.
 Writing your own plugins in rust!
 
 - [Async auth](./async-auth/rust)
+- [Connector request header](./connector-request-header/rust)
 - [Context](./context/rust)
 - [Forbid anonymous operations](./forbid-anonymous-operations/rust)
 - [Forbid mutations](./forbid-mutations/rust)

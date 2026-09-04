@@ -1,0 +1,2 @@
+plugins:
+  example.connector_request_header: null
