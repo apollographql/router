@@ -2342,7 +2342,7 @@ expression: "&schema"
         },
         "max_mapping_errors": {
           "default": null,
-          "description": "Limit how many errors a connector's response mapping may add to the GraphQL\nresponse via `->withError`. A `->withError` inside a `->map` records one error\nper element, so a mapping over a large API response can contribute an error per\nrow. Errors past the limit are replaced by a single summary error naming how\nmany were dropped. Default: no limit.",
+          "description": "Limit how many errors a connector's response mapping may report in the response's\n`extensions.connectorErrors` via `->withError`. A `->withError` inside a `->map`\nrecords one error per element, so a mapping over a large API response can\ncontribute an error per row. Errors past the limit are replaced by a single\nsummary error naming how many were dropped. Default: no limit.",
           "format": "uint",
           "minimum": 0,
           "type": [

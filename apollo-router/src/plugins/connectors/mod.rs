@@ -1,4 +1,5 @@
 pub(crate) mod configuration;
+pub(crate) mod declared_errors;
 pub(crate) mod handle_responses;
 pub(crate) mod incompatible;
 pub(crate) mod make_requests;

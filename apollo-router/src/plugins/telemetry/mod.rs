@@ -117,6 +117,7 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
+use crate::plugins::telemetry::error_counter::count_connector_errors;
 use crate::plugins::telemetry::error_counter::count_execution_errors;
 use crate::plugins::telemetry::error_counter::count_router_errors;
 use crate::plugins::telemetry::error_counter::count_subgraph_errors;
@@ -1213,6 +1214,14 @@ impl PluginPrivate for Telemetry {
                                 custom_instruments.on_response(response);
                                 apollo_connector_instruments.on_response(response);
                                 custom_events.on_response(response);
+                                // Errors the mapping declared with `->withError`.
+                                // Counted here, before `include_subgraph_errors`
+                                // decides what the client sees, so that
+                                // client-facing redaction cannot suppress a
+                                // metric — the same reason subgraph errors are
+                                // counted at the subgraph layer. The connector
+                                // span is current, so any error event lands on it.
+                                count_connector_errors(response, &conf.apollo.errors);
                             }
                             Err(err) => {
                                 span.set_span_dyn_attributes(

@@ -568,6 +568,9 @@ mod tests {
 
     use super::*;
     use crate::Configuration;
+    use crate::Context;
+    use crate::plugins::connectors::declared_errors::ConnectorDeclaredErrors;
+    use crate::plugins::connectors::declared_errors::DECLARED_ERROR_MARKER;
 
     fn test_schema() -> Schema {
         let sdl = r#"
@@ -933,6 +936,67 @@ mod tests {
             .unwrap();
         assert_eq!(arr[0], json!({"name": "Alice"}));
         assert_eq!(arr[2], json!({"name": "Alice"}));
+    }
+
+    /// Why a connector's `->withError` errors ride in the `errors` array as
+    /// far as the fetch service before being lifted into the response
+    /// `extensions`: this is the only place that turns the connector-local
+    /// path they are declared at into paths a client can resolve, and it does
+    /// it once per place the entity was fetched for.
+    ///
+    /// Asserted here rather than in the connectors plugin because the rewrite
+    /// is the fetch node's, and a change to it — the entity branch dropping
+    /// extensions, say — would silently strip the marker and leave declared
+    /// errors sitting in `errors` where the spec says they must not be.
+    #[test]
+    fn entity_fetch_rewrites_paths_of_connector_declared_errors() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("accounts"), flatten()]);
+        let inverted_paths = vec![vec![
+            Path(vec![key("accounts"), index(0)]),
+            Path(vec![key("accounts"), index(2)]),
+        ]];
+        let response = graphql::Response::builder()
+            .data(json!({ "_entities": [{ "balance": 0 }] }))
+            .error(
+                graphql::Error::builder()
+                    .message("balance unavailable")
+                    .path(Path::from("_entities/0/balance"))
+                    .extension_code("CONNECTORS_MAPPING_ERROR")
+                    .extension(DECLARED_ERROR_MARKER, Value::Bool(true))
+                    .build(),
+            )
+            .build();
+
+        let (_value, mut errors) =
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+
+        // One error per path the entity landed at, each naming that path...
+        assert_eq!(errors.len(), 2);
+        assert_eq!(
+            errors
+                .iter()
+                .map(|error| error.path.as_ref().map(ToString::to_string))
+                .collect::<Vec<_>>(),
+            vec![
+                Some("/accounts/0/balance".to_string()),
+                Some("/accounts/2/balance".to_string()),
+            ],
+        );
+
+        // ...and the marker survived the rebuild, so the hand-off still
+        // recognizes them.
+        let context = Context::new();
+        ConnectorDeclaredErrors::take_marked(&context, &mut errors);
+        assert!(errors.is_empty());
+        assert_eq!(
+            ConnectorDeclaredErrors::drain(&context)
+                .as_ref()
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(2),
+        );
     }
 
     #[test]
