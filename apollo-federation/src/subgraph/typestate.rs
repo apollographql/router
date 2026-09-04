@@ -482,12 +482,11 @@ impl Subgraph<Expanded> {
         self.state.orphan_extension_types.contains(type_name)
     }
 
-    /// Upgrades the schema for compatibility with the GraphQL September 2025 spec (federation 3),
-    /// returning a hint for every transformation applied. See [`fed3_upgrader::apply_fed3_upgrade`].
+    /// Upgrades the schema for compatibility with the GraphQL September 2025 spec,
+    /// returning a hint for every transformation applied.
     ///
     /// Runs on `Expanded`, ahead of every validation: the constructs it rewrites are invalid under
-    /// the 2025 spec, so a subgraph must not reach a validation — including the fed1-rules pass in
-    /// [`Subgraph::<Expanded>::into_fed_2_subgraph`] — before this has run.
+    /// the 2025 spec, so a subgraph must not reach a validation before this has run.
     ///
     /// The hints are returned rather than stored in the subgraph state because every transition
     /// after this one is fallible, and their `?`s would drop hints carried along in the state. It is
