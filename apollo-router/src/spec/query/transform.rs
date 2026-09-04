@@ -257,6 +257,7 @@ pub(crate) fn operation(
     }
 
     Ok(Some(ast::OperationDefinition {
+        description: def.description.clone(),
         name: def.name.clone(),
         operation_type: def.operation_type,
         variables: def.variables.clone(),
@@ -284,6 +285,7 @@ pub(crate) fn fragment_definition(
     }
 
     Ok(Some(ast::FragmentDefinition {
+        description: def.description.clone(),
         name: def.name.clone(),
         type_condition: def.type_condition.clone(),
         directives: def.directives.clone(),

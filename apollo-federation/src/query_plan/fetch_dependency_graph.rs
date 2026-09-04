@@ -2906,6 +2906,7 @@ impl FetchDependencyGraphNode {
         let context_variable_definitions = self.inputs.iter().flat_map(|inputs| {
             inputs.used_contexts.iter().map(|(context, ty)| {
                 Node::new(VariableDefinition {
+                    description: None,
                     name: context.clone(),
                     ty: ty.clone(),
                     default_value: None,
@@ -3452,6 +3453,7 @@ fn representations_variable_definition(
     let any_name = schema.federation_type_name_in_schema(ANY_SCALAR_NAME)?;
 
     Ok(VariableDefinition {
+        description: None,
         name: FEDERATION_REPRESENTATIONS_VAR_NAME,
         ty: Type::Named(any_name).non_null().list().non_null().into(),
         default_value: None,

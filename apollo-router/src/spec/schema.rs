@@ -68,8 +68,12 @@ impl Schema {
             ..Default::default()
         };
 
-        let expansion =
-            expand_connectors(&raw_sdl.sdl, &api_schema_options).map_err(SchemaError::Connector)?;
+        let expansion = expand_connectors(
+            &raw_sdl.sdl,
+            &api_schema_options,
+            config.supergraph.validate_default_values,
+        )
+        .map_err(SchemaError::Connector)?;
         let preserved_launch_id = raw_sdl.launch_id.clone();
         let (raw_sdl, api_schema, connectors) = match expansion {
             ExpansionResult::Expanded {
@@ -103,6 +107,7 @@ impl Schema {
             })?
             .to_schema()
             .map_err(|errors| SchemaError::Validate(errors.into()))?;
+        definitions.validate_default_values = config.supergraph.validate_default_values;
         coerce_and_validate_schema_values(&mut definitions)?;
         let definitions = definitions
             .validate()
@@ -803,5 +808,39 @@ mod tests {
         let schema = "schema {";
         let result = Schema::parse(schema, &Default::default());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_default_values_rejects_invalid_defaults() {
+        let schema = with_supergraph_boilerplate(
+            r#"
+            type Query {
+              field(arg: Input = {}): String
+            }
+            input Input {
+              required: String!
+            }
+            "#,
+        );
+
+        // Default config has validate_default_values = true
+        let result = Schema::parse(&schema, &Default::default());
+        assert!(
+            result.is_err(),
+            "invalid default should be rejected when validate_default_values is true"
+        );
+
+        // Opting out allows the invalid default through
+        let config: Configuration = serde_json::from_value(serde_json::json!({
+            "supergraph": {
+                "validate_default_values": false
+            }
+        }))
+        .unwrap();
+        let result = Schema::parse(&schema, &config);
+        assert!(
+            result.is_ok(),
+            "invalid default should be allowed when validate_default_values is false"
+        );
     }
 }

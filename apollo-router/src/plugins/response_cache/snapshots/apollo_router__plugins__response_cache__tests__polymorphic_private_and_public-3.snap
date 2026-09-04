@@ -85,7 +85,7 @@ expression: cache_keys
       "data": {
         "creatorUser": {
           "__typename": "User",
-          "id": 3
+          "id": "3"
         }
       }
     },

@@ -20,6 +20,52 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 # [2.16.x](unreleased) - Unreleased
 
+> Important: 2 breaking changes below, indicated by **BREAKING**
+
+## ❗ BREAKING CHANGES ❗
+
+### **BREAKING**: Composition now rejects invalid default values ([PR #10119](https://github.com/apollographql/router/pull/10119))
+
+As part of the upgrade to the GraphQL 2025 specification via apollo-compiler v2,
+composition now validates default values against their declared input types.
+Subgraphs that previously composed despite carrying invalid defaults (e.g.
+`arg: InputWithRequired = {}` where `InputWithRequired` has a required field)
+will now fail composition.
+
+This is an intentional breaking change for the v3 upgrade. There is no opt-out
+flag for composition; schemas must be corrected before they will compose. The
+router does provide a `supergraph.validate_default_values` config option to
+control validation at startup for previously-composed supergraphs.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10119>
+
+### **BREAKING**: GraphQL ID fields are now coerced to strings per the spec ([PR #10119](https://github.com/apollographql/router/pull/10119))
+
+The GraphQL specification defines `ID` as a string type that happens to accept
+integer input for convenience. Previously, the router could return integer values
+for `ID` fields (e.g. `"id": 7`); it now coerces them to strings (e.g.
+`"id": "7"`) as required by the spec. This aligns with the stricter type
+coercion in apollo-compiler v2.
+
+Clients that parsed `ID` fields as integers may need to be updated. Subgraph
+entity representations will also carry string `ID` values where they previously
+carried integers, which may affect response caching.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10119>
+
+## 🛠 Maintenance
+
+### Align `@deprecated` directive handling with GraphQL 2025 spec ([PR #10119](https://github.com/apollographql/router/pull/10119))
+
+The `@deprecated(reason: null)` compatibility branch in introspection has been
+removed. apollo-compiler v2 now rejects `reason: null` outright per the updated
+spec, making that code path unreachable. The `@oneOf` directive is now recognized
+as a semantic (introspection-visible) directive. The `__Type.fields` introspection
+argument `includeDeprecated` changed from `Boolean` to `Boolean!`, matching the
+spec definition.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10119>
+
 ## 🐛 Fixes
 
 ### Fix connector composition validation for `->toString`, `->get`, `->contains`, and `->in` with concrete array and object shapes ([PR #10118](https://github.com/apollographql/router/pull/10118))

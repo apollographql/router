@@ -410,7 +410,7 @@ impl Query {
                 "Float" => self.format_float(parameters, path, input, output)?,
                 "Boolean" => self.format_boolean(parameters, path, input, output)?,
                 "String" => self.format_string(parameters, path, input, output)?,
-                "Id" => self.format_id(parameters, path, input, output)?,
+                "ID" => self.format_id(parameters, path, input, output)?,
                 _ => self.format_named_type(
                     parameters,
                     field_type,
@@ -809,23 +809,29 @@ impl Query {
         input: &mut Value,
         output: &mut Value,
     ) -> Result<(), InvalidValue> {
-        if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
+        if input.is_string() {
             *output = input.clone();
+            Ok(())
+        } else if let Some(int) = input.as_i64() {
+            // GraphQL spec: ID result coercion serializes integers as strings
+            *output = Value::String(int.to_string().into());
+            Ok(())
+        } else if let Some(uint) = input.as_u64() {
+            *output = Value::String(uint.to_string().into());
+            Ok(())
+        } else if input.is_null() {
+            *output = Value::Null;
             Ok(())
         } else {
             *output = Value::Null;
-            if input.is_null() {
-                Ok(())
-            } else {
-                parameters.insert_coercion_error(
-                    Error::builder()
-                        .message("Invalid value found for the type ID")
-                        .path(Path::from_response_slice(path))
-                        .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
-                        .build(),
-                );
-                Err(InvalidValue)
-            }
+            parameters.insert_coercion_error(
+                Error::builder()
+                    .message("Invalid value found for the type ID")
+                    .path(Path::from_response_slice(path))
+                    .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                    .build(),
+            );
+            Err(InvalidValue)
         }
     }
 

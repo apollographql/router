@@ -34,15 +34,15 @@ async fn progressive_override() {
       "data": {
         "users": [
           {
-            "id": 3,
+            "id": "3",
             "name": "Clementine Bauch"
           },
           {
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham"
           },
           {
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell"
           }
         ]

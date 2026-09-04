@@ -11657,6 +11657,11 @@ expression: "&schema"
           ],
           "default": "enforce",
           "description": "Determines how to handle queries which include additional fields of an input object.\n- `enforce` (default): rejects query\n- `measure`: permits query and the logs unknown fields"
+        },
+        "validate_default_values": {
+          "default": true,
+          "description": "Validate that default values of input fields and arguments match their declared types.\nDefault: true",
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -13241,7 +13246,8 @@ expression: "&schema"
           "warmed_up_queries": null
         },
         "redact_query_validation_errors": false,
-        "strict_variable_validation": "enforce"
+        "strict_variable_validation": "enforce",
+        "validate_default_values": true
       },
       "description": "Configuration for the supergraph"
     },

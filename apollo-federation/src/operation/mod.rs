@@ -2811,6 +2811,7 @@ impl TryFrom<&Operation> for executable::Operation {
     fn try_from(normalized_operation: &Operation) -> Result<Self, Self::Error> {
         let operation_type: executable::OperationType = normalized_operation.root_kind.into();
         Ok(Self {
+            description: None,
             operation_type,
             name: normalized_operation.name.clone(),
             variables: normalized_operation.variables.deref().clone(),
