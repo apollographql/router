@@ -39,6 +39,7 @@ pub(super) struct CommitTarget {
     pub(super) response_path: SharedPath<FetchDataPathElement>,
     /// True at the root of an entity fetch group (key hop or same-subgraph
     /// @requires hop): children restart their type path there.
+    #[allow(dead_code)]
     pub(super) entity_root: bool,
 }
 

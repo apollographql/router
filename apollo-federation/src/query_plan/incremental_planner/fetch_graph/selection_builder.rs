@@ -68,6 +68,7 @@ impl SelectionBuilder {
 
     /// Absorb all entries from `other`, for post-search merging of sibling
     /// entity groups.
+    #[allow(dead_code)]
     pub(super) fn merge_from(&mut self, other: &SelectionBuilder) {
         self.entries.extend(other.entries.iter().cloned());
     }
@@ -77,6 +78,7 @@ impl SelectionBuilder {
     /// builders assigning different signatures to the same response path
     /// cannot be materialized into one fetch because the same response key would
     /// need two different field executions.
+    #[allow(dead_code)]
     pub(super) fn field_signatures(&self) -> HashMap<String, String> {
         fn record_selection_set(
             out: &mut HashMap<String, String>,

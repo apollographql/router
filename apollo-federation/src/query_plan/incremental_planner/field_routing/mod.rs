@@ -66,6 +66,7 @@ pub(crate) struct FieldRoutingSearchSpace {
     pub(crate) query_graph: Arc<QueryGraph>,
     pub(crate) supergraph_schema: ValidFederationSchema,
     pub(crate) override_conditions: OverrideConditions,
+    #[allow(dead_code)]
     pub(crate) inconsistent_abstract_types: Arc<apollo_compiler::collections::IndexSet<Name>>,
 }
 
