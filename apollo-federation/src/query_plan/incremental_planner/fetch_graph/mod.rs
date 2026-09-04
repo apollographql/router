@@ -2,6 +2,8 @@
 //! entity inputs riding those edges, built incrementally during BULB
 //! search with O(1) checkpoint / undo-log rollback.
 
+#[allow(dead_code)]
+pub(crate) mod plan_builder;
 pub(crate) mod selection_builder;
 
 use std::collections::HashMap;
