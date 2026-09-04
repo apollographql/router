@@ -1004,17 +1004,6 @@ expression: "&schema"
           ],
           "description": "Specify a DNS resolution strategy to use when resolving the coprocessor URL."
         },
-        "experimental_http2": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Http2Config"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Use HTTP/2 to communicate with the coprocessor."
-        },
         "experimental_http2_keep_alive_interval": {
           "default": null,
           "description": "Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If\nunset (the default), keep-alive pings are disabled.",
@@ -1030,6 +1019,17 @@ expression: "&schema"
             "string",
             "null"
           ]
+        },
+        "http2": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Http2Config"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Use HTTP/2 to communicate with the coprocessor."
         },
         "pool_idle_timeout": {
           "default": {
@@ -7750,9 +7750,6 @@ expression: "&schema"
         "experimental.broken": {
           "$ref": "#/definitions/Config"
         },
-        "experimental.expose_query_plan": {
-          "$ref": "#/definitions/ExposeQueryPlanConfig"
-        },
         "experimental.record": {
           "$ref": "#/definitions/RecordConfig"
         },
@@ -11213,17 +11210,6 @@ expression: "&schema"
           ],
           "description": "DNS resolution strategy for subgraphs"
         },
-        "experimental_http2": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Http2Config"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Enable HTTP2 for subgraphs"
-        },
         "experimental_http2_keep_alive_interval": {
           "default": null,
           "description": "Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If\nunset (the default), keep-alive pings are disabled.",
@@ -11250,6 +11236,17 @@ expression: "&schema"
             }
           ],
           "description": "Enable global rate limiting"
+        },
+        "http2": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Http2Config"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Enable HTTP2 for subgraphs"
         },
         "pool_idle_timeout": {
           "default": {
@@ -11593,11 +11590,6 @@ expression: "&schema"
           "description": "Enable errors generated during response reformatting and result coercion to be returned in\nresponses.\nDefault: false\nAll subgraph responses are checked and corrected to ensure alignment with the schema and\nquery. When enabled, misaligned values will generate errors which are included in errors\narray in the response.",
           "type": "boolean"
         },
-        "experimental_log_on_broken_pipe": {
-          "default": false,
-          "description": "Log a message if the client closes the connection before the response is sent.\nDefault: false.",
-          "type": "boolean"
-        },
         "generate_query_fragments": {
           "default": true,
           "description": "Enable QP generation of fragments for subgraph requests\nDefault: true",
@@ -11616,6 +11608,11 @@ expression: "&schema"
           ],
           "default": "127.0.0.1:4000",
           "description": "The socket address and port to listen on\nDefaults to 127.0.0.1:4000"
+        },
+        "log_on_broken_pipe": {
+          "default": false,
+          "description": "Log a message if the client closes the connection before the response is sent.\nDefault: false.",
+          "type": "boolean"
         },
         "path": {
           "default": "/",
@@ -12472,14 +12469,6 @@ expression: "&schema"
           ],
           "description": "Datadog exporter configuration"
         },
-        "experimental_response_trace_id": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ExposeTraceId"
-            }
-          ],
-          "description": "A way to expose trace id in response headers"
-        },
         "otlp": {
           "allOf": [
             {
@@ -12495,6 +12484,14 @@ expression: "&schema"
             }
           ],
           "description": "Propagation configuration"
+        },
+        "response_trace_id": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ExposeTraceId"
+            }
+          ],
+          "description": "A way to expose trace id in response headers"
         }
       },
       "type": "object"
@@ -13082,6 +13079,9 @@ expression: "&schema"
       "description": "Type conditioned fetching configuration.",
       "type": "boolean"
     },
+    "expose_query_plan": {
+      "$ref": "#/definitions/ExposeQueryPlanConfig"
+    },
     "fleet_detector": {
       "$ref": "#/definitions/Conf2"
     },
@@ -13218,10 +13218,10 @@ expression: "&schema"
         "defer_support": true,
         "early_cancel": true,
         "enable_result_coercion_errors": false,
-        "experimental_log_on_broken_pipe": false,
         "generate_query_fragments": true,
         "introspection": false,
         "listen": "127.0.0.1:4000",
+        "log_on_broken_pipe": false,
         "path": "/",
         "query_planning": {
           "cache": {
