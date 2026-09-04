@@ -4,7 +4,9 @@ expression: api_schema_string
 ---
 type Query {
   widgets: [Widget!]!
+  widget(id: ID!): Widget
   resources: [Resource!]!
+  resource(id: ID!): Resource
 }
 
 type Widget {

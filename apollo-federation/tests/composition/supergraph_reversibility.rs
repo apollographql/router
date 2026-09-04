@@ -35,7 +35,8 @@ fn compose_and_test_reversibility(subgraphs: &[ServiceDefinition<'_>]) {
             .expect("Expected subgraph schema unexpectedly failed to convert to Fed 2.")
             .expand_links()
             .expect("Expected subgraph schema unexpectedly failed to expand")
-            .assume_validated();
+            .validate()
+            .expect("expanded subgraph is valid");
 
         let actual_schema = actual_subgraph.schema.schema().clone().into_inner();
         let actual_schema = normalize_schema(actual_schema);
