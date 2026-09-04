@@ -918,7 +918,7 @@ mod shape_tests {
     #[test]
     fn parse_int_shape_should_error_for_object_input() {
         assert_eq!(
-            get_shape(vec![], Shape::empty_object([])),
+            get_shape(vec![], Shape::any_object([])),
             Shape::error_with_partial(
                 "Method ->parseInt can only parse strings and numbers. Found: {}".to_string(),
                 Shape::none(),
@@ -930,7 +930,7 @@ mod shape_tests {
     #[test]
     fn parse_int_shape_should_error_for_array_input() {
         assert_eq!(
-            get_shape(vec![], Shape::tuple([], [])),
+            get_shape(vec![], Shape::any_array([])),
             Shape::error_with_partial(
                 "Method ->parseInt can only parse strings and numbers. Found: []".to_string(),
                 Shape::none(),

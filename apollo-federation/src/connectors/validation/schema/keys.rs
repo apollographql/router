@@ -305,13 +305,6 @@ fn extract_concrete_typenames_into(shape: &Shape, in_typename: bool, result: &mu
             }
             extract_concrete_typenames_into(tail, false, result);
         }
-        ShapeCase::Error(shape::Error { partial, .. }) => {
-            // If the error has a partial shape, treat the partial shape
-            // as the root shape to extract from.
-            if let Some(partial) = partial {
-                extract_concrete_typenames_into(partial, in_typename, result);
-            }
-        }
         // Named types, and leaf types - nothing to extract at the root level
         ShapeCase::Name(_, _) => {}
         ShapeCase::None => {}
@@ -419,7 +412,7 @@ mod tests {
             ],
             [],
         );
-        let shape = Shape::record(
+        let shape = Shape::closed_record(
             [
                 ("__typename".to_string(), typename_union),
                 ("id".to_string(), Shape::string([])),
@@ -444,7 +437,7 @@ mod tests {
         use shape::Shape;
 
         // Build shape: { id: String, author: { __typename: "User", id: String } }
-        let nested_object = Shape::record(
+        let nested_object = Shape::closed_record(
             [
                 ("__typename".to_string(), Shape::string_value("User", [])),
                 ("id".to_string(), Shape::string([])),
@@ -452,7 +445,7 @@ mod tests {
             .into(),
             [],
         );
-        let shape = Shape::record(
+        let shape = Shape::closed_record(
             [
                 ("id".to_string(), Shape::string([])),
                 ("author".to_string(), nested_object),
@@ -488,7 +481,7 @@ mod tests {
             ],
             [],
         );
-        let shape = Shape::record(
+        let shape = Shape::closed_record(
             [
                 ("__typename".to_string(), conflicting_typename),
                 ("id".to_string(), Shape::string([])),
@@ -518,7 +511,7 @@ mod tests {
         use shape::Shape;
 
         // Valid object: { __typename: "Cat", id: String }
-        let valid_cat = Shape::record(
+        let valid_cat = Shape::closed_record(
             [
                 ("__typename".to_string(), Shape::string_value("Cat", [])),
                 ("id".to_string(), Shape::string([])),
@@ -528,7 +521,7 @@ mod tests {
         );
 
         // Invalid object: { __typename: All<"Cat", "Dog">, id: String }
-        let conflicting = Shape::record(
+        let conflicting = Shape::closed_record(
             [
                 (
                     "__typename".to_string(),
@@ -547,7 +540,7 @@ mod tests {
         );
 
         // Valid object: { __typename: "Bird", id: String }
-        let valid_bird = Shape::record(
+        let valid_bird = Shape::closed_record(
             [
                 ("__typename".to_string(), Shape::string_value("Bird", [])),
                 ("id".to_string(), Shape::string([])),

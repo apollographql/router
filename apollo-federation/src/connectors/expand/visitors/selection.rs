@@ -436,15 +436,6 @@ impl<'a> TypeShapeWalker<'a> {
                     object.type_name.as_str(),
                 )));
             }
-
-            ShapeCase::Error(shape::Error { partial, .. }) => {
-                if let Some(partial) = partial {
-                    // Errors with partial shapes still mostly behave like those
-                    // shapes (except for simplification), so we need to
-                    // validate the object against the partial shape.
-                    self.walk_object_helper(object, new_object_type, partial)?;
-                }
-            }
         };
 
         Ok(())
@@ -582,15 +573,6 @@ impl<'a> TypeShapeWalker<'a> {
                     "Unexpected primitive shape provided for interface type: {}",
                     shape.pretty_print()
                 )));
-            }
-
-            ShapeCase::Error(shape::Error { partial, .. }) => {
-                if let Some(partial) = partial {
-                    // Errors with partial shapes still mostly behave like those
-                    // shapes (except for simplification), so we need to
-                    // validate the interface against the partial shape.
-                    self.walk_interface_helper(interface, partial)?;
-                }
             }
         };
 
@@ -771,15 +753,6 @@ impl<'a> TypeShapeWalker<'a> {
                     "Unexpected primitive shape provided for union type: {}",
                     shape.pretty_print()
                 )));
-            }
-
-            ShapeCase::Error(shape::Error { partial, .. }) => {
-                if let Some(partial) = partial {
-                    // Errors with partial shapes still mostly behave like those
-                    // shapes (except for simplification), so we need to
-                    // validate the union against the partial shape.
-                    self.walk_union_helper(union_type, partial)?;
-                }
             }
         }
 

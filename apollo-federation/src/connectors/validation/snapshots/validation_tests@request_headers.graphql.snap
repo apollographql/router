@@ -1,26 +1,26 @@
 ---
 source: apollo-federation/src/connectors/validation/mod.rs
-expression: "format!(\"{:#?}\", result.errors)"
+expression: result.errors
 input_file: apollo-federation/src/connectors/validation/test_data/request_headers.graphql
 ---
 [
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<List<String>, None>`",
+        message: "In `@source(http.headers:)`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<[...String], None>`",
         locations: [
             5:101..5:111,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.failOnArray`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<List<String>, None>`",
+        message: "In `@connect(http.headers:)` on `Query.failOnArray`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<[...String], None>`",
         locations: [
             28:68..28:78,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.failOnArray`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<List<String>, None>`",
+        message: "In `GET` in `@connect(http:)` on `Query.failOnArray`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<[...String], None>`",
         locations: [
             27:61..27:71,
         ],
@@ -43,14 +43,14 @@ input_file: apollo-federation/src/connectors/validation/test_data/request_header
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.failOnInvalidObject`: expected union but received incompatible object\nDetails: `One<Float, Bool, String, null, None>` does not accept `Dict<List<String>>`",
+        message: "In `@connect(http.headers:)` on `Query.failOnInvalidObject`: expected union but received incompatible object\nDetails: `One<Float, Bool, String, null, None>` does not accept `{...[...String]}`",
         locations: [
             44:60..44:67,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.failOnInvalidObject`: expected union but received incompatible object\nDetails: `One<Float, Bool, String, null, None>` does not accept `Dict<List<String>>`",
+        message: "In `GET` in `@connect(http:)` on `Query.failOnInvalidObject`: expected union but received incompatible object\nDetails: `One<Float, Bool, String, null, None>` does not accept `{...[...String]}`",
         locations: [
             43:53..43:60,
         ],
