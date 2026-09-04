@@ -1122,10 +1122,7 @@ impl FieldRoutingSearchSpace {
             let Some(edge_index) = opt.edge_index() else {
                 continue;
             };
-            let (_, alt_target) = self
-                .cached_query_graph
-                .query_graph
-                .edge_endpoints(edge_index)?;
+            let (_, alt_target) = self.qg().edge_endpoints(edge_index)?;
             if alt_target != target_qg_node && !alt_targets.contains(&alt_target) {
                 alt_targets.push(alt_target);
             }
