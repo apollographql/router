@@ -506,7 +506,7 @@ impl Merger {
     ) -> Result<(), FederationError> {
         let mut repeatable: Option<bool> = None;
         let mut inconsistent_repeatable = false;
-        let mut locations: Option<Vec<DirectiveLocation>> = None;
+        let mut locations: Option<IndexSet<DirectiveLocation>> = None;
         let mut inconsistent_locations = false;
 
         for (idx, source) in sources {
@@ -565,7 +565,7 @@ impl Merger {
                         dest,
                         sources,
                         &self.subgraphs,
-                        |_| Some(location_string(&[])),
+                        |_| Some(location_string(&IndexSet::default())),
                         |pos, idx| pos.try_get(self.subgraphs[idx].schema().schema())
                             .map(|elt| location_string(&extract_executable_locations(elt))),
                         |_, _subgraphs| "it will not appear in the supergraph as there no intersection between ".to_string(),
@@ -725,8 +725,7 @@ impl Merger {
                                     for other_interface in
                                         implementation.implemented_interfaces(&self.merged)?
                                     {
-                                        if other_interface.name
-                                            == field_definition_position.type_name
+                                        if *other_interface == *field_definition_position.type_name
                                         {
                                             // skip current @interfaceObject
                                             continue;
@@ -778,7 +777,7 @@ impl Merger {
     }
 }
 
-fn extract_executable_locations(source: &Node<DirectiveDefinition>) -> Vec<DirectiveLocation> {
+fn extract_executable_locations(source: &Node<DirectiveDefinition>) -> IndexSet<DirectiveLocation> {
     source
         .locations
         .iter()
@@ -790,7 +789,7 @@ fn extract_executable_locations(source: &Node<DirectiveDefinition>) -> Vec<Direc
         .collect()
 }
 
-fn location_string(locations: &[DirectiveLocation]) -> String {
+fn location_string(locations: &IndexSet<DirectiveLocation>) -> String {
     if locations.is_empty() {
         return "".to_string();
     }

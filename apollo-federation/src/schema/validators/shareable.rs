@@ -53,7 +53,7 @@ fn validate_shareable_not_repeated_on_same_type_declaration(
         let shareable_applications = pos.get_applied_directives(schema, directive_name);
         let count_by_extension = shareable_applications
             .iter()
-            .counts_by(|x| x.origin.extension_id());
+            .counts_by(|x| x.extension_id());
         if count_by_extension.iter().any(|(_, count)| *count > 1) {
             errors.push(
                 SingleFederationError::InvalidShareableUsage {

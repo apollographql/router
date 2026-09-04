@@ -14,7 +14,6 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::parser::LineColumn;
-use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ExtensionId;
 use apollo_compiler::schema::SchemaDefinition;
@@ -224,7 +223,7 @@ impl FederationSchema {
                 .members
                 .iter()
                 .map(|t| ObjectTypeDefinitionPosition {
-                    type_name: t.name.clone(),
+                    type_name: Name::clone(t),
                 })
                 .collect::<IndexSet<_>>(),
         })
@@ -1177,7 +1176,7 @@ pub(crate) struct KeyDirective<'schema> {
     /// The parsed arguments of this `@key` application
     arguments: KeyDirectiveArguments<'schema>,
     /// The original `Directive` instance from the AST with unparsed arguments
-    schema_directive: &'schema apollo_compiler::schema::Component<Directive>,
+    schema_directive: &'schema Node<Directive>,
     /// The `DirectiveList` containing all directives applied to the target position, including this one
     sibling_directives: &'schema apollo_compiler::schema::DirectiveList,
     /// The schema position to which this directive is applied
@@ -1418,18 +1417,19 @@ impl From<ValidFederationSchema> for FederationSchema {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) trait SchemaElement {
-    /// Iterates over the origins of the schema element.
-    /// - Expected to use the apollo_compiler's `iter_origins` implementation.
-    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin>;
+    /// Iterates over the extension IDs of the schema element.
+    /// `None` indicates a definition origin, `Some(id)` indicates an extension origin.
+    fn iter_extension_ids(&self) -> impl Iterator<Item = Option<&ExtensionId>>;
 
     /// Returns true in the first tuple element if `self` has a definition.
     /// Returns a set of extension IDs in the second tuple element, if any.
     fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>) {
         let mut extensions = IndexSet::default();
         let mut has_definition = false;
-        for origin in self.iter_origins() {
-            if let Some(extension_id) = origin.extension_id() {
+        for ext_id in self.iter_extension_ids() {
+            if let Some(extension_id) = ext_id {
                 extensions.insert(extension_id);
             } else {
                 has_definition = true;
@@ -1446,28 +1446,28 @@ pub(crate) trait SchemaElement {
         !self.extensions().is_empty()
     }
 
-    fn origin_to_use(&self) -> ComponentOrigin {
+    fn origin_to_use(&self) -> Option<ExtensionId> {
         let (has_definition, extensions) = self.definition_and_extensions();
         // Use extension origin only when extensions exist but no definition does
         // (i.e., only extension elements are populated). Otherwise, use definition.
         // For more details, see the comments in the `add_to_schema` method.
         // Note: Use an arbitrary extension origin, since no defined ordering between origins.
         if !has_definition && let Some(first_extension) = extensions.first() {
-            return ComponentOrigin::Extension((*first_extension).clone());
+            return Some((*first_extension).clone());
         }
-        ComponentOrigin::Definition
+        None
     }
 }
 
 impl SchemaElement for SchemaDefinition {
-    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
-        self.iter_origins()
+    fn iter_extension_ids(&self) -> impl Iterator<Item = Option<&ExtensionId>> {
+        self.iter_extension_ids()
     }
 }
 
 impl SchemaElement for ExtendedType {
-    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
-        self.iter_origins()
+    fn iter_extension_ids(&self) -> impl Iterator<Item = Option<&ExtensionId>> {
+        self.iter_extension_ids()
     }
 }
 

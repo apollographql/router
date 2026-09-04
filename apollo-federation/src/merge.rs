@@ -22,7 +22,6 @@ use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::Implementers;
@@ -394,7 +393,7 @@ impl Merger {
                     .make_mut()
                     .values
                     .entry(enum_value_name.clone())
-                    .or_insert(Component::new(EnumValueDefinition {
+                    .or_insert(Node::new(EnumValueDefinition {
                         value: enum_value.value.clone(),
                         description: None,
                         directives: Default::default(),
@@ -450,7 +449,7 @@ impl Merger {
                 let existing_field = mutable_object.fields.entry(field_name.clone());
 
                 let supergraph_field = match existing_field {
-                    Vacant(i) => i.insert(Component::new(InputValueDefinition {
+                    Vacant(i) => i.insert(Node::new(InputValueDefinition {
                         name: field.name.clone(),
                         description: field.description.clone(),
                         ty: field.ty.clone(),
@@ -539,7 +538,7 @@ impl Merger {
                     }
                     Vacant(f) => {
                         // TODO warning mismatch missing fields
-                        f.insert(Component::new(FieldDefinition {
+                        f.insert(Node::new(FieldDefinition {
                             name: field.name.clone(),
                             description: field.description.clone(),
                             arguments: vec![],
@@ -638,7 +637,7 @@ impl Merger {
                         // check args
                         f.into_mut()
                     }
-                    Vacant(f) => f.insert(Component::new(FieldDefinition {
+                    Vacant(f) => f.insert(Node::new(FieldDefinition {
                         name: field.name.clone(),
                         description: field.description.clone(),
                         arguments: vec![],
@@ -740,7 +739,7 @@ impl Merger {
                         // check args
                         f.into_mut()
                     }
-                    Vacant(f) => f.insert(Component::new(FieldDefinition {
+                    Vacant(f) => f.insert(Node::new(FieldDefinition {
                         name: field.name.clone(),
                         description: field.description.clone(),
                         arguments: vec![],
@@ -841,7 +840,7 @@ impl Merger {
             for union_member in union.members.iter() {
                 // IndexSet::insert deduplicates
                 u.make_mut().members.insert(union_member.clone());
-                u.make_mut().directives.push(Component::new(Directive {
+                u.make_mut().directives.push(Node::new(Directive {
                     name: name!("join__unionMember"),
                     arguments: vec![
                         Node::new(Argument {
@@ -1029,7 +1028,7 @@ fn copy_input_object_type(
     for (field_name, input_field) in input_object.fields.iter() {
         new_input_object.fields.insert(
             field_name.clone(),
-            Component::new(InputValueDefinition {
+            Node::new(InputValueDefinition {
                 name: input_field.name.clone(),
                 description: input_field.description.clone(),
                 directives: Default::default(),
@@ -1080,9 +1079,9 @@ fn copy_object_type_stub(
 }
 
 fn copy_fields(
-    fields_to_copy: Iter<Name, Component<FieldDefinition>>,
-) -> IndexMap<Name, Component<FieldDefinition>> {
-    let mut new_fields: IndexMap<Name, Component<FieldDefinition>> = IndexMap::default();
+    fields_to_copy: Iter<Name, Node<FieldDefinition>>,
+) -> IndexMap<Name, Node<FieldDefinition>> {
+    let mut new_fields: IndexMap<Name, Node<FieldDefinition>> = IndexMap::default();
     for (field_name, field) in fields_to_copy {
         // skip federation built-in queries
         if field_name == "_service" || field_name == "_entities" {
@@ -1101,7 +1100,7 @@ fn copy_fields(
                 })
             })
             .collect();
-        let new_field = Component::new(FieldDefinition {
+        let new_field = Node::new(FieldDefinition {
             name: field.name.clone(),
             description: field.description.clone(),
             directives: Default::default(),
@@ -1125,9 +1124,9 @@ fn copy_union_type(union_name: Name, description: Option<Node<str>>) -> Extended
 
 fn join_type_applied_directive<'a>(
     subgraph_name: EnumValue,
-    key_directives: impl Iterator<Item = &'a Component<Directive>> + Sized,
+    key_directives: impl Iterator<Item = &'a Node<Directive>> + Sized,
     is_interface_object: bool,
-) -> Vec<Component<Directive>> {
+) -> Vec<Node<Directive>> {
     let mut join_type_directive = Directive {
         name: name!("join__type"),
         arguments: vec![Node::new(Argument {
@@ -1170,15 +1169,15 @@ fn join_type_applied_directive<'a>(
     }
     result
         .into_iter()
-        .map(Component::new)
-        .collect::<Vec<Component<Directive>>>()
+        .map(Node::new)
+        .collect::<Vec<Node<Directive>>>()
 }
 
 fn join_implements_applied_directive(
     subgraph_name: EnumValue,
     intf_name: &Name,
-) -> Component<Directive> {
-    Component::new(Directive {
+) -> Node<Directive> {
+    Node::new(Directive {
         name: name!("join__implements"),
         arguments: vec![
             Node::new(Argument {
@@ -1222,7 +1221,7 @@ fn add_core_feature_link(supergraph: &mut Schema) {
         .schema_definition
         .make_mut()
         .directives
-        .push(Component::new(Directive {
+        .push(Node::new(Directive {
             name: name!("link"),
             arguments: vec![Node::new(Argument {
                 name: name!("url"),
@@ -1285,7 +1284,7 @@ fn link_directive_definition() -> DirectiveDefinition {
                 default_value: None,
             }),
         ],
-        locations: vec![DirectiveLocation::Schema],
+        locations: IndexSet::from_iter([DirectiveLocation::Schema]),
         repeatable: true,
     }
 }
@@ -1325,11 +1324,11 @@ fn link_purpose_enum_type() -> (Name, EnumType) {
     };
     link_purpose_enum.values.insert(
         link_purpose_security_value.value.clone(),
-        Component::new(link_purpose_security_value),
+        Node::new(link_purpose_security_value),
     );
     link_purpose_enum.values.insert(
         link_purpose_execution_value.value.clone(),
-        Component::new(link_purpose_execution_value),
+        Node::new(link_purpose_execution_value),
     );
     (link_purpose_name, link_purpose_enum)
 }
@@ -1344,7 +1343,7 @@ fn add_core_feature_join(
         .schema_definition
         .make_mut()
         .directives
-        .push(Component::new(Directive {
+        .push(Node::new(Directive {
             name: name!("link"),
             arguments: vec![
                 Node::new(Argument {
@@ -1394,7 +1393,7 @@ fn add_core_feature_join(
         fields: vec![
             (
                 name!("name"),
-                Component::new(InputValueDefinition {
+                Node::new(InputValueDefinition {
                     name: name!("name"),
                     description: None,
                     directives: Default::default(),
@@ -1404,7 +1403,7 @@ fn add_core_feature_join(
             ),
             (
                 name!("type"),
-                Component::new(InputValueDefinition {
+                Node::new(InputValueDefinition {
                     name: name!("type"),
                     description: None,
                     directives: Default::default(),
@@ -1414,7 +1413,7 @@ fn add_core_feature_join(
             ),
             (
                 name!("context"),
-                Component::new(InputValueDefinition {
+                Node::new(InputValueDefinition {
                     name: name!("context"),
                     description: None,
                     directives: Default::default(),
@@ -1424,7 +1423,7 @@ fn add_core_feature_join(
             ),
             (
                 name!("selection"),
-                Component::new(InputValueDefinition {
+                Node::new(InputValueDefinition {
                     name: name!("selection"),
                     description: None,
                     directives: Default::default(),
@@ -1510,7 +1509,7 @@ fn join_enum_value_directive_definition() -> DirectiveDefinition {
             ty: ty!(join__Graph!).into(),
             default_value: None,
         })],
-        locations: vec![DirectiveLocation::EnumValue],
+        locations: IndexSet::from_iter([DirectiveLocation::EnumValue]),
         repeatable: true,
     }
 }
@@ -1543,12 +1542,12 @@ fn join_directive_directive_definition() -> DirectiveDefinition {
                 default_value: None,
             }),
         ],
-        locations: vec![
+        locations: IndexSet::from_iter([
             DirectiveLocation::Schema,
             DirectiveLocation::Object,
             DirectiveLocation::Interface,
             DirectiveLocation::FieldDefinition,
-        ],
+        ]),
         repeatable: true,
     }
 }
@@ -1631,10 +1630,10 @@ fn join_field_directive_definition() -> DirectiveDefinition {
                 default_value: None,
             }),
         ],
-        locations: vec![
+        locations: IndexSet::from_iter([
             DirectiveLocation::FieldDefinition,
             DirectiveLocation::InputFieldDefinition,
-        ],
+        ]),
         repeatable: true,
     }
 }
@@ -1717,7 +1716,7 @@ fn join_graph_directive_definition() -> DirectiveDefinition {
                 default_value: None,
             }),
         ],
-        locations: vec![DirectiveLocation::EnumValue],
+        locations: IndexSet::from_iter([DirectiveLocation::EnumValue]),
         repeatable: false,
     }
 }
@@ -1746,7 +1745,7 @@ fn join_implements_directive_definition() -> DirectiveDefinition {
                 default_value: None,
             }),
         ],
-        locations: vec![DirectiveLocation::Interface, DirectiveLocation::Object],
+        locations: IndexSet::from_iter([DirectiveLocation::Interface, DirectiveLocation::Object]),
         repeatable: true,
     }
 }
@@ -1799,14 +1798,14 @@ fn join_type_directive_definition() -> DirectiveDefinition {
                 default_value: Some(Node::new(Value::Boolean(false))),
             }),
         ],
-        locations: vec![
+        locations: IndexSet::from_iter([
             DirectiveLocation::Enum,
             DirectiveLocation::InputObject,
             DirectiveLocation::Interface,
             DirectiveLocation::Object,
             DirectiveLocation::Scalar,
             DirectiveLocation::Union,
-        ],
+        ]),
         repeatable: true,
     }
 }
@@ -1832,7 +1831,7 @@ fn join_union_member_directive_definition() -> DirectiveDefinition {
                 default_value: None,
             }),
         ],
-        locations: vec![DirectiveLocation::Union],
+        locations: IndexSet::from_iter([DirectiveLocation::Union]),
         repeatable: true,
     }
 }
@@ -1869,7 +1868,7 @@ fn join_graph_enum_type(
         };
         join_graph_enum_type
             .values
-            .insert(graph.value.clone(), Component::new(graph));
+            .insert(graph.value.clone(), Node::new(graph));
     }
     (join_graph_enum_name, join_graph_enum_type)
 }
@@ -1885,7 +1884,7 @@ fn add_core_feature_inaccessible(supergraph: &mut Schema) {
         .schema_definition
         .make_mut()
         .directives
-        .push(Component::new(Directive {
+        .push(Node::new(Directive {
             name: name!("link"),
             arguments: vec![
                 Node::new(Argument {
@@ -1905,7 +1904,7 @@ fn add_core_feature_inaccessible(supergraph: &mut Schema) {
             name: INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC,
             description: None,
             arguments: vec![],
-            locations: vec![
+            locations: IndexSet::from_iter([
                 DirectiveLocation::FieldDefinition,
                 DirectiveLocation::Object,
                 DirectiveLocation::Interface,
@@ -1916,7 +1915,7 @@ fn add_core_feature_inaccessible(supergraph: &mut Schema) {
                 DirectiveLocation::EnumValue,
                 DirectiveLocation::InputObject,
                 DirectiveLocation::InputFieldDefinition,
-            ],
+            ]),
             repeatable: false,
         }),
     );

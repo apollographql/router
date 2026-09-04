@@ -6,8 +6,6 @@ use apollo_compiler::Node;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::DirectiveLocation;
 use apollo_compiler::schema::ExtendedType;
@@ -417,8 +415,8 @@ fn validate_inaccessible_in_fields(
     schema: &FederationSchema,
     inaccessible_directive: &Name,
     type_position: &TypeDefinitionPosition,
-    fields: &IndexMap<Name, Component<FieldDefinition>>,
-    implements: &IndexSet<ComponentName>,
+    fields: &IndexMap<Name, Node<FieldDefinition>>,
+    implements: &IndexSet<Node<Name>>,
     errors: &mut MultipleFederationErrors,
 ) -> Result<(), FederationError> {
     let mut has_inaccessible_field = false;
@@ -1031,7 +1029,7 @@ fn validate_inaccessible(
                     let types = &schema.schema().types;
                     let any_accessible_member = union_.members.iter().any(|member| {
                         !types
-                            .get(&member.name)
+                            .get(&**member)
                             .is_some_and(|ty| ty.directives().has(&inaccessible_directive))
                     });
 
