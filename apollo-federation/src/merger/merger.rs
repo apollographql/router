@@ -187,15 +187,14 @@ pub(crate) struct Merger {
 
 impl Merger {
     pub(crate) fn new(
-        mut subgraphs: Vec<Subgraph<Validated>>,
+        subgraphs: Vec<Subgraph<Validated>>,
         options: CompositionOptions,
     ) -> Result<Self, FederationError> {
         let names: Vec<String> = subgraphs.iter().map(|s| s.name.clone()).collect();
+        // The hints each subgraph raised on its way to `Validated` are *not* seeded into the error
+        // reporter here: `compose` reports them itself, so that they survive a failure between
+        // validation and merging. Seeding them here as well reported each one twice.
         let mut error_reporter = ErrorReporter::new(names.clone());
-        // Seed the error reporter with hints from subgraphs, so merge hints are appended to the end
-        for subgraph in subgraphs.iter_mut() {
-            error_reporter.add_hints(subgraph.take_hints());
-        }
         let latest_federation_version_used =
             Self::get_latest_federation_version_used(&subgraphs, &mut error_reporter).clone();
         let Some(join_spec) =
