@@ -289,9 +289,10 @@ pub(crate) async fn warm_up(
     requests: Vec<WarmupRequest>,
 ) {
     let _timer = Timer::new(|duration| {
-        f64_histogram!(
+        f64_histogram_with_unit!(
             "apollo.router.query_planning.warmup.duration",
             "Time spent warming up the query planner queries in seconds",
+            "s",
             duration.as_secs_f64()
         );
     });
