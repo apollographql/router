@@ -4,7 +4,7 @@ description: |
   - `traffic_shaping.all.experimental_http2` -> `traffic_shaping.all.http2`
   - `coprocessor.client.experimental_http2` -> `coprocessor.client.http2`
   - `telemetry.exporters.tracing.experimental_response_trace_id` -> `telemetry.exporters.tracing.response_trace_id`
-  The old names still work as deprecated aliases through the Router 3.x line.
+  Configurations using the old names are migrated automatically at startup throughout the Router 3.x line, but please update your configuration file.
 actions:
   - type: move
     from: supergraph.experimental_log_on_broken_pipe
