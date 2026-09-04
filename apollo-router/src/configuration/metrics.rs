@@ -493,6 +493,16 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
+            apollo.router.config.incremental_planner,
+            "$.incremental_planner[?(@.enabled == true)]"
+        );
+
+        populate_config_instrument!(
+            apollo.router.config.native_connectors,
+            "$.native_connectors[?(@==true)]"
+        );
+
+        populate_config_instrument!(
             apollo.router.config.experimental_prewarm_query_plan_cache,
             "$.persisted_queries.experimental_prewarm_query_plan_cache[?(@.on_startup==true)]"
         );

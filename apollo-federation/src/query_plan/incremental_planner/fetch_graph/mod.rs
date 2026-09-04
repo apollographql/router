@@ -2,7 +2,6 @@
 //! entity inputs riding those edges, built incrementally during BULB
 //! search with O(1) checkpoint / undo-log rollback.
 
-#[allow(dead_code)]
 pub(crate) mod plan_builder;
 pub(crate) mod selection_builder;
 
@@ -1587,5 +1586,140 @@ mod tests {
             FetchDataPathElement::TypenameEquals(name) if name == "Admin"
         ));
         assert!(matches!(&stripped[3], FetchDataPathElement::Parent));
+    }
+
+    #[test]
+    fn display_covers_all_node_kinds() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("A");
+        let sg2: Arc<str> = Arc::from("B");
+        let root = g.get_or_create_root_group(&sg, dummy_root_type());
+        let entity = g.add_entity_group(&sg2, user_path(None));
+        g.add_dependency(root, entity, vec![]);
+        let _root_hop = g.add_root_hop_group(&sg2, dummy_root_type(), vec![]);
+
+        let display = format!("{g}");
+        assert!(
+            display.contains("root"),
+            "Display should contain root node: {display}"
+        );
+        assert!(
+            display.contains("entity"),
+            "Display should contain entity node: {display}"
+        );
+        assert!(
+            display.contains("root_hop"),
+            "Display should contain root_hop node: {display}"
+        );
+        assert!(
+            display.contains("selections"),
+            "Display should show selection counts: {display}"
+        );
+    }
+
+    #[test]
+    fn is_reachable_transitive() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let root = g.get_or_create_root_group(&sg, dummy_root_type());
+        let mid = g.add_entity_group(&sg, vec![]);
+        let leaf = g.add_entity_group(&sg, user_path(None));
+        g.add_dependency(root, mid, vec![]);
+        g.add_dependency(mid, leaf, vec![]);
+
+        assert!(g.is_reachable(root, leaf));
+        assert!(g.is_reachable(root, mid));
+        assert!(!g.is_reachable(leaf, root));
+        assert!(!g.is_reachable(mid, root));
+    }
+
+    #[test]
+    fn get_or_create_root_group_with_defer_differentiates_labels() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let root_type = dummy_root_type();
+        let primary = g.get_or_create_root_group(&sg, root_type.clone());
+        let deferred = g.get_or_create_root_group_with_defer(
+            &sg,
+            root_type.clone(),
+            Some("label1".to_string()),
+        );
+        let same_deferred =
+            g.get_or_create_root_group_with_defer(&sg, root_type, Some("label1".to_string()));
+
+        assert_ne!(primary, deferred);
+        assert_eq!(deferred, same_deferred);
+        assert_eq!(g.node_count(), 2);
+    }
+
+    #[test]
+    fn add_entity_group_with_defer_sets_defer_ref() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let entity = g.add_entity_group_with_defer(&sg, vec![], Some("d1".to_string()));
+        assert_eq!(g.graph[entity].defer_ref.as_deref(), Some("d1"));
+    }
+
+    #[test]
+    fn get_or_create_entity_group_with_defer_is_idempotent() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let path = user_path(None);
+        let e1 = g.get_or_create_entity_group_with_defer(&sg, path.clone(), Some("d1".to_string()));
+        let e2 = g.get_or_create_entity_group_with_defer(&sg, path, Some("d1".to_string()));
+        assert_eq!(e1, e2);
+        assert_eq!(g.node_count(), 1);
+    }
+
+    #[test]
+    fn edge_has_key_input_returns_false_when_empty() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let root = g.get_or_create_root_group(&sg, dummy_root_type());
+        let entity = g.add_entity_group(&sg, vec![]);
+        let edge = g.add_dependency(root, entity, vec![]);
+        assert!(!g.edge_has_key_input(edge, &apollo_compiler::name!("User")));
+    }
+
+    #[test]
+    fn incoming_inputs_empty_for_root() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let root = g.get_or_create_root_group(&sg, dummy_root_type());
+        let inputs: Vec<_> = g.incoming_inputs(root).collect();
+        assert!(inputs.is_empty());
+    }
+
+    #[test]
+    fn checkpoint_rollback_root_hop_group() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let cp = g.checkpoint();
+        g.add_root_hop_group(&sg, dummy_root_type(), vec![]);
+        assert_eq!(g.node_count(), 1);
+        g.rollback(cp);
+        assert_eq!(g.node_count(), 0);
+    }
+
+    #[test]
+    fn checkpoint_rollback_deferred_root_group() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let cp = g.checkpoint();
+        g.get_or_create_root_group_with_defer(&sg, dummy_root_type(), Some("d".to_string()));
+        assert_eq!(g.node_count(), 1);
+        g.rollback(cp);
+        assert_eq!(g.node_count(), 0);
+    }
+
+    #[test]
+    fn checkpoint_rollback_deferred_entity_group() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let cp = g.checkpoint();
+        g.get_or_create_entity_group_with_defer(&sg, user_path(None), Some("d".to_string()));
+        assert_eq!(g.node_count(), 1);
+        g.rollback(cp);
+        assert_eq!(g.node_count(), 0);
     }
 }
