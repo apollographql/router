@@ -233,6 +233,132 @@ async fn exported_span_name_by_id(otlp: &wiremock::MockServer, span_id: &str) ->
         .and_then(|v| v.as_string())
 }
 
+// BEGIN ROUTER-2060
+
+const SUBGRAPH_TRACE_CONTEXT_FABRICATED_TRACEPARENT: &str =
+    "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01";
+
+/// Shared scenario for the `preserve_trace_context_on_subgraph_requests` tests: mocks a
+/// coprocessor that rewrites `traceparent` on the `SubgraphRequest` stage to a fabricated hop
+/// value, mocks the "products" subgraph (the one `execute_default_query` hits) to capture the
+/// `traceparent` it actually receives, and returns that captured value.
+async fn run_subgraph_trace_context_preservation_scenario(
+    preserve_enabled: bool,
+) -> Option<String> {
+    let coprocessor = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(move |req: &wiremock::Request| {
+            let mut body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+            if body["stage"] == "SubgraphRequest" {
+                body["control"] = json!("continue");
+                body["headers"]["traceparent"] =
+                    json!([SUBGRAPH_TRACE_CONTEXT_FABRICATED_TRACEPARENT]);
+            }
+            ResponseTemplate::new(200).set_body_json(body)
+        })
+        .mount(&coprocessor)
+        .await;
+
+    let captured_traceparent: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let captured = captured_traceparent.clone();
+    let mock_products = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(move |req: &wiremock::Request| {
+            if let Some(tp) = req.headers.get("traceparent") {
+                *captured.lock().unwrap() = tp.to_str().ok().map(str::to_string);
+            }
+            ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "topProducts": [{ "name": "Table" }] }
+            }))
+        })
+        .mount(&mock_products)
+        .await;
+
+    let otlp = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/traces"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            ExportTraceServiceResponse::default().encode_to_vec(),
+            "application/x-protobuf",
+        ))
+        .mount(&otlp)
+        .await;
+
+    let fixture = if preserve_enabled {
+        include_str!("fixtures/coprocessor_subgraph_trace_context_preservation_enabled.router.yaml")
+    } else {
+        include_str!(
+            "fixtures/coprocessor_subgraph_trace_context_preservation_disabled.router.yaml"
+        )
+    };
+    let config = fixture
+        .replace("<coprocessor-address>", &coprocessor.uri())
+        .replace("<otel-collector-endpoint>", &otlp.uri());
+
+    let mut router = IntegrationTest::builder()
+        .config(config)
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", otlp.uri())),
+        })
+        .subgraph_overrides([("products".to_string(), mock_products.uri())].into())
+        .reqwest_client(no_keepalive_reqwest_client())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    router.graceful_shutdown().await;
+
+    captured_traceparent.lock().unwrap().clone()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_subgraph_trace_context_preserved_when_enabled() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let received = run_subgraph_trace_context_preservation_scenario(true).await;
+
+    assert_eq!(
+        received.as_deref(),
+        Some(SUBGRAPH_TRACE_CONTEXT_FABRICATED_TRACEPARENT),
+        "with preserve_trace_context_on_subgraph_requests enabled, the coprocessor's explicit \
+         traceparent rewrite must survive HttpClientService::call under OTLP, not be silently \
+         overwritten by the router's own span context"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_subgraph_trace_context_overwritten_when_disabled() -> Result<(), BoxError>
+{
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let received = run_subgraph_trace_context_preservation_scenario(false).await;
+
+    assert_ne!(
+        received.as_deref(),
+        Some(SUBGRAPH_TRACE_CONTEXT_FABRICATED_TRACEPARENT),
+        "with the config disabled (default), the coprocessor's rewrite must still be discarded \
+         and replaced with the router's own span context -- this is the pre-existing, correct \
+         default behavior and must not regress"
+    );
+    assert!(
+        received.is_some(),
+        "the subgraph must still receive *some* traceparent from the router's normal injection"
+    );
+    Ok(())
+}
+
+// END ROUTER-2060
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_coprocessor_response_handling() -> Result<(), BoxError> {
     if !graph_os_enabled() {

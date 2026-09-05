@@ -50,6 +50,7 @@ use crate::plugins::traffic_shaping::Http2Config;
 use crate::services::http::HttpClientService;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
+use crate::services::http::TraceContextPreservation; // BEGIN/END ROUTER-2060
 use crate::services::router;
 use crate::services::supergraph;
 
@@ -81,7 +82,15 @@ fn make_service(
     let root_store = &rustls::RootCertStore::empty();
     match kind {
         ServiceKind::Subgraph => {
-            HttpClientService::from_config_for_subgraph("test", config, root_store, client)
+            // BEGIN ROUTER-2060
+            HttpClientService::from_config_for_subgraph(
+                "test",
+                config,
+                root_store,
+                client,
+                TraceContextPreservation::default(),
+            )
+            // END ROUTER-2060
         }
         ServiceKind::Connector => {
             HttpClientService::from_config_for_connector("test", config, root_store, client)
@@ -1473,6 +1482,7 @@ mod http_version_negotiation {
             crate::configuration::shared::Client::builder()
                 .experimental_http2(http2_config)
                 .build(),
+            TraceContextPreservation::default(), // BEGIN/END ROUTER-2060
         )
         .expect("created http client");
 

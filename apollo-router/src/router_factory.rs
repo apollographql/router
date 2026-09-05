@@ -29,6 +29,7 @@ use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugin::PluginInit;
 use crate::plugins::subscription::notification::Notify;
+use crate::plugins::telemetry::Telemetry; // BEGIN/END ROUTER-2060
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::plugins::traffic_shaping::TrafficShaping;
@@ -41,6 +42,7 @@ use crate::services::SupergraphCreator;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
+use crate::services::http::TraceContextPreservation; // BEGIN/END ROUTER-2060
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
@@ -446,6 +448,28 @@ pub(crate) async fn create_http_services(
         .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
         .expect("traffic shaping should always be part of the plugin list");
 
+    // BEGIN ROUTER-2060
+    let telemetry_config = plugins
+        .iter()
+        .find(|i| i.0.as_str() == "apollo.telemetry") // BEGIN/END ROUTER-2060: registered as "{group}.{name}", see PluginFactory::new_private
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Telemetry>())
+        .map(|t| t.config.clone());
+    let subgraph_trace_context_preservation = TraceContextPreservation {
+        enabled: telemetry_config
+            .as_ref()
+            .map(|c| {
+                c.exporters
+                    .tracing
+                    .propagation
+                    .preserve_trace_context_on_subgraph_requests
+            })
+            .unwrap_or(false),
+        custom_header_name: telemetry_config
+            .as_ref()
+            .and_then(|c| c.exporters.tracing.propagation.request.header_name.clone()),
+    };
+    // END ROUTER-2060
+
     let connector_subgraphs: HashSet<String> = schema
         .connectors
         .as_ref()
@@ -467,6 +491,7 @@ pub(crate) async fn create_http_services(
             configuration,
             &subgraph_tls_root_store,
             shaping.subgraph_client_config(name),
+            subgraph_trace_context_preservation.clone(), // BEGIN/END ROUTER-2060
         )?;
 
         let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
