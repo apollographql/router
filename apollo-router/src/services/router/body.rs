@@ -1,7 +1,12 @@
+use std::error::Error as StdError;
+use std::fmt;
+use std::io::ErrorKind;
+
 use axum::Error as AxumError;
 use bytes::Bytes;
 use futures::Stream;
 use futures::StreamExt;
+use http::StatusCode;
 use http_body::Frame;
 use http_body_util::BodyExt;
 use http_body_util::Empty;
@@ -14,8 +19,109 @@ use tower::BoxError;
 
 pub type RouterBody = UnsyncBoxBody<Bytes, AxumError>;
 
+/// nginx-style 499: the client closed the connection. Not in the HTTP RFCs, but
+/// already used by the router when a request is canceled after the body is read.
+pub(crate) fn client_closed_request_status() -> StatusCode {
+    StatusCode::from_u16(499).expect("499 is not a standard status code but common enough")
+}
+
+/// Incoming client-body read failed because the client disconnected.
+///
+/// Created only at inbound `RouterBody` collection sites, so a later
+/// `ConnectionReset` from a backend/coprocessor HTTP call is not mistaken for
+/// a client abort.
+#[derive(Debug)]
+pub(crate) struct ClientRequestBodyReadError {
+    source: BoxError,
+}
+
+impl fmt::Display for ClientRequestBodyReadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "client closed the connection while the request body was being read: {}",
+            self.source
+        )
+    }
+}
+
+impl StdError for ClientRequestBodyReadError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
+/// True when `err` (or a source) is a `ClientRequestBodyReadError`.
+pub(crate) fn is_client_request_body_read_error(err: &(dyn StdError + 'static)) -> bool {
+    let mut current = Some(err);
+    while let Some(e) = current {
+        if e.downcast_ref::<ClientRequestBodyReadError>().is_some() {
+            return true;
+        }
+        current = e.source();
+    }
+    false
+}
+
+/// True when `err` (or a source) is a client abort while reading the incoming body.
+///
+/// Covers hyper's incomplete/closed/canceled body errors and the IO kinds those
+/// typically wrap. Only call this at inbound body-read sites — not on the
+/// whole-service `BoxError` boundary, which also carries outbound I/O failures.
+pub(crate) fn is_client_closed_connection(err: &(dyn StdError + 'static)) -> bool {
+    let mut current = Some(err);
+    while let Some(e) = current {
+        if let Some(hyper_err) = e.downcast_ref::<hyper::Error>()
+            && (hyper_err.is_incomplete_message()
+                || hyper_err.is_closed()
+                || hyper_err.is_canceled())
+        {
+            return true;
+        }
+        if let Some(io_err) = e.downcast_ref::<std::io::Error>()
+            && matches!(
+                io_err.kind(),
+                ErrorKind::ConnectionReset
+                    | ErrorKind::ConnectionAborted
+                    | ErrorKind::BrokenPipe
+                    | ErrorKind::UnexpectedEof
+                    | ErrorKind::NotConnected
+            )
+        {
+            return true;
+        }
+        current = e.source();
+    }
+    false
+}
+
+/// Wrap an inbound body-read error as `ClientRequestBodyReadError` when it is a
+/// client disconnect; otherwise pass it through unchanged.
+pub(crate) fn map_client_body_read_error(
+    err: impl StdError + Into<BoxError> + Send + Sync + 'static,
+) -> BoxError {
+    if is_client_closed_connection(&err) {
+        Box::new(ClientRequestBodyReadError { source: err.into() })
+    } else {
+        err.into()
+    }
+}
+
 pub(crate) async fn into_bytes<B: HttpBody>(body: B) -> Result<Bytes, B::Error> {
     Ok(body.collect().await?.to_bytes())
+}
+
+/// Collect an inbound client request body, tagging client-disconnect failures
+/// so the HTTP boundary can return 499 without classifying backend I/O errors.
+pub(crate) async fn into_client_request_bytes<B>(body: B) -> Result<Bytes, BoxError>
+where
+    B: HttpBody,
+    B::Error: Into<BoxError> + StdError + Send + Sync + 'static,
+{
+    match into_bytes(body).await {
+        Ok(bytes) => Ok(bytes),
+        Err(e) => Err(map_client_body_read_error(e)),
+    }
 }
 
 // We create some utility functions to make Empty and Full bodies
@@ -75,7 +181,62 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::io::ErrorKind;
+
     use super::*;
+
+    #[test]
+    fn client_closed_connection_detects_io_kinds() {
+        for kind in [
+            ErrorKind::ConnectionReset,
+            ErrorKind::ConnectionAborted,
+            ErrorKind::BrokenPipe,
+            ErrorKind::UnexpectedEof,
+            ErrorKind::NotConnected,
+        ] {
+            let err = std::io::Error::new(kind, "client gone");
+            assert!(
+                is_client_closed_connection(&err),
+                "expected {kind:?} to classify as client-closed"
+            );
+        }
+    }
+
+    #[test]
+    fn client_closed_connection_ignores_unrelated_io() {
+        let err = std::io::Error::other("disk full");
+        assert!(!is_client_closed_connection(&err));
+        let err = std::io::Error::new(ErrorKind::InvalidData, "bad frame");
+        assert!(!is_client_closed_connection(&err));
+    }
+
+    #[test]
+    fn client_closed_connection_walks_wrapped_axum_error() {
+        let io_err = std::io::Error::new(ErrorKind::ConnectionReset, "connection reset by peer");
+        let wrapped = AxumError::new(io_err);
+        assert!(is_client_closed_connection(&wrapped));
+    }
+
+    #[test]
+    fn client_closed_connection_detects_boxed_io_error() {
+        let err: BoxError = std::io::Error::new(ErrorKind::ConnectionReset, "reset").into();
+        assert!(is_client_closed_connection(err.as_ref()));
+    }
+
+    #[test]
+    fn map_client_body_read_error_wraps_disconnect() {
+        let err = std::io::Error::new(ErrorKind::ConnectionReset, "reset");
+        let boxed = map_client_body_read_error(err);
+        assert!(is_client_request_body_read_error(boxed.as_ref()));
+    }
+
+    #[test]
+    fn map_client_body_read_error_does_not_wrap_unrelated() {
+        let err = std::io::Error::other("disk full");
+        let boxed = map_client_body_read_error(err);
+        assert!(!is_client_request_body_read_error(boxed.as_ref()));
+        assert!(boxed.downcast_ref::<std::io::Error>().is_some());
+    }
 
     #[tokio::test]
     async fn into_bytes_limited_under_limit() {
