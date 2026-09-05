@@ -30,7 +30,7 @@
 #   - PAT scoped: uses `APOLLO_BOT2_GITHUB_PAT` so the tag is attributed
 #     to apollo-bot2 and bypasses tag-creation rules.
 
-name: Release: auto-tag
+name: "Release: auto-tag"
 
 on:
   push:
