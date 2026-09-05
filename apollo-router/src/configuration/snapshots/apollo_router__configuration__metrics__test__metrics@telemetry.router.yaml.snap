@@ -27,7 +27,14 @@ expression: "& metrics.non_zero()"
           opt.spans.router: true
           opt.spans.subgraph: true
           opt.spans.supergraph: true
+          opt.tracing.common.preview_datadog_agent_sampling: true
           opt.tracing.common.sampler: false
           opt.tracing.datadog: true
+          opt.tracing.datadog.enable_span_mapping: true
+          opt.tracing.datadog.fixed_span_names: true
+          opt.tracing.datadog.resource_mapping: true
+          opt.tracing.datadog.sampler: always_on
+          opt.tracing.datadog.span_metrics: true
           opt.tracing.otlp: true
+          opt.tracing.propagation.datadog: true
           opt.tracing.zipkin: true
