@@ -18,10 +18,19 @@ spec:
       targetPort: {{ .Values.service.targetport }}
       protocol: TCP
       name: http
-    - port: {{ (splitList ":" (index .Values.router.configuration "health_check").listen | last ) | default "8088" }}
+    {{- /* When the health listener is co-located with the main listener,
+           rendering a second entry with the same port and protocol produces
+           an invalid Service (spec.ports duplicate value), so the health
+           port is only rendered when it differs from the main port. The
+           health endpoint remains reachable through the main port in the
+           co-located case. */}}
+    {{- $healthPort := (splitList ":" (index .Values.router.configuration "health_check").listen | last ) | default "8088" }}
+    {{- if ne (toString $healthPort) (toString .Values.service.port) }}
+    - port: {{ $healthPort }}
       targetPort: health
       protocol: TCP
       name: health
+    {{- end }}
     {{- /* Should we expose an entity cache invalidation port? */}}
     {{- if and (.Values.router.configuration.preview_entity_cache).enabled (.Values.router.configuration.preview_entity_cache).invalidation }}
     - port: {{ (splitList ":" .Values.router.configuration.preview_entity_cache.invalidation.listen | last) }}
