@@ -1,3 +1,4 @@
+mod consolidate;
 mod satisfiability;
 
 use std::sync::Arc;
@@ -5,6 +6,7 @@ use std::vec;
 
 use tracing::instrument;
 
+use crate::composition::consolidate::consolidate_for_satisfiability;
 pub use crate::composition::satisfiability::validate_satisfiability;
 use crate::connectors::Connector;
 use crate::connectors::expand::Connectors;
@@ -215,7 +217,13 @@ pub fn validate_satisfiability_with_connectors(
             },
             ..
         } => {
-            let expanded_supergraph = match Supergraph::parse(&raw_sdl) {
+            // Satisfiability-only optimization: merge synthetic @join__graphs that share an
+            // identical resolvable-key signature, shrinking the federated query graph the
+            // verdict is computed over. The router's runtime expansion (`raw_sdl`) is
+            // untouched; only this validation input is consolidated. See
+            // `composition::consolidate` for the soundness argument.
+            let consolidated_sdl = consolidate_for_satisfiability(&raw_sdl);
+            let expanded_supergraph = match Supergraph::parse(&consolidated_sdl) {
                 Ok(s) => s,
                 Err(e) => {
                     return Err(CompositionFailure {
