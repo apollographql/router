@@ -440,7 +440,7 @@ dependencies = [
  "tonic",
  "tonic-prost-build",
  "tower",
- "tower-http 0.7.0",
+ "tower-http 0.7.1",
  "tower-service",
  "tower-test",
  "tracing",
@@ -6958,7 +6958,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7209,7 +7209,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
  "windows-sys 0.52.0",
@@ -7677,9 +7677,9 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b11f75e912b0c2be01b63d8cf8057b8c3f97cf34abb3d431a3a4c8675498e233"
+checksum = "08a05a66a4fdd61cbbe0a1d755ffe0ca6aba159dd4820936a0ff8a8278245b9c"
 dependencies = [
  "async-compression",
  "base64 0.22.1",
