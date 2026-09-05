@@ -683,7 +683,8 @@ impl Executable {
         // Order of precedence for licenses:
         // 1. explicit path from cli
         // 2. env APOLLO_ROUTER_LICENSE
-        // 3. uplink
+        // 3. the OCI registry, when the schema comes from a graph artifact reference
+        // 4. uplink
 
         let license = if let Some(license) = license {
             license
@@ -706,6 +707,12 @@ impl Executable {
                     }
                 }
                 (Some(_license), _, _, _) => LicenseSource::Env,
+                // OCI-delivered schema implies OCI-delivered license: the entitlement identifier
+                // is discovered from the graph artifact manifest annotations and the license is
+                // fetched from the same registry with the same graph API key.
+                (_, _, Some(_apollo_key), _) if opt.graph_artifact_reference.is_some() => {
+                    LicenseSource::OCI(opt.oci_config()?)
+                }
                 (_, _, Some(_apollo_key), Some(_apollo_graph_ref)) => {
                     LicenseSource::Registry(opt.uplink_config()?)
                 }
